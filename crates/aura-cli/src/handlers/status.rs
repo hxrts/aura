@@ -3,8 +3,8 @@
 //! Effect-based implementation of the status command.
 
 use anyhow::Result;
+use aura_agent::runtime::AuraEffectSystem;
 use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects};
-use aura_protocol::AuraEffectSystem;
 use std::path::Path;
 
 /// Handle status display through effects

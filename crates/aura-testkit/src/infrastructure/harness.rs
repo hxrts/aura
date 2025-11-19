@@ -7,7 +7,9 @@ use std::sync::Once;
 use std::time::Duration;
 
 use crate::foundation::{create_mock_test_context, SimpleTestContext};
+use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
 use aura_core::{AuraError, AuraResult, DeviceId};
+use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
 static TRACING_INIT: Once = Once::new();
@@ -121,12 +123,10 @@ impl TestFixture {
     /// Get an effect system for testing
     ///
     /// This creates a mock effect system configured for testing.
-    pub fn effect_system(&self) -> aura_protocol::effects::AuraEffectSystem {
-        let config = aura_protocol::effects::EffectSystemConfig {
-            device_id: self.device_id(),
-        };
-        aura_protocol::effects::AuraEffectSystemFactory::new(config)
-            .expect("Failed to create test effect system")
+    pub fn effect_system(&self) -> Arc<AuraEffectSystem> {
+        let config = EffectSystemConfig::for_testing(self.device_id());
+        let system = AuraEffectSystem::new(config).expect("Failed to create test effect system");
+        Arc::new(system)
     }
 
     /// Get a reference to the test context for effect access

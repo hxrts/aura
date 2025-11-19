@@ -53,6 +53,7 @@ pub mod tree_policy;
 // Biscuit-based authorization (new implementation)
 pub mod biscuit_resources;
 pub mod biscuit_token;
+pub mod resource_scope; // Authority-based resource scopes
 
 pub use errors::{AuraError, AuraResult, WotError, WotResult};
 
@@ -71,9 +72,12 @@ pub use aura_core::semilattice::{MeetSemiLattice, Top};
 // Re-export Biscuit types
 pub use biscuit_auth::{Biscuit, KeyPair, PublicKey};
 pub use biscuit_resources::{
-    AdminOperation, JournalOp, RecoveryType, ResourceScope, StorageCategory,
+    AdminOperation, JournalOp, RecoveryType, ResourceScope as LegacyResourceScope, StorageCategory,
 };
 pub use biscuit_token::{AccountAuthority, BiscuitError, BiscuitTokenManager, SerializableBiscuit};
+
+// Re-export authority-based resource scopes
+pub use resource_scope::{AuthorityOp, ContextOp, ResourceScope};
 
 /// Type alias for capability meet operation results
 pub type CapResult<T> = Result<T, WotError>;

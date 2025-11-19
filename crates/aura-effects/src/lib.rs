@@ -75,6 +75,7 @@ pub mod context;
 /// Cryptographic effect handlers for signing, verification, and key derivation
 pub mod crypto;
 pub mod journal;
+pub mod leakage_handler;
 pub mod random;
 pub mod storage;
 pub mod system;
@@ -87,6 +88,7 @@ pub use console::{MockConsoleHandler, RealConsoleHandler};
 pub use context::{ExecutionContext, MockContextHandler, StandardContextHandler};
 pub use crypto::{EffectSystemRng, MockCryptoHandler, RealCryptoHandler};
 pub use journal::{MockJournalHandler, StandardJournalHandler};
+pub use leakage_handler::{NoOpLeakageHandler, ProductionLeakageHandler, TestLeakageHandler};
 pub use random::{MockRandomHandler, RealRandomHandler};
 pub use storage::{EncryptedStorageHandler, FilesystemStorageHandler, MemoryStorageHandler};
 pub use time::{RealTimeHandler, SimulatedTimeHandler};

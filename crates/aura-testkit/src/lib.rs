@@ -105,7 +105,7 @@ pub fn test_key_pair(seed: u64) -> (SigningKey, VerifyingKey) {
 
 /// Create a test fixture with pre-configured effect system
 ///
-/// Convenience function that replaces the deprecated `AuraEffectSystem::for_testing()` pattern.
+/// Convenience function that replaces the deprecated monolithic effect runtime pattern.
 /// This function creates a TestFixture with the effect system already initialized.
 pub async fn create_test_fixture() -> aura_core::AuraResult<infrastructure::harness::TestFixture> {
     infrastructure::harness::TestFixture::new().await

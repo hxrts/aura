@@ -11,7 +11,8 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use aura_cli::{
-    AdminAction, CliHandler, InvitationAction, RecoveryAction, ScenarioAction, SnapshotAction,
+    AdminAction, AuthorityCommands, CliHandler, ContextAction, InvitationAction, RecoveryAction,
+    ScenarioAction, SnapshotAction,
 };
 
 #[derive(Parser)]
@@ -114,8 +115,20 @@ enum Commands {
         action: InvitationAction,
     },
 
+    /// Authority management (experimental)
+    Authority {
+        #[command(subcommand)]
+        command: AuthorityCommands,
+    },
+
     /// Show version information
     Version,
+
+    /// Inspect relational contexts and rendezvous state
+    Context {
+        #[command(subcommand)]
+        action: ContextAction,
+    },
 }
 
 #[tokio::main]
@@ -181,6 +194,8 @@ async fn main() -> Result<()> {
         Commands::Admin { action } => cli_handler.handle_admin(action).await,
         Commands::Recovery { action } => cli_handler.handle_recovery(action).await,
         Commands::Invite { action } => cli_handler.handle_invitation(action).await,
+        Commands::Authority { command } => cli_handler.handle_authority(command).await,
+        Commands::Context { action } => cli_handler.handle_context(action).await,
         Commands::Version => cli_handler.handle_version().await,
     }
 }

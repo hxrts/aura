@@ -9,9 +9,12 @@ use aura_core::context_derivation::RelayContextDerivation;
 use aura_core::hash::hasher;
 use aura_core::identifiers::RelayId;
 use aura_core::{AuraError, AuraResult, DeviceId};
-use aura_protocol::orchestration::AuraEffectSystem;
+use aura_protocol::effects::AuraEffects;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+type SharedEffects = Arc<dyn AuraEffects>;
 
 /// Content-addressed envelope ID (Blake3 hash)
 pub type EnvelopeId = [u8; 32];
@@ -221,7 +224,7 @@ pub struct SbbFloodingCoordinator {
     /// Envelope cache with expiration tracking
     envelope_cache: HashMap<EnvelopeId, (RendezvousEnvelope, u64)>, // (envelope, expires_at)
     /// Effect system interface for journal and capability checks
-    effects: AuraEffectSystem,
+    effects: SharedEffects,
 }
 
 impl RendezvousEnvelope {
@@ -265,7 +268,7 @@ impl RendezvousEnvelope {
 
 impl SbbFloodingCoordinator {
     /// Create new SBB flooding coordinator
-    pub fn new(device_id: DeviceId, effects: AuraEffectSystem) -> Self {
+    pub fn new(device_id: DeviceId, effects: SharedEffects) -> Self {
         Self {
             device_id,
             friends: Vec::new(),
@@ -540,10 +543,12 @@ mod tests {
     }
 
     // Helper to create test effects
-    fn create_test_effects(device_id: DeviceId) -> AuraEffectSystem {
-        use aura_protocol::effects::{AuraEffectSystemFactory, EffectSystemConfig};
-        AuraEffectSystemFactory::new(EffectSystemConfig { device_id })
-            .expect("Failed to create test effects")
+    fn create_test_effects(device_id: DeviceId) -> SharedEffects {
+        use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+
+        let config = EffectSystemConfig::for_testing(device_id);
+        let system = AuraEffectSystem::new(config).expect("Failed to create test effects");
+        Arc::new(system)
     }
 
     #[test]

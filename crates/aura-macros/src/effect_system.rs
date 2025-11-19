@@ -166,7 +166,10 @@ fn generate_trait_impl(spec: &EffectTraitImpl) -> Result<proc_macro2::TokenStrea
 
     Ok(quote! {
         #[async_trait::async_trait]
-        impl #trait_name for AuraEffectSystem {
+        impl<T> #trait_name for T
+        where
+            T: aura_protocol::effects::AuraEffects + ?Sized,
+        {
             #(#methods)*
         }
     })

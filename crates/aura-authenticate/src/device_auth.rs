@@ -6,12 +6,13 @@
 use crate::{AuraResult, BiscuitGuardEvaluator, ResourceScope};
 use aura_core::{AccountId, DeviceId, FlowBudget};
 use aura_macros::choreography;
-use aura_protocol::AuraEffectSystem;
+use aura_protocol::effects::AuraEffects;
 use aura_verify::session::{SessionScope, SessionTicket};
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 use aura_wot::BiscuitTokenManager;
 use biscuit_auth::Biscuit;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Device authentication request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,20 +187,26 @@ pub fn get_device_auth_choreography() {
 }
 
 /// Device authentication coordinator using choreographic protocol
-pub struct DeviceAuthCoordinator {
-    /// Local effect system
-    effect_system: AuraEffectSystem,
+pub struct DeviceAuthCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
+    /// Shared effect system implementing AuraEffects
+    effects: Arc<E>,
     /// Biscuit token manager for authorization
     token_manager: Option<BiscuitTokenManager>,
     /// Biscuit guard evaluator for permission checks
     guard_evaluator: Option<BiscuitGuardEvaluator>,
 }
 
-impl DeviceAuthCoordinator {
+impl<E> DeviceAuthCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
     /// Create a new device auth coordinator
-    pub fn new(effect_system: AuraEffectSystem) -> Self {
+    pub fn new(effect_system: Arc<E>) -> Self {
         Self {
-            effect_system,
+            effects: effect_system,
             token_manager: None,
             guard_evaluator: None,
         }
@@ -207,12 +214,12 @@ impl DeviceAuthCoordinator {
 
     /// Create a new device auth coordinator with Biscuit authorization
     pub fn new_with_biscuit(
-        effect_system: AuraEffectSystem,
+        effect_system: Arc<E>,
         token_manager: BiscuitTokenManager,
         guard_evaluator: BiscuitGuardEvaluator,
     ) -> Self {
         Self {
-            effect_system,
+            effects: effect_system,
             token_manager: Some(token_manager),
             guard_evaluator: Some(guard_evaluator),
         }
@@ -243,8 +250,8 @@ impl DeviceAuthCoordinator {
     }
 
     /// Get the current effect system
-    pub fn effect_system(&self) -> &AuraEffectSystem {
-        &self.effect_system
+    pub fn effects(&self) -> &Arc<E> {
+        &self.effects
     }
 }
 
@@ -280,7 +287,7 @@ mod tests {
         assert_eq!(request.account_id, deserialized.account_id);
     }
 
-    // Note: This test is disabled due to runtime context issues in AuraEffectSystem::new()
+    // Note: This test is disabled due to runtime context issues in the effect system builder
     // The effect system initialization requires careful async runtime management
     #[aura_test]
     async fn test_coordinator_creation() -> aura_core::AuraResult<()> {
@@ -288,7 +295,7 @@ mod tests {
         let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
         let coordinator = DeviceAuthCoordinator::new(fixture.effect_system());
 
-        assert_eq!(coordinator.effect_system().device_id(), device_id);
+        assert_eq!(coordinator.effects().device_id(), device_id);
         Ok(())
     }
 }

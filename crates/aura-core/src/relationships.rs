@@ -159,60 +159,7 @@ impl fmt::Display for RelationshipStatus {
     }
 }
 
-/// Context identifier for operation contexts
-///
-/// Identifies the context in which operations are performed.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct ContextId(pub String);
-
-impl ContextId {
-    /// Create a new context ID
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
-    /// Get the context string
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Create a hierarchical context ID
-    pub fn hierarchical(parts: &[&str]) -> Self {
-        Self(parts.join("."))
-    }
-
-    /// Get the parent context (if hierarchical)
-    pub fn parent(&self) -> Option<ContextId> {
-        self.0
-            .rsplit_once('.')
-            .map(|(parent, _)| ContextId(parent.to_string()))
-    }
-
-    /// Check if this context is a child of another context
-    pub fn is_child_of(&self, parent: &ContextId) -> bool {
-        self.0.starts_with(&parent.0)
-            && self.0.len() > parent.0.len()
-            && self.0.chars().nth(parent.0.len()) == Some('.')
-    }
-}
-
-impl fmt::Display for ContextId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "context:{}", self.0)
-    }
-}
-
-impl From<String> for ContextId {
-    fn from(id: String) -> Self {
-        Self(id)
-    }
-}
-
-impl From<&str> for ContextId {
-    fn from(id: &str) -> Self {
-        Self(id.to_string())
-    }
-}
+// ContextId has been moved to identifiers.rs to avoid duplication and use UUID-based implementation
 
 /// Trust level enumeration
 ///

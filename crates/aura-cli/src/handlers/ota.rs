@@ -5,8 +5,8 @@
 #![allow(clippy::disallowed_methods)]
 
 use anyhow::{Context, Result};
+use aura_agent::runtime::AuraEffectSystem;
 use aura_core::{Hash32, SemanticVersion};
-use aura_protocol::orchestration::AuraEffectSystem;
 use aura_protocol::effect_traits::ConsoleEffects;
 use aura_sync::maintenance::UpgradeProposal;
 use aura_sync::protocols::ota::UpgradeKind;

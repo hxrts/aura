@@ -329,10 +329,10 @@ impl Default for ReceiptVerificationProtocol {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use aura_core::effects::CryptoError;
     use aura_core::effects::crypto::{
         FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext,
     };
+    use aura_core::effects::CryptoError;
 
     // Mock crypto effects for testing
     #[derive(Debug)]

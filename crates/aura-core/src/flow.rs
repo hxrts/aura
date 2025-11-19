@@ -6,8 +6,7 @@
 
 use crate::{
     content::Hash32,
-    identifiers::DeviceId,
-    relationships::ContextId,
+    identifiers::{ContextId, DeviceId},
     semilattice::{Bottom, CvState, JoinSemilattice},
     session_epochs::Epoch,
 };

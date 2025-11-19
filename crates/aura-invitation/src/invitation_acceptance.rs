@@ -9,8 +9,8 @@ use crate::{
 use aura_core::effects::{NetworkEffects, TimeEffects};
 use aura_core::{AccountId, DeviceId, RelationshipId, TrustLevel};
 use aura_journal::semilattice::InvitationLedger;
-use aura_protocol::orchestration::AuraEffectSystem;
 use aura_protocol::effect_traits::LedgerEffects;
+use aura_protocol::effects::AuraEffects;
 use aura_wot::SerializableBiscuit;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -66,15 +66,21 @@ impl Default for AcceptanceProtocolConfig {
 }
 
 /// Coordinator used by invitees to accept pending invitations with transport integration.
-pub struct InvitationAcceptanceCoordinator {
-    effects: AuraEffectSystem,
+pub struct InvitationAcceptanceCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
+    effects: Arc<E>,
     ledger: Arc<Mutex<InvitationLedger>>,
     config: AcceptanceProtocolConfig,
 }
 
-impl InvitationAcceptanceCoordinator {
+impl<E> InvitationAcceptanceCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
     /// Create a new acceptance coordinator with default configuration.
-    pub fn new(effect_system: AuraEffectSystem) -> Self {
+    pub fn new(effect_system: Arc<E>) -> Self {
         Self {
             effects: effect_system,
             ledger: shared_invitation_ledger(),
@@ -83,10 +89,7 @@ impl InvitationAcceptanceCoordinator {
     }
 
     /// Create with explicit ledger reference (useful for tests).
-    pub fn with_ledger(
-        effect_system: AuraEffectSystem,
-        ledger: Arc<Mutex<InvitationLedger>>,
-    ) -> Self {
+    pub fn with_ledger(effect_system: Arc<E>, ledger: Arc<Mutex<InvitationLedger>>) -> Self {
         Self {
             effects: effect_system,
             ledger,
@@ -95,7 +98,7 @@ impl InvitationAcceptanceCoordinator {
     }
 
     /// Create with custom configuration.
-    pub fn with_config(effect_system: AuraEffectSystem, config: AcceptanceProtocolConfig) -> Self {
+    pub fn with_config(effect_system: Arc<E>, config: AcceptanceProtocolConfig) -> Self {
         Self {
             effects: effect_system,
             ledger: shared_invitation_ledger(),
@@ -105,7 +108,7 @@ impl InvitationAcceptanceCoordinator {
 
     /// Create with custom configuration and explicit ledger reference (useful for tests).
     pub fn with_config_and_ledger(
-        effect_system: AuraEffectSystem,
+        effect_system: Arc<E>,
         config: AcceptanceProtocolConfig,
         ledger: Arc<Mutex<InvitationLedger>>,
     ) -> Self {
@@ -121,7 +124,7 @@ impl InvitationAcceptanceCoordinator {
         &self,
         envelope: InvitationEnvelope,
     ) -> InvitationResult<InvitationAcceptance> {
-        let now = TimeEffects::current_timestamp(&self.effects).await;
+        let now = TimeEffects::current_timestamp(self.effects.as_ref()).await;
 
         // Validate invitation
         if now > envelope.expires_at {
@@ -233,7 +236,7 @@ impl InvitationAcceptanceCoordinator {
             "from": envelope.invitee,
             "to": envelope.inviter,
             "trust_level": self.config.default_trust_level,
-            "timestamp": <AuraEffectSystem as TimeEffects>::current_timestamp(&self.effects).await,
+            "timestamp": TimeEffects::current_timestamp(self.effects.as_ref()).await,
             "context": "invitation_acceptance"
         });
 
@@ -261,7 +264,7 @@ impl InvitationAcceptanceCoordinator {
             "role": envelope.device_role,
             "capabilities": "biscuit_token_serialized", // Token would be serialized to bytes
             "added_by": envelope.inviter,
-            "timestamp": <AuraEffectSystem as TimeEffects>::current_timestamp(&self.effects).await,
+            "timestamp": TimeEffects::current_timestamp(self.effects.as_ref()).await,
             "invitation_id": envelope.invitation_id
         });
 
@@ -298,7 +301,7 @@ impl InvitationAcceptanceCoordinator {
     async fn send_acceptance_ack(&self, envelope: &InvitationEnvelope) -> InvitationResult<()> {
         // Flow hints removed - no longer needed in stateless effect system
 
-        let now = <AuraEffectSystem as TimeEffects>::current_timestamp(&self.effects).await;
+        let now = TimeEffects::current_timestamp(self.effects.as_ref()).await;
         let ack = serde_json::json!({
             "type": "invitation_accepted",
             "invitation_id": envelope.invitation_id,

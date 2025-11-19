@@ -260,9 +260,14 @@ mod tests {
         let random_handler = MockRandomHandler::new();
 
         // This should fail with insufficient signatures
-        let result =
-            perform_frost_aggregation(&insufficient_signatures, message, threshold, total_signers, &random_handler)
-                .await;
+        let result = perform_frost_aggregation(
+            &insufficient_signatures,
+            message,
+            threshold,
+            total_signers,
+            &random_handler,
+        )
+        .await;
         assert!(result.is_err());
 
         // Test that error message is correct

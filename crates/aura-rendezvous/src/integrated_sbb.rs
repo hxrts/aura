@@ -17,6 +17,7 @@ use crate::{
     sbb::{FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding},
 };
 use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId, TrustLevel};
+use aura_protocol::effects::AuraEffects;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -85,11 +86,7 @@ pub struct SbbDiscoveryResult {
 
 impl IntegratedSbbSystem {
     /// Create new integrated SBB system
-    pub fn new(
-        device_id: DeviceId,
-        config: SbbConfig,
-        effects: aura_protocol::effects::AuraEffectSystem,
-    ) -> Self {
+    pub fn new(device_id: DeviceId, config: SbbConfig, effects: Arc<dyn AuraEffects>) -> Self {
         // Initialize components
         let flooding_coordinator = CapabilityAwareSbbCoordinator::new(device_id);
 
@@ -114,7 +111,7 @@ impl IntegratedSbbSystem {
         device_id: DeviceId,
         transport: Arc<RwLock<NetworkTransport>>,
         config: SbbConfig,
-        effects: aura_protocol::effects::AuraEffectSystem,
+        effects: Arc<dyn AuraEffects>,
     ) -> Self {
         let flooding_coordinator = CapabilityAwareSbbCoordinator::new(device_id);
 
@@ -384,7 +381,7 @@ impl SbbSystemBuilder {
     }
 
     /// Build the integrated SBB system
-    pub fn build(self, effects: aura_protocol::effects::AuraEffectSystem) -> IntegratedSbbSystem {
+    pub fn build(self, effects: Arc<dyn AuraEffects>) -> IntegratedSbbSystem {
         match self.transport {
             Some(transport) => IntegratedSbbSystem::with_network_transport(
                 self.device_id,
@@ -401,6 +398,13 @@ impl SbbSystemBuilder {
 mod tests {
     use super::*;
     use crate::messaging::TransportMethod;
+    use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+
+    fn test_effects(device_id: DeviceId) -> Arc<dyn AuraEffects> {
+        let config = EffectSystemConfig::for_testing(device_id);
+        let system = AuraEffectSystem::new(config).expect("Failed to create test effects");
+        Arc::new(system)
+    }
 
     fn create_test_transport_offer(device_id: DeviceId) -> TransportOfferPayload {
         TransportOfferPayload {
@@ -423,7 +427,8 @@ mod tests {
     async fn test_integrated_sbb_system_creation() {
         let device_id = DeviceId::new();
         let config = SbbConfig::default();
-        let _system = IntegratedSbbSystem::new(device_id, config);
+        let effects = test_effects(device_id);
+        let _system = IntegratedSbbSystem::new(device_id, config, effects);
         // Should create without errors
     }
 
@@ -434,7 +439,7 @@ mod tests {
         let system = SbbSystemBuilder::new(device_id)
             .with_app_context("test-sbb".to_string())
             .with_padding_strategy(PaddingStrategy::ExactSize { size: 2048 })
-            .build();
+            .build(test_effects(device_id));
 
         assert_eq!(system.device_id, device_id);
     }
@@ -442,7 +447,8 @@ mod tests {
     #[tokio::test]
     async fn test_relationship_management() {
         let device_id = DeviceId::new();
-        let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default());
+        let effects = test_effects(device_id);
+        let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default(), effects);
 
         let friend_id = DeviceId::new();
         let guardian_id = DeviceId::new();
@@ -468,7 +474,9 @@ mod tests {
     async fn test_discovery_request_flooding() {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
-        let mut alice_system = IntegratedSbbSystem::new(alice_id, SbbConfig::default());
+        let alice_effects = test_effects(alice_id);
+        let mut alice_system =
+            IntegratedSbbSystem::new(alice_id, SbbConfig::default(), alice_effects);
 
         let rel_id = RelationshipId::new([0u8; 32]);
         alice_system
@@ -502,7 +510,9 @@ mod tests {
     async fn test_encrypted_discovery_to_peer() {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
-        let mut alice_system = IntegratedSbbSystem::new(alice_id, SbbConfig::default());
+        let alice_effects = test_effects(alice_id);
+        let mut alice_system =
+            IntegratedSbbSystem::new(alice_id, SbbConfig::default(), alice_effects);
 
         let transport_offer = create_test_transport_offer(alice_id);
         let discovery_request = SbbDiscoveryRequest {
@@ -525,7 +535,8 @@ mod tests {
     #[tokio::test]
     async fn test_trust_level_updates() {
         let device_id = DeviceId::new();
-        let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default());
+        let effects = test_effects(device_id);
+        let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default(), effects);
 
         let peer_id = DeviceId::new();
         let rel_id = RelationshipId::new([0u8; 32]);
@@ -550,7 +561,8 @@ mod tests {
     #[tokio::test]
     async fn test_peer_capability_checking() {
         let device_id = DeviceId::new();
-        let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default());
+        let effects = test_effects(device_id);
+        let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default(), effects);
 
         let peer_id = DeviceId::new();
         let rel_id = RelationshipId::new([0u8; 32]);

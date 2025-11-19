@@ -58,6 +58,10 @@ pub mod ota;
 pub mod receipts;
 pub mod snapshots;
 
+// New authority-centric modules
+pub mod authority_journal_sync;
+pub mod namespaced_sync;
+
 // Re-export key types for convenience
 pub use anti_entropy::{
     AntiEntropyConfig, AntiEntropyProtocol, AntiEntropyRequest, AntiEntropyResult, DigestStatus,

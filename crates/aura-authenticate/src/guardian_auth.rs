@@ -10,12 +10,13 @@ use crate::{AuraError, AuraResult, BiscuitGuardEvaluator, RecoveryType, Resource
 use aura_core::effects::JournalEffects;
 use aura_core::{hash::hash, AccountId, DeviceId, FlowBudget};
 use aura_macros::choreography;
-use aura_protocol::AuraEffectSystem;
+use aura_protocol::effects::AuraEffects;
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 use aura_wot::{AccountAuthority, BiscuitTokenManager, JournalOp, StorageCategory};
 use biscuit_auth::Biscuit;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
@@ -480,11 +481,14 @@ impl GuardianAuthState {
 }
 
 /// Guardian authentication coordinator using choreographic protocol
-pub struct GuardianAuthenticationCoordinator {
+pub struct GuardianAuthenticationCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
     /// Choreography state
     state: Mutex<GuardianAuthState>,
     /// Effect system
-    effect_system: AuraEffectSystem,
+    effect_system: Arc<E>,
     /// Role in the choreography
     role: GuardianRole,
     /// Biscuit token manager for authorization
@@ -493,9 +497,12 @@ pub struct GuardianAuthenticationCoordinator {
     guard_evaluator: Option<BiscuitGuardEvaluator>,
 }
 
-impl GuardianAuthenticationCoordinator {
+impl<E> GuardianAuthenticationCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
     /// Create new guardian authentication coordinator
-    pub fn new(effect_system: AuraEffectSystem, role: GuardianRole) -> Self {
+    pub fn new(effect_system: Arc<E>, role: GuardianRole) -> Self {
         Self {
             state: Mutex::new(GuardianAuthState::new()),
             effect_system,
@@ -507,7 +514,7 @@ impl GuardianAuthenticationCoordinator {
 
     /// Create new guardian authentication coordinator with Biscuit authorization
     pub fn new_with_biscuit(
-        effect_system: AuraEffectSystem,
+        effect_system: Arc<E>,
         role: GuardianRole,
         token_manager: BiscuitTokenManager,
         guard_evaluator: BiscuitGuardEvaluator,
@@ -839,7 +846,7 @@ impl GuardianAuthenticationCoordinator {
         let success = approved_count >= request.required_guardians;
 
         // TODO: Implement journal state tracking with new effect system
-        // This will use AuraEffectSystem's journal capabilities
+        // This will use the effect system's journal capabilities
 
         tracing::info!(
             "Guardian authentication complete: {} approvals collected, {} required, success: {}",
@@ -1223,18 +1230,24 @@ impl GuardianAuthenticationCoordinator {
 }
 
 /// Guardian authentication coordinator
-pub struct GuardianAuthCoordinator {
-    /// Local effect system (wrapped for cloning)
-    effect_system: std::sync::Arc<std::sync::Mutex<AuraEffectSystem>>,
+pub struct GuardianAuthCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
+    /// Shared effect system handle
+    effect_system: Arc<E>,
     /// Current choreography
-    choreography: Option<GuardianAuthenticationCoordinator>,
+    choreography: Option<GuardianAuthenticationCoordinator<E>>,
 }
 
-impl GuardianAuthCoordinator {
+impl<E> GuardianAuthCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
     /// Create new coordinator
-    pub fn new(effect_system: AuraEffectSystem) -> Self {
+    pub fn new(effect_system: Arc<E>) -> Self {
         Self {
-            effect_system: std::sync::Arc::new(std::sync::Mutex::new(effect_system)),
+            effect_system,
             choreography: None,
         }
     }
@@ -1257,25 +1270,24 @@ impl GuardianAuthCoordinator {
         }
 
         // Create choreography with requester role
-        let effect_system_clone = {
-            // Clone the Arc, not the actual effect system
-            self.effect_system.clone()
-        };
-        // TODO: GuardianAuthenticationCoordinator needs to be updated to accept Arc<Mutex<AuraEffectSystem>>
-        // For now, this is a placeholder to make compilation work
-        // Since we can't easily clone or create AuraEffectSystem, return early with a placeholder response
+        let effect_system_clone = self.effect_system.clone();
+        let choreography =
+            GuardianAuthenticationCoordinator::new(effect_system_clone, GuardianRole::Requester);
+        self.choreography = Some(choreography);
 
-        tracing::warn!("Guardian authentication coordinator needs architectural refactoring");
-
-        return Ok(GuardianAuthResponse {
+        tracing::warn!("Guardian authentication choreography not fully implemented");
+        Ok(GuardianAuthResponse {
             guardian_approvals: vec![],
             success: false,
-            error: Some("GuardianAuthenticationCoordinator requires architectural refactoring to support cloneable effect systems".to_string()),
-        });
+            error: Some(
+                "GuardianAuthenticationCoordinator protocol execution pending implementation"
+                    .to_string(),
+            ),
+        })
     }
 
     /// Get the current effect system
-    pub fn effect_system(&self) -> std::sync::Arc<std::sync::Mutex<AuraEffectSystem>> {
+    pub fn effect_system(&self) -> Arc<E> {
         self.effect_system.clone()
     }
 

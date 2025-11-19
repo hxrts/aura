@@ -81,6 +81,9 @@ pub mod tree;
 /// FlowBudget primitives
 pub mod flow;
 
+/// Authority abstraction (new architecture)
+pub mod authority;
+
 /// Type conversion utilities (internal helpers)
 #[doc(hidden)]
 pub mod conversions;
@@ -116,6 +119,10 @@ pub use context_derivation::{
 };
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use identifiers::*;
+
+// Authority abstraction (new architecture)
+#[doc = "unstable: Authority model is under active development - migration from AccountId ongoing"]
+pub use authority::{Authority, AuthorityRef, AuthorityState, TreeState};
 
 // Messages and versioning
 #[doc = "stable: Core message types with semver guarantees"]

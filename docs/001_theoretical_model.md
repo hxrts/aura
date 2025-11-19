@@ -1,4 +1,4 @@
-# Aura Theory
+# Theoretical Model
 
 This document establishes the complete mathematical foundation for Aura's distributed system architecture. It presents the formal calculus, algebraic/session types, and semilattice semantics that underlie all system components.
 
@@ -17,63 +17,71 @@ The combination forms a privacy-preserving, spam-resistant, capability-checked d
 
 ### 1.1 Syntax
 
-We define programs as *effectful, session-typed processes* operating over semilattice-structured state.
+We define programs as effectful, session-typed processes operating over semilattice-structured state.
 
-**Terms:**
+Terms:
 $$e ::= v \mid e_1\ e_2 \mid \text{handle}\ e\ \text{with}\ H \mid \text{send}\ \kappa\ m \mid \text{recv}\ \kappa \mid \text{merge}\ \delta \mid \text{refine}\ \gamma$$
 
-**Facts (Join-Semilattice):**
+Facts (Join-Semilattice):
 $$(F, \sqcup, \bot) \quad \text{where} \quad x \sqcup y = y \sqcup x,\ x \sqcup (y \sqcup z) = (x \sqcup y) \sqcup z,\ x \sqcup x = x$$
 
-**Capabilities (Meet-Semilattice):**
+Capabilities (Meet-Semilattice):
 $$(C, \sqcap, \top) \quad \text{where} \quad x \sqcap y = y \sqcap x,\ x \sqcap (y \sqcap z) = (x \sqcap y) \sqcap z,\ x \sqcap x = x$$
 
-**Contexts:**
-$$\kappa \in \text{Ctx} = \{ \text{DKD}(\text{app}, \text{label}) \mid \text{RID}(A,B) \mid \text{GID}(G,k) \}$$
+Contexts:
+$$\kappa \in \text{Ctx} = \{ \text{ContextId} \}$$
 
-**Messages:**
-$$m ::= \langle \kappa, T, \sigma \rangle \quad \text{// context, typed payload, signature/auth tag}$$
+Contexts are opaque UUIDs representing authority journals or RelationalContexts. Keys for transport sessions and DKD outputs are scoped to these identifiers. The identifier itself never leaks participants. See [Identifiers and Boundaries](109_identifiers_and_boundaries.md) for canonical definitions.
 
-**Message extraction functions (used by operational rules):**
+Messages:
+$$m ::= \langle \kappa, T, \sigma, \beta \rangle \quad \text{// context, typed payload, signature/auth tag, optional Biscuit token}$$
+
+Message extraction functions (used by operational rules):
 $$\text{facts}(m) : \text{Fact} \quad \text{// join-contribution carried by message payload}$$
-$$\text{caps}(m) : \text{Cap} \quad \text{// meet-contribution (constraint) carried by message payload}$$
+$$\text{token}(m) : \text{Biscuit} \quad \text{// attenuated capability presented alongside the message}$$
 
 A process configuration:
 $$\langle P, F, C, \kappa \rangle$$
-represents a running session with fact-state $F$, capability frontier $C$, and privacy context $\kappa$.
+
+This represents a running session with fact-state $F$, capability frontier $C$ derived from verified Biscuit tokens and local policy, and privacy context $\kappa$.
 
 ### 1.2 Judgments
 
 $$\Gamma \vdash e : T \mid \epsilon$$
-means: under typing context $\Gamma$, expression $e$ has type $T$ and may perform effects $\epsilon$.
 
-**Effect set:**
+Under typing context $\Gamma$, expression $e$ has type $T$ and may perform effects $\epsilon$.
+
+Effect set:
 $$\epsilon ::= \emptyset \mid \epsilon \cup \{\text{Merge}\ \Delta F\} \mid \epsilon \cup \{\text{Refine}\ \Delta C\} \mid \epsilon \cup \{\text{Send}\ \kappa\ m\} \mid \epsilon \cup \{\text{Recv}\ \kappa\}$$
 
 ### 1.3 Operational Semantics
 
-**State evolution:**
+State evolution:
 
 $$(Merge)\quad \langle \text{merge}\ \delta, F, C, \kappa \rangle \to \langle \text{unit}, F \sqcup \delta, C, \kappa \rangle$$
 
 $$(Refine)\quad \langle \text{refine}\ \gamma, F, C, \kappa \rangle \to \langle \text{unit}, F, C \sqcap \gamma, \kappa \rangle$$
 
-**Capability-guarded actions:**
+Capability-guarded actions:
+
 Each side effect or message action $a$ carries a required capability predicate $\text{need}(a)$.
 
 $$(Send)\quad \text{if}\ \text{need}(m) \leq C \land \text{headroom}(\kappa, \text{cost}, F, C)\ \text{then}\ \langle \text{send}\ \kappa\ m, F, C, \kappa \rangle \to \langle \text{unit}, F, C, \kappa \rangle$$
 $$\text{else block}$$
 
-$$(Recv)\quad \langle \text{recv}\ \kappa, F, C, \kappa \rangle \to \langle m, F \sqcup \text{facts}(m), C \sqcap \text{caps}(m), \kappa \rangle$$
+$$(Recv)\quad \langle \text{recv}\ \kappa, F, C, \kappa \rangle \to \langle m, F \sqcup \text{facts}(m), C \sqcap \text{attn}(\text{token}(m)), \kappa \rangle$$
 
-**Context isolation:**
+The function $\text{attn}$ applies the Biscuit token's caveats to the local frontier. Biscuit attenuation never widens authority. The operation remains meet-monotone even though the token data lives outside the journal.
+
+Context isolation:
+
 No reduction may combine messages of distinct contexts:
 $$\text{if}\ \kappa_1 \neq \kappa_2\ \text{then}\ \text{send}\ \kappa_1\ m \parallel \text{recv}\ \kappa_2 \equiv \text{blocked}$$
 
-Here $\text{headroom}(\kappa, \text{cost}, F, C)$ is shorthand for the budget predicate derived from journal facts and capability limits for context $\kappa$:
-$$\text{headroom}(\kappa, \text{cost}, F, C) \triangleq \text{spent}_\kappa(F) + \text{cost} \leq \text{limit}_\kappa(C)$$
+Here $\text{headroom}(\kappa, \text{cost}, F, C)$ is shorthand for the budget predicate derived from journal facts and Biscuit-imposed limits for context $\kappa$:
+$$\text{headroom}(\kappa, \text{cost}, F, C) \triangleq \text{spent}_\kappa(F) + \text{cost} \leq \text{limit}_\kappa(\text{policy} \sqcap C)$$
 
-Implementations realize this by merging a $\text{FlowBudget}$ charge fact before $\text{send}$ (see §2.3 and §5.3), so the side condition is enforced by the same monotone laws as other effects.
+Implementations realize this by merging a $\text{FlowBudget}$ charge fact before $\text{send}$ (see §2.3 and §5.3) while evaluating Biscuit caveats inside the guard chain. The side condition is enforced by the same monotone laws as other effects even though capability data itself is not stored in the CRDT.
 
 ### 1.4 Algebraic Laws (Invariants)
 
@@ -81,52 +89,50 @@ Implementations realize this by merging a $\text{FlowBudget}$ charge fact before
 2. Monotonic Restriction: $C_{t+1} = C_t \sqcap \gamma \implies C_{t+1} \leq C_t$
 3. Safety: Every side effect $\sigma$ requires $\text{need}(\sigma) \leq C$.
 4. Context Separation: For any two contexts $\kappa_1, \kappa_2$, no observable trace relates their internal state unless a bridge protocol is typed for $(\kappa_1, \kappa_2)$.
-5. Compositional Confluence:
-   - $(\text{merge}\ \delta_1; \text{merge}\ \delta_2) \equiv \text{merge}(\delta_1 \sqcup \delta_2)$
-   - $(\text{refine}\ \gamma_1; \text{refine}\ \gamma_2) \equiv \text{refine}(\gamma_1 \sqcap \gamma_2)$
+5. Compositional Confluence: $(\text{merge}\ \delta_1; \text{merge}\ \delta_2) \equiv \text{merge}(\delta_1 \sqcup \delta_2)$ and $(\text{refine}\ \gamma_1; \text{refine}\ \gamma_2) \equiv \text{refine}(\gamma_1 \sqcap \gamma_2)$
 
 ## 2. Core Algebraic Types
 
 ### 2.1 Foundation Objects
 
 ```rust
-// Capabilities are meet-semilattice elements (refinement only shrinks them).
-type Cap     // partially ordered set (≤), with meet ⊓ and top ⊤
-type Policy  // same carrier as Cap, different role (policy-as-capability)
+// Capabilities describe Biscuit caveats. They form a meet-semilattice but are evaluated outside the CRDT.
+type Cap        // partially ordered set (≤), with meet ⊓ and top ⊤
+type Policy     // same carrier as Cap, representing sovereign policy
 
 // Facts are join-semilattice elements (accumulation only grows them).
-type Fact    // partially ordered set (≤), with join ⊔ and bottom ⊥
+type Fact       // partially ordered set (≤), with join ⊔ and bottom ⊥
 
-// Journal state is a CRDT over Facts; Revocations / Constraints are Caps.
+// Journal state is only a Cv/Δ/CmRDT over facts.
 struct Journal {
   facts: Fact,            // Cv/Δ/CmRDT carrier with ⊔
-  caps:  Cap,             // capability frontier with ⊓
 }
 
-// Relationship-scoped keys (pairwise or group) define privacy contexts.
-struct ContextId;   // derived (DKD) identifiers
-struct RID;         // pairwise secret context (X25519-derived)
-struct GID;         // group secret context (threshold-derived)
+// Context identifiers are opaque (authority namespace or RelationalContext).
+struct ContextId(Uuid);
 struct Epoch(u64);  // monotone, context-scoped
 struct FlowBudget { limit: u64, spent: u64, epoch: Epoch };
-struct Receipt { ctx: ContextId, src: DeviceId, dst: DeviceId, epoch: Epoch, cost: u32, nonce: u64, prev: Hash32, sig: Signature };
+struct Receipt { ctx: ContextId, src: AuthorityId, dst: AuthorityId, epoch: Epoch, cost: u32, nonce: u64, prev: Hash32, sig: Signature };
 
 // Typed messages carry effects and proofs under a context.
 struct Msg<Ctx, Payload, Version> {
-  ctx: Ctx,                 // RID or GID or DKD-context
+  ctx: Ctx,                 // ContextId chosen by relationship
   payload: Payload,         // typed by protocol role/state
   ver: Version,             // semantic version nego
   auth: AuthTag,            // signatures/MACs/AEAD tags
+  biscuit: Option<Biscuit>, // optional attenuated capability
 }
 ```
 
-The type `Cap` represents capabilities as meet-semilattice elements. Refinement operations can only reduce authority through the meet operation.
+These type definitions establish the foundation for Aura's formal model. The `Cap` and `Policy` types form meet-semilattices for capability evaluation. The `Fact` type forms a join-semilattice for accumulating evidence. The `Journal` contains only facts and inherits join-semilattice properties. Messages are typed and scoped to contexts to ensure isolation.
+
+The type `Cap` represents the evaluation lattice used by Biscuit. Refinement operations (caveats, delegation) can only reduce authority through the meet operation.
 
 The type `Fact` represents facts as join-semilattice elements. Accumulation operations can only add information through the join operation.
 
-The `Journal` struct combines facts and capabilities into a unified CRDT. Facts grow monotonically while capabilities shrink monotonically.
+Journals replicate only facts. Capability evaluations run locally by interpreting Biscuit tokens plus policy. This keeps authorization independent of the replicated CRDT while preserving the same meet monotonicity at runtime.
 
-Contexts (`RID`, `GID`, `ContextId`) define privacy partitions. Messages never cross partition boundaries without explicit protocol support.
+Contexts (`ContextId`) define privacy partitions. Messages never cross partition boundaries without explicit protocol support. See [Identifiers and Boundaries](109_identifiers_and_boundaries.md) for precise identifier semantics.
 
 ### 2.2 Content Addressing Contract
 
@@ -136,7 +142,7 @@ Structures are serialized using canonical CBOR with sorted maps and deterministi
 
 Once a digest is published, the bytes for that artifact cannot change. New content requires a new digest and a new fact in the journal.
 
-Snapshots and upgrade bundles stored outside the journal are referenced solely by their digest. Downloaders verify the digest before accepting the payload. Journal merges compare digests and reject mismatches before updating state.
+Snapshots and upgrade bundles stored outside the journal are referenced solely by their digest. Downloaders verify the digest before accepting the payload. Journal merges compare digests and reject mismatches before updating state. See [State Reduction Flows](110_state_reduction_flows.md) for the complete fact-to-state pipeline.
 
 ### 2.3 Effect Signatures
 
@@ -147,15 +153,18 @@ Core effect families provide the runtime contract:
 class JournalEffects m where
   read_facts   :: m Fact
   merge_facts  :: Fact -> m Unit
-  read_caps    :: m Cap
-  refine_caps  :: Cap -> m Unit       -- meet: caps := caps ⊓ arg
+
+-- Biscuit verification + guard evaluation
+class AuthorizationEffects m where
+  evaluate_guard :: Biscuit -> CapabilityPredicate -> m Cap
+  derive_cap     :: ContextId -> m Cap -- cached policy frontier
 
 -- Cryptography and key mgmt (abstracted to swap FROST, AEAD, DR, etc.)
 class CryptoEffects m where
   sign_threshold  :: Bytes -> m SigWitness
   aead_seal       :: K_box -> Plain -> m Cipher
   aead_open       :: K_box -> Cipher -> m (Maybe Plain)
-  ratchet_step    :: RID_or_GID -> m RID_or_GID
+  ratchet_step    :: ContextId -> m ContextId
 
 -- Transport (unified)
 class TransportEffects m where
@@ -164,11 +173,11 @@ class TransportEffects m where
   connect :: PeerId -> m Channel
 ```
 
-These effect signatures define the interface between protocols and the runtime. The `JournalEffects` family handles state operations. The `CryptoEffects` family handles cryptographic operations. The `TransportEffects` family handles network communication.
+These effect signatures define the interface between protocols and the runtime. The `JournalEffects` family handles state operations. The `AuthorizationEffects` family verifies Biscuit tokens and fuses them with local policy. The `CryptoEffects` family handles cryptographic operations. The `TransportEffects` family handles network communication.
 
 ### 2.4 Guards and Observability Invariants
 
-Every observable side effect is mediated by a guard chain:
+Every observable side effect is mediated by a guard chain fully described in [Authorization Pipeline](108_authorization_pipeline.md):
 
 1. CapGuard: $\text{need}(\sigma) \leq \text{Caps}(\text{ctx})$
 2. FlowGuard: $\text{headroom}(\text{ctx}, \text{cost})$ where $\text{charge}(\text{ctx}, \text{peer}, \text{cost}, \text{epoch})$ succeeds and yields a $\text{Receipt}$
@@ -177,7 +186,7 @@ Every observable side effect is mediated by a guard chain:
 Named invariants used across documents:
 - Charge-Before-Send: FlowGuard must succeed before any transport send.
 - No-Observable-Without-Charge: there is no $\text{send}(\text{ctx}, \text{peer}, \ldots)$ event without a preceding successful $\text{charge}(\text{ctx}, \text{peer}, \text{cost}, \text{epoch})$.
-- Deterministic-Replenishment: $\text{limit}(\text{ctx})$ updates via meet on deterministic journal facts. The value $\text{spent}$ is join-monotone. Epochs gate resets.
+- Deterministic-Replenishment: $\text{limit}(\text{ctx})$ is computed deterministically from capability evaluation. The value $\text{spent}$ (stored as journal facts) is join-monotone. Epochs gate resets.
 
 ```purescript
 -- Time & randomness for simulation/proofs
@@ -209,13 +218,15 @@ struct FlowBudget {
 }
 ```
 
-The `FlowBudget` struct tracks message emission through two monotone counters. The `spent` field increases through join operations. The `limit` field decreases through meet operations.
+The `FlowBudget` struct tracks message emission through two components:
+- The `spent` field is stored in the journal as facts and increases through join operations
+- The `limit` field is derived from capability evaluation (Biscuit tokens + local policy) and decreases through meet operations
 
-Budgets live in the journal beside capability facts. They inherit the same semilattice laws where `spent` only grows and `limit` only shrinks.
+Only `spent` counters live in the journal as facts, inheriting join-semilattice properties. The `limit` is computed at runtime by evaluating Biscuit tokens and local policy through the capability meet-semilattice, consistent with the principle that capabilities are evaluated outside the CRDT.
 
 Sending a message deducts a fixed `flow_cost` from the local budget before the effect executes. If $\text{spent} + \text{flow\_cost} > \text{limit}$, the effect runtime blocks the send.
 
-Replenishment happens through explicit `BudgetUpdate` facts emitted during epoch-rotation choreographies. Because updates are facts, every replica converges on the same `limit` value without side channels.
+Budget charge facts (incrementing `spent`) are emitted to the journal during send operations. The `limit` value is deterministically computed from the current capability frontier, ensuring all replicas with the same tokens and policy derive the same limit.
 
 Multi-hop forwarding charges budgets hop-by-hop. Relays attach a signed `Receipt` that proves the previous hop still had headroom. Receipts are scoped to the same context so they never leak to unrelated observers.
 
@@ -223,7 +234,7 @@ Multi-hop forwarding charges budgets hop-by-hop. Relays attach a signed `Receipt
 
 Join laws apply to facts. These operations are associative, commutative, and idempotent. If $F_0 = \text{read\_facts}()$ and after $\text{merge\_facts}(f)$ we have $F_1$, then $F_0 \leq F_1$ with respect to the facts partial order.
 
-Meet laws apply to capabilities. These operations are associative, commutative, and idempotent. The operation $\text{refine\_caps}\ c$ never increases authority.
+Meet laws apply to capabilities. These operations are associative, commutative, and idempotent. Applying Biscuit caveats corresponds to multiplying by $c$ under $\sqcap$ and never increases authority.
 
 Cap-guarded effects enforce non-interference. For any effect $e$ guarded by capability predicate $\Gamma \vdash e : \text{allowed}$, executing $e$ from $\text{caps} = C$ is only permitted if $C \sqcap \text{need}(e) = \text{need}(e)$.
 
@@ -250,7 +261,7 @@ $$\Gamma ::= \text{meet-closed predicate}\ \text{need}(m) \leq \text{caps}_r(\te
 $$\Delta ::= \text{journal delta (facts) merged around the message}$$
 $$L ::= \text{leakage tuple}\ (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})$$
 
-**Conventions:**
+Conventions:
 - $r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G$ means "role $r_1$ checks $\Gamma$, applies $\Delta$, records leakage $L$, sends $T$ to $r_2$, then continues with $G$."
 - $r \to * : \ldots$ performs the same sequence for broadcasts.
 - $G_1 \parallel G_2$ means "execute $G_1$ and $G_2$ concurrently."
@@ -258,6 +269,8 @@ $$L ::= \text{leakage tuple}\ (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text
 - $\mu X.\ G$ binds recursion variable $X$ in $G$.
 
 Note on $\Delta$: the journal delta may include budget-charge updates (incrementing $\text{spent}$ for the active epoch) and receipt acknowledgments. Projection ensures these updates occur before any transport effect so "no observable without charge" holds operationally.
+
+Note on $\Gamma$: `check_caps` and `refine_caps` are implemented via `AuthorizationEffects`. Sends verify Biscuit chains (with optional cached evaluations) before touching transport. Receives cache new tokens by refining the local capability frontier. Neither operation mutates the journal. All capability semantics stay outside the CRDT.
 
 ### 3.2 Local Type Grammar (L)
 
@@ -321,25 +334,25 @@ $$\text{dual}(\mu X.\ L) = \mu X.\ \text{dual}(L)$$
 $$\text{dual}(X) = X$$
 $$\text{dual}(\text{end}) = \text{end}$$
 
-**Property**: If Alice's local type is $L$, then Bob's local type is $\text{dual}(L)$ for their communication to be type-safe.
+Property: If Alice's local type is $L$, then Bob's local type is $\text{dual}(L)$ for their communication to be type-safe.
 
 ### 3.5 Session Type Safety Guarantees
 
 The projection process ensures:
 
-1. **Deadlock Freedom**: No circular dependencies in communication
-2. **Type Safety**: Messages have correct types at send/receive
-3. **Communication Safety**: Every send matches a receive
-4. **Progress**: Protocols always advance (no livelocks)
-5. **Agreement**: All participants agree on the chosen branch and protocol state (modulo permitted interleavings of independent actions)
+1. Deadlock Freedom: No circular dependencies in communication
+2. Type Safety: Messages have correct types at send/receive
+3. Communication Safety: Every send matches a receive
+4. Progress: Protocols always advance (no livelocks)
+5. Agreement: All participants agree on the chosen branch and protocol state (modulo permitted interleavings of independent actions)
 
 ### 3.6 Turing Completeness vs Safety Restrictions
 
 The MPST algebra is Turing complete when recursion ($\text{Rec}/\text{Var}$) is unrestricted. However, well-typed programs intentionally restrict expressivity to ensure critical safety properties:
 
-- **Termination**: Protocols that always complete (no infinite loops)
-- **Deadlock Freedom**: No circular waiting on communication
-- **Progress**: Protocols always advance to next state
+- Termination: Protocols that always complete (no infinite loops)
+- Deadlock Freedom: No circular waiting on communication
+- Progress: Protocols always advance to next state
 
 Rumpsteak balances expressivity and safety through guarded recursion constructs.
 
@@ -347,7 +360,7 @@ Rumpsteak balances expressivity and safety through guarded recursion constructs.
 
 You can think of the choreography language as a small set of protocol-building moves:
 
-**Generators:**
+Generators:
 - $\text{Send}(r_1, r_2, T, [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L])$
 - $\text{Broadcast}(r, R^*, T, [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L])$
 - $\text{Parallel}(G_1, \ldots, G_n)$
@@ -369,84 +382,117 @@ Aura treats protocol execution as interpretation over an algebraic effect interf
 
 Because the interface is algebraic, there is a single semantics regardless of execution strategy. This enables two interchangeable modes:
 
-- **Static compilation**: choreographies lower to direct effect calls with zero runtime overhead.
-- **Dynamic interpretation**: choreographies execute through the runtime interpreter for flexibility and tooling.
+- Static compilation: choreographies lower to direct effect calls with zero runtime overhead.
+- Dynamic interpretation: choreographies execute through the runtime interpreter for flexibility and tooling.
 
-Both preserve the same program structure and checks; the choice becomes an implementation detail. This also captures the computation/communication symmetry: a choreographic step describes a typed transform. If the sender and receiver are the same role, projection collapses the step to a local effect invocation. If they differ, the interpreter performs a network send/receive with the same surrounding $\text{merge}/\text{check\_caps}/\text{refine}/\text{record\_leak}$ sequence. Protocol authors reason about transforms, the interpreter decides locality at projection time.
+Both preserve the same program structure and checks. The choice becomes an implementation detail. This also captures the computation/communication symmetry. A choreographic step describes a typed transform. If the sender and receiver are the same role, projection collapses the step to a local effect invocation. If they differ, the interpreter performs a network send/receive with the same surrounding $\text{merge}/\text{check\_caps}/\text{refine}/\text{record\_leak}$ sequence. Protocol authors reason about transforms. The interpreter decides locality at projection time.
 
 ## 4. CRDT Semantic Foundations
 
-### 4.1 CRDT Semantic Interfaces
+### 4.1 CRDT Type System
 
-We model CRDT laws via traits that handlers enforce. These are orthogonal to session typing and used to type message payloads.
+Aura implements four CRDT variants to handle different consistency requirements.
 
 ```rust
-// State-based (CvRDT)
+// State-based (CvRDT) - Full state synchronization
 pub trait JoinSemilattice: Clone { fn join(&self, other: &Self) -> Self; }
 pub trait Bottom { fn bottom() -> Self; }
 pub trait CvState: JoinSemilattice + Bottom {}
 
-// Delta CRDTs
+// Delta CRDTs - Incremental state synchronization
 pub trait Delta: Clone { fn join_delta(&self, other: &Self) -> Self; }
 pub trait DeltaProduce<S> { fn delta_from(old: &S, new: &S) -> Self; }
 
-// Op-based (CmRDT)
+// Operation-based (CmRDT) - Causal operation broadcast
 pub trait CausalOp { type Id: Clone; type Ctx: Clone; fn id(&self) -> Self::Id; fn ctx(&self) -> &Self::Ctx; }
-pub trait CmApply<Op> { fn apply(&mut self, op: Op); } // commutes under causal delivery
+pub trait CmApply<Op> { fn apply(&mut self, op: Op); }
 pub trait Dedup<I> { fn seen(&self, id: &I) -> bool; fn mark_seen(&mut self, id: I); }
 
-// Meet-based CRDTs (constraints)
+// Meet-based CRDTs - Constraint propagation
 pub trait MeetSemilattice: Clone { fn meet(&self, other: &Self) -> Self; }
 pub trait Top { fn top() -> Self; }
 pub trait MvState: MeetSemilattice + Top {}
 ```
 
-### 4.2 Message Types for CRDTs
+The type system enforces mathematical properties. `CvState` types must satisfy associativity, commutativity, and idempotency for join operations. `MvState` types satisfy the same laws for meet operations.
+
+### 4.2 Convergence Proofs
+
+Each CRDT type provides specific convergence guarantees:
+
+CvRDT Convergence: Under eventual message delivery, all replicas converge to the least upper bound of their updates.
+
+Proof sketch: Let states $S_1, S_2, \ldots, S_n$ be replica states after all updates. The final state is $S_1 \sqcup S_2 \sqcup \cdots \sqcup S_n$. By associativity and commutativity of join, this value is unique regardless of message ordering.
+
+Delta-CRDT Convergence: Equivalent to CvRDT but with bandwidth optimization through incremental updates.
+
+CmRDT Convergence: Under causal message delivery and deduplication, all replicas apply the same set of operations.
+
+Proof sketch: Causal delivery ensures operations are applied in a consistent order respecting dependencies. Deduplication prevents double-application. Commutativity ensures that concurrent operations can be applied in any order with the same result.
+
+Meet-CRDT Convergence: All replicas converge to the greatest lower bound of their constraints.
+
+### 4.3 Authority-Specific Applications
+
+Authority journals use join-semilattice facts for evidence accumulation. Facts include `AttestedOp` records proving ratchet tree operations occurred. Multiple attestations of the same operation join to the same fact.
+
+RelationalContext journals use both join operations for shared facts and meet operations for consensus constraints. The prestate model ensures all authorities agree on initial conditions before applying operations.
+
+Biscuit capability evaluation uses meet operations outside the CRDT. Token caveats restrict authority through intersection without affecting replicated state.
+
+### 4.4 Message Schemas for Authority Synchronization
 
 ```rust
-// Phantom tags for clarity (optional at runtime)
-#[derive(Clone)] pub enum MsgKind { FullState, Delta, Op, Constraint }
+// Tagged message types for different synchronization patterns
+#[derive(Clone)] pub enum SyncMsgKind { FullState, Delta, Op, Constraint }
 
-pub type StateMsg<S> = (S, MsgKind);      // (payload, tag::FullState)
-pub type DeltaMsg<D> = (D, MsgKind);      // (payload, tag::Delta)
-pub type ConstraintMsg<C> = (C, MsgKind); // (payload, tag::Constraint)
+pub type AuthorityStateMsg = (AuthorityFacts, SyncMsgKind);
+pub type ContextStateMsg = (ContextFacts, SyncMsgKind);
+pub type FactDelta = (Vec<Fact>, SyncMsgKind);
 
-#[derive(Clone)] pub struct OpWithCtx<Op, Ctx> { pub op: Op, pub ctx: Ctx }
+#[derive(Clone)] pub struct AuthenticatedOp { 
+    pub op: TreeOp, 
+    pub attestation: ThresholdSig, 
+    pub ctx: ContextId 
+}
 
-// Auxiliary protocol payloads
-pub type Digest<Id> = Vec<Id>;
-pub type Missing<Op> = Vec<Op>;
+// Anti-entropy protocol support
+pub type FactDigest = Vec<Hash32>;
+pub type MissingFacts = Vec<Fact>;
 ```
 
-### 4.3 CRDT Protocol Schemas
+These message types support different synchronization strategies. Authority namespaces primarily use delta synchronization for efficiency. RelationalContext namespaces use operation-based synchronization to preserve consensus ordering.
 
-**CvRDT (State-based Anti-Entropy):**
-CvRDTs synchronize by state exchange. Each replica periodically sends its full state to others, who merge it using the join operation.
+### 4.5 Authority Synchronization Protocols
 
-$$\text{CvSync}\langle S \rangle := \mu X.\ (A \to B : \text{State}\langle S \rangle\ .\ X) \parallel (B \to A : \text{State}\langle S \rangle\ .\ X)$$
+Authority Fact Synchronization:
+Authorities exchange facts using delta-based gossip for efficiency.
 
-**Δ-CRDT (Delta-based Gossip):**
-Δ-CRDTs optimize CvRDTs by transmitting deltas rather than full states.
+$$\text{AuthoritySync} := \mu X.\ (A \to B : \text{FactDelta}\langle \Delta \rangle\ .\ X) \parallel (B \to A : \text{FactDelta}\langle \Delta \rangle\ .\ X)$$
 
-$$\text{DeltaSync}\langle \Delta \rangle := \mu X.\ (A \to B : \text{DeltaMsg}\langle \Delta \rangle\ .\ X) \parallel (B \to A : \text{DeltaMsg}\langle \Delta \rangle\ .\ X)$$
+RelationalContext Consensus:
+Contexts use operation-based synchronization to preserve consensus ordering.
 
-**CmRDT (Operation-based):**
-CmRDTs propagate operations with causal broadcast guarantees.
+$$\text{ContextSync} := \mu X.\ (r \to * : \text{AuthenticatedOp}\langle \text{Op}, \text{Ctx} \rangle\ .\ X)$$
 
-$$\text{OpBroadcast}\langle \text{Op}, \text{Ctx} \rangle := \mu X.\ (r \triangleright \{\text{issue} : r \to * : \text{OpWithCtx}\langle \text{Op}, \text{Ctx} \rangle\ .\ X,\ \text{idle} : \text{end}\})$$
+Anti-Entropy Recovery:
+Peers detect missing facts through digest comparison and request specific items.
 
-**Meet-based Constraint Propagation:**
-Meet CRDTs handle constraint intersection and capability refinement.
+$$\text{AntiEntropy} := \text{Alice} \to \text{Bob} : \text{FactDigest}\ .\ \text{Bob} \to \text{Alice} : \text{MissingFacts}\ .\ \text{end}$$
 
-$$\text{ConstraintSync}\langle C \rangle := \mu X.\ (A \to B : \text{ConstraintMsg}\langle C \rangle\ .\ X) \parallel (B \to A : \text{ConstraintMsg}\langle C \rangle\ .\ X)$$
+These protocols ensure eventual consistency across authority boundaries while maintaining context isolation. Facts are scoped to their originating authority or RelationalContext.
 
-### 4.4 Convergence Properties
+### 4.6 Implementation Verification
 
-**Safety & Convergence:**
-- **Session safety**: Projection ensures dual locals, communication safety, and deadlock freedom
-- **Cv/Δ convergence**: eventual delivery + semilattice laws $\implies$ states converge to the join of all local updates
-- **Cm convergence**: causal delivery + dedup + commutative ops $\implies$ replicas converge modulo permutation of independent ops
-- **Meet convergence**: constraint propagation + meet laws $\implies$ capabilities converge to intersection of all constraints
+Aura provides property verification for CRDT implementations through several mechanisms.
+
+Property-Based Testing: Implementations include QuickCheck properties verifying semilattice laws. Tests generate random sequences of operations and verify associativity, commutativity, and idempotency.
+
+Convergence Testing: Integration tests simulate network partitions and verify that replicas converge after partition healing. Tests measure convergence time and verify final state consistency.
+
+Formal Verification: Critical CRDT implementations include formal proofs using the Quint specification language. Proofs verify that implementation behavior matches mathematical specifications.
+
+Safety Guarantees: Session type projection ensures communication safety and deadlock freedom. Semilattice laws guarantee convergence under eventual message delivery. Meet operations ensure that capability restrictions are monotonic and cannot be bypassed.
 
 ## 5. Information Flow Contract (Privacy + Spam)
 
@@ -454,41 +500,41 @@ $$\text{ConstraintSync}\langle C \rangle := \mu X.\ (A \to B : \text{ConstraintM
 
 For any trace $\tau$ of observable messages:
 
-1. **Unlinkability:** $\forall \kappa_1 \neq \kappa_2,\ \tau[\kappa_1 \leftrightarrow \kappa_2] \approx_{\text{ext}} \tau$
-2. **Non-amplification:** Information visible to observer class $o$ is monotone in authorized capabilities:
+1. Unlinkability: $\forall \kappa_1 \neq \kappa_2,\ \tau[\kappa_1 \leftrightarrow \kappa_2] \approx_{\text{ext}} \tau$
+2. Non-amplification: Information visible to observer class $o$ is monotone in authorized capabilities:
    $$I_o(\tau_1) \leq I_o(\tau_2) \iff C_o(\tau_1) \leq C_o(\tau_2)$$
-3. **Leakage Bound:** For each observer $o$, $L(\tau, o) \leq \text{Budget}(o)$.
-4. **Flow Budget Soundness (Named):**
+3. Leakage Bound: For each observer $o$, $L(\tau, o) \leq \text{Budget}(o)$.
+4. Flow Budget Soundness (Named):
    - Charge-Before-Send
    - No-Observable-Without-Charge
    - Deterministic-Replenishment
-   - **Convergence**: Within a fixed epoch and after convergence, $\text{spent}_\kappa \leq \min_r \text{limit}_\kappa^r$ across replicas $r$.
+   - Convergence: Within a fixed epoch and after convergence, $\text{spent}_\kappa \leq \min_r \text{limit}_\kappa^r$ across replicas $r$.
 
 ### 5.2 Web-of-Trust Model
 
-Let $W = (V, E)$ where vertices are accounts; edges carry relationship contexts and delegation fragments.
+Let $W = (V, E)$ where vertices are accounts. Edges carry relationship contexts and delegation fragments.
 
-- Each edge $(A, B)$ defines a **pairwise context** $\text{RID}_{AB}$ with derived keys
+- Each edge $(A, B)$ defines a pairwise context $\text{Ctx}_{AB}$ with derived keys
 - Delegations are meet-closed elements $d \in \text{Cap}$, scoped to contexts
-- The **effective capability** at $A$ is:
+- The effective capability at $A$ is:
   $$\text{Caps}_A = (\text{LocalGrants}_A \sqcap \bigcap_{(A,x) \in E} \text{Delegation}_{x \to A}) \sqcap \text{Policy}_A$$
 
-**WoT invariants:**
-- **Compositionality:** Combining multiple delegations uses $\sqcap$ (never widens)
-- **Local sovereignty:** $\text{Policy}_A$ is always in the meet; $A$ can only reduce authority further
-- **Projection:** For any protocol projection to $A$, guard checks refer to $\text{Caps}_A(\text{ctx})$
+WoT invariants:
+- Compositionality: Combining multiple delegations uses $\sqcap$ (never widens)
+- Local sovereignty: $\text{Policy}_A$ is always in the meet. $A$ can only reduce authority further
+- Projection: For any protocol projection to $A$, guard checks refer to $\text{Caps}_A(\text{ctx})$
 
 ### 5.3 Flow Budget Contract
 
-The unified information-flow budget regulates emission rate/volume and observable leakage using the same semilattice laws as capabilities and facts. For any context $\kappa$ and peer $p$:
+The unified information-flow budget regulates emission rate/volume and observable leakage. The budget system combines join-semilattice facts (for `spent` counters) with meet-semilattice capability evaluation (for `limit` computation). For any context $\kappa$ and peer $p$:
 
-1. **Charge-Before-Send**: A send or forward is permitted only if a budget charge succeeds first. If charging fails, the step blocks locally and emits no network observable.
-2. **No-Observable-Without-Charge**: For any trace $\tau$, there is no event labeled $\text{send}(\kappa, p, \ldots)$ without a preceding successful charge for $(\kappa, p)$ in the same epoch.
-3. **Receipt soundness**: A relay accepts a packet only with a valid per-hop $\text{Receipt}$ (context-scoped, epoch-bound, signed) and sufficient local headroom; otherwise it drops locally.
-4. **Deterministic replenishment**: $\text{limit}_\kappa$ updates are deterministic functions of journal facts and converge via meet; $\text{spent}_\kappa$ is join-monotone. Upon epoch rotation, $\text{spent}_\kappa$ resets and receipts rebind to the new epoch.
-5. **Context scope**: Budget facts and receipts are scoped to $\kappa$; they neither leak nor apply across distinct contexts (non-interference).
-6. **Composition with caps**: A transport effect requires both $\text{need}(m) \leq C$ and $\text{headroom}(\kappa, \text{cost}, F, C)$ (see §1.3). Either guard failing blocks the effect.
-7. **Convergence bound**: Within a fixed epoch and after convergence, $\text{spent}_\kappa \leq \min_r \text{limit}_\kappa^r$ across replicas $r$.
+1. Charge-Before-Send: A send or forward is permitted only if a budget charge succeeds first. If charging fails, the step blocks locally and emits no network observable.
+2. No-Observable-Without-Charge: For any trace $\tau$, there is no event labeled $\text{send}(\kappa, p, \ldots)$ without a preceding successful charge for $(\kappa, p)$ in the same epoch.
+3. Receipt soundness: A relay accepts a packet only with a valid per-hop $\text{Receipt}$ (context-scoped, epoch-bound, signed) and sufficient local headroom. Otherwise it drops locally.
+4. Deterministic limit computation: $\text{limit}_\kappa$ is computed deterministically from Biscuit tokens and local policy via meet operations. $\text{spent}_\kappa$ is stored as journal facts and is join-monotone. Upon epoch rotation, $\text{spent}_\kappa$ resets through new epoch facts.
+5. Context scope: Budget facts and receipts are scoped to $\kappa$. They neither leak nor apply across distinct contexts (non-interference).
+6. Composition with caps: A transport effect requires both $\text{need}(m) \leq C$ and $\text{headroom}(\kappa, \text{cost}, F, C)$ (see §1.3). Either guard failing blocks the effect.
+7. Convergence bound: Within a fixed epoch and after convergence, $\text{spent}_\kappa \leq \min_r \text{limit}_\kappa^r$ across replicas $r$, where each replica's limit is computed from its local capability evaluation.
 
 ## 6. Application Model
 
@@ -513,13 +559,13 @@ Under this calculus, we can make the following interpretation:
 
 ### The Semilattice Layer
 
-The **join-semilattice (Facts)** captures evidence and observations (trust and information flow). Examples: delegations/attestations, quorum proofs, ceremony transcripts, flow receipts, and monotone $\text{spent}$ counters.
+The join-semilattice (Facts) captures evidence and observations (trust and information flow). Examples: delegations/attestations, quorum proofs, ceremony transcripts, flow receipts, and monotone $\text{spent}$ counters.
 
-The **meet-semilattice (Capabilities)** captures enforcement limits and constraints (trust and information flow). Examples: local policy, revocations, capability constraints, per-context $\text{limit}$ budgets, leak bounds, and consent gates.
+The meet-semilattice (Capabilities) captures enforcement limits and constraints (trust and information flow). Examples: the sovereign policy lattice, Biscuit token caveats, leak bounds, and consent gates. Flow budget limits are derived from capability evaluation, not stored as facts. This lattice is evaluated locally rather than stored in the journal, but it obeys the same algebra.
 
 Effective authority and headroom are computed from both lattices:
-$$C_{\text{eff}}(F, C) = \text{derive\_caps}(F) \sqcap C \sqcap \text{Policy}$$
-$$\text{headroom}(F, C) \text{ uses } \text{limit} \in C \text{ and } \text{spent} \in F, \text{ permitting sends iff } \text{spent} + \text{cost} \leq \text{limit}$$
+$$C_{\text{eff}}(\text{tokens}, \text{Policy}) = \left(\bigwedge_{t \in \text{tokens}} \text{attn}(t)\right) \sqcap \text{Policy}$$
+$$\text{headroom}(F, C) \text{ uses } \text{limit}(C_{\text{eff}}) \text{ and } \text{spent} \in F, \text{ permitting sends iff } \text{spent} + \text{cost} \leq \text{limit}$$
 
 ### The Session-Typed Process Layer
 
@@ -537,7 +583,9 @@ Together, these form a *privacy-preserving, capability-checked distributed λ-ca
 
 ## See Also
 
-- [Project Overview](000_project_overview.md) - Overall project architecture and goals
-- [System Architecture](002_system_architecture.md) - Implementation patterns and system design
-- [Information Flow](003_information_flow.md) - Concrete applications and examples
-- [Flow Budget System](103_flow_budget_system.md) - Unified budget model for privacy and spam
+- [System Architecture](001_system_architecture.md) - Implementation patterns and runtime layering
+- [Privacy and Information Flow](003_privacy_and_information_flow.md) - Concrete applications and adversary analysis
+- [Journal](102_journal.md) - Fact storage and CRDT semantics
+- [Authorization Pipeline](108_authorization_pipeline.md) - Biscuit evaluation and guard chaining
+- [Identifiers and Boundaries](109_identifiers_and_boundaries.md) - Canonical identifier definitions
+- [State Reduction Flows](110_state_reduction_flows.md) - Reducer pipelines for authorities and contexts

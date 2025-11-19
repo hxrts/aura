@@ -131,7 +131,7 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
 /// Generate the Aura wrapper module that integrates with the effects system
 fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> TokenStream {
     let roles = &input.roles;
-    let _annotations = &input.aura_annotations; // Parsed annotations for choreography generation (unused in basic generation)
+    let annotations = &input.aura_annotations;
 
     let role_variants: Vec<_> = roles
         .iter()
@@ -158,6 +158,9 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
     } else {
         quote::format_ident!("aura_choreography")
     };
+
+    // Generate leakage integration code
+    let leakage_integration = generate_leakage_integration(annotations);
 
     quote! {
         /// Generated Aura choreography module with effects system integration
@@ -269,6 +272,7 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                 EvaluateGuardWithFlow(AuraRole, String, String, u64), // role, capability, resource_type, flow_cost
                 ChargeFlowCost(AuraRole, i32),
                 Send(AuraRole, AuraRole, String),
+                RecordLeakage(AuraRole, AuraRole, Vec<String>, u64), // from, to, observers, flow_cost
             }
 
             impl ChoreographyBuilder {
@@ -311,6 +315,17 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
 
                 pub fn send(mut self, from: AuraRole, to: AuraRole, message: impl Into<String>) -> Self {
                     self.operations.push(Operation::Send(from, to, message.into()));
+                    self
+                }
+
+                pub fn record_leakage(
+                    mut self,
+                    from: AuraRole,
+                    to: AuraRole,
+                    observers: Vec<String>,
+                    flow_cost: u64
+                ) -> Self {
+                    self.operations.push(Operation::RecordLeakage(from, to, observers, flow_cost));
                     self
                 }
 
@@ -395,6 +410,15 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                                 handler.log_audit(format!("RECEIVED: {} from {:?} to {:?}", message, from, to));
                             }
                         },
+                        Operation::RecordLeakage(from, to, observers, flow_cost) => {
+                            // Record leakage for send/recv operations
+                            if from == handler.role {
+                                handler.charge_flow_cost(flow_cost as i32)?;
+                                handler.log_audit(format!("LEAKAGE_SENT: from {:?} to {:?}, observers: {:?}, cost: {}", from, to, observers, flow_cost));
+                            } else if to == handler.role {
+                                handler.log_audit(format!("LEAKAGE_RECV: from {:?} to {:?}, observers: {:?}", from, to, observers));
+                            }
+                        },
                     }
                 }
                 Ok(())
@@ -428,6 +452,7 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
 
             /// Generate choreography from extracted annotations
             pub fn generate_from_annotations_impl(annotations: Vec<(String, String, String, u64)>) -> ChoreographyProgram {
+                let roles = vec![AuraRole::#first_role]; // Simplified - real impl would get all roles
                 let mut builder = builder();
                 builder = builder.audit_log("choreography_start", HashMap::new());
 
@@ -455,6 +480,24 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                             "journal_merge" => {
                                 builder = builder.audit_log("journal_merge_requested", HashMap::new());
                             },
+                            "leak" => {
+                                // Parse observers from capability_or_value
+                                let observers: Vec<String> = capability_or_value
+                                    .split(',')
+                                    .map(|s| s.trim().to_string())
+                                    .collect();
+
+                                // For leakage, we need to know sender and receiver
+                                // This is simplified - real implementation would parse from choreography
+                                if let Some(next_role) = roles.iter().find(|r| **r != role) {
+                                    builder = builder.record_leakage(
+                                        role,
+                                        *next_role,
+                                        observers,
+                                        flow_cost.max(100), // Default 100 if not specified
+                                    );
+                                }
+                            },
                             _ => {
                                 // Unknown annotation type - log it for debugging
                                 let mut metadata = HashMap::new();
@@ -477,6 +520,8 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                     _ => None,
                 }
             }
+
+            #leakage_integration
         }
     }
 }
@@ -567,6 +612,63 @@ fn extract_namespace_from_input(input: TokenStream) -> Option<String> {
     let re = regex::Regex::new(r#"#\s*\[\s*namespace\s*=\s*"([^"]+)"\s*\]"#).ok()?;
     let captures = re.captures(&input_str)?;
     captures.get(1).map(|m| m.as_str().to_string())
+}
+
+/// Generate leakage integration code from annotations
+fn generate_leakage_integration(annotations: &[AuraEffect]) -> TokenStream {
+    let mut leakage_ops = Vec::new();
+
+    // Process each annotation to find leakage effects
+    for annotation in annotations {
+        if let AuraEffect::Leakage { observers, role } = annotation {
+            // Convert observer strings to ObserverClass enum variants
+            let observer_variants: Vec<_> = observers
+                .iter()
+                .map(|obs| {
+                    match obs.as_str() {
+                        "External" => quote! { ObserverClass::External },
+                        "Neighbor" => quote! { ObserverClass::Neighbor },
+                        "InGroup" => quote! { ObserverClass::InGroup },
+                        _ => quote! { ObserverClass::External }, // Default fallback
+                    }
+                })
+                .collect();
+
+            // Generate leakage recording code for this role
+            let role_ident = quote::format_ident!("{}", role);
+            leakage_ops.push(quote! {
+                // Record leakage for role #role_ident
+                if handler.role == AuraRole::#role_ident {
+                    #(
+                    handler.log_audit(format!("LEAKAGE: {:?} operation visible to {:?}", #role, #observer_variants));
+                    )*
+                }
+            });
+        }
+    }
+
+    // If we have leakage operations, generate the integration module
+    if !leakage_ops.is_empty() {
+        quote! {
+            /// Leakage tracking integration
+            pub mod leakage_integration {
+                use super::*;
+                use aura_core::effects::{LeakageEffects, ObserverClass};
+
+                /// Apply leakage tracking to choreography operations
+                pub async fn track_leakage<BiscuitEvaluator, FlowBudget>(
+                    handler: &mut AuraHandler<BiscuitEvaluator, FlowBudget>,
+                    leakage_effects: &impl LeakageEffects,
+                ) -> Result<(), String> {
+                    #(#leakage_ops)*
+                    Ok(())
+                }
+            }
+        }
+    } else {
+        // No leakage annotations, generate empty module
+        quote! {}
+    }
 }
 
 /// Standard rumpsteak-aura implementation with empty extension registry

@@ -38,11 +38,11 @@ Aura's codebase is organized into 8 clean architectural layers, progressing from
 **Purpose**: Single source of truth for all domain concepts and interfaces
 
 **Contains**:
-- Effect traits: `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `TimeEffects`, `JournalEffects`, `ConsoleEffects`, `RandomEffects`, `TransportEffects`
-- Domain types: `DeviceId`, `AccountId`, `SessionId`, `Capability`, `FlowBudget`
-- Cryptographic utilities: Key derivation, FROST types, merkle trees, Ed25519 operations
+- Effect traits: `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `TimeEffects`, `JournalEffects`, `ConsoleEffects`, `RandomEffects`, `TransportEffects`, `AuthorityEffects`, `RelationalEffects`, `LeakageEffects`
+- Domain types: `AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`, `ObserverClass`, `Capability`
+- Cryptographic utilities: key derivation, FROST types, merkle trees, Ed25519 helpers
 - Semantic traits: `JoinSemilattice`, `MeetSemilattice`, `CvState`, `MvState`
-- Error types and core protocols
+- Error types and guard metadata (`AuraError`, choreography annotations)
 
 **Key principle**: Interface only - no implementations, no business logic
 
@@ -60,11 +60,12 @@ Define domain-specific types, semantics, and pure logic without effect handlers:
 
 | Crate | Domain | Responsibility |
 |-------|--------|-----------------|
-| `aura-journal` | CRDT State | CRDT domain types and semilattice operations (protocols migrated to aura-sync) |
-| `aura-wot` | Trust/Authorization | Capability refinement, meet-semilattice, trust relationships |
-| `aura-verify` | Identity | Complete identity system: cryptographic verification + device lifecycle |
-| `aura-store` | Storage Domain | Storage types, capabilities, and domain logic |
-| `aura-transport` | Transport | P2P communication abstractions |
+| `aura-journal` | Fact-based journal | Fact model, validation, deterministic reduction, Aura Consensus integration |
+| `aura-wot` | Trust/Authorization | Meet-semilattice capability refinement, Biscuit token helpers |
+| `aura-relational` | Relational contexts | Guardian bindings, recovery grants, prestate computation |
+| `aura-verify` | Identity semantics | Identity verification + device lifecycle (planned updates to authority model) |
+| `aura-store` | Storage domain | Storage types, capabilities, domain logic |
+| `aura-transport` | Transport semantics | P2P communication abstractions |
 
 **Key characteristics**:
 - Implement `aura-core` traits for domain-specific types
@@ -75,7 +76,7 @@ Define domain-specific types, semantics, and pure logic without effect handlers:
 
 #### Runtime Library: `aura-mpst`
 
-Provides semantic abstractions for Aura-specific choreographic features:
+Provides semantic abstractions for Aura-specific choreographic features (guard annotations, leakage trackers, context isolation). Works with both macro-generated and hand-written protocols, and integrates with the guard chain (CapGuard → FlowGuard → JournalCoupler → Leakage tracker).
 
 - **Session type extensions**: `CapabilityGuard`, `JournalCoupling`, `LeakageBudget`, `ContextIsolation` traits
 - **Protocol types**: Abstract interfaces that define what choreographic operations must enforce
@@ -193,7 +194,7 @@ Note: `aura-sync` intentionally removed the `aura-macros` dependency but still u
 **Purpose**: Standard library of context-free effect handlers that work in any execution context
 
 
-Provides **stateless, single-operation implementations** of `aura-core` effect traits:
+Provides **stateless, context-free implementations** of `aura-core` effect traits:
 
 ### Mock Handlers (Testing)
 - `MockCryptoHandler` - Deterministic signatures for reproducible tests
@@ -225,22 +226,22 @@ Provides **stateless, single-operation implementations** of `aura-core` effect t
 
 ## Layer 4: Orchestration — `aura-protocol`
 
-**Purpose**: Coordinate effects across multiple parties or handlers in distributed systems
+**Purpose**: Define *how* effects are coordinated, without owning their concrete runtime.
 
-Provides **stateful coordination infrastructure** for multi-party execution:
+`aura-protocol` exports only trait interfaces, orchestration patterns, and choreography bridges. Runtime composition has moved to Layer 6 so protocols can depend on small trait bundles instead of a monolithic type.
 
 ### Core Coordination Primitives
 
 **Handler Orchestration**:
 - `AuraHandlerAdapter` - Bridges choreography DSL to effect handlers
-- `CompositeHandler` - Composes multiple effect handlers (stateful)
+- `CompositeHandler` - Reference compositor used by tests/examples (still trait-only)
 - `CrdtCoordinator` - Coordinates 4+ CRDT handler types for distributed sync
 - `GuardChain` - Authorization pipeline: `CapGuard → FlowGuard → JournalCoupler`
 
-**Cross-Cutting Effect Implementations**:
+**Cross-Cutting Effect Interfaces**:
 - Reliability patterns for fault isolation (circuit breakers, retry logic)
 - Distributed coordination with exponential backoff
-- Protocol-level authorization and validation through explicit effect interfaces
+- Protocol-level authorization and validation through explicit effect traits and guard evaluators
 
 ### Reusable Coordination Patterns
 
@@ -288,14 +289,15 @@ pub async fn execute_anti_entropy(
 
 **Crates**:
 
-| Crate | Protocol | Purpose |
-|-------|----------|---------|
-| `aura-authenticate` | Authentication | Device and guardian authentication choreographies (G_auth, session establishment) |
-| `aura-frost` | FROST | Threshold signature choreography, reference implementation |
-| `aura-invitation` | Invitation | Peer onboarding, content-addressed invitations |
-| `aura-recovery` | Recovery | Guardian recovery ceremonies, dispute escalation |
-| `aura-rendezvous` | Peer Discovery | Secret-Branded Broadcasting (SBB) and peer discovery protocols |
-| `aura-sync` | Synchronization | Journal synchronization protocols, anti-entropy, and tree choreographies |
+| Crate | Protocol | Highlights |
+|-------|----------|-----------|
+| `aura-authenticate` | Authentication | Device & guardian auth flows |
+| `aura-frost` | Threshold signatures | FROST ceremonies |
+| `aura-invitation` | Invitations | Peer onboarding, relational facts |
+| `aura-recovery` | Guardian recovery | Aura Consensus-backed recovery grants |
+| `aura-rendezvous` | Peer discovery | Context-scoped rendezvous envelopes/descriptors |
+| `aura-sync` | Synchronization | Namespaced journal sync, anti-entropy |
+| `aura-storage` | Storage | Capability-guarded encrypted storage protocols |
 
 **Characteristics**:
 - Implement complete business logic and protocol flows
@@ -307,26 +309,26 @@ pub async fn execute_anti_entropy(
 
 ---
 
-## Layer 6: Runtime Composition
+## Layer 6: Runtime Composition — `aura-agent`, `aura-simulator`
 
-**Purpose**: Assemble effect handlers and protocols into working agent runtimes
+**Purpose**: Own the actual effect runtime (builder, registry, lifecycle, metadata) and expose a concrete `AuraEffectSystem` handle that implements every trait from `aura-core`/`aura-protocol`.
 
-These are **libraries**, not binaries. They provide runtime infrastructure that user interface layers drive:
+These crates are **libraries**, not binaries. They turn stateless handlers into running systems that Layer 7 drives.
 
 ### `aura-agent` — Production Runtime
-- Composes all effect handlers and protocols
-- Manages agent lifecycle and state
-- Provides APIs for driving the agent
-- Used by CLI, web UI, and other interfaces
+- Owns the real `AuraEffectSystem` handle (effect executor, guard chain, lifecycle)
+- Provides the effect registry/builder APIs for composing handlers, middleware, telemetry
+- Manages lifecycle services: `ContextManager`, `FlowBudgetManager`, `ReceiptManager`, OTA/maintenance
+- Implements every effect trait + the `AuraEffects` umbrella
+- New modules: `authority_manager`, `registry`, `effect_builder`
 
-### `aura-simulator` — Testing Runtime
-- Deterministic runtime for reproducible testing
-- Controlled scheduling and injectable effects
-- Property-based testing support
-- Used by test harnesses and formal verification
+### `aura-simulator` — Deterministic Runtime
+- Wraps the runtime with deterministic shims (virtual time, transport, storage)
+- Integrates with `aura-testkit` for reproducible multi-party simulations
+- Offers knobs for partitions, failure injection, seeded randomness
 
 **Analogy**: Think of `tokio` (runtime library) vs `main.rs` (application):
-- `aura-agent` = runtime that composes and executes protocols
+- `aura-agent`/`aura-simulator` = runtimes that compose and execute protocols
 - `aura-cli` = application that instantiates and drives an agent
 
 **Dependencies**: All domain crates + `aura-effects` + `aura-protocol`
@@ -341,11 +343,11 @@ These are **libraries**, not binaries. They provide runtime infrastructure that 
 
 | Crate | Interface | Purpose |
 |-------|-----------|---------|
-| `aura-cli` | Terminal | Command-line tools for account management, testing |
+| `aura-cli` | Terminal | Command-line tools (account/guardian/recovery/rendezvous + context/authority inspection) |
 | `app-console` | Web UI | Developer console (planned) |
 | `app-wasm` | Browser | WebAssembly bindings (planned) |
 
-**Key characteristic**: These have `main()` entry points. Users run these directly.
+**Key characteristic**: These have `main()` entry points. Users run these directly. `aura-cli` now includes context and authority inspection commands that read exported JSON snapshots (FlowBudget, receipts, rendezvous envelopes) for debugging.
 
 **Relationship**: Drive the `aura-agent` runtime from the UI layer, translating user actions into protocol operations.
 

@@ -52,6 +52,9 @@ pub mod integration_tests;
 /// Rendezvous-specific errors
 pub mod error;
 
+/// Context-aware rendezvous system
+pub mod context_rendezvous;
+
 /// Connection priority management for NAT traversal
 pub mod connection_manager;
 
@@ -71,9 +74,6 @@ pub use crypto::{BlindSignature, SecretBrand, UnlinkableCredential};
 
 // Re-export WoT types for capabilities
 pub use aura_wot::Capability;
-
-// Re-export protocol effect system
-pub use aura_protocol::AuraEffectSystem;
 
 // Re-export main APIs
 pub use capability_aware_sbb::{
@@ -107,4 +107,10 @@ pub use sbb::{
 pub use secure_channel::{
     ChannelConfig, ChannelLifecycleState, ChannelState, HandshakeComplete, HandshakeInit,
     HandshakeResponse, HandshakeResult, KeyRotationRequest, SecureChannelCoordinator,
+};
+
+// Re-export context rendezvous types
+pub use context_rendezvous::{
+    ContextEnvelope, ContextRendezvousCoordinator, ContextRendezvousDescriptor,
+    ContextTransportBridge, ContextTransportOffer, RendezvousReceipt,
 };

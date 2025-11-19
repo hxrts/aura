@@ -470,7 +470,7 @@ mod tests {
     use super::*;
     use aura_core::DeviceId;
     use aura_macros::aura_test;
-    use aura_protocol::orchestration::AuraEffectSystem;
+    use crate::runtime::AuraEffectSystem;
 
     #[aura_test]
     async fn test_storage_operations() -> aura_core::AuraResult<()> {

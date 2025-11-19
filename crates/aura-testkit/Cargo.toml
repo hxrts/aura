@@ -11,7 +11,8 @@ workspace = true
 
 [dependencies]
 # Workspace crates
-# REMOVED: aura-agent dependency violates 8-layer architecture (Layer 8 should not depend on Layer 6)
+# Layer 8 testkit is allowed to depend on runtime composition for fixtures
+aura-agent = { path = "../aura-agent" }
 aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
 aura-journal = { path = "../aura-journal" }

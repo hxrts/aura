@@ -10,10 +10,12 @@
 //! - Following proper dependency injection patterns
 //! - Avoiding direct system access except in effect handlers
 
+pub mod commands;
 pub mod handlers;
 pub mod visualization;
 
-// Re-export CLI handler
+// Re-export CLI handler and command enums
+pub use commands::{AuthorityCommands, ContextAction};
 pub use handlers::CliHandler;
 
 // Action types are defined in this module and automatically available

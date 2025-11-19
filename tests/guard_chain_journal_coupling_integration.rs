@@ -211,7 +211,7 @@ async fn test_journal_coupling_with_different_annotation_types() -> AuraResult<(
         assert!(result.coupling_metrics.coupling_successful);
 
         // Should have applied journal operations
-        assert!(!result.journal_ops_applied.is_empty());
+        assert!(!result.applied_operations.is_empty());
     }
 }
 
@@ -409,5 +409,5 @@ async fn test_guard_chain_with_multiple_delta_facts() -> AuraResult<()> {
 
     assert_eq!(result.result, "multi_delta_completed");
     assert!(result.coupling_metrics.coupling_successful);
-    assert!(!result.journal_ops_applied.is_empty());
+    assert!(!result.applied_operations.is_empty());
 }

@@ -454,6 +454,143 @@ impl FromStr for AccountId {
     }
 }
 
+impl From<Uuid> for AccountId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl From<AccountId> for Uuid {
+    fn from(account_id: AccountId) -> Self {
+        account_id.0
+    }
+}
+
+/// Authority identifier - primary identifier for authorities in the new model
+///
+/// Represents an opaque cryptographic authority that can sign operations and
+/// hold state. Replaces AccountId in the authority-centric architecture.
+/// Authorities are self-contained entities with internal device structure
+/// that is not exposed externally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct AuthorityId(pub Uuid);
+
+impl AuthorityId {
+    /// Create a new random authority ID
+    #[allow(clippy::disallowed_methods)]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    /// Create from a UUID
+    pub fn from_uuid(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+
+    /// Get the inner UUID
+    pub fn uuid(&self) -> Uuid {
+        self.0
+    }
+
+    /// Convert to bytes
+    pub fn to_bytes(&self) -> [u8; 16] {
+        self.0.into_bytes()
+    }
+}
+
+impl Default for AuthorityId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for AuthorityId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "authority-{}", self.0)
+    }
+}
+
+impl FromStr for AuthorityId {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Handle both raw UUIDs and prefixed format
+        let uuid_str = s.strip_prefix("authority-").unwrap_or(s);
+        Ok(AuthorityId(Uuid::parse_str(uuid_str)?))
+    }
+}
+
+impl From<Uuid> for AuthorityId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl From<AuthorityId> for Uuid {
+    fn from(authority_id: AuthorityId) -> Self {
+        authority_id.0
+    }
+}
+
+/// Context identifier for RelationalContexts
+///
+/// Identifies a RelationalContext that manages cross-authority relationships.
+/// ContextIds are opaque and never encode participant data or authority structure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct ContextId(pub Uuid);
+
+impl ContextId {
+    /// Create a new random context ID
+    #[allow(clippy::disallowed_methods)]
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+
+    /// Create from a UUID
+    pub fn from_uuid(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+
+    /// Get the inner UUID
+    pub fn uuid(&self) -> Uuid {
+        self.0
+    }
+}
+
+impl Default for ContextId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for ContextId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "context-{}", self.0)
+    }
+}
+
+impl FromStr for ContextId {
+    type Err = uuid::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Handle both raw UUIDs and prefixed format
+        let uuid_str = s.strip_prefix("context-").unwrap_or(s);
+        Ok(ContextId(Uuid::parse_str(uuid_str)?))
+    }
+}
+
+impl From<Uuid> for ContextId {
+    fn from(uuid: Uuid) -> Self {
+        Self(uuid)
+    }
+}
+
+impl From<ContextId> for Uuid {
+    fn from(context_id: ContextId) -> Self {
+        context_id.0
+    }
+}
+
 // Extension traits for Effects-based ID generation moved to aura-effects
 // to maintain clean interface layer separation
 

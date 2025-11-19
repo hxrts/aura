@@ -43,7 +43,7 @@ use aura_core::{
 
 /// Simple test context that provides basic effect handler composition
 ///
-/// This replaces the complex orchestration-layer AuraEffectSystem with a simple
+/// This replaces the complex orchestration-layer effect runtime with a simple
 /// composition suitable for testing foundational functionality.
 pub struct SimpleTestContext {
     execution_mode: ExecutionMode,

@@ -1,0 +1,33 @@
+[package]
+name = "aura-relational"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "RelationalContext implementation for cross-authority coordination in Aura"
+repository = "https://github.com/Aura-platform/aura"
+readme = "README.md"
+keywords = ["aura", "relational", "authority", "coordination", "crdt"]
+categories = ["cryptography", "data-structures"]
+
+[dependencies]
+# Core dependencies
+aura-core = { path = "../aura-core", version = "0.1.0" }
+aura-journal = { path = "../aura-journal", version = "0.1.0" }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Utilities
+uuid = { workspace = true, features = ["v4", "serde"] }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+
+[features]
+default = []

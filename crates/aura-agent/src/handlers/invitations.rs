@@ -8,7 +8,7 @@ use aura_invitation::{
     },
     invitation_acceptance::{InvitationAcceptance, InvitationAcceptanceCoordinator},
 };
-use aura_protocol::orchestration::AuraEffectSystem;
+use crate::runtime::AuraEffectSystem;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 

@@ -12,9 +12,11 @@ use aura_core::effects::TimeEffects;
 use aura_core::frost::ThresholdSignature;
 use aura_core::{identifiers::GuardianId, AccountId, AuraError, DeviceId};
 use aura_macros::choreography;
-use aura_protocol::{guards::BiscuitGuardEvaluator, AuraEffectSystem};
+use aura_protocol::effects::AuraEffects;
+use aura_protocol::guards::BiscuitGuardEvaluator;
 use aura_wot::{BiscuitTokenManager, ResourceScope};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Type of membership change
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,8 +147,11 @@ choreography! {
 }
 
 /// Guardian membership coordinator
-pub struct GuardianMembershipCoordinator {
-    _effect_system: AuraEffectSystem,
+pub struct GuardianMembershipCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
+    _effect_system: Arc<E>,
     /// Optional token manager for Biscuit authorization
     token_manager: Option<BiscuitTokenManager>,
     /// Optional guard evaluator for Biscuit authorization
@@ -164,9 +169,12 @@ pub struct MembershipChangeRequest {
     pub new_threshold: Option<usize>,
 }
 
-impl GuardianMembershipCoordinator {
+impl<E> GuardianMembershipCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
     /// Create new coordinator
-    pub fn new(effect_system: AuraEffectSystem) -> Self {
+    pub fn new(effect_system: Arc<E>) -> Self {
         Self {
             _effect_system: effect_system,
             token_manager: None,
@@ -176,7 +184,7 @@ impl GuardianMembershipCoordinator {
 
     /// Create new coordinator with Biscuit authorization
     pub fn new_with_biscuit(
-        effect_system: AuraEffectSystem,
+        effect_system: Arc<E>,
         token_manager: BiscuitTokenManager,
         guard_evaluator: BiscuitGuardEvaluator,
     ) -> Self {
@@ -385,7 +393,7 @@ impl GuardianMembershipCoordinator {
 
     /// Get current timestamp
     async fn current_timestamp(&self) -> u64 {
-        self._effect_system.current_timestamp().await
+        TimeEffects::current_timestamp(self._effect_system.as_ref()).await
     }
 
     /// Generate unique change ID

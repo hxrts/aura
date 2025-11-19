@@ -1,6 +1,9 @@
 //! Journal effect interface for CRDT operations
 
-use crate::{identifiers::DeviceId, relationships::ContextId, AuraError, FlowBudget, Journal};
+use crate::{
+    identifiers::{ContextId, DeviceId},
+    AuraError, FlowBudget, Journal,
+};
 use async_trait::async_trait;
 
 /// Pure trait for journal/CRDT operations

@@ -11,7 +11,7 @@
 //! by creating multiple accounts, establishing guardian relationships,
 //! and executing recovery ceremonies.
 
-use aura_agent::AgentOperations;
+use aura_agent::{AgentOperations, runtime::AuraEffectSystem};
 use aura_core::{AccountId, Cap, DeviceId, TrustLevel, Top, AuraResult};
 use aura_crypto::key_derivation::DkdEngine;
 use aura_verify::registry::IdentityVerifier;
@@ -21,15 +21,40 @@ use aura_invitation::{
     guardian_invitation::{GuardianInvitationRequest, GuardianInvitationCoordinator},
     invitation_acceptance::{AcceptanceProtocolConfig, InvitationAcceptanceCoordinator},
 };
-use aura_journal::{JournalOperations, semilattice::InvitationLedger};
+use aura_journal::semilattice::InvitationLedger;
 use aura_recovery::{
     guardian_recovery::GuardianRecoveryCoordinator,
     account_recovery::{AccountRecoveryRequest, AccountRecoveryCoordinator},
 };
 use aura_wot::CapabilitySet;
+use serde_json::json;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tokio::time::timeout;
+
+#[derive(Clone, Default)]
+struct TestFactJournal {
+    inner: Arc<Mutex<Vec<serde_json::Value>>>,
+}
+
+impl TestFactJournal {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    async fn append_fact_bytes(
+        &self,
+        bytes: Vec<u8>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+        self.inner.lock().await.push(value);
+        Ok(())
+    }
+
+    async fn fact_count(&self) -> usize {
+        self.inner.lock().await.len()
+    }
+}
 
 /// Test participant representing a friend in the network
 #[derive(Debug)]
@@ -42,8 +67,8 @@ struct TestParticipant {
     pub agent_ops: AgentOperations,
     /// Identity operations
     pub identity_ops: IdentityOperations,
-    /// Journal operations
-    pub journal_ops: JournalOperations,
+    /// Journal recorder for debugging
+    pub journal: TestFactJournal,
     /// Effect system
     pub effects: AuraEffectSystem,
     /// Participant name for debugging
@@ -60,14 +85,14 @@ impl TestParticipant {
 
         let agent_ops = AgentOperations::new(device_id, effects.clone()).await;
         let identity_ops = IdentityOperations::new(effects.clone());
-        let journal_ops = JournalOperations::new(effects.clone());
+        let journal = TestFactJournal::new();
 
         Ok(Self {
             device_id,
             account_id,
             agent_ops,
             identity_ops,
-            journal_ops,
+            journal,
             effects,
             name,
         })
@@ -96,7 +121,9 @@ impl TestParticipant {
         });
 
         let fact_bytes = serde_json::to_vec(&init_fact)?;
-        self.journal_ops.append_fact(fact_bytes).await?;
+        self.journal
+            .append_fact_bytes(fact_bytes)
+            .await?;
 
         println!("✓ Account initialized for {}", self.name);
         Ok(())
@@ -330,7 +357,7 @@ async fn test_threshold_identity_complete_workflow() -> AuraResult<()> {
         // Verify all participants have valid state
         for (name, participant) in &network.participants {
             // Check journal state
-            let facts_count = participant.journal_ops.get_fact_count().await?;
+            let facts_count = participant.journal.fact_count().await;
             assert!(facts_count > 0, "Participant {} should have facts in journal", name);
 
             // Check identity state

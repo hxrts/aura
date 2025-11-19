@@ -14,10 +14,12 @@ use aura_core::frost::ThresholdSignature;
 use aura_core::{hash, identifiers::GuardianId, AccountId, AuraError, DeviceId, FlowBudget};
 use aura_effects::crypto::derive_key_material;
 use aura_macros::choreography;
-use aura_protocol::{guards::BiscuitGuardEvaluator, AuraEffectSystem};
+use aura_protocol::effects::AuraEffects;
+use aura_protocol::guards::BiscuitGuardEvaluator;
 use aura_wot::{BiscuitTokenManager, ResourceScope};
 use biscuit_auth::Biscuit;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Guardian key recovery request data
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,67 +70,64 @@ choreography! {
 
         // Phase 1: Recovery request to all guardians
         RecoveringDevice[guard_capability = "initiate_emergency_recovery",
-                        flow_cost = 300,
                         journal_facts = "emergency_recovery_initiated",
                         leakage_budget = [1, 0, 0]]
         -> Guardian1: RequestRecovery(KeyRecoveryRequest);
 
-        RecoveringDevice[guard_capability = "initiate_emergency_recovery",
-                        flow_cost = 300]
+        RecoveringDevice[guard_capability = "initiate_emergency_recovery"]
         -> Guardian2: RequestRecovery(KeyRecoveryRequest);
 
-        RecoveringDevice[guard_capability = "initiate_emergency_recovery",
-                        flow_cost = 300]
+        RecoveringDevice[guard_capability = "initiate_emergency_recovery"]
         -> Guardian3: RequestRecovery(KeyRecoveryRequest);
 
         // Phase 2: Guardian approvals back to recovering device
         Guardian1[guard_capability = "approve_emergency_recovery,verify_recovery_context",
-                  flow_cost = 200,
                   journal_facts = "guardian_recovery_approved",
                   leakage_budget = [0, 1, 0]]
         -> RecoveringDevice: ApproveRecovery(GuardianKeyApproval);
 
         Guardian2[guard_capability = "approve_emergency_recovery,verify_recovery_context",
-                  flow_cost = 200,
                   journal_facts = "guardian_recovery_approved"]
         -> RecoveringDevice: ApproveRecovery(GuardianKeyApproval);
 
         Guardian3[guard_capability = "approve_emergency_recovery,verify_recovery_context",
-                  flow_cost = 200,
                   journal_facts = "guardian_recovery_approved"]
         -> RecoveringDevice: ApproveRecovery(GuardianKeyApproval);
 
         // Phase 3: Recovery completion broadcast
         RecoveringDevice[guard_capability = "complete_emergency_recovery",
-                        flow_cost = 150,
                         journal_facts = "emergency_recovery_completed",
                         journal_merge = true]
         -> Guardian1: CompleteRecovery(RecoveryCompletion);
 
         RecoveringDevice[guard_capability = "complete_emergency_recovery",
-                        flow_cost = 150,
                         journal_merge = true]
         -> Guardian2: CompleteRecovery(RecoveryCompletion);
 
         RecoveringDevice[guard_capability = "complete_emergency_recovery",
-                        flow_cost = 150,
                         journal_merge = true]
         -> Guardian3: CompleteRecovery(RecoveryCompletion);
     }
 }
 
 /// Guardian key recovery coordinator
-pub struct GuardianKeyRecoveryCoordinator {
-    _effect_system: AuraEffectSystem,
+pub struct GuardianKeyRecoveryCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
+    _effect_system: Arc<E>,
     /// Optional token manager for Biscuit authorization
     token_manager: Option<BiscuitTokenManager>,
     /// Optional guard evaluator for Biscuit authorization
     guard_evaluator: Option<BiscuitGuardEvaluator>,
 }
 
-impl GuardianKeyRecoveryCoordinator {
+impl<E> GuardianKeyRecoveryCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
     /// Create new coordinator
-    pub fn new(effect_system: AuraEffectSystem) -> Self {
+    pub fn new(effect_system: Arc<E>) -> Self {
         Self {
             _effect_system: effect_system,
             token_manager: None,
@@ -138,7 +137,7 @@ impl GuardianKeyRecoveryCoordinator {
 
     /// Create new coordinator with Biscuit authorization
     pub fn new_with_biscuit(
-        effect_system: AuraEffectSystem,
+        effect_system: Arc<E>,
         token_manager: BiscuitTokenManager,
         guard_evaluator: BiscuitGuardEvaluator,
     ) -> Self {
@@ -314,7 +313,7 @@ impl GuardianKeyRecoveryCoordinator {
 
     /// Get current timestamp
     async fn current_timestamp(&self) -> u64 {
-        self._effect_system.current_timestamp().await
+        TimeEffects::current_timestamp(self._effect_system.as_ref()).await
     }
 
     // Helper methods

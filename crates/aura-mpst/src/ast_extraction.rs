@@ -39,6 +39,13 @@ pub enum AuraEffect {
         /// The role that performs the action
         role: String,
     },
+    /// Leakage tracking annotation
+    Leakage {
+        /// Observer classes that can see this operation
+        observers: Vec<String>,
+        /// The role that leaks information
+        role: String,
+    },
 }
 
 /// Errors that can occur during annotation extraction
@@ -121,6 +128,12 @@ pub fn generate_aura_choreography_code(
                     action, role
                 ));
             }
+            AuraEffect::Leakage { observers, role } => {
+                code.push_str(&format!(
+                    "    // Leakage to observers {:?} for role {}\n",
+                    observers, role
+                ));
+            }
         }
     }
 
@@ -171,6 +184,16 @@ fn detect_annotations_in_text(
             if let Some(facts) = extract_journal_facts_from_line(line) {
                 effects.push(AuraEffect::JournalFacts {
                     facts,
+                    role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
+                });
+            }
+        }
+
+        // Handle leak annotation: [leak: (External, Neighbor)]
+        if line.contains("leak:") {
+            if let Some(observers) = extract_leakage_observers_from_line(line) {
+                effects.push(AuraEffect::Leakage {
+                    observers,
                     role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
                 });
             }
@@ -240,6 +263,33 @@ fn extract_journal_facts_from_line(line: &str) -> Option<String> {
             let quote_start = start + quote_start + 1;
             if let Some(quote_end) = line[quote_start..].find('"') {
                 return Some(line[quote_start..quote_start + quote_end].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Extract leakage observers from a line
+fn extract_leakage_observers_from_line(line: &str) -> Option<Vec<String>> {
+    // Look for pattern like "leak: (External, Neighbor)" or "leak: (External)"
+    if let Some(start) = line.find("leak:") {
+        let after_leak = &line[start + 5..];
+
+        // Find the parentheses
+        if let Some(paren_start) = after_leak.find('(') {
+            if let Some(paren_end) = after_leak.find(')') {
+                let observers_str = &after_leak[paren_start + 1..paren_end];
+
+                // Split by comma and trim
+                let observers: Vec<String> = observers_str
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+
+                if !observers.is_empty() {
+                    return Some(observers);
+                }
             }
         }
     }

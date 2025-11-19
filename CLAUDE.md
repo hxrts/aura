@@ -4,7 +4,7 @@
 
 Aura is a threshold identity and encrypted storage platform built on relational security principles. It uses threshold cryptography and social recovery to eliminate the traditional choice between trusting a single device or a centralized entity.
 
-**Architecture**: Choreographic programming with session types for coordinating distributed protocols. Uses algebraic effects for modular runtime composition. See `docs/999_project_structure.md` for a complete crate breakdown.
+**Architecture**: Choreographic programming with session types for coordinating distributed protocols. Uses algebraic effects for modular runtime composition. See `docs_2/001_system_architecture.md` and `docs/999_project_structure.md` for the latest crate breakdown.
 
 ## Development Setup
 
@@ -58,263 +58,69 @@ All commands below must be run within `nix develop`.
 
 The codebase follows a strict 8-layer architecture with zero circular dependencies:
 
-1. **Foundation** (`aura-core`): Single source of truth for all domain concepts and interfaces. Effect traits (`CryptoEffects`, `NetworkEffects`, `StorageEffects`, `TimeEffects`, `JournalEffects`, `ConsoleEffects`, `RandomEffects`, `TransportEffects`), domain types (`DeviceId`, `AccountId`, `SessionId`, `Capability`, `FlowBudget`), cryptographic utilities (key derivation, FROST types, merkle trees), semantic traits (`JoinSemilattice`, `MeetSemilattice`, `CvState`, `MvState`), unified error handling (`AuraError`), and reliability utilities (`RetryPolicy`, `RateLimiter`). No other Aura crate dependencies.
+1. **Foundation** (`aura-core`): Effect traits (crypto, network, storage, time, journal, console, random, transport), domain types (`AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`), cryptographic utilities (FROST, merkle trees), semilattice traits, unified errors (`AuraError`), and reliability utilities. Other crates depend on `aura-core`, but it depends on none of them.
 
-2. **Specification** (Domain Crates + `aura-mpst` + `aura-macros`): 
-   - Domain crates (`aura-journal`, `aura-wot`, `aura-verify`, `aura-store`, `aura-transport`): Domain-specific types, semantics, and pure logic without effect handlers. `aura-journal` contains CRDT domain types and semilattice operations for distributed ledger state.
-   - `aura-mpst` (runtime library): Session type extensions, runtime types, security policies (`LeakageTracker` with secure-by-default budget enforcement), extension registry. Used by 7 crates.
-   - `aura-macros` (compile-time tool): Choreography DSL parser, annotation extraction (`guard_capability`, `flow_cost`, `journal_facts`), code generation. Parses choreography syntax with Aura-specific annotations, generates Rust code calling `rumpsteak-aura` for projection. Used by 2 feature crates.
-   - **Note**: `aura-sync` demonstrates semantic library independence by intentionally removing `aura-macros` dependency while still using `aura-mpst` types via `aura-protocol`.
+2. **Specification** (Domain Crates + `aura-mpst` + `aura-macros`):
+   - Domain crates (`aura-journal`, `aura-wot`, `aura-verify`, `aura-store`, `aura-transport`): CRDT domains, capability systems, transport semantics. `aura-journal` now exposes fact-based journals and reduction pipelines (`docs_2/102_journal.md`, `docs_2/110_state_reduction_flows.md`).
+   - `aura-mpst`: Session type runtime with guard extensions and leakage tracking (`LeakageTracker`).
+   - `aura-macros`: Choreography DSL parser/annotation extractor (`guard_capability`, `flow_cost`, `journal_facts`, `leak`) that emits rumpsteak projections.
 
-3. **Implementation** (`aura-effects`): Standard library of stateless, single-party, context-free effect handlers. Mock handlers (`MockCryptoHandler`, `MockNetworkHandler`, `InMemoryStorageHandler`, `MockTimeHandler`) for testing. Real handlers (`RealCryptoHandler`, `TcpNetworkHandler`, `FilesystemStorageHandler`, `RealTimeHandler`) for production. System handlers (`MonitoringSystemHandler`, `HealthCheckHandler`) for observability. Each handler implements one effect trait independently.
+3. **Implementation** (`aura-effects`): Stateless, single-party handlers (real & mock) implementing core effect traits (crypto, network, storage, randomness, console, leakage, etc.).
 
-4. **Orchestration** (`aura-protocol`): Stateful coordination infrastructure for multi-party execution. Handler orchestration (`AuraHandlerAdapter`, `CompositeHandler`, `CrdtCoordinator`, `GuardChain`), capability evaluation (`CapabilityEvaluator`), cross-cutting effect implementations (circuit breakers), and reusable coordination patterns (`anti_entropy`, `consensus`, `snapshot`, `threshold_ceremony`).
+4. **Orchestration** (`aura-protocol`): Multi-party coordination and guard infrastructure: handler adapters, CrdtCoordinator, GuardChain (CapGuard → FlowGuard → JournalCoupler), Capability evaluator, Aura Consensus runtime, anti-entropy/snapshot helpers.
 
-5. **Feature/Protocol Implementation** (`aura-authenticate`, `aura-frost`, `aura-invitation`, `aura-recovery`, `aura-rendezvous`, `aura-storage`, `aura-sync`): Complete end-to-end protocol implementations. Each crate implements a specific protocol (authentication, FROST threshold signatures, peer invitations, recovery ceremonies, peer discovery, capability-based storage, journal synchronization). `aura-sync` includes choreographic protocols for tree synchronization and journal coordination migrated from `aura-journal`. Use choreography macros, compose handlers from `aura-effects`, use coordination from `aura-protocol`. No UI or main entry points - designed as reusable building blocks.
+5. **Feature/Protocol** (`aura-authenticate`, `aura-frost`, `aura-invitation`, `aura-recovery`, `aura-rendezvous`, `aura-storage`, `aura-sync`): End-to-end protocol crates (auth, guardian recovery, rendezvous, storage, etc.) built atop the orchestration layer.
 
-6. **Runtime Composition** (`aura-agent`, `aura-simulator`): Runtime libraries (NOT binaries) that assemble handlers and protocols. `aura-agent` for production runtime, `aura-simulator` for deterministic testing with controlled scheduling.
+6. **Runtime Composition** (`aura-agent`, `aura-simulator`): Runtime assembly of effect systems (agent) and deterministic simulation (simulator). `aura-agent` now owns the effect registry/builder infrastructure; `aura-protocol` no longer exports the legacy registry.
 
-7. **User Interface** (`aura-cli`): Binaries with `main()` entry points that users actually run. Drives the `aura-agent` runtime, translating user actions into protocol operations.
+7. **User Interface** (`aura-cli`): CLI entry points driving the agent runtime. Current CLI exposes scenario/admin/recovery/invitation flows plus the new authority/context inspection commands.
 
-8. **Testing & Development Tools** (`aura-testkit`, `aura-quint-api`): Cross-cutting test utilities (shared fixtures, scenario builders, property test helpers) and formal verification bridges.
+8. **Testing & Tools** (`aura-testkit`, `aura-quint-api`): Shared fixtures, simulation harnesses, property tests, Quint interop.
 
-**Where does my code go?** Use this decision matrix:
-- **Stateless + single-party + context-free?** → `aura-effects`
-- **Coordinates multiple handlers or multi-party?** → `aura-protocol`
-- **Domain-specific types/logic?** → Domain crate
-- **Complete protocol implementation?** → Feature crate
-- **UI with main()?** → UI crate
+**Where does my code go?** See the docs under `docs_2/001_system_architecture.md` and `docs/AUTHORITY_ARCHITECTURE.md` for the latest authority-centric guidance.
 
-### Key Concepts
+## Architecture Essentials (Authority Model)
 
-- **Choreographic Programming**: Write protocols from global viewpoint, automatically projected to device-specific actions. Provides deadlock freedom and type-checked communication.
-- **Session Types**: Compile-time safety for protocol state transitions. Typestate prevents invalid operations.
-- **Unified State Model**: Single Journal CRDT for account, storage, and communication state. Atomic consistency across subsystems.
-- **Threshold Cryptography**: FROST-based M-of-N signatures. No single device can compromise account.
-- **Capability-Based Access Control**: Unified system for storage access, relay permissions, and trust evaluation. Supports both traditional capability-based authorization and **Biscuit tokens** for cryptographically verifiable, attenuated delegation.
+Aura now models identity via opaque authorities (`AuthorityId`) and relational contexts (`ContextId`). Key points:
 
-## Distributed Protocols
+- Ratchet tree updates and device membership are expressed as fact-based AttestedOps (`aura-journal/src/fact_journal.rs`). No graph-based `journal_ops` remain.
+- Relational contexts (guardian bindings, recovery grants, rendezvous receipts) live in their own journals (`docs_2/103_relational_contexts.md`).
+- Aura Consensus is the sole strong-agreement mechanism (`docs_2/104_consensus.md`). Fast path + fallback gossip integrate with the guard chain.
+- Guard chain sequence: `AuthorizationEffects` (Biscuit/capabilities) → `FlowBudgetEffects` (charge-before-send) → `LeakageEffects` (`docs_2/003_privacy_and_information_flow.md`) → `JournalEffects` (fact commit) → `TransportEffects`.
+- Flow budgets: only the `spent` counters are facts; limits are derived at runtime from Biscuit + policy.
 
-### Choreography System Architecture
+## Distributed Systems Contract
 
-Aura uses a 3-layer choreographic programming system:
+See `docs_2/004_distributed_systems_contract.md` for the distributed-systems guarantees (safety, liveness, partial synchrony assumptions, latency expectations, adversarial models, and monitoring guidance).
 
-```
-choreography! { ... }      # User writes choreography with Aura annotations
-    ↓ [aura-macros proc macro]
-ExtensionRegistry + rumpsteak session types generation
-    ↓ [generated code calls]
-aura-mpst runtime with typed extensions + guard chains + journal coupling
-```
+## Information Flow / Privacy
 
-**Key Components:**
-
-- **`aura-macros`** (proc macro crate): Parses choreography syntax with Aura-specific annotations (`guard_capability`, `flow_cost`, `journal_facts`) and generates calls to rumpsteak-aura + aura-mpst integration
-- **`aura-mpst`** (runtime integration): Provides `ExtensionRegistry`, `AuraRuntime`, guard chains, journal coupling, and effect system bridge with rumpsteak session types
-- **`rumpsteak-aura`** (session types foundation): Handles choreographic projection, session type safety, and distributed execution
-
-### Choreography Guidelines
-
-Aura uses rumpsteak-aura for choreographic protocol implementation with Aura-specific extensions:
-
-- **DSL-based protocols**: Write protocols using string-based choreography DSL that's parsed at runtime via `rumpsteak_aura_choreography::compiler::parser::parse_choreography_str`
-- **Automatic projection**: Global protocols project to local session types for each role, ensuring deadlock freedom
-- **Effect-based execution**: Protocols execute through the effect system with `interpret()` using configurable handlers
-- **Aura extensions**: Use `aura-macros` for domain-specific annotations (guard capabilities, flow costs, journal facts):
-
-  ```rust
-  use aura_macros::choreography;
-  
-  choreography! {
-      #[namespace = "secure_request"]
-      protocol SecureRequest {
-          roles: Client, Server;
-          
-          Client[guard_capability = "send_request", flow_cost = 50]
-          -> Server: SendRequest(RequestData);
-          
-          Server[guard_capability = "send_response", flow_cost = 30, 
-                 journal_facts = "response_sent"]
-          -> Client: SendResponse(ResponseData);
-          
-          // Messages with annotations but no flow_cost get default of 100
-          Client[guard_capability = "acknowledge"]
-          -> Server: Ack(AckData);
-      }
-  }
-  ```
-
-- **Protocol composition**: Compose choreographies through effect programs using `.then()` and `.ext()` for cross-cutting concerns
-- **Testing support**: Use `InMemoryHandler` for testing, real transport handlers for production
-- **Default flow costs**: Messages with role annotations (e.g., `guard_capability`, `journal_facts`) automatically receive a default `flow_cost = 100` if not explicitly specified. This ensures all annotated operations have flow budget tracking without requiring redundant cost declarations.
-
-### Semilattice Guidelines
-
-Aura uses semilattice CRDTs for distributed state management with eventual consistency guarantees:
-
-- **Join semilattices** (⊔): Implement `Join` trait for types that accumulate knowledge through union operations:
-  ```rust
-  use aura_journal::semilattice::Join;
-  
-  impl Join for GCounterState {
-      fn join(&self, other: &Self) -> Self {
-          let mut merged = self.device_counts.clone();
-          for (device_id, count) in &other.device_counts {
-              let current = merged.get(device_id).copied().unwrap_or(0);
-              merged.insert(*device_id, current.max(*count));
-          }
-          GCounterState { device_counts: merged }
-      }
-  }
-  ```
-  Operations must be associative, commutative, and idempotent. Used for `Journal.facts` and other monotonically growing state.
-
-- **Meet semilattices** (⊓): Implement `Meet` trait for types that refine authority through intersection:
-  ```rust
-  use aura_wot::CapabilitySet;
-  
-  impl Meet for CapabilitySet {
-      fn meet(&self, other: &Self) -> Self {
-          let intersection = self.capabilities
-              .intersection(&other.capabilities)
-              .cloned()
-              .collect();
-          CapabilitySet { capabilities: intersection }
-      }
-  }
-  ```
-  Ensures conservative security - operations require explicit authorization from all sources. Used for `Journal.caps`.
-
-- **Capability system**: Aura's authorization is built on meet-semilattice operations. Capabilities refine through `⊓` (intersection), ensuring that delegation can only restrict authority, never expand it. This provides mathematically guaranteed security - no privilege escalation is possible.
-
-- **CRDT integration**: Use `CrdtCoordinator` builders to integrate with protocols:
-  - `CrdtCoordinator::with_cv_state()` for state-based CRDTs
-  - `CrdtCoordinator::with_delta_threshold()` for delta CRDTs (more efficient)
-  - `CrdtCoordinator::with_mv_state()` for meet-semilattice constraints
-
-- **Key property**: The Journal combines both: facts grow (⊔), capabilities shrink (⊓), providing atomic consistency across subsystems
+Reference `docs_2/003_privacy_and_information_flow.md` for the unified flow-budget/metadata-leakage contract. Key notes:
+- Charge-before-send invariant enforced by FlowGuard + JournalCoupler.
+- Receipts propagate via relational contexts (`docs_2/107_transport_and_information_flow.md`).
+- Leakage budgets tracked via `LeakageEffects` and choreography annotations.
 
 ## Authorization Systems
 
-Aura provides two complementary authorization systems that can be used independently or together:
+1. **Traditional Capability Semantics** (`aura-wot`): Meet-semilattice capability evaluation for local checks.
+2. **Biscuit Tokens** (`aura-wot/src/biscuit_*`, `aura-protocol/src/authorization/*`): Cryptographically verifiable, attenuated tokens.
+3. **Guard Integration**: `aura-protocol::guards::{CapGuard, FlowGuard, JournalCoupler, LeakageTracker}` enforce Biscuit/policy requirements, flow budgets, journal commits, and leakage budgets per message.
 
-### Traditional Capability-Based Authorization
+## Documentation Map
 
-Located in `aura-wot` crate, provides semilattice-based capability evaluation:
+- Core overview: `docs/000_project_overview.md`
+- Theoretical model: `docs_2/001_theoretical_model.md`
+- Architecture: `docs_2/001_system_architecture.md`
+- Privacy: `docs_2/003_privacy_and_information_flow.md`
+- Distributed systems contract: `docs_2/004_distributed_systems_contract.md`
+- Authority/Relational identity: `docs/AUTHORITY_ARCHITECTURE.md`, `docs_2/103_relational_contexts.md`
+- Consensus: `docs_2/104_consensus.md`
+- Transport/receipts: `docs_2/107_transport_and_information_flow.md`, `docs_2/108_rendezvous.md`
+- Developer guides: `docs/803_coordination_systems_guide.md`, `docs/804_advanced_choreography_guide.md`, `docs/805_testing_guide.md`
+- Reference: `docs/999_project_structure.md`
 
-```rust
-use aura_wot::{Capability, CapabilitySet, evaluate_capabilities};
+## Legacy Cleanup Status
 
-// Check if device has required capabilities
-let required = CapabilitySet::single(Capability::Write);
-if device_caps.contains_all(&required) {
-    // Authorized to write
-}
-```
+- Graph-based `journal_ops` directory removed; guard/tests now track fact deltas.
+- `DeviceMetadata`/`DeviceType` removal in progress (see work plan in `refactor.md`). Until the new authority-derived device view lands, legacy structs remain in `aura-journal::types`, ledger APIs, and testkit builders.
 
-**Use Cases**: Device-to-device operations, local authorization decisions, simple capability checks
-**Key Features**: Meet-semilattice properties, delegation chains, storage permissions
-
-### Biscuit Token Authorization
-
-Located in `aura-wot/src/biscuit_*` and `aura-protocol/src/authorization/biscuit_*`, provides cryptographically verifiable tokens:
-
-```rust
-use aura_wot::biscuit_token::{AccountAuthority, BiscuitTokenManager};
-use aura_protocol::authorization::BiscuitAuthorizationBridge;
-
-// Create root authority
-let authority = AccountAuthority::new(account_id);
-let device_token = authority.create_device_token(device_id)?;
-
-// Create attenuated delegation
-let manager = BiscuitTokenManager::new(device_id, device_token);
-let read_token = manager.attenuate_read("documents/shared/")?;
-
-// Verify authorization
-let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), device_id);
-let result = bridge.authorize(&read_token, "read", &resource_scope)?;
-```
-
-**Use Cases**: Cross-network delegation, offline authorization, audit trails, fine-grained resource access
-**Key Features**: Cryptographic verification, attenuation-only delegation, resource-specific authorization
-
-### Integration with Guard System
-
-Both authorization systems integrate with Aura's guard evaluation:
-
-```rust
-use aura_protocol::guards::biscuit_evaluator::BiscuitGuardEvaluator;
-
-// Biscuit guards with flow budget
-let evaluator = BiscuitGuardEvaluator::new(biscuit_bridge);
-let result = evaluator.evaluate_guard(&token, "write", &resource, 50, &mut flow_budget)?;
-
-// Traditional capability guards
-if device_caps.contains(&Capability::Write) && flow_budget.can_charge(50) {
-    // Execute operation
-}
-```
-
-### Authorization Guidelines
-
-1. **Choose the Right System**:
-   - Use **traditional capabilities** for direct device operations and simple authorization
-   - Use **Biscuit tokens** for delegation, cross-network authorization, and audit requirements
-
-2. **Security Best Practices**:
-   - Always use least-privilege principles (minimal required capabilities/token scope)
-   - Implement flow budget limits to prevent abuse
-   - Validate token integrity before authorization decisions
-   - Use resource scopes for fine-grained access control
-
-3. **Integration Patterns**:
-   - Combine both systems for defense-in-depth (require both to authorize)
-   - Use capabilities for local checks, Biscuit for remote delegation
-   - Implement caching for performance-critical authorization paths
-
-4. **Resource Scope Patterns**:
-   ```rust
-   // Storage access
-   ResourceScope::Storage { 
-       category: StorageCategory::Personal, 
-       path: "documents/private/" 
-   }
-   
-   // Journal operations
-   ResourceScope::Journal { 
-       account_id: account.to_string(), 
-       operation: JournalOp::Write 
-   }
-   
-   // Recovery operations
-   ResourceScope::Recovery { 
-       recovery_type: RecoveryType::DeviceKey 
-   }
-   ```
-
-See `work/authorization_patterns.md` for comprehensive usage patterns and examples.
-
-## Documentation
-
-### Core Documentation
-
-- **[Project Overview](docs/000_project_overview.md)**: Explains Aura's goals, constraints, and how threshold cryptography combined with choreographic protocols enables practical web-of-trust systems. Provides architecture overview and complete documentation index.
-
-- **[Theoretical Model](docs/001_theoretical_model.md)**: Formal mathematical foundation including Aura calculus, algebraic type definitions, session type algebra, and CRDT semantics. Defines the theoretical guarantees for deadlock freedom, convergence, and information flow.
-
-- **[System Architecture](docs/002_system_architecture.md)**: Complete implementation architecture covering the stateless effect system, CRDT coordination, choreographic protocols, and guard chains. Shows how theoretical concepts map to actual code organization.
-
-- **[Information Flow](docs/003_information_flow.md)**: Privacy framework defining how information flows through trust boundaries with unified flow budgets. Covers threat model, privacy layers, and spam prevention through capability-based authorization.
-
-### Developer Guides
-
-- **[Coordination Systems Guide](docs/803_coordination_systems_guide.md)**: Practical guide to CRDT programming, ratchet tree operations, web-of-trust coordination, and flow budget management. Shows how to compose distributed protocols using session types.
-
-- **[Advanced Choreography Guide](docs/804_advanced_choreography_guide.md)**: Comprehensive DSL syntax reference including message types, dynamic roles, choice constructs, and Aura-specific extensions. Covers protocol composition, error handling, and system layering techniques.
-
-- **[Testing Guide](docs/805_testing_guide.md)**: Testing philosophy and practices including property-based testing, integration testing, and performance benchmarking. Demonstrates how to validate protocol properties like consistency, safety, and liveness.
-
-### Reference
-
-- **[Project Structure](docs/999_project_structure.md)**: Complete 8-layer architecture breakdown with crate responsibilities, dependency graph, and API reference. Essential for understanding where code belongs and how crates interact.

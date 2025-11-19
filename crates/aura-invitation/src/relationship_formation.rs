@@ -937,7 +937,9 @@ impl<E: RelationshipFormationEffects> RelationshipFormationCoordinator<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext};
+    use aura_core::effects::crypto::{
+        FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext,
+    };
     use aura_core::AuraError;
 
     // Mock implementation for testing

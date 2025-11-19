@@ -6,6 +6,7 @@
 use crate::sbb::{RendezvousEnvelope, SbbFlooding, SbbFloodingCoordinator};
 use aura_core::effects::{NetworkEffects, NetworkError};
 use aura_core::{AuraError, AuraResult, DeviceId};
+use aura_protocol::effects::AuraEffects;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -182,7 +183,7 @@ pub struct MockTransportSender {
 
 impl SbbTransportBridge {
     /// Create new SBB transport bridge
-    pub fn new(device_id: DeviceId, effects: aura_protocol::effects::AuraEffectSystem) -> Self {
+    pub fn new(device_id: DeviceId, effects: Arc<dyn AuraEffects>) -> Self {
         let flooding_coordinator =
             Arc::new(RwLock::new(SbbFloodingCoordinator::new(device_id, effects)));
 
@@ -196,7 +197,7 @@ impl SbbTransportBridge {
     pub fn with_network_transport(
         device_id: DeviceId,
         transport: Arc<RwLock<NetworkTransport>>,
-        effects: aura_protocol::effects::AuraEffectSystem,
+        effects: Arc<dyn AuraEffects>,
     ) -> Self {
         let flooding_coordinator =
             Arc::new(RwLock::new(SbbFloodingCoordinator::new(device_id, effects)));
@@ -454,11 +455,19 @@ impl crate::sbb::SbbFlooding for SbbTransportBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+
+    fn test_effects(device_id: DeviceId) -> Arc<dyn AuraEffects> {
+        let config = EffectSystemConfig::for_testing(device_id);
+        let system = AuraEffectSystem::new(config).expect("Failed to create test effects");
+        Arc::new(system)
+    }
 
     #[tokio::test]
     async fn test_sbb_transport_bridge_creation() {
         let device_id = DeviceId::new();
-        let bridge = SbbTransportBridge::new(device_id);
+        let effects = test_effects(device_id);
+        let bridge = SbbTransportBridge::new(device_id, effects);
 
         // Should create successfully
         assert!(bridge.transport_sender.is_none());
@@ -467,7 +476,8 @@ mod tests {
     #[tokio::test]
     async fn test_relationship_management() {
         let device_id = DeviceId::new();
-        let bridge = SbbTransportBridge::new(device_id);
+        let effects = test_effects(device_id);
+        let bridge = SbbTransportBridge::new(device_id, effects);
 
         let friend_id = DeviceId::new();
         let guardian_id = DeviceId::new();
@@ -485,7 +495,8 @@ mod tests {
     #[tokio::test]
     async fn test_rendezvous_offer_creation() {
         let device_id = DeviceId::new();
-        let bridge = SbbTransportBridge::new(device_id);
+        let effects = test_effects(device_id);
+        let bridge = SbbTransportBridge::new(device_id, effects);
 
         let offer = TransportOfferPayload {
             device_id,
@@ -510,7 +521,8 @@ mod tests {
     #[tokio::test]
     async fn test_message_handling() {
         let device_id = DeviceId::new();
-        let bridge = SbbTransportBridge::new(device_id);
+        let effects = test_effects(device_id);
+        let bridge = SbbTransportBridge::new(device_id, effects);
 
         // Create test envelope
         let payload = b"test offer data".to_vec();
@@ -572,7 +584,8 @@ mod tests {
         use super::{NetworkConfig, NetworkTransport};
 
         let device_id = DeviceId::new();
-        let mut bridge = SbbTransportBridge::new(device_id);
+        let effects = test_effects(device_id);
+        let mut bridge = SbbTransportBridge::new(device_id, effects);
 
         // Set up real transport sender
         let config = NetworkConfig::default();

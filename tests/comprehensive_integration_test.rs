@@ -9,9 +9,9 @@ use aura_core::{
     ledger::{Cap, Fact, Journal},
     MessageContext, FactValue, AuraResult,
 };
+use aura_agent::runtime::AuraEffectSystem;
 use aura_protocol::{
     authorization_bridge::{authenticate_and_authorize, AuthorizationContext, AuthorizationRequest},
-    effects::AuraEffectSystem,
     guards::{evaluate_guard, ProtocolGuard},
     handlers::{CompositeHandler, ExecutionMode},
     verification::{CapabilitySoundnessVerifier, SoundnessProperty, VerificationConfig},

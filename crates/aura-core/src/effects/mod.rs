@@ -41,11 +41,13 @@
 
 // Core effect trait definitions
 pub mod agent;
+pub mod authority;
 pub mod authorization;
 pub mod chaos;
 pub mod console;
 pub mod crypto;
 pub mod journal;
+pub mod leakage; // Privacy leakage tracking
 pub mod migration; // Empty module - migration complete
 pub mod network;
 pub mod random;
@@ -63,11 +65,15 @@ pub use agent::{
     DeviceConfig, DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
     SessionManagementEffects, SessionMessage, SessionRole, SessionStatus, SessionType,
 };
+pub use authority::{AuthorityEffects, AuthorityRelationalEffects, RelationalEffects};
 pub use authorization::{AuthorizationEffects, AuthorizationError};
 pub use chaos::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
 pub use console::ConsoleEffects;
 pub use crypto::{CryptoEffects, CryptoError};
 pub use journal::JournalEffects;
+pub use leakage::{
+    LeakageBudget, LeakageChoreographyExt, LeakageEffects, LeakageEvent, ObserverClass,
+};
 #[allow(deprecated)]
 // Migration utilities removed - middleware transition complete
 pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream};

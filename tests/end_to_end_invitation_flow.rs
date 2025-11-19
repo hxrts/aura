@@ -4,7 +4,7 @@
 //! invitation flow from creation through acceptance, relationship establishment, and
 //! account state updates.
 
-use aura_agent::AgentOperations;
+use aura_agent::{AgentOperations, runtime::AuraEffectSystem};
 use aura_core::{AccountId, Cap, DeviceId, RelationshipId, TrustLevel, Top, AuraResult};
 use aura_macros::aura_test;
 use aura_invitation::{
@@ -12,10 +12,7 @@ use aura_invitation::{
     invitation_acceptance::{AcceptanceProtocolConfig, InvitationAcceptanceCoordinator},
     relationship_formation::RelationshipFormationCoordinator,
 };
-use aura_journal::{
-    semilattice::InvitationLedger,
-    JournalOperations,
-};
+use aura_journal::semilattice::InvitationLedger;
 use aura_protocol::{
     handlers::{HandlerRegistry, HandlerError},
 };
@@ -36,8 +33,6 @@ pub struct InvitationFlowTest {
     pub effect_systems: HashMap<DeviceId, AuraEffectSystem>,
     /// Agent operations for each device
     pub agent_ops: HashMap<DeviceId, AgentOperations>,
-    /// Journal operations for ledger access
-    pub journal_ops: HashMap<DeviceId, JournalOperations>,
     /// Shared invitation ledger
     pub invitation_ledger: Arc<Mutex<InvitationLedger>>,
 }
@@ -52,27 +47,19 @@ impl InvitationFlowTest {
         
         let mut effect_systems = HashMap::new();
         let mut agent_ops = HashMap::new();
-        let mut journal_ops = HashMap::new();
-        
         // Set up inviter device
         let inviter_fixture = aura_testkit::create_test_fixture_with_device_id(inviter_device).await?;
         let inviter_effects = inviter_fixture.effects().as_ref().clone();
         let inviter_agent = AgentOperations::new(inviter_device, inviter_effects.clone()).await;
-        let inviter_journal = JournalOperations::new(inviter_effects.clone());
-        
         effect_systems.insert(inviter_device, inviter_effects);
         agent_ops.insert(inviter_device, inviter_agent);
-        journal_ops.insert(inviter_device, inviter_journal);
         
         // Set up invitee device
         let invitee_fixture = aura_testkit::create_test_fixture_with_device_id(invitee_device).await?;
         let invitee_effects = invitee_fixture.effects().as_ref().clone();
         let invitee_agent = AgentOperations::new(invitee_device, invitee_effects.clone()).await;
-        let invitee_journal = JournalOperations::new(invitee_effects.clone());
-        
         effect_systems.insert(invitee_device, invitee_effects);
         agent_ops.insert(invitee_device, invitee_agent);
-        journal_ops.insert(invitee_device, invitee_journal);
         
         Ok(Self {
             inviter_device,
@@ -80,7 +67,6 @@ impl InvitationFlowTest {
             account_id,
             effect_systems,
             agent_ops,
-            journal_ops,
             invitation_ledger,
         })
     }
@@ -107,10 +93,6 @@ impl InvitationFlowTest {
         &self.agent_ops[&device]
     }
 
-    /// Get journal operations for device
-    pub fn journal(&self, device: DeviceId) -> &JournalOperations {
-        &self.journal_ops[&device]
-    }
 }
 
 /// Test complete invitation flow from creation to acceptance

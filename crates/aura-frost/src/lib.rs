@@ -52,9 +52,6 @@ pub use aura_core::frost::{
     ThresholdSignature, TreeSigningContext,
 };
 
-// Re-export protocol effect system
-pub use aura_protocol::AuraEffectSystem;
-
 // Re-export FROST types and utilities
 pub use signature_aggregation::{perform_frost_aggregation, validate_aggregation_config};
 pub use threshold_signing::{FrostCrypto, SigningPhase, ThresholdSigningConfig};

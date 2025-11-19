@@ -25,6 +25,7 @@ members = [
     "crates/aura-invitation",
     "crates/aura-recovery",
     "crates/aura-rendezvous",
+    "crates/aura-relational",
     "examples/hello-crdt",
     "examples/hello-choreo",
 ]

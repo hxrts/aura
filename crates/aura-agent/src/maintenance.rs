@@ -11,7 +11,7 @@ use std::time::SystemTime;
 
 use aura_core::{hash_canonical, serialization::to_vec, AccountId, AuraError, DeviceId, Hash32};
 use aura_core::tree::{Epoch as TreeEpoch, LeafId, NodeIndex, Policy, Snapshot};
-use aura_protocol::orchestration::AuraEffectSystem;
+use crate::runtime::AuraEffectSystem;
 use aura_protocol::effect_traits::{ConsoleEffects, LedgerEffects, StorageEffects};
 use aura_protocol::effects::TreeEffects;
 use aura_sync::protocols::snapshots::{SnapshotConfig, SnapshotProtocol as SnapshotManager};

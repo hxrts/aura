@@ -86,7 +86,8 @@ async fn test_invalid_configuration() -> aura_core::AuraResult<()> {
         timeout_secs: 60,
     };
 
-    let result = execute_relationship_formation(device_id, config, true, effect_system.as_ref()).await;
+    let result =
+        execute_relationship_formation(device_id, config, true, effect_system.as_ref()).await;
 
     assert!(result.is_err());
     assert!(matches!(

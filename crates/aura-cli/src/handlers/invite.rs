@@ -16,7 +16,7 @@ use std::{fs, str::FromStr};
 ///
 /// Processes invitation actions including create, accept, and status operations
 pub async fn handle_invitation(
-    effects: &aura_protocol::effects::AuraEffectSystem,
+    effects: &aura_agent::runtime::AuraEffectSystem,
     action: &InvitationAction,
 ) -> Result<()> {
     // Get device_id from context (for now, create a temp one - this should be passed from CLI)

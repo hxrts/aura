@@ -14,10 +14,10 @@
 
 use aura_core::{DeviceId, AccountId, AuraResult, AuraError};
 use aura_journal::{
-    journal_ops::JournalOp,
+    fact::{Fact, FactContent, FlowBudgetFact},
     semilattice::{
-        journal_map::JournalMap,
         account_state::AccountState,
+        journal_map::JournalMap,
         JoinSemilattice,
     },
 };
@@ -107,11 +107,11 @@ proptest! {
         let derive_result = derive_encryption_key(&root_key, &empty_spec);
         prop_assert!(derive_result.is_ok(), "Empty device ID should produce valid key");
         
-        // Test journal with empty operations
+        // Test journal with empty facts
         let mut journal = JournalMap::new();
         let empty_account_id = AccountId::from_bytes([0u8; 32]);
         let empty_account_state = AccountState::new(empty_account_id);
-        
+
         let insert_result = journal.insert_account_state(empty_account_state);
         prop_assert!(insert_result.is_ok(), "Empty account state should be insertable");
         

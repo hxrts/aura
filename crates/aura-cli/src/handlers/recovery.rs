@@ -3,11 +3,11 @@
 //! Commands for managing guardian-based account recovery.
 
 use anyhow::Result;
+use aura_agent::runtime::AuraEffectSystem;
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::JournalEffects;
 use aura_core::identifiers::GuardianId;
 use aura_core::{AccountId, DeviceId};
-use aura_protocol::orchestration::AuraEffectSystem;
 use aura_protocol::effect_traits::ConsoleEffects;
 use aura_recovery::types::{GuardianProfile, GuardianSet};
 use aura_recovery::{RecoveryRequest, RecoveryResponse};

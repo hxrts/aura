@@ -46,7 +46,7 @@ pub struct JournalCouplingResult<T> {
     /// The protocol execution result
     pub result: T,
     /// Journal operations that were applied
-    pub journal_ops_applied: Vec<JournalOperation>,
+    pub applied_operations: Vec<JournalOperation>,
     /// Updated journal state after coupling
     pub updated_journal: Journal,
     /// Coupling metrics
@@ -211,7 +211,7 @@ impl JournalCoupler {
 
                 Ok(JournalCouplingResult {
                     result,
-                    journal_ops_applied: journal_ops.clone(),
+                    applied_operations: journal_ops.clone(),
                     updated_journal,
                     coupling_metrics: CouplingMetrics {
                         journal_application_time_us: journal_application_time.as_micros() as u64,
@@ -269,7 +269,7 @@ impl JournalCoupler {
 
         Ok(JournalCouplingResult {
             result: execution_result,
-            journal_ops_applied: journal_ops.clone(),
+            applied_operations: journal_ops.clone(),
             updated_journal,
             coupling_metrics: CouplingMetrics {
                 journal_application_time_us: journal_application_time.as_micros() as u64,
@@ -555,7 +555,7 @@ mod tests {
             .await?;
 
         assert_eq!(result.result, 42);
-        assert!(result.journal_ops_applied.is_empty());
+        assert!(result.applied_operations.is_empty());
         assert!(result.coupling_metrics.coupling_successful);
         Ok(())
     }
@@ -579,7 +579,7 @@ mod tests {
             .await?;
 
         assert_eq!(result.result, "facts_applied");
-        assert!(!result.journal_ops_applied.is_empty());
+        assert!(!result.applied_operations.is_empty());
         assert!(result.coupling_metrics.coupling_successful);
         Ok(())
     }

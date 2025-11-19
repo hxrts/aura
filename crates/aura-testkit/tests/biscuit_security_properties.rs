@@ -6,9 +6,7 @@
 
 use aura_core::{AccountId, DeviceId, FlowBudget};
 use aura_protocol::authorization::biscuit_bridge::BiscuitAuthorizationBridge;
-use aura_testkit::{
-    create_security_test_scenario, BiscuitTestFixture,
-};
+use aura_testkit::{create_security_test_scenario, BiscuitTestFixture};
 use aura_wot::{
     biscuit_resources::{AdminOperation, JournalOp, RecoveryType, ResourceScope, StorageCategory},
     biscuit_token::{BiscuitError, BiscuitTokenManager},

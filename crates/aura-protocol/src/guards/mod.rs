@@ -66,6 +66,7 @@ pub mod privacy;
 
 // Biscuit-based guards (new implementation)
 pub mod biscuit_evaluator;
+pub mod capability_guard; // Authority-based capability guards
 
 pub use effect_system_trait::GuardEffectSystem;
 pub use flow::{FlowBudgetEffects, FlowGuard, FlowHint};
@@ -251,3 +252,4 @@ pub use privacy::*;
 
 // Re-export Biscuit guard types
 pub use biscuit_evaluator::{BiscuitGuardEvaluator, GuardError, GuardResult};
+pub use capability_guard::{CapabilityGuard, CapabilityGuardExt};

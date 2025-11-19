@@ -76,6 +76,9 @@ pub mod protocols {
     pub mod websocket;
 }
 
+/// Context-aware transport for authority-centric model
+pub mod context_transport;
+
 // Re-export types from sub-modules
 pub use types::config::TransportConfig;
 pub use types::connection::{ConnectionId, ConnectionInfo, ConnectionState, ScopedConnectionId};
@@ -89,3 +92,10 @@ pub use peers::selection::PrivacyAwareSelectionCriteria;
 pub use protocols::hole_punch::{HolePunchMessage, PunchConfig};
 pub use protocols::stun::{StunAttribute, StunClass, StunConfig, StunMessage, StunMethod};
 pub use protocols::websocket::WebSocketMessage;
+
+// Re-export context transport types
+pub use context_transport::{
+    ContextTransportConfig, ContextTransportEndpoint, ContextTransportMessage,
+    ContextTransportMetrics, ContextTransportSession, SessionControl, SessionState,
+    TransportProtocol,
+};

@@ -34,8 +34,14 @@
 
 /// Ratchet tree application and verification
 pub mod application;
+/// AttestedOp converter for fact-based journal
+pub mod attested_ops;
+/// Authority-internal tree state
+pub mod authority_state;
 /// Ratchet tree compaction and garbage collection
 pub mod compaction;
+/// Local device types for authority-internal use
+pub mod local_types;
 /// Ratchet tree operation processing
 pub mod operations;
 /// Ratchet tree state reduction from operations

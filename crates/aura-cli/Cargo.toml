@@ -33,6 +33,7 @@ clap = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true }
 hex = { workspace = true }
+blake3 = { workspace = true }
 
 # TUI
 ratatui = "0.26"

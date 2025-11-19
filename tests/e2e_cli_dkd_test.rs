@@ -21,7 +21,7 @@ use tokio::time::{timeout, Duration};
 use aura_cli::{create_test_cli_handler, CliHandler};
 // TODO: DKD protocol should be implemented in aura-authenticate feature crate
 // use aura_authenticate::dkd::{execute_dkd, DkdConfig, DkdResult, DkdError};
-use aura_protocol::AuraEffectSystem;
+use aura_agent::runtime::AuraEffectSystem;
 use aura_simulator::context::SimulatorContext;
 use aura_core::{DeviceId, identifiers::SessionId, AuraResult};
 use aura_macros::aura_test;

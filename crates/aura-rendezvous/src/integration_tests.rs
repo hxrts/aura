@@ -16,8 +16,9 @@ use crate::{
     integrated_sbb::{IntegratedSbbSystem, SbbConfig, SbbDiscoveryRequest, SbbSystemBuilder},
     messaging::{TransportMethod, TransportOfferPayload},
 };
+use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
-use aura_protocol::effects::{AuraEffectSystemFactory, EffectSystemConfig};
+use aura_protocol::effects::AuraEffects;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -128,7 +129,9 @@ impl TestDevice {
             app_context: "test-sbb-e2e".to_string(),
         };
 
-        let effects = AuraEffectSystemFactory::new(EffectSystemConfig { device_id })?;
+        let config = EffectSystemConfig::for_testing(device_id);
+        let effects = AuraEffectSystem::new(config)?;
+        let effects = Arc::new(effects) as Arc<dyn aura_protocol::effects::AuraEffects>;
         let sbb_system = SbbSystemBuilder::new(device_id)
             .with_config(sbb_config)
             .with_transport(Arc::clone(&transport))

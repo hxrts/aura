@@ -6,12 +6,13 @@
 use crate::{AuraResult, BiscuitGuardEvaluator, ResourceScope};
 use aura_core::{AccountId, DeviceId, FlowBudget};
 use aura_macros::choreography;
-use aura_protocol::AuraEffectSystem;
+use aura_protocol::effects::AuraEffects;
 use aura_verify::session::{SessionScope, SessionTicket};
 use aura_verify::VerifiedIdentity;
 use aura_wot::BiscuitTokenManager;
 use biscuit_auth::Biscuit;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Session creation request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,20 +206,26 @@ pub fn get_session_creation_choreography() {
 }
 
 /// Session creation coordinator using choreographic protocol
-pub struct SessionCreationCoordinator {
-    /// Local effect system
-    effect_system: AuraEffectSystem,
+pub struct SessionCreationCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
+    /// Shared effect system implementing AuraEffects
+    effects: Arc<E>,
     /// Biscuit token manager for authorization
     token_manager: Option<BiscuitTokenManager>,
     /// Biscuit guard evaluator for permission checks
     guard_evaluator: Option<BiscuitGuardEvaluator>,
 }
 
-impl SessionCreationCoordinator {
+impl<E> SessionCreationCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
     /// Create new session creation coordinator
-    pub fn new(effect_system: AuraEffectSystem) -> Self {
+    pub fn new(effect_system: Arc<E>) -> Self {
         Self {
-            effect_system,
+            effects: effect_system,
             token_manager: None,
             guard_evaluator: None,
         }
@@ -226,12 +233,12 @@ impl SessionCreationCoordinator {
 
     /// Create new session creation coordinator with Biscuit authorization
     pub fn new_with_biscuit(
-        effect_system: AuraEffectSystem,
+        effect_system: Arc<E>,
         token_manager: BiscuitTokenManager,
         guard_evaluator: BiscuitGuardEvaluator,
     ) -> Self {
         Self {
-            effect_system,
+            effects: effect_system,
             token_manager: Some(token_manager),
             guard_evaluator: Some(guard_evaluator),
         }
@@ -260,8 +267,8 @@ impl SessionCreationCoordinator {
     }
 
     /// Get the current effect system
-    pub fn effect_system(&self) -> &AuraEffectSystem {
-        &self.effect_system
+    pub fn effects(&self) -> &Arc<E> {
+        &self.effects
     }
 }
 
@@ -314,7 +321,7 @@ mod tests {
         let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
         let coordinator = SessionCreationCoordinator::new(fixture.effect_system());
 
-        assert_eq!(coordinator.effect_system().device_id(), device_id);
+        assert_eq!(coordinator.effects().device_id(), device_id);
         Ok(())
     }
 }

@@ -7,11 +7,15 @@
 //! system and manages the lifecycle of effect handlers.
 
 // Core runtime coordinator (formerly system.rs in aura-protocol)
-// DISABLED: pub mod coordinator; // Complex import issues, using aura-protocol directly
+pub mod coordinator;
 
 // Runtime builder and container
 pub mod builder;
 pub mod container;
+
+// Effect system registry and builder (moved from aura-protocol)
+pub mod registry;
+pub mod effect_builder;
 
 // Execution infrastructure
 pub mod executor;
@@ -38,14 +42,18 @@ pub mod choreography_adapter;
 // OTA orchestration (moved from aura-protocol)
 pub mod ota_orchestration;
 
+// Authority management
+pub mod authority_manager;
+
 // Re-export main types for convenience
 pub use builder::AuraEffectSystemBuilder as EffectSystemBuilder;
 pub use choreography_adapter::AuraHandlerAdapter;
 pub use container::EffectContainer;
 pub use context::EffectContext;
-// Import AuraEffectSystem from aura-protocol instead of local coordinator
 use aura_core::effects::ExecutionMode;
-pub use aura_protocol::orchestration::AuraEffectSystem;
+pub use coordinator::AuraEffectSystem;
+pub use effect_builder::{EffectBuilder, QuickBuilder, ProtocolRequirements, EffectBundle};
+pub use registry::{EffectRegistry, EffectRegistryError, EffectRegistryExt};
 
 // TODO: Define these locally or import from appropriate location
 #[derive(Debug, Clone)]
@@ -115,6 +123,7 @@ impl StorageConfig {
 pub use executor::{EffectExecutor, EffectExecutorBuilder};
 pub use lifecycle::{EffectSystemState, LifecycleAware, LifecycleManager};
 pub use services::{ContextManager, FlowBudgetManager, ReceiptManager};
+pub use authority_manager::{AuthorityManager, SharedAuthorityManager};
 
 #[cfg(any(test, feature = "testing"))]
 pub use services::SyncContextManager;

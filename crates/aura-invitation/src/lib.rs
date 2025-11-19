@@ -108,7 +108,4 @@ pub use aura_core::effects::{
 
 // MPST types removed - using stateless effect system instead
 
-// Re-export effect system
-pub use aura_protocol::AuraEffectSystem;
-
 // Error re-exports removed - use aura_core::AuraError directly

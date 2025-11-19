@@ -3,8 +3,8 @@
 //! Effect-based implementation of the node command.
 
 use anyhow::Result;
+use aura_agent::runtime::AuraEffectSystem;
 use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects, TimeEffects};
-use aura_protocol::AuraEffectSystem;
 use std::path::Path;
 
 /// Handle node operations through effects

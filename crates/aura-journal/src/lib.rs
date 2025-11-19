@@ -1,18 +1,17 @@
-//! Automerge-based distributed ledger for Aura
+//! Fact-based distributed journal for Aura
 //!
-//! This crate provides a CRDT-based account ledger using Automerge,
-//! enabling automatic conflict resolution and convergence across devices.
+//! This crate provides a fact-based CRDT journal using join semilattices,
+//! enabling automatic conflict resolution and convergence across authorities.
 //!
 //! # Architecture
 //!
-//! - **State**: Automerge document storing account configuration
-//! - **Operations**: Type-safe operations that map to Automerge changes
-//! - **Effects**: Algebraic effect system for ledger operations
-//! - **Sync**: Built-in protocol for efficient state synchronization
+//! - **Facts**: Immutable, attested operations that form the journal
+//! - **Reduction**: Deterministic state computation from facts
+//! - **Namespaces**: Authority and context-scoped journals
+//! - **Integration**: Bridge with ratchet tree for AttestedOp support
 
 // Core modules
 mod error;
-pub mod journal_ops;
 pub mod middleware;
 mod operations;
 mod types;
@@ -31,6 +30,15 @@ pub mod ratchet_tree;
 // Clean Journal API (Phase 1 API cleanup)
 pub mod journal_api;
 
+// New fact-based journal implementation (Phase 2)
+pub mod fact;
+pub mod fact_journal;
+pub mod ratchet_integration;
+pub mod reduction;
+
+// Authority state derivation (Phase 5)
+pub mod authority_state;
+
 // Note: Choreographic protocols moved to aura-sync (Layer 5)
 
 // Test effects moved to aura-testkit to maintain clean domain layer
@@ -44,10 +52,18 @@ pub use operations::*;
 pub use aura_core::Hash32;
 
 // Domain re-exports
-pub use journal::*;
+pub use journal::*; // Now re-exports fact-based types
 pub use ledger::{
     CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus, JournalMap, Priority,
 };
+
+// New fact-based journal exports
+pub use fact::{
+    AttestedOp as FactAttestedOp, Fact, FactContent, FactId, FlowBudgetFact, RelationalFact,
+    SnapshotFact,
+};
+pub use fact_journal::{Journal as FactJournal, JournalNamespace};
+pub use reduction::{reduce_authority, reduce_context, RelationalState};
 // Note: TreeOp and TreeOpRecord are now aura_core::tree::TreeOpKind and aura_core::tree::AttestedOp
 pub use aura_core::tree::{AttestedOp as TreeOpRecord, TreeOpKind as TreeOp};
 // Primary Journal API (STABLE)

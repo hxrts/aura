@@ -3,8 +3,8 @@
 //! Effect-based implementation of the version command.
 
 use anyhow::Result;
+use aura_agent::runtime::AuraEffectSystem;
 use aura_protocol::effect_traits::ConsoleEffects;
-use aura_protocol::AuraEffectSystem;
 
 /// Handle version display through effects
 pub async fn handle_version(effects: &AuraEffectSystem) -> Result<()> {

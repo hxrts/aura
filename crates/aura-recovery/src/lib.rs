@@ -24,8 +24,11 @@ pub mod guardian_setup;
 /// Guardian membership change choreography for adding/removing guardians
 pub mod guardian_membership;
 
-/// Guardian key recovery choreography for emergency key recovery
+/// Guardian key recovery choreography for emergency key recovery (deprecated)
 pub mod guardian_key_recovery;
+
+/// Recovery protocol using relational contexts (new model)
+pub mod recovery_protocol;
 
 /// Shared types for guardian operations
 pub mod types;

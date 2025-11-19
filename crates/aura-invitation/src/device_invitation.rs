@@ -3,14 +3,13 @@
 //! This module implements device invitation workflows using choreographic programming
 //! patterns with the rumpsteak-aura framework for type-safe protocol execution.
 
-use crate::{
-    transport::deliver_via_rendezvous, AuraEffectSystem, InvitationError, InvitationResult,
-};
+use crate::{transport::deliver_via_rendezvous, InvitationError, InvitationResult};
 use aura_core::effects::{NetworkEffects, TimeEffects};
 use aura_core::hash;
 use aura_core::{AccountId, DeviceId};
 use aura_journal::semilattice::{InvitationLedger, InvitationRecord};
 use aura_macros::choreography;
+use aura_protocol::effects::AuraEffects;
 use aura_wot::SerializableBiscuit;
 use biscuit_auth::Biscuit;
 use once_cell::sync::Lazy;
@@ -18,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-
 
 static GLOBAL_INVITATION_LEDGER: Lazy<Arc<Mutex<InvitationLedger>>> =
     Lazy::new(|| Arc::new(Mutex::new(InvitationLedger::new())));
@@ -246,15 +244,21 @@ mod invitation_rejection_protocol {
 }
 
 /// Device invitation coordinator with in-memory ledger.
-pub struct DeviceInvitationCoordinator {
-    effects: AuraEffectSystem,
+pub struct DeviceInvitationCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
+    effects: Arc<E>,
     ledger: Arc<Mutex<InvitationLedger>>,
     default_ttl_secs: u64,
 }
 
-impl DeviceInvitationCoordinator {
+impl<E> DeviceInvitationCoordinator<E>
+where
+    E: AuraEffects + ?Sized,
+{
     /// Create new device invitation coordinator.
-    pub fn new(effect_system: AuraEffectSystem) -> Self {
+    pub fn new(effect_system: Arc<E>) -> Self {
         Self {
             effects: effect_system,
             ledger: Arc::clone(&GLOBAL_INVITATION_LEDGER),
@@ -263,10 +267,7 @@ impl DeviceInvitationCoordinator {
     }
 
     /// Create coordinator with shared ledger reference.
-    pub fn with_ledger(
-        effect_system: AuraEffectSystem,
-        ledger: Arc<Mutex<InvitationLedger>>,
-    ) -> Self {
+    pub fn with_ledger(effect_system: Arc<E>, ledger: Arc<Mutex<InvitationLedger>>) -> Self {
         Self {
             effects: effect_system,
             ledger,
@@ -295,7 +296,7 @@ impl DeviceInvitationCoordinator {
             ));
         }
 
-        let created_at = self.effects.current_timestamp().await;
+        let created_at = TimeEffects::current_timestamp(self.effects.as_ref()).await;
         let envelope = InvitationEnvelope::new(&request, created_at, ttl);
 
         // Phase 2: Record invitation through choreographic state management

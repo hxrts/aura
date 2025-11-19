@@ -31,14 +31,20 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
-/// Device authentication coordinator
+/// Device authentication coordinator (deprecated - use authority_auth)
 pub mod device_auth;
+
+/// Authority authentication coordinator (new authority-centric model)
+pub mod authority_auth;
 
 /// Session establishment coordinator
 pub mod session_creation;
 
-/// Guardian authentication coordinator for recovery operations
+/// Guardian authentication coordinator for recovery operations (device-centric, deprecated)
 pub mod guardian_auth;
+
+/// Guardian authentication via relational contexts (new model)
+pub mod guardian_auth_relational;
 
 /// Distributed Key Derivation (DKD) protocol implementation
 pub mod dkd;
@@ -52,9 +58,6 @@ pub use aura_verify::{
     AuthenticationError, IdentityProof, KeyMaterial, Result as AuthenticationResult,
     VerifiedIdentity,
 };
-
-// Re-export effect system types
-pub use aura_protocol::AuraEffectSystem;
 
 // Re-export Biscuit authorization types
 pub use aura_protocol::guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
