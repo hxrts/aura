@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, Result};
 use aura_agent::{runtime::EffectSystemBuilder, AuraAgent};
-use aura_core::identifiers::DeviceId;
+use aura_core::identifiers::{AuthorityId, DeviceId};
 use aura_protocol::effect_traits::ConsoleEffects;
 
 use crate::SnapshotAction;
@@ -21,8 +21,12 @@ async fn propose_snapshot(device_id: DeviceId) -> Result<()> {
         .build_sync()?;
 
     let _ = effects.log_info("Starting snapshot proposal…").await;
+
+    // Convert DeviceId to AuthorityId (1:1 mapping for single-device authorities)
+    let authority_id = AuthorityId(device_id.0);
+
     // Move the effect system into the agent runtime so maintenance wiring is reused.
-    let agent = AuraAgent::new(effects, device_id);
+    let agent = AuraAgent::new(effects, authority_id);
     let outcome = agent
         .propose_snapshot()
         .await
