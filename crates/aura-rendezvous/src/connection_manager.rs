@@ -1456,10 +1456,11 @@ mod tests {
             enable_hole_punch: true,
             enable_relay_fallback: false,
             punch_config: PunchConfig {
-                punch_duration: Duration::from_millis(50),
+                max_attempts: 10,
+                punch_timeout: Duration::from_millis(50),
                 punch_interval: Duration::from_millis(10),
-                receive_timeout: Duration::from_millis(5),
-                max_packet_size: 256,
+                enable_symmetric_detection: false,
+                relay_servers: vec![],
             },
         };
 
