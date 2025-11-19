@@ -215,9 +215,13 @@ mod tests {
 
         let mut context = RelationalContext::new(vec![auth1, auth2]);
 
+        // Hash the authority IDs to create 32-byte commitments
+        let hash1 = aura_core::hash::hash(&auth1.to_bytes());
+        let hash2 = aura_core::hash::hash(&auth2.to_bytes());
+
         let binding = GuardianBinding {
-            account_commitment: auth1.to_bytes().into(),
-            guardian_commitment: auth2.to_bytes().into(),
+            account_commitment: Hash32::new(hash1),
+            guardian_commitment: Hash32::new(hash2),
             parameters: GuardianParameters::default(),
             consensus_proof: None,
         };

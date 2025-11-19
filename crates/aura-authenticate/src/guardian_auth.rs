@@ -1324,7 +1324,8 @@ mod tests {
             expires_at,
         );
 
-        let verified_challenge = state.verify_guardian_challenge(&request_id, guardian_id);
+        // Verify with timestamp before expiration
+        let verified_challenge = state.verify_guardian_challenge(&request_id, guardian_id, expires_at - 1000);
         assert_eq!(verified_challenge, Some(&challenge));
 
         assert!(!state.has_sufficient_approvals(&request_id, 1));
@@ -1353,7 +1354,7 @@ mod tests {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
 
-        let coordinator = GuardianAuthCoordinator::new(**fixture.effects());
+        let coordinator = GuardianAuthCoordinator::new(fixture.effect_system());
         assert!(!coordinator.has_active_choreography());
 
         // Just test basic coordinator creation and state
