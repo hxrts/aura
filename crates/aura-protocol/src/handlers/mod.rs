@@ -463,7 +463,10 @@ mod tests {
 }
 
 // Remaining handler modules
-pub mod agent;
+// NOTE: agent module temporarily disabled - uses AuraEffectSystem from aura-agent (Layer 6)
+// aura-protocol (Layer 4) should not depend on aura-agent types
+// TODO: Refactor agent handlers to use only aura-core effect traits
+// pub mod agent;
 pub mod storage;
 // REMOVED: pub mod system; // Moved to aura-effects (Layer 3) - basic handlers
 pub mod mock;

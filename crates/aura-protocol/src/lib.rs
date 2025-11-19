@@ -102,7 +102,10 @@ pub mod choreography;
 pub mod consensus; // Real Aura Consensus implementation
 pub mod context;
 pub mod effects;
-pub mod facades; // NEW: High-level facade traits for common patterns (Phase 2.2)
+// NOTE: facades temporarily disabled - uses AuraEffectSystem/EffectBundle from aura-agent (Layer 6)
+// aura-protocol (Layer 4) should not depend on aura-agent types
+// TODO: Refactor facades to use only aura-core effect traits
+// pub mod facades; // NEW: High-level facade traits for common patterns (Phase 2.2)
 pub mod guards;
 pub mod handlers;
 pub mod messages;
@@ -128,7 +131,8 @@ pub mod wot;
 /// - Protocol messaging and guards
 pub mod orchestration {
     // High-level facades
-    pub use crate::facades::{DefaultProtocolOrchestrator, ProtocolOrchestrator, StandardPatterns};
+    // NOTE: Facades disabled - depends on aura-agent types
+    // pub use crate::facades::{DefaultProtocolOrchestrator, ProtocolOrchestrator, StandardPatterns};
 
     // Core system (AuraEffectSystem moved to aura-agent runtime)
     pub use crate::effects::AuraEffects;
@@ -173,7 +177,8 @@ pub mod standard_patterns {
 /// - Custom effect system assembly
 pub mod composition {
     // High-level facade
-    pub use crate::facades::EffectComposer;
+    // NOTE: Facades disabled - depends on aura-agent types
+    // pub use crate::facades::EffectComposer;
 
     // NOTE: Builder pattern moved to aura-agent runtime
     // Use aura_agent::runtime::{EffectBuilder, EffectRegistryError} for effect building
@@ -328,11 +333,7 @@ pub use effects::NetworkError;
     note = "Use `aura_protocol::standard_patterns::ProtocolRequirements` instead"
 )]
 pub use effects::ProtocolRequirements;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::standard_patterns::QuickBuilder` instead"
-)]
-pub use effects::QuickBuilder;
+// NOTE: QuickBuilder removed - it's from aura-agent (Layer 6), not aura-protocol (Layer 4)
 #[deprecated(
     since = "0.2.0",
     note = "Use `aura_protocol::effect_traits::RandomEffects` instead"

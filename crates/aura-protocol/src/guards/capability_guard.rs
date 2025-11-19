@@ -174,7 +174,7 @@ impl CapabilityGuardExt for CapabilityGuard {
         Ok(GuardResult {
             authorized,
             flow_consumed: if authorized { flow_cost } else { 0 },
-            delegation_depth: 0, // TODO: Extract from Biscuit evaluation
+            delegation_depth: None, // TODO: Extract from Biscuit evaluation
         })
     }
 }

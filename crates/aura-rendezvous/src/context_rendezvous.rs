@@ -5,7 +5,7 @@
 
 use crate::sbb::{EnvelopeId, FloodResult, SbbFlooding};
 use aura_core::identifiers::ContextId;
-use aura_core::relationships::RelationalContext;
+use aura_relational::RelationalContext;
 use aura_core::{AuraError, AuraResult, AuthorityId};
 use aura_protocol::effects::AuraEffects;
 // GuardChain will be integrated once available from aura-protocol
@@ -121,15 +121,15 @@ impl ContextRendezvousCoordinator {
         let context = self
             .contexts
             .get(&context_id)
-            .ok_or_else(|| AuraError::NotFound("Context not found".to_string()))?;
+            .ok_or_else(|| AuraError::not_found("Context not found"))?;
 
         if !context.is_participant(&self.local_authority).await? {
-            return Err(AuraError::Authorization(
+            return Err(AuraError::permission_denied(
                 "Not a participant in context".to_string(),
             ));
         }
 
-        let now = self.effects.now_timestamp().await?;
+        let now = self.effects.current_timestamp().await?;
         let expires_at = now + 3600; // 1 hour expiration
 
         Ok(ContextRendezvousDescriptor {
@@ -212,7 +212,7 @@ impl ContextRendezvousCoordinator {
         let context = self
             .contexts
             .get(&envelope.context_id)
-            .ok_or_else(|| AuraError::NotFound("Context not found".to_string()))?;
+            .ok_or_else(|| AuraError::not_found("Context not found"))?;
 
         if !context.is_participant(&self.local_authority).await? {
             return Ok(FloodResult::Dropped);
@@ -264,7 +264,7 @@ impl ContextRendezvousCoordinator {
     ) -> AuraResult<Vec<u8>> {
         // TODO: Implement actual encryption using context keys
         let serialized =
-            serde_json::to_vec(descriptor).map_err(|e| AuraError::Serialization(e.to_string()))?;
+            serde_json::to_vec(descriptor).map_err(|e| AuraError::serialization(e.to_string()))?;
         Ok(serialized)
     }
 
@@ -302,7 +302,7 @@ impl ContextRendezvousCoordinator {
         let context = self
             .contexts
             .get(context_id)
-            .ok_or_else(|| AuraError::NotFound("Context not found".to_string()))?;
+            .ok_or_else(|| AuraError::not_found("Context not found"))?;
 
         context.get_participants().await
     }
@@ -328,7 +328,7 @@ impl ContextRendezvousCoordinator {
         envelope: &ContextEnvelope,
     ) -> AuraResult<Option<RendezvousReceipt>> {
         // TODO: Check if receipts are enabled for this context
-        let timestamp = self.effects.now_timestamp().await?;
+        let timestamp = self.effects.current_timestamp().await?;
 
         let receipt = RendezvousReceipt {
             envelope_id: envelope.id,

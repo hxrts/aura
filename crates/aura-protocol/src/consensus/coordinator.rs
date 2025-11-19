@@ -73,14 +73,17 @@ impl ConsensusCoordinator {
 
     /// Run the consensus protocol for an instance
     pub async fn run_protocol(&mut self, instance_id: Hash32) -> Result<CommitFact> {
-        // Get instance
-        let instance = self
-            .instances
-            .get_mut(&instance_id)
-            .ok_or_else(|| AuraError::NotFound("Consensus instance not found".to_string()))?;
+        // Check if instance exists and get consensus_id
+        let consensus_id = {
+            let instance = self
+                .instances
+                .get(&instance_id)
+                .ok_or_else(|| AuraError::not_found("Consensus instance not found"))?;
+            instance.consensus_id
+        };
 
         // Check if already have a result
-        if let Some(commit_fact) = self.completed.get(&instance.consensus_id) {
+        if let Some(commit_fact) = self.completed.get(&consensus_id) {
             return Ok(commit_fact.clone());
         }
 
@@ -88,7 +91,7 @@ impl ConsensusCoordinator {
         match self.run_fast_path(instance_id).await {
             Ok(commit_fact) => {
                 self.completed
-                    .insert(instance.consensus_id, commit_fact.clone());
+                    .insert(consensus_id, commit_fact.clone());
                 self.instances.remove(&instance_id);
                 return Ok(commit_fact);
             }
@@ -104,7 +107,7 @@ impl ConsensusCoordinator {
         let instance = self
             .instances
             .get_mut(&instance_id)
-            .ok_or_else(|| AuraError::NotFound("Instance not found".to_string()))?;
+            .ok_or_else(|| AuraError::not_found("Instance not found"))?;
 
         // Send execute requests to all witnesses
         let execute_request = WitnessMessage::ExecuteRequest {
@@ -124,7 +127,9 @@ impl ConsensusCoordinator {
             Ok::<(), AuraError>(())
         })
         .await
-        .map_err(|_| AuraError::Timeout("Nonce collection timeout".to_string()))?;
+        .map_err(|_| AuraError::Internal {
+            message: "Nonce collection timeout".to_string(),
+        })?;
 
         // TODO: Send signature request with aggregated nonces
 
@@ -134,10 +139,15 @@ impl ConsensusCoordinator {
             Ok::<(), AuraError>(())
         })
         .await
-        .map_err(|_| AuraError::Timeout("Signature collection timeout".to_string()))?;
+        .map_err(|_| AuraError::Internal {
+            message: "Signature collection timeout".to_string(),
+        })?;
 
         // TODO: Aggregate signatures using FROST
-        let threshold_signature = ThresholdSignature::default(); // Placeholder
+        let threshold_signature = ThresholdSignature {
+            signature: vec![],  // Placeholder - will be filled by FROST aggregation
+            signers: vec![],    // Placeholder - will contain signer IDs
+        };
 
         // Create commit fact
         let commit_fact = CommitFact::new(
@@ -168,9 +178,9 @@ impl ConsensusCoordinator {
         // 3. Waiting for convergence
         // 4. Aggregating final result
 
-        Err(AuraError::NotImplemented(
-            "Epidemic gossip not yet implemented".to_string(),
-        ))
+        Err(AuraError::Internal {
+            message: "Epidemic gossip not yet implemented".to_string(),
+        })
     }
 }
 
