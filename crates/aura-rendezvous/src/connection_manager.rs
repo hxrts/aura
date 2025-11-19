@@ -1323,14 +1323,14 @@ impl<N: NetworkEffects> ConnectionManager<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_effects::MockRandomHandler;
+    use aura_agent::AuraEffectSystem;
 
     #[tokio::test]
     async fn test_connection_manager_creation() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
-        let manager = ConnectionManager::new(device_id, stun_config, random);
+        let effects = std::sync::Arc::new(AuraEffectSystem::new());
+        let manager = ConnectionManager::new(device_id, stun_config, effects);
 
         assert_eq!(manager.device_id, device_id);
     }
@@ -1339,8 +1339,8 @@ mod tests {
     async fn test_connection_priority_logic() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
-        let manager = ConnectionManager::new(device_id, stun_config, random);
+        let effects = std::sync::Arc::new(AuraEffectSystem::new());
+        let manager = ConnectionManager::new(device_id, stun_config, effects);
 
         let offers = vec![
             TransportDescriptor::quic("192.168.1.100:8080".to_string(), "aura".to_string()),
@@ -1426,8 +1426,8 @@ mod tests {
 
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let random = std::sync::Arc::new(MockRandomHandler::new_with_seed(12345));
-        let manager = ConnectionManager::new(device_id, stun_config, random);
+        let effects = std::sync::Arc::new(AuraEffectSystem::new());
+        let manager = ConnectionManager::new(device_id, stun_config, effects);
 
         // Create transport with reflexive address
         let transport = TransportDescriptor {
