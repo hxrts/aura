@@ -21,13 +21,16 @@ workspace = true
 # Core foundation (Layer 1)
 aura-core = { path = "../aura-core" }
 
+# Layer 2 dependencies
+aura-wot = { path = "../aura-wot" }
+
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_cbor = { workspace = true }
 bincode = { workspace = true }
 
-# Utilities 
+# Utilities
 uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

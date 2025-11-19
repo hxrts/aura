@@ -881,9 +881,9 @@ The refactoring involves a **fundamental architectural transformation** from:
 ### 8.2 Clean Up Old Code
 
 #### Task: Remove graph-based code
-- [ ] **File**: `crates/aura-journal/src/journal_ops/`
-  - [ ] Delete entire `journal_ops` directory
-  - [ ] Remove graph.rs, types.rs, views.rs, derivation.rs
+- [x] **File**: `crates/aura-journal/src/journal_ops/`
+  - [x] Delete entire `journal_ops` directory
+  - [x] Remove graph.rs, types.rs, views.rs, derivation.rs
 
 #### Task: Remove device-centric types
 - [ ] **File**: `crates/aura-journal/src/types.rs`
