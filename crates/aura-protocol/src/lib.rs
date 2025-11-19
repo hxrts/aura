@@ -102,10 +102,7 @@ pub mod choreography;
 pub mod consensus; // Real Aura Consensus implementation
 pub mod context;
 pub mod effects;
-// NOTE: facades temporarily disabled - uses AuraEffectSystem/EffectBundle from aura-agent (Layer 6)
-// aura-protocol (Layer 4) should not depend on aura-agent types
-// TODO: Refactor facades to use only aura-core effect traits
-// pub mod facades; // NEW: High-level facade traits for common patterns (Phase 2.2)
+pub mod facades; // High-level facade traits (Layer 4 appropriate - traits only, implementations in Layer 6)
 pub mod guards;
 pub mod handlers;
 pub mod messages;
@@ -127,12 +124,12 @@ pub mod wot;
 /// Use this module when implementing distributed protocols that need:
 /// - Protocol orchestration and choreography
 /// - Anti-entropy coordination
+/// - Standard pattern abstractions (facades)
 /// - Device metadata management
 /// - Protocol messaging and guards
 pub mod orchestration {
-    // High-level facades
-    // NOTE: Facades disabled - depends on aura-agent types
-    // pub use crate::facades::{DefaultProtocolOrchestrator, ProtocolOrchestrator, StandardPatterns};
+    // High-level facade traits (Layer 4 appropriate)
+    pub use crate::facades::{ProtocolOrchestrator, StandardPatterns};
 
     // Core system (AuraEffectSystem moved to aura-agent runtime)
     pub use crate::effects::AuraEffects;
