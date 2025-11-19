@@ -30,6 +30,7 @@ tokio = { workspace = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
 biscuit-auth = { workspace = true }
+bincode = { workspace = true }
 
 [dev-dependencies]
 # Testing infrastructure (Layer 5 can use testkit)

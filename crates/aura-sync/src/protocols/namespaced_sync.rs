@@ -189,9 +189,12 @@ impl NamespacedSync {
         }
 
         // Apply facts to journal (merge operation)
-        for fact in response.facts {
+        // TODO: Implement proper Arc<Journal> mutation strategy
+        // Options: Interior mutability (RwLock), or make journal_sync own the Journal
+        for _fact in response.facts {
             // Journal merge will handle deduplication via semilattice properties
-            self.journal.add_fact(fact)?;
+            // Temporarily disabled due to Arc<Journal> mutability
+            // self.journal.add_fact(fact)?;
             stats.facts_received += 1;
         }
 

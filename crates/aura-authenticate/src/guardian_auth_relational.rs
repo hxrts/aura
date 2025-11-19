@@ -89,7 +89,7 @@ pub async fn authenticate_guardian(
 
     // Sign the operation
     let operation_bytes = bincode::serialize(&request.operation)
-        .map_err(|e| AuraError::Serialization(e.to_string()))?;
+        .map_err(|e| AuraError::serialization(e.to_string()))?;
 
     let signature = guardian_authority.sign_operation(&operation_bytes).await?;
 
