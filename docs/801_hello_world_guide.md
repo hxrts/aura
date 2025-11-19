@@ -147,34 +147,38 @@ This command shows recent journal entries created by protocol execution. Each en
 Create a test script for the hello world protocol:
 
 ```rust
-use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+use aura_macros::aura_test;
+use aura_testkit::*;
+use aura_agent::runtime::AuraEffectSystem;
 
-#[tokio::test]
-async fn test_hello_world_protocol() {
-    let alice_device = aura_core::DeviceId::new();
-    let bob_device = aura_core::DeviceId::new();
-    
-    // Create stateless effect systems for testing
-    let alice_config = EffectSystemConfig::for_testing(alice_device);
-    let alice_effects = AuraEffectSystem::new(alice_config)
-        .expect("Failed to create Alice effect system");
-        
-    let bob_config = EffectSystemConfig::for_testing(bob_device);
-    let bob_effects = AuraEffectSystem::new(bob_config)
-        .expect("Failed to create Bob effect system");
-    
+#[aura_test]
+async fn test_hello_world_protocol() -> aura_core::AuraResult<()> {
+    // Create test fixture with automatic tracing
+    let fixture = create_test_fixture().await?;
+
+    // Create simple effect systems for testing
+    let alice_effects = AuraEffectSystem::new();
+    let bob_effects = AuraEffectSystem::new();
+
+    // Get device IDs for routing
+    let alice_device = fixture.create_device_id();
+    let bob_device = fixture.create_device_id();
+
     let ping_message = "Hello Bob!".to_string();
-    
+
+    // Run protocol sessions concurrently
     let (alice_result, bob_result) = tokio::join!(
         execute_alice_session(&alice_effects, ping_message.clone(), bob_device),
         execute_bob_session(&bob_effects, ping_message.clone())
     );
-    
-    assert!(alice_result.is_ok());
-    assert!(bob_result.is_ok());
-    
-    let pong = alice_result.unwrap();
+
+    assert!(alice_result.is_ok(), "Alice session failed");
+    assert!(bob_result.is_ok(), "Bob session failed");
+
+    let pong = alice_result?;
     assert!(pong.response.contains(&ping_message));
+
+    Ok(())
 }
 ```
 
