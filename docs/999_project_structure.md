@@ -38,7 +38,15 @@ Aura's codebase is organized into 8 clean architectural layers, progressing from
 **Purpose**: Single source of truth for all domain concepts and interfaces
 
 **Contains**:
-- Effect traits: `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `TimeEffects`, `JournalEffects`, `ConsoleEffects`, `RandomEffects`, `TransportEffects`, `AuthorityEffects`, `RelationalEffects`, `LeakageEffects`
+- **Effect traits** (20 total):
+  - *Core Infrastructure*: `AgentEffects`, `SystemEffects`, `TimeEffects`, `RandomEffects`, `ConsoleEffects`
+  - *Authentication & Authorization*: `AuthenticationEffects`, `AuthorizationEffects`, `AuthorityEffects`, `RelationalEffects`
+  - *Storage & Journal*: `StorageEffects`, `DeviceStorageEffects`, `JournalEffects`
+  - *Network & Reliability*: `NetworkEffects`, `ReliabilityEffects`
+  - *Cryptography*: `CryptoEffects`
+  - *Privacy & Security*: `LeakageEffects`
+  - *Configuration & Sessions*: `ConfigurationEffects`, `SessionManagementEffects`
+  - *Testing & Chaos*: `TestingEffects`, `ChaosEffects`
 - Domain types: `AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`, `ObserverClass`, `Capability`
 - Cryptographic utilities: key derivation, FROST types, merkle trees, Ed25519 helpers
 - Semantic traits: `JoinSemilattice`, `MeetSemilattice`, `CvState`, `MvState`
