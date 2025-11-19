@@ -29,6 +29,18 @@ pub struct AuraEffectSystem {
     storage: Arc<MemoryStorageHandler>,
 }
 
+impl std::fmt::Debug for AuraEffectSystem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuraEffectSystem")
+            .field("console", &"<RealConsoleHandler>")
+            .field("crypto", &"<RealCryptoHandler>")
+            .field("random", &"<RealRandomHandler>")
+            .field("time", &"<RealTimeHandler>")
+            .field("storage", &"<MemoryStorageHandler>")
+            .finish()
+    }
+}
+
 impl AuraEffectSystem {
     /// Create a new stub effect system
     pub fn new() -> Self {

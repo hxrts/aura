@@ -417,9 +417,9 @@ mod tests {
 
     #[aura_test]
     async fn test_adapter_creation() -> aura_core::AuraResult<()> {
-        let fixture = create_test_fixture().await?;
-        let device_id = fixture.device_id();
-        let adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone(), device_id);
+        let device_id = DeviceId::new();
+        let effects = AuraEffectSystem::new();
+        let adapter = AuraHandlerAdapter::with_effect_system(effects, device_id);
 
         // Should create without error
         assert_eq!(adapter.device_id(), device_id);
@@ -428,9 +428,9 @@ mod tests {
 
     #[aura_test]
     async fn test_role_mapping() -> aura_core::AuraResult<()> {
-        let fixture = create_test_fixture().await?;
-        let device_id = fixture.device_id();
-        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone(), device_id);
+        let device_id = DeviceId::new();
+        let effects = AuraEffectSystem::new();
+        let mut adapter = AuraHandlerAdapter::with_effect_system(effects, device_id);
 
         let peer_device = DeviceId::new();
         adapter.add_role_mapping("alice".to_string(), peer_device);
@@ -442,10 +442,10 @@ mod tests {
 
     #[aura_test]
     async fn guard_chain_emits_receipt() -> aura_core::AuraResult<()> {
-        let fixture = create_test_fixture().await?;
-        let device_a = fixture.device_id();
+        let device_a = DeviceId::new();
         let device_b = DeviceId::new();
-        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone(), device_a);
+        let effects = AuraEffectSystem::new();
+        let mut adapter = AuraHandlerAdapter::with_effect_system(effects, device_a);
         adapter.set_flow_context_for_peer(device_b, ContextId::new());
 
         // Network send will fail due to missing peers, but guard execution should still emit a receipt.
@@ -467,10 +467,10 @@ mod tests {
 
     #[aura_test]
     async fn custom_guard_profile_controls_flow_cost() -> aura_core::AuraResult<()> {
-        let fixture = create_test_fixture().await?;
-        let device_a = fixture.device_id();
+        let device_a = DeviceId::new();
         let device_b = DeviceId::new();
-        let mut adapter = AuraHandlerAdapter::with_effect_system((*fixture.effects()).clone(), device_a);
+        let effects = AuraEffectSystem::new();
+        let mut adapter = AuraHandlerAdapter::with_effect_system(effects, device_a);
         adapter.set_flow_context_for_peer(device_b, ContextId::new());
 
         let profile = SendGuardProfile {
@@ -488,14 +488,14 @@ mod tests {
 
     #[aura_test]
     async fn memory_network_delivers_messages_between_adapters() -> aura_core::AuraResult<()> {
-        let fixture_a = create_test_fixture().await?;
-        let fixture_b = create_test_fixture().await?;
-        let device_a = fixture_a.device_id();
-        let device_b = fixture_b.device_id();
+        let device_a = DeviceId::new();
+        let device_b = DeviceId::new();
 
         // Create adapters with proper testing setup
-        let mut adapter_a = AuraHandlerAdapter::with_effect_system((*fixture_a.effects()).clone(), device_a);
-        let mut adapter_b = AuraHandlerAdapter::with_effect_system((*fixture_b.effects()).clone(), device_b);
+        let effects_a = AuraEffectSystem::new();
+        let effects_b = AuraEffectSystem::new();
+        let mut adapter_a = AuraHandlerAdapter::with_effect_system(effects_a, device_a);
+        let mut adapter_b = AuraHandlerAdapter::with_effect_system(effects_b, device_b);
 
         // The network delivery should work via shared memory network registry
         adapter_a

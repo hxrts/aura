@@ -147,8 +147,8 @@ mod tests {
         
         let device_key = vec![1, 2, 3, 4]; // Mock public key
         let authority_id = manager.create_authority(device_key, 2).await.unwrap();
-        
-        assert!(!authority_id.as_bytes().is_empty());
+
+        assert!(!authority_id.to_bytes().is_empty());
         assert_eq!(manager.list_authorities().len(), 1);
     }
     
@@ -165,6 +165,6 @@ mod tests {
         ).await.unwrap();
         
         let context = manager.get_context(&context_id).unwrap();
-        assert_eq!(context.context_id(), context_id);
+        assert_eq!(context.context_id, context_id);
     }
 }
