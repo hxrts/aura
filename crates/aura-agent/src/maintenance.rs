@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use aura_core::{hash_canonical, serialization::to_vec, AccountId, AuraError, DeviceId, Hash32};
+use aura_core::{hash_canonical, serialization::to_vec, AccountId, AuraError, AuthorityId, DeviceId, Hash32};
 use aura_core::tree::{Epoch as TreeEpoch, LeafId, NodeIndex, Policy, Snapshot};
 use crate::runtime::AuraEffectSystem;
 use aura_protocol::effect_traits::{ConsoleEffects, LedgerEffects, StorageEffects};
@@ -23,12 +23,14 @@ use uuid::Uuid;
 
 use crate::errors::Result;
 
-/// Admin replacement event
+/// Admin replacement event (authority-centric model)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminReplaced {
     pub account_id: AccountId,
-    pub replaced_by: DeviceId,
-    pub new_admin: DeviceId,
+    /// Authority that initiated the replacement
+    pub replaced_by: AuthorityId,
+    /// New admin authority
+    pub new_admin: AuthorityId,
     pub activation_epoch: u64,
 }
 
@@ -36,8 +38,8 @@ impl AdminReplaced {
     /// Create new admin replacement record
     pub fn new(
         account_id: AccountId,
-        replaced_by: DeviceId,
-        new_admin: DeviceId,
+        replaced_by: AuthorityId,
+        new_admin: AuthorityId,
         activation_epoch: u64,
     ) -> Self {
         Self {
@@ -70,7 +72,7 @@ pub enum CacheInvalidationEvent {
     /// Admin override, force cache invalidation
     AdminOverride {
         reason: String,
-        affected_devices: Vec<DeviceId>,
+        affected_authorities: Vec<AuthorityId>,
         timestamp: SystemTime,
     },
     /// OTA upgrade completed, invalidate protocol caches

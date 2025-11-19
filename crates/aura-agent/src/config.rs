@@ -8,23 +8,24 @@
 //! Device settings are stored in the journal as CRDT facts.
 //! Authentication settings are handled by choreographic protocols.
 
-pub use aura_core::{AccountId, DeviceId};
+pub use aura_core::{AccountId, AuthorityId};
 use uuid;
 
 /// Minimal essential configuration for agent startup
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AgentConfig {
-    /// This device's unique identifier
-    pub device_id: DeviceId,
-    /// Account this device belongs to (if known)
+    /// This authority's unique identifier
+    pub authority_id: AuthorityId,
+    /// Account this authority belongs to (if known)
+    /// NOTE: Deprecated - authority_id replaces this in authority-centric model
     pub account_id: Option<AccountId>,
 }
 
 impl AgentConfig {
     /// Create minimal config for testing
-    pub fn test(device_id: DeviceId) -> Self {
+    pub fn test(authority_id: AuthorityId) -> Self {
         Self {
-            device_id,
+            authority_id,
             account_id: None,
         }
     }
@@ -33,7 +34,7 @@ impl AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            device_id: DeviceId(uuid::Uuid::from_bytes([0u8; 16])),
+            authority_id: AuthorityId(uuid::Uuid::from_bytes([0u8; 16])),
             account_id: None,
         }
     }

@@ -74,7 +74,7 @@ pub use effects::*;
 
 // Re-export core types from aura-core for convenience
 pub use aura_core::{
-    identifiers::{AccountId, DeviceId, SessionId},
+    identifiers::{AccountId, AuthorityId, DeviceId, SessionId},
     AuraError, AuraResult,
 };
 
@@ -91,8 +91,18 @@ pub use runtime::{
 /// Create an agent with production effects
 ///
 /// This is a convenience function for creating an agent runtime with production
-/// effect handlers. The runtime composes real system effects into device workflows.
-pub async fn create_production_agent(device_id: DeviceId) -> AgentResult<AuraAgent> {
+/// effect handlers. The runtime composes real system effects into authority workflows.
+///
+/// # Arguments
+/// * `authority_id` - The authority identifier for this agent
+///
+/// # Device ID Derivation
+/// For single-device authorities, device_id is derived from authority_id internally.
+/// TODO: For multi-device authorities, support explicit device_id or lookup from authority state.
+pub async fn create_production_agent(authority_id: AuthorityId) -> AgentResult<AuraAgent> {
+    // Derive device_id from authority_id (1:1 mapping for single-device authorities)
+    let device_id = DeviceId(authority_id.0);
+
     // Use new EffectRegistry pattern for standardized production setup
     let core_effects_arc = crate::runtime::EffectRegistry::production()
         .with_device_id(device_id)
@@ -105,22 +115,25 @@ pub async fn create_production_agent(device_id: DeviceId) -> AgentResult<AuraAge
     let core_effects = Arc::try_unwrap(core_effects_arc)
         .unwrap_or_else(|arc| (*arc).clone());
 
-    Ok(AuraAgent::new(core_effects, device_id))
+    Ok(AuraAgent::new(core_effects, authority_id))
 }
 
 /// Create an agent with testing effects
 ///
 /// This creates an agent runtime with deterministic, mockable effects suitable
 /// for unit testing. All handlers use controlled mock behaviors.
-pub fn create_testing_agent(device_id: DeviceId) -> AuraAgent {
-    AuraAgent::for_testing(device_id)
+pub fn create_testing_agent(authority_id: AuthorityId) -> AuraAgent {
+    AuraAgent::for_testing(authority_id)
 }
 
 /// Create an agent with simulation effects
 ///
 /// This creates an agent runtime with controlled effects for simulation scenarios.
 /// The seed ensures deterministic behavior across simulation runs.
-pub fn create_simulation_agent(device_id: DeviceId, seed: u64) -> AgentResult<AuraAgent> {
+pub fn create_simulation_agent(authority_id: AuthorityId, seed: u64) -> AgentResult<AuraAgent> {
+    // Derive device_id from authority_id (1:1 mapping for single-device authorities)
+    let device_id = DeviceId(authority_id.0);
+
     // Use new EffectRegistry pattern for standardized simulation setup
     let core_effects_arc = crate::runtime::EffectRegistry::simulation(seed)
         .with_device_id(device_id)
@@ -132,5 +145,5 @@ pub fn create_simulation_agent(device_id: DeviceId, seed: u64) -> AgentResult<Au
     let core_effects = Arc::try_unwrap(core_effects_arc)
         .unwrap_or_else(|arc| (*arc).clone());
 
-    Ok(AuraAgent::new(core_effects, device_id))
+    Ok(AuraAgent::new(core_effects, authority_id))
 }
