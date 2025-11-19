@@ -470,6 +470,7 @@ pub struct PoolStatistics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[tokio::test]
     async fn test_connection_acquisition_and_release() {

@@ -7,7 +7,7 @@
 use crate::core::metrics::ErrorCategory;
 use crate::core::{
     sync_resource_with_limit, sync_session_error, sync_timeout_error, sync_validation_error,
-    MetricsCollector, SyncConfig, SyncResult,
+    MetricsCollector, SyncConfig, SyncError, SyncResult,
 };
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
