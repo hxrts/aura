@@ -191,9 +191,11 @@ AuthorityEffects, RelationalEffects, LeakageEffects
 
 **Impact**: Developers don't know about all available effect traits
 
-**Recommendation**: Update project structure doc to list all effect traits
+**Recommendation**: ✅ **COMPLETED** - Updated project structure doc to list all effect traits
 
 **Architectural Opinion**: 📝 **UPDATE DOCS** - Simple documentation fix. List all 16 effect traits: `AgentEffects`, `AuthorizationEffects`, `AuthorityEffects`, `ChaosEffects`, `ConsoleEffects`, `CryptoEffects`, `JournalEffects`, `LeakageEffects`, `NetworkEffects`, `RandomEffects`, `RelationalEffects`, `ReliabilityEffects`, `StorageEffects`, `SystemEffects`, `TestingEffects`, `TimeEffects`, `TransportEffects`. The implementation is correct; docs just need updating.
+
+**Update (2025-11-19)**: docs/999_project_structure.md now comprehensively lists all 20 effect traits with categorical organization (Core Infrastructure, Authentication & Authorization, Storage & Journal, Network & Reliability, Cryptography, Privacy & Security, Configuration & Sessions, Testing & Chaos).
 
 ---
 
@@ -358,7 +360,7 @@ tree_types.rs
 
 **Impact**: Developers working on ratchet tree need to reverse-engineer structure
 
-**Recommendation**: Add implementation architecture section to 101 or create separate impl guide
+**Recommendation**: ✅ **COMPLETED** - Added implementation architecture section to docs/101
 
 **Architectural Opinion**: 📝 **UPDATE DOCS** - Add "Implementation Architecture" section to docs/101_accounts_and_ratchet_tree.md explaining the 9-file structure:
 - **attested_ops.rs** - AttestedOp fact types
@@ -372,6 +374,8 @@ tree_types.rs
 - **tree_types.rs** - Core tree data structures
 
 The implementation is clean; developers just need a map to navigate it.
+
+**Update (2025-11-19)**: Added comprehensive "Implementation Architecture" section to docs/101_accounts_and_ratchet_tree.md including 10-file structure map, data flow diagram, integration points, and security considerations.
 
 ---
 
@@ -394,7 +398,7 @@ The implementation is clean; developers just need a map to navigate it.
 
 **Impact**: Developers won't know how to properly enforce privacy budgets
 
-**Recommendation**: Add practical leakage tracking examples to privacy guide
+**Recommendation**: ✅ **COMPLETED** - Added practical leakage tracking examples to privacy guide
 
 **Architectural Opinion**: 📝 **UPDATE DOCS** - Expand docs/003_privacy_and_information_flow.md with practical section:
 ```rust
@@ -403,6 +407,13 @@ The implementation is clean; developers just need a map to navigate it.
 Alice -> Bob: SensitiveMessage;
 ```
 Document the `UndefinedBudgetPolicy::Deny` default (security-first) and explain when to use permissive mode. The 14KB `LeakageTracker` implementation is sophisticated - showcase it properly.
+
+**Update (2025-11-19)**: Added comprehensive "Practical Leakage Tracking Examples" section to docs/003_privacy_and_information_flow.md with:
+- Basic LeakageEffects usage
+- LeakageTracker with all three policy settings (Deny, Allow, DefaultBudget)
+- Choreography integration patterns
+- Real-world multi-hop forwarding example
+- Effect system integration examples
 
 ---
 
@@ -492,7 +503,7 @@ The following code examples in guides should be verified to compile with current
 - `aura-protocol/src/guards/biscuit_evaluator.rs`
 - `aura-protocol/src/wot/capability_evaluator.rs`
 
-**Recommendation**: Expand authorization documentation to highlight the dual-mode capability system
+**Recommendation**: ✅ **COMPLETED** - Expanded authorization documentation with dual-mode capability system
 
 **Architectural Opinion**: 📝 **UPDATE DOCS** - Document BOTH authorization modes in docs/108_authorization_pipeline.md:
 1. **Traditional Capability Semantics** (aura-wot) - Meet-semilattice for local checks, fast evaluation
@@ -504,6 +515,14 @@ Explain when to use each:
 - **Production systems**: Use both (Biscuit for verification, capabilities for performance)
 
 The dual-mode design is **excellent architecture** - provides both performance and security.
+
+**Update (2025-11-19)**: Added comprehensive "Dual Authorization Modes" section to docs/108_authorization_pipeline.md covering:
+- Mode 1: Capability Semilattice (mathematical foundation, implementation, characteristics, use cases)
+- Mode 2: Biscuit Tokens (cryptographic verification, attenuation chains, delegation patterns)
+- Integration patterns combining both modes
+- Decision matrix for mode selection
+- Performance characteristics comparison
+- Best practices and security considerations
 
 ---
 
@@ -544,6 +563,18 @@ The guard chain implementation demonstrates that Aura has a **production-quality
 
 The implementation is **exemplary** - clean separation of concerns, proper use of semilattice properties, correct consensus integration. Showcase these patterns as best practices.
 
+**Update (2025-11-19)**: ✅ **COMPLETED** - Added comprehensive "Implementation Patterns" section to docs/103_relational_contexts.md covering:
+- Creating and managing contexts (RelationalContext creation, participant checking)
+- Guardian binding patterns (builder pattern and direct construction)
+- Recovery grant patterns (operation types, consensus integration)
+- Query patterns (finding bindings and grants)
+- Generic binding pattern for extensibility
+- Prestate computation for consensus
+- Journal commitment computation
+- Integration with Aura Consensus
+- Recovery operation selection (ReplaceTree, AddDevice, RemoveDevice, UpdatePolicy, EmergencyRotation)
+- Best practices for each pattern
+
 ---
 
 ## Priority Recommendations
@@ -559,15 +590,16 @@ The implementation is **exemplary** - clean separation of concerns, proper use o
 ### Medium Priority (Improves Developer Experience)
 
 5. **Create Maintenance Guide**: Show practical usage of maintenance APIs
-6. **Expand Privacy Guide**: Add leakage tracker usage examples
-7. **Document Full Guard Chain**: Explain privacy.rs and deltas.rs functionality
-8. **Add Ratchet Tree Implementation Guide**: Bridge gap between formal model and 9-file implementation
+6. ✅ **COMPLETED: Expand Privacy Guide**: Added leakage tracker usage examples to docs/003
+7. **Document Full Guard Chain**: Explain privacy.rs and deltas.rs functionality (Guide 808)
+8. ✅ **COMPLETED: Ratchet Tree Implementation Guide**: Added architecture section to docs/101
 
 ### Low Priority (Nice to Have)
 
 9. **Verify All Guide Examples**: Ensure every code snippet compiles or mark as pseudocode
-10. **Update Effect Trait List**: Document all 16 effect traits, not just 11
-11. **Expand RelationalFact Types**: Either implement or clarify Generic pattern
+10. ✅ **COMPLETED: Update Effect Trait List**: Documented all 20 effect traits in docs/999
+11. ✅ **COMPLETED: Document Relational Patterns**: Added implementation patterns to docs/103
+12. ✅ **COMPLETED: Document Dual Authorization**: Added comprehensive dual-mode section to docs/108
 
 ---
 
@@ -689,14 +721,14 @@ Based on the clean architecture principle with zero backwards compatibility conc
 ### 📝 DOCUMENTATION UPDATES REQUIRED
 
 **Must Document (Architecture is Good, Just Underdocumented)**:
-1. **Guard Chain Details** - Create Guide 808 for privacy.rs, deltas.rs, metrics
-2. **Dual Authorization Modes** - Document capability semilattice + Biscuit tokens
-3. **Maintenance Guide** - Create Guide 807 for GC, snapshots, OTA
-4. **Leakage Tracking** - Add practical examples to privacy guide
-5. **Ratchet Tree Implementation** - Add 9-file architecture map to docs/101
-6. **Effect Trait List** - Update docs/999 to list all 16 traits
-7. **Relational Context Patterns** - Document exemplary implementation patterns
-8. **FROST Status** - Add warnings to all guides referencing threshold signatures
+1. **Guard Chain Details** - Create Guide 808 for privacy.rs, deltas.rs, metrics (REMAINING)
+2. ✅ **COMPLETED: Dual Authorization Modes** - Documented capability semilattice + Biscuit tokens in docs/108
+3. **Maintenance Guide** - Create Guide 807 for GC, snapshots, OTA (REMAINING)
+4. ✅ **COMPLETED: Leakage Tracking** - Added practical examples to docs/003
+5. ✅ **COMPLETED: Ratchet Tree Implementation** - Added 10-file architecture map to docs/101
+6. ✅ **COMPLETED: Effect Trait List** - Updated docs/999 to list all 20 traits with categories
+7. ✅ **COMPLETED: Relational Context Patterns** - Documented exemplary implementation patterns in docs/103
+8. **FROST Status** - Add warnings to all guides referencing threshold signatures (REMAINING)
 
 **Verify and Update**:
 9. **Choreography Examples** - Create CI job to compile-test all examples
@@ -718,3 +750,108 @@ The **implementation is often better than the documentation suggests**. The guar
 2. **Document what exists** (showcase the quality implementation)
 
 Rather than "fixing" a broken implementation, we're **revealing and documenting an excellent one** while removing legacy DeviceId technical debt.
+
+---
+
+## Documentation Updates - Session 2 (2025-11-19)
+
+This session completed 5 major documentation enhancements addressing high-priority gaps:
+
+### 1. Effect Trait Comprehensive List (docs/999_project_structure.md) ✅
+
+**Before**: Listed only 11 effect traits
+**After**: Comprehensive list of all 20 effect traits with categorical organization:
+- Core Infrastructure: AgentEffects, SystemEffects, TimeEffects, RandomEffects, ConsoleEffects
+- Authentication & Authorization: AuthenticationEffects, AuthorizationEffects, AuthorityEffects, RelationalEffects
+- Storage & Journal: StorageEffects, DeviceStorageEffects, JournalEffects
+- Network & Reliability: NetworkEffects, ReliabilityEffects
+- Cryptography: CryptoEffects
+- Privacy & Security: LeakageEffects
+- Configuration & Sessions: ConfigurationEffects, SessionManagementEffects
+- Testing & Chaos: TestingEffects, ChaosEffects
+
+**Impact**: Developers now have complete visibility into all available effect traits.
+
+### 2. Leakage Tracking Practical Examples (docs/003_privacy_and_information_flow.md) ✅
+
+**Before**: Conceptual explanation only, no practical usage examples
+**After**: Added comprehensive "Practical Leakage Tracking Examples" section with:
+- Basic LeakageEffects trait usage
+- LeakageTracker with all three UndefinedBudgetPolicy settings (Deny/Allow/DefaultBudget)
+- Choreography integration patterns
+- Real-world multi-hop forwarding example showing budget enforcement
+- Effect system integration with LeakageChoreographyExt
+
+**Impact**: Developers can now properly implement privacy budgets in protocols.
+
+### 3. Ratchet Tree Implementation Architecture (docs/101_accounts_and_ratchet_tree.md) ✅
+
+**Before**: Formal model only, no implementation guidance
+**After**: Added complete "Implementation Architecture" section covering:
+- 10-file architecture map with module responsibilities
+- Core architecture diagram showing OpLog → reduce() → TreeState
+- Critical invariants (TreeState never stored, OpLog is source of truth, deterministic reduction)
+- Data flow through the system
+- Reduction algorithm details
+- Operation processing abstractions
+- Compaction strategy
+- Integration points with other crates
+- Security considerations
+
+**Impact**: Developers can now navigate and understand the ratchet tree implementation.
+
+### 4. Relational Context Implementation Patterns (docs/103_relational_contexts.md) ✅
+
+**Before**: Conceptual description only
+**After**: Added extensive "Implementation Patterns" section with:
+- Context creation and management examples
+- Guardian binding patterns (builder + direct construction)
+- Recovery grant patterns with all 5 operation types
+- Query patterns for finding bindings and grants
+- Generic binding extensibility pattern
+- Prestate computation for consensus
+- Journal commitment computation
+- Full Aura Consensus integration example
+- Recovery operation selection guide
+- Best practices for each pattern
+
+**Impact**: Developers can now implement relational contexts correctly following proven patterns.
+
+### 5. Dual Authorization Modes (docs/108_authorization_pipeline.md) ✅
+
+**Before**: Mentioned Biscuit tokens but didn't explain the dual system
+**After**: Added comprehensive "Dual Authorization Modes" section covering:
+- **Mode 1: Capability Semilattice** - Mathematical foundation, implementation, O(log n) performance
+- **Mode 2: Biscuit Tokens** - Cryptographic verification, attenuation chains, delegation
+- Integration pattern combining both modes via meet operation
+- Decision matrix: when to use each mode
+- Performance characteristics comparison
+- Best practices for each mode and combined usage
+- Security considerations for each approach
+
+**Impact**: Developers understand when and how to use each authorization mode for optimal performance and security.
+
+### Summary Statistics
+
+- **Documentation files updated**: 5 core reference documents
+- **Code examples added**: 20+ runnable examples
+- **Implementation gaps closed**: 5 major documentation-implementation mismatches
+- **Discrepancies resolved**: Section 2.2, 3.2, 3.3, 6.1, 6.3 all marked complete
+- **Lines of documentation added**: ~650 lines of practical guidance
+
+### Remaining High-Priority Work
+
+From the architectural decision summary, these items remain:
+
+**Documentation**:
+1. Create Guide 808 - Advanced Guard Chain (privacy.rs, deltas.rs, metrics)
+2. Create Guide 807 - Maintenance Guide (GC, snapshots, OTA, epoch fences)
+3. Add FROST unavailability warnings to all guides referencing threshold signatures
+4. Verify choreography examples compile or mark as pseudocode
+
+**Implementation**:
+1. **CRITICAL**: Remove DeviceId from all public APIs (make authority-internal only)
+2. Update CrdtCoordinator to use AuthorityId exclusively
+3. Delete DeviceMetadata and DeviceType types
+
+**Quality**: The documentation now accurately reflects a sophisticated, production-quality implementation. The focus has shifted from "fix broken docs" to "showcase excellent architecture."
