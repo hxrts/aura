@@ -290,8 +290,9 @@ All session management operations incomplete:
 
 **File:** `crates/aura-relational/src/lib.rs`
 
-- **Line 165:** `TODO: Implement proper fact hashing`
-  - **Impact:** Using placeholder for fact content hashing
+- ✅ **COMPLETED** ~~**Line 165:** `TODO: Implement proper fact hashing`~~
+  - ~~**Impact:** Using placeholder for fact content hashing~~
+  - **Implementation:** Replaced Debug formatting with canonical serde_json serialization for deterministic fact hashing. Added fallback to debug formatting for safety, with note that DAG-CBOR could be used for better efficiency in production.
 
 ### Tests (Architecture Updates)
 

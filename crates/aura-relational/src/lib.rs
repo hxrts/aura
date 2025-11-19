@@ -161,9 +161,17 @@ impl RelationalJournal {
         hasher.update(b"RELATIONAL_JOURNAL");
         hasher.update(self.context_id.uuid().as_bytes());
 
+        // Hash facts using canonical serialization for deterministic ordering
         for fact in &self.facts {
-            // TODO: Implement proper fact hashing
-            hasher.update(format!("{:?}", fact).as_bytes());
+            // Use serde_json for deterministic serialization
+            // In production, this could be replaced with DAG-CBOR for better efficiency
+            if let Ok(fact_bytes) = serde_json::to_vec(fact) {
+                hasher.update(&fact_bytes);
+            } else {
+                // Fallback to debug formatting if serialization fails
+                // (should never happen since RelationalFact implements Serialize)
+                hasher.update(format!("{:?}", fact).as_bytes());
+            }
         }
 
         Hash32(hasher.finalize())
