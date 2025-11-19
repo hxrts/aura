@@ -546,7 +546,9 @@ mod tests {
     async fn test_maintenance_service_lifecycle() {
         let service = MaintenanceService::new(Default::default()).unwrap();
 
-        service.start().await.unwrap();
+        #[allow(clippy::disallowed_methods)]
+        let now = std::time::Instant::now();
+        service.start(now).await.unwrap();
         assert!(service.is_running());
 
         service.stop().await.unwrap();

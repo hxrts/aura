@@ -519,16 +519,24 @@ mod tests {
 
     #[async_trait]
     impl aura_core::effects::RandomEffects for MockCryptoEffects {
-        async fn random_bytes(&self, len: usize) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![1; len])
+        async fn random_bytes(&self, len: usize) -> Vec<u8> {
+            vec![1; len]
         }
 
-        async fn random_bytes_32(&self) -> Result<[u8; 32], CryptoError> {
-            Ok([1; 32])
+        async fn random_bytes_32(&self) -> [u8; 32] {
+            [1; 32]
         }
 
-        async fn random_range(&self, min: u64, max: u64) -> Result<u64, CryptoError> {
-            Ok((min + max) / 2) // Simple deterministic value
+        async fn random_u64(&self) -> u64 {
+            12345u64
+        }
+
+        async fn random_range(&self, min: u64, max: u64) -> u64 {
+            (min + max) / 2 // Simple deterministic value
+        }
+
+        async fn random_uuid(&self) -> uuid::Uuid {
+            uuid::Uuid::from_u128(12345)
         }
     }
 

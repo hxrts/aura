@@ -424,8 +424,9 @@ mod tests {
     fn test_request_response_flow() {
         let from = test_device_id(1);
         let to = test_device_id(2);
+        let request_id = uuid::Uuid::new_v4();
 
-        let request = RequestMessage::new(from, to, "ping".to_string());
+        let request = RequestMessage::new(from, to, "ping".to_string(), request_id);
         let response = ResponseMessage::success(&request, "pong".to_string());
 
         assert_eq!(response.request_id, request.request_id);
@@ -448,7 +449,8 @@ mod tests {
     #[test]
     fn test_batch_creation() {
         let items = vec![1, 2, 3, 4, 5, 6, 7];
-        let batches = BatchMessage::create_batches(items, 3);
+        let batch_id = uuid::Uuid::new_v4();
+        let batches = BatchMessage::create_batches(items, 3, batch_id);
 
         assert_eq!(batches.len(), 3);
         assert_eq!(batches[0].items, vec![1, 2, 3]);

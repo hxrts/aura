@@ -880,11 +880,15 @@ mod tests {
     fn sample_op(epoch: u64) -> AttestedOp {
         AttestedOp {
             op: TreeOp {
-                kind: TreeOpKind::AddDevice,
                 parent_epoch: epoch,
-                data: vec![],
+                parent_commitment: [0u8; 32],
+                op: TreeOpKind::RotateEpoch {
+                    affected: vec![],
+                },
+                version: 1,
             },
-            attestation: vec![],
+            agg_sig: vec![],
+            signer_count: 1,
         }
     }
 

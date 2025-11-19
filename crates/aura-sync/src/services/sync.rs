@@ -581,7 +581,9 @@ mod tests {
 
         assert!(!service.is_running());
 
-        service.start().await.unwrap();
+        #[allow(clippy::disallowed_methods)]
+        let now = std::time::Instant::now();
+        service.start(now).await.unwrap();
         assert!(service.is_running());
 
         service.stop().await.unwrap();
@@ -591,7 +593,9 @@ mod tests {
     #[tokio::test]
     async fn test_sync_service_health_check() {
         let service = SyncService::builder().build().unwrap();
-        service.start().await.unwrap();
+        #[allow(clippy::disallowed_methods)]
+        let now = std::time::Instant::now();
+        service.start(now).await.unwrap();
 
         let health = service.health_check().await.unwrap();
         assert_eq!(health.status, HealthStatus::Healthy);
