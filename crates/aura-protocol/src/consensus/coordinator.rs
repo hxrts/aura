@@ -154,7 +154,7 @@ impl ConsensusCoordinator {
         // Verify before returning
         commit_fact
             .verify()
-            .map_err(|e| AuraError::ValidationError(e))?;
+            .map_err(|e| AuraError::invalid(e))?;
 
         Ok(commit_fact)
     }

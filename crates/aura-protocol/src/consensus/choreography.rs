@@ -135,7 +135,7 @@ impl CoordinatorRole {
         commitment: NonceCommitment,
     ) -> Result<()> {
         if !self.config.witnesses.contains(&witness) {
-            return Err(AuraError::ValidationError("Unknown witness".to_string()));
+            return Err(AuraError::invalid("Unknown witness".to_string()));
         }
 
         self.collected_nonces.insert(witness, commitment);
@@ -164,7 +164,7 @@ impl CoordinatorRole {
         share: PartialSignature,
     ) -> Result<()> {
         if !self.config.witnesses.contains(&witness) {
-            return Err(AuraError::ValidationError("Unknown witness".to_string()));
+            return Err(AuraError::invalid("Unknown witness".to_string()));
         }
 
         self.collected_shares.insert(witness, share);

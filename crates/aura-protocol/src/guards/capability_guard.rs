@@ -58,7 +58,7 @@ impl CapabilityGuard {
 
         // Check flow budget
         if !flow_budget.can_charge(flow_cost) {
-            return Err(AuraError::FlowBudgetExceeded(format!(
+            return Err(AuraError::invalid(format!(
                 "Insufficient budget for operation: {} (required: {}, available: {})",
                 operation.as_str(),
                 flow_cost,
@@ -68,14 +68,14 @@ impl CapabilityGuard {
 
         // If no token provided, deny by default
         let token = token.ok_or_else(|| {
-            AuraError::AuthorizationError("No authorization token provided".to_string())
+            AuraError::permission_denied("No authorization token provided".to_string())
         })?;
 
         // Authorize with Biscuit
         let auth_result = self
             .biscuit_bridge
             .authorize(token, operation.as_str(), &scope)
-            .map_err(|e| AuraError::AuthorizationError(format!("Biscuit error: {:?}", e)))?;
+            .map_err(|e| AuraError::permission_denied(format!("Biscuit error: {:?}", e)))?;
 
         if !auth_result.authorized {
             return Ok(false);
@@ -110,7 +110,7 @@ impl CapabilityGuard {
 
         // Check flow budget
         if !flow_budget.can_charge(flow_cost) {
-            return Err(AuraError::FlowBudgetExceeded(format!(
+            return Err(AuraError::invalid(format!(
                 "Insufficient budget for operation: {} (required: {}, available: {})",
                 operation.as_str(),
                 flow_cost,
@@ -120,14 +120,14 @@ impl CapabilityGuard {
 
         // If no token provided, deny by default
         let token = token.ok_or_else(|| {
-            AuraError::AuthorizationError("No authorization token provided".to_string())
+            AuraError::permission_denied("No authorization token provided".to_string())
         })?;
 
         // Authorize with Biscuit
         let auth_result = self
             .biscuit_bridge
             .authorize(token, operation.as_str(), &scope)
-            .map_err(|e| AuraError::AuthorizationError(format!("Biscuit error: {:?}", e)))?;
+            .map_err(|e| AuraError::permission_denied(format!("Biscuit error: {:?}", e)))?;
 
         if !auth_result.authorized {
             return Ok(false);

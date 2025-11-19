@@ -224,27 +224,20 @@ pub use effects::AuraEffects;
 // NOTE: AuraEffectSystem, EffectRegistry, and effect bundles moved to aura-agent runtime
 // Use aura_agent::runtime::{AuraEffectSystem, EffectRegistry, BasicProtocolBundle} instead
 
+// NOTE: Legacy aura_agent re-exports removed
+// aura-protocol (Layer 4) should not depend on aura-agent (Layer 6)
+// Effect system builders and registries are now owned by aura-agent
+// See: docs_2/001_system_architecture.md for correct layering
+//
 // Deprecated flat exports - Use grouped interfaces instead (Phase 2.3)
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_agent::runtime::EffectBuilder` instead"
-)]
-pub use aura_agent::runtime::EffectBuilder;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_agent::runtime::EffectBundle` instead"
-)]
-pub use aura_agent::runtime::EffectBundle;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_agent::runtime::EffectRegistryError` instead"
-)]
-pub use aura_agent::runtime::EffectRegistryError;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_agent::runtime::EffectRegistryExt` instead"
-)]
-pub use aura_agent::runtime::EffectRegistryExt;
+// #[deprecated(since = "0.2.0", note = "Use `aura_agent::runtime::EffectBuilder` instead")]
+// pub use aura_agent::runtime::EffectBuilder;
+// #[deprecated(since = "0.2.0", note = "Use `aura_agent::runtime::EffectBundle` instead")]
+// pub use aura_agent::runtime::EffectBundle;
+// #[deprecated(since = "0.2.0", note = "Use `aura_agent::runtime::EffectRegistryError` instead")]
+// pub use aura_agent::runtime::EffectRegistryError;
+// #[deprecated(since = "0.2.0", note = "Use `aura_agent::runtime::EffectRegistryExt` instead")]
+// pub use aura_agent::runtime::EffectRegistryExt;
 #[deprecated(
     since = "0.2.0",
     note = "Use `aura_protocol::orchestration::AntiEntropyConfig` instead"
