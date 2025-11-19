@@ -37,7 +37,10 @@ impl fmt::Display for ConsensusId {
 /// This is the primary output of the Aura Consensus protocol. It contains
 /// all evidence needed to verify that a threshold of witnesses agreed on
 /// an operation bound to a specific prestate.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Note: Does not derive PartialEq/Eq because ThresholdSignature contains
+/// cryptographic data that should be verified, not compared.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitFact {
     /// Unique identifier for this consensus instance
     pub consensus_id: ConsensusId,

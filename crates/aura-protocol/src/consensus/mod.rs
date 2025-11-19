@@ -19,7 +19,7 @@ pub mod witness;
 // Re-export core types
 pub use commit_fact::{CommitFact, ConsensusId};
 pub use coordinator::{ConsensusCoordinator, ConsensusInstance};
-pub use witness::{WitnessSet, WitnessShare};
+pub use witness::{WitnessMessage, WitnessSet, WitnessShare};
 
 use aura_core::{AuthorityId, Hash32, Result};
 use aura_relational::prestate::Prestate;

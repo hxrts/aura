@@ -92,8 +92,11 @@ impl JoinSemilattice for Journal {
             facts: merged_facts,
         }
     }
+}
 
-    fn join_assign(&mut self, other: &Self) {
+impl Journal {
+    /// In-place join operation for efficiency
+    pub fn join_assign(&mut self, other: &Self) {
         assert_eq!(
             self.namespace, other.namespace,
             "Cannot merge journals from different namespaces"

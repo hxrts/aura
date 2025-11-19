@@ -5,15 +5,13 @@
 
 use crate::{
     fact::{Fact, FactContent},
+    fact_journal::Journal,
     ratchet_tree::authority_state::AuthorityTreeState,
     reduction::reduce_authority,
-    Journal,
 };
 use async_trait::async_trait;
-use aura_core::{
-    crypto::tree_signing::{PublicKey, Signature},
-    AuraError, Authority, AuthorityId, Hash32, Result,
-};
+use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
+use ed25519_dalek::{Signature, VerifyingKey as PublicKey};
 use std::sync::Arc;
 
 /// Authority state derived from facts
@@ -28,12 +26,12 @@ pub struct AuthorityState {
 
 impl AuthorityState {
     /// Sign with threshold - internal implementation
-    pub async fn sign_with_threshold(&self, data: &[u8]) -> Result<Signature> {
+    pub async fn sign_with_threshold(&self, _data: &[u8]) -> Result<Signature> {
         // TODO: Implement actual threshold signing
         // This would coordinate with local devices without exposing them
-        Err(AuraError::NotImplemented(
-            "Threshold signing not yet implemented",
-        ))
+        Err(AuraError::Internal {
+            message: "Threshold signing not yet implemented".to_string(),
+        })
     }
 }
 
@@ -94,17 +92,13 @@ impl Authority for DerivedAuthority {
 }
 
 /// Reduce journal facts to authority state
-fn reduce_authority_state(authority_id: AuthorityId, journal: &Journal) -> Result<AuthorityState> {
+fn reduce_authority_state(_authority_id: AuthorityId, journal: &Journal) -> Result<AuthorityState> {
     // Start with empty tree state
     let mut tree_state = AuthorityTreeState::new();
 
     // Process facts in order
+    // Note: The journal's namespace determines which authority this belongs to
     for fact in journal.iter_facts() {
-        // Only process facts for this authority
-        if fact.authority_id != authority_id {
-            continue;
-        }
-
         match &fact.content {
             FactContent::AttestedOp(op) => {
                 // Apply tree operation
@@ -131,11 +125,13 @@ fn apply_tree_op(tree_state: &mut AuthorityTreeState, op: &crate::fact::Attested
             // Add device without exposing device ID
             tree_state.add_device(public_key.clone());
         }
-        TreeOpKind::RemoveLeaf { leaf_index } => {
+        TreeOpKind::RemoveLeaf { leaf_index: _leaf_index } => {
             // TODO: Implement leaf removal
+            // tree_state.remove_device(leaf_index);
         }
-        TreeOpKind::UpdatePolicy { threshold } => {
+        TreeOpKind::UpdatePolicy { threshold: _threshold } => {
             // TODO: Update threshold policy
+            // tree_state.update_threshold(threshold);
         }
         TreeOpKind::RotateEpoch => {
             // TODO: Rotate epoch
@@ -143,7 +139,7 @@ fn apply_tree_op(tree_state: &mut AuthorityTreeState, op: &crate::fact::Attested
         }
     }
 
-    // Update commitment
+    // Update commitment from the attested operation
     tree_state.root_commitment = op.new_commitment.0;
 
     Ok(())

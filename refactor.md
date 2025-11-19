@@ -2,6 +2,19 @@
 
 This document outlines the complete transformation from the current graph-based, device-centric architecture to the target authority-centric, fact-based architecture with relational contexts.
 
+## Current Status (2025-11-19)
+
+**Recent Progress:**
+- ✅ Removed legacy graph-based journal_ops directory
+- ✅ Fixed authority effects circular dependency (RelationalContext import)
+- ✅ Fixed aura-transport Capability import and dependency
+- ✅ Refactored aura-store to use authority-based ResourceScope
+- ⚠️ Compilation errors remain in aura-journal (fact type mismatches)
+
+**Remaining Work:**
+See Phase 8.2 "Remove device-centric types" - significant type refactoring needed
+in aura-journal to align fact-based and legacy structures.
+
 ## Executive Summary
 
 The refactoring involves a **fundamental architectural transformation** from:
@@ -719,6 +732,7 @@ The refactoring involves a **fundamental architectural transformation** from:
   - [x] Implemented context-aware transport types
   - [x] Created `ContextTransportSession` with authority addressing
   - [x] Added `TransportProtocol` enum supporting QUIC, TCP, WebRTC, Relay
+  - [x] Fixed Capability import from aura_wot (2025-11-19)
 
 #### Task: Align CLI/API with context-scoped rendezvous
 - [x] **File**: `crates/aura-cli/src/commands/context.rs`
@@ -734,8 +748,8 @@ The refactoring involves a **fundamental architectural transformation** from:
 ### 7.1 Update Agent Runtime *(ensures runtime layering from `docs_2/001_system_architecture.md`)*
 
 #### Task: Create authority manager
-- [ ] **File**: `crates/aura-agent/src/runtime/authority_manager.rs` (new file)
-  - [ ] Authority runtime management:
+- [x] **File**: `crates/aura-agent/src/runtime/authority_manager.rs` (new file)
+  - [x] Authority runtime management:
     ```rust
     use aura_core::{Authority, AuthorityId, ContextId};
     use aura_journal::{Journal, DerivedAuthority};
@@ -768,8 +782,8 @@ The refactoring involves a **fundamental architectural transformation** from:
     ```
 
 #### Task: Add authority effects
-- [ ] **File**: `crates/aura-core/src/effects.rs`
-  - [ ] Add to effect traits:
+- [x] **File**: `crates/aura-core/src/effects/authority.rs`
+  - [x] Add to effect traits:
     ```rust
     #[async_trait]
     pub trait AuthorityEffects: Send + Sync {
@@ -790,10 +804,10 @@ The refactoring involves a **fundamental architectural transformation** from:
     ```
 
 #### Task: Update effect system builder
-- [ ] **File**: `crates/aura-agent/src/runtime/effect_builder.rs`
-  - [ ] Add authority/relational handlers to registry
-  - [ ] Update default configurations
-  - [ ] Ensure new effects are wired in
+- [x] **File**: `crates/aura-agent/src/runtime/effect_builder.rs`
+  - [x] Add authority/relational handlers to registry
+  - [x] Update default configurations
+  - [x] Ensure new effects are wired in
 
 ### 7.2 Update CLI
 
@@ -881,9 +895,9 @@ The refactoring involves a **fundamental architectural transformation** from:
 ### 8.2 Clean Up Old Code
 
 #### Task: Remove graph-based code
-- [ ] **File**: `crates/aura-journal/src/journal_ops/`
-  - [ ] Delete entire `journal_ops` directory
-  - [ ] Remove graph.rs, types.rs, views.rs, derivation.rs
+- [x] **File**: `crates/aura-journal/src/journal_ops/`
+  - [x] Delete entire `journal_ops` directory
+  - [x] Remove graph.rs, types.rs, views.rs, derivation.rs
 
 #### Task: Remove device-centric types
 - [ ] **File**: `crates/aura-journal/src/types.rs`

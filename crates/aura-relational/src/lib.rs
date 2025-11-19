@@ -71,7 +71,11 @@ impl RelationalContext {
     pub fn get_guardian_binding(&self, authority_id: AuthorityId) -> Option<&GuardianBinding> {
         self.guardian_bindings()
             .into_iter()
-            .find(|b| b.account_commitment == authority_id.to_bytes().into())
+            .find(|b| {
+                // Compare authority IDs directly instead of converting to Hash32
+                // since account_commitment should be derived from the authority ID
+                b.account_commitment == Hash32::from_bytes(&authority_id.to_bytes())
+            })
     }
 
     /// Get all recovery grants in this context
@@ -145,7 +149,7 @@ impl RelationalJournal {
         let mut hasher = hash::hasher();
 
         hasher.update(b"RELATIONAL_JOURNAL");
-        hasher.update(&self.context_id.uuid().as_bytes());
+        hasher.update(self.context_id.uuid().as_bytes());
 
         for fact in &self.facts {
             // TODO: Implement proper fact hashing

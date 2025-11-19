@@ -100,7 +100,7 @@ impl GuardEffectSystem for Box<dyn AuraEffects> {
 impl FlowBudgetEffects for Box<dyn AuraEffects> {
     async fn charge_flow(
         &self,
-        context: &aura_core::relationships::ContextId,
+        context: &aura_core::identifiers::ContextId,
         peer: &DeviceId,
         cost: u32,
     ) -> aura_core::AuraResult<aura_core::Receipt> {
@@ -290,7 +290,7 @@ impl crate::effects::JournalEffects for Box<dyn AuraEffects> {
 
     async fn get_flow_budget(
         &self,
-        context: &aura_core::relationships::ContextId,
+        context: &aura_core::identifiers::ContextId,
         peer: &DeviceId,
     ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
         (**self).get_flow_budget(context, peer).await
@@ -298,7 +298,7 @@ impl crate::effects::JournalEffects for Box<dyn AuraEffects> {
 
     async fn update_flow_budget(
         &self,
-        context: &aura_core::relationships::ContextId,
+        context: &aura_core::identifiers::ContextId,
         peer: &DeviceId,
         budget: &aura_core::FlowBudget,
     ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
@@ -307,7 +307,7 @@ impl crate::effects::JournalEffects for Box<dyn AuraEffects> {
 
     async fn charge_flow_budget(
         &self,
-        context: &aura_core::relationships::ContextId,
+        context: &aura_core::identifiers::ContextId,
         peer: &DeviceId,
         cost: u32,
     ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {

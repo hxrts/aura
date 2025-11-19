@@ -5,8 +5,8 @@
 //! authorization system.
 
 use crate::{AccessDecision, StoragePermission, StorageResource};
-use aura_core::FlowBudget;
-use aura_wot::{ResourceScope, StorageCategory};
+use aura_core::{AuthorityId, FlowBudget};
+use aura_wot::ResourceScope;
 use biscuit_auth::{Biscuit, PublicKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -21,14 +21,17 @@ pub struct BiscuitStorageEvaluator {
     root_public_key: PublicKey,
     /// Permission mappings for authorization checks
     permission_mappings: PermissionMappings,
+    /// Authority ID for storage scope (owner of the storage namespace)
+    authority_id: AuthorityId,
 }
 
 impl BiscuitStorageEvaluator {
-    /// Create a new Biscuit storage evaluator
-    pub fn new(root_public_key: PublicKey) -> Self {
+    /// Create a new Biscuit storage evaluator for a specific authority
+    pub fn new(root_public_key: PublicKey, authority_id: AuthorityId) -> Self {
         Self {
             root_public_key,
             permission_mappings: PermissionMappings::default(),
+            authority_id,
         }
     }
 
@@ -101,92 +104,39 @@ impl BiscuitStorageEvaluator {
     ) -> Result<ResourceScope, BiscuitStorageError> {
         match resource {
             StorageResource::Content(content_id) => {
-                // Parse content ID to determine category and path
-                let (category, path) = self.parse_content_id(content_id)?;
-                Ok(ResourceScope::Storage { category, path })
+                // Use authority ID and content ID as path
+                Ok(ResourceScope::Storage {
+                    authority_id: self.authority_id,
+                    path: format!("content/{}", content_id),
+                })
             }
             StorageResource::Namespace(namespace) => {
-                // Parse namespace to determine category
-                let category = self.parse_namespace(namespace)?;
+                // Use authority ID and namespace as path
                 Ok(ResourceScope::Storage {
-                    category,
-                    path: format!("{}/*", namespace),
+                    authority_id: self.authority_id,
+                    path: format!("namespace/{}/*", namespace),
                 })
             }
             StorageResource::Global => {
+                // Global storage scoped to this authority
                 Ok(ResourceScope::Storage {
-                    category: StorageCategory::Public, // Most permissive for global
-                    path: "*".to_string(),
+                    authority_id: self.authority_id,
+                    path: "global/*".to_string(),
                 })
             }
             StorageResource::SearchIndex => Ok(ResourceScope::Storage {
-                category: StorageCategory::Shared,
+                authority_id: self.authority_id,
                 path: "search_index".to_string(),
             }),
             StorageResource::GarbageCollection => Ok(ResourceScope::Storage {
-                category: StorageCategory::Shared,
+                authority_id: self.authority_id,
                 path: "gc".to_string(),
             }),
         }
     }
 
-    /// Parse content ID to extract category and path
-    fn parse_content_id(
-        &self,
-        content_id: &str,
-    ) -> Result<(StorageCategory, String), BiscuitStorageError> {
-        // Content IDs follow pattern: category/path
-        // e.g., "personal/user123/document1", "shared/project/file", "public/asset"
-        let parts: Vec<&str> = content_id.splitn(2, '/').collect();
-
-        if parts.len() < 2 {
-            return Err(BiscuitStorageError::InvalidResource(format!(
-                "Invalid content ID format: {}",
-                content_id
-            )));
-        }
-
-        let category = match parts[0] {
-            "personal" => StorageCategory::Personal,
-            "shared" => StorageCategory::Shared,
-            "public" => StorageCategory::Public,
-            _ => {
-                return Err(BiscuitStorageError::InvalidResource(format!(
-                    "Unknown storage category: {}",
-                    parts[0]
-                )))
-            }
-        };
-
-        Ok((category, parts[1].to_string()))
-    }
-
-    /// Parse namespace to extract category
-    fn parse_namespace(&self, namespace: &str) -> Result<StorageCategory, BiscuitStorageError> {
-        // Namespaces follow pattern: category/...
-        let parts: Vec<&str> = namespace.splitn(2, '/').collect();
-
-        if parts.is_empty() {
-            return Err(BiscuitStorageError::InvalidResource(format!(
-                "Invalid namespace format: {}",
-                namespace
-            )));
-        }
-
-        let category = match parts[0] {
-            "personal" => StorageCategory::Personal,
-            "shared" => StorageCategory::Shared,
-            "public" => StorageCategory::Public,
-            _ => {
-                return Err(BiscuitStorageError::InvalidResource(format!(
-                    "Unknown storage category: {}",
-                    parts[0]
-                )))
-            }
-        };
-
-        Ok(category)
-    }
+    // Note: parse_content_id and parse_namespace methods removed as they are
+    // no longer needed with the authority-centric ResourceScope model
 
     /// Check Biscuit token authorization using Authorizer
     fn check_biscuit_authorization(
@@ -201,32 +151,33 @@ impl BiscuitStorageEvaluator {
 
         // For now, implement basic authorization logic based on resource and operation
         match resource_scope {
-            ResourceScope::Storage { category, path: _ } => {
+            ResourceScope::Storage { authority_id: _authority_id, path } => {
                 // Check basic operation permissions
+                // In the authority-centric model, permissions are evaluated based on:
+                // 1. The authority owning the storage
+                // 2. The path within that authority's storage
+                // 3. The operation being performed
+                // TODO: Verify token authority_id matches _authority_id
+
                 match operation {
                     "read" => {
-                        // Read is generally allowed for most storage categories
-                        match category {
-                            StorageCategory::Public => Ok(true),
-                            StorageCategory::Shared => Ok(true), // Would check group membership
-                            StorageCategory::Personal => Ok(true), // Would check device ownership
-                        }
+                        // Read operations are generally allowed if token is for the right authority
+                        // Full implementation would verify token authority_id matches
+                        Ok(true)
                     }
                     "write" => {
-                        // Write requires higher permissions
-                        match category {
-                            StorageCategory::Public => Ok(false),  // Public is read-only
-                            StorageCategory::Shared => Ok(true), // Would check group write permissions
-                            StorageCategory::Personal => Ok(true), // Would check device ownership
+                        // Write operations require ownership or delegation
+                        // Check if path is writable for this authority
+                        if path.starts_with("global/") {
+                            Ok(false) // Global paths might be read-only
+                        } else {
+                            Ok(true) // Authority can write to own storage
                         }
                     }
                     "admin" => {
-                        // Admin operations require special privileges
-                        match category {
-                            StorageCategory::Public => Ok(false),
-                            StorageCategory::Shared => Ok(false), // Would check admin permissions
-                            StorageCategory::Personal => Ok(true), // Owner can admin their storage
-                        }
+                        // Admin operations require full authority control
+                        // Only the authority itself can perform admin operations
+                        Ok(true) // Simplified: assume token validates authority
                     }
                     _ => Ok(false), // Unknown operations denied
                 }

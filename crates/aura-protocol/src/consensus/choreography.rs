@@ -135,7 +135,7 @@ impl CoordinatorRole {
         commitment: NonceCommitment,
     ) -> Result<()> {
         if !self.config.witnesses.contains(&witness) {
-            return Err(AuraError::ValidationError("Unknown witness".to_string()));
+            return Err(AuraError::invalid("Unknown witness".to_string()));
         }
 
         self.collected_nonces.insert(witness, commitment);
@@ -164,7 +164,7 @@ impl CoordinatorRole {
         share: PartialSignature,
     ) -> Result<()> {
         if !self.config.witnesses.contains(&witness) {
-            return Err(AuraError::ValidationError("Unknown witness".to_string()));
+            return Err(AuraError::invalid("Unknown witness".to_string()));
         }
 
         self.collected_shares.insert(witness, share);
@@ -185,7 +185,10 @@ impl CoordinatorRole {
     ) -> Result<CommitFact> {
         // TODO: Actually aggregate signatures using FROST
         // For now, create a placeholder
-        let threshold_signature = ThresholdSignature::default();
+        let threshold_signature = ThresholdSignature {
+            signature: vec![],
+            signers: vec![],
+        };
 
         let participants: Vec<_> = self.collected_shares.keys().cloned().collect();
 
@@ -237,7 +240,10 @@ impl WitnessRole {
         // TODO: Verify prestate matches our view
         // TODO: Generate real nonce using FROST
 
-        let nonce_commitment = NonceCommitment::default(); // Placeholder
+        let nonce_commitment = NonceCommitment {
+            signer: 0,
+            commitment: vec![],
+        }; // Placeholder
 
         let instance = WitnessInstance {
             prestate_hash,
@@ -263,10 +269,13 @@ impl WitnessRole {
         let instance = self
             .active_instances
             .get_mut(&consensus_id)
-            .ok_or_else(|| AuraError::NotFound("Unknown consensus instance".to_string()))?;
+            .ok_or_else(|| AuraError::not_found("Unknown consensus instance"))?;
 
         // TODO: Generate real partial signature using FROST
-        let partial_signature = PartialSignature::default(); // Placeholder
+        let partial_signature = PartialSignature {
+            signer: 0,
+            signature: vec![],
+        }; // Placeholder
 
         instance.partial_signature = Some(partial_signature.clone());
 
@@ -303,9 +312,9 @@ where
     // 3. Collecting results
     // 4. Returning commit fact
 
-    Err(AuraError::NotImplemented(
-        "Choreography execution not yet implemented".to_string(),
-    ))
+    Err(AuraError::Internal {
+        message: "Choreography execution not yet implemented".to_string(),
+    })
 }
 
 #[cfg(test)]
@@ -328,7 +337,10 @@ mod tests {
         // Add nonces
         for witness in &coordinator.config.witnesses[..2] {
             coordinator
-                .handle_nonce_commit(*witness, NonceCommitment::default())
+                .handle_nonce_commit(*witness, NonceCommitment {
+                    signer: 0,
+                    commitment: vec![],
+                })
                 .unwrap();
         }
 

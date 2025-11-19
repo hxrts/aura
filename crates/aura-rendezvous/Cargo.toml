@@ -15,6 +15,7 @@ aura-transport = { path = "../aura-transport" }
 aura-protocol = { path = "../aura-protocol" }
 aura-macros = { path = "../aura-macros" }
 aura-journal = { path = "../aura-journal" }
+aura-relational = { path = "../aura-relational" }
 
 # Cryptographic dependencies
 curve25519-dalek = { workspace = true }

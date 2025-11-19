@@ -7,7 +7,8 @@
 //! Actual coordination logic belongs in Layer 4 (aura-protocol).
 
 use aura_core::identifiers::ContextId;
-use aura_core::{AuthorityId, Capability};
+use aura_core::AuthorityId;
+use aura_wot::Capability;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 

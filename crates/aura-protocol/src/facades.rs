@@ -4,7 +4,11 @@
 //! making it easier to use the protocol orchestration capabilities without
 //! needing to understand all the implementation details.
 
-use crate::effects::{AuraEffectSystem, ChoreographicEffects, EffectBundle};
+// NOTE: Facade currently disabled - uses AuraEffectSystem and EffectBundle from aura-agent (Layer 6)
+// aura-protocol (Layer 4) should not depend on aura-agent types
+// TODO: Refactor to use only aura-core effect traits
+
+use crate::effects::ChoreographicEffects;
 use async_trait::async_trait;
 use aura_core::{AuraResult, DeviceId};
 
