@@ -141,7 +141,7 @@ mod tests {
             .build();
 
         // Create a test context
-        let context = crate::handlers::immutable::AuraContext::default();
+        let context = crate::handlers::AuraContext::default();
 
         // Execute an operation
         let result = executor
@@ -159,7 +159,7 @@ mod tests {
 
         // Create executor with no handlers
         let executor = EffectExecutor::new();
-        let context = crate::handlers::immutable::AuraContext::default();
+        let context = crate::handlers::AuraContext::default();
 
         // Try to execute unsupported effect
         let result = executor
@@ -190,7 +190,7 @@ mod tests {
         let executor2 = executor1.clone();
 
         // Both should work identically
-        let context = crate::handlers::immutable::AuraContext::default();
+        let context = crate::handlers::AuraContext::default();
 
         let result1 = executor1
             .execute(EffectType::Time, "current_timestamp", &[], &context)

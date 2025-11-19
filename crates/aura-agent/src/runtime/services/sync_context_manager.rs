@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::handlers::context_immutable::AuraContext;
+use crate::handlers::AuraContext;
 use aura_core::{AuraError, AuraResult, DeviceId};
 
 /// Synchronous context manager for testing
