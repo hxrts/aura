@@ -104,18 +104,23 @@ impl FlowBudgetEffects for Box<dyn AuraEffects> {
         peer: &DeviceId,
         cost: u32,
     ) -> aura_core::AuraResult<aura_core::Receipt> {
-        // TODO: This should delegate to the actual effect system
-        // For now, return a dummy receipt to make compilation work
-        use aura_core::Hash32;
+        // Use the journal-backed flow budget charge to honor charge-before-send
+        let updated_budget =
+            crate::effects::JournalEffects::charge_flow_budget(&**self, context, peer, cost)
+                .await?;
+
+        // Build a receipt chained by spent value as a monotone nonce; signatures are left empty here
+        let nonce = updated_budget.spent;
+        let epoch = updated_budget.epoch;
         Ok(aura_core::Receipt::new(
             context.clone(),
-            DeviceId::new(),                          // src (dummy)
-            *peer,                                    // dst
-            aura_core::session_epochs::Epoch::new(0), // epoch (dummy)
+            DeviceId::new(), // source is unknown from the boxed trait object
+            *peer,
+            epoch,
             cost,
-            0,                      // nonce (dummy)
-            Hash32::new([0u8; 32]), // prev (dummy)
-            Vec::new(),             // sig (empty)
+            nonce,
+            aura_core::Hash32::default(),
+            Vec::new(),
         ))
     }
 }

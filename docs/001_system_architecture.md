@@ -2,7 +2,7 @@
 
 This document describes Aura’s system architecture and implementation patterns. It covers the async effect system, CRDT implementation patterns, choreographic protocol design, and crate organization principles, updated to align with the current authority and relational identity model.
 
-Formal definitions live in [Theoretical Model](001_theoretical_model.md) and the specs for:
+Formal definitions live in [Theoretical Model](002_theoretical_model.md) and the specs for:
 
 * Relational Identity
 * Ratchet Tree Semilattice
@@ -197,8 +197,6 @@ Shared fixtures, model checking interfaces, and property tests.
 
 #### Where does my code go?
 
-Same decision matrix as before, but with current terminology:
-
 * Stateless, single effect → `aura-effects`
 * Multi-handler coordination, multi-party → `aura-protocol`
 * Domain semilattice or journal logic → domain crate (`aura-journal`, etc.)
@@ -325,7 +323,7 @@ Flow budgets, receipts, and epochs govern channel lifetime.
 
 ### 1.7 Guard Chain and Predicate
 
-All network sends pass through the guard chain defined in [Authorization Pipeline](108_authorization_pipeline.md). CapGuard evaluates Biscuit tokens and local policy to derive the current `limit`. FlowGuard checks if `spent + cost <= limit`, and if successful, emits a charge fact (incrementing `spent`) to the journal and creates a receipt scoped to `(ContextId, source AuthorityId, dest AuthorityId, epoch)`. JournalCoupler applies any fact deltas atomically with the send.
+All network sends pass through the guard chain defined in [Authorization](109_authorization.md). CapGuard evaluates Biscuit tokens and local policy to derive the current `limit`. FlowGuard checks if `spent + cost <= limit`, and if successful, emits a charge fact (incrementing `spent`) to the journal and creates a receipt scoped to `(ContextId, source AuthorityId, dest AuthorityId, epoch)`. JournalCoupler applies any fact deltas atomically with the send.
 
 Failure at any stage returns locally with no observable side effect. Capabilities remain outside the CRDT so JournalCoupler operates only on fact merges (including the `spent` counter updates).
 

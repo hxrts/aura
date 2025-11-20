@@ -61,32 +61,47 @@ pub struct AuthorityState {
 /// from aura-journal when integrating with existing code.
 #[derive(Debug, Clone)]
 pub struct TreeState {
-    // Internal representation will be added during integration
-    _placeholder: (),
+    /// Current commitment hash
+    commitment: Hash32,
 }
 
 impl Default for TreeState {
     fn default() -> Self {
-        Self { _placeholder: () }
+        Self::new()
     }
 }
 
 impl TreeState {
+    /// Create a new tree state with zero commitment
+    pub fn new() -> Self {
+        Self {
+            commitment: Hash32::new([0; 32]),
+        }
+    }
+
     /// Get the root public key for the current tree state
     pub fn root_key(&self) -> PublicKey {
         // TODO: Implement actual derivation from tree
-        PublicKey::default()
+        // For now, derive a deterministic key from commitment
+        let bytes = self.commitment.as_bytes();
+        let mut key_bytes = [0u8; 32];
+        key_bytes[..std::cmp::min(32, bytes.len())].copy_from_slice(&bytes[..std::cmp::min(32, bytes.len())]);
+        PublicKey::from_bytes(&key_bytes).unwrap_or_else(|_| PublicKey::from_bytes(&[0; 32]).unwrap())
     }
 
     /// Get the root commitment hash for the current tree state
     pub fn root_commitment(&self) -> Hash32 {
-        // TODO: Implement actual commitment computation
-        Hash32::new([0; 32])
+        self.commitment
     }
 
     /// Apply an attested operation to the tree state
     pub fn apply(&self, _op: &[u8]) -> Self {
         // TODO: Implement actual tree update logic with AttestedOp
         self.clone()
+    }
+
+    /// Update the commitment (internal method for reduction pipeline)
+    pub fn _update_commitment(&mut self, new_commitment: Hash32) {
+        self.commitment = new_commitment;
     }
 }

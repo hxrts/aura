@@ -5,7 +5,7 @@
 //!
 //! This crate implements the Web of Trust layer from Aura's architectural
 //! model, providing concrete realizations of the theoretical foundations
-//! described in docs/001_theoretical_model.md.
+//! described in docs/002_theoretical_model.md.
 //!
 //! ## Theoretical Foundations
 //!
@@ -47,7 +47,10 @@
 pub mod errors;
 
 // Legacy capability system (for backward compatibility with tests)
+// TODO: Remove in Phase 4 of authorization unification
+#[deprecated(note = "Legacy capability system. Use Biscuit tokens instead.")]
 pub mod capability;
+#[deprecated(note = "Legacy device-centric policy. Use authority-based ResourceScope instead.")]
 pub mod tree_policy;
 
 // Biscuit-based authorization (new implementation)
@@ -58,12 +61,16 @@ pub mod resource_scope; // Authority-based resource scopes
 pub use errors::{AuraError, AuraResult, WotError, WotResult};
 
 // Export legacy capability types
+#[deprecated(note = "Legacy capability system. Use Biscuit tokens instead.")]
 pub use capability::{
     evaluate_capabilities, Capability, CapabilitySet, DelegationChain, DelegationLink,
     EvaluationContext, LocalChecks, Policy,
 };
 
 // Export tree policy types
+#[deprecated(
+    note = "Legacy device-centric policy. Use authority-based ResourceScope instead."
+)]
 pub use tree_policy::Policy as TreePolicy;
 
 // Re-export semilattice traits for convenience

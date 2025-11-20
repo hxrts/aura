@@ -1,5 +1,8 @@
 //! High-level capability evaluator for protocol integration
 //!
+//! **DEPRECATED**: This module uses the legacy capability semilattice system.
+//! New code should use `BiscuitAuthorizationBridge` instead.
+//!
 //! **Layer 4 (aura-protocol)**: Orchestration logic with effect system integration.
 //!
 //! This module was moved from aura-wot (Layer 2) because it contains effect-dependent

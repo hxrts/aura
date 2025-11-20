@@ -54,18 +54,18 @@
           installPhase = ''
             runHook preInstall
             mkdir -p $out/bin
-            
+
             # Copy the entire apalache directory
             cp -r . $out/lib-apalache
-            
+
             # Make the apalache-mc script executable
             chmod +x $out/lib-apalache/bin/apalache-mc
-            
+
             # Create wrapper script
             makeWrapper $out/lib-apalache/bin/apalache-mc $out/bin/apalache-mc \
               --set JAVA_HOME ${pkgs.jre} \
               --prefix PATH : ${pkgs.jre}/bin
-            
+
             runHook postInstall
           '';
 
@@ -187,6 +187,9 @@
             nodejs_20
             jre # For ANTLR4TS and Apalache
 
+            # Documentation tools
+            markdown-link-check
+
             # Nix tools and formatting
             nixpkgs-fmt
             crate2nix.packages.${system}.default
@@ -212,7 +215,7 @@
               echo "  just quint-parse     Parse Quint files to JSON"
               echo "  trunk serve          Serve console with hot reload (in console/)"
               echo "  quint --help         Formal verification with Quint"
-              echo "  apalache-mc --help   Model checking with Apalache"  
+              echo "  apalache-mc --help   Model checking with Apalache"
               echo "  crate2nix --help     Generate hermetic Nix builds"
               echo ""
               echo "Hermetic builds:"

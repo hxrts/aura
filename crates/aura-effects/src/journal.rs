@@ -5,7 +5,7 @@
 //! and other Aura components.
 
 use aura_core::effects::JournalEffects;
-use aura_core::{identifiers::ContextId, AuraError, DeviceId, Epoch, FlowBudget, Journal};
+use aura_core::{identifiers::{AuthorityId, ContextId}, AuraError, Epoch, FlowBudget, Journal};
 use aura_macros::aura_effect_handlers;
 
 use std::collections::HashMap;
@@ -19,7 +19,7 @@ aura_effect_handlers! {
         struct_name: MockJournalHandler,
         state: {
             journal: Arc<RwLock<Journal>>,
-            flow_budgets: Arc<RwLock<HashMap<(ContextId, DeviceId), FlowBudget>>>,
+            flow_budgets: Arc<RwLock<HashMap<(ContextId, AuthorityId), FlowBudget>>>,
             operation_counter: Arc<Mutex<u64>>,
         },
         features: {
@@ -44,19 +44,19 @@ aura_effect_handlers! {
                 *current = journal.clone();
                 Ok(())
             },
-            get_flow_budget(context: &ContextId, peer: &DeviceId) -> Result<FlowBudget, AuraError> => {
+            get_flow_budget(context: &ContextId, peer: &AuthorityId) -> Result<FlowBudget, AuraError> => {
                 let budgets = self.flow_budgets.read().await;
                 Ok(budgets
                     .get(&(context.clone(), *peer))
                     .copied()
                     .unwrap_or_default())
             },
-            update_flow_budget(context: &ContextId, peer: &DeviceId, budget: &FlowBudget) -> Result<FlowBudget, AuraError> => {
+            update_flow_budget(context: &ContextId, peer: &AuthorityId, budget: &FlowBudget) -> Result<FlowBudget, AuraError> => {
                 let mut budgets = self.flow_budgets.write().await;
                 budgets.insert((context.clone(), *peer), *budget);
                 Ok(*budget)
             },
-            charge_flow_budget(context: &ContextId, peer: &DeviceId, cost: u32) -> Result<FlowBudget, AuraError> => {
+            charge_flow_budget(context: &ContextId, peer: &AuthorityId, cost: u32) -> Result<FlowBudget, AuraError> => {
                 let mut budgets = self.flow_budgets.write().await;
                 let budget_key = (context.clone(), *peer);
                 let mut budget = budgets.get(&budget_key).copied().unwrap_or_default();
@@ -115,17 +115,17 @@ aura_effect_handlers! {
                 // For now, succeed without doing anything
                 Ok(())
             },
-            get_flow_budget(_context: &ContextId, _peer: &DeviceId) -> Result<FlowBudget, AuraError> => {
+            get_flow_budget(_context: &ContextId, _peer: &AuthorityId) -> Result<FlowBudget, AuraError> => {
                 // Standard implementation would load from persistent budget store
                 // For now, return default flow budget
                 Ok(FlowBudget::default())
             },
-            update_flow_budget(_context: &ContextId, _peer: &DeviceId, budget: &FlowBudget) -> Result<FlowBudget, AuraError> => {
+            update_flow_budget(_context: &ContextId, _peer: &AuthorityId, budget: &FlowBudget) -> Result<FlowBudget, AuraError> => {
                 // Standard implementation would persist and return merged budget using CRDT logic
                 // For now, just return the input budget
                 Ok(*budget)
             },
-            charge_flow_budget(context: &ContextId, peer: &DeviceId, cost: u32) -> Result<FlowBudget, AuraError> => {
+            charge_flow_budget(context: &ContextId, peer: &AuthorityId, cost: u32) -> Result<FlowBudget, AuraError> => {
                 // Standard implementation with atomic headroom check and charge
                 // In production, this would use persistent storage and proper CRDT merging
 

@@ -1,5 +1,9 @@
 //! Legacy Capability System
 //!
+//! **DEPRECATED**: This module provides the legacy capability semilattice system.
+//! New code should use Biscuit tokens via `aura_wot::BiscuitTokenManager` instead.
+//! This legacy system will be removed in a future version.
+//!
 //! This module provides the legacy capability types that are expected by the existing tests.
 //! These implement meet-semilattice laws for capability restriction and delegation.
 //!
@@ -23,6 +27,7 @@ use std::collections::BTreeSet;
 /// Represents atomic authority units in the capability lattice.
 /// These form the basis elements that compose via meet operations.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[deprecated(note = "Use Biscuit tokens via BiscuitTokenManager instead")]
 pub enum Capability {
     /// Read access to resources matching a pattern
     Read { resource_pattern: String },
@@ -59,6 +64,7 @@ pub enum Capability {
 ///
 /// Per §2.4 Semantic Laws: "The operation refine_caps c never increases authority"
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[deprecated(note = "Use Biscuit tokens via BiscuitTokenManager instead")]
 pub struct CapabilitySet {
     capabilities: BTreeSet<Capability>,
 }
@@ -511,6 +517,7 @@ impl DelegationChain {
 /// 1. Start with LocalGrants_A from policy
 /// 2. Apply each delegation via meet operation (∩ delegations)
 /// 3. Apply local policy constraints via meet operation
+#[deprecated(note = "Use Biscuit tokens via BiscuitAuthorizationBridge instead")]
 pub fn evaluate_capabilities(
     policy: &Policy,
     delegations: &[DelegationLink],

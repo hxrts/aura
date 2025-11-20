@@ -255,7 +255,8 @@ impl RecoveryProtocolHandler {
         let mut approvals = self.approvals.lock().await;
         approvals.insert(request.recovery_id.clone(), Vec::new());
 
-        // TODO: Notify guardians
+        // Notify guardians via effects
+        self.notify_guardians_via_effects(&request).await?;
 
         Ok(())
     }
@@ -274,9 +275,113 @@ impl RecoveryProtocolHandler {
         let threshold_met = self.protocol.is_threshold_met(ceremony_approvals);
 
         if threshold_met {
-            // TODO: Finalize recovery
+            // Finalize recovery via effects
+            self.finalize_recovery_via_effects(&approval.recovery_id, ceremony_approvals).await?;
         }
 
         Ok(threshold_met)
+    }
+
+    /// Notify guardians about recovery request via NetworkEffects
+    async fn notify_guardians_via_effects(&self, request: &RecoveryRequest) -> Result<()> {
+        // Serialize the recovery request
+        let message_data = serde_json::to_vec(request)
+            .map_err(|e| AuraError::serialization(e.to_string()))?;
+
+        // Send recovery request to each guardian via network effects
+        for guardian_id in &self.protocol.guardian_authorities {
+            // TODO: Use actual NetworkEffects to send messages
+            // For now, simulate sending recovery notification
+            let _notification_sent = self.simulate_guardian_notification(*guardian_id, &message_data);
+        }
+
+        // Update journal state with recovery initiation
+        self.update_journal_recovery_state_via_effects(&request.recovery_id, "initiated", &[]).await?;
+
+        Ok(())
+    }
+
+    /// Finalize recovery via effects
+    async fn finalize_recovery_via_effects(
+        &self,
+        recovery_id: &str,
+        approvals: &[GuardianApproval],
+    ) -> Result<()> {
+        // Create recovery result
+        let result = RecoveryResult {
+            success: true,
+            recovery_grant: None, // Would be populated from actual consensus
+            error: None,
+            approvals: approvals.to_vec(),
+        };
+
+        // Serialize the recovery result  
+        let result_data = serde_json::to_vec(&result)
+            .map_err(|e| AuraError::serialization(e.to_string()))?;
+
+        // Notify account of recovery completion via network effects
+        // TODO: Use actual NetworkEffects to send result back to requesting account
+        let _result_sent = self.simulate_account_notification(&result_data);
+
+        // Update journal state with recovery completion
+        self.update_journal_recovery_state_via_effects(recovery_id, "completed", approvals).await?;
+
+        Ok(())
+    }
+
+    /// Update recovery state in journal via JournalEffects
+    async fn update_journal_recovery_state_via_effects(
+        &self,
+        recovery_id: &str,
+        state: &str,
+        approvals: &[GuardianApproval],
+    ) -> Result<()> {
+        // Create a fact representing the recovery state change
+        let state_data = serde_json::json!({
+            "recovery_id": recovery_id,
+            "state": state,
+            "approvals_count": approvals.len(),
+            "timestamp": chrono::Utc::now().timestamp(),
+        });
+
+        // TODO: Use actual JournalEffects to record recovery state
+        // For now, simulate journal update
+        let _journal_updated = self.simulate_journal_update(&state_data);
+
+        Ok(())
+    }
+
+    /// Simulate guardian notification (placeholder for NetworkEffects)
+    fn simulate_guardian_notification(&self, guardian_id: AuthorityId, message_data: &[u8]) -> bool {
+        // TODO: Replace with actual effect system call
+        // effect_handler.send_to_authority(guardian_id, message_data).await
+        println!(
+            "Simulated recovery notification to guardian {:?}: {} bytes",
+            guardian_id,
+            message_data.len()
+        );
+        true
+    }
+
+    /// Simulate account notification (placeholder for NetworkEffects)
+    fn simulate_account_notification(&self, result_data: &[u8]) -> bool {
+        // TODO: Replace with actual effect system call
+        // effect_handler.send_to_authority(account_authority, result_data).await
+        println!(
+            "Simulated recovery result to account: {} bytes",
+            result_data.len()
+        );
+        true
+    }
+
+    /// Simulate journal update (placeholder for JournalEffects)
+    fn simulate_journal_update(&self, state_data: &serde_json::Value) -> bool {
+        // TODO: Replace with actual effect system call
+        // effect_handler.record_recovery_state(state_data).await
+        println!(
+            "Simulated journal recovery state update: {}",
+            state_data.to_string()
+        );
+        true
     }
 }

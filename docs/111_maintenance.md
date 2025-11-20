@@ -4,8 +4,8 @@ This document captures the operational practices required to keep Aura deploymen
 
 ## Journal Hygiene
 
-- **Snapshots and pruning**: Follow the rules in `102_journal.md` and `110_state_reduction_flows.md`. Create `SnapshotFact` entries once the fact set grows beyond local thresholds, then garbage collect any fact dominated by the snapshot digest. Always keep the most recent two epochs of `FlowBudget` facts so charge reconciliation can survive transient partitions.
-- **Receipts**: Receipts described in `003_privacy_and_information_flow.md` and `107_transport_and_information_flow.md` must be retained for at least one epoch after issuance so downstream auditors can validate relay behavior. When pruning, ensure that any receipt referenced by an in-progress recovery or rendezvous flow remains available.
+- **Snapshots and pruning**: Follow the rules in `102_journal.md` and ``. Create `SnapshotFact` entries once the fact set grows beyond local thresholds, then garbage collect any fact dominated by the snapshot digest. Always keep the most recent two epochs of `FlowBudget` facts so charge reconciliation can survive transient partitions.
+- **Receipts**: Receipts described in `003_information_flow_contract.md` and `108_transport_and_information_flow.md` must be retained for at least one epoch after issuance so downstream auditors can validate relay behavior. When pruning, ensure that any receipt referenced by an in-progress recovery or rendezvous flow remains available.
 
 ## Epoch and Key Rotation
 
@@ -14,7 +14,7 @@ This document captures the operational practices required to keep Aura deploymen
 
 ## Capability and Budget Refresh
 
-- **Biscuit cache invalidation**: CapGuard implementations (`108_authorization_pipeline.md`) must flush cached capability frontiers when journal policy facts change, when Biscuit revocation lists update, or when the authority rotates its root commitment.
+- **Biscuit cache invalidation**: CapGuard implementations (`109_authorization.md`) must flush cached capability frontiers when journal policy facts change, when Biscuit revocation lists update, or when the authority rotates its root commitment.
 - **Flow budget floors**: Periodically recompute policy-derived `limit` values for dormant peers to ensure they never drop below the minimum floor required for liveness. Any manual overrides should be committed as new policy facts rather than local configuration.
 
 ## Relational Context Care
@@ -24,8 +24,8 @@ This document captures the operational practices required to keep Aura deploymen
 
 ## Runtime and Handler Upgrades
 
-- **Effect handlers**: When upgrading handler crates referenced in `105_effect_system_and_runtime.md`, follow the lifecycle protocol—enter `shutting_down`, drain inflight work, apply the upgrade, then re-enter `ready`. This prevents dangling FlowGuard reservations.
-- **Transport services**: Rendezvous and guard-chain components (`107_transport_and_information_flow.md`, `108_rendezvous.md`) must be upgraded in lockstep so that new receipt formats or flow-cost policies remain consistent across peers. Always rotate rendezvous descriptors after a transport upgrade.
+- **Effect handlers**: When upgrading handler crates referenced in `106_effect_system_and_runtime.md`, follow the lifecycle protocol—enter `shutting_down`, drain inflight work, apply the upgrade, then re-enter `ready`. This prevents dangling FlowGuard reservations.
+- **Transport services**: Rendezvous and guard-chain components (`108_transport_and_information_flow.md`, `108_rendezvous.md`) must be upgraded in lockstep so that new receipt formats or flow-cost policies remain consistent across peers. Always rotate rendezvous descriptors after a transport upgrade.
 
 ## Monitoring Checklist
 

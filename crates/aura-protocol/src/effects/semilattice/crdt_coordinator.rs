@@ -10,22 +10,22 @@
 //!
 //! ```ignore
 //! // Convergent CRDT with default state
-//! let coordinator = CrdtCoordinator::with_cv(device_id);
+//! let coordinator = CrdtCoordinator::with_cv(authority_id);
 //!
 //! // Convergent CRDT with initial state
-//! let coordinator = CrdtCoordinator::with_cv_state(device_id, my_state);
+//! let coordinator = CrdtCoordinator::with_cv_state(authority_id, my_state);
 //!
 //! // Commutative CRDT
-//! let coordinator = CrdtCoordinator::with_cm(device_id, initial_state);
+//! let coordinator = CrdtCoordinator::with_cm(authority_id, initial_state);
 //!
 //! // Delta CRDT with compaction threshold
-//! let coordinator = CrdtCoordinator::with_delta_threshold(device_id, 100);
+//! let coordinator = CrdtCoordinator::with_delta_threshold(authority_id, 100);
 //!
 //! // Meet-semilattice CRDT
-//! let coordinator = CrdtCoordinator::with_mv(device_id);
+//! let coordinator = CrdtCoordinator::with_mv(authority_id);
 //!
 //! // Multiple handlers can be chained
-//! let coordinator = CrdtCoordinator::new(device_id)
+//! let coordinator = CrdtCoordinator::new(authority_id)
 //!     .with_cv_handler(CvHandler::new())
 //!     .with_delta_handler(DeltaHandler::with_threshold(50));
 //! ```
@@ -35,9 +35,9 @@
 //! Use the coordinator in anti-entropy and other synchronization protocols:
 //!
 //! ```ignore
-//! let coordinator = CrdtCoordinator::with_cv_state(device_id, journal_state);
+//! let coordinator = CrdtCoordinator::with_cv_state(authority_id, journal_state);
 //! let result = execute_anti_entropy(
-//!     device_id,
+//!     authority_id,
 //!     config,
 //!     is_requester,
 //!     &effect_system,
@@ -51,7 +51,7 @@ use aura_core::{
     semilattice::{
         Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState, OpWithCtx, Top,
     },
-    AuraError, DeviceId, SessionId,
+    AuraError, AuthorityId, SessionId,
 };
 use aura_journal::{CausalContext, VectorClock};
 use serde::{de::DeserializeOwned, Serialize};
@@ -104,8 +104,8 @@ where
     delta_handler: Option<DeltaHandler<DeltaS, DeltaS::Delta>>,
     /// Meet-semilattice CRDT handler
     mv_handler: Option<MvHandler<MvS>>,
-    /// Device identifier for this coordinator
-    device_id: DeviceId,
+    /// Authority identifier for this coordinator
+    authority_id: AuthorityId,
     /// Current vector clock for causal ordering
     vector_clock: VectorClock,
     /// Type markers
@@ -124,13 +124,13 @@ where
     Id: Clone + PartialEq + Serialize + DeserializeOwned,
 {
     /// Create a new CRDT coordinator
-    pub fn new(device_id: DeviceId) -> Self {
+    pub fn new(authority_id: AuthorityId) -> Self {
         Self {
             cv_handler: None,
             cm_handler: None,
             delta_handler: None,
             mv_handler: None,
-            device_id,
+            authority_id,
             vector_clock: VectorClock::new(),
             _phantom: PhantomData,
         }
@@ -364,9 +364,9 @@ where
         &self.vector_clock
     }
 
-    /// Get device ID
-    pub fn device_id(&self) -> DeviceId {
-        self.device_id
+    /// Get authority ID
+    pub fn authority_id(&self) -> AuthorityId {
+        self.authority_id
     }
 
     /// Check if a specific CRDT handler is registered
@@ -443,80 +443,80 @@ where
     /// ```ignore
     /// let coordinator = CrdtCoordinator::with_cv(device_id);
     /// ```
-    pub fn with_cv(device_id: DeviceId) -> Self
+    pub fn with_cv(authority_id: AuthorityId) -> Self
     where
         CvS: Bottom,
     {
-        Self::new(device_id).with_cv_handler(CvHandler::new())
+        Self::new(authority_id).with_cv_handler(CvHandler::new())
     }
 
     /// Create a coordinator with a convergent CRDT handler initialized with given state
     ///
     /// # Example
     /// ```ignore
-    /// let coordinator = CrdtCoordinator::with_cv_state(device_id, my_state);
+    /// let coordinator = CrdtCoordinator::with_cv_state(authority_id, my_state);
     /// ```
-    pub fn with_cv_state(device_id: DeviceId, state: CvS) -> Self {
-        Self::new(device_id).with_cv_handler(CvHandler::with_state(state))
+    pub fn with_cv_state(authority_id: AuthorityId, state: CvS) -> Self {
+        Self::new(authority_id).with_cv_handler(CvHandler::with_state(state))
     }
 
     /// Create a coordinator with a commutative CRDT handler
     ///
     /// # Example
     /// ```ignore
-    /// let coordinator = CrdtCoordinator::with_cm(device_id, initial_state);
+    /// let coordinator = CrdtCoordinator::with_cm(authority_id, initial_state);
     /// ```
-    pub fn with_cm(device_id: DeviceId, state: CmS) -> Self {
-        Self::new(device_id).with_cm_handler(CmHandler::new(state))
+    pub fn with_cm(authority_id: AuthorityId, state: CmS) -> Self {
+        Self::new(authority_id).with_cm_handler(CmHandler::new(state))
     }
 
     /// Create a coordinator with a delta CRDT handler
     ///
     /// # Example
     /// ```ignore
-    /// let coordinator = CrdtCoordinator::with_delta(device_id);
+    /// let coordinator = CrdtCoordinator::with_delta(authority_id);
     /// ```
-    pub fn with_delta(device_id: DeviceId) -> Self
+    pub fn with_delta(authority_id: AuthorityId) -> Self
     where
         DeltaS: Bottom,
     {
-        Self::new(device_id).with_delta_handler(DeltaHandler::new())
+        Self::new(authority_id).with_delta_handler(DeltaHandler::new())
     }
 
     /// Create a coordinator with a delta CRDT handler with compaction threshold
     ///
     /// # Example
     /// ```ignore
-    /// let coordinator = CrdtCoordinator::with_delta_threshold(device_id, 100);
+    /// let coordinator = CrdtCoordinator::with_delta_threshold(authority_id, 100);
     /// ```
-    pub fn with_delta_threshold(device_id: DeviceId, threshold: usize) -> Self
+    pub fn with_delta_threshold(authority_id: AuthorityId, threshold: usize) -> Self
     where
         DeltaS: Bottom,
     {
-        Self::new(device_id).with_delta_handler(DeltaHandler::with_threshold(threshold))
+        Self::new(authority_id).with_delta_handler(DeltaHandler::with_threshold(threshold))
     }
 
     /// Create a coordinator with a meet-semilattice CRDT handler
     ///
     /// # Example
     /// ```ignore
-    /// let coordinator = CrdtCoordinator::with_mv(device_id);
+    /// let coordinator = CrdtCoordinator::with_mv(authority_id);
     /// ```
-    pub fn with_mv(device_id: DeviceId) -> Self
+    pub fn with_mv(authority_id: AuthorityId) -> Self
     where
         MvS: Top,
     {
-        Self::new(device_id).with_mv_handler(MvHandler::new())
+        Self::new(authority_id).with_mv_handler(MvHandler::new())
     }
 
     /// Create a coordinator with a meet-semilattice CRDT handler initialized with given state
     ///
     /// # Example
     /// ```ignore
-    /// let coordinator = CrdtCoordinator::with_mv_state(device_id, my_constraints);
+    /// let coordinator = CrdtCoordinator::with_mv_state(authority_id, my_constraints);
     /// ```
-    pub fn with_mv_state(device_id: DeviceId, state: MvS) -> Self {
-        Self::new(device_id).with_mv_handler(MvHandler::with_state(state))
+    pub fn with_mv_state(authority_id: AuthorityId, state: MvS) -> Self {
+        Self::new(authority_id).with_mv_handler(MvHandler::with_state(state))
     }
 }
 
@@ -591,7 +591,7 @@ mod tests {
         fn ctx(&self) -> &Self::Ctx {
             use std::sync::LazyLock;
             static DUMMY_CTX: LazyLock<CausalContext> =
-                LazyLock::new(|| CausalContext::new(DeviceId::new()));
+                LazyLock::new(|| CausalContext::new(AuthorityId::new()));
             &DUMMY_CTX
         }
     }
@@ -658,7 +658,7 @@ mod tests {
 
     #[test]
     fn test_builder_with_cv() {
-        let device_id = DeviceId::new();
+        let authority_id = AuthorityId::new();
         let coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
@@ -666,9 +666,9 @@ mod tests {
             DummyMvState,
             DummyOp,
             DummyId,
-        > = CrdtCoordinator::with_cv(device_id);
+        > = CrdtCoordinator::with_cv(authority_id);
 
-        assert_eq!(coordinator.device_id(), device_id);
+        assert_eq!(coordinator.authority_id(), authority_id);
         assert!(coordinator.has_handler(CrdtType::Convergent));
         assert!(!coordinator.has_handler(CrdtType::Commutative));
         assert!(!coordinator.has_handler(CrdtType::Delta));
@@ -677,7 +677,7 @@ mod tests {
 
     #[test]
     fn test_builder_with_cv_state() {
-        let device_id = DeviceId::new();
+        let authority_id = AuthorityId::new();
         let initial_state = TestCounter(42);
         let coordinator: CrdtCoordinator<
             TestCounter,
@@ -686,15 +686,15 @@ mod tests {
             DummyMvState,
             DummyOp,
             DummyId,
-        > = CrdtCoordinator::with_cv_state(device_id, initial_state.clone());
+        > = CrdtCoordinator::with_cv_state(authority_id, initial_state.clone());
 
-        assert_eq!(coordinator.device_id(), device_id);
+        assert_eq!(coordinator.authority_id(), authority_id);
         assert!(coordinator.has_handler(CrdtType::Convergent));
     }
 
     #[test]
     fn test_builder_chaining() {
-        let device_id = DeviceId::new();
+        let authority_id = AuthorityId::new();
         let coordinator = CrdtCoordinator::<
             TestCounter,
             DummyCmState,
@@ -702,17 +702,17 @@ mod tests {
             DummyMvState,
             DummyOp,
             DummyId,
-        >::new(device_id)
+        >::new(authority_id)
         .with_cv_handler(CvHandler::new());
 
-        assert_eq!(coordinator.device_id(), device_id);
+        assert_eq!(coordinator.authority_id(), authority_id);
         assert!(coordinator.has_handler(CrdtType::Convergent));
     }
 
     #[aura_test]
     async fn test_sync_request_creation() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
-        let device_id = fixture.device_id();
+        let authority_id = AuthorityId::from(fixture.device_id());
         let coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
@@ -720,7 +720,7 @@ mod tests {
             DummyMvState,
             DummyOp,
             DummyId,
-        > = CrdtCoordinator::with_cv(device_id);
+        > = CrdtCoordinator::with_cv(authority_id);
         let session_id = SessionId::new();
 
         let request = coordinator.create_sync_request(session_id, CrdtType::Convergent)?;
@@ -733,7 +733,7 @@ mod tests {
     #[aura_test]
     async fn test_cv_sync_request_handling() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
-        let device_id = fixture.device_id();
+        let authority_id = AuthorityId::from(fixture.device_id());
         let mut coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
@@ -741,7 +741,7 @@ mod tests {
             DummyMvState,
             DummyOp,
             DummyId,
-        > = CrdtCoordinator::with_cv_state(device_id, TestCounter(42));
+        > = CrdtCoordinator::with_cv_state(authority_id, TestCounter(42));
         let session_id = SessionId::new();
 
         let request = CrdtSyncRequest {
@@ -761,7 +761,7 @@ mod tests {
     #[aura_test]
     async fn test_cv_sync_response_handling() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
-        let device_id = fixture.device_id();
+        let authority_id = AuthorityId::from(fixture.device_id());
         let mut coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
@@ -769,7 +769,7 @@ mod tests {
             DummyMvState,
             DummyOp,
             DummyId,
-        > = CrdtCoordinator::with_cv_state(device_id, TestCounter(10));
+        > = CrdtCoordinator::with_cv_state(authority_id, TestCounter(10));
         let session_id = SessionId::new();
 
         // Create a response with a higher counter value
@@ -793,7 +793,7 @@ mod tests {
 
     #[test]
     fn test_has_handler() {
-        let device_id = DeviceId::new();
+        let authority_id = AuthorityId::new();
         let coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
@@ -801,7 +801,7 @@ mod tests {
             DummyMvState,
             DummyOp,
             DummyId,
-        > = CrdtCoordinator::with_cv(device_id);
+        > = CrdtCoordinator::with_cv(authority_id);
 
         assert!(coordinator.has_handler(CrdtType::Convergent));
         assert!(!coordinator.has_handler(CrdtType::Commutative));

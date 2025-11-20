@@ -452,4 +452,4 @@ Aura's testing infrastructure provides:
 
 The testing approach emphasizes simplicity and fidelity to production code. Tests use the same stateless effect handlers as production, ensuring high confidence in test results.
 
-For simulation capabilities that enable fault injection and network modeling, see [Simulation Guide](806_simulation_guide.md). Learn about the effect system in [Effect System Guide](105_effect_system_and_runtime.md). Review the async refactor progress in [project documentation](../work/).
+For simulation capabilities that enable fault injection and network modeling, see [Simulation Guide](806_simulation_guide.md). Learn about the effect system in [Effect System Guide](106_effect_system_and_runtime.md). Review the async refactor progress in [project documentation](../work/).

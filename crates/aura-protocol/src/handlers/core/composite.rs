@@ -30,7 +30,7 @@ use async_trait::async_trait;
 use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext};
 use aura_core::effects::JournalEffects;
 use aura_core::hash::hash;
-use aura_core::{identifiers::{ContextId, DeviceId}, FlowBudget, LocalSessionType};
+use aura_core::{identifiers::{AuthorityId, ContextId, DeviceId}, FlowBudget, LocalSessionType};
 use serde_json;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
@@ -869,7 +869,7 @@ impl JournalEffects for CompositeHandler {
     async fn get_flow_budget(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &aura_core::identifiers::AuthorityId,
     ) -> Result<FlowBudget, aura_core::AuraError> {
         self.journal
             .get_flow_budget(context, peer)
@@ -880,7 +880,7 @@ impl JournalEffects for CompositeHandler {
     async fn update_flow_budget(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &aura_core::identifiers::AuthorityId,
         budget: &FlowBudget,
     ) -> Result<FlowBudget, aura_core::AuraError> {
         self.journal
@@ -894,7 +894,7 @@ impl JournalEffects for CompositeHandler {
     async fn charge_flow_budget(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &aura_core::identifiers::AuthorityId,
         cost: u32,
     ) -> Result<FlowBudget, aura_core::AuraError> {
         self.journal

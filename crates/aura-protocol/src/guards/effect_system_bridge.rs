@@ -15,7 +15,7 @@ pub struct GuardEffectSystemWrapper<E>(pub E);
 
 /// Implementation of EffectSystemInterface for the wrapper
 impl<E: GuardEffectSystem> EffectSystemInterface for GuardEffectSystemWrapper<E> {
-    /// Get the device ID for this effect system
+    /// Get the authority ID for this effect system
     fn device_id(&self) -> DeviceId {
         GuardEffectSystem::device_id(&self.0)
     }

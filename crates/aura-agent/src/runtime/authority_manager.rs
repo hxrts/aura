@@ -106,10 +106,216 @@ impl AuthorityManager {
         authority_id: AuthorityId,
         device_public_key: Vec<u8>,
     ) -> Result<()> {
-        let _ = (authority_id, device_public_key);
-        Err(AuraError::internal(
-            "Device management not yet implemented"
-        ))
+        // Get the authority journal for this authority
+        let journal = self
+            .authority_journals
+            .get_mut(&authority_id)
+            .ok_or_else(|| AuraError::not_found(format!("Authority {} not found", authority_id)))?;
+        
+        // Create an attested operation to add a leaf (device) to the tree
+        use aura_journal::fact::{AttestedOp, Fact, FactContent, TreeOpKind};
+        use aura_core::Hash32;
+        
+        // Create the tree operation
+        let tree_op = TreeOpKind::AddLeaf {
+            public_key: device_public_key,
+        };
+        
+        // Create commitment hash (simplified for now)
+        use aura_core::hash;
+        let mut hasher = hash::hasher();
+        hasher.update(b"add_leaf_commitment");
+        hasher.update(&authority_id.to_bytes());
+        let commitment = hasher.finalize();
+        
+        // Create attested operation
+        let attested_op = AttestedOp {
+            tree_op,
+            parent_commitment: Hash32::new([0; 32]), // Zero commitment as placeholder for parent
+            new_commitment: Hash32::new(commitment),
+            witness_threshold: 1, // Minimum threshold for now
+            signature: vec![], // Empty signature for now
+        };
+        
+        // Create fact
+        let fact = Fact {
+            fact_id: aura_journal::fact_journal::FactId::new(),
+            content: FactContent::AttestedOp(attested_op),
+        };
+        
+        // Add fact to journal
+        journal.add_fact(fact)?;
+        
+        // Invalidate cached authority to force reload
+        self.authorities.remove(&authority_id);
+        
+        Ok(())
+    }
+    
+    /// Remove device from authority
+    pub async fn remove_device_from_authority(
+        &mut self,
+        authority_id: AuthorityId,
+        leaf_index: u32,
+    ) -> Result<()> {
+        // Get the authority journal for this authority
+        let journal = self
+            .authority_journals
+            .get_mut(&authority_id)
+            .ok_or_else(|| AuraError::not_found(format!("Authority {} not found", authority_id)))?;
+        
+        // Create an attested operation to remove a leaf (device) from the tree
+        use aura_journal::fact::{AttestedOp, Fact, FactContent, TreeOpKind};
+        use aura_core::Hash32;
+        
+        // Create the tree operation
+        let tree_op = TreeOpKind::RemoveLeaf { leaf_index };
+        
+        // Create commitment hash
+        use aura_core::hash;
+        let mut hasher = hash::hasher();
+        hasher.update(b"remove_leaf_commitment");
+        hasher.update(&authority_id.to_bytes());
+        hasher.update(&leaf_index.to_le_bytes());
+        let commitment = hasher.finalize();
+        
+        // Create attested operation
+        let attested_op = AttestedOp {
+            tree_op,
+            parent_commitment: Hash32::new([0; 32]), // Zero commitment as placeholder for parent
+            new_commitment: Hash32::new(commitment),
+            witness_threshold: 1, // Minimum threshold for now
+            signature: vec![], // Empty signature for now
+        };
+        
+        // Create fact
+        let fact = Fact {
+            fact_id: aura_journal::fact_journal::FactId::new(),
+            content: FactContent::AttestedOp(attested_op),
+        };
+        
+        // Add fact to journal
+        journal.add_fact(fact)?;
+        
+        // Invalidate cached authority to force reload
+        self.authorities.remove(&authority_id);
+        
+        Ok(())
+    }
+    
+    /// Update authority threshold policy
+    pub async fn update_authority_threshold(
+        &mut self,
+        authority_id: AuthorityId,
+        new_threshold: u16,
+    ) -> Result<()> {
+        // Get the authority journal for this authority
+        let journal = self
+            .authority_journals
+            .get_mut(&authority_id)
+            .ok_or_else(|| AuraError::not_found(format!("Authority {} not found", authority_id)))?;
+        
+        // Create an attested operation to update the threshold policy
+        use aura_journal::fact::{AttestedOp, Fact, FactContent, TreeOpKind};
+        use aura_core::Hash32;
+        
+        // Create the tree operation
+        let tree_op = TreeOpKind::UpdatePolicy { threshold: new_threshold };
+        
+        // Create commitment hash
+        use aura_core::hash;
+        let mut hasher = hash::hasher();
+        hasher.update(b"update_threshold_commitment");
+        hasher.update(&authority_id.to_bytes());
+        hasher.update(&new_threshold.to_le_bytes());
+        let commitment = hasher.finalize();
+        
+        // Create attested operation
+        let attested_op = AttestedOp {
+            tree_op,
+            parent_commitment: Hash32::new([0; 32]), // Zero commitment as placeholder for parent
+            new_commitment: Hash32::new(commitment),
+            witness_threshold: 1, // Minimum threshold for now
+            signature: vec![], // Empty signature for now
+        };
+        
+        // Create fact
+        let fact = Fact {
+            fact_id: aura_journal::fact_journal::FactId::new(),
+            content: FactContent::AttestedOp(attested_op),
+        };
+        
+        // Add fact to journal
+        journal.add_fact(fact)?;
+        
+        // Invalidate cached authority to force reload
+        self.authorities.remove(&authority_id);
+        
+        Ok(())
+    }
+    
+    /// Rotate authority epoch (invalidates old shares)
+    pub async fn rotate_authority_epoch(
+        &mut self,
+        authority_id: AuthorityId,
+    ) -> Result<()> {
+        // Get the authority journal for this authority
+        let journal = self
+            .authority_journals
+            .get_mut(&authority_id)
+            .ok_or_else(|| AuraError::not_found(format!("Authority {} not found", authority_id)))?;
+        
+        // Create an attested operation to rotate the epoch
+        use aura_journal::fact::{AttestedOp, Fact, FactContent, TreeOpKind};
+        use aura_core::Hash32;
+        
+        // Create the tree operation
+        let tree_op = TreeOpKind::RotateEpoch;
+        
+        // Create commitment hash
+        use aura_core::hash;
+        let mut hasher = hash::hasher();
+        hasher.update(b"rotate_epoch_commitment");
+        hasher.update(&authority_id.to_bytes());
+        let commitment = hasher.finalize();
+        
+        // Create attested operation
+        let attested_op = AttestedOp {
+            tree_op,
+            parent_commitment: Hash32::new([0; 32]), // Zero commitment as placeholder for parent
+            new_commitment: Hash32::new(commitment),
+            witness_threshold: 1, // Minimum threshold for now
+            signature: vec![], // Empty signature for now
+        };
+        
+        // Create fact
+        let fact = Fact {
+            fact_id: aura_journal::fact_journal::FactId::new(),
+            content: FactContent::AttestedOp(attested_op),
+        };
+        
+        // Add fact to journal
+        journal.add_fact(fact)?;
+        
+        // Invalidate cached authority to force reload
+        self.authorities.remove(&authority_id);
+        
+        Ok(())
+    }
+    
+    /// Get authority tree information
+    pub async fn get_authority_tree_info(
+        &mut self,
+        authority_id: AuthorityId,
+    ) -> Result<(u16, usize, Vec<u8>)> { // (threshold, active_devices, root_commitment)
+        let authority = self.load_authority(authority_id).await?;
+        
+        // Get tree information from the authority
+        let threshold = 1; // TODO: Extract from authority state
+        let active_devices = 1; // TODO: Extract from authority state  
+        let root_commitment = authority.root_commitment().as_bytes().to_vec();
+        
+        Ok((threshold, active_devices, root_commitment))
     }
 }
 

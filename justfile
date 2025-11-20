@@ -501,8 +501,35 @@ ci-dry-run:
     fi
     echo ""
 
-    # 5. Build Check
-    echo "[5/5] Running Build Check..."
+    # 5. Documentation Links Check
+    echo "[5/6] Checking Documentation Links..."
+    # Install markdown-link-check if not available
+    if ! command -v markdown-link-check &> /dev/null; then
+        echo "Installing markdown-link-check..."
+        npm install -g markdown-link-check > /dev/null 2>&1
+    fi
+
+    doc_errors=0
+    for file in docs/*.md CLAUDE.md README.md; do
+        if [ -f "$file" ]; then
+            if markdown-link-check "$file" --config .github/config/markdown-link-check.json > /dev/null 2>&1; then
+                :
+            else
+                doc_errors=1
+            fi
+        fi
+    done
+
+    if [ $doc_errors -eq 0 ]; then
+        echo -e "${GREEN}[OK]${NC} Documentation links check passed"
+    else
+        echo -e "${RED}[FAIL]${NC} Documentation links check failed"
+        exit_code=1
+    fi
+    echo ""
+
+    # 6. Build Check
+    echo "[6/7] Running Build Check..."
     if cargo build --workspace --verbose; then
         echo -e "${GREEN}[OK]${NC} Build check passed"
     else

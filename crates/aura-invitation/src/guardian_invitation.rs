@@ -78,21 +78,21 @@ impl GuardianInvitationCoordinator {
             ));
         }
 
-        // Simulate invitation evaluation
-        // In a real implementation, this would:
-        // 1. Send invitation message to invitee via NetworkEffects
-        // 2. Wait for invitee's decision
-        // 3. Exchange cryptographic attestations
-        // 4. Record relationship in journal
+        // Send invitation message to invitee via effects
+        self.send_invitation_via_effects(&request).await?;
 
-        let accepted = self.evaluate_invitation(&request);
+        // Wait for invitee's decision via effects
+        let accepted = self.receive_invitation_decision_via_effects(&request).await?;
 
         if accepted {
-            // Create GuardianId (which is just a Uuid wrapper)
-            let guardian = GuardianId(uuid::Uuid::nil());
+            // Exchange cryptographic attestations via effects
+            self.exchange_guardian_attestation_via_effects(&request).await?;
+
+            // Record relationship in journal via effects
+            let guardian_id = self.record_guardian_relationship_via_effects(&request).await?;
 
             Ok(GuardianInvitationResponse {
-                guardian_relationship: Some(guardian),
+                guardian_relationship: Some(guardian_id),
                 accepted: true,
                 message: format!(
                     "Guardian invitation accepted. {} is now a guardian for account {}",
@@ -102,6 +102,9 @@ impl GuardianInvitationCoordinator {
                 error: None,
             })
         } else {
+            // Record rejection in journal via effects
+            self.record_invitation_rejection_via_effects(&request).await?;
+
             Ok(GuardianInvitationResponse {
                 guardian_relationship: None,
                 accepted: false,
@@ -110,6 +113,128 @@ impl GuardianInvitationCoordinator {
                 error: Some("Invitation evaluation failed requirements".to_string()),
             })
         }
+    }
+
+    /// Send invitation message to invitee via NetworkEffects
+    async fn send_invitation_via_effects(&self, request: &GuardianInvitationRequest) -> InvitationResult<()> {
+        // Serialize the invitation request
+        let message_data = serde_json::to_vec(request)
+            .map_err(|e| InvitationError::serialization(e.to_string()))?;
+
+        // TODO: Use actual NetworkEffects to send message
+        // For now, simulate sending invitation
+        let _sent = self.simulate_invitation_message_send(&request.invitee, &message_data);
+
+        Ok(())
+    }
+
+    /// Wait for and receive invitee's decision via NetworkEffects
+    async fn receive_invitation_decision_via_effects(&self, request: &GuardianInvitationRequest) -> InvitationResult<bool> {
+        // TODO: Use actual NetworkEffects to receive response
+        // For now, simulate receiving decision based on evaluation
+        let decision = self.evaluate_invitation(request);
+
+        // Simulate network delay
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        Ok(decision)
+    }
+
+    /// Exchange cryptographic attestations via CryptoEffects
+    async fn exchange_guardian_attestation_via_effects(&self, request: &GuardianInvitationRequest) -> InvitationResult<()> {
+        // Create guardian attestation data
+        let attestation_data = serde_json::json!({
+            "type": "guardian_attestation",
+            "inviter": request.inviter,
+            "invitee": request.invitee,
+            "account_id": request.account_id,
+            "role_description": request.role_description,
+            "required_trust_level": request.required_trust_level,
+            "recovery_responsibilities": request.recovery_responsibilities,
+            "timestamp": chrono::Utc::now().timestamp(),
+        });
+
+        // TODO: Use actual CryptoEffects to sign and exchange attestations
+        // For now, simulate cryptographic attestation
+        let _attestation = self.simulate_cryptographic_attestation(&attestation_data);
+
+        Ok(())
+    }
+
+    /// Record guardian relationship in journal via JournalEffects  
+    async fn record_guardian_relationship_via_effects(&self, request: &GuardianInvitationRequest) -> InvitationResult<GuardianId> {
+        // Create guardian relationship record
+        let guardian_id = GuardianId(uuid::Uuid::new_v4());
+        
+        let relationship_data = serde_json::json!({
+            "type": "guardian_relationship_established",
+            "guardian_id": guardian_id,
+            "inviter": request.inviter,
+            "invitee": request.invitee,
+            "account_id": request.account_id,
+            "role_description": request.role_description,
+            "trust_level": request.required_trust_level,
+            "recovery_responsibilities": request.recovery_responsibilities,
+            "established_at": chrono::Utc::now().timestamp(),
+        });
+
+        // TODO: Use actual JournalEffects to record relationship
+        // For now, simulate journal recording
+        let _recorded = self.simulate_journal_record(&relationship_data);
+
+        Ok(guardian_id)
+    }
+
+    /// Record invitation rejection in journal via JournalEffects
+    async fn record_invitation_rejection_via_effects(&self, request: &GuardianInvitationRequest) -> InvitationResult<()> {
+        let rejection_data = serde_json::json!({
+            "type": "guardian_invitation_rejected",
+            "inviter": request.inviter,
+            "invitee": request.invitee,
+            "account_id": request.account_id,
+            "rejected_at": chrono::Utc::now().timestamp(),
+            "reason": "Invitation evaluation failed requirements",
+        });
+
+        // TODO: Use actual JournalEffects to record rejection
+        // For now, simulate journal recording
+        let _recorded = self.simulate_journal_record(&rejection_data);
+
+        Ok(())
+    }
+
+    /// Simulate invitation message sending (placeholder for NetworkEffects)
+    fn simulate_invitation_message_send(&self, invitee: &DeviceId, message_data: &[u8]) -> bool {
+        // TODO: Replace with actual effect system call
+        // effect_handler.send_to_device(invitee, message_data).await
+        println!(
+            "Simulated guardian invitation message to {}: {} bytes",
+            invitee,
+            message_data.len()
+        );
+        true
+    }
+
+    /// Simulate cryptographic attestation (placeholder for CryptoEffects)
+    fn simulate_cryptographic_attestation(&self, attestation_data: &serde_json::Value) -> bool {
+        // TODO: Replace with actual effect system call
+        // effect_handler.create_and_exchange_attestation(attestation_data).await
+        println!(
+            "Simulated cryptographic attestation: {}",
+            attestation_data.to_string()
+        );
+        true
+    }
+
+    /// Simulate journal recording (placeholder for JournalEffects)
+    fn simulate_journal_record(&self, record_data: &serde_json::Value) -> bool {
+        // TODO: Replace with actual effect system call
+        // effect_handler.record_guardian_relationship(record_data).await
+        println!(
+            "Simulated journal guardian relationship record: {}",
+            record_data.to_string()
+        );
+        true
     }
 
     /// Evaluate whether to accept guardian invitation

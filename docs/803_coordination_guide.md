@@ -557,4 +557,4 @@ pub async fn create_coordinated_application(
 
 Integrated coordination provides security, consistency, and privacy guarantees. Applications build on proven distributed systems patterns.
 
-Continue with [Advanced Choreography Guide](804_advanced_choreography_guide.md) for sophisticated protocol development. Learn comprehensive testing in [Simulation and Testing Guide](805_simulation_and_testing_guide.md).
+Continue with [Advanced Choreography Guide](804_advanced_coordination_guide.md) for sophisticated protocol development. Learn comprehensive testing in [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md).

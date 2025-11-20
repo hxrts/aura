@@ -13,83 +13,129 @@ Aura's theoretical foundation rests on four mathematical pillars:
 
 The combination forms a privacy-preserving, spam-resistant, capability-checked distributed λ-calculus. The system enforces a unified information flow budget across all operations.
 
-## 1. Aura Calculus ($\mathcal{A}$)
+## 1. Aura Calculus ($`\mathcal{A}`$)
 
 ### 1.1 Syntax
 
 We define programs as effectful, session-typed processes operating over semilattice-structured state.
 
 Terms:
-$$e ::= v \mid e_1\ e_2 \mid \text{handle}\ e\ \text{with}\ H \mid \text{send}\ \kappa\ m \mid \text{recv}\ \kappa \mid \text{merge}\ \delta \mid \text{refine}\ \gamma$$
+
+$$
+e ::= v \mid e_1\ e_2 \mid \text{handle}\ e\ \text{with}\ H \mid \text{send}\ \kappa\ m \mid \text{recv}\ \kappa \mid \text{merge}\ \delta \mid \text{refine}\ \gamma
+$$
 
 Facts (Join-Semilattice):
-$$(F, \sqcup, \bot) \quad \text{where} \quad x \sqcup y = y \sqcup x,\ x \sqcup (y \sqcup z) = (x \sqcup y) \sqcup z,\ x \sqcup x = x$$
+
+$$
+(F, \sqcup, \bot) \quad \text{where} \quad x \sqcup y = y \sqcup x,\ x \sqcup (y \sqcup z) = (x \sqcup y) \sqcup z,\ x \sqcup x = x
+$$
 
 Capabilities (Meet-Semilattice):
-$$(C, \sqcap, \top) \quad \text{where} \quad x \sqcap y = y \sqcap x,\ x \sqcap (y \sqcap z) = (x \sqcap y) \sqcap z,\ x \sqcap x = x$$
+
+$$
+(C, \sqcap, \top) \quad \text{where} \quad x \sqcap y = y \sqcap x,\ x \sqcap (y \sqcap z) = (x \sqcap y) \sqcap z,\ x \sqcap x = x
+$$
 
 Contexts:
-$$\kappa \in \text{Ctx} = \{ \text{ContextId} \}$$
 
-Contexts are opaque UUIDs representing authority journals or RelationalContexts. Keys for transport sessions and DKD outputs are scoped to these identifiers. The identifier itself never leaks participants. See [Identifiers and Boundaries](109_identifiers_and_boundaries.md) for canonical definitions.
+$$
+\kappa \in \text{Ctx} = \{ \text{ContextId} \}
+$$
+
+Contexts are opaque UUIDs representing authority journals or RelationalContexts. Keys for transport sessions and DKD outputs are scoped to these identifiers. The identifier itself never leaks participants. See [Identifiers and Boundaries](105_identifiers_and_boundaries.md) for canonical definitions.
 
 Messages:
-$$m ::= \langle \kappa, T, \sigma, \beta \rangle \quad \text{// context, typed payload, signature/auth tag, optional Biscuit token}$$
+
+$$
+m ::= \langle \kappa, T, \sigma, \beta \rangle \quad \text{// context, typed payload, signature/auth tag, optional Biscuit token}
+$$
 
 Message extraction functions (used by operational rules):
-$$\text{facts}(m) : \text{Fact} \quad \text{// join-contribution carried by message payload}$$
-$$\text{token}(m) : \text{Biscuit} \quad \text{// attenuated capability presented alongside the message}$$
+
+$$
+\text{facts}(m) : \text{Fact} \quad \text{// join-contribution carried by message payload}
+$$
+
+$$
+\text{token}(m) : \text{Biscuit} \quad \text{// attenuated capability presented alongside the message}
+$$
 
 A process configuration:
-$$\langle P, F, C, \kappa \rangle$$
 
-This represents a running session with fact-state $F$, capability frontier $C$ derived from verified Biscuit tokens and local policy, and privacy context $\kappa$.
+$$
+\langle P, F, C, \kappa \rangle
+$$
+
+This represents a running session with fact-state $`F`$, capability frontier $`C`$ derived from verified Biscuit tokens and local policy, and privacy context $`\kappa`$.
 
 ### 1.2 Judgments
 
-$$\Gamma \vdash e : T \mid \epsilon$$
+$$
+\Gamma \vdash e : T \mid \epsilon
+$$
 
-Under typing context $\Gamma$, expression $e$ has type $T$ and may perform effects $\epsilon$.
+Under typing context $`\Gamma`$, expression $`e`$ has type $`T`$ and may perform effects $`\epsilon`$.
 
 Effect set:
-$$\epsilon ::= \emptyset \mid \epsilon \cup \{\text{Merge}\ \Delta F\} \mid \epsilon \cup \{\text{Refine}\ \Delta C\} \mid \epsilon \cup \{\text{Send}\ \kappa\ m\} \mid \epsilon \cup \{\text{Recv}\ \kappa\}$$
+
+$$
+\epsilon ::= \emptyset \mid \epsilon \cup \{\text{Merge}\ \Delta F\} \mid \epsilon \cup \{\text{Refine}\ \Delta C\} \mid \epsilon \cup \{\text{Send}\ \kappa\ m\} \mid \epsilon \cup \{\text{Recv}\ \kappa\}
+$$
 
 ### 1.3 Operational Semantics
 
 State evolution:
 
-$$(Merge)\quad \langle \text{merge}\ \delta, F, C, \kappa \rangle \to \langle \text{unit}, F \sqcup \delta, C, \kappa \rangle$$
+$$
+(Merge)\quad \langle \text{merge}\ \delta, F, C, \kappa \rangle \to \langle \text{unit}, F \sqcup \delta, C, \kappa \rangle
+$$
 
-$$(Refine)\quad \langle \text{refine}\ \gamma, F, C, \kappa \rangle \to \langle \text{unit}, F, C \sqcap \gamma, \kappa \rangle$$
+$$
+(Refine)\quad \langle \text{refine}\ \gamma, F, C, \kappa \rangle \to \langle \text{unit}, F, C \sqcap \gamma, \kappa \rangle
+$$
 
 Capability-guarded actions:
 
-Each side effect or message action $a$ carries a required capability predicate $\text{need}(a)$.
+Each side effect or message action $`a`$ carries a required capability predicate $`\text{need}(a)`$.
 
-$$(Send)\quad \text{if}\ \text{need}(m) \leq C \land \text{headroom}(\kappa, \text{cost}, F, C)\ \text{then}\ \langle \text{send}\ \kappa\ m, F, C, \kappa \rangle \to \langle \text{unit}, F, C, \kappa \rangle$$
-$$\text{else block}$$
+$$
+(Send)\quad \text{if}\ \text{need}(m) \leq C \land \text{headroom}(\kappa, \text{cost}, F, C)\ \text{then}\ \langle \text{send}\ \kappa\ m, F, C, \kappa \rangle \to \langle \text{unit}, F, C, \kappa \rangle
+$$
 
-$$(Recv)\quad \langle \text{recv}\ \kappa, F, C, \kappa \rangle \to \langle m, F \sqcup \text{facts}(m), C \sqcap \text{attn}(\text{token}(m)), \kappa \rangle$$
+$$
+\text{else block}
+$$
 
-The function $\text{attn}$ applies the Biscuit token's caveats to the local frontier. Biscuit attenuation never widens authority. The operation remains meet-monotone even though the token data lives outside the journal.
+$$
+(Recv)\quad \langle \text{recv}\ \kappa, F, C, \kappa \rangle \to \langle m, F \sqcup \text{facts}(m), C \sqcap \text{attn}(\text{token}(m)), \kappa \rangle
+$$
+
+The function $`\text{attn}`$ applies the Biscuit token's caveats to the local frontier. Biscuit attenuation never widens authority. The operation remains meet-monotone even though the token data lives outside the journal.
 
 Context isolation:
 
 No reduction may combine messages of distinct contexts:
-$$\text{if}\ \kappa_1 \neq \kappa_2\ \text{then}\ \text{send}\ \kappa_1\ m \parallel \text{recv}\ \kappa_2 \equiv \text{blocked}$$
 
-Here $\text{headroom}(\kappa, \text{cost}, F, C)$ is shorthand for the budget predicate derived from journal facts and Biscuit-imposed limits for context $\kappa$:
-$$\text{headroom}(\kappa, \text{cost}, F, C) \triangleq \text{spent}_\kappa(F) + \text{cost} \leq \text{limit}_\kappa(\text{policy} \sqcap C)$$
+$$
+\text{if}\ \kappa_1 \neq \kappa_2\ \text{then}\ \text{send}\ \kappa_1\ m \parallel \text{recv}\ \kappa_2 \equiv \text{blocked}
+$$
 
-Implementations realize this by merging a $\text{FlowBudget}$ charge fact before $\text{send}$ (see §2.3 and §5.3) while evaluating Biscuit caveats inside the guard chain. The side condition is enforced by the same monotone laws as other effects even though capability data itself is not stored in the CRDT.
+Here $`\text{headroom}(\kappa, \text{cost}, F, C)`$ is shorthand for the budget predicate derived from journal facts and Biscuit-imposed limits for context $`\kappa`$:
+
+$$
+\text{headroom}(\kappa, \text{cost}, F, C) \triangleq \text{spent}_\kappa(F) + \text{cost} \leq \text{limit}_\kappa(\text{policy} \sqcap C)
+$$
+
+Implementations realize this by merging a $`\text{FlowBudget}`$ charge fact before $`\text{send}`$ (see §2.3 and §5.3) while evaluating Biscuit caveats inside the guard chain. The side condition is enforced by the same monotone laws as other effects even though capability data itself is not stored in the CRDT.
 
 ### 1.4 Algebraic Laws (Invariants)
 
-1. Monotonic Growth: $F_{t+1} = F_t \sqcup \delta \implies F_t \leq F_{t+1}$
-2. Monotonic Restriction: $C_{t+1} = C_t \sqcap \gamma \implies C_{t+1} \leq C_t$
-3. Safety: Every side effect $\sigma$ requires $\text{need}(\sigma) \leq C$.
-4. Context Separation: For any two contexts $\kappa_1, \kappa_2$, no observable trace relates their internal state unless a bridge protocol is typed for $(\kappa_1, \kappa_2)$.
-5. Compositional Confluence: $(\text{merge}\ \delta_1; \text{merge}\ \delta_2) \equiv \text{merge}(\delta_1 \sqcup \delta_2)$ and $(\text{refine}\ \gamma_1; \text{refine}\ \gamma_2) \equiv \text{refine}(\gamma_1 \sqcap \gamma_2)$
+1. Monotonic Growth: $`F_{t+1} = F_t \sqcup \delta \implies F_t \leq F_{t+1}`$
+2. Monotonic Restriction: $`C_{t+1} = C_t \sqcap \gamma \implies C_{t+1} \leq C_t`$
+3. Safety: Every side effect $`\sigma`$ requires $`\text{need}(\sigma) \leq C`$.
+4. Context Separation: For any two contexts $`\kappa_1, \kappa_2`$, no observable trace relates their internal state unless a bridge protocol is typed for $`(\kappa_1, \kappa_2)`$.
+5. Compositional Confluence: $`(\text{merge}\ \delta_1; \text{merge}\ \delta_2) \equiv \text{merge}(\delta_1 \sqcup \delta_2)`$ and $`(\text{refine}\ \gamma_1; \text{refine}\ \gamma_2) \equiv \text{refine}(\gamma_1 \sqcap \gamma_2)`$
 
 ## 2. Core Algebraic Types
 
@@ -132,17 +178,17 @@ The type `Fact` represents facts as join-semilattice elements. Accumulation oper
 
 Journals replicate only facts. Capability evaluations run locally by interpreting Biscuit tokens plus policy. This keeps authorization independent of the replicated CRDT while preserving the same meet monotonicity at runtime.
 
-Contexts (`ContextId`) define privacy partitions. Messages never cross partition boundaries without explicit protocol support. See [Identifiers and Boundaries](109_identifiers_and_boundaries.md) for precise identifier semantics.
+Contexts (`ContextId`) define privacy partitions. Messages never cross partition boundaries without explicit protocol support. See [Identifiers and Boundaries](105_identifiers_and_boundaries.md) for precise identifier semantics.
 
 ### 2.2 Content Addressing Contract
 
 All Aura artifacts are identified by the hash of their canonical encoding. This includes facts, snapshot blobs, cache metadata, and upgrade manifests.
 
-Structures are serialized using canonical CBOR with sorted maps and deterministic integer width. The helper function $\text{hash\_canonical}(\text{bytes})$ computes digests when needed.
+Structures are serialized using canonical CBOR with sorted maps and deterministic integer width. The helper function $`\text{hash\_canonical}(\text{bytes})`$ computes digests when needed.
 
 Once a digest is published, the bytes for that artifact cannot change. New content requires a new digest and a new fact in the journal.
 
-Snapshots and upgrade bundles stored outside the journal are referenced solely by their digest. Downloaders verify the digest before accepting the payload. Journal merges compare digests and reject mismatches before updating state. See [State Reduction Flows](110_state_reduction_flows.md) for the complete fact-to-state pipeline.
+Snapshots and upgrade bundles stored outside the journal are referenced solely by their digest. Downloaders verify the digest before accepting the payload. Journal merges compare digests and reject mismatches before updating state. See [Maintenance](111_maintenance.md) for the complete fact-to-state pipeline.
 
 ### 2.3 Effect Signatures
 
@@ -177,16 +223,16 @@ These effect signatures define the interface between protocols and the runtime. 
 
 ### 2.4 Guards and Observability Invariants
 
-Every observable side effect is mediated by a guard chain fully described in [Authorization Pipeline](108_authorization_pipeline.md):
+Every observable side effect is mediated by a guard chain fully described in [Authorization](109_authorization.md):
 
-1. CapGuard: $\text{need}(\sigma) \leq \text{Caps}(\text{ctx})$
-2. FlowGuard: $\text{headroom}(\text{ctx}, \text{cost})$ where $\text{charge}(\text{ctx}, \text{peer}, \text{cost}, \text{epoch})$ succeeds and yields a $\text{Receipt}$
+1. CapGuard: $`\text{need}(\sigma) \leq \text{Caps}(\text{ctx})`$
+2. FlowGuard: $`\text{headroom}(\text{ctx}, \text{cost})`$ where $`\text{charge}(\text{ctx}, \text{peer}, \text{cost}, \text{epoch})`$ succeeds and yields a $`\text{Receipt}`$
 3. JournalCoupler: commit of attested facts is atomic with the send
 
 Named invariants used across documents:
 - Charge-Before-Send: FlowGuard must succeed before any transport send.
-- No-Observable-Without-Charge: there is no $\text{send}(\text{ctx}, \text{peer}, \ldots)$ event without a preceding successful $\text{charge}(\text{ctx}, \text{peer}, \text{cost}, \text{epoch})$.
-- Deterministic-Replenishment: $\text{limit}(\text{ctx})$ is computed deterministically from capability evaluation. The value $\text{spent}$ (stored as journal facts) is join-monotone. Epochs gate resets.
+- No-Observable-Without-Charge: there is no $`\text{send}(\text{ctx}, \text{peer}, \ldots)`$ event without a preceding successful $`\text{charge}(\text{ctx}, \text{peer}, \text{cost}, \text{epoch})`$.
+- Deterministic-Replenishment: $`\text{limit}(\text{ctx})`$ is computed deterministically from capability evaluation. The value $`\text{spent}`$ (stored as journal facts) is join-monotone. Epochs gate resets.
 
 ```purescript
 -- Time & randomness for simulation/proofs
@@ -205,11 +251,11 @@ class LeakageEffects m where
 
 The `TimeEffects` and `RandEffects` families support simulation and testing. The `LeakageEffects` family enforces privacy budget constraints.
 
-The `LeakageEffects` implementation is the runtime hook that enforces the $[\text{leak}: (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})]$ annotations introduced in the session grammar. Its concrete implementation lives in `crates/aura-protocol/src/guards/privacy.rs`. The system wires it through the effect system so choreographies cannot exceed configured budgets.
+The `LeakageEffects` implementation is the runtime hook that enforces the $`[\text{leak}: (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})]\`$ annotations introduced in the session grammar. Its concrete implementation lives in `crates/aura-protocol/src/guards/privacy.rs`. The system wires it through the effect system so choreographies cannot exceed configured budgets.
 
 ### Information Flow Budgets (Spam + Privacy)
 
-Each context pair $(\text{Ctx}, \text{Peer})$ carries a flow budget to couple spam resistance with privacy guarantees.
+Each context pair $`(\text{Ctx}, \text{Peer})`$ carries a flow budget to couple spam resistance with privacy guarantees.
 
 ```rust
 struct FlowBudget {
@@ -224,7 +270,7 @@ The `FlowBudget` struct tracks message emission through two components:
 
 Only `spent` counters live in the journal as facts, inheriting join-semilattice properties. The `limit` is computed at runtime by evaluating Biscuit tokens and local policy through the capability meet-semilattice, consistent with the principle that capabilities are evaluated outside the CRDT.
 
-Sending a message deducts a fixed `flow_cost` from the local budget before the effect executes. If $\text{spent} + \text{flow\_cost} > \text{limit}$, the effect runtime blocks the send.
+Sending a message deducts a fixed `flow_cost` from the local budget before the effect executes. If $`\text{spent} + \text{flow\_cost} > \text{limit}`$, the effect runtime blocks the send.
 
 Budget charge facts (incrementing `spent`) are emitted to the journal during send operations. The `limit` value is deterministically computed from the current capability frontier, ensuring all replicas with the same tokens and policy derive the same limit.
 
@@ -232,13 +278,13 @@ Multi-hop forwarding charges budgets hop-by-hop. Relays attach a signed `Receipt
 
 ### 2.4 Semantic Laws
 
-Join laws apply to facts. These operations are associative, commutative, and idempotent. If $F_0 = \text{read\_facts}()$ and after $\text{merge\_facts}(f)$ we have $F_1$, then $F_0 \leq F_1$ with respect to the facts partial order.
+Join laws apply to facts. These operations are associative, commutative, and idempotent. If $`F_0 = \text{read\_facts}()`$ and after $`\text{merge\_facts}(f)`$ we have $`F_1`$, then $`F_0 \leq F_1`$ with respect to the facts partial order.
 
-Meet laws apply to capabilities. These operations are associative, commutative, and idempotent. Applying Biscuit caveats corresponds to multiplying by $c$ under $\sqcap$ and never increases authority.
+Meet laws apply to capabilities. These operations are associative, commutative, and idempotent. Applying Biscuit caveats corresponds to multiplying by $`c`$ under $`\sqcap`$ and never increases authority.
 
-Cap-guarded effects enforce non-interference. For any effect $e$ guarded by capability predicate $\Gamma \vdash e : \text{allowed}$, executing $e$ from $\text{caps} = C$ is only permitted if $C \sqcap \text{need}(e) = \text{need}(e)$.
+Cap-guarded effects enforce non-interference. For any effect $`e`$ guarded by capability predicate $`\Gamma \vdash e : \text{allowed}`$, executing $`e`$ from $`\text{caps} = C`$ is only permitted if $`C \sqcap \text{need}(e) = \text{need}(e)`$.
 
-Context isolation prevents cross-context flow. If two contexts $\text{Ctx}_1 \neq \text{Ctx}_2$ are not explicitly bridged by a typed protocol, no $\text{Msg}\langle\text{Ctx}_1, \ldots\rangle$ flows into $\text{Ctx}_2$.
+Context isolation prevents cross-context flow. If two contexts $`\text{Ctx}_1 \neq \text{Ctx}_2`$ are not explicitly bridged by a typed protocol, no $`\text{Msg}\langle\text{Ctx}_1, \ldots\rangle`$ flows into $`\text{Ctx}_2`$.
 
 ## 3. Multi-Party Session Type Algebra
 
@@ -246,95 +292,145 @@ Context isolation prevents cross-context flow. If two contexts $\text{Ctx}_1 \ne
 
 The global choreography type describes the entire protocol from a bird's-eye view. Aura extends vanilla MPST with capability guards, journal coupling, and leakage budgets:
 
-$$G ::= r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G \quad \text{// Point-to-point send}$$
-$$\mid r \to * : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G \quad \text{// Broadcast (one-to-many)}$$
-$$\mid G \parallel G \quad \text{// Parallel composition}$$
-$$\mid r \triangleright \{ \ell_i : G_i \}_{i \in I} \quad \text{// Choice (role r decides)}$$
-$$\mid \mu X.\ G \quad \text{// Recursion}$$
-$$\mid X \quad \text{// Recursion variable}$$
-$$\mid \text{end} \quad \text{// Termination}$$
+$$
+\begin{align*}
+G ::=\ & r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G && \text{// Point-to-point send} \\
+\mid\ & r \to * : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G && \text{// Broadcast (one-to-many)} \\
+\mid\ & G \parallel G && \text{// Parallel composition} \\
+\mid\ & r \triangleright \{ \ell_i : G_i \}_{i \in I} && \text{// Choice (role r decides)} \\
+\mid\ & \mu X.\ G && \text{// Recursion} \\
+\mid\ & X && \text{// Recursion variable} \\
+\mid\ & \text{end} && \text{// Termination}
+\end{align*}
+$$
 
-$$T ::= \text{Unit} \mid \text{Bool} \mid \text{Int} \mid \text{String} \mid \ldots \quad \text{// Message types}$$
-$$r ::= \text{Role identifiers (Alice, Bob, \ldots)}$$
-$$\ell ::= \text{Label identifiers (accept, reject, \ldots)}$$
-$$\Gamma ::= \text{meet-closed predicate}\ \text{need}(m) \leq \text{caps}_r(\text{ctx})$$
-$$\Delta ::= \text{journal delta (facts) merged around the message}$$
-$$L ::= \text{leakage tuple}\ (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})$$
+$$
+\begin{align*}
+T &::= \text{Unit} \mid \text{Bool} \mid \text{Int} \mid \text{String} \mid \ldots && \text{// Message types} \\
+r &::= \text{Role identifiers (Alice, Bob, \ldots)} \\
+\ell &::= \text{Label identifiers (accept, reject, \ldots)} \\
+\Gamma &::= \text{meet-closed predicate}\ \text{need}(m) \leq \text{caps}_r(\text{ctx}) \\
+\Delta &::= \text{journal delta (facts) merged around the message} \\
+L &::= \text{leakage tuple}\ (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})
+\end{align*}
+$$
 
 Conventions:
-- $r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G$ means "role $r_1$ checks $\Gamma$, applies $\Delta$, records leakage $L$, sends $T$ to $r_2$, then continues with $G$."
-- $r \to * : \ldots$ performs the same sequence for broadcasts.
-- $G_1 \parallel G_2$ means "execute $G_1$ and $G_2$ concurrently."
-- $r \triangleright \{ \ell_i : G_i \}$ means "role $r$ decides which branch $\ell_i$ to take, affecting all participants."
-- $\mu X.\ G$ binds recursion variable $X$ in $G$.
+- $`r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G`$ means "role $`r_1`$ checks $`\Gamma`$, applies $`\Delta`$, records leakage $`L`$, sends $`T`$ to $`r_2`$, then continues with $`G`$."
+- $`r \to * : \ldots`$ performs the same sequence for broadcasts.
+- $`G_1 \parallel G_2`$ means "execute $`G_1`$ and $`G_2`$ concurrently."
+- $`r \triangleright \{ \ell_i : G_i \}`$ means "role $`r`$ decides which branch $`\ell_i`$ to take, affecting all participants."
+- $`\mu X.\ G`$ binds recursion variable $`X`$ in $`G`$.
 
-Note on $\Delta$: the journal delta may include budget-charge updates (incrementing $\text{spent}$ for the active epoch) and receipt acknowledgments. Projection ensures these updates occur before any transport effect so "no observable without charge" holds operationally.
+Note on $`\Delta`$: the journal delta may include budget-charge updates (incrementing $`\text{spent}`$ for the active epoch) and receipt acknowledgments. Projection ensures these updates occur before any transport effect so "no observable without charge" holds operationally.
 
-Note on $\Gamma$: `check_caps` and `refine_caps` are implemented via `AuthorizationEffects`. Sends verify Biscuit chains (with optional cached evaluations) before touching transport. Receives cache new tokens by refining the local capability frontier. Neither operation mutates the journal. All capability semantics stay outside the CRDT.
+Note on $`\Gamma`$: `check_caps` and `refine_caps` are implemented via `AuthorizationEffects`. Sends verify Biscuit chains (with optional cached evaluations) before touching transport. Receives cache new tokens by refining the local capability frontier. Neither operation mutates the journal. All capability semantics stay outside the CRDT.
 
 ### 3.2 Local Type Grammar (L)
 
 After projection, each role executes a local session type (binary protocol) augmented with effect sequencing:
 
-$$L ::= \text{do}\ E\ .\ L \quad \text{// Perform effect (merge, guard, leak)}$$
-$$\mid !T\ .\ L \quad \text{// Send (output)}$$
-$$\mid ?T\ .\ L \quad \text{// Receive (input)}$$
-$$\mid \oplus \{ \ell_i : L_i \}_{i \in I} \quad \text{// Internal choice (select)}$$
-$$\mid \& \{ \ell_i : L_i \}_{i \in I} \quad \text{// External choice (branch)}$$
-$$\mid \mu X.\ L \quad \text{// Recursion}$$
-$$\mid X \quad \text{// Recursion variable}$$
-$$\mid \text{end} \quad \text{// Termination}$$
+$$
+\begin{align*}
+L ::=\ & \text{do}\ E\ .\ L && \text{// Perform effect (merge, guard, leak)} \\
+\mid\ & !T\ .\ L && \text{// Send (output)} \\
+\mid\ & ?T\ .\ L && \text{// Receive (input)} \\
+\mid\ & \oplus \{ \ell_i : L_i \}_{i \in I} && \text{// Internal choice (select)} \\
+\mid\ & \& \{ \ell_i : L_i \}_{i \in I} && \text{// External choice (branch)} \\
+\mid\ & \mu X.\ L && \text{// Recursion} \\
+\mid\ & X && \text{// Recursion variable} \\
+\mid\ & \text{end} && \text{// Termination}
+\end{align*}
+$$
 
-$$E ::= \text{merge}(\Delta) \mid \text{check\_caps}(\Gamma) \mid \text{refine\_caps}(\Gamma) \mid \text{record\_leak}(L) \mid \text{noop}$$
+$$
+E ::= \text{merge}(\Delta) \mid \text{check\_caps}(\Gamma) \mid \text{refine\_caps}(\Gamma) \mid \text{record\_leak}(L) \mid \text{noop}
+$$
 
-### 3.3 Projection Function ($\pi$)
+### 3.3 Projection Function ($`\pi`$)
 
-The projection function $\pi_r(G)$ extracts role $r$'s local view from global choreography $G$:
+The projection function $`\pi_r(G)`$ extracts role $`r`$'s local view from global choreography $`G`$:
 
-By convention, an annotation $\triangleright \Delta$ at a global step induces per-side deltas $\Delta_{\text{send}}$ and $\Delta_{\text{recv}}$. Unless otherwise specified by a protocol, we take $\Delta_{\text{send}} = \Delta_{\text{recv}} = \Delta$ (symmetric journal updates applied at both endpoints).
+By convention, an annotation $`\triangleright \Delta`$ at a global step induces per-side deltas $`\Delta_{\text{send}}`$ and $`\Delta_{\text{recv}}`$. Unless otherwise specified by a protocol, we take $`\Delta_{\text{send}} = \Delta_{\text{recv}} = \Delta`$ (symmetric journal updates applied at both endpoints).
 
-$$\pi_r(r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G) =$$
-$$\begin{cases}
+$$
+\pi_r(r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G) =
+\begin{cases}
 \text{do merge}(\Delta_{\text{send}});\ \text{do check\_caps}(\Gamma);\ \text{do record\_leak}(L);\ !T\ .\ \pi_r(G) & \text{if}\ r = r_1 \\
 \text{do merge}(\Delta_{\text{recv}});\ \text{do refine\_caps}(\Gamma);\ \text{do record\_leak}(L);\ ?T\ .\ \pi_r(G) & \text{if}\ r = r_2 \\
 \pi_r(G) & \text{otherwise}
-\end{cases}$$
+\end{cases}
+$$
 
-$$\pi_r(s \to * : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G) =$$
-$$\begin{cases}
+$$
+\pi_r(s \to * : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G) =
+\begin{cases}
 \text{do merge}(\Delta_{\text{send}});\ \text{do check\_caps}(\Gamma);\ \text{do record\_leak}(L);\ !T\ .\ \pi_r(G) & \text{if}\ r = s \\
 \text{do merge}(\Delta_{\text{recv}});\ \text{do refine\_caps}(\Gamma);\ \text{do record\_leak}(L);\ ?T\ .\ \pi_r(G) & \text{otherwise}
-\end{cases}$$
+\end{cases}
+$$
 
-$$\pi_r(G_1 \parallel G_2) = \pi_r(G_1) \odot \pi_r(G_2) \quad \text{where}\ \odot\ \text{is merge operator}$$
-$$\text{(sequential interleaving if no conflicts)}$$
+$$
+\pi_r(G_1 \parallel G_2) = \pi_r(G_1) \odot \pi_r(G_2) \quad \text{where}\ \odot\ \text{is merge operator}
+$$
 
-$$\pi_r(r' \triangleright \{ \ell_i : G_i \}) = \begin{cases}
+(sequential interleaving if no conflicts)
+
+$$
+\pi_r(r' \triangleright \{ \ell_i : G_i \}) = \begin{cases}
 \oplus \{ \ell_i : \pi_r(G_i) \} & \text{if}\ r = r'\ \text{(decider)} \\
 \& \{ \ell_i : \pi_r(G_i) \} & \text{if}\ r \neq r'\ \text{(observer)}
-\end{cases}$$
+\end{cases}
+$$
 
-$$\pi_r(\mu X.\ G) = \begin{cases}
+$$
+\pi_r(\mu X.\ G) = \begin{cases}
 \mu X.\ \pi_r(G) & \text{if}\ \pi_r(G) \neq \text{end} \\
 \text{end} & \text{if}\ \pi_r(G) = \text{end}
-\end{cases}$$
+\end{cases}
+$$
 
-$$\pi_r(X) = X$$
-$$\pi_r(\text{end}) = \text{end}$$
+$$
+\pi_r(X) = X
+$$
+
+$$
+\pi_r(\text{end}) = \text{end}
+$$
 
 ### 3.4 Duality and Safety
 
 For binary session types, duality ensures complementary behavior:
 
-$$\text{dual}(!T\ .\ L) = ?T\ .\ \text{dual}(L)$$
-$$\text{dual}(?T\ .\ L) = !T\ .\ \text{dual}(L)$$
-$$\text{dual}(\oplus \{ \ell_i : L_i \}) = \& \{ \ell_i : \text{dual}(L_i) \}$$
-$$\text{dual}(\& \{ \ell_i : L_i \}) = \oplus \{ \ell_i : \text{dual}(L_i) \}$$
-$$\text{dual}(\mu X.\ L) = \mu X.\ \text{dual}(L)$$
-$$\text{dual}(X) = X$$
-$$\text{dual}(\text{end}) = \text{end}$$
+$$
+\text{dual}(!T\ .\ L) = ?T\ .\ \text{dual}(L)
+$$
 
-Property: If Alice's local type is $L$, then Bob's local type is $\text{dual}(L)$ for their communication to be type-safe.
+$$
+\text{dual}(?T\ .\ L) = !T\ .\ \text{dual}(L)
+$$
+
+$$
+\text{dual}(\oplus \{ \ell_i : L_i \}) = \& \{ \ell_i : \text{dual}(L_i) \}
+$$
+
+$$
+\text{dual}(\& \{ \ell_i : L_i \}) = \oplus \{ \ell_i : \text{dual}(L_i) \}
+$$
+
+$$
+\text{dual}(\mu X.\ L) = \mu X.\ \text{dual}(L)
+$$
+
+$$
+\text{dual}(X) = X
+$$
+
+$$
+\text{dual}(\text{end}) = \text{end}
+$$
+
+Property: If Alice's local type is $`L`$, then Bob's local type is $`\text{dual}(L)`$ for their communication to be type-safe.
 
 ### 3.5 Session Type Safety Guarantees
 
@@ -422,7 +518,7 @@ Each CRDT type provides specific convergence guarantees:
 
 CvRDT Convergence: Under eventual message delivery, all replicas converge to the least upper bound of their updates.
 
-Proof sketch: Let states $S_1, S_2, \ldots, S_n$ be replica states after all updates. The final state is $S_1 \sqcup S_2 \sqcup \cdots \sqcup S_n$. By associativity and commutativity of join, this value is unique regardless of message ordering.
+Proof sketch: Let states $`S_1, S_2, \ldots, S_n`$ be replica states after all updates. The final state is $`S_1 \sqcup S_2 \sqcup \cdots \sqcup S_n`$. By associativity and commutativity of join, this value is unique regardless of message ordering.
 
 Delta-CRDT Convergence: Equivalent to CvRDT but with bandwidth optimization through incremental updates.
 
@@ -468,17 +564,23 @@ These message types support different synchronization strategies. Authority name
 Authority Fact Synchronization:
 Authorities exchange facts using delta-based gossip for efficiency.
 
-$$\text{AuthoritySync} := \mu X.\ (A \to B : \text{FactDelta}\langle \Delta \rangle\ .\ X) \parallel (B \to A : \text{FactDelta}\langle \Delta \rangle\ .\ X)$$
+$$
+\text{AuthoritySync} := \mu X.\ (A \to B : \text{FactDelta}\langle \Delta \rangle\ .\ X) \parallel (B \to A : \text{FactDelta}\langle \Delta \rangle\ .\ X)
+$$
 
 RelationalContext Consensus:
 Contexts use operation-based synchronization to preserve consensus ordering.
 
-$$\text{ContextSync} := \mu X.\ (r \to * : \text{AuthenticatedOp}\langle \text{Op}, \text{Ctx} \rangle\ .\ X)$$
+$$
+\text{ContextSync} := \mu X.\ (r \to * : \text{AuthenticatedOp}\langle \text{Op}, \text{Ctx} \rangle\ .\ X)
+$$
 
 Anti-Entropy Recovery:
 Peers detect missing facts through digest comparison and request specific items.
 
-$$\text{AntiEntropy} := \text{Alice} \to \text{Bob} : \text{FactDigest}\ .\ \text{Bob} \to \text{Alice} : \text{MissingFacts}\ .\ \text{end}$$
+$$
+\text{AntiEntropy} := \text{Alice} \to \text{Bob} : \text{FactDigest}\ .\ \text{Bob} \to \text{Alice} : \text{MissingFacts}\ .\ \text{end}
+$$
 
 These protocols ensure eventual consistency across authority boundaries while maintaining context isolation. Facts are scoped to their originating authority or RelationalContext.
 
@@ -498,55 +600,66 @@ Safety Guarantees: Session type projection ensures communication safety and dead
 
 ### 5.1 Privacy Layers
 
-For any trace $\tau$ of observable messages:
+For any trace $`\tau`$ of observable messages:
 
-1. Unlinkability: $\forall \kappa_1 \neq \kappa_2,\ \tau[\kappa_1 \leftrightarrow \kappa_2] \approx_{\text{ext}} \tau$
-2. Non-amplification: Information visible to observer class $o$ is monotone in authorized capabilities:
-   $$I_o(\tau_1) \leq I_o(\tau_2) \iff C_o(\tau_1) \leq C_o(\tau_2)$$
-3. Leakage Bound: For each observer $o$, $L(\tau, o) \leq \text{Budget}(o)$.
+1. Unlinkability: $`\forall \kappa_1 \neq \kappa_2,\ \tau[\kappa_1 \leftrightarrow \kappa_2] \approx_{\text{ext}} \tau`$
+2. Non-amplification: Information visible to observer class $`o`$ is monotone in authorized capabilities:
+   
+   $$
+   I_o(\tau_1) \leq I_o(\tau_2) \iff C_o(\tau_1) \leq C_o(\tau_2)
+   $$
+
+3. Leakage Bound: For each observer $`o`$, $`L(\tau, o) \leq \text{Budget}(o)`$.
 4. Flow Budget Soundness (Named):
    - Charge-Before-Send
    - No-Observable-Without-Charge
    - Deterministic-Replenishment
-   - Convergence: Within a fixed epoch and after convergence, $\text{spent}_\kappa \leq \min_r \text{limit}_\kappa^r$ across replicas $r$.
+   - Convergence: Within a fixed epoch and after convergence, $`\text{spent}_\kappa \leq \min_r \text{limit}_\kappa^r`$ across replicas $`r`$.
 
 ### 5.2 Web-of-Trust Model
 
-Let $W = (V, E)$ where vertices are accounts. Edges carry relationship contexts and delegation fragments.
+Let $`W = (V, E)`$ where vertices are accounts. Edges carry relationship contexts and delegation fragments.
 
-- Each edge $(A, B)$ defines a pairwise context $\text{Ctx}_{AB}$ with derived keys
-- Delegations are meet-closed elements $d \in \text{Cap}$, scoped to contexts
-- The effective capability at $A$ is:
-  $$\text{Caps}_A = (\text{LocalGrants}_A \sqcap \bigcap_{(A,x) \in E} \text{Delegation}_{x \to A}) \sqcap \text{Policy}_A$$
+- Each edge $`(A, B)`$ defines a pairwise context $`\text{Ctx}_{AB}`$ with derived keys
+- Delegations are meet-closed elements $`d \in \text{Cap}`$, scoped to contexts
+- The effective capability at $`A`$ is:
+  
+  $$
+  \text{Caps}_A = (\text{LocalGrants}_A \sqcap \bigcap_{(A,x) \in E} \text{Delegation}_{x \to A}) \sqcap \text{Policy}_A
+  $$
 
 WoT invariants:
-- Compositionality: Combining multiple delegations uses $\sqcap$ (never widens)
-- Local sovereignty: $\text{Policy}_A$ is always in the meet. $A$ can only reduce authority further
-- Projection: For any protocol projection to $A$, guard checks refer to $\text{Caps}_A(\text{ctx})$
+- Compositionality: Combining multiple delegations uses $`\sqcap`$ (never widens)
+- Local sovereignty: $`\text{Policy}_A`$ is always in the meet. $`A`$ can only reduce authority further
+- Projection: For any protocol projection to $`A`$, guard checks refer to $`\text{Caps}_A(\text{ctx})`$
 
 ### 5.3 Flow Budget Contract
 
-The unified information-flow budget regulates emission rate/volume and observable leakage. The budget system combines join-semilattice facts (for `spent` counters) with meet-semilattice capability evaluation (for `limit` computation). For any context $\kappa$ and peer $p$:
+The unified information-flow budget regulates emission rate/volume and observable leakage. The budget system combines join-semilattice facts (for `spent` counters) with meet-semilattice capability evaluation (for `limit` computation). For any context $`\kappa`$ and peer $`p`$:
 
 1. Charge-Before-Send: A send or forward is permitted only if a budget charge succeeds first. If charging fails, the step blocks locally and emits no network observable.
-2. No-Observable-Without-Charge: For any trace $\tau$, there is no event labeled $\text{send}(\kappa, p, \ldots)$ without a preceding successful charge for $(\kappa, p)$ in the same epoch.
-3. Receipt soundness: A relay accepts a packet only with a valid per-hop $\text{Receipt}$ (context-scoped, epoch-bound, signed) and sufficient local headroom. Otherwise it drops locally.
-4. Deterministic limit computation: $\text{limit}_\kappa$ is computed deterministically from Biscuit tokens and local policy via meet operations. $\text{spent}_\kappa$ is stored as journal facts and is join-monotone. Upon epoch rotation, $\text{spent}_\kappa$ resets through new epoch facts.
-5. Context scope: Budget facts and receipts are scoped to $\kappa$. They neither leak nor apply across distinct contexts (non-interference).
-6. Composition with caps: A transport effect requires both $\text{need}(m) \leq C$ and $\text{headroom}(\kappa, \text{cost}, F, C)$ (see §1.3). Either guard failing blocks the effect.
-7. Convergence bound: Within a fixed epoch and after convergence, $\text{spent}_\kappa \leq \min_r \text{limit}_\kappa^r$ across replicas $r$, where each replica's limit is computed from its local capability evaluation.
+2. No-Observable-Without-Charge: For any trace $`\tau`$, there is no event labeled $`\text{send}(\kappa, p, \ldots)`$ without a preceding successful charge for $`(\kappa, p)`$ in the same epoch.
+3. Receipt soundness: A relay accepts a packet only with a valid per-hop $`\text{Receipt}`$ (context-scoped, epoch-bound, signed) and sufficient local headroom. Otherwise it drops locally.
+4. Deterministic limit computation: $`\text{limit}_\kappa`$ is computed deterministically from Biscuit tokens and local policy via meet operations. $`\text{spent}_\kappa`$ is stored as journal facts and is join-monotone. Upon epoch rotation, $`\text{spent}_\kappa`$ resets through new epoch facts.
+5. Context scope: Budget facts and receipts are scoped to $`\kappa`$. They neither leak nor apply across distinct contexts (non-interference).
+6. Composition with caps: A transport effect requires both $`\text{need}(m) \leq C`$ and $`\text{headroom}(\kappa, \text{cost}, F, C)`$ (see §1.3). Either guard failing blocks the effect.
+7. Convergence bound: Within a fixed epoch and after convergence, $`\text{spent}_\kappa \leq \min_r \text{limit}_\kappa^r`$ across replicas $`r`$, where each replica's limit is computed from its local capability evaluation.
 
 ## 6. Application Model
 
-Every distributed protocol $G$ is defined as a multi-party session type with role projections:
+Every distributed protocol $`G`$ is defined as a multi-party session type with role projections:
 
-$$G ::= \mu X.\ A \to B : m\langle T \rangle\ [\text{guard}\ \text{need}(m) \leq C_A,\ \text{update}\ F_A \sqcup= \Delta F,\ \text{refine}\ C_B \sqcap= \Delta C];\ X$$
+$$
+G ::= \mu X.\ A \to B : m\langle T \rangle\ [\text{guard}\ \text{need}(m) \leq C_A,\ \text{update}\ F_A \sqcup= \Delta F,\ \text{refine}\ C_B \sqcap= \Delta C];\ X
+$$
 
-When executed, each role $\rho$ instantiates a handler:
+When executed, each role $`\rho`$ instantiates a handler:
 
-$$\text{handle protocol}(G, \rho)\ \text{with}\ \{\text{on\_send}, \text{on\_recv}, \text{on\_merge}, \text{on\_refine}\}$$
+$$
+\text{handle protocol}(G, \rho)\ \text{with}\ \{\text{on\_send}, \text{on\_recv}, \text{on\_merge}, \text{on\_refine}\}
+$$
 
-Handlers compose algebraically over $(F, C)$ by distributing operations over semilattice state transitions. This yields an *effect runtime* capable of:
+Handlers compose algebraically over $`(F, C)`$ by distributing operations over semilattice state transitions. This yields an *effect runtime* capable of:
 
 - key-ceremony coordination (threshold signatures)
 - gossip and rendezvous (context-isolated send/recv)
@@ -559,21 +672,27 @@ Under this calculus, we can make the following interpretation:
 
 ### The Semilattice Layer
 
-The join-semilattice (Facts) captures evidence and observations (trust and information flow). Examples: delegations/attestations, quorum proofs, ceremony transcripts, flow receipts, and monotone $\text{spent}$ counters.
+The join-semilattice (Facts) captures evidence and observations (trust and information flow). Examples: delegations/attestations, quorum proofs, ceremony transcripts, flow receipts, and monotone $`\text{spent}`$ counters.
 
 The meet-semilattice (Capabilities) captures enforcement limits and constraints (trust and information flow). Examples: the sovereign policy lattice, Biscuit token caveats, leak bounds, and consent gates. Flow budget limits are derived from capability evaluation, not stored as facts. This lattice is evaluated locally rather than stored in the journal, but it obeys the same algebra.
 
 Effective authority and headroom are computed from both lattices:
-$$C_{\text{eff}}(\text{tokens}, \text{Policy}) = \left(\bigwedge_{t \in \text{tokens}} \text{attn}(t)\right) \sqcap \text{Policy}$$
-$$\text{headroom}(F, C) \text{ uses } \text{limit}(C_{\text{eff}}) \text{ and } \text{spent} \in F, \text{ permitting sends iff } \text{spent} + \text{cost} \leq \text{limit}$$
+
+$$
+C_{\text{eff}}(\text{tokens}, \text{Policy}) = \left(\bigwedge_{t \in \text{tokens}} \text{attn}(t)\right) \sqcap \text{Policy}
+$$
+
+$$
+\text{headroom}(F, C) \text{ uses } \text{limit}(C_{\text{eff}}) \text{ and } \text{spent} \in F, \text{ permitting sends iff } \text{spent} + \text{cost} \leq \text{limit}
+$$
 
 ### The Session-Typed Process Layer
 
-This layer guarantees *communication safety* and *progress*. It projects global types with annotations $[\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]$ into local programs, ensuring deadlock freedom, communication safety, branch agreement, and aligning capability checks, journal updates, and leakage accounting with each send/recv.
+This layer guarantees *communication safety* and *progress*. It projects global types with annotations $`[\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]`$ into local programs, ensuring deadlock freedom, communication safety, branch agreement, and aligning capability checks, journal updates, and leakage accounting with each send/recv.
 
 ### The Effect Handler Layer
 
-The Effect Handler system provides *operational semantics and composability*. It realizes $\text{merge}/\text{refine}/\text{send}/\text{recv}$ as algebraic effects, enforces lattice monotonicity ($\sqcup$ facts, $\sqcap$ caps), guard predicates, and budget/leakage metering, and composes via explicit dependency injection across crypto, storage, and transport layers.
+The Effect Handler system provides *operational semantics and composability*. It realizes $`\text{merge}/\text{refine}/\text{send}/\text{recv}`$ as algebraic effects, enforces lattice monotonicity ($`\sqcup`$ facts, $`\sqcap`$ caps), guard predicates, and budget/leakage metering, and composes via explicit dependency injection across crypto, storage, and transport layers.
 
 ### The Privacy Contract
 
@@ -581,11 +700,15 @@ The privacy contract defines *which transitions are observationally equivalent*.
 
 Together, these form a *privacy-preserving, capability-checked distributed λ-calculus*.
 
+## System Contracts
+
+- [Privacy and Information Flow](003_information_flow_contract.md) - Unified information-flow budgets, privacy layers, leakage tracking, and adversary analysis
+- [Distributed Systems Contract](004_distributed_systems_contract.md) - Safety, liveness, consistency guarantees, synchrony assumptions, and failure handling
+
 ## See Also
 
 - [System Architecture](001_system_architecture.md) - Implementation patterns and runtime layering
-- [Privacy and Information Flow](003_privacy_and_information_flow.md) - Concrete applications and adversary analysis
 - [Journal](102_journal.md) - Fact storage and CRDT semantics
-- [Authorization Pipeline](108_authorization_pipeline.md) - Biscuit evaluation and guard chaining
-- [Identifiers and Boundaries](109_identifiers_and_boundaries.md) - Canonical identifier definitions
-- [State Reduction Flows](110_state_reduction_flows.md) - Reducer pipelines for authorities and contexts
+- [Authorization](109_authorization.md) - Biscuit evaluation and guard chaining
+- [Identifiers and Boundaries](105_identifiers_and_boundaries.md) - Canonical identifier definitions
+- [Maintenance](111_maintenance.md) - Reducer pipelines for authorities and contexts

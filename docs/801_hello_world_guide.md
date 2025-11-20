@@ -196,6 +196,6 @@ The test validates protocol correctness without requiring network infrastructure
 
 You now have a working Aura development environment. The hello world protocol demonstrates basic choreographic programming concepts.
 
-Continue with [Core Systems Guide](802_core_systems_guide.md) to learn about effect systems, authentication, and capabilities. Learn advanced coordination patterns in [Coordination Systems Guide](803_coordination_systems_guide.md).
+Continue with [Core Systems Guide](802_core_systems_guide.md) to learn about effect systems, authentication, and capabilities. Learn advanced coordination patterns in [Coordination Systems Guide](803_coordination_guide.md).
 
-Explore the simulation system in [Simulation and Testing Guide](805_simulation_and_testing_guide.md) for comprehensive protocol testing approaches.
+Explore the simulation system in [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md) for comprehensive protocol testing approaches.

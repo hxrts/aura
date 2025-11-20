@@ -388,7 +388,7 @@ Choreographic protocols integrate with broader Aura infrastructure through stand
 
 Choreographies compose with CRDT programming patterns for state consistency. Flow budget enforcement prevents excessive resource usage. Journal facts enable distributed auditability across protocol execution.
 
-For foundational concepts, see [Coordination Systems Guide](803_coordination_systems_guide.md). For testing approaches, see [Simulation and Testing Guide](805_simulation_and_testing_guide.md).
+For foundational concepts, see [Coordination Systems Guide](803_coordination_guide.md). For testing approaches, see [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md).
 
 Ring protocols ensure ordered processing across participants. Token passing accumulates state changes. Each node contributes to the final decision. Journal merging synchronizes accumulated state.
 
@@ -970,4 +970,4 @@ Privacy budget layering enables fine-grained leakage control. Different layers t
 
 Advanced choreographic programming enables building sophisticated distributed systems with strong security and privacy guarantees. These patterns provide the foundation for complex real-world applications.
 
-Continue with [Simulation and Testing Guide](805_simulation_and_testing_guide.md) for comprehensive protocol testing approaches using Aura's simulation infrastructure.
+Continue with [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md) for comprehensive protocol testing approaches using Aura's simulation infrastructure.

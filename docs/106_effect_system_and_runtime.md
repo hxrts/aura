@@ -123,11 +123,11 @@ This snippet shows parallel initialization of handlers. Parallel initialization 
 
 ## 8. Guard Chain and Leakage Integration
 
-The effect runtime enforces the guard-chain sequencing defined in `108_authorization_pipeline.md` and the leakage contract from `003_privacy_and_information_flow.md`. Each projected choreography message expands to the following effect calls:
+The effect runtime enforces the guard-chain sequencing defined in `109_authorization.md` and the leakage contract from `003_information_flow_contract.md`. Each projected choreography message expands to the following effect calls:
 
 1. **CapGuard / AuthorizationEffects** – evaluate Biscuit tokens plus sovereign policy to derive the capability frontier for the `(ContextId, peer)` pair.
 2. **FlowGuard / FlowBudgetEffects** – atomically increment the replicated `spent` counter (stored as journal facts) and produce a receipt if the operation succeeds.
-3. **LeakageEffects** – record observer-class leakage costs (`external`, `neighbor`, `group`) so privacy budgets remain monotone, as described in `001_theoretical_model.md`.
+3. **LeakageEffects** – record observer-class leakage costs (`external`, `neighbor`, `group`) so privacy budgets remain monotone, as described in `002_theoretical_model.md`.
 4. **JournalCoupler / JournalEffects** – merge protocol facts together with the FlowBudget charge to preserve the charge-before-send invariant.
 5. **TransportEffects** – finally emit the encrypted packet over the secure channel.
 

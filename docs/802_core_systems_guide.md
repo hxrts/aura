@@ -409,4 +409,4 @@ pub async fn create_production_application(
 
 The agent provides complete runtime composition. Applications build on top of integrated core systems. This pattern provides security and consistency guarantees.
 
-Continue with [Coordination Systems Guide](803_coordination_systems_guide.md) for distributed coordination patterns. Learn advanced techniques in [Advanced Choreography Guide](804_advanced_choreography_guide.md).
+Continue with [Coordination Systems Guide](803_coordination_guide.md) for distributed coordination patterns. Learn advanced techniques in [Advanced Choreography Guide](804_advanced_coordination_guide.md).

@@ -144,6 +144,15 @@ pub enum WitnessMessage {
     /// Partial signature share
     ShareResponse { share: WitnessShare },
 
+    /// Gossip request for epidemic fallback
+    GossipRequest {
+        consensus_id: super::ConsensusId,
+        prestate_hash: Hash32,
+        operation_hash: Hash32,
+        operation_bytes: Vec<u8>,
+        requester: AuthorityId,
+    },
+
     /// Conflict detected
     ConflictReport {
         consensus_id: super::ConsensusId,

@@ -5,14 +5,18 @@
 
 use aura_core::effects::*;
 use aura_core::effects::crypto::{KeyDerivationContext, FrostKeyGenResult, FrostSigningPackage};
-use aura_core::identifiers::{ContextId, DeviceId};
-use aura_core::{AuraError, Cap, FlowBudget, Journal, Hash32, Policy};
+use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
+use aura_core::{AuraError, Cap, FlowBudget, Journal, Hash32, Policy, Receipt};
 use aura_effects::*;
 use aura_protocol::effects::ledger::{LedgerEffects, LedgerError, DeviceMetadata, LedgerEventStream};
 use aura_protocol::effects::tree::TreeEffects;
 use aura_protocol::effects::choreographic::{ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent, ChoreographyMetrics};
 use aura_journal::ratchet_tree::{TreeState, AttestedOp, LeafNode, NodeIndex, LeafId, TreeOpKind};
 use aura_protocol::effects::tree::{Cut, ProposalId, Partial, Snapshot};
+use aura_protocol::guards::flow::FlowBudgetEffects;
+use aura_protocol::guards::GuardEffectSystem;
+use aura_protocol::handlers::tree::DummyTreeHandler;
+use aura_protocol::handlers::memory::MemoryChoreographicHandler;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,11 +26,15 @@ use uuid::Uuid;
 /// Minimal stub effect system that composes handlers from aura-effects
 #[derive(Clone)]
 pub struct AuraEffectSystem {
+    device_id: DeviceId,
     console: Arc<RealConsoleHandler>,
     crypto: Arc<RealCryptoHandler>,
     random: Arc<RealRandomHandler>,
     time: Arc<RealTimeHandler>,
     storage: Arc<MemoryStorageHandler>,
+    journal: Arc<MockJournalHandler>,
+    tree: Arc<DummyTreeHandler>,
+    choreographic: Arc<MemoryChoreographicHandler>,
 }
 
 impl std::fmt::Debug for AuraEffectSystem {
@@ -37,6 +45,9 @@ impl std::fmt::Debug for AuraEffectSystem {
             .field("random", &"<RealRandomHandler>")
             .field("time", &"<RealTimeHandler>")
             .field("storage", &"<MemoryStorageHandler>")
+            .field("journal", &"<MockJournalHandler>")
+            .field("tree", &"<DummyTreeHandler>")
+            .field("choreographic", &"<MemoryChoreographicHandler>")
             .finish()
     }
 }
@@ -45,11 +56,30 @@ impl AuraEffectSystem {
     /// Create a new stub effect system
     pub fn new() -> Self {
         Self {
+            device_id: DeviceId::new(),
             console: Arc::new(RealConsoleHandler::new()),
             crypto: Arc::new(RealCryptoHandler::new()),
             random: Arc::new(RealRandomHandler::new()),
             time: Arc::new(RealTimeHandler::new()),
             storage: Arc::new(MemoryStorageHandler::new()),
+            journal: Arc::new(MockJournalHandler::new()),
+            tree: Arc::new(DummyTreeHandler::new()),
+            choreographic: Arc::new(MemoryChoreographicHandler::new(Uuid::new_v4())),
+        }
+    }
+
+    /// Create a stub effect system seeded with a specific device ID
+    pub fn with_device_id(device_id: DeviceId) -> Self {
+        Self {
+            device_id,
+            console: Arc::new(RealConsoleHandler::new()),
+            crypto: Arc::new(RealCryptoHandler::new()),
+            random: Arc::new(RealRandomHandler::new()),
+            time: Arc::new(RealTimeHandler::new()),
+            storage: Arc::new(MemoryStorageHandler::new()),
+            journal: Arc::new(MockJournalHandler::new()),
+            tree: Arc::new(DummyTreeHandler::new()),
+            choreographic: Arc::new(MemoryChoreographicHandler::new(Uuid::new_v4())),
         }
     }
 }
@@ -57,6 +87,49 @@ impl AuraEffectSystem {
 impl Default for AuraEffectSystem {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[async_trait]
+impl FlowBudgetEffects for AuraEffectSystem {
+    async fn charge_flow(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+        cost: u32,
+    ) -> Result<Receipt, AuraError> {
+        // Use the journal handler to perform an atomic charge
+        let updated_budget = JournalEffects::charge_flow_budget(self.journal.as_ref(), context, peer, cost).await?;
+        let nonce = updated_budget.spent;
+        Ok(Receipt::new(
+            context.clone(),
+            self.device_id,
+            *peer,
+            updated_budget.epoch,
+            cost,
+            nonce,
+            Hash32::default(),
+            Vec::new(),
+        ))
+    }
+}
+
+// Guard integration for send guard chain / leakage tracking
+impl GuardEffectSystem for AuraEffectSystem {
+    fn device_id(&self) -> DeviceId {
+        self.device_id
+    }
+
+    fn execution_mode(&self) -> aura_core::effects::ExecutionMode {
+        aura_core::effects::ExecutionMode::Testing
+    }
+
+    fn get_metadata(&self, _key: &str) -> Option<String> {
+        None
+    }
+
+    fn can_perform_operation(&self, _operation: &str) -> bool {
+        true
     }
 }
 
@@ -391,45 +464,45 @@ impl StorageEffects for AuraEffectSystem {
     }
 }
 
-// Implement JournalEffects with stub implementations
+// Implement JournalEffects by delegating to the journal handler
 #[async_trait]
 impl JournalEffects for AuraEffectSystem {
-    async fn merge_facts(&self, _target: &Journal, _delta: &Journal) -> Result<Journal, AuraError> {
-        Err(AuraError::internal("JournalEffects::merge_facts not implemented in stub"))
+    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
+        JournalEffects::merge_facts(self.journal.as_ref(), target, delta).await
     }
 
-    async fn refine_caps(&self, _target: &Journal, _refinement: &Journal) -> Result<Journal, AuraError> {
-        Err(AuraError::internal("JournalEffects::refine_caps not implemented in stub"))
+    async fn refine_caps(&self, target: &Journal, refinement: &Journal) -> Result<Journal, AuraError> {
+        JournalEffects::refine_caps(self.journal.as_ref(), target, refinement).await
     }
 
     async fn get_journal(&self) -> Result<Journal, AuraError> {
-        Err(AuraError::internal("JournalEffects::get_journal not implemented in stub"))
+        JournalEffects::get_journal(self.journal.as_ref()).await
     }
 
-    async fn persist_journal(&self, _journal: &Journal) -> Result<(), AuraError> {
-        Err(AuraError::internal("JournalEffects::persist_journal not implemented in stub"))
+    async fn persist_journal(&self, journal: &Journal) -> Result<(), AuraError> {
+        JournalEffects::persist_journal(self.journal.as_ref(), journal).await
     }
 
-    async fn get_flow_budget(&self, _context: &ContextId, _peer: &DeviceId) -> Result<FlowBudget, AuraError> {
-        Err(AuraError::internal("JournalEffects::get_flow_budget not implemented in stub"))
+    async fn get_flow_budget(&self, context: &ContextId, peer: &AuthorityId) -> Result<FlowBudget, AuraError> {
+        JournalEffects::get_flow_budget(self.journal.as_ref(), context, peer).await
     }
 
     async fn update_flow_budget(
         &self,
-        _context: &ContextId,
-        _peer: &DeviceId,
-        _budget: &FlowBudget,
+        context: &ContextId,
+        peer: &AuthorityId,
+        budget: &FlowBudget,
     ) -> Result<FlowBudget, AuraError> {
-        Err(AuraError::internal("JournalEffects::update_flow_budget not implemented in stub"))
+        JournalEffects::update_flow_budget(self.journal.as_ref(), context, peer, budget).await
     }
 
     async fn charge_flow_budget(
         &self,
-        _context: &ContextId,
-        _peer: &DeviceId,
-        _cost: u32,
+        context: &ContextId,
+        peer: &AuthorityId,
+        cost: u32,
     ) -> Result<FlowBudget, AuraError> {
-        Err(AuraError::internal("JournalEffects::charge_flow_budget not implemented in stub"))
+        JournalEffects::charge_flow_budget(self.journal.as_ref(), context, peer, cost).await
     }
 }
 
@@ -591,141 +664,126 @@ impl LedgerEffects for AuraEffectSystem {
     }
 }
 
-// Implement TreeEffects with stub implementations
+// Implement TreeEffects by delegating to the tree handler
 #[async_trait]
 impl TreeEffects for AuraEffectSystem {
     async fn get_current_state(&self) -> Result<TreeState, AuraError> {
-        Err(AuraError::internal("TreeEffects::get_current_state not implemented in stub"))
+        TreeEffects::get_current_state(self.tree.as_ref()).await
     }
 
     async fn get_current_commitment(&self) -> Result<Hash32, AuraError> {
-        Err(AuraError::internal("TreeEffects::get_current_commitment not implemented in stub"))
+        TreeEffects::get_current_commitment(self.tree.as_ref()).await
     }
 
     async fn get_current_epoch(&self) -> Result<u64, AuraError> {
-        Ok(0)
+        TreeEffects::get_current_epoch(self.tree.as_ref()).await
     }
 
-    async fn apply_attested_op(&self, _op: AttestedOp) -> Result<Hash32, AuraError> {
-        Err(AuraError::internal("TreeEffects::apply_attested_op not implemented in stub"))
+    async fn apply_attested_op(&self, op: AttestedOp) -> Result<Hash32, AuraError> {
+        TreeEffects::apply_attested_op(self.tree.as_ref(), op).await
     }
 
     async fn verify_aggregate_sig(
         &self,
-        _op: &AttestedOp,
-        _state: &TreeState,
+        op: &AttestedOp,
+        state: &TreeState,
     ) -> Result<bool, AuraError> {
-        Ok(true) // Stub: always accept
+        TreeEffects::verify_aggregate_sig(self.tree.as_ref(), op, state).await
     }
 
-    async fn add_leaf(&self, _leaf: LeafNode, _under: NodeIndex) -> Result<TreeOpKind, AuraError> {
-        Err(AuraError::internal("TreeEffects::add_leaf not implemented in stub"))
+    async fn add_leaf(&self, leaf: LeafNode, under: NodeIndex) -> Result<TreeOpKind, AuraError> {
+        TreeEffects::add_leaf(self.tree.as_ref(), leaf, under).await
     }
 
-    async fn remove_leaf(&self, _leaf_id: LeafId, _reason: u8) -> Result<TreeOpKind, AuraError> {
-        Err(AuraError::internal("TreeEffects::remove_leaf not implemented in stub"))
+    async fn remove_leaf(&self, leaf_id: LeafId, reason: u8) -> Result<TreeOpKind, AuraError> {
+        TreeEffects::remove_leaf(self.tree.as_ref(), leaf_id, reason).await
     }
 
     async fn change_policy(
         &self,
-        _node: NodeIndex,
-        _new_policy: Policy,
+        node: NodeIndex,
+        new_policy: Policy,
     ) -> Result<TreeOpKind, AuraError> {
-        Err(AuraError::internal("TreeEffects::change_policy not implemented in stub"))
+        TreeEffects::change_policy(self.tree.as_ref(), node, new_policy).await
     }
 
-    async fn rotate_epoch(&self, _affected: Vec<NodeIndex>) -> Result<TreeOpKind, AuraError> {
-        Err(AuraError::internal("TreeEffects::rotate_epoch not implemented in stub"))
+    async fn rotate_epoch(&self, affected: Vec<NodeIndex>) -> Result<TreeOpKind, AuraError> {
+        TreeEffects::rotate_epoch(self.tree.as_ref(), affected).await
     }
 
-    async fn propose_snapshot(&self, _cut: Cut) -> Result<ProposalId, AuraError> {
-        Err(AuraError::internal("TreeEffects::propose_snapshot not implemented in stub"))
+    async fn propose_snapshot(&self, cut: Cut) -> Result<ProposalId, AuraError> {
+        TreeEffects::propose_snapshot(self.tree.as_ref(), cut).await
     }
 
-    async fn approve_snapshot(&self, _proposal_id: ProposalId) -> Result<Partial, AuraError> {
-        Err(AuraError::internal("TreeEffects::approve_snapshot not implemented in stub"))
+    async fn approve_snapshot(&self, proposal_id: ProposalId) -> Result<Partial, AuraError> {
+        TreeEffects::approve_snapshot(self.tree.as_ref(), proposal_id).await
     }
 
-    async fn finalize_snapshot(&self, _proposal_id: ProposalId) -> Result<Snapshot, AuraError> {
-        Err(AuraError::internal("TreeEffects::finalize_snapshot not implemented in stub"))
+    async fn finalize_snapshot(&self, proposal_id: ProposalId) -> Result<Snapshot, AuraError> {
+        TreeEffects::finalize_snapshot(self.tree.as_ref(), proposal_id).await
     }
 
-    async fn apply_snapshot(&self, _snapshot: &Snapshot) -> Result<(), AuraError> {
-        Err(AuraError::internal("TreeEffects::apply_snapshot not implemented in stub"))
+    async fn apply_snapshot(&self, snapshot: &Snapshot) -> Result<(), AuraError> {
+        TreeEffects::apply_snapshot(self.tree.as_ref(), snapshot).await
     }
 }
 
-// Implement ChoreographicEffects with stub implementations
+// Implement ChoreographicEffects by delegating to the choreographic handler
 #[async_trait]
 impl ChoreographicEffects for AuraEffectSystem {
     async fn send_to_role_bytes(
         &self,
-        _role: ChoreographicRole,
-        _message: Vec<u8>,
+        role: ChoreographicRole,
+        message: Vec<u8>,
     ) -> Result<(), ChoreographyError> {
-        Err(ChoreographyError::InternalError {
-            message: "ChoreographicEffects::send_to_role_bytes not implemented in stub".to_string(),
-        })
+        ChoreographicEffects::send_to_role_bytes(self.choreographic.as_ref(), role, message).await
     }
 
     async fn receive_from_role_bytes(
         &self,
-        _role: ChoreographicRole,
+        role: ChoreographicRole,
     ) -> Result<Vec<u8>, ChoreographyError> {
-        Err(ChoreographyError::InternalError {
-            message: "ChoreographicEffects::receive_from_role_bytes not implemented in stub".to_string(),
-        })
+        ChoreographicEffects::receive_from_role_bytes(self.choreographic.as_ref(), role).await
     }
 
-    async fn broadcast_bytes(&self, _message: Vec<u8>) -> Result<(), ChoreographyError> {
-        Err(ChoreographyError::InternalError {
-            message: "ChoreographicEffects::broadcast_bytes not implemented in stub".to_string(),
-        })
+    async fn broadcast_bytes(&self, message: Vec<u8>) -> Result<(), ChoreographyError> {
+        ChoreographicEffects::broadcast_bytes(self.choreographic.as_ref(), message).await
     }
 
     fn current_role(&self) -> ChoreographicRole {
-        ChoreographicRole::new(Uuid::nil(), 0)
+        ChoreographicEffects::current_role(self.choreographic.as_ref())
     }
 
     fn all_roles(&self) -> Vec<ChoreographicRole> {
-        Vec::new()
+        ChoreographicEffects::all_roles(self.choreographic.as_ref())
     }
 
-    async fn is_role_active(&self, _role: ChoreographicRole) -> bool {
-        false
+    async fn is_role_active(&self, role: ChoreographicRole) -> bool {
+        ChoreographicEffects::is_role_active(self.choreographic.as_ref(), role).await
     }
 
     async fn start_session(
         &self,
-        _session_id: Uuid,
-        _roles: Vec<ChoreographicRole>,
+        session_id: Uuid,
+        roles: Vec<ChoreographicRole>,
     ) -> Result<(), ChoreographyError> {
-        Err(ChoreographyError::InternalError {
-            message: "ChoreographicEffects::start_session not implemented in stub".to_string(),
-        })
+        ChoreographicEffects::start_session(self.choreographic.as_ref(), session_id, roles).await
     }
 
     async fn end_session(&self) -> Result<(), ChoreographyError> {
-        Ok(()) // Stub: no-op
+        ChoreographicEffects::end_session(self.choreographic.as_ref()).await
     }
 
-    async fn emit_choreo_event(&self, _event: ChoreographyEvent) -> Result<(), ChoreographyError> {
-        Ok(()) // Stub: no-op
+    async fn emit_choreo_event(&self, event: ChoreographyEvent) -> Result<(), ChoreographyError> {
+        ChoreographicEffects::emit_choreo_event(self.choreographic.as_ref(), event).await
     }
 
-    async fn set_timeout(&self, _timeout_ms: u64) {
-        // Stub: no-op
+    async fn set_timeout(&self, timeout_ms: u64) {
+        ChoreographicEffects::set_timeout(self.choreographic.as_ref(), timeout_ms).await
     }
 
     async fn get_metrics(&self) -> ChoreographyMetrics {
-        ChoreographyMetrics {
-            messages_sent: 0,
-            messages_received: 0,
-            avg_latency_ms: 0.0,
-            timeout_count: 0,
-            retry_count: 0,
-            total_duration_ms: 0,
-        }
+        ChoreographicEffects::get_metrics(self.choreographic.as_ref()).await
     }
 }
 

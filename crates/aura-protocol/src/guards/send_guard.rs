@@ -6,7 +6,10 @@
 
 use super::effect_system_trait::GuardEffectSystem;
 use crate::{
-    guards::{flow::FlowGuard, ProtocolGuard},
+    guards::{
+        flow::FlowGuard, privacy::track_leakage_consumption, JournalCoupler, LeakageBudget,
+        ProtocolGuard,
+    },
     wot::{EffectSystemInterface, EffectiveCapabilitySet},
 };
 use aura_core::identifiers::ContextId;
@@ -27,6 +30,10 @@ pub struct SendGuardChain {
     cost: u32,
     /// Context for capability and flow evaluation
     context: ContextId,
+    /// Optional leakage budget to consume for this send
+    leakage_budget: Option<LeakageBudget>,
+    /// Optional journal coupler to atomically apply annotated facts
+    journal_coupler: Option<JournalCoupler>,
     /// Optional operation ID for logging
     operation_id: Option<String>,
 }
@@ -82,6 +89,8 @@ impl SendGuardChain {
             peer,
             cost,
             context,
+            leakage_budget: None,
+            journal_coupler: None,
             operation_id: None,
         }
     }
@@ -89,6 +98,18 @@ impl SendGuardChain {
     /// Set operation ID for logging and metrics
     pub fn with_operation_id(mut self, operation_id: impl Into<String>) -> Self {
         self.operation_id = Some(operation_id.into());
+        self
+    }
+
+    /// Set an explicit leakage budget that will be consumed before sending
+    pub fn with_leakage_budget(mut self, budget: LeakageBudget) -> Self {
+        self.leakage_budget = Some(budget);
+        self
+    }
+
+    /// Attach a journal coupler so annotated deltas can be applied atomically
+    pub fn with_journal_coupler(mut self, coupler: JournalCoupler) -> Self {
+        self.journal_coupler = Some(coupler);
         self
     }
 
@@ -187,6 +208,11 @@ impl SendGuardChain {
                 total_time_us = total_time.as_micros(),
                 "Send authorized by complete guard chain"
             );
+
+            // Phase 0 (optional) - consume leakage budget after successful authorization
+            if let Some(budget) = &self.leakage_budget {
+                track_leakage_consumption(budget, operation_id, effect_system).await?;
+            }
         } else {
             warn!(
                 operation_id = operation_id,
@@ -285,6 +311,26 @@ impl SendGuardChain {
                     .unwrap_or_else(|| "Send authorization failed for unknown reason".to_string()),
             ))
         }
+    }
+
+    /// Evaluate the guard chain and, if authorized, apply journal coupling hooks (requires &mut).
+    pub async fn evaluate_with_coupling<E: GuardEffectSystem + EffectSystemInterface>(
+        &self,
+        effect_system: &mut E,
+    ) -> AuraResult<SendGuardResult> {
+        let mut result = self.evaluate(&*effect_system).await?;
+
+        if result.authorized {
+            if let Some(coupler) = &self.journal_coupler {
+                let mut coupler = coupler.clone();
+                let op_id = self.operation_id.as_deref().unwrap_or("unnamed_send");
+                let _ = coupler
+                    .execute_with_coupling(op_id, effect_system, |_es| async { Ok(()) })
+                    .await?;
+            }
+        }
+
+        Ok(result)
     }
 }
 

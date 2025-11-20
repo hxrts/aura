@@ -54,6 +54,10 @@ impl CapabilityGuard {
             AuthorityOp::AddDevice => 75,
             AuthorityOp::RemoveDevice => 75,
             AuthorityOp::Rotate => 150,
+            AuthorityOp::AddGuardian => 200,
+            AuthorityOp::RemoveGuardian => 200,
+            AuthorityOp::ModifyThreshold => 300,
+            AuthorityOp::RevokeDevice => 100,
         };
 
         // Check flow budget
@@ -106,6 +110,10 @@ impl CapabilityGuard {
             ContextOp::AddBinding => 100,
             ContextOp::ApproveRecovery => 200,
             ContextOp::UpdateParams => 50,
+            ContextOp::RecoverDeviceKey => 250,
+            ContextOp::RecoverAccountAccess => 300,
+            ContextOp::UpdateGuardianSet => 250,
+            ContextOp::EmergencyFreeze => 500,
         };
 
         // Check flow budget
@@ -165,6 +173,10 @@ impl CapabilityGuardExt for CapabilityGuard {
             AuthorityOp::AddDevice => 75,
             AuthorityOp::RemoveDevice => 75,
             AuthorityOp::Rotate => 150,
+            AuthorityOp::AddGuardian => 200,
+            AuthorityOp::RemoveGuardian => 200,
+            AuthorityOp::ModifyThreshold => 300,
+            AuthorityOp::RevokeDevice => 100,
         };
 
         let authorized = self

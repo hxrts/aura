@@ -7,7 +7,7 @@
 //! - Journal operations
 //! - Effect system integration
 
-use aura_core::{DeviceId, Epoch, FlowBudget, FlowBudgetKey, Journal, Fact, Cap};
+use aura_core::{AuthorityId, Epoch, FlowBudget, FlowBudgetKey, Journal, Fact, Cap};
 use aura_core::flow::Receipt;
 use aura_core::relationships::ContextId;
 use aura_journal::semilattice::{CvHandler, DeltaHandler, CmHandler, MvHandler};
@@ -59,7 +59,7 @@ async fn test_guard_chain_authorization_protocol() {
     
     let device_id = DeviceId::new();
     let context = ContextId::new();
-    let peer_device = DeviceId::new();
+    let peer_device = AuthorityId::new();
     
     // Create flow budget for the context/peer pair
     let budget_key = FlowBudgetKey::new(context, peer_device);
@@ -98,7 +98,7 @@ async fn test_journal_flow_budget_integration() {
     
     let device_id = DeviceId::new();
     let context = ContextId::new();
-    let peer_device = DeviceId::new();
+    let peer_device = AuthorityId::new();
     
     // Create a journal with flow budget tracking
     let mut journal = Journal::new();

@@ -20,7 +20,7 @@ This structure identifies a single secure channel. One channel exists per `(Cont
 
 ## 2. Guard Chain
 
-All transport sends pass through the guard chain defined in [Authorization Pipeline](108_authorization_pipeline.md). CapGuard evaluates Biscuit capabilities and sovereign policy. FlowGuard charges the per-context flow budget and produces a receipt. JournalCoupler records the accompanying facts atomically. Each stage must succeed before the next stage executes.
+All transport sends pass through the guard chain defined in [Authorization](109_authorization.md). CapGuard evaluates Biscuit capabilities and sovereign policy. FlowGuard charges the per-context flow budget and produces a receipt. JournalCoupler records the accompanying facts atomically. Each stage must succeed before the next stage executes.
 
 ## 3. Flow Budget and Receipts
 
@@ -108,7 +108,7 @@ Secure channels follow a lifecycle aligned with rendezvous and epoch semantics:
    - Channels close explicitly when contexts end or when FlowGuard hits the configured budget limit.
    - Receipts emitted during teardown propagate through the relational context journal so guardians or auditors can verify all hops charged their budgets up to the final packet.
 
-By tying establishment and teardown to relational context journals, receipts become part of the same fact set tracked in `109_maintenance.md`, ensuring long-term accountability.
+By tying establishment and teardown to relational context journals, receipts become part of the same fact set tracked in `111_maintenance.md`, ensuring long-term accountability.
 
 ## 8. Summary
 

@@ -1,10 +1,10 @@
 # Journal
 
-This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes integration with the ledger layer and defines the invariants that ensure correctness. See [State Reduction Flows](110_state_reduction_flows.md) for the end-to-end reducer pipeline.
+This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes integration with the ledger layer and defines the invariants that ensure correctness. See [Maintenance](111_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
 
 ## 1. Journal Namespaces
 
-Aura maintains a separate journal namespace for each authority and each relational context. A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an `AuthorityId` or a `ContextId`. No namespace shares state with another. Identifier definitions appear in [Identifiers and Boundaries](109_identifiers_and_boundaries.md).
+Aura maintains a separate journal namespace for each authority and each relational context. A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an `AuthorityId` or a `ContextId`. No namespace shares state with another. Identifier definitions appear in [Identifiers and Boundaries](105_identifiers_and_boundaries.md).
 
 A journal namespace evolves through fact insertion. Facts accumulate monotonically. No fact is removed except through garbage collection rules that preserve logical meaning.
 
@@ -158,7 +158,7 @@ Every fact inserted into a journal must be validated before merge. The following
 **Checks**
 - Ensure `spent` deltas are non-negative and reference the active epoch for the `(ContextId, peer)` pair.
 - Reject facts that would decrease the recorded `spent` (monotone requirement).
-- Validate receipt signatures associated with the charge (see `107_transport_and_information_flow.md`).
+- Validate receipt signatures associated with the charge (see `108_transport_and_information_flow.md`).
 
 **Responsible Effects**
 - `FlowBudgetEffects` (or FlowGuard) produce the fact and enforce monotonicity before inserting.

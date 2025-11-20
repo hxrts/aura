@@ -4,66 +4,188 @@ This document provides an overview of Aura's architecture and goals.
 
 ## Project Goals
 
-Aura aims to demonstrate that web-of-trust architectures can be practical and user-aligned. Instead of anchoring trust to a single device or centralized service, Aura treats the network as the platform and expresses identity through opaque authorities plus relational contexts. This keeps social relationships—rather than infrastructure providers—at the center of security decisions.
+Aura aims to demonstrate that web-of-trust architectures can be practical and user-aligned. Instead of anchoring trust to a single device or centralized service, Aura treats the network as the platform. Identity is expressed through opaque authorities plus relational contexts. This keeps social relationships at the center of security decisions instead of infrastructure providers.
 
-The target is 20 close friends using the system twice weekly. This constraint forces delivery of something unique and valuable, not just technically interesting. Users must feel confident that their privacy expectations won't be violated, their data is durable, and the system is secure enough to trust with real relationships.
+The target is 20 close friends using the system twice weekly. This constraint forces delivery of something unique and valuable, not just technically interesting. Users must feel confident that their privacy expectations will not be violated, their data is durable, and the system is secure enough to trust with real relationships.
 
-## Constraints and Solutions
+## Problem Statement
+
+Most existing approaches cannot meet the requirements for a practical web-of-trust system. Centralized services violate peer-to-peer and alignment constraints. Eventually-consistent systems without strong semantics fail unpredictably during network partitions. Ad-hoc peer-to-peer protocols cannot safely evolve because protocol changes fragment the network.
+
+Aura's design solves these problems by combining threshold cryptography, choreographic protocols, fact-based semilattices, session types, guard-chain-enforced effects, and deterministic simulation.
+
+## Eight Constraints
 
 Aura must meet eight constraints simultaneously. These constraints shape every architectural decision.
 
-The system must run on web (Chrome, Firefox, Safari via WebAssembly), mobile (iOS, Android), and desktop (macOS, Linux). Information flows through your social graph based on explicit choices. Peer discovery and storage are performed by your social network. The system has no servers, not even for peer discovery or bootstrapping. All coordination happens through the social graph. Latency must not create friction during daily use. The app works in airplane mode and syncs seamlessly when connectivity returns. Users must be able to store secrets without external backups. Most failure scenarios are recoverable through snapshots. Older clients can interact with newer ones within semantic version compatibility bounds.
+**1. Cross-platform deployment:** The system must run on web (Chrome, Firefox, Safari via WebAssembly), mobile (iOS, Android), and desktop (macOS, Linux).
 
-Most existing approaches cannot meet these constraints simultaneously. Centralized services violate P2P and alignment constraints. Eventually-consistent systems without strong semantics fail unpredictably during partitions. Ad-hoc P2P protocols cannot safely evolve because protocol changes fragment the network.
+**2. Social-graph-based coordination:** Information flows through your social graph based on explicit choices. Peer discovery and storage are performed by your social network. The system has no servers, not even for peer discovery or bootstrapping.
 
-Aura's solution combines threshold cryptography, choreographic protocols, fact-based semilattices, session types, guard-chain-enforced effects, and deterministic simulation. This foundation enables the following capabilities:
+**3. Offline-first operation:** Latency must not create friction during daily use. The app works in airplane mode and syncs seamlessly when connectivity returns.
 
-| Constraint                 | Required Capability         |Solution                    |
-|----------------------------|-----------------------------|------------------------------------|
-| Fully P2P                  | Peer discovery              | Social Bulletin Board via web-of-trust |
-| Cross-platform             | Protocol abstraction        | WebAssembly and typed messages     |
-| Daily performance          | Offline-first operations    | CRDTs and local-first architecture |
-| Real security              | No single point of failure  | Threshold cryptography M-of-N      |
-| Upgrade safety             | Version compatibility       | Semantic versioning and types      |
-| Consent-based design       | Selective disclosure        | Content-addressed invites          |
-| Testable before deploy     | Simulation framework        | Deterministic simulation           |
-| Network as platform        | Peer infrastructure         | P2P choreographic coordination     |
+**4. Decentralized secrets storage:** Users must be able to store secrets without external backups. Most failure scenarios are recoverable through snapshots.
 
-Threshold identity validates that these capabilities work together. The current choice between trusting a single device or trusting a corporation is impossible. Aura uses social trust through M-of-N cryptographic guarantees across devices, friends, and chosen guardians. This approach demonstrates that the same foundations enable collaborative editing, secure messaging, decentralized storage, and multi-party computation.
+**5. No single point of failure:** The system must provide real security without depending on any single device or entity.
 
-## System Architecture
+**6. Version compatibility:** Older clients must interact with newer ones within semantic version compatibility bounds.
 
-Aura's architecture rests on three pillars that work together to meet the constraints above.
+**7. Privacy by design:** Information disclosure must be selective and consent-based.
 
-The first pillar is algebraic state management. The Journal is a fact-based CRDT: facts (join-semilattice) capture account and relational events, while capability frontiers are evaluated at runtime (meet-semilattice) using Biscuit tokens plus sovereign policy. Flow budgets only replicate `spent` counters; limits are derived deterministically from current tokens/policy, preserving atomic consistency without storing privileged state.
+**8. Network as platform:** All coordination happens through the social graph. There is no separate infrastructure layer.
 
-The second pillar is protocol specification and safety. Multi-party session types (MPST) specify distributed protocols from a global viewpoint. Automatic projection to local roles provides deadlock freedom and compile-time safety. Choreographic programming ensures that complex multi-party coordination is verifiable before deployment.
+## Architectural Solution
 
-The third pillar is stateless effect system composition. Effects are capabilities code can request without shared mutable state. Effect traits live in `aura-core`, stateless handlers in `aura-effects`, and orchestrators in `aura-protocol`/`aura-agent`. The guard chain is explicit: `AuthorizationEffects` (Biscuit/policy evaluation) → `FlowBudgetEffects` (charge-before-send) → `LeakageEffects` (observer-class budgets) → `JournalEffects` (fact commit) → `TransportEffects`. This sequencing eliminates deadlocks, enables deterministic testing, and keeps architectural boundaries clean.
+Aura's solution maps each constraint to a required capability and an architectural component.
 
-These three pillars combine into an 8-layer architecture from interface definitions through user-facing applications. See [System Architecture](001_system_architecture.md) for the complete layer breakdown, [Theoretical Model](001_theoretical_model.md) for mathematical foundations, [Distributed Systems Contract](004_distributed_systems_contract.md) for safety/liveness assumptions, and [Project Structure](999_project_structure.md) for dependency details.
+| Constraint | Required Capability | Solution |
+|-----------|---------------------|----------|
+| Cross-platform | Protocol abstraction | WebAssembly and typed messages |
+| Social-graph coordination | Peer discovery | Social Bulletin Board via web-of-trust |
+| Offline-first | Offline-first operations | CRDTs and local-first architecture |
+| Decentralized secrets | No single point of failure | Threshold cryptography M-of-N |
+| No single point of failure | Real security | Threshold cryptography across devices, friends, guardians |
+| Version compatibility | Safe evolution | Semantic versioning and types |
+| Privacy by design | Selective disclosure | Content-addressed invites |
+| Network as platform | Peer infrastructure | Peer-to-peer choreographic coordination |
+
+Aura uses social trust through M-of-N cryptographic guarantees across devices, friends, and chosen guardians. The same foundations enable collaborative editing, secure messaging, decentralized storage, and multi-party computation.
+
+## Three Architectural Pillars
+
+Aura's architecture rests on three pillars that work together to meet all constraints.
+
+**First pillar: Algebraic state management.** The Journal is a fact-based CRDT that captures account and relational events. Facts form a join-semilattice and merge via set union. Capability frontiers are evaluated at runtime as a meet-semilattice using Biscuit tokens plus sovereign policy. Flow budgets only replicate `spent` counters. Limits are derived deterministically from current tokens and policy. This design preserves atomic consistency without storing privileged state.
+
+**Second pillar: Protocol specification and safety.** Multi-party session types (MPST) specify distributed protocols from a global viewpoint. Automatic projection to local roles provides deadlock freedom and compile-time safety. Choreographic programming ensures that complex multi-party coordination is verifiable before deployment. Session types prevent entire classes of distributed protocol errors.
+
+**Third pillar: Stateless effect system composition.** Effects are capabilities code can request without shared mutable state. Effect traits live in `aura-core`. Stateless handlers are in `aura-effects`. Orchestrators are in `aura-protocol` and `aura-agent`. The guard chain is explicit and ordered: `AuthorizationEffects` (Biscuit/policy evaluation) flows to `FlowBudgetEffects` (charge-before-send) to `LeakageEffects` (observer-class budgets) to `JournalEffects` (fact commit) to `TransportEffects`. This sequencing eliminates deadlocks, enables deterministic testing, and keeps architectural boundaries clean.
+
+## Implementation Architecture
+
+These three pillars combine into an 8-layer architecture. The layers progress from interface definitions through user-facing applications. See [System Architecture](001_system_architecture.md) for the complete layer breakdown.
+
+The layers are as follows:
+
+1. Foundation (`aura-core`): Effect traits, domain types, cryptographic utilities, and error types.
+
+2. Specification (Domain crates and `aura-mpst`): CRDT domains, capability systems, transport semantics, and session type definitions.
+
+3. Implementation (`aura-effects`): Stateless handlers for effect traits.
+
+4. Orchestration (`aura-protocol`): Multi-party coordination, guard chain, and Aura Consensus runtime.
+
+5. Feature implementation: End-to-end protocol crates for authentication, recovery, rendezvous, and storage.
+
+6. Runtime composition (`aura-agent`, `aura-simulator`): Effect system assembly and deterministic simulation.
+
+7. User interface (`aura-cli`): CLI entry points.
+
+8. Testing and tools (`aura-testkit`, `aura-quint-api`): Fixtures and simulation harnesses.
+
+## Key Design Principles
+
+These three pillars enable several key properties that solve the constraints.
+
+**Monotone journals prevent divergence:** Facts merge via set union and never retract. Identical fact sets produce identical states across all replicas. This guarantees eventual consistency.
+
+**Charge-before-send prevents authorization violations:** Every transport message is preceded by the guard chain. No packet is emitted without successful authorization, flow budget, and leakage checks. Fact commits are atomic.
+
+**Session types prevent deadlock:** Multi-party session types ensure that distributed protocols cannot deadlock. Automatic projection provides compile-time safety.
+
+**Deterministic reduction enables testing:** State reduction from fact journals is deterministic. Identical inputs produce identical outputs. This enables property-based testing and simulation.
+
+**No circular dependencies:** Each architectural layer builds on lower layers without reaching back down. This enables independent testing, reusability, and clear responsibility boundaries. Layer 1 depends on nothing. Layer 2 depends only on Layer 1. This pattern continues through all 8 layers.
+
+**Architecture answers one question per layer:** Foundation layer asks "what operations exist?" Specification layer asks "what does this mean?" Implementation layer asks "how do I do one thing?" Orchestration layer asks "how do I coordinate?" Each answer is independent and composable.
+
+For mathematical foundations see [Theoretical Model](002_theoretical_model.md). For safety and liveness guarantees see [Distributed Systems Contract](004_distributed_systems_contract.md). For crate details see [Project Structure](999_project_structure.md).
 
 ## Documentation Index
 
-Additional documentation covers specific aspects of the system:
+Additional documentation covers specific aspects of the system. The Foundation category covers mathematical and architectural foundations. The Core Systems category covers each major component. The Developer Guides category provides practical guides for implementation. The Project Meta category covers project structure.
 
-| Category | Document | Description |
-|----------|----------|-------------|
-| Foundation | [Theoretical Model](001_theoretical_model.md) | Mathematical foundation including formal calculus, algebraic types, and semilattice semantics |
-| Foundation | [System Architecture](001_system_architecture.md) | Implementation architecture including effect system patterns, CRDT implementations, and choreographic protocols |
-| Foundation | [Privacy & Information Flow](003_privacy_and_information_flow.md) | Consent-based privacy framework with trust boundaries, flow budgets, and leakage tracking |
-| Foundation | [Distributed Systems Contract](004_distributed_systems_contract.md) | Safety/liveness guarantees, synchrony model, latency bounds, adversarial assumptions |
-| Core Systems | [Authority & Identity](100_authority_and_identity.md) | Authority-centric identity model with opaque authorities and relational contexts |
-| Core Systems | [Accounts & Ratchet Tree](101_accounts_and_ratchet_tree.md) | Ratchet tree structure for threshold identity management |
-| Core Systems | [Journal System](102_journal.md) | Fact-based journal, validation, and deterministic reduction flows |
-| Core Systems | [Relational Contexts](103_relational_contexts.md) | Guardian bindings, recovery grants, and context-scoped journals |
-| Core Systems | [Consensus](104_consensus.md) | Aura Consensus protocol for strong agreement |
-| Core Systems | [Effect System & Runtime](105_effect_system_and_runtime.md) | Effect system architecture and runtime composition |
-| Core Systems | [MPST & Choreography](106_mpst_and_choreography.md) | Multi-party session types and choreographic programming |
-| Core Systems | [Transport & Information Flow](107_transport_and_information_flow.md) | Guard chain enforcement, secure channel lifecycle, FlowBudget receipts |
-| Core Systems | [Authorization Pipeline](108_authorization_pipeline.md) | Authorization flow from capabilities to Biscuit tokens |
-| Core Systems | [Rendezvous Architecture](108_rendezvous.md) | Context-scoped rendezvous envelopes/descriptors and channel establishment |
-| Core Systems | [Identifiers & Boundaries](109_identifiers_and_boundaries.md) | Identifier system and context isolation |
-| Core Systems | [Maintenance](109_maintenance.md) | Distributed maintenance stack including snapshots and garbage collection |
-| Core Systems | [State Reduction Flows](110_state_reduction_flows.md) | Deterministic state reduction from fact journals |
-| Project Meta | [Project Structure](999_project_structure.md) | Comprehensive crate structure overview with dependency graph |
+**Foundation**
+
+[Theoretical Model](002_theoretical_model.md) provides mathematical foundations including formal calculus, algebraic types, and semilattice semantics.
+
+[System Architecture](001_system_architecture.md) describes implementation architecture including effect system patterns, CRDT implementations, and choreographic protocols.
+
+[Privacy and Information Flow](003_information_flow_contract.md) documents the consent-based privacy framework with trust boundaries, flow budgets, and leakage tracking.
+
+[Distributed Systems Contract](004_distributed_systems_contract.md) specifies safety and liveness guarantees, the synchrony model, latency bounds, and adversarial assumptions.
+
+**Core Systems**
+
+[Authority and Identity](100_authority_and_identity.md) describes the authority-centric identity model with opaque authorities and relational contexts.
+
+[Accounts and Ratchet Tree](101_accounts_and_ratchet_tree.md) covers the ratchet tree structure for threshold identity management.
+
+[Journal System](102_journal.md) documents the fact-based journal, validation rules, and deterministic reduction flows.
+
+[Relational Contexts](103_relational_contexts.md) covers guardian bindings, recovery grants, and context-scoped journals.
+
+[Consensus](104_consensus.md) describes the Aura Consensus protocol for strong agreement.
+
+[Effect System and Runtime](106_effect_system_and_runtime.md) covers effect system architecture and runtime composition.
+
+[MPST and Choreography](107_mpst_and_choreography.md) documents multi-party session types and choreographic programming.
+
+[Transport and Information Flow](108_transport_and_information_flow.md) covers guard chain enforcement, secure channel lifecycle, and FlowBudget receipts.
+
+[Authorization](109_authorization.md) describes the authorization flow from capabilities to Biscuit tokens.
+
+[Rendezvous Architecture](110_rendezvous.md) covers context-scoped rendezvous envelopes and channel establishment.
+
+[State Reduction](110_state_reduction.md) describes deterministic state reduction from fact journals to canonical state.
+
+[Identifiers and Boundaries](105_identifiers_and_boundaries.md) documents the identifier system and context isolation.
+
+[Maintenance](111_maintenance.md) covers the distributed maintenance stack including snapshots and garbage collection.
+
+**Developer Guides**
+
+[Hello World Guide](801_hello_world_guide.md) provides a starting point for developers new to Aura.
+
+[Core Systems Guide](802_core_systems_guide.md) explains the core systems and how they work together.
+
+[Coordination Guide](803_coordination_guide.md) covers choreographic protocol design and implementation patterns.
+
+[Advanced Coordination Guide](804_advanced_coordination_guide.md) documents advanced techniques for distributed coordination.
+
+[Development Patterns and Workflows](805_development_patterns.md) covers practical patterns for developing Aura systems, including code location guidance and typical implementation workflows.
+
+[Testing Guide](805_testing_guide.md) describes property testing, simulation harnesses, and validation frameworks.
+
+[Simulation Guide](806_simulation_guide.md) covers deterministic simulation for verification and debugging.
+
+[Maintenance and OTA Guide](807_maintenance_ota_guide.md) explains distributed maintenance, snapshots, garbage collection, and over-the-air upgrade procedures.
+
+**Project Meta**
+
+[Project Structure](999_project_structure.md) provides a comprehensive crate structure overview with the dependency graph.
+
+[Development Patterns and Workflows](805_development_patterns.md) covers practical patterns for developing Aura systems, including code location guidance and typical implementation workflows.
+
+## System Features
+
+### Maintenance and Over-the-Air Updates
+
+Aura supports distributed maintenance and over-the-air updates through coordinated mechanisms.
+
+Garbage collection runs with statistics tracking and device state cleanup. Over-the-air updates detect soft and hard forks with epoch fence enforcement. Snapshot coordination handles coordinated state capture. Cache invalidation integrates with all layers to ensure consistency.
+
+### Guardian Recovery
+
+Guardian-based recovery implements a four-level dispute escalation system for account recovery scenarios.
+
+Severity levels are Low, Medium, High, and Critical. Each level has different escalation policies and auto-cancel logic. A persistent recovery ledger maintains audit trails of all recovery operations for transparency and accountability.
+
+Recovery operations can be visualized in the CLI with a recovery status dashboard that shows the current recovery state and evidence.
+
+### Testing Framework
+
+The testing framework provides comprehensive tools for verification and property-based validation.
+
+An integration test suite covers multi-device coordination scenarios. Property-based testing works across core systems to catch edge cases. Deterministic simulation enables chaos injection and property verification without real distributed systems complexity.
+

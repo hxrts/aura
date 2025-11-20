@@ -2,9 +2,9 @@ name: CI - Effects System Enforcement
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main, develop ]
+    branches: [main, develop]
 
 env:
   CARGO_TERM_COLOR: always
@@ -121,27 +121,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install markdown-link-check
-        run: npm install -g markdown-link-check
       - name: Check markdown links
-        run: |
-          echo "Checking for broken links in documentation..."
-          find docs/ -name "*.md" -exec markdown-link-check {} \;
-      - name: Check relative links in docs directory
-        run: |
-          echo "Checking for broken relative links in docs..."
-          cd docs/
-          for file in *.md; do
-            echo "Checking $file..."
-            # Extract markdown links and check if referenced files exist
-            grep -o '\[.*\]([^)]*\.md)' "$file" | sed 's/.*(\([^)]*\)).*/\1/' | while read link; do
-              if [ ! -f "$link" ]; then
-                echo "[ERROR] Broken link in $file: $link"
-                exit 1
-              fi
-            done
-          done
-          echo "[OK] All relative documentation links are valid"
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: "yes"
+          use-verbose-mode: "yes"
+          config-file: ".github/config/markdown-link-check.json"
+          base-branch: "main"
 
   build:
     name: Build Check
@@ -186,14 +172,14 @@ jobs:
           name = "lint-test"
           version = "0.1.0"
           edition = "2021"
-          
+
           [lints]
           workspace = true
-          
+
           [dependencies]
           uuid = "1.0"
           rand = "0.8"
-          
+
           [[bin]]
           name = "test"
           path = "test_lints.rs"

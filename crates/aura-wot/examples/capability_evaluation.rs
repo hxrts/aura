@@ -4,7 +4,7 @@
 //! for authorization decisions following meet-semilattice laws.
 //!
 //! The example shows practical application of the theoretical model from
-//! docs/001_theoretical_model.md, particularly:
+//! docs/002_theoretical_model.md, particularly:
 //! - §2.1: Capabilities as meet-semilattice elements
 //! - §2.4: Meet operations that monotonically restrict authority
 //! - §5.2: Web-of-Trust delegation composition

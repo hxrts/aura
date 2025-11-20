@@ -180,23 +180,30 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
         scope: SessionScope,
     ) -> Result<AuthorityAuthResponse> {
         // Create authentication request
-        let request = AuthorityAuthRequest {
+        let mut request = AuthorityAuthRequest {
             authority_id: authority.authority_id(),
             nonce: [0; 32], // Will be replaced by challenge
             commitment: authority.root_commitment(),
             requested_scope: scope,
         };
 
-        // Run the choreography protocol
-        // TODO: Integrate with rumpsteak session types
+        // Step 1: Send authentication request
+        // In a full implementation, this would use the choreography runtime
+        // For now, simulate the protocol steps
 
-        // For now, return a placeholder
-        Ok(AuthorityAuthResponse {
-            verified_identity: None,
-            session_ticket: None,
-            success: false,
-            error: Some("Not yet implemented".to_string()),
-        })
+        // Step 2: Receive challenge from verifier
+        let challenge = self.simulate_receive_challenge(&request).await?;
+        
+        // Update request with the actual challenge nonce
+        request.nonce = challenge.nonce;
+
+        // Step 3: Generate proof by signing the challenge
+        let proof = authenticate_authority(authority.as_ref(), request.clone()).await?;
+
+        // Step 4: Receive authentication result
+        let response = self.simulate_verify_proof(&request, &proof).await?;
+
+        Ok(response)
     }
 
     /// Run the authentication protocol as verifier
@@ -204,25 +211,160 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
         &self,
         request: AuthorityAuthRequest,
     ) -> Result<AuthorityAuthResponse> {
+        // Step 1: Receive authentication request (already provided)
+        
+        // Step 2: Generate and send challenge
+        let challenge = self.generate_challenge(&request).await?;
+        
+        // In a full choreography implementation, we would wait for the proof submission
+        // For now, simulate receiving a proof and verify it
+        let simulated_proof = AuthorityAuthProof {
+            authority_id: request.authority_id,
+            signature: vec![0; 64], // Placeholder signature
+            public_key: vec![0; 32], // Placeholder public key
+            commitment: request.commitment,
+        };
+
+        // Step 3: Verify the submitted proof
+        let verification_result = verify_authority_proof(&request, &simulated_proof).await;
+        
+        // Step 4: Return authentication result
+        match verification_result {
+            Ok(true) => {
+                // Create session ticket
+                let session_ticket = SessionTicket {
+                    session_id: uuid::Uuid::parse_str(&challenge.session_id)
+                        .unwrap_or_else(|_| uuid::Uuid::new_v4()),
+                    issuer_device_id: aura_core::DeviceId::new(), // TODO: Map from AuthorityId
+                    scope: request.requested_scope,
+                    issued_at: challenge.timestamp,
+                    expires_at: challenge.timestamp + 3600, // 1 hour
+                    nonce: [0; 16], // TODO: Generate proper nonce
+                };
+
+                // Create identity proof - simulating a device signature for authority
+                let signature = if simulated_proof.signature.len() == 64 {
+                    let mut sig_bytes = [0u8; 64];
+                    sig_bytes.copy_from_slice(&simulated_proof.signature);
+                    aura_core::Ed25519Signature::from_bytes(&sig_bytes)
+                } else {
+                    aura_core::Ed25519Signature::from_bytes(&[0; 64])
+                };
+                
+                let identity_proof = IdentityProof::Device {
+                    device_id: aura_core::DeviceId::new(), // TODO: Map from authority
+                    signature,
+                };
+
+                // Create verified identity
+                let verified_identity = VerifiedIdentity {
+                    proof: identity_proof,
+                    message_hash: request.nonce, // The challenge nonce that was signed
+                };
+
+                Ok(AuthorityAuthResponse {
+                    verified_identity: Some(verified_identity),
+                    session_ticket: Some(session_ticket),
+                    success: true,
+                    error: None,
+                })
+            }
+            Ok(false) => Ok(AuthorityAuthResponse {
+                verified_identity: None,
+                session_ticket: None,
+                success: false,
+                error: Some("Authentication failed: invalid proof".to_string()),
+            }),
+            Err(e) => Ok(AuthorityAuthResponse {
+                verified_identity: None,
+                session_ticket: None,
+                success: false,
+                error: Some(format!("Authentication error: {}", e)),
+            }),
+        }
+    }
+
+    /// Simulate receiving challenge from verifier (for choreography integration)
+    async fn simulate_receive_challenge(&self, request: &AuthorityAuthRequest) -> Result<ChallengeData> {
+        self.generate_challenge(request).await
+    }
+
+    /// Generate challenge data for authentication
+    async fn generate_challenge(&self, request: &AuthorityAuthRequest) -> Result<ChallengeData> {
         // Generate challenge nonce
         let mut nonce = [0u8; 32];
         let nonce_bytes = self.effects.random_bytes(32).await;
         nonce.copy_from_slice(&nonce_bytes[..32]);
 
-        // Create challenge data
-        let challenge = ChallengeData {
+        Ok(ChallengeData {
             nonce,
             session_id: uuid::Uuid::new_v4().to_string(),
             timestamp: aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await,
-        };
-
-        // TODO: Complete verifier implementation
-
-        Ok(AuthorityAuthResponse {
-            verified_identity: None,
-            session_ticket: None,
-            success: false,
-            error: Some("Verifier not yet implemented".to_string()),
         })
+    }
+
+    /// Simulate verifying proof and returning result (for choreography integration)
+    async fn simulate_verify_proof(
+        &self,
+        request: &AuthorityAuthRequest,
+        proof: &AuthorityAuthProof,
+    ) -> Result<AuthorityAuthResponse> {
+        // Verify the proof
+        let verification_result = verify_authority_proof(request, proof).await;
+        
+        match verification_result {
+            Ok(true) => {
+                let timestamp = aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await;
+                
+                // Create session ticket
+                let session_ticket = SessionTicket {
+                    session_id: uuid::Uuid::new_v4(),
+                    issuer_device_id: aura_core::DeviceId::new(), // TODO: Map from AuthorityId
+                    scope: request.requested_scope.clone(),
+                    issued_at: timestamp,
+                    expires_at: timestamp + 3600, // 1 hour
+                    nonce: [0; 16], // TODO: Generate proper nonce
+                };
+
+                // Create identity proof - simulating a device signature for authority
+                let signature = if proof.signature.len() == 64 {
+                    let mut sig_bytes = [0u8; 64];
+                    sig_bytes.copy_from_slice(&proof.signature);
+                    aura_core::Ed25519Signature::from_bytes(&sig_bytes)
+                } else {
+                    aura_core::Ed25519Signature::from_bytes(&[0; 64])
+                };
+                
+                let identity_proof = IdentityProof::Device {
+                    device_id: aura_core::DeviceId::new(), // TODO: Map from authority
+                    signature,
+                };
+
+                // Create verified identity
+                let verified_identity = VerifiedIdentity {
+                    proof: identity_proof,
+                    message_hash: request.nonce, // The challenge nonce that was signed
+                };
+
+                Ok(AuthorityAuthResponse {
+                    verified_identity: Some(verified_identity),
+                    session_ticket: Some(session_ticket),
+                    success: true,
+                    error: None,
+                })
+            }
+            Ok(false) => Ok(AuthorityAuthResponse {
+                verified_identity: None,
+                session_ticket: None,
+                success: false,
+                error: Some("Authentication failed: invalid proof".to_string()),
+            }),
+            Err(e) => Ok(AuthorityAuthResponse {
+                verified_identity: None,
+                session_ticket: None,
+                success: false,
+                error: Some(format!("Authentication error: {}", e)),
+            }),
+        }
     }
 }

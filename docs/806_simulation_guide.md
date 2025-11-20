@@ -443,4 +443,4 @@ Aura's simulation infrastructure provides:
 
 The simulation emphasizes composition and explicit control rather than implicit coordination. This aligns with Aura's stateless effect architecture and provides flexibility for different testing scenarios.
 
-For testing infrastructure that complements simulation, see [Testing Guide](805_testing_guide.md). Learn about the effect system in [Effect System Guide](105_effect_system_and_runtime.md).
+For testing infrastructure that complements simulation, see [Testing Guide](805_testing_guide.md). Learn about the effect system in [Effect System Guide](106_effect_system_and_runtime.md).

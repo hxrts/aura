@@ -2,7 +2,7 @@
 
 Aura's privacy model is consent-based and articulated as a unified information-flow system. Privacy boundaries align with social relationships rather than technical perimeters. Violations occur when information crosses trust boundaries without consent. Acceptable flows consume explicitly budgeted headroom.
 
-This document specifies Aura's privacy and information-flow model covering privacy leakage and spam as one regulatory system. It defines what information is visible to different observers, how properties degrade under attack, and how enforcement works via a monotone semilattice-based budget. Per-context per-peer flow headroom is charged before any transport side effect. See [Flow Budget System](003_privacy_and_information_flow.md#flow-budget-system-reference) for the full budget specification.
+This document specifies Aura's privacy and information-flow model covering privacy leakage and spam as one regulatory system. It defines what information is visible to different observers, how properties degrade under attack, and how enforcement works via a monotone semilattice-based budget. Per-context per-peer flow headroom is charged before any transport side effect. See [Flow Budget System](003_information_flow_contract.md#flow-budget-system-reference) for the full budget specification.
 
 ## Privacy Philosophy
 
@@ -24,7 +24,7 @@ FlowBudget {
 
 Only `spent` and `epoch` values appear as facts inside the journal. The `limit` field is computed at runtime by intersecting Biscuit-derived capabilities with sovereign policy; it is never stored in the journal. Before any transport effect, `FlowGuard` charges `cost` to the context and peer pair. If `spent` plus `cost` exceeds the computed `limit`, the send is blocked locally with no observable behavior.
 
-For multi-hop forwarding, relays validate a signed per-hop receipt from the previous hop, then charge their own budget before forwarding. Limits update deterministically via the shared Biscuit/policy evaluation on every device, so replicas converge even though only `spent` charges are recorded. Guard evaluation follows the sequence described in [Authorization Pipeline](108_authorization_pipeline.md).
+For multi-hop forwarding, relays validate a signed per-hop receipt from the previous hop, then charge their own budget before forwarding. Limits update deterministically via the shared Biscuit/policy evaluation on every device, so replicas converge even though only `spent` charges are recorded. Guard evaluation follows the sequence described in [Authorization](109_authorization.md).
 
 ### Budget Formulas
 
@@ -62,7 +62,7 @@ The acceptance window is the current epoch only. Rotation triggers when the jour
 
 At most one outstanding reservation exists per context and device. Provide a minimum headroom floor for active relationships to prevent starvation. Optional jitter on sensitive protocols like guardian recovery reduces timing correlation without violating monotonicity.
 
-This unifies who may talk, how often, and with how much metadata leakage under the same laws as capabilities and facts. See [Flow Budget System](003_privacy_and_information_flow.md#flow-budget-system-reference) for implementation details.
+This unifies who may talk, how often, and with how much metadata leakage under the same laws as capabilities and facts. See [Flow Budget System](003_information_flow_contract.md#flow-budget-system-reference) for implementation details.
 
 ## Privacy Boundaries
 
@@ -403,7 +403,7 @@ async fn protocol_step_with_leakage(
 
 ## Implementation Metrics
 
-Aura 1.0 ties privacy guarantees to the FlowBudget system described in [Flow Budget System](003_privacy_and_information_flow.md#flow-budget-system-reference).
+Aura 1.0 ties privacy guarantees to the FlowBudget system described in [Flow Budget System](003_information_flow_contract.md#flow-budget-system-reference).
 
 Per-context activity requires `spent(ctx)` not exceed `limit(ctx)` per epoch, enforced by FlowGuard charge before every transport call. Leakage per observer class requires `L(τ, class)` not exceed `Budget(class)`, enforced by guard mechanisms. Timing dispersion requires high-sensitivity protocols add at least 2 seconds jitter via optional delay guard. Reservation fairness requires at most one outstanding FlowBudget reservation per context and authority.
 
@@ -416,7 +416,7 @@ The FlowBudget system enforces both spam resistance and privacy budgets by combi
 - **Epoch rotation**: Journals carry `Epoch(ctx)` facts. When the epoch increments, transport handlers discard pending receipts and reset `spent` counters for the new epoch.
 - **Receipts**: Each send/forward that succeeds produces a Receipt fact scoped to `(context, epoch)` with chained hashes. Relays validate receipts before forwarding and record them as relational facts so downstream peers can audit budget usage.
 - **Multi-hop enforcement**: Every hop independently executes CapGuard → FlowGuard → JournalCoupler. Headroom must exist at each hop; failures block locally and leak no metadata. Because `spent` is monotone, convergence holds even if later hops fail.
-- **Charge-before-send invariant**: FlowGuard charges occur before any observable transport action. JournalCoupler atomically merges the charge fact and optional protocol deltas, ensuring the calculus guarantees from `docs_2/001_theoretical_model.md` hold in implementation.
+- **Charge-before-send invariant**: FlowGuard charges occur before any observable transport action. JournalCoupler atomically merges the charge fact and optional protocol deltas, ensuring the calculus guarantees from `docs_2/002_theoretical_model.md` hold in implementation.
 
 Together these rules ensure that spam limits, leakage budgets, and receipt accountability share the same semilattice foundation described throughout this document.
 
@@ -502,12 +502,12 @@ Implementation requires careful attention to cryptographic details, metadata han
 
 ## See Also
 
-- [Theoretical Model](001_theoretical_model.md)
+- [Theoretical Model](002_theoretical_model.md)
 - [System Architecture](001_system_architecture.md)
 - [Authority and Identity](100_authority_and_identity.md)
 - [Relational Contexts](103_relational_contexts.md)
-- [Authorization Pipeline](108_authorization_pipeline.md)
-- [Identifiers and Boundaries](109_identifiers_and_boundaries.md)
+- [Authorization](109_authorization.md)
+- [Identifiers and Boundaries](105_identifiers_and_boundaries.md)
 
 ## Implementation References
 

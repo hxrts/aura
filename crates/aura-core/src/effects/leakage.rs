@@ -1,7 +1,7 @@
 //! Leakage tracking effects
 //!
 //! This module defines the effect traits for privacy leakage tracking
-//! as specified in docs/001_theoretical_model.md §2.4 and docs/003_information_flow.md
+//! as specified in docs/002_theoretical_model.md §2.4 and docs/003_information_flow.md
 
 use crate::identifiers::ContextId;
 use crate::{AuthorityId, Result};

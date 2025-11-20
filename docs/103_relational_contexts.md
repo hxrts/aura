@@ -28,6 +28,8 @@ pub enum RelationalFact {
 
 This fact model covers guardian configuration, recovery, and general relational operations. Each fact is self contained. Each fact carries enough information for reduction to produce relational state.
 
+The `Generic` variant is the extensible pattern for new fact types. Applications should use `Generic` to define context specific bindings. Do not add new enum variants to `RelationalFact` for each use case. Instead encode the operation type and schema information in the `payload` field. This design supports unbounded application extensibility without modifying the core fact model.
+
 ## 3. Prestate Model
 
 Relational context operations use a prestate model. Aura Consensus verifies that all witnesses see the same authority states. The prestate hash binds the relational fact to current authority states.
