@@ -38,7 +38,15 @@ Aura's codebase is organized into 8 clean architectural layers, progressing from
 **Purpose**: Single source of truth for all domain concepts and interfaces
 
 **Contains**:
-- Effect traits: `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `TimeEffects`, `JournalEffects`, `ConsoleEffects`, `RandomEffects`, `TransportEffects`, `AuthorityEffects`, `RelationalEffects`, `LeakageEffects`
+- **Effect traits** (20 total):
+  - *Core Infrastructure*: `AgentEffects`, `SystemEffects`, `TimeEffects`, `RandomEffects`, `ConsoleEffects`
+  - *Authentication & Authorization*: `AuthenticationEffects`, `AuthorizationEffects`, `AuthorityEffects`, `RelationalEffects`
+  - *Storage & Journal*: `StorageEffects`, `DeviceStorageEffects`, `JournalEffects`
+  - *Network & Reliability*: `NetworkEffects`, `ReliabilityEffects`
+  - *Cryptography*: `CryptoEffects`
+  - *Privacy & Security*: `LeakageEffects`
+  - *Configuration & Sessions*: `ConfigurationEffects`, `SessionManagementEffects`
+  - *Testing & Chaos*: `TestingEffects`, `ChaosEffects`
 - Domain types: `AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`, `ObserverClass`, `Capability`
 - Cryptographic utilities: key derivation, FROST types, merkle trees, Ed25519 helpers
 - Semantic traits: `JoinSemilattice`, `MeetSemilattice`, `CvState`, `MvState`
@@ -482,7 +490,7 @@ crates/
 ├── aura-cli             Command-line interface for account management
 ├── aura-core            Foundation types (ID system, effects, semilattice, config, crypto)
 ├── aura-effects         Standard effect handler implementations (the standard library)
-├── aura-frost           FROST threshold signatures and key resharing (TEMPORARILY EXCLUDED)
+├── aura-frost           FROST threshold signatures and key resharing
 ├── aura-invitation      Invitation and acceptance choreographies
 ├── aura-journal         CRDT domain types and semilattice operations
 ├── aura-mpst            Multi-party session types and choreographic specifications
@@ -918,7 +926,7 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 
 ---
 
-### aura-frost (TEMPORARILY EXCLUDED)
+### aura-frost
 **Purpose**: FROST threshold signatures and key resharing operations
 
 **Key Exports**:
@@ -930,7 +938,7 @@ The guard chain prevents unauthorized sends, enforces privacy budgets, and maint
 
 **Dependencies**: `aura-core`, `aura-journal`, `aura-mpst`
 
-**Status**: Currently excluded from workspace build due to frost-ed25519 API compatibility issues
+**Status**: ✅ Active - All tests passing (11/11)
 
 ---
 

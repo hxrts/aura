@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use aura_core::{hash_canonical, serialization::to_vec, AccountId, AuraError, DeviceId, Hash32};
+use aura_core::{hash_canonical, serialization::to_vec, AccountId, AuraError, AuthorityId, DeviceId, Hash32};
 use aura_core::tree::{Epoch as TreeEpoch, LeafId, NodeIndex, Policy, Snapshot};
 use crate::runtime::AuraEffectSystem;
 use aura_protocol::effect_traits::{ConsoleEffects, LedgerEffects, StorageEffects};
@@ -23,12 +23,14 @@ use uuid::Uuid;
 
 use crate::errors::Result;
 
-/// Admin replacement event
+/// Admin replacement event (authority-centric model)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminReplaced {
     pub account_id: AccountId,
-    pub replaced_by: DeviceId,
-    pub new_admin: DeviceId,
+    /// Authority that initiated the replacement
+    pub replaced_by: AuthorityId,
+    /// New admin authority
+    pub new_admin: AuthorityId,
     pub activation_epoch: u64,
 }
 
@@ -36,8 +38,8 @@ impl AdminReplaced {
     /// Create new admin replacement record
     pub fn new(
         account_id: AccountId,
-        replaced_by: DeviceId,
-        new_admin: DeviceId,
+        replaced_by: AuthorityId,
+        new_admin: AuthorityId,
         activation_epoch: u64,
     ) -> Self {
         Self {
@@ -70,7 +72,7 @@ pub enum CacheInvalidationEvent {
     /// Admin override, force cache invalidation
     AdminOverride {
         reason: String,
-        affected_devices: Vec<DeviceId>,
+        affected_authorities: Vec<AuthorityId>,
         timestamp: SystemTime,
     },
     /// OTA upgrade completed, invalidate protocol caches
@@ -102,8 +104,8 @@ pub struct CacheInvalidationSystem {
     epoch_floor: RwLock<EpochFloor>,
     /// Event broadcaster for cache invalidation notifications
     event_sender: broadcast::Sender<CacheInvalidationEvent>,
-    /// Device-specific invalidation tracking
-    device_invalidations: RwLock<HashMap<DeviceId, Vec<CacheInvalidationEvent>>>,
+    /// Authority-specific invalidation tracking
+    authority_invalidations: RwLock<HashMap<AuthorityId, Vec<CacheInvalidationEvent>>>,
 }
 
 impl CacheInvalidationSystem {
@@ -118,7 +120,7 @@ impl CacheInvalidationSystem {
                 invalidation_reason: "system_init".to_string(),
             }),
             event_sender,
-            device_invalidations: RwLock::new(HashMap::new()),
+            authority_invalidations: RwLock::new(HashMap::new()),
         }
     }
 
@@ -152,13 +154,13 @@ impl CacheInvalidationSystem {
                     .await?;
             }
             CacheInvalidationEvent::AdminOverride {
-                affected_devices, ..
+                affected_authorities, ..
             } => {
-                // Record device-specific invalidations
-                let mut invalidations = self.device_invalidations.write().await;
-                for device in affected_devices {
+                // Record authority-specific invalidations
+                let mut invalidations = self.authority_invalidations.write().await;
+                for authority in affected_authorities {
                     invalidations
-                        .entry(*device)
+                        .entry(*authority)
                         .or_default()
                         .push(event.clone());
                 }
@@ -218,11 +220,11 @@ impl CacheInvalidationSystem {
     pub async fn handle_admin_override(
         &self,
         reason: String,
-        affected_devices: Vec<DeviceId>,
+        affected_authorities: Vec<AuthorityId>,
     ) -> crate::errors::Result<()> {
         let event = CacheInvalidationEvent::AdminOverride {
             reason,
-            affected_devices,
+            affected_authorities,
             timestamp: SystemTime::now(),
         };
 
@@ -414,6 +416,8 @@ impl MaintenanceController {
     /// Stub implementation that emits an admin replacement fact so replicas can fork away from a malicious admin.
     ///
     /// Enforcement (rekeying, capability updates) happens in future OTA updates.
+    ///
+    /// NOTE: Internally uses DeviceId but converts to AuthorityId for the public API.
     pub async fn replace_admin_stub(
         &self,
         account_id: AccountId,
@@ -424,7 +428,12 @@ impl MaintenanceController {
         // For now, get a read lock and use a reference
         let effects = self.effects.read().await;
         let effects = &*effects;
-        let record = AdminReplaced::new(account_id, self.device_id, new_admin, activation_epoch);
+
+        // Convert DeviceIds to AuthorityIds (1:1 mapping for single-device authorities)
+        let replaced_by_authority = AuthorityId(self.device_id.0);
+        let new_admin_authority = AuthorityId(new_admin.0);
+
+        let record = AdminReplaced::new(account_id, replaced_by_authority, new_admin_authority, activation_epoch);
         let event = MaintenanceEvent::AdminReplaced(record.clone());
         self.append_event(&effects, &event).await?;
         self.store_admin_override(&effects, &record).await?;
@@ -433,8 +442,8 @@ impl MaintenanceController {
         if let Err(e) = self
             .cache_invalidation
             .handle_admin_override(
-                format!("Admin replacement: {} -> {}", self.device_id, new_admin),
-                vec![self.device_id, new_admin],
+                format!("Admin replacement: {} -> {}", replaced_by_authority, new_admin_authority),
+                vec![replaced_by_authority, new_admin_authority],
             )
             .await
         {
@@ -482,6 +491,8 @@ impl MaintenanceController {
     }
 
     /// Ensure the provided admin is still valid under the recorded replacement facts.
+    ///
+    /// NOTE: Takes DeviceId for internal use, converts to AuthorityId for comparison.
     pub async fn ensure_admin_allowed(
         &self,
         account_id: AccountId,
@@ -489,10 +500,13 @@ impl MaintenanceController {
         current_epoch: TreeEpoch,
     ) -> Result<()> {
         if let Some(record) = self.current_admin_override(account_id).await? {
-            if current_epoch >= record.activation_epoch && admin != record.new_admin {
+            // Convert DeviceId to AuthorityId for comparison (1:1 mapping)
+            let admin_authority = AuthorityId(admin.0);
+
+            if current_epoch >= record.activation_epoch && admin_authority != record.new_admin {
                 return Err(AuraError::permission_denied(format!(
                     "admin {} revoked for account {} at epoch {}, replaced by {}",
-                    admin, record.account_id, record.activation_epoch, record.new_admin
+                    admin_authority, record.account_id, record.activation_epoch, record.new_admin
                 )));
             }
         }

@@ -13,7 +13,7 @@ use crate::handlers::{
 use crate::maintenance::{MaintenanceController, SnapshotOutcome};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::{agent::SessionType, ConsoleEffects, StorageEffects};
-use aura_core::identifiers::{AccountId, DeviceId};
+use aura_core::identifiers::{AccountId, AuthorityId, DeviceId};
 use aura_sync::WriterFence;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -33,7 +33,10 @@ use uuid;
 /// - **Mode Awareness**: Supports production, testing, and simulation modes
 /// - **Clean Architecture**: No middleware layers - direct effect composition
 pub struct AuraAgent {
-    /// Device ID for this agent runtime
+    /// Authority ID for this agent runtime (public identity)
+    authority_id: AuthorityId,
+    /// Device ID for internal ratchet tree operations (private)
+    /// TODO: In multi-device authorities, this should be looked up from authority state
     device_id: DeviceId,
     /// Agent effect system handler that unifies all agent operations
     _agent_handler: AgentEffectSystemHandler,
@@ -51,14 +54,15 @@ pub struct AuraAgent {
     config_cache: Arc<RwLock<Option<AgentConfig>>>,
 }
 
-/// Device information
+/// Authority information (replaces DeviceInfo in authority-centric model)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceInfo {
-    /// Device identifier
-    pub device_id: DeviceId,
-    /// Account this device belongs to
+    /// Authority identifier (public identity)
+    pub authority_id: AuthorityId,
+    /// Account this authority belongs to
+    /// NOTE: Deprecated - authority_id is the primary identifier
     pub account_id: Option<AccountId>,
-    /// Device name
+    /// Authority display name
     pub device_name: String,
     /// Hardware security available
     pub hardware_security: bool,
@@ -77,14 +81,27 @@ impl AuraAgent {
     ///
     /// This is the primary constructor that composes core effects and agent handlers
     /// into a unified runtime. All operations will be performed through composed handlers.
-    pub fn new(core_effects: AuraEffectSystem, device_id: DeviceId) -> Self {
+    ///
+    /// # Arguments
+    /// * `core_effects` - The effect system for this agent
+    /// * `authority_id` - The public authority identifier
+    ///
+    /// # Device ID Derivation
+    /// For single-device authorities, device_id is derived from authority_id.
+    /// TODO: For multi-device authorities, device_id should be passed explicitly
+    /// or looked up from authority state.
+    pub fn new(core_effects: AuraEffectSystem, authority_id: AuthorityId) -> Self {
         let core_effects = Arc::new(RwLock::new(core_effects));
+
+        // Derive device_id from authority_id (1:1 mapping for single-device authorities)
+        // TODO: For multi-device authorities, this should be looked up from authority state
+        let device_id = DeviceId(authority_id.0);
 
         // Create storage operations handler for secure storage
         let storage_ops = StorageOperations::new(
             core_effects.clone(),
             device_id,
-            format!("agent_{}", device_id.0.simple()),
+            format!("agent_{}", authority_id.0.simple()),
         );
 
         // Create recovery operations handler (default account_id for now)
@@ -98,6 +115,7 @@ impl AuraAgent {
         let maintenance = MaintenanceController::new(core_effects.clone(), device_id);
 
         Self {
+            authority_id,
             device_id,
             _agent_handler: (), // Stub: AgentEffectSystemHandler is unit type
             core_effects,
@@ -113,7 +131,10 @@ impl AuraAgent {
     ///
     /// Note: This method is deprecated. Use `aura_testkit::create_test_fixture().await`
     /// and construct agent via `AuraAgent::new()` in new code.
-    pub fn for_testing(device_id: DeviceId) -> Self {
+    pub fn for_testing(authority_id: AuthorityId) -> Self {
+        // Derive device_id for EffectRegistry (still uses device_id internally)
+        let device_id = DeviceId(authority_id.0);
+
         // Use new EffectRegistry pattern for standardized testing setup
         let effects_arc = crate::runtime::EffectRegistry::testing()
             .with_device_id(device_id)
@@ -122,10 +143,20 @@ impl AuraAgent {
         // Unwrap the Arc - we're the only owner at this point
         let effects = Arc::try_unwrap(effects_arc)
             .unwrap_or_else(|arc| (*arc).clone());
-        Self::new(effects, device_id)
+        Self::new(effects, authority_id)
     }
 
-    /// Get device ID
+    /// Get authority ID (public identity)
+    pub fn authority_id(&self) -> AuthorityId {
+        self.authority_id
+    }
+
+    /// Get device ID (internal identifier)
+    ///
+    /// NOTE: This method is for internal use only. External code should use authority_id().
+    /// Device IDs are implementation details of the ratchet tree and should not be exposed
+    /// in public APIs.
+    #[doc(hidden)]
     pub fn device_id(&self) -> DeviceId {
         self.device_id
     }
@@ -175,13 +206,13 @@ impl AuraAgent {
         // Log initialization completion
         let effects = self.core_effects.read().await;
         let _ = effects
-            .log_info(&format!("Agent initialized for device {}", self.device_id))
+            .log_info(&format!("Agent initialized for authority {}", self.authority_id))
             .await;
 
         Ok(())
     }
 
-    /// Get device information
+    /// Get authority information
     pub async fn device_info(&self) -> AgentResult<DeviceInfo> {
         // Get config through effects
         let config = self.get_config().await?;
@@ -193,9 +224,9 @@ impl AuraAgent {
         let last_sync = None; // TODO: Implement through config effects
 
         Ok(DeviceInfo {
-            device_id: self.device_id,
+            authority_id: self.authority_id,
             account_id: config.account_id,
-            device_name: format!("Device-{}", self.device_id.0), // TODO: Store in journal as CRDT fact
+            device_name: format!("Authority-{}", self.authority_id.0), // TODO: Store in journal as CRDT fact
             hardware_security,
             attestation_available,
             last_sync,
@@ -250,9 +281,9 @@ impl AuraAgent {
 
     /// Update configuration through effects
     pub async fn update_config(&self, config: AgentConfig) -> AgentResult<()> {
-        // Validate device ID matches
-        if config.device_id != self.device_id {
-            return Err(AuraError::invalid("Device ID mismatch"));
+        // Validate authority ID matches
+        if config.authority_id != self.authority_id {
+            return Err(AuraError::invalid("Authority ID mismatch"));
         }
 
         // Serialize config
@@ -261,7 +292,7 @@ impl AuraAgent {
 
         // Store through effects
         let effects = self.core_effects.read().await;
-        let config_key = format!("agent/config/{}", self.device_id.0);
+        let config_key = format!("agent/config/{}", self.authority_id.0);
         StorageEffects::store(&*effects, &config_key, config_bytes)
             .await
             .map_err(|e| AuraError::internal(format!("Failed to store config: {}", e)))?;
@@ -274,7 +305,7 @@ impl AuraAgent {
 
         ConsoleEffects::log_debug(
             &*effects,
-            &format!("Saved config for device {}", self.device_id),
+            &format!("Saved config for authority {}", self.authority_id),
         )
         .await
         .ok();
@@ -364,14 +395,22 @@ impl AuraAgent {
     }
 
     /// Replace the administrator for an account (stub implementation).
+    ///
+    /// NOTE: This method takes AuthorityId for the new admin. Internally, it derives
+    /// the DeviceId for the maintenance controller.
+    /// TODO: Refactor MaintenanceController to use AuthorityId
     pub async fn replace_admin(
         &self,
         account_id: AccountId,
-        new_admin: DeviceId,
+        new_admin_authority: AuthorityId,
         activation_epoch: u64,
     ) -> AgentResult<()> {
+        // Derive device_id from authority_id for now (1:1 mapping)
+        // TODO: MaintenanceController should be refactored to use AuthorityId
+        let new_admin_device = DeviceId(new_admin_authority.0);
+
         self.maintenance
-            .replace_admin_stub(account_id, new_admin, activation_epoch)
+            .replace_admin_stub(account_id, new_admin_device, activation_epoch)
             .await
     }
 
@@ -395,7 +434,7 @@ impl AuraAgent {
 
     async fn load_or_create_config(&self) -> AgentResult<AgentConfig> {
         let effects = self.core_effects.read().await;
-        let config_key = format!("agent/config/{}", self.device_id.0);
+        let config_key = format!("agent/config/{}", self.authority_id.0);
 
         match StorageEffects::retrieve(&*effects, &config_key).await {
             Ok(Some(bytes)) => {
@@ -406,7 +445,7 @@ impl AuraAgent {
 
                 ConsoleEffects::log_debug(
                     &*effects,
-                    &format!("Loaded config for device {}", self.device_id),
+                    &format!("Loaded config for authority {}", self.authority_id),
                 )
                 .await
                 .ok();
@@ -415,15 +454,15 @@ impl AuraAgent {
             Ok(None) => {
                 // No config exists, create default
                 let config = AgentConfig {
-                    device_id: self.device_id,
+                    authority_id: self.authority_id,
                     account_id: None,
                 };
 
                 ConsoleEffects::log_debug(
                     &*effects,
                     &format!(
-                        "No existing config found, creating default for device {}",
-                        self.device_id
+                        "No existing config found, creating default for authority {}",
+                        self.authority_id
                     ),
                 )
                 .await
@@ -442,7 +481,7 @@ impl AuraAgent {
     async fn initialize_storage(&self, _config: &AgentConfig) -> AgentResult<()> {
         // Verify storage is accessible by performing a test write/read/delete
         let effects = self.core_effects.read().await;
-        let test_key = format!("agent/init_check/{}", self.device_id.0);
+        let test_key = format!("agent/init_check/{}", self.authority_id.0);
         let test_data = b"initialized".to_vec();
 
         // Test write
@@ -466,7 +505,7 @@ impl AuraAgent {
 
         ConsoleEffects::log_debug(
             &*effects,
-            &format!("Storage initialized for device {}", self.device_id),
+            &format!("Storage initialized for authority {}", self.authority_id),
         )
         .await
         .ok();
@@ -480,7 +519,7 @@ impl AuraAgent {
         let effects = self.core_effects.read().await;
         ConsoleEffects::log_debug(
             &*effects,
-            &format!("Session management ready for device {}", self.device_id),
+            &format!("Session management ready for authority {}", self.authority_id),
         )
         .await
         .ok();
@@ -495,34 +534,34 @@ mod tests {
 
     #[aura_test]
     async fn test_agent_creation() -> aura_core::AuraResult<()> {
-        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let authority_id = AuthorityId(uuid::Uuid::from_bytes([0u8; 16]));
         let effects = AuraEffectSystem::new();
-        let agent = AuraAgent::new(effects, device_id);
+        let agent = AuraAgent::new(effects, authority_id);
 
-        assert_eq!(agent.device_id(), device_id);
+        assert_eq!(agent.authority_id(), authority_id);
         Ok(())
     }
 
     #[aura_test]
     async fn test_agent_initialization() -> aura_core::AuraResult<()> {
-        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let authority_id = AuthorityId(uuid::Uuid::from_bytes([0u8; 16]));
         let effects = AuraEffectSystem::new();
-        let agent = AuraAgent::new(effects, device_id);
+        let agent = AuraAgent::new(effects, authority_id);
 
         // Should not panic and should complete successfully
         agent.initialize().await?;
 
         // Should be able to get config after initialization
         let config = agent.get_config().await?;
-        assert_eq!(config.device_id, device_id);
+        assert_eq!(config.authority_id, authority_id);
         Ok(())
     }
 
     #[aura_test]
     async fn test_secure_storage_operations() -> aura_core::AuraResult<()> {
-        let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
+        let authority_id = AuthorityId(uuid::Uuid::from_bytes([0u8; 16]));
         let effects = AuraEffectSystem::new();
-        let agent = AuraAgent::new(effects, device_id);
+        let agent = AuraAgent::new(effects, authority_id);
 
         agent.initialize().await?;
 

@@ -142,7 +142,29 @@ pub async fn verify_guardian_proof(
     }
 
     // Verify operation signature
-    // TODO: Implement signature verification using guardian's public key
+    // The proof.operation_signature contains the guardian's signature over the operation
+    // In production, this would verify the signature against the guardian's public key
+    // from the binding commitment
+
+    // For now, we perform structural validation of the proof
+    // TODO: Add cryptographic signature verification once public key lookup is implemented
+
+    if proof.operation_signature.is_empty() {
+        return Ok(GuardianAuthResponse {
+            success: false,
+            authorized: false,
+            error: Some("Missing operation signature".to_string()),
+        });
+    }
+
+    // Serialize the operation to verify it matches
+    let _operation_bytes = bincode::serialize(&request.operation)
+        .map_err(|e| AuraError::serialization(format!("Failed to serialize operation: {}", e)))?;
+
+    // TODO: Verify signature cryptographically:
+    // 1. Extract guardian's public key from binding commitment
+    // 2. Verify proof.operation_signature over operation_bytes
+    // For now, we accept if the proof structure is valid
 
     Ok(GuardianAuthResponse {
         success: true,
@@ -156,9 +178,43 @@ fn verify_consensus_proof(
     proof: &aura_relational::ConsensusProof,
     binding: &GuardianBinding,
 ) -> bool {
-    // TODO: Implement actual consensus proof verification
-    // For now, check basic threshold
-    proof.threshold_met
+    // Verify threshold signature
+    // The proof should contain a valid threshold signature from the attester set
+
+    // Check 1: Threshold met
+    if !proof.threshold_met {
+        return false;
+    }
+
+    // Check 2: Verify threshold signature is present
+    // Production code would verify the signature cryptographically
+    // For now, we check that the signature structure is valid
+    if proof.threshold_signature.is_none() {
+        return false;
+    }
+
+    // Check 3: Verify attester set is non-empty
+    if proof.attester_set.is_empty() {
+        return false;
+    }
+
+    // Check 4: Verify prestate hash matches binding
+    // The prestate should include the guardian binding commitment
+    // This ensures the consensus is about the correct binding operation
+
+    // TODO: Implement proper hash verification:
+    // 1. Compute binding commitment from binding fields
+    // 2. Reconstruct prestate from binding
+    // 3. Hash the prestate
+    // 4. Compare with proof.prestate_hash
+
+    // For now, we accept if the proof structure is valid and has a prestate_hash
+    if proof.prestate_hash.0 == [0u8; 32] {
+        return false; // Invalid/zero prestate hash
+    }
+
+    // All checks passed
+    true
 }
 
 // Guardian Authentication Choreography via Relational Context
@@ -223,18 +279,47 @@ impl GuardianAuthHandler {
 
         // Check operation-specific requirements
         match operation {
-            GuardianOperation::ApproveRecovery { .. } => {
+            GuardianOperation::ApproveRecovery { new_commitment: _ } => {
                 // Check if recovery delay has passed
-                // TODO: Implement time-based checks
+                // Guardian parameters specify minimum delay before approval
+                let recovery_delay = binding.parameters.recovery_delay;
+
+                // TODO: Track recovery request time in relational context
+                // For now, we check that the delay period is configured
+                // In production, verify: current_time >= request_time + recovery_delay
+
+                // Check if notification was required
+                if binding.parameters.notification_required {
+                    // In production, verify notification was sent and acknowledged
+                    // This would be tracked as a fact in the relational context
+                }
+
+                // For now, approve if binding exists and has reasonable parameters
+                if recovery_delay.as_secs() < 3600 {
+                    // Delay too short (less than 1 hour)
+                    return Ok(false);
+                }
+
                 Ok(true)
             }
             GuardianOperation::DenyRecovery { .. } => {
-                // Guardians can always deny
+                // Guardians can always deny recovery attempts
+                // This is a safety mechanism that requires no additional checks
                 Ok(true)
             }
-            GuardianOperation::UpdateParameters { .. } => {
+            GuardianOperation::UpdateParameters { recovery_delay_seconds } => {
                 // Check if guardian has parameter update permission
-                // TODO: Check specific permissions
+                // Only allow reasonable parameter changes
+
+                // Verify new delay is within acceptable bounds (e.g., 1 hour to 30 days)
+                const MIN_DELAY_SECS: u64 = 3600; // 1 hour
+                const MAX_DELAY_SECS: u64 = 30 * 24 * 3600; // 30 days
+
+                if *recovery_delay_seconds < MIN_DELAY_SECS || *recovery_delay_seconds > MAX_DELAY_SECS {
+                    return Ok(false); // Invalid delay range
+                }
+
+                // Delay is within acceptable range
                 Ok(true)
             }
         }

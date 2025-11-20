@@ -151,6 +151,285 @@ A relational context does not reveal its participants. The `ContextId` is opaque
 
 Profile information shared inside a context stays local to that context. Display names and contact attributes do not leave the context journal. Each context forms a separate identity boundary. Authorities can maintain many unrelated relationships without cross linking.
 
-## 9. Summary
+## 9. Implementation Patterns
+
+The implementation in `aura-relational` provides concrete patterns for working with relational contexts.
+
+### Creating and Managing Contexts
+
+```rust
+use aura_relational::{RelationalContext, RelationalFact};
+use aura_core::{AuthorityId, ContextId};
+
+// Create a new guardian-account relational context
+let account_authority = AuthorityId::new();
+let guardian_authority = AuthorityId::new();
+
+let context = RelationalContext::new(vec![account_authority, guardian_authority]);
+
+// Or use a specific context ID
+let context_id = ContextId::new();
+let context = RelationalContext::with_id(
+    context_id,
+    vec![account_authority, guardian_authority],
+);
+
+// Check participation
+assert!(context.is_participant(&account_authority));
+assert!(context.is_participant(&guardian_authority));
+```
+
+### Guardian Binding Pattern
+
+```rust
+use aura_relational::{GuardianBinding, GuardianBindingBuilder, GuardianParameters};
+use std::time::Duration;
+use chrono::Utc;
+
+// Pattern 1: Using the builder (recommended)
+let binding = GuardianBindingBuilder::new()
+    .account(account_commitment)
+    .guardian(guardian_commitment)
+    .recovery_delay(Duration::from_secs(24 * 60 * 60)) // 24 hours
+    .notification_required(true)
+    .expires_at(Utc::now() + chrono::Duration::days(365))
+    .build()?;
+
+// Add to context
+context.add_fact(RelationalFact::GuardianBinding(binding))?;
+
+// Pattern 2: Direct construction
+let params = GuardianParameters {
+    recovery_delay: Duration::from_secs(86400),
+    notification_required: true,
+    expiration: Some(Utc::now() + chrono::Duration::days(365)),
+};
+
+let binding = GuardianBinding {
+    account_commitment: Hash32::from_bytes(&account_authority.to_bytes()),
+    guardian_commitment: Hash32::from_bytes(&guardian_authority.to_bytes()),
+    parameters: params,
+    consensus_proof: None, // Set after consensus completes
+};
+
+context.add_fact(RelationalFact::GuardianBinding(binding))?;
+```
+
+### Recovery Grant Pattern
+
+```rust
+use aura_relational::{RecoveryGrant, RecoveryOp, ConsensusProof};
+
+// Construct a recovery operation
+let recovery_op = RecoveryOp::AddDevice {
+    device_public_key: new_device_pubkey.to_bytes(),
+};
+
+// Create recovery grant (requires consensus proof)
+let grant = RecoveryGrant {
+    account_old: old_tree_commitment,
+    account_new: new_tree_commitment,
+    guardian: guardian_commitment,
+    operation: recovery_op,
+    consensus_proof: consensus_result.proof, // From Aura Consensus
+};
+
+// Add to recovery context
+recovery_context.add_fact(RelationalFact::RecoveryGrant(grant))?;
+
+// Check operation type
+if grant.operation.is_emergency() {
+    // Handle emergency operations immediately
+    execute_emergency_recovery(&grant)?;
+}
+```
+
+### Query Patterns
+
+```rust
+// Query guardian bindings
+let bindings = context.guardian_bindings();
+for binding in bindings {
+    println!("Guardian: {:?}", binding.guardian_commitment);
+    println!("Recovery delay: {:?}", binding.parameters.recovery_delay);
+
+    if let Some(expiration) = binding.parameters.expiration {
+        if expiration < Utc::now() {
+            // Binding has expired
+        }
+    }
+}
+
+// Find specific guardian binding
+if let Some(binding) = context.get_guardian_binding(account_authority) {
+    // Found guardian for this account
+    let guardian_id = binding.guardian_commitment;
+}
+
+// Query recovery grants
+let grants = context.recovery_grants();
+for grant in grants {
+    println!("Operation: {}", grant.operation.description());
+    println!("From: {:?} -> To: {:?}", grant.account_old, grant.account_new);
+}
+```
+
+### Generic Binding Pattern
+
+```rust
+use aura_relational::{GenericBinding, RelationalFact};
+
+// Application-specific binding (e.g., project collaboration)
+let binding_data = serde_json::to_vec(&ProjectMetadata {
+    name: "Alpha Project",
+    role: "Reviewer",
+    permissions: vec!["read", "comment"],
+})?;
+
+let generic = GenericBinding {
+    binding_type: "project_collaboration".to_string(),
+    binding_data,
+    consensus_proof: None,
+};
+
+context.add_fact(RelationalFact::Generic(generic))?;
+```
+
+### Prestate Computation Pattern
+
+```rust
+use aura_relational::Prestate;
+
+// Collect current authority commitments
+let authority_commitments = vec![
+    (account_authority, account_tree_commitment),
+    (guardian_authority, guardian_tree_commitment),
+];
+
+// Compute prestate for consensus
+let prestate = context.compute_prestate(authority_commitments);
+
+// Use prestate in consensus protocol
+let consensus_result = run_consensus(
+    prestate,
+    operation_data,
+    witness_set,
+).await?;
+```
+
+### Journal Commitment Pattern
+
+```rust
+// Get deterministic commitment of current relational state
+let commitment = context.journal.compute_commitment();
+
+// Commitment is deterministic - all replicas compute same value
+// Used for:
+// - Prestate computation in consensus
+// - Context verification
+// - Anti-entropy sync checkpoints
+```
+
+### Integration with Aura Consensus
+
+```rust
+use aura_relational::{run_consensus, ConsensusProof};
+
+// 1. Prepare operation requiring consensus
+let binding = GuardianBindingBuilder::new()
+    .account(account_commitment)
+    .guardian(guardian_commitment)
+    .build()?;
+
+// 2. Compute prestate
+let prestate = context.compute_prestate(authority_commitments);
+
+// 3. Run consensus
+let consensus_proof = run_consensus(
+    prestate,
+    serde_json::to_vec(&binding)?,
+    witness_set,
+).await?;
+
+// 4. Attach proof to fact
+let binding_with_proof = GuardianBinding {
+    consensus_proof: Some(consensus_proof),
+    ..binding
+};
+
+// 5. Add to context
+context.add_fact(RelationalFact::GuardianBinding(binding_with_proof))?;
+```
+
+### Recovery Operation Selection
+
+```rust
+use aura_relational::RecoveryOp;
+
+// Select appropriate recovery operation
+let recovery_op = match recovery_scenario {
+    RecoveryScenario::LostAllDevices => RecoveryOp::ReplaceTree {
+        new_tree_root: new_tree_commitment,
+    },
+    RecoveryScenario::AddNewDevice => RecoveryOp::AddDevice {
+        device_public_key: device_key.to_bytes(),
+    },
+    RecoveryScenario::RemoveCompromised => RecoveryOp::RemoveDevice {
+        leaf_index: compromised_device_index,
+    },
+    RecoveryScenario::ChangeThreshold => RecoveryOp::UpdatePolicy {
+        new_threshold: new_m_of_n.0,
+    },
+    RecoveryScenario::EmergencyCompromise => RecoveryOp::EmergencyRotation {
+        new_epoch: current_epoch + 1,
+    },
+};
+
+// Emergency operations bypass delay
+if recovery_op.is_emergency() {
+    // No recovery_delay applied
+} else {
+    // Wait for binding.parameters.recovery_delay
+}
+```
+
+### Best Practices
+
+**Guardian Configuration:**
+- Use 24-hour minimum recovery delay for security
+- Always require notification unless emergency scenario
+- Set expiration for temporary guardian relationships
+- Rotate guardian bindings periodically
+
+**Recovery Grants:**
+- Always require consensus proof for recovery operations
+- Validate prestate commitments before accepting grants
+- Log all recovery operations for audit trail
+- Emergency operations should be rare and logged prominently
+
+**Generic Bindings:**
+- Document binding_type schema externally
+- Version your binding_data format
+- Include consensus_proof for critical application bindings
+- Keep binding_data size reasonable for sync performance
+
+**Context Management:**
+- Use opaque ContextId - never encode participant info
+- Limit participants to 2-10 authorities for efficiency
+- Separate contexts for different relationship types
+- Garbage collect expired bindings periodically
+
+## 10. Summary
 
 Relational contexts represent cross-authority relationships in Aura. They provide shared state without revealing authority structure. They support guardian configuration, recovery, and application specific collaboration. Aura Consensus ensures strong agreement where needed. Deterministic reduction ensures consistent relational state. Privacy boundaries isolate each relationship from all others.
+
+The implementation provides concrete types (`RelationalContext`, `GuardianBinding`, `RecoveryGrant`) with builder patterns, query methods, and consensus integration. All relational facts are stored in a CRDT journal with deterministic commitment computation.
+
+## 11. Implementation References
+
+- **Core Types**: `aura-relational/src/lib.rs` - RelationalContext, RelationalJournal, RelationalFact
+- **Guardian Types**: `aura-relational/src/guardian.rs` - GuardianBinding, RecoveryGrant, RecoveryOp
+- **Consensus Integration**: `aura-relational/src/consensus.rs` - run_consensus, ConsensusProof
+- **Prestate Computation**: `aura-relational/src/prestate.rs` - Prestate struct and methods
+- **Protocol Usage**: `aura-authenticate/src/guardian_auth_relational.rs` - Guardian authentication
+- **Recovery Flows**: `aura-recovery/src/` - Guardian recovery choreographies

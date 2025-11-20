@@ -146,6 +146,261 @@ Metadata privacy degrades gracefully under increasingly powerful adversaries. A 
 
 The testing metric `metadata_leakage` measures information leakage in bits. For timing, H(actual_send_time | observed_traffic) should exceed 4 bits. For participation, P(user active | observed_neighborhood_traffic) should be within 10% of base rate.
 
+## Practical Leakage Tracking Examples
+
+### Basic LeakageEffects Usage
+
+```rust
+use aura_core::effects::LeakageEffects;
+use aura_core::{AuthorityId, ContextId, ObserverClass, LeakageEvent};
+
+async fn record_message_send(
+    leakage: &impl LeakageEffects,
+    context: ContextId,
+    source: AuthorityId,
+    dest: AuthorityId,
+) -> aura_core::Result<()> {
+    // Record that neighbors can observe encrypted envelope metadata
+    let event = LeakageEvent {
+        source,
+        destination: dest,
+        context_id: context,
+        leakage_amount: 1, // 1 message observed
+        observer_class: ObserverClass::Neighbor,
+        operation: "send_message".to_string(),
+        timestamp_ms: current_timestamp_ms(),
+    };
+
+    leakage.record_leakage(event).await?;
+
+    // Check if we're within budget before continuing
+    let within_budget = leakage.check_leakage_budget(
+        context,
+        ObserverClass::Neighbor,
+        10, // planning to send 10 more messages
+    ).await?;
+
+    if !within_budget {
+        return Err(aura_core::AuraError::privacy_budget_exceeded(
+            "Would exceed neighbor observation budget"
+        ));
+    }
+
+    Ok(())
+}
+```
+
+### LeakageTracker with Policy Settings
+
+```rust
+use aura_mpst::{LeakageTracker, LeakageBudget, LeakageType, UndefinedBudgetPolicy};
+use aura_core::DeviceId;
+use chrono::Utc;
+
+// Secure default: deny undefined budgets
+async fn create_secure_tracker() -> LeakageTracker {
+    let tracker = LeakageTracker::new(); // Uses UndefinedBudgetPolicy::Deny
+
+    // Any leakage without explicit budget will be denied
+    // This is the recommended approach for production
+    tracker
+}
+
+// Legacy permissive mode for backward compatibility
+async fn create_permissive_tracker() -> LeakageTracker {
+    let tracker = LeakageTracker::legacy_permissive();
+
+    // Allows unlimited leakage when no budget is defined
+    // Only use during migration period
+    tracker
+}
+
+// Custom default budget for undefined observers
+async fn create_default_budget_tracker() -> LeakageTracker {
+    let tracker = LeakageTracker::with_undefined_policy(
+        UndefinedBudgetPolicy::DefaultBudget(1000) // 1000 units default
+    );
+
+    // Falls back to 1000 unit budget when undefined
+    tracker
+}
+
+// Typical production setup with explicit budgets
+async fn create_production_tracker() -> LeakageTracker {
+    let mut tracker = LeakageTracker::new();
+    let now = Utc::now();
+
+    // Define budgets for each observer class
+    let neighbor_device = DeviceId::new();
+
+    // Neighbor can observe 100 metadata events per hour
+    let neighbor_budget = LeakageBudget::with_refresh(
+        neighbor_device,
+        LeakageType::Metadata,
+        100,
+        chrono::Duration::hours(1),
+        now,
+    );
+    tracker.add_budget(neighbor_budget);
+
+    // Neighbor can observe 50 timing events per hour
+    let timing_budget = LeakageBudget::with_refresh(
+        neighbor_device,
+        LeakageType::Timing,
+        50,
+        chrono::Duration::hours(1),
+        now,
+    );
+    tracker.add_budget(timing_budget);
+
+    tracker
+}
+```
+
+### Choreography Integration
+
+```rust
+use aura_mpst::{LeakageTracker, LeakageType};
+use aura_core::DeviceId;
+use chrono::Utc;
+
+async fn choreography_with_leakage_tracking(
+    tracker: &mut LeakageTracker,
+    relay: DeviceId,
+) -> aura_core::Result<()> {
+    let now = Utc::now();
+
+    // Before sending through relay, check budget
+    if !tracker.check_leakage(&LeakageType::Metadata, 1, relay) {
+        return Err(aura_core::AuraError::privacy_budget_exceeded(
+            "Relay metadata budget exhausted"
+        ));
+    }
+
+    // Record the leakage
+    tracker.record_leakage(
+        LeakageType::Metadata,
+        1,
+        relay,
+        now,
+        "Message forwarded through relay - envelope metadata visible"
+    )?;
+
+    // Send actual message (budget already charged)
+    // ... transport operation ...
+
+    Ok(())
+}
+```
+
+### Real-World Example: Multi-Hop Forwarding
+
+```rust
+use aura_mpst::{LeakageTracker, LeakageType, LeakageBudget};
+use aura_core::DeviceId;
+use chrono::Utc;
+
+struct RelayChain {
+    tracker: LeakageTracker,
+    relays: Vec<DeviceId>,
+}
+
+impl RelayChain {
+    fn new(relays: Vec<DeviceId>) -> Self {
+        let mut tracker = LeakageTracker::new();
+        let now = Utc::now();
+
+        // Each relay gets limited metadata observation budget
+        for relay in &relays {
+            let budget = LeakageBudget::with_refresh(
+                *relay,
+                LeakageType::Metadata,
+                100, // 100 envelopes per hour per relay
+                chrono::Duration::hours(1),
+                now,
+            );
+            tracker.add_budget(budget);
+        }
+
+        Self { tracker, relays }
+    }
+
+    async fn forward_message(&mut self, message: Vec<u8>) -> aura_core::Result<()> {
+        let now = Utc::now();
+
+        // Check budget for entire relay chain before sending
+        for relay in &self.relays {
+            if !self.tracker.check_leakage(&LeakageType::Metadata, 1, *relay) {
+                return Err(aura_core::AuraError::privacy_budget_exceeded(
+                    format!("Relay {} metadata budget exhausted", relay)
+                ));
+            }
+        }
+
+        // Forward through each hop, recording leakage
+        for relay in &self.relays {
+            self.tracker.record_leakage(
+                LeakageType::Metadata,
+                1,
+                *relay,
+                now,
+                format!("Envelope forwarded through relay {}", relay)
+            )?;
+
+            // Actual network send would happen here
+            // send_to_relay(relay, &message).await?;
+        }
+
+        Ok(())
+    }
+
+    fn get_relay_status(&self) -> Vec<(DeviceId, Option<u64>)> {
+        self.relays.iter().map(|relay| {
+            let remaining = self.tracker.remaining_budget(*relay, &LeakageType::Metadata);
+            (*relay, remaining)
+        }).collect()
+    }
+}
+```
+
+### Integration with Effect System
+
+```rust
+use aura_core::effects::{LeakageEffects, LeakageChoreographyExt};
+use aura_core::{AuthorityId, ContextId, ObserverClass};
+
+async fn protocol_step_with_leakage(
+    effects: &impl LeakageEffects,
+    context: ContextId,
+    source: AuthorityId,
+    dest: AuthorityId,
+    flow_cost: u64,
+) -> aura_core::Result<()> {
+    // Use extension trait for common patterns
+    effects.record_send_leakage(
+        source,
+        dest,
+        context,
+        flow_cost,
+        &[ObserverClass::Neighbor, ObserverClass::InGroup],
+    ).await?;
+
+    // Query leakage history for debugging
+    let history = effects.get_leakage_history(context, None).await?;
+
+    for event in history.iter().take(5) {
+        tracing::debug!(
+            "Leakage: {} units to {:?} observer for {}",
+            event.leakage_amount,
+            event.observer_class,
+            event.operation
+        );
+    }
+
+    Ok(())
+}
+```
+
 ## Implementation Metrics
 
 Aura 1.0 ties privacy guarantees to the FlowBudget system described in [Flow Budget System](003_privacy_and_information_flow.md#flow-budget-system-reference).

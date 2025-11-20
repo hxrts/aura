@@ -156,3 +156,132 @@ The ratchet tree provides fork resistance. Devices refuse to sign under mismatch
 The threshold signature scheme prevents unauthorized updates. All operations must be signed by the required number of devices. An attacker cannot forge signatures or bypass policies.
 
 The tree design ensures that no external party can identify device structure. The only visible values are the epoch and the root commitment.
+
+## 11. Implementation Architecture
+
+The ratchet tree implementation lives in `aura-journal/src/ratchet_tree/` with a 10-file architecture:
+
+### Core Architecture Diagram
+
+```text
+OpLog (CRDT OR-set of AttestedOp) ─────┐
+                                        │
+                                        ↓ reduce()
+                                   TreeState
+                                   (derived, materialized on-demand)
+                                   - epoch: u64
+                                   - root_commitment: Hash32
+                                   - nodes: BTreeMap<NodeIndex, Node>
+                                   - leaves: BTreeMap<LeafId, LeafNode>
+```
+
+### File Organization
+
+| File | Purpose | Key Types/Functions |
+|------|---------|---------------------|
+| `mod.rs` | Module definition and re-exports | Public API surface |
+| `tree_types.rs` | Type definitions (re-exported from aura-core during transition) | Core tree types |
+| `local_types.rs` | Authority-internal device types | `DeviceId`, internal-only types |
+| `attested_ops.rs` | Fact-to-operation conversion | `AttestedOp` ↔ fact conversion |
+| `state.rs` | Tree state representation | `TreeState`, node storage, commitment |
+| `authority_state.rs` | Authority-internal state | Device membership tracking |
+| `operations.rs` | Operation processing pipeline | `TreeOperationProcessor`, `BatchProcessor`, `TreeStateQuery` |
+| `reduction.rs` | Deterministic reduction algorithm | `reduce()`, conflict resolution |
+| `application.rs` | Operation application and verification | `apply_verified()`, `validate_invariants()` |
+| `compaction.rs` | Garbage collection and state cleanup | `compact()`, snapshot optimization |
+
+### Critical Invariants
+
+The implementation enforces these fundamental rules:
+
+1. **TreeState is NEVER stored in the journal** - It is always derived on-demand via reduction
+2. **OpLog is the ONLY persisted tree data** - All tree state can be recovered from the operation log
+3. **Reduction is DETERMINISTIC across all replicas** - Same OpLog always produces same TreeState
+4. **DeviceId is authority-internal only** - Never exposed in public APIs (see `local_types.rs`)
+
+### Data Flow
+
+```text
+1. Tree Operation Initiated
+   ↓
+2. operations.rs: TreeOperationProcessor validates and processes
+   ↓
+3. attested_ops.rs: Convert to AttestedOp fact
+   ↓
+4. Journal stores fact (CRDT OR-set)
+   ↓
+5. reduction.rs: reduce() processes all facts
+   ↓
+6. application.rs: apply_verified() builds TreeState
+   ↓
+7. state.rs: TreeState materialized
+   ↓
+8. authority_state.rs: Internal device view updated
+```
+
+### Reduction Algorithm (reduction.rs)
+
+The reduction function implements the deterministic conflict resolution described in §6:
+
+```rust
+fn reduce(facts: &[AttestedOp]) -> TreeState {
+    // 1. Group ops by parent commitment + epoch
+    // 2. Deterministic winner selection via H(op) ordering
+    // 3. Apply winners in topological (parent) order
+    // 4. Return materialized TreeState
+}
+```
+
+### Operation Processing (operations.rs)
+
+Three key abstractions for operation handling:
+
+- **TreeOperationProcessor**: Validates and processes individual operations
+- **BatchProcessor**: Efficient bulk operation processing
+- **TreeStateQuery**: Query interface for derived tree state
+
+### Compaction (compaction.rs)
+
+Periodic garbage collection removes superseded operations:
+
+```rust
+fn compact(op_log: &[AttestedOp]) -> Vec<AttestedOp> {
+    // 1. Reduce to current TreeState
+    // 2. Identify superseded operations
+    // 3. Return minimal op set that produces same state
+    // 4. Verify join-preserving property
+}
+```
+
+### Integration Points
+
+**From Other Modules:**
+- `aura-core`: Core tree types during transition (will be moved to `aura-journal`)
+- `aura-relational`: Consensus integration for attested operations
+- `aura-protocol`: Guard chain enforcement for tree modifications
+
+**Exports To:**
+- `aura-agent`: Tree state queries for device management
+- `aura-cli`: Authority inspection and debugging
+- `aura-testkit`: Test fixtures and builders
+
+### Migration Notes
+
+The implementation is transitioning from the legacy graph-based approach:
+
+- **Old**: `KeyNode`/`KeyEdge` graph structures stored directly in journal
+- **New**: `AttestedOp` facts with deterministic reduction to `TreeState`
+- **Status**: New implementation complete; old code removed as of Phase 8
+
+### Security Considerations
+
+1. **Structural Opacity**: DeviceId types in `local_types.rs` are never exposed externally
+2. **Fork Resistance**: Devices refuse to sign operations with mismatched parent commitments
+3. **Threshold Enforcement**: All operations require valid threshold signatures in `AttestedOp.agg_sig`
+4. **Deterministic Convergence**: Conflict resolution guarantees eventual consistency
+
+### See Also
+
+- [Journal Architecture](102_journal.md) - Fact-based journal system
+- [Relational Contexts](103_relational_contexts.md) - Cross-authority coordination
+- [Consensus](104_consensus.md) - Aura Consensus for strong agreement

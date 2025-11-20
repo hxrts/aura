@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, Result};
 use aura_agent::{runtime::EffectSystemBuilder, AuraAgent};
-use aura_core::identifiers::{AccountId, DeviceId};
+use aura_core::identifiers::{AccountId, AuthorityId, DeviceId};
 use aura_protocol::effect_traits::ConsoleEffects;
 
 use crate::AdminAction;
@@ -25,7 +25,7 @@ async fn replace_admin(
     activation_epoch: u64,
 ) -> Result<()> {
     let account_id: AccountId = account.parse().map_err(|e: uuid::Error| anyhow!(e))?;
-    let new_admin_id: DeviceId = new_admin.parse().map_err(|e: uuid::Error| anyhow!(e))?;
+    let new_admin_id: AuthorityId = new_admin.parse().map_err(|e: uuid::Error| anyhow!(e))?;
 
     // Create effect system for this operation
     let effects = EffectSystemBuilder::new()
@@ -39,7 +39,10 @@ async fn replace_admin(
         ))
         .await;
 
-    let agent = AuraAgent::new(effects, device_id);
+    // Convert DeviceId to AuthorityId (1:1 mapping for single-device authorities)
+    let authority_id = AuthorityId(device_id.0);
+
+    let agent = AuraAgent::new(effects, authority_id);
     agent
         .replace_admin(account_id, new_admin_id, activation_epoch)
         .await
