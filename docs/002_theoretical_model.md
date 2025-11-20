@@ -336,7 +336,7 @@ L ::=\ & \text{do}\ E\ .\ L && \text{// Perform effect (merge, guard, leak)} \\
 \mid\ & !T\ .\ L && \text{// Send (output)} \\
 \mid\ & ?T\ .\ L && \text{// Receive (input)} \\
 \mid\ & \oplus \{ \ell_i : L_i \}_{i \in I} && \text{// Internal choice (select)} \\
-\mid\ & \& \{ \ell_i : L_i \}_{i \in I} && \text{// External choice (branch)} \\
+\mid\ & \mathbin{\&} \{ \ell_i : L_i \}_{i \in I} && \text{// External choice (branch)} \\
 \mid\ & \mu X.\ L && \text{// Recursion} \\
 \mid\ & X && \text{// Recursion variable} \\
 \mid\ & \text{end} && \text{// Termination}
@@ -344,7 +344,7 @@ L ::=\ & \text{do}\ E\ .\ L && \text{// Perform effect (merge, guard, leak)} \\
 $$
 
 $$
-E ::= \text{merge}(\Delta) \mid \text{check\_caps}(\Gamma) \mid \text{refine\_caps}(\Gamma) \mid \text{record\_leak}(L) \mid \text{noop}
+E ::= \text{merge}(\Delta) \mid \text{check{\_}caps}(\Gamma) \mid \text{refine{\_}caps}(\Gamma) \mid \text{record{\_}leak}(L) \mid \text{noop}
 $$
 
 ### 3.3 Projection Function ($`\pi`$)
@@ -356,8 +356,8 @@ By convention, an annotation $`\triangleright \Delta`$ at a global step induces 
 $$
 \pi_r(r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G) =
 \begin{cases}
-\text{do merge}(\Delta_{\text{send}});\ \text{do check\_caps}(\Gamma);\ \text{do record\_leak}(L);\ !T\ .\ \pi_r(G) & \text{if}\ r = r_1 \\
-\text{do merge}(\Delta_{\text{recv}});\ \text{do refine\_caps}(\Gamma);\ \text{do record\_leak}(L);\ ?T\ .\ \pi_r(G) & \text{if}\ r = r_2 \\
+\text{do merge}(\Delta_{\text{send}});\ \text{do check{\_}caps}(\Gamma);\ \text{do record{\_}leak}(L);\ !T\ .\ \pi_r(G) & \text{if}\ r = r_1 \\
+\text{do merge}(\Delta_{\text{recv}});\ \text{do refine{\_}caps}(\Gamma);\ \text{do record{\_}leak}(L);\ ?T\ .\ \pi_r(G) & \text{if}\ r = r_2 \\
 \pi_r(G) & \text{otherwise}
 \end{cases}
 $$
@@ -365,8 +365,8 @@ $$
 $$
 \pi_r(s \to * : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G) =
 \begin{cases}
-\text{do merge}(\Delta_{\text{send}});\ \text{do check\_caps}(\Gamma);\ \text{do record\_leak}(L);\ !T\ .\ \pi_r(G) & \text{if}\ r = s \\
-\text{do merge}(\Delta_{\text{recv}});\ \text{do refine\_caps}(\Gamma);\ \text{do record\_leak}(L);\ ?T\ .\ \pi_r(G) & \text{otherwise}
+\text{do merge}(\Delta_{\text{send}});\ \text{do check{\_}caps}(\Gamma);\ \text{do record{\_}leak}(L);\ !T\ .\ \pi_r(G) & \text{if}\ r = s \\
+\text{do merge}(\Delta_{\text{recv}});\ \text{do refine{\_}caps}(\Gamma);\ \text{do record{\_}leak}(L);\ ?T\ .\ \pi_r(G) & \text{otherwise}
 \end{cases}
 $$
 
@@ -379,7 +379,7 @@ $$
 $$
 \pi_r(r' \triangleright \{ \ell_i : G_i \}) = \begin{cases}
 \oplus \{ \ell_i : \pi_r(G_i) \} & \text{if}\ r = r'\ \text{(decider)} \\
-\& \{ \ell_i : \pi_r(G_i) \} & \text{if}\ r \neq r'\ \text{(observer)}
+\mathbin{\&} \{ \ell_i : \pi_r(G_i) \} & \text{if}\ r \neq r'\ \text{(observer)}
 \end{cases}
 $$
 
@@ -411,11 +411,11 @@ $$
 $$
 
 $$
-\text{dual}(\oplus \{ \ell_i : L_i \}) = \& \{ \ell_i : \text{dual}(L_i) \}
+\text{dual}(\oplus \{ \ell_i : L_i \}) = \mathbin{\&} \{ \ell_i : \text{dual}(L_i) \}
 $$
 
 $$
-\text{dual}(\& \{ \ell_i : L_i \}) = \oplus \{ \ell_i : \text{dual}(L_i) \}
+\text{dual}(\mathbin{\&} \{ \ell_i : L_i \}) = \oplus \{ \ell_i : \text{dual}(L_i) \}
 $$
 
 $$
