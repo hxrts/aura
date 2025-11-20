@@ -251,7 +251,7 @@ class LeakageEffects m where
 
 The `TimeEffects` and `RandEffects` families support simulation and testing. The `LeakageEffects` family enforces privacy budget constraints.
 
-The `LeakageEffects` implementation is the runtime hook that enforces the $`[\text{leak}: (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})]\`$ annotations introduced in the session grammar. Its concrete implementation lives in `crates/aura-protocol/src/guards/privacy.rs`. The system wires it through the effect system so choreographies cannot exceed configured budgets.
+The `LeakageEffects` implementation is the runtime hook that enforces the $`[\text{leak}: (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})]`$ annotations introduced in the session grammar. Its concrete implementation lives in [`crates/aura-protocol/src/guards/privacy.rs`](../crates/aura-protocol/src/guards/privacy.rs). The system wires it through the effect system so choreographies cannot exceed configured budgets.
 
 ### Information Flow Budgets (Spam + Privacy)
 
@@ -628,10 +628,10 @@ For any trace $`\tau`$ of observable messages:
 
 1. Unlinkability: $`\forall \kappa_1 \neq \kappa_2,\ \tau[\kappa_1 \leftrightarrow \kappa_2] \approx_{\text{ext}} \tau`$
 2. Non-amplification: Information visible to observer class $`o`$ is monotone in authorized capabilities:
-   
-   $$
-   I_o(\tau_1) \leq I_o(\tau_2) \iff C_o(\tau_1) \leq C_o(\tau_2)
-   $$
+
+$$
+I_o(\tau_1) \leq I_o(\tau_2) \iff C_o(\tau_1) \leq C_o(\tau_2)
+$$
 
 3. Leakage Bound: For each observer $`o`$, $`L(\tau, o) \leq \text{Budget}(o)`$.
 4. Flow Budget Soundness (Named):
@@ -647,10 +647,10 @@ Let $`W = (V, E)`$ where vertices are accounts. Edges carry relationship context
 - Each edge $`(A, B)`$ defines a pairwise context $`\text{Ctx}_{AB}`$ with derived keys
 - Delegations are meet-closed elements $`d \in \text{Cap}`$, scoped to contexts
 - The effective capability at $`A`$ is:
-  
-  ```math
-  \text{Caps}_A = (\text{LocalGrants}_A \sqcap \bigcap_{(A,x) \in E} \text{Delegation}_{x \to A}) \sqcap \text{Policy}_A
-  ```
+
+$$
+\text{Caps}_A = (\text{LocalGrants}_A \sqcap \bigcap_{(A,x) \in E} \text{Delegation}_{x \to A}) \sqcap \text{Policy}_A
+$$
 
 WoT invariants:
 - Compositionality: Combining multiple delegations uses $`\sqcap`$ (never widens)
