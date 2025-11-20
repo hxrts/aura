@@ -307,8 +307,8 @@ $$
 $$
 \begin{align*}
 T &::= \text{Unit} \mid \text{Bool} \mid \text{Int} \mid \text{String} \mid \ldots && \text{// Message types} \\
-r &::= \text{Role identifiers (Alice, Bob, \ldots)} \\
-\ell &::= \text{Label identifiers (accept, reject, \ldots)} \\
+r &::= \text{Role identifiers (Alice, Bob, } \ldots \text{)} \\
+\ell &::= \text{Label identifiers (accept, reject, } \ldots \text{)} \\
 \Gamma &::= \text{meet-closed predicate}\ \text{need}(m) \leq \text{caps}_r(\text{ctx}) \\
 \Delta &::= \text{journal delta (facts) merged around the message} \\
 L &::= \text{leakage tuple}\ (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})
