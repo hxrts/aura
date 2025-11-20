@@ -292,28 +292,46 @@ Context isolation prevents cross-context flow. If two contexts $`\text{Ctx}_1 \n
 
 The global choreography type describes the entire protocol from a bird's-eye view. Aura extends vanilla MPST with capability guards, journal coupling, and leakage budgets:
 
-$$
-\begin{align*}
-G ::=\ & r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G && \text{// Point-to-point send} \\
-\mid\ & r \to * : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G && \text{// Broadcast (one-to-many)} \\
-\mid\ & G \parallel G && \text{// Parallel composition} \\
-\mid\ & r \triangleright \{ \ell_i : G_i \}_{i \in I} && \text{// Choice (role r decides)} \\
-\mid\ & \mu X.\ G && \text{// Recursion} \\
-\mid\ & X && \text{// Recursion variable} \\
-\mid\ & \text{end} && \text{// Termination}
-\end{align*}
-$$
+```math
+G ::= r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G \quad \text{(Point-to-point send)}
+```
+```math
+\mid r \to * : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G \quad \text{(Broadcast)}
+```
+```math
+\mid G \parallel G \quad \text{(Parallel composition)}
+```
+```math
+\mid r \triangleright \{ \ell_i : G_i \}_{i \in I} \quad \text{(Choice)}
+```
+```math
+\mid \mu X.\ G \quad \text{(Recursion)}
+```
+```math
+\mid X \quad \text{(Recursion variable)}
+```
+```math
+\mid \text{end} \quad \text{(Termination)}
+```
 
-$$
-\begin{align*}
-T &::= \text{Unit} \mid \text{Bool} \mid \text{Int} \mid \text{String} \mid \ldots && \text{// Message types} \\
-r &::= \text{Role identifiers (Alice, Bob, } \ldots \text{)} \\
-\ell &::= \text{Label identifiers (accept, reject, } \ldots \text{)} \\
-\Gamma &::= \text{meet-closed predicate}\ \text{need}(m) \leq \text{caps}_r(\text{ctx}) \\
-\Delta &::= \text{journal delta (facts) merged around the message} \\
-L &::= \text{leakage tuple}\ (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})
-\end{align*}
-$$
+```math
+T ::= \text{Unit} \mid \text{Bool} \mid \text{Int} \mid \text{String} \mid \ldots \quad \text{(Message types)}
+```
+```math
+r ::= \text{Role identifiers (Alice, Bob, } \ldots \text{)}
+```
+```math
+\ell ::= \text{Label identifiers (accept, reject, } \ldots \text{)}
+```
+```math
+\Gamma ::= \text{meet-closed predicate}\ \text{need}(m) \leq \text{caps}_r(\text{ctx})
+```
+```math
+\Delta ::= \text{journal delta (facts) merged around the message}
+```
+```math
+L ::= \text{leakage tuple}\ (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})
+```
 
 Conventions:
 - $`r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G`$ means "role $`r_1`$ checks $`\Gamma`$, applies $`\Delta`$, records leakage $`L`$, sends $`T`$ to $`r_2`$, then continues with $`G`$."
@@ -330,22 +348,34 @@ Note on $`\Gamma`$: `check_caps` and `refine_caps` are implemented via `Authoriz
 
 After projection, each role executes a local session type (binary protocol) augmented with effect sequencing:
 
-$$
-\begin{align*}
-L ::=\ & \text{do}\ E\ .\ L && \text{// Perform effect (merge, guard, leak)} \\
-\mid\ & !T\ .\ L && \text{// Send (output)} \\
-\mid\ & ?T\ .\ L && \text{// Receive (input)} \\
-\mid\ & \oplus \{ \ell_i : L_i \}_{i \in I} && \text{// Internal choice (select)} \\
-\mid\ & \mathbin{\&} \{ \ell_i : L_i \}_{i \in I} && \text{// External choice (branch)} \\
-\mid\ & \mu X.\ L && \text{// Recursion} \\
-\mid\ & X && \text{// Recursion variable} \\
-\mid\ & \text{end} && \text{// Termination}
-\end{align*}
-$$
+```math
+L ::= \text{do}\ E\ .\ L \quad \text{(Perform effect)}
+```
+```math
+\mid !T\ .\ L \quad \text{(Send)}
+```
+```math
+\mid ?T\ .\ L \quad \text{(Receive)}
+```
+```math
+\mid \oplus \{ \ell_i : L_i \}_{i \in I} \quad \text{(Internal choice)}
+```
+```math
+\mid \mathbin{\&} \{ \ell_i : L_i \}_{i \in I} \quad \text{(External choice)}
+```
+```math
+\mid \mu X.\ L \quad \text{(Recursion)}
+```
+```math
+\mid X \quad \text{(Recursion variable)}
+```
+```math
+\mid \text{end} \quad \text{(Termination)}
+```
 
-$$
-E ::= \text{merge}(\Delta) \mid \text{check{\_}caps}(\Gamma) \mid \text{refine{\_}caps}(\Gamma) \mid \text{record{\_}leak}(L) \mid \text{noop}
-$$
+```math
+E ::= \text{merge}(\Delta) \mid \text{check\_caps}(\Gamma) \mid \text{refine\_caps}(\Gamma) \mid \text{record\_leak}(L) \mid \text{noop}
+```
 
 ### 3.3 Projection Function ($`\pi`$)
 
@@ -353,82 +383,76 @@ The projection function $`\pi_r(G)`$ extracts role $`r`$'s local view from globa
 
 By convention, an annotation $`\triangleright \Delta`$ at a global step induces per-side deltas $`\Delta_{\text{send}}`$ and $`\Delta_{\text{recv}}`$. Unless otherwise specified by a protocol, we take $`\Delta_{\text{send}} = \Delta_{\text{recv}} = \Delta`$ (symmetric journal updates applied at both endpoints).
 
-$$
-\pi_r(r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G) =
-\begin{cases}
-\text{do merge}(\Delta_{\text{send}});\ \text{do check{\_}caps}(\Gamma);\ \text{do record{\_}leak}(L);\ !T\ .\ \pi_r(G) & \text{if}\ r = r_1 \\
-\text{do merge}(\Delta_{\text{recv}});\ \text{do refine{\_}caps}(\Gamma);\ \text{do record{\_}leak}(L);\ ?T\ .\ \pi_r(G) & \text{if}\ r = r_2 \\
-\pi_r(G) & \text{otherwise}
-\end{cases}
-$$
+**Point-to-point projection:**
 
-$$
-\pi_r(s \to * : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G) =
-\begin{cases}
-\text{do merge}(\Delta_{\text{send}});\ \text{do check{\_}caps}(\Gamma);\ \text{do record{\_}leak}(L);\ !T\ .\ \pi_r(G) & \text{if}\ r = s \\
-\text{do merge}(\Delta_{\text{recv}});\ \text{do refine{\_}caps}(\Gamma);\ \text{do record{\_}leak}(L);\ ?T\ .\ \pi_r(G) & \text{otherwise}
-\end{cases}
-$$
+- If $`r = r_1`$ (sender): $`\pi_r(r_1 \to r_2 : T[\ldots]) = \text{do merge}(\Delta_{\text{send}}); \text{do check\_caps}(\Gamma); \text{do record\_leak}(L); !T . \pi_r(G)`$
+- If $`r = r_2`$ (receiver): $`\pi_r(r_1 \to r_2 : T[\ldots]) = \text{do merge}(\Delta_{\text{recv}}); \text{do refine\_caps}(\Gamma); \text{do record\_leak}(L); ?T . \pi_r(G)`$
+- Otherwise: $`\pi_r(r_1 \to r_2 : T[\ldots]) = \pi_r(G)`$
 
-$$
-\pi_r(G_1 \parallel G_2) = \pi_r(G_1) \odot \pi_r(G_2) \quad \text{where}\ \odot\ \text{is merge operator}
-$$
+**Broadcast projection:**
 
-(sequential interleaving if no conflicts)
+- If $`r = s`$ (sender): $`\pi_r(s \to * : T[\ldots]) = \text{do merge}(\Delta_{\text{send}}); \text{do check\_caps}(\Gamma); \text{do record\_leak}(L); !T . \pi_r(G)`$
+- Otherwise (receiver): $`\pi_r(s \to * : T[\ldots]) = \text{do merge}(\Delta_{\text{recv}}); \text{do refine\_caps}(\Gamma); \text{do record\_leak}(L); ?T . \pi_r(G)`$
 
-$$
-\pi_r(r' \triangleright \{ \ell_i : G_i \}) = \begin{cases}
-\oplus \{ \ell_i : \pi_r(G_i) \} & \text{if}\ r = r'\ \text{(decider)} \\
-\mathbin{\&} \{ \ell_i : \pi_r(G_i) \} & \text{if}\ r \neq r'\ \text{(observer)}
-\end{cases}
-$$
+**Parallel composition:**
 
-$$
-\pi_r(\mu X.\ G) = \begin{cases}
-\mu X.\ \pi_r(G) & \text{if}\ \pi_r(G) \neq \text{end} \\
-\text{end} & \text{if}\ \pi_r(G) = \text{end}
-\end{cases}
-$$
+```math
+\pi_r(G_1 \parallel G_2) = \pi_r(G_1) \odot \pi_r(G_2)
+```
 
-$$
+where $`\odot`$ is the merge operator (sequential interleaving if no conflicts)
+
+**Choice projection:**
+
+- If $`r = r'`$ (decider): $`\pi_r(r' \triangleright \{ \ell_i : G_i \}) = \oplus \{ \ell_i : \pi_r(G_i) \}`$
+- If $`r \neq r'`$ (observer): $`\pi_r(r' \triangleright \{ \ell_i : G_i \}) = \mathbin{\&} \{ \ell_i : \pi_r(G_i) \}`$
+
+**Recursion projection:**
+
+- If $`\pi_r(G) \neq \text{end}`$: $`\pi_r(\mu X. G) = \mu X. \pi_r(G)`$
+- If $`\pi_r(G) = \text{end}`$: $`\pi_r(\mu X. G) = \text{end}`$
+
+**Base cases:**
+
+```math
 \pi_r(X) = X
-$$
+```
 
-$$
+```math
 \pi_r(\text{end}) = \text{end}
-$$
+```
 
 ### 3.4 Duality and Safety
 
 For binary session types, duality ensures complementary behavior:
 
-$$
+```math
 \text{dual}(!T\ .\ L) = ?T\ .\ \text{dual}(L)
-$$
+```
 
-$$
+```math
 \text{dual}(?T\ .\ L) = !T\ .\ \text{dual}(L)
-$$
+```
 
-$$
+```math
 \text{dual}(\oplus \{ \ell_i : L_i \}) = \mathbin{\&} \{ \ell_i : \text{dual}(L_i) \}
-$$
+```
 
-$$
+```math
 \text{dual}(\mathbin{\&} \{ \ell_i : L_i \}) = \oplus \{ \ell_i : \text{dual}(L_i) \}
-$$
+```
 
-$$
+```math
 \text{dual}(\mu X.\ L) = \mu X.\ \text{dual}(L)
-$$
+```
 
-$$
+```math
 \text{dual}(X) = X
-$$
+```
 
-$$
+```math
 \text{dual}(\text{end}) = \text{end}
-$$
+```
 
 Property: If Alice's local type is $`L`$, then Bob's local type is $`\text{dual}(L)`$ for their communication to be type-safe.
 
@@ -474,14 +498,14 @@ The system treats computation and communication symmetrically. A step is the sam
 
 ### 3.9 Algebraic Effects and the Interpreter
 
-Aura treats protocol execution as interpretation over an algebraic effect interface. After projecting a global choreography to each role, a polymorphic interpreter walks the role's AST and dispatches each operation to `AuraEffectSystem` via explicit effect handlers. The core actions are exactly the ones defined by the calculus and effect signatures in this document: $\text{merge}$ (facts grow by $\sqcup$), $\text{refine}$ (caps shrink by $\sqcap$), $\text{send}/\text{recv}$ (context-scoped communication), and leakage/budget metering. The interpreter enforces the lattice laws and guard predicates while executing these actions in the order dictated by the session type.
+Aura treats protocol execution as interpretation over an algebraic effect interface. After projecting a global choreography to each role, a polymorphic interpreter walks the role's AST and dispatches each operation to `AuraEffectSystem` via explicit effect handlers. The core actions are exactly the ones defined by the calculus and effect signatures in this document: $`\text{merge}`$ (facts grow by $`\sqcup`$), $`\text{refine}`$ (caps shrink by $`\sqcap`$), $`\text{send}/\text{recv}`$ (context-scoped communication), and leakage/budget metering. The interpreter enforces the lattice laws and guard predicates while executing these actions in the order dictated by the session type.
 
 Because the interface is algebraic, there is a single semantics regardless of execution strategy. This enables two interchangeable modes:
 
 - Static compilation: choreographies lower to direct effect calls with zero runtime overhead.
 - Dynamic interpretation: choreographies execute through the runtime interpreter for flexibility and tooling.
 
-Both preserve the same program structure and checks. The choice becomes an implementation detail. This also captures the computation/communication symmetry. A choreographic step describes a typed transform. If the sender and receiver are the same role, projection collapses the step to a local effect invocation. If they differ, the interpreter performs a network send/receive with the same surrounding $\text{merge}/\text{check\_caps}/\text{refine}/\text{record\_leak}$ sequence. Protocol authors reason about transforms. The interpreter decides locality at projection time.
+Both preserve the same program structure and checks. The choice becomes an implementation detail. This also captures the computation/communication symmetry. A choreographic step describes a typed transform. If the sender and receiver are the same role, projection collapses the step to a local effect invocation. If they differ, the interpreter performs a network send/receive with the same surrounding $`\text{merge}/\text{check\_caps}/\text{refine}/\text{record\_leak}`$ sequence. Protocol authors reason about transforms. The interpreter decides locality at projection time.
 
 ## 4. CRDT Semantic Foundations
 
@@ -624,9 +648,9 @@ Let $`W = (V, E)`$ where vertices are accounts. Edges carry relationship context
 - Delegations are meet-closed elements $`d \in \text{Cap}`$, scoped to contexts
 - The effective capability at $`A`$ is:
   
-  $$
+  ```math
   \text{Caps}_A = (\text{LocalGrants}_A \sqcap \bigcap_{(A,x) \in E} \text{Delegation}_{x \to A}) \sqcap \text{Policy}_A
-  $$
+  ```
 
 WoT invariants:
 - Compositionality: Combining multiple delegations uses $`\sqcap`$ (never widens)
@@ -655,9 +679,9 @@ $$
 
 When executed, each role $`\rho`$ instantiates a handler:
 
-$$
+```math
 \text{handle protocol}(G, \rho)\ \text{with}\ \{\text{on\_send}, \text{on\_recv}, \text{on\_merge}, \text{on\_refine}\}
-$$
+```
 
 Handlers compose algebraically over $`(F, C)`$ by distributing operations over semilattice state transitions. This yields an *effect runtime* capable of:
 
