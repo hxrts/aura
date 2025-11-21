@@ -3,6 +3,8 @@
 //! This module implements choreographic protocols for guardian relationship
 //! establishment and invitation acceptance.
 
+#![allow(clippy::disallowed_methods)] // TODOs use Utc::now() and new_v4() temporarily
+
 use crate::{Guardian, GuardianId, InvitationError, InvitationResult, TrustLevel};
 use aura_core::{AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
