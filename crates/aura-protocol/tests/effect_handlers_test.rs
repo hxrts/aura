@@ -29,7 +29,7 @@ async fn test_composite_handler_implements_all_effects() {
     let crypto_effect: &dyn CryptoEffects = &handler;
     let time_effect: &dyn TimeEffects = &handler;
     let _console_effect: &dyn ConsoleEffects = &handler;
-    let _ledger_effect: &dyn LedgerEffects = &handler;
+    let _effect_api_effect: &dyn EffectApiEffects = &handler;
     let _choreographic_effect: &dyn ChoreographicEffects = &handler;
 
     // Basic smoke tests to ensure traits are working
@@ -228,11 +228,11 @@ async fn test_console_effects() {
     // Note: emit_event method not available on RealConsoleHandler - skip for now
 }
 
-/// Test ledger effects (disabled - MemoryLedgerHandler not yet available)
+/// Test effect_api effects (disabled - MemoryLedgerHandler not yet available)
 #[tokio::test]
-async fn test_ledger_effects() {
+async fn test_effect_api_effects() {
     // Skip test since MemoryLedgerHandler implementation is not yet complete
-    println!("Ledger effects test skipped - handler not yet implemented");
+    println!("Effect API effects test skipped - handler not yet implemented");
     // TODO: Re-enable when MemoryLedgerHandler is fully implemented
 }
 

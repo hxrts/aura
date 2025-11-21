@@ -43,6 +43,9 @@
 pub mod agent;
 pub mod authority;
 pub mod authorization;
+pub mod biometric;
+pub mod bloom;
+pub mod capability;
 pub mod chaos;
 pub mod console;
 pub mod crypto;
@@ -52,6 +55,7 @@ pub mod migration; // Empty module - migration complete
 pub mod network;
 pub mod random;
 pub mod reliability;
+pub mod secure;
 pub mod storage;
 pub mod supertraits;
 pub mod system;
@@ -61,12 +65,23 @@ pub mod time;
 // Re-export core effect traits
 pub use agent::{
     AgentEffects, AgentHealthStatus, AuthMethod, AuthenticationEffects, AuthenticationResult,
-    BiometricType, ConfigError, ConfigValidationError, ConfigurationEffects, CredentialBackup,
-    DeviceConfig, DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
+    ConfigError, ConfigValidationError, ConfigurationEffects, CredentialBackup, DeviceConfig,
+    DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
     SessionManagementEffects, SessionMessage, SessionRole, SessionStatus, SessionType,
 };
 pub use authority::{AuthorityEffects, AuthorityRelationalEffects, RelationalEffects};
 pub use authorization::{AuthorizationEffects, AuthorizationError};
+pub use biometric::{
+    BiometricCapability, BiometricConfig, BiometricEffects, BiometricEnrollmentResult,
+    BiometricError, BiometricSecurityLevel, BiometricStatistics, BiometricType,
+    BiometricVerificationResult,
+};
+pub use bloom::{BloomConfig, BloomEffects, BloomError, BloomFilter};
+pub use capability::{
+    CapabilityConfig, CapabilityEffects, CapabilityError, CapabilityStatistics,
+    CapabilityTokenFormat, CapabilityTokenInfo, CapabilityTokenRequest,
+    CapabilityVerificationResult, TokenStatus, VerificationLevel,
+};
 pub use chaos::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
 pub use console::ConsoleEffects;
 pub use crypto::{CryptoEffects, CryptoError};
@@ -92,6 +107,9 @@ pub use reliability::{
     RetryContext,
     RetryPolicy,
     RetryResult,
+};
+pub use secure::{
+    SecureStorageCapability, SecureStorageEffects, SecureStorageError, SecureStorageLocation,
 };
 pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
 pub use supertraits::{

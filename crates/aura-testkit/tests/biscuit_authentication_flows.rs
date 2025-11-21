@@ -5,7 +5,7 @@
 //! and authorization enforcement throughout the authentication lifecycle.
 
 use aura_core::{AccountId, DeviceId};
-use aura_protocol::authorization::biscuit_bridge::BiscuitAuthorizationBridge;
+use aura_protocol::authorization::BiscuitAuthorizationBridge;
 use aura_testkit::{
     create_multi_device_scenario, create_test_fixture, BiscuitTestFixture, TestFixture,
 };

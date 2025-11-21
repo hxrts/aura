@@ -3,7 +3,7 @@
 //! Tests the new BiscuitAuthorizationBridge implementation that provides
 //! cryptographic token verification and Datalog policy evaluation.
 
-use aura_core::{AuthorityId, ContextId, DeviceId};
+use aura_core::{AuthorityId, ContextId, identifiers::DeviceId};
 use aura_protocol::authorization::BiscuitAuthorizationBridge;
 use aura_wot::{AccountAuthority, AuthorityOp, BiscuitTokenManager, ContextOp, ResourceScope};
 use biscuit_auth::PublicKey;

@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 //! Journal synchronization protocol
 //!
 //! Provides complete end-to-end journal synchronization using CRDT semantics
@@ -40,14 +42,13 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::{sync_biscuit_guard_error, sync_session_error, sync_timeout_error, SyncResult};
+use crate::core::{sync_session_error, sync_timeout_error, SyncResult};
 use crate::infrastructure::RetryPolicy;
 use crate::protocols::anti_entropy::{AntiEntropyConfig, AntiEntropyProtocol, JournalDigest};
 use aura_core::effects::{JournalEffects, NetworkEffects};
-use aura_core::{AccountId, AttestedOp, DeviceId, Journal};
-use aura_protocol::guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
-use aura_wot::{BiscuitTokenManager, ResourceScope};
-use biscuit_auth::Biscuit;
+use aura_core::{AccountId, AttestedOp, DeviceId};
+use aura_protocol::guards::BiscuitGuardEvaluator;
+use aura_wot::BiscuitTokenManager;
 use futures;
 
 // =============================================================================

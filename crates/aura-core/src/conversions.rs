@@ -126,8 +126,6 @@ pub fn cap_to_journal(cap: &Cap) -> (String, String) {
 
 #[cfg(test)]
 mod cap_conversion_tests {
-    use super::*;
-
     // TODO: These tests use the old Cap API that was removed during authority-centric refactoring
     // They need to be rewritten to test the new Biscuit-based authorization system
 

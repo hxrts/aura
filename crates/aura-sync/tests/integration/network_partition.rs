@@ -19,7 +19,7 @@ async fn test_partition_detection() -> AuraResult<()> {
     let group2 = vec![fixture.devices[2], fixture.devices[3]];
     let isolated = fixture.devices[4];
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("partition_detection")
         .await?;
 
@@ -68,7 +68,7 @@ async fn test_partition_detection() -> AuraResult<()> {
         println!("Operations queued during partition");
         tokio::time::sleep(Duration::from_millis(300)).await;
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -80,7 +80,7 @@ async fn test_partition_detection() -> AuraResult<()> {
     // Allow session to handle partition state
     let session_result = timeout(
         Duration::from_secs(30),
-        fixture.wait_for_session_completion(session_id, Duration::from_secs(120)),
+        fixture.wait_for_session_completion(&session, Duration::from_secs(120)),
     )
     .await;
 
@@ -104,7 +104,7 @@ async fn test_split_brain_prevention() -> AuraResult<()> {
     let partition2 = vec![fixture.devices[2], fixture.devices[3]];
     // Device 4 is isolated (cannot participate in either partition)
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("split_brain_prevention")
         .await?;
 
@@ -138,7 +138,7 @@ async fn test_split_brain_prevention() -> AuraResult<()> {
         println!("Read-only operations may continue within partitions");
         tokio::time::sleep(Duration::from_millis(300)).await;
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -150,7 +150,7 @@ async fn test_split_brain_prevention() -> AuraResult<()> {
     // Session should remain blocked due to lack of quorum
     let session_result = timeout(
         Duration::from_secs(30),
-        fixture.wait_for_session_completion(session_id, Duration::from_secs(60)),
+        fixture.wait_for_session_completion(&session, Duration::from_secs(60)),
     )
     .await;
 
@@ -173,7 +173,7 @@ async fn test_majority_partition_operation() -> AuraResult<()> {
     let majority_partition = vec![fixture.devices[0], fixture.devices[1], fixture.devices[2]]; // 3/5
     let minority_partition = vec![fixture.devices[3], fixture.devices[4]]; // 2/5
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("majority_partition")
         .await?;
 
@@ -210,7 +210,7 @@ async fn test_majority_partition_operation() -> AuraResult<()> {
         println!("Minority devices: queueing operations for partition healing");
         tokio::time::sleep(Duration::from_millis(200)).await;
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -220,7 +220,7 @@ async fn test_majority_partition_operation() -> AuraResult<()> {
     );
 
     fixture
-        .wait_for_session_completion(session_id, Duration::from_secs(120))
+        .wait_for_session_completion(&session, Duration::from_secs(120))
         .await?;
 
     Ok(())
@@ -235,7 +235,7 @@ async fn test_partition_during_active_sync() -> AuraResult<()> {
     let device2 = fixture.devices[1];
     let device3 = fixture.devices[2];
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("partition_during_sync")
         .await?;
 
@@ -271,7 +271,7 @@ async fn test_partition_during_active_sync() -> AuraResult<()> {
         println!("Each partition maintains internal consistency");
         tokio::time::sleep(Duration::from_millis(400)).await;
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -283,7 +283,7 @@ async fn test_partition_during_active_sync() -> AuraResult<()> {
     // Session might complete with partial success
     let session_result = timeout(
         Duration::from_secs(45),
-        fixture.wait_for_session_completion(session_id, Duration::from_secs(150)),
+        fixture.wait_for_session_completion(&session, Duration::from_secs(150)),
     )
     .await;
 
@@ -301,7 +301,7 @@ async fn test_partition_during_active_sync() -> AuraResult<()> {
 async fn test_cascading_partition_failures() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("cascading_failures")
         .await?;
 
@@ -382,7 +382,7 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
         println!("All devices in safe mode - awaiting partition healing");
         tokio::time::sleep(Duration::from_millis(400)).await;
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -394,7 +394,7 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
     // Session should fail due to loss of quorum
     let session_result = timeout(
         Duration::from_secs(30),
-        fixture.wait_for_session_completion(session_id, Duration::from_secs(60)),
+        fixture.wait_for_session_completion(&session, Duration::from_secs(60)),
     )
     .await;
 
@@ -415,7 +415,7 @@ async fn test_flapping_network_partition() -> AuraResult<()> {
     let device1 = fixture.devices[0];
     let device2 = fixture.devices[1];
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("flapping_network")
         .await?;
 
@@ -460,7 +460,7 @@ async fn test_flapping_network_partition() -> AuraResult<()> {
         }
 
         println!("Network stabilized after flapping");
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -470,7 +470,7 @@ async fn test_flapping_network_partition() -> AuraResult<()> {
     );
 
     fixture
-        .wait_for_session_completion(session_id, Duration::from_secs(200))
+        .wait_for_session_completion(&session, Duration::from_secs(200))
         .await?;
 
     // Verify final consistency after network stabilized
@@ -488,7 +488,7 @@ async fn test_flapping_network_partition() -> AuraResult<()> {
 async fn test_partial_connectivity_partition() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("partial_connectivity")
         .await?;
 
@@ -549,7 +549,7 @@ async fn test_partial_connectivity_partition() -> AuraResult<()> {
         println!("Routing operations through available connectivity paths");
         tokio::time::sleep(Duration::from_millis(800)).await;
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -560,7 +560,7 @@ async fn test_partial_connectivity_partition() -> AuraResult<()> {
 
     // Session might succeed with degraded performance
     fixture
-        .wait_for_session_completion(session_id, Duration::from_secs(180))
+        .wait_for_session_completion(&session, Duration::from_secs(180))
         .await?;
 
     Ok(())
@@ -574,7 +574,7 @@ async fn test_partition_detection_accuracy() -> AuraResult<()> {
     let device1 = fixture.devices[0];
     let device2 = fixture.devices[1];
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("detection_accuracy")
         .await?;
 
@@ -631,7 +631,7 @@ async fn test_partition_detection_accuracy() -> AuraResult<()> {
         println!("System should now detect actual partition");
         tokio::time::sleep(Duration::from_millis(1500)).await;
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -643,7 +643,7 @@ async fn test_partition_detection_accuracy() -> AuraResult<()> {
     // Session may fail due to final partition
     let session_result = timeout(
         Duration::from_secs(30),
-        fixture.wait_for_session_completion(session_id, Duration::from_secs(120)),
+        fixture.wait_for_session_completion(&session, Duration::from_secs(120)),
     )
     .await;
 

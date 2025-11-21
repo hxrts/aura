@@ -5,7 +5,7 @@ This document describes Aura’s system architecture and implementation patterns
 Formal definitions live in [Theoretical Model](002_theoretical_model.md) and the specs for:
 
 * Relational Identity
-* Ratchet Tree Semilattice
+* commitment tree Semilattice
 * Journal System
 * Aura Consensus
 
@@ -13,7 +13,7 @@ Formal definitions live in [Theoretical Model](002_theoretical_model.md) and the
 
 Aura’s system architecture implements the mathematical foundations through practical patterns that avoid deadlocks and ensure distributed correctness. The architecture centers on:
 
-* Authorities and their ratchet-tree-based internal state
+* Authorities and their commitment tree-based internal state
 * Journals as CRDT fact stores per authority and per RelationalContext
 * RelationalContexts for cross-authority relationships
 * Aura Consensus for single-operation strong agreement where CRDT alone is insufficient
@@ -522,7 +522,7 @@ graph LR
 
 Flow:
 
-1. Authentication uses public keys from authority state (ratchet tree + reduction) to verify signatures.
+1. Authentication uses public keys from authority state (commitment tree + reduction) to verify signatures.
 2. Authorization evaluates Biscuit tokens against the requested action and context restrictions.
 3. Guard chain enforces `need(message) ≤ Caps(ctx)` and `headroom(ctx, cost)` at send sites.
 
@@ -594,7 +594,7 @@ Leakage budgets tag operations with privacy cost. Policies bound total cost per 
 Crates are layered:
 
 * `aura-core` – traits, identifiers, semilattices.
-* Domain crates – ratchet, journal, relational.
+* Domain crates – commitment, journal, relational.
 * `aura-effects` – stateless handlers.
 * `aura-protocol` – orchestration, guard chains, Aura Consensus integration.
 * Feature crates – FROST, DKD, recovery, sync.
@@ -656,7 +656,7 @@ CRDT integration always composes from `JoinSemilattice` traits upwards, never by
 
 * Theoretical Foundations
 * Relational Identity Specification
-* Ratchet Tree Semilattice Specification
+* commitment tree Semilattice Specification
 * Revised Journal Specification
 * Authorities and RelationalContexts Specification
 
@@ -672,26 +672,26 @@ Original approach:
 
 * Treated devices, accounts, guardians, groups, and identities as first-class roles.
 * Mixed device-level identity with system logic.
-* Guardians appeared as leaf roles in ratchet trees.
+* Guardians appeared as leaf roles in commitment trees.
 
 Revised approach:
 
 * Identity is relational and contextual, not global.
 * Authorities are opaque cryptographic actors.
-* Guardianship and recovery moved entirely to RelationalContexts, not ratchet tree roles.
+* Guardianship and recovery moved entirely to RelationalContexts, not commitment tree roles.
 * No device-level public identifiers surface outside authorities.
 
-### 2. Ratchet Tree Reframed as a Pure Intra-Authority Semilattice
+### 2. commitment tree Reframed as a Pure Intra-Authority Semilattice
 
 Original approach:
 
-* Ratchet tree integrated guardian leaves.
+* commitment tree integrated guardian leaves.
 * Device IDs in tree ops.
 * Tree updates tied to device-level signers.
 
 Revised approach:
 
-* Ratchet tree contains only device leaves and threshold policies.
+* commitment tree contains only device leaves and threshold policies.
 * It is explicitly a semilattice of AttestedOps.
 * Guardians and cross-authority relationships removed from the tree.
 
@@ -784,7 +784,7 @@ Original approach:
 Revised approach has clear boundaries:
 
 * `aura-core` = traits and types
-* domain crates = ratchet/journal/relational logic
+* domain crates = commitment/journal/relational logic
 * `aura-effects` = stateless single-party handlers
 * `aura-protocol` = multi-party orchestration + consensus
 * feature crates = DKD, FROST, recovery
@@ -795,7 +795,7 @@ Revised approach has clear boundaries:
 
 Original approach:
 
-* Guardians encoded directly in ratchet tree.
+* Guardians encoded directly in commitment tree.
 * Recovery tied to guardian leaves.
 
 Revised approach:

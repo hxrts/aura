@@ -3,7 +3,8 @@
 //! This module implements distributed session ticket creation and validation
 //! using choreographic programming principles with the rumpsteak-aura framework.
 
-use crate::{AccountId, AuraError, AuraResult, BiscuitGuardEvaluator, DeviceId, ResourceScope};
+use crate::{AccountId, AuraError, AuraResult, BiscuitGuardEvaluator, ResourceScope};
+use aura_core::DeviceId;
 use aura_core::TimeEffects;
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
@@ -268,7 +269,7 @@ where
 
         // Generate session ID
         let session_id = uuid::Uuid::new_v4().to_string();
-        
+
         // Create session request for choreography
         let session_request = SessionRequest {
             device_id: request.device_id,
@@ -280,7 +281,10 @@ where
         };
 
         // Execute session creation choreography
-        match self.execute_session_creation_choreography(&session_request).await {
+        match self
+            .execute_session_creation_choreography(&session_request)
+            .await
+        {
             Ok(session_ticket) => {
                 tracing::info!("Session created successfully: {}", session_id);
                 Ok(SessionCreationResponse {
@@ -309,10 +313,10 @@ where
     ) -> AuraResult<SessionTicket> {
         // Phase 1: Submit session request
         tracing::debug!("Phase 1: Submitting session request");
-        
+
         // Validate the session request
         self.validate_session_request(request).await?;
-        
+
         // Phase 2: Simulate approval request to approver
         let approval_request = ApprovalRequest {
             session_id: request.session_id.clone(),
@@ -321,10 +325,10 @@ where
             requested_scope: request.requested_scope.clone(),
             duration_seconds: request.duration_seconds,
         };
-        
+
         // Phase 3: Simulate approval response
         let approval_response = self.simulate_approval_process(&approval_request).await?;
-        
+
         // Phase 4: Create session ticket based on approval
         match approval_response.approved {
             true => {
@@ -332,12 +336,10 @@ where
                 tracing::debug!("Session creation successful for {}", request.session_id);
                 Ok(session_ticket)
             }
-            false => {
-                Err(AuraError::invalid(&format!(
-                    "Session creation rejected: {}", 
-                    approval_response.reason
-                )))
-            }
+            false => Err(AuraError::invalid(&format!(
+                "Session creation rejected: {}",
+                approval_response.reason
+            ))),
         }
     }
 
@@ -347,12 +349,12 @@ where
         if request.duration_seconds > 86400 {
             return Err(AuraError::invalid("Session duration too long"));
         }
-        
+
         // Validate device ID is not empty
         if request.device_id.to_string().is_empty() {
             return Err(AuraError::invalid("Device ID cannot be empty"));
         }
-        
+
         // Check authorization if we have a guard evaluator
         if let Some(_guard_evaluator) = &self.guard_evaluator {
             // For validation, we'll create a minimal token if we have a token manager
@@ -361,17 +363,20 @@ where
                 tracing::debug!("Token validation would occur here in full implementation");
             }
         }
-        
+
         Ok(())
     }
 
     /// Simulate the approval process (in real implementation, this would involve network communication)
-    async fn simulate_approval_process(&self, _request: &ApprovalRequest) -> AuraResult<ApprovalResponse> {
+    async fn simulate_approval_process(
+        &self,
+        _request: &ApprovalRequest,
+    ) -> AuraResult<ApprovalResponse> {
         // In a real implementation, this would:
         // 1. Send approval request to designated approvers
         // 2. Wait for responses
         // 3. Apply approval policy (e.g., threshold voting)
-        
+
         // For simulation, we'll auto-approve reasonable requests
         Ok(ApprovalResponse {
             session_id: _request.session_id.clone(),
@@ -385,12 +390,12 @@ where
     async fn create_session_ticket(&self, request: &SessionRequest) -> AuraResult<SessionTicket> {
         let current_time = TimeEffects::current_timestamp(self.effects.as_ref()).await;
         let expiry_time = current_time + request.duration_seconds;
-        
+
         // Generate random nonce
         let nonce_bytes = self.effects.random_bytes(16).await;
         let mut nonce = [0u8; 16];
         nonce.copy_from_slice(&nonce_bytes[..16]);
-        
+
         let session_ticket = SessionTicket {
             session_id: uuid::Uuid::parse_str(&request.session_id)
                 .unwrap_or_else(|_| uuid::Uuid::new_v4()),
@@ -400,13 +405,13 @@ where
             expires_at: expiry_time,
             nonce,
         };
-        
+
         tracing::info!(
             "Created session ticket for device {} with expiry at {}",
             request.device_id,
             expiry_time
         );
-        
+
         Ok(session_ticket)
     }
 
@@ -422,7 +427,7 @@ mod tests {
     use aura_core::test_utils::test_device_id;
     use aura_core::{AccountId, DeviceId};
     use aura_macros::aura_test;
-    use aura_protocol::LedgerEffects;
+    use aura_protocol::EffectApiEffects;
     use aura_verify::session::SessionScope;
     use aura_verify::VerifiedIdentity;
 
@@ -464,7 +469,7 @@ mod tests {
     async fn test_coordinator_creation() -> aura_core::AuraResult<()> {
         let device_id = test_device_id(2);
         let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-        let coordinator = SessionCreationCoordinator::new(fixture.effect_system());
+        let coordinator = SessionCreationCoordinator::new(fixture.effect_system_arc());
 
         // Just verify the coordinator was created successfully
         // Test passes if we can create and access the coordinator

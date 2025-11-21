@@ -8,7 +8,7 @@ These specifications formally model the key protocols and invariants in the Aura
 
 ### Core Infrastructure
 - **session_types.qnt**: Session type system providing compile-time safety for distributed protocols
-- **journal_ledger.qnt**: CRDT-based event ledger with threshold signatures and causal ordering
+- **journal_effect_api.qnt**: CRDT-based event effect_api with threshold signatures and causal ordering
 
 ### Cryptographic Protocols
 - **dkd_protocol.qnt**: Deterministic Key Derivation (DKD) for threshold identity derivation
@@ -56,7 +56,7 @@ To check these specifications with Quint:
 quint verify session_types.qnt
 quint verify dkd_protocol.qnt
 quint verify frost_protocol.qnt
-quint verify journal_ledger.qnt
+quint verify journal_effect_api.qnt
 quint verify transport_sbb.qnt
 quint verify groups_cgka.qnt
 

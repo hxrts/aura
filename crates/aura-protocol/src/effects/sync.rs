@@ -12,6 +12,7 @@
 
 use async_trait::async_trait;
 use aura_core::{AttestedOp, Hash32};
+ // TODO: Use BloomEffects for real implementation
 // use aura_journal::semilattice::OpLog;  // Temporarily disabled
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -19,12 +20,17 @@ use uuid::Uuid;
 
 /// Bloom filter digest for efficient OpLog comparison
 ///
-/// This is a TODO fix - Simplified representation. A full implementation would use
-/// a proper Bloom filter or rolling hash for space efficiency.
+/// TODO: Replace with BloomEffects-based implementation
+/// Real implementation should use:
+/// ```ignore
+/// bloom_effects.create_bloom_filter(BloomConfig::oplog_sync()).await
+/// bloom_effects.bloom_insert(&mut filter, &op_cid.as_bytes()).await
+/// bloom_effects.bloom_contains(&filter, &cid.as_bytes()).await
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BloomDigest {
-    /// Set of operation CIDs
-    /// TODO fix - In a real implementation, this would be a Bloom filter bit vector
+    /// Set of operation CIDs (placeholder - should be BloomFilter)
+    /// TODO: Replace with `filter: BloomFilter` field
     pub cids: BTreeSet<Hash32>,
 }
 

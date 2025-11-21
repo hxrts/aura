@@ -88,7 +88,7 @@ Testing configuration provides mock implementations that eliminate external depe
 
 ## Identity System
 
-Aura implements threshold identity where accounts are relational identities anchored in the journal. Every device and guardian occupies a leaf in a ratchet tree with threshold policies stored at branches.
+Aura implements threshold identity where accounts are relational identities anchored in the journal. Every device and guardian occupies a leaf in a commitment tree with threshold policies stored at branches.
 
 ### Account Structure
 
@@ -96,7 +96,7 @@ Account state is managed through attested tree operations:
 
 ```rust
 use aura_core::{DeviceId, AccountId};
-use aura_journal::ratchet_tree::{TreeSnapshot, DeviceLeaf, GuardianLeaf};
+use aura_journal::commitment tree::{TreeSnapshot, DeviceLeaf, GuardianLeaf};
 
 pub struct AccountState {
     tree_snapshot: TreeSnapshot,

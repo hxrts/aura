@@ -22,7 +22,7 @@
 
 use crate::FrostResult;
 use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature, TreeSigningContext};
-use aura_core::{AccountId, AuraError, DeviceId, SessionId};
+use aura_core::{identifiers::AuthorityId, AccountId, AuraError, SessionId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -86,8 +86,8 @@ pub struct SigningRequest {
 pub struct NonceCommitmentMsg {
     /// Session identifier
     pub session_id: SessionId,
-    /// Signer device ID
-    pub signer_id: DeviceId,
+    /// Signer authority ID
+    pub signer_id: AuthorityId,
     /// FROST nonce commitment
     pub commitment: NonceCommitment,
 }
@@ -97,8 +97,8 @@ pub struct NonceCommitmentMsg {
 pub struct PartialSignatureMsg {
     /// Session identifier
     pub session_id: SessionId,
-    /// Signer device ID
-    pub signer_id: DeviceId,
+    /// Signer authority ID
+    pub signer_id: AuthorityId,
     /// FROST partial signature
     pub signature: PartialSignature,
 }
@@ -111,7 +111,7 @@ pub struct SignatureResult {
     /// Aggregated threshold signature (if successful)
     pub signature: Option<ThresholdSignature>,
     /// List of participating signers
-    pub participants: Vec<DeviceId>,
+    pub participants: Vec<AuthorityId>,
     /// Success indicator
     pub success: bool,
     /// Error message if failed
@@ -125,8 +125,8 @@ pub struct AbortMsg {
     pub session_id: SessionId,
     /// Abort reason
     pub reason: String,
-    /// Device that initiated the abort
-    pub initiator: DeviceId,
+    /// Authority that initiated the abort
+    pub initiator: AuthorityId,
 }
 
 // FROST threshold signing choreography protocol
@@ -267,8 +267,8 @@ impl FrostCrypto {
     pub async fn aggregate_signatures(
         context: &TreeSigningContext,
         message: &[u8],
-        partial_signatures: &HashMap<DeviceId, PartialSignature>,
-        nonce_commitments: &HashMap<DeviceId, NonceCommitment>,
+        partial_signatures: &HashMap<AuthorityId, PartialSignature>,
+        nonce_commitments: &HashMap<AuthorityId, NonceCommitment>,
         config: &ThresholdSigningConfig,
         random_effects: &dyn aura_core::effects::RandomEffects,
     ) -> FrostResult<ThresholdSignature> {
@@ -291,9 +291,7 @@ impl FrostCrypto {
         // Convert commitments to FROST format
         let mut frost_commitments = BTreeMap::new();
         for (signer_id, commitment) in nonce_commitments {
-            let device_bytes = signer_id
-                .to_bytes()
-                .map_err(|_| AuraError::crypto("Invalid device ID bytes"))?;
+            let device_bytes = signer_id.to_bytes();
             let signer_index = (device_bytes[0] % (config.total_signers as u8)) as u16 + 1;
             frost_commitments.insert(signer_index, commitment.clone());
         }
@@ -318,11 +316,9 @@ impl FrostCrypto {
 
         let participating_signers: Vec<u16> = partial_signatures
             .keys()
-            .filter_map(|device_id| {
-                device_id
-                    .to_bytes()
-                    .ok()
-                    .map(|bytes| (bytes[0] % (config.total_signers as u8)) as u16)
+            .map(|device_id| {
+                let bytes = device_id.to_bytes();
+                (bytes[0] % (config.total_signers as u8)) as u16
             })
             .collect();
 
@@ -407,8 +403,8 @@ mod tests {
         assert!(config.validate().is_ok());
 
         // Test that the aggregation would fail with insufficient signatures
-        let partial_signatures: HashMap<DeviceId, PartialSignature> = HashMap::new(); // Empty - insufficient
-        let _nonce_commitments: HashMap<DeviceId, NonceCommitment> = HashMap::new();
+        let partial_signatures: HashMap<AuthorityId, PartialSignature> = HashMap::new(); // Empty - insufficient
+        let _nonce_commitments: HashMap<AuthorityId, NonceCommitment> = HashMap::new();
 
         // This test verifies the validation logic without running actual cryptography
         // which requires a complete DKG ceremony setup

@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
-use aura_core::{AuraError, DeviceId};
+use aura_core::{AuraError, identifiers::DeviceId};
 use aura_effects::handlers::{
     InMemoryStorageHandler, MockCryptoHandler, MockNetworkHandler, MockTimeHandler,
 };

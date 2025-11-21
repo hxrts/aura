@@ -7,9 +7,12 @@
 //!
 //! This crate implements rendezvous application layer:
 //! - `sbb/` - Secret-Branded Broadcasting protocols
-//! - `discovery/` - Privacy-preserving peer discovery
-//! - `messaging/` - Anonymous messaging with relationship isolation
+//! - `crypto/` - Encryption and key management
 //! - `relay/` - Relay coordination and capability-based routing
+//! - `messaging/` - Anonymous messaging with relationship isolation
+//! - `context/` - Context-aware rendezvous system
+//! - `channel/` - Secure channel establishment
+//! - `integration/` - Complete integrated SBB system
 //!
 //! # Design Principles
 //!
@@ -24,93 +27,105 @@
 /// Secret-Branded Broadcasting protocols
 pub mod sbb;
 
-/// Privacy-preserving peer discovery
-pub mod discovery;
-
-/// Anonymous messaging with relationship isolation
-pub mod messaging;
+/// Cryptographic primitives and key management
+pub mod crypto;
 
 /// Relay coordination and capability-based routing
 pub mod relay;
 
-/// Relationship key derivation for SBB encryption
-pub mod relationship_keys;
+/// Anonymous messaging with relationship isolation
+pub mod messaging;
 
-/// Envelope encryption with HPKE and padding
-pub mod envelope_encryption;
+/// Context-aware rendezvous system
+pub mod context;
 
-/// Capability-aware SBB flooding with WoT integration
-pub mod capability_aware_sbb;
+/// Secure channel establishment protocols
+pub mod channel;
 
 /// Complete integrated SBB system
-pub mod integrated_sbb;
+pub mod integration;
 
-/// End-to-end integration tests for SBB system
-#[cfg(test)]
-pub mod integration_tests;
+/// Privacy-preserving peer discovery (legacy, to be refactored)
+pub mod discovery;
 
 /// Rendezvous-specific errors
 pub mod error;
 
-/// Context-aware rendezvous system
-pub mod context_rendezvous;
 
-/// Connection priority management for NAT traversal
-pub mod connection_manager;
+// Keep legacy top-level modules for backward compatibility during transition
+// These will be removed once all imports are updated
+#[doc(hidden)]
+pub use crate::channel::secure as secure_channel;
+#[doc(hidden)]
+pub use crate::context::rendezvous as context_rendezvous;
+#[doc(hidden)]
+pub use crate::crypto::encryption as envelope_encryption;
+#[doc(hidden)]
+pub use crate::crypto::keys as relationship_keys;
+#[doc(hidden)]
+pub use crate::integration::capability_aware as capability_aware_sbb;
+#[doc(hidden)]
+pub use crate::integration::connection as connection_manager;
+#[doc(hidden)]
+pub use crate::integration::sbb_system as integrated_sbb;
+#[doc(hidden)]
+pub use crate::relay::selection as relay_selection;
 
-/// Relay selection heuristics with guardian preference
-pub mod relay_selection;
-
-/// Secure channel establishment protocols
-pub mod secure_channel;
-
-mod crypto;
-
-// Re-export core types
-pub use aura_core::{AccountId, AuraError, AuraResult, Cap, DeviceId, RelationshipId, TrustLevel};
+// Re-export core types from aura-core
+pub use aura_core::{AccountId, AuraError, AuraResult, Cap, RelationshipId, TrustLevel};
 
 // Re-export crypto placeholder types
 pub use crypto::{BlindSignature, SecretBrand, UnlinkableCredential};
 
-// Re-export WoT types for capabilities
-pub use aura_wot::Capability;
+// Re-export capability types from journal
+pub use aura_journal::Capability;
 
-// Re-export main APIs
-pub use capability_aware_sbb::{
-    CapabilityAwareSbbCoordinator, SbbFlowBudget, SbbForwardingPolicy, SbbRelationship,
-    TrustStatistics,
-};
-pub use connection_manager::{
-    ConnectionConfig, ConnectionManager, ConnectionMethod, ConnectionResult,
-};
-pub use discovery::{DiscoveryQuery, DiscoveryService, RendezvousPoint};
-pub use envelope_encryption::{EncryptedEnvelope, EnvelopeEncryption, PaddingStrategy};
-pub use integrated_sbb::{
-    IntegratedSbbSystem, SbbConfig, SbbDiscoveryRequest, SbbDiscoveryResult, SbbSystemBuilder,
-};
-pub use messaging::{
-    MockTransportSender, NetworkTransportSender, SbbMessageType, SbbTransportBridge,
-    TransportMethod, TransportOfferPayload, TransportSender,
-};
-pub use relationship_keys::{
-    derive_test_root_key, RelationshipContext, RelationshipKey, RelationshipKeyManager,
-};
-pub use relay::{
-    RelayCapabilities, RelayCoordinator, RelayNode, RelayStream, StreamFlags, StreamState,
-};
-pub use relay_selection::{
-    RelayCandidate, RelaySelectionConfig, RelaySelectionResult, RelaySelector, RelayType,
-};
+// Re-export SBB types
 pub use sbb::{
     EnvelopeId, FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding, SbbFloodingCoordinator,
+    SBB_MESSAGE_SIZE,
 };
-pub use secure_channel::{
+
+// Re-export crypto types
+pub use crypto::{
+    derive_test_root_key, EncryptedEnvelope, EnvelopeEncryption, PaddingStrategy,
+    RelationshipContext, RelationshipKey, RelationshipKeyManager,
+};
+
+// Re-export relay types
+pub use relay::{
+    RelayCandidate, RelayCapabilities, RelayNode, RelaySelectionConfig, RelaySelectionResult,
+    RelaySelector, RelayStream, RelayType, StreamFlags, StreamState,
+};
+
+// Note: RelayCoordinator and related types are still in the legacy relay.rs file
+// and need to be properly extracted during full refactoring
+
+// Re-export messaging types
+pub use messaging::{
+    MockTransportSender, NetworkConfig, NetworkTransport, NetworkTransportSender, SbbMessageType,
+    SbbTransportBridge, TransportMethod, TransportOfferPayload, TransportSender,
+};
+
+// Re-export channel types
+pub use channel::{
     ChannelConfig, ChannelLifecycleState, ChannelState, HandshakeComplete, HandshakeInit,
     HandshakeResponse, HandshakeResult, KeyRotationRequest, SecureChannelCoordinator,
 };
 
 // Re-export context rendezvous types
-pub use context_rendezvous::{
+pub use context::{
     ContextEnvelope, ContextRendezvousCoordinator, ContextRendezvousDescriptor,
     ContextTransportBridge, ContextTransportOffer, RendezvousReceipt,
 };
+
+// Re-export integration types
+pub use integration::{
+    CapabilityAwareSbbCoordinator, ConnectionConfig, ConnectionManager, ConnectionMethod,
+    ConnectionResult, IntegratedSbbSystem, PunchResult, PunchSession, QuicConfig, SbbConfig,
+    SbbDiscoveryRequest, SbbDiscoveryResult, SbbFlowBudget, SbbForwardingPolicy, SbbRelationship,
+    SbbSystemBuilder, StunClient, StunResult, TrustStatistics,
+};
+
+// Re-export discovery types
+pub use discovery::{DiscoveryQuery, DiscoveryService, RendezvousPoint};

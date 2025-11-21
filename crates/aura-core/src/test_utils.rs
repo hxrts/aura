@@ -8,7 +8,9 @@
 //! of core types for testing purposes.
 
 use crate::hash::hash;
-use crate::{AccountId, DeviceId, SessionId};
+use crate::{AccountId, SessionId};
+use crate::identifiers::DeviceId;
+use crate::identifiers::AuthorityId;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use uuid::Uuid;
 
@@ -29,6 +31,25 @@ pub fn test_device_id(seed: u64) -> DeviceId {
     let hash_bytes = hash(hash_input.as_bytes());
     let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
     DeviceId(Uuid::from_bytes(uuid_bytes))
+}
+
+/// Create a deterministic AuthorityId from a seed
+///
+/// This produces the same AuthorityId for the same seed, enabling reproducible tests.
+///
+/// # Example
+/// ```
+/// use aura_core::test_utils::test_authority_id;
+///
+/// let authority1 = test_authority_id(42);
+/// let authority2 = test_authority_id(42);
+/// assert_eq!(authority1, authority2);
+/// ```
+pub fn test_authority_id(seed: u64) -> AuthorityId {
+    let hash_input = format!("authority-{}", seed);
+    let hash_bytes = hash(hash_input.as_bytes());
+    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    AuthorityId(Uuid::from_bytes(uuid_bytes))
 }
 
 /// Create a deterministic AccountId from a seed
@@ -101,6 +122,16 @@ mod tests {
         assert_eq!(id1, id2);
 
         let id3 = test_device_id(43);
+        assert_ne!(id1, id3);
+    }
+
+    #[test]
+    fn test_authority_id_deterministic() {
+        let id1 = test_authority_id(42);
+        let id2 = test_authority_id(42);
+        assert_eq!(id1, id2);
+
+        let id3 = test_authority_id(43);
         assert_ne!(id1, id3);
     }
 

@@ -19,7 +19,7 @@
 //! }
 //! ```
 
-use aura_core::{AuraError, AuraResult, DeviceId};
+use aura_core::{AuraError, AuraResult, identifiers::DeviceId};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -419,7 +419,7 @@ impl PrivacyContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::DeviceId;
+    use aura_core::identifiers::DeviceId;
 
     #[test]
     fn test_leakage_budget() {

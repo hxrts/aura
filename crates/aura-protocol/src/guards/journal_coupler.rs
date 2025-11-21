@@ -19,10 +19,10 @@
 
 use super::effect_system_trait::GuardEffectSystem;
 use super::ProtocolGuard;
-use aura_core::{AuraResult, Journal, TimeEffects};
+use aura_core::{AuraResult, Journal};
 use aura_mpst::journal::{JournalAnnotation, JournalOpType};
 use serde_json::Value as JsonValue;
-use std::{collections::HashMap, future::Future, time::Instant};
+use std::{collections::HashMap, future::Future};
 use tracing::{debug, error, info, warn};
 
 /// Journal coupling coordinator for the guard chain
@@ -163,9 +163,19 @@ impl JournalCoupler {
             "Starting journal-coupled execution"
         );
 
-        // Get current journal state - create new journal for now
-        // TODO: Convert JournalMap to Journal properly when needed
-        let initial_journal = Journal::new();
+        // Get current journal state from the effect system
+        let initial_journal = effect_system
+            .get_journal()
+            .await
+            .map_err(|e| {
+                warn!(
+                    operation_id = operation_id,
+                    error = %e,
+                    "Failed to retrieve current journal state, using empty journal"
+                );
+                e
+            })
+            .unwrap_or_else(|_| Journal::new());
 
         if self.optimistic_application {
             self.execute_optimistic(operation_id, effect_system, operation, initial_journal)
@@ -342,6 +352,54 @@ impl JournalCoupler {
         Ok((current_journal, applied_ops))
     }
 
+    /// Couple journal operations with a successful send operation
+    ///
+    /// This method is called by the send guard chain after successful authorization
+    /// and flow budget charging to atomically apply any journal changes.
+    pub async fn couple_with_send<E: GuardEffectSystem>(
+        &self,
+        effect_system: &mut E,
+        receipt: &Option<aura_core::Receipt>,
+    ) -> AuraResult<CouplingMetrics> {
+        let coupling_start = effect_system.now_instant().await;
+        let operation_id = "send_coupling";
+
+        debug!(
+            receipt_present = receipt.is_some(),
+            "Coupling journal operations with send"
+        );
+
+        // Get the current journal state
+        let current_journal = effect_system
+            .get_journal()
+            .await
+            .unwrap_or_else(|_| Journal::new());
+
+        // Apply any pending annotations for this send operation
+        let (updated_journal, applied_ops) = self
+            .apply_annotations(operation_id, effect_system, &current_journal)
+            .await?;
+
+        // Persist the updated journal if changes were made
+        if !applied_ops.is_empty() {
+            effect_system.persist_journal(&updated_journal).await?;
+
+            debug!(
+                operations_applied = applied_ops.len(),
+                "Journal coupling with send completed successfully"
+            );
+        }
+
+        let coupling_time = coupling_start.elapsed();
+
+        Ok(CouplingMetrics {
+            journal_application_time_us: coupling_time.as_micros() as u64,
+            operations_applied: applied_ops.len(),
+            retry_attempts: 0,
+            coupling_successful: true,
+        })
+    }
+
     /// Apply a single journal annotation
     async fn apply_single_annotation<E: GuardEffectSystem>(
         &self,
@@ -457,8 +515,37 @@ impl ProtocolGuard {
         F: FnOnce(&mut E) -> Fut + Send,
         Fut: Future<Output = AuraResult<T>> + Send,
     {
-        // For now, execute the journal coupling directly
-        // TODO: Integrate with proper guard execution chain
+        // Execute with full guard chain integration
+        debug!(
+            operation_id = %self.operation_id,
+            required_tokens = self.required_tokens.len(),
+            delta_facts = self.delta_facts.len(),
+            "Executing protocol guard with journal coupling integration"
+        );
+
+        // Phase 1: Evaluate authorization guards (using existing guard evaluation)
+        use crate::guards::execution::evaluate_guard;
+        let guard_result = evaluate_guard(self, effect_system).await?;
+
+        if !guard_result.passed {
+            warn!(
+                operation_id = %self.operation_id,
+                failed_requirements = guard_result.failed_requirements.len(),
+                "Protocol guard evaluation failed, blocking journal coupling"
+            );
+            return Err(aura_core::AuraError::permission_denied(format!(
+                "Guard evaluation failed for operation '{}': {:?}",
+                self.operation_id, guard_result.failed_requirements
+            )));
+        }
+
+        info!(
+            operation_id = %self.operation_id,
+            flow_consumed = guard_result.flow_consumed,
+            "Protocol guards passed, proceeding with journal-coupled execution"
+        );
+
+        // Phase 2: Execute with journal coupling after successful guard evaluation
         let coupling_result = journal_coupler
             .execute_with_coupling(&self.operation_id, effect_system, operation)
             .await?;
@@ -513,7 +600,7 @@ impl Default for JournalCouplerBuilder {
 #[cfg(all(test, feature = "fixture_effects"))]
 mod tests {
     use super::*;
-    use aura_core::DeviceId;
+    use aura_core::identifiers::DeviceId;
     use aura_macros::aura_test;
     use aura_mpst::journal::JournalAnnotation;
     use aura_testkit::*;

@@ -123,7 +123,7 @@ pub use ast_extraction::{
 /// Note: The choreography! macro is available in the aura-macros crate.
 /// Generated code uses types from this crate.
 // Legacy API re-exports for compatibility
-pub use aura_core::{AuraError, AuraResult, Cap, DeviceId, Journal, JournalEffects};
+pub use aura_core::{AuraError, AuraResult, Cap, Journal, JournalEffects, identifiers::DeviceId};
 pub use context::{ContextIsolation, ContextType};
 pub use guards::{CapabilityGuard, GuardSyntax};
 pub use journal::{JournalAnnotation, JournalCoupling};

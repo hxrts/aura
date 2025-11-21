@@ -1,7 +1,7 @@
-//! Operations for the Automerge ledger
+//! Operations for the Automerge effect_api
 
-use crate::types::{DeviceMetadata, GuardianMetadata};
-use aura_core::{DeviceId, GuardianId, ProtocolType, SessionId};
+use crate::types::GuardianMetadata;
+use aura_core::{AuthorityId, GuardianId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -82,10 +82,10 @@ pub struct Capability {
     pub constraints: HashMap<String, String>,
 }
 
-/// Operations that can be applied to the ledger
+/// Operations that can be applied to the effect_api
 ///
-/// **DEPRECATED**: This enum represents legacy device-centric ledger operations.
-/// In the authority-centric model, these operations are replaced by AttestedOps in the ratchet tree.
+/// **DEPRECATED**: This enum represents legacy device-centric effect_api operations.
+/// In the authority-centric model, these operations are replaced by AttestedOps in the commitment tree.
 ///
 /// **Migration Path**:
 /// - Device operations: Use TreeEffects (add_leaf, remove_leaf, etc.)
@@ -99,129 +99,16 @@ pub struct Capability {
 )]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Operation {
-    /// Add a new device to the account
-    AddDevice {
-        /// Device metadata to add
-        device: DeviceMetadata,
-    },
-    /// Remove a device from the account
-    RemoveDevice {
-        /// Identifier of device to remove
-        device_id: DeviceId,
-    },
-    /// Update metadata for an existing device
-    UpdateDeviceMetadata {
-        /// Identifier of device to update
-        device_id: DeviceId,
-        /// Map of metadata fields to update
-        updates: HashMap<String, serde_json::Value>,
-        /// Device that performed the update
-        updated_by: DeviceId,
-    },
-
     /// Add a new guardian to the account
     AddGuardian {
         /// Guardian metadata to add
         guardian: GuardianMetadata,
     },
-    /// Remove a guardian from the account
-    RemoveGuardian {
-        /// Identifier of guardian to remove
-        guardian_id: GuardianId,
-        /// Device that removed the guardian
-        removed_by: DeviceId,
-    },
-    /// Update metadata for an existing guardian
-    UpdateGuardianMetadata {
-        /// Identifier of guardian to update
-        guardian_id: GuardianId,
-        /// Map of metadata fields to update
-        updates: HashMap<String, serde_json::Value>,
-        /// Device that performed the update
-        updated_by: DeviceId,
-    },
-
-    /// Start a new protocol execution
-    StartProtocol {
-        /// Unique identifier for this protocol instance
-        protocol_id: Uuid,
-        /// Type of protocol being started
-        protocol_type: ProtocolType,
-        /// Devices participating in the protocol
-        participants: Vec<DeviceId>,
-        /// Device that initiated the protocol
-        initiator: DeviceId,
-        /// Additional protocol-specific metadata
-        metadata: HashMap<String, String>,
-    },
-    /// Update state for an ongoing protocol
-    UpdateProtocolState {
-        /// Identifier of protocol being updated
-        protocol_id: Uuid,
-        /// Map of state fields to update
-        state_updates: HashMap<String, serde_json::Value>,
-        /// Device that performed the update
-        updated_by: DeviceId,
-    },
-    /// Mark a protocol as completed with outcome
-    CompleteProtocol {
-        /// Identifier of protocol being completed
-        protocol_id: Uuid,
-        /// Result of the protocol execution
-        outcome: ProtocolOutcome,
-        /// Device that completed the protocol
-        completed_by: DeviceId,
-    },
-
     /// Increment the account epoch for key rotation
     IncrementEpoch,
-
-    /// Grant a capability to a device
-    GrantCapability {
-        /// Capability being granted
-        capability: Capability,
-        /// Device receiving the capability
-        grantee: DeviceId,
-        /// Device granting the capability
-        grantor: DeviceId,
-    },
-    /// Revoke a previously granted capability
-    RevokeCapability {
-        /// Identifier of capability to revoke
-        capability_id: Uuid,
-        /// Device that revoked the capability
-        revoked_by: DeviceId,
-    },
-
-    /// Create a new session for protocol coordination
-    CreateSession {
-        /// Unique identifier for the session
-        session_id: SessionId,
-        /// Type of session being created
-        session_type: String,
-        /// Devices participating in the session
-        participants: Vec<DeviceId>,
-        /// Device that created the session
-        created_by: DeviceId,
-    },
-    /// Update state for an existing session
-    UpdateSession {
-        /// Identifier of session being updated
-        session_id: SessionId,
-        /// Map of session fields to update
-        updates: HashMap<String, serde_json::Value>,
-        /// Device that performed the update
-        updated_by: DeviceId,
-    },
-    /// Close an active session
-    CloseSession {
-        /// Identifier of session to close
-        session_id: SessionId,
-        /// Device that closed the session
-        closed_by: DeviceId,
-    },
 }
 
+#[allow(deprecated)]
 impl Operation {
     /// Generate a deterministic identifier for this operation
     ///
@@ -236,95 +123,36 @@ impl Operation {
         OperationId(Uuid::from_bytes(uuid_bytes))
     }
 
-    /// Get the device that initiated this operation
+    /// Get the authority that initiated this operation
     ///
-    /// Returns the device identifier for operations that have an explicit initiator,
-    /// or None for operations that don't track an initiating device.
-    pub fn initiator(&self) -> Option<&DeviceId> {
+    /// Returns None for all current operations (deprecated legacy operations).
+    pub fn initiator(&self) -> Option<&AuthorityId> {
         match self {
-            Self::AddDevice { .. } => None,
-            Self::RemoveDevice { .. } => None,
-            Self::UpdateDeviceMetadata { updated_by, .. } => Some(updated_by),
             Self::AddGuardian { .. } => None,
-            Self::RemoveGuardian { removed_by, .. } => Some(removed_by),
-            Self::UpdateGuardianMetadata { updated_by, .. } => Some(updated_by),
-            Self::StartProtocol { initiator, .. } => Some(initiator),
-            Self::UpdateProtocolState { updated_by, .. } => Some(updated_by),
-            Self::CompleteProtocol { completed_by, .. } => Some(completed_by),
             Self::IncrementEpoch => None,
-            Self::GrantCapability { grantor, .. } => Some(grantor),
-            Self::RevokeCapability { revoked_by, .. } => Some(revoked_by),
-            Self::CreateSession { created_by, .. } => Some(created_by),
-            Self::UpdateSession { updated_by, .. } => Some(updated_by),
-            Self::CloseSession { closed_by, .. } => Some(closed_by),
         }
     }
 
     /// Check if this operation can be safely applied multiple times
     ///
-    /// Returns true for operations that are idempotent and safe to replay,
-    /// such as updates and epoch increments. Returns false for operations
-    /// that should only be applied once, such as adding or removing entities.
+    /// Returns true for operations that are idempotent and safe to replay.
     pub fn is_idempotent(&self) -> bool {
-        matches!(
-            self,
-            Self::IncrementEpoch { .. }
-                | Self::UpdateProtocolState { .. }
-                | Self::UpdateDeviceMetadata { .. }
-                | Self::UpdateGuardianMetadata { .. }
-                | Self::UpdateSession { .. }
-        )
+        matches!(self, Self::IncrementEpoch)
     }
 
     /// Check if this operation conflicts with another operation
     ///
     /// Returns true if applying both operations concurrently would create
     /// an inconsistent state. Used for conflict detection in CRDT merging.
-    pub fn conflicts_with(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::AddDevice { device }, Self::RemoveDevice { device_id })
-            | (Self::RemoveDevice { device_id }, Self::AddDevice { device }) => {
-                device.device_id == *device_id
-            }
-
-            (
-                Self::UpdateDeviceMetadata { device_id: id1, .. },
-                Self::RemoveDevice { device_id: id2 },
-            )
-            | (
-                Self::RemoveDevice { device_id: id1 },
-                Self::UpdateDeviceMetadata { device_id: id2, .. },
-            ) => id1 == id2,
-
-            (
-                Self::UpdateProtocolState {
-                    protocol_id: id1, ..
-                },
-                Self::CompleteProtocol {
-                    protocol_id: id2, ..
-                },
-            )
-            | (
-                Self::CompleteProtocol {
-                    protocol_id: id1, ..
-                },
-                Self::UpdateProtocolState {
-                    protocol_id: id2, ..
-                },
-            ) => id1 == id2,
-
-            _ => false,
-        }
+    pub fn conflicts_with(&self, _other: &Self) -> bool {
+        // No conflicts between remaining operations (legacy enum)
+        false
     }
 }
 
 /// Validation errors for operations
 #[derive(Debug, thiserror::Error)]
 pub enum ValidationError {
-    /// Device not found in account state
-    #[error("Device not found: {0}")]
-    DeviceNotFound(DeviceId),
-
     /// Guardian not found in account state
     #[error("Guardian not found: {0}")]
     GuardianNotFound(GuardianId),
@@ -352,7 +180,7 @@ pub enum ValidationError {
 /// In the authority-centric model, device and guardian operations are replaced by AttestedOps.
 ///
 /// **Migration Path**:
-/// - Device operations: Use TreeEffects to add/remove leaves in the ratchet tree
+/// - Device operations: Use TreeEffects to add/remove leaves in the commitment tree
 /// - Guardian operations: Use RelationalContext to manage guardian bindings
 /// - Epoch operations: Use TreeEffects::rotate_epoch() for key rotation
 /// - Queries: Use TreeEffects::get_current_state() to query tree state
@@ -366,18 +194,6 @@ pub enum ValidationError {
 )]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum JournalOperation {
-    /// Add a device to the account
-    AddDevice {
-        /// The device metadata to add
-        device: DeviceMetadata,
-    },
-
-    /// Remove a device from the account
-    RemoveDevice {
-        /// The ID of the device to remove
-        device_id: DeviceId,
-    },
-
     /// Add a guardian to the account
     AddGuardian {
         /// The guardian metadata to add
@@ -387,9 +203,6 @@ pub enum JournalOperation {
     /// Increment the account epoch
     IncrementEpoch,
 
-    /// Get all active devices
-    GetDevices,
-
     /// Get current epoch
     GetEpoch,
 }
@@ -397,7 +210,6 @@ pub enum JournalOperation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uuid::Uuid;
 
     #[test]
     fn test_operation_id_deterministic() {
@@ -405,31 +217,5 @@ mod tests {
         let op2 = Operation::IncrementEpoch;
 
         assert_eq!(op1.id(), op2.id());
-    }
-
-    #[test]
-    fn test_operation_conflicts() {
-        // Use fixed test data instead of effects-based generation
-        let device_id = DeviceId(Uuid::from_bytes([13u8; 16]));
-
-        let add_op = Operation::AddDevice {
-            device: DeviceMetadata {
-                device_id,
-                device_name: "Test".to_string(),
-                device_type: crate::types::DeviceType::Native,
-                public_key: aura_core::Ed25519SigningKey::from_bytes(&[1u8; 32]).verifying_key(),
-                added_at: 1000,
-                last_seen: 1000,
-                dkd_commitment_proofs: std::collections::BTreeMap::new(),
-                next_nonce: 0,
-                used_nonces: std::collections::BTreeSet::new(),
-                key_share_epoch: 0,
-            },
-        };
-
-        let remove_op = Operation::RemoveDevice { device_id };
-
-        assert!(add_op.conflicts_with(&remove_op));
-        assert!(remove_op.conflicts_with(&add_op));
     }
 }

@@ -17,9 +17,9 @@
 //!
 //! - **Agent Effects**: Device authentication, session management, configuration
 //! - **Choreographic Effects**: Multi-party protocol coordination, session types
-//! - **Ledger Effects**: Event sourcing, audit trail, device authorization
+//! - **Effect API Effects**: Event sourcing, audit trail, device authorization
 //! - **Sync Effects**: Anti-entropy coordination, state reconciliation
-//! - **Tree Effects**: Ratchet tree operations, group key management
+//! - **Tree Effects**: Commitment tree operations, group key management
 //! - **Tree Coordination Effects**: Complex tree protocol orchestration
 //!
 //! For basic effects (Network, Storage, Crypto, Time, Console, Random), see `aura-core`.
@@ -51,7 +51,7 @@
 // NOTE: Agent effect traits moved to aura-core (Layer 1) - foundational capability definitions
 pub mod choreographic;
 pub mod cli;
-pub mod ledger;
+pub mod effect_api;
 pub mod params;
 pub mod semilattice;
 pub mod sync;
@@ -85,7 +85,7 @@ pub use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};
 // Note: Removed duplicate re-exports to avoid conflicts with aura_core imports
 // Only re-export types that are protocol-specific and don't conflict with aura-core
 
-pub use ledger::{DeviceMetadata, LedgerEffects, LedgerError, LedgerEvent, LedgerEventStream};
+pub use effect_api::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
 pub use params::*; // Re-export all parameter types
 pub use semilattice::{
     CausalContext, CmHandler, CvHandler, DeliveryConfig, DeliveryEffect, DeliveryGuarantee,
@@ -120,7 +120,7 @@ pub trait AuraEffects:
     + RandomEffects
     + ConsoleEffects
     + JournalEffects
-    + LedgerEffects
+    + EffectApiEffects
     + TreeEffects
     + ChoreographicEffects
     + SystemEffects

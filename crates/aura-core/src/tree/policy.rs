@@ -17,7 +17,7 @@
 //!
 //! # Reference
 //!
-//! See [`docs/123_ratchet_tree.md`](../../../docs/123_ratchet_tree.md) - Policy Lattice section.
+//! See [`docs/123_commitment_tree.md`](../../../docs/123_commitment_tree.md) - Policy Lattice section.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;

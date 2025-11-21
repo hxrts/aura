@@ -1,7 +1,7 @@
-//! Ratchet Tree Core Types
+//! Commitment Tree Core Types
 //!
-//! This module defines the foundational data types for Aura's ratchet tree with
-//! threshold signing, following the specification in `docs/123_ratchet_tree.md`.
+//! This module defines the foundational data types for Aura's commitment tree with
+//! threshold signing, following the specification in `docs/123_commitment_tree.md`.
 //!
 //! # Design Principles
 //!
@@ -22,7 +22,7 @@
 //!
 //! # Reference
 //!
-//! See [`docs/123_ratchet_tree.md`](../../../docs/123_ratchet_tree.md) for complete specification.
+//! See [`docs/123_commitment_tree.md`](../../../docs/123_commitment_tree.md) for complete specification.
 
 pub mod commitment;
 pub mod policy;

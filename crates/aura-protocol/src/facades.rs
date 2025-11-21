@@ -12,7 +12,7 @@
 //! layering while providing useful abstractions.
 
 use async_trait::async_trait;
-use aura_core::DeviceId;
+use aura_core::identifiers::DeviceId;
 
 /// High-level protocol orchestrator for executing distributed protocols
 ///

@@ -5,7 +5,7 @@
 
 use crate::{AuthenticationError, Result, ThresholdSig};
 use aura_core::Ed25519Signature;
-use aura_core::{DeviceId, GuardianId};
+use aura_core::{identifiers::DeviceId, GuardianId};
 
 /// Identity verification functions
 pub struct IdentityValidator;

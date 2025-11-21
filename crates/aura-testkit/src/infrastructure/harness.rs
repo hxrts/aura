@@ -7,7 +7,7 @@ use std::sync::Once;
 use std::time::Duration;
 
 use crate::foundation::{create_mock_test_context, SimpleTestContext};
-use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig, SharedAuraEffectSystem};
 use aura_core::{AuraError, AuraResult, DeviceId};
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -123,10 +123,30 @@ impl TestFixture {
     /// Get an effect system for testing
     ///
     /// This creates a mock effect system configured for testing.
-    pub fn effect_system(&self) -> Arc<AuraEffectSystem> {
+    /// Returns a SharedAuraEffectSystem that implements all effect traits.
+    pub fn effect_system(&self) -> SharedAuraEffectSystem {
+        let _config = EffectSystemConfig::for_testing(self.device_id());
+        let system = AuraEffectSystem::new(); // Stub coordinator takes no arguments
+        SharedAuraEffectSystem::new(system)
+    }
+
+    /// Get an effect system for testing (raw Arc)
+    ///
+    /// This creates a mock effect system configured for testing.
+    /// Returns an Arc<AuraEffectSystem> for compatibility with old interfaces.
+    pub fn effect_system_arc(&self) -> Arc<AuraEffectSystem> {
         let _config = EffectSystemConfig::for_testing(self.device_id());
         let system = AuraEffectSystem::new(); // Stub coordinator takes no arguments
         Arc::new(system)
+    }
+
+    /// Get an effect system for testing (without wrapper)
+    ///
+    /// This creates a mock effect system configured for testing.
+    /// Use this when you need the concrete type, not wrapped.
+    pub fn effect_system_direct(&self) -> AuraEffectSystem {
+        let _config = EffectSystemConfig::for_testing(self.device_id());
+        AuraEffectSystem::new() // Stub coordinator takes no arguments
     }
 
     /// Get a reference to the test context for effect access

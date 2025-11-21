@@ -3,7 +3,7 @@
 //! Core hole punching messages compatible with rumpsteak-aura choreographic DSL.
 //! Target: <120 lines (minimal implementation).
 
-use aura_core::DeviceId;
+use aura_core::identifiers::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::time::SystemTime;
@@ -43,7 +43,7 @@ pub enum HolePunchMessage {
         /// Session ID being acknowledged
         session_id: Uuid,
         /// Device sending acknowledgment
-        acknowledger: DeviceId,
+        acknoweffect_api: DeviceId,
         /// Successfully reached peer
         reached_peer: DeviceId,
         /// Local endpoint that succeeded
@@ -178,14 +178,14 @@ impl HolePunchMessage {
     /// Create acknowledgment
     pub fn acknowledgment(
         session_id: Uuid,
-        acknowledger: DeviceId,
+        acknoweffect_api: DeviceId,
         reached_peer: DeviceId,
         local_endpoint: SocketAddr,
         remote_endpoint: SocketAddr,
     ) -> Self {
         Self::PunchAcknowledgment {
             session_id,
-            acknowledger,
+            acknoweffect_api,
             reached_peer,
             local_endpoint,
             remote_endpoint,

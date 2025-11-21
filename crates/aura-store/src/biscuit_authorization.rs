@@ -10,6 +10,7 @@ use aura_wot::ResourceScope;
 use biscuit_auth::{Biscuit, PublicKey};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tracing;
 
 /// Biscuit-based storage authorization evaluator
 ///
@@ -18,6 +19,7 @@ use std::collections::HashMap;
 #[derive(Debug)]
 pub struct BiscuitStorageEvaluator {
     /// Root public key for token verification
+    #[allow(dead_code)]
     root_public_key: PublicKey,
     /// Permission mappings for authorization checks
     permission_mappings: PermissionMappings,
@@ -212,37 +214,79 @@ impl BiscuitStorageEvaluator {
         let mut authorizer = Authorizer::new();
 
         // Add the token to the authorizer
-        authorizer
-            .add_token(token)
-            .map_err(|e| BiscuitStorageError::TokenVerification(format!("Failed to add token: {}", e)))?;
+        authorizer.add_token(token).map_err(|e| {
+            BiscuitStorageError::TokenVerification(format!("Failed to add token: {}", e))
+        })?;
 
-        // Query for authority_id fact
-        // This is a simplified implementation - production code would use proper Datalog queries
-        // For now, we check if the token contains any facts that reference the expected authority
+        // Add proper Datalog query to check for authority_id fact
+        // Format: authority_id(<uuid_string>)
+        let expected_uuid = expected_authority.to_string();
 
-        let expected_str = expected_authority.to_string();
+        // Add query to check for authority_id fact
+        // Note: query() method accepts &str directly and parses it into a Rule internally
+        let query_str = format!(
+            "data($authority) <- authority_id($authority), $authority == \"{}\"",
+            expected_uuid
+        );
+        let query_result: Result<Vec<(String,)>, _> = authorizer.query(query_str.as_str());
 
-        // Get all facts from the token (this is a simplified approach)
-        // In a full implementation, we'd use authorizer.query() with proper Datalog
-        let facts_str = format!("{:?}", token);
-
-        // Check if token contains the expected authority_id
-        if facts_str.contains(&expected_str) {
-            return Ok(true);
+        match query_result {
+            Ok(results) if !results.is_empty() => return Ok(true),
+            Err(e) => {
+                return Err(BiscuitStorageError::TokenVerification(format!(
+                    "Authority query failed: {}",
+                    e
+                )))
+            }
+            _ => {} // Continue to next check
         }
 
-        // If no authority_id fact found, token is not properly scoped
-        // For backward compatibility during migration, we'll allow access
-        // In production, this should return Ok(false) or Err()
+        // Try alternative fact formats that might be in the token
+        // Check for authority fact: authority(<uuid>)
+        let alt_query_str = format!(
+            "data($authority) <- authority($authority), $authority == \"{}\"",
+            expected_uuid
+        );
+        let alt_query_result: Result<Vec<(String,)>, _> = authorizer.query(alt_query_str.as_str());
 
-        // Log warning (would use tracing::warn! if tracing were available)
-        eprintln!(
-            "WARNING: Token does not contain authority_id fact for {}. Allowing for backward compatibility.",
-            expected_authority
+        match alt_query_result {
+            Ok(results) if !results.is_empty() => return Ok(true),
+            Err(e) => {
+                return Err(BiscuitStorageError::TokenVerification(format!(
+                    "Alternative authority query failed: {}",
+                    e
+                )))
+            }
+            _ => {} // Continue to next check
+        }
+
+        // Check for owner fact: owner(<uuid>)
+        let owner_query_str = format!(
+            "data($owner) <- owner($owner), $owner == \"{}\"",
+            expected_uuid
+        );
+        let owner_query_result: Result<Vec<(String,)>, _> =
+            authorizer.query(owner_query_str.as_str());
+
+        match owner_query_result {
+            Ok(results) if !results.is_empty() => return Ok(true),
+            Err(e) => {
+                return Err(BiscuitStorageError::TokenVerification(format!(
+                    "Owner query failed: {}",
+                    e
+                )))
+            }
+            _ => {} // No match found
+        }
+
+        // No authority_id fact found - token is not properly scoped for this authority
+        // In the authority-centric model, this is a security requirement
+        tracing::warn!(
+            expected_authority = %expected_authority,
+            "Token does not contain authority_id fact for expected authority - access denied"
         );
 
-        // TODO: Once all tokens properly include authority_id facts, change this to Ok(false)
-        Ok(true)
+        Ok(false)
     }
 
     /// Calculate flow cost for storage operation
@@ -389,7 +433,8 @@ pub fn check_biscuit_access(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{AccountId, DeviceId};
+    use aura_core::identifiers::DeviceId;
+    use aura_core::AccountId;
     use aura_wot::AccountAuthority;
 
     fn setup_test_authority() -> AccountAuthority {
@@ -402,30 +447,70 @@ mod tests {
         BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id)
     }
 
-    // TODO: These tests need to be updated for the new authority-centric API
-    // The parse_content_id and parse_namespace methods were removed during refactoring
+    // Tests updated for the new authority-centric API
     #[test]
-    #[ignore = "parse_content_id method removed during authority refactor"]
-    fn test_content_id_parsing() {
-        let _evaluator = setup_test_evaluator();
-        // This test needs to be rewritten to test the public API
-        // instead of internal parsing logic
+    fn test_authority_centric_content_access() {
+        let evaluator = setup_test_evaluator();
+        let authority_id = AuthorityId::new();
+
+        // Test content resource scope conversion
+        let content_resource = StorageResource::content("personal/user123/doc");
+        let scope_result = evaluator.storage_resource_to_scope(&content_resource);
+        assert!(scope_result.is_ok());
+
+        if let Ok(ResourceScope::Storage {
+            authority_id: scope_authority,
+            path,
+        }) = scope_result
+        {
+            assert_eq!(scope_authority, evaluator.authority_id);
+            assert!(path.contains("content/"));
+            assert!(path.contains("personal/user123/doc"));
+        } else {
+            panic!("Expected Storage ResourceScope");
+        }
     }
 
     #[test]
-    #[ignore = "parse_namespace method removed during authority refactor"]
-    fn test_namespace_parsing() {
-        let _evaluator = setup_test_evaluator();
-        // This test needs to be rewritten to test the public API
-        // instead of internal parsing logic
+    fn test_authority_centric_namespace_access() {
+        let evaluator = setup_test_evaluator();
+
+        // Test namespace resource scope conversion
+        let namespace_resource = StorageResource::namespace("personal");
+        let scope_result = evaluator.storage_resource_to_scope(&namespace_resource);
+        assert!(scope_result.is_ok());
+
+        if let Ok(ResourceScope::Storage {
+            authority_id: scope_authority,
+            path,
+        }) = scope_result
+        {
+            assert_eq!(scope_authority, evaluator.authority_id);
+            assert_eq!(path, "namespace/personal/*");
+        } else {
+            panic!("Expected Storage ResourceScope");
+        }
     }
 
     #[test]
-    #[ignore = "parse_content_id method removed during authority refactor"]
-    fn test_invalid_content_id() {
-        let _evaluator = setup_test_evaluator();
-        // This test needs to be rewritten to test the public API
-        // instead of internal parsing logic
+    fn test_authority_centric_global_access() {
+        let evaluator = setup_test_evaluator();
+
+        // Test global resource scope conversion
+        let global_resource = StorageResource::Global;
+        let scope_result = evaluator.storage_resource_to_scope(&global_resource);
+        assert!(scope_result.is_ok());
+
+        if let Ok(ResourceScope::Storage {
+            authority_id: scope_authority,
+            path,
+        }) = scope_result
+        {
+            assert_eq!(scope_authority, evaluator.authority_id);
+            assert_eq!(path, "global/*");
+        } else {
+            panic!("Expected Storage ResourceScope");
+        }
     }
 
     #[test]

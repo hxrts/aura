@@ -645,7 +645,7 @@ pub struct RateLimiter {
     global_limit: RateLimit,
 
     /// Per-peer rate limits (using DeviceId as key)
-    peer_limits: std::collections::HashMap<crate::DeviceId, RateLimit>,
+    peer_limits: std::collections::HashMap<crate::identifiers::DeviceId, RateLimit>,
 
     /// Statistics
     stats: RateLimiterStatistics,
@@ -681,7 +681,7 @@ impl RateLimiter {
     /// - `RateLimitResult::Denied` if rate limit exceeded
     pub fn check_rate_limit(
         &mut self,
-        peer_id: crate::DeviceId,
+        peer_id: crate::identifiers::DeviceId,
         cost: u32,
         now: std::time::Instant,
     ) -> RateLimitResult {
@@ -730,7 +730,7 @@ impl RateLimiter {
     }
 
     /// Check if operation would exceed rate limit without consuming tokens
-    pub fn would_exceed_limit(&self, peer_id: &crate::DeviceId, cost: u32) -> bool {
+    pub fn would_exceed_limit(&self, peer_id: &crate::identifiers::DeviceId, cost: u32) -> bool {
         // Check global limit
         if self.global_limit.available_tokens() < cost {
             return true;
@@ -747,7 +747,7 @@ impl RateLimiter {
     }
 
     /// Get available tokens for a peer
-    pub fn available_tokens(&self, peer_id: &crate::DeviceId) -> u32 {
+    pub fn available_tokens(&self, peer_id: &crate::identifiers::DeviceId) -> u32 {
         let global_tokens = self.global_limit.available_tokens();
 
         let peer_tokens = self
@@ -779,7 +779,7 @@ impl RateLimiter {
     }
 
     /// Remove rate limit for a peer
-    pub fn remove_peer(&mut self, peer_id: &crate::DeviceId) {
+    pub fn remove_peer(&mut self, peer_id: &crate::identifiers::DeviceId) {
         self.peer_limits.remove(peer_id);
     }
 

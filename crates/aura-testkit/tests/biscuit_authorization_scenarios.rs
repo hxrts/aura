@@ -5,9 +5,7 @@
 //! privilege levels and constraints.
 
 use aura_core::{AccountId, DeviceId};
-use aura_protocol::authorization::biscuit_bridge::{
-    AuthorizationResult, BiscuitAuthorizationBridge,
-};
+use aura_protocol::authorization::{AuthorizationResult, BiscuitAuthorizationBridge};
 use aura_testkit::{
     create_delegation_scenario, create_multi_device_scenario, create_recovery_scenario,
     create_security_test_scenario, BiscuitTestFixture,

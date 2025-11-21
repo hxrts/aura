@@ -3,17 +3,24 @@
 //! This module provides common utilities, helpers, and fixtures used across
 //! all integration test scenarios.
 
-use aura_core::{AuraError, AuraResult, DeviceId, SessionId};
+use aura_core::{AuraError, AuraResult, DeviceId};
+use super::test_device_id;
 use aura_sync::{
     core::{SessionManager, SyncConfig, SyncResult},
-    protocols::*,
+    protocols::{
+        AntiEntropyProtocol, AntiEntropyConfig,
+        JournalSyncProtocol, JournalSyncConfig,
+        SnapshotProtocol, SnapshotConfig,
+        OTAProtocol, OTAConfig,
+        EpochRotationCoordinator, EpochConfig,
+    },
     services::{MaintenanceService, SyncService},
 };
 use aura_testkit::{
     builders::{account::*, device::*},
     foundation::{create_mock_test_context, TestEffectComposer},
     simulation::{
-        choreography::{ChoreographyTestHarness, SessionStatus},
+        choreography::{ChoreographyTestHarness, CoordinatedSession, TestError, SessionStatus, MockSessionState},
         network::{NetworkCondition, NetworkSimulator},
     },
 };
@@ -26,7 +33,7 @@ pub struct MultiDeviceTestFixture {
     pub harness: ChoreographyTestHarness,
     pub network: NetworkSimulator,
     pub devices: Vec<DeviceId>,
-    pub session_managers: HashMap<DeviceId, SessionManager>,
+    pub session_managers: HashMap<DeviceId, SessionManager<()>>,
     pub config: SyncConfig,
 }
 
@@ -35,8 +42,9 @@ impl MultiDeviceTestFixture {
     pub async fn new(device_count: usize) -> AuraResult<Self> {
         let device_labels: Vec<String> =
             (0..device_count).map(|i| format!("device_{}", i)).collect();
+        let device_labels_refs: Vec<&str> = device_labels.iter().map(|s| s.as_str()).collect();
 
-        let harness = ChoreographyTestHarness::with_labeled_devices(device_labels);
+        let harness = ChoreographyTestHarness::with_labeled_devices(device_labels_refs);
         let network = NetworkSimulator::new();
         let devices = harness.device_ids();
         let config = test_sync_config();
@@ -79,33 +87,16 @@ impl MultiDeviceTestFixture {
 
     /// Partition the network between two device groups
     pub async fn create_partition(&mut self, group1: Vec<DeviceId>, group2: Vec<DeviceId>) {
-        let partition_condition = NetworkCondition {
-            latency: Duration::ZERO,
-            jitter: Duration::ZERO,
-            loss_rate: 0.0,
-            bandwidth: None,
-            partitioned: true,
-        };
-
-        for device1 in &group1 {
-            for device2 in &group2 {
-                self.network
-                    .set_conditions(*device1, *device2, partition_condition.clone())
-                    .await;
-                self.network
-                    .set_conditions(*device2, *device1, partition_condition.clone())
-                    .await;
-            }
-        }
+        self.network.partition(group1, group2).await;
     }
 
     /// Heal all network partitions
     pub async fn heal_partitions(&mut self) {
-        self.network.heal_all_partitions().await;
+        self.network.heal_partition().await;
     }
 
     /// Get session manager for a device
-    pub fn session_manager(&self, device: DeviceId) -> Option<&SessionManager> {
+    pub fn session_manager(&self, device: DeviceId) -> Option<&SessionManager<()>> {
         self.session_managers.get(&device)
     }
 
@@ -118,25 +109,24 @@ impl MultiDeviceTestFixture {
     }
 
     /// Create coordinated session across all devices
-    pub async fn create_coordinated_session(&self, session_type: &str) -> AuraResult<SessionId> {
+    pub async fn create_coordinated_session(&self, session_type: &str) -> AuraResult<CoordinatedSession> {
         self.harness.create_coordinated_session(session_type).await
+            .map_err(|e| AuraError::internal(format!("Failed to create session: {}", e)))
     }
 
     /// Wait for session to complete with timeout
     pub async fn wait_for_session_completion(
         &self,
-        session_id: SessionId,
+        session: &CoordinatedSession,
         timeout_duration: Duration,
     ) -> AuraResult<()> {
         timeout(timeout_duration, async {
             loop {
-                let status = self.harness.get_session_status(session_id).await?;
+                let status = session.status().await
+                    .map_err(|e| AuraError::internal(format!("Failed to get session status: {}", e)))?;
                 match status.status {
-                    SessionStatus::Completed => return Ok(()),
-                    SessionStatus::Failed => {
-                        return Err(AuraError::internal("Session failed".to_string()))
-                    }
-                    _ => tokio::time::sleep(Duration::from_millis(100)).await,
+                    SessionStatus::Ended => return Ok(()),
+                    SessionStatus::Active => tokio::time::sleep(Duration::from_millis(100)).await,
                 }
             }
         })
@@ -149,9 +139,9 @@ impl MultiDeviceTestFixture {
 pub fn create_anti_entropy_protocol() -> AntiEntropyProtocol {
     let config = AntiEntropyConfig {
         digest_timeout: Duration::from_secs(5),
-        reconciliation_timeout: Duration::from_secs(10),
-        max_batch_size: 100,
-        retry_attempts: 3,
+        transfer_timeout: Duration::from_secs(10),
+        batch_size: 100,
+        max_rounds: 3,
         ..Default::default()
     };
     AntiEntropyProtocol::new(config)
@@ -160,9 +150,11 @@ pub fn create_anti_entropy_protocol() -> AntiEntropyProtocol {
 /// Helper for creating journal sync protocol instances
 pub fn create_journal_sync_protocol() -> JournalSyncProtocol {
     let config = JournalSyncConfig {
+        account_id: aura_core::AccountId::new(),
         batch_size: 50,
         sync_timeout: Duration::from_secs(15),
-        max_retries: 5,
+        max_concurrent_syncs: 5,
+        retry_enabled: true,
         ..Default::default()
     };
     JournalSyncProtocol::new(config)
@@ -171,9 +163,9 @@ pub fn create_journal_sync_protocol() -> JournalSyncProtocol {
 /// Helper for creating snapshot protocol instances
 pub fn create_snapshot_protocol() -> SnapshotProtocol {
     let config = SnapshotConfig {
-        snapshot_threshold: 1000,
-        approval_timeout: Duration::from_secs(30),
-        min_participant_threshold: 2,
+        approval_threshold: 2,
+        quorum_size: 3,
+        use_writer_fence: true,
         ..Default::default()
     };
     SnapshotProtocol::new(config)
@@ -181,7 +173,7 @@ pub fn create_snapshot_protocol() -> SnapshotProtocol {
 
 /// Helper for creating OTA protocol instances
 pub fn create_ota_protocol() -> OTAProtocol {
-    let config = aura_sync::protocols::ota::OTAConfig {
+    let config = OTAConfig {
         readiness_threshold: 2,
         quorum_size: 3,
         enforce_epoch_fence: true,
@@ -196,6 +188,7 @@ pub fn create_epoch_coordinator(
 ) -> EpochRotationCoordinator {
     let config = EpochConfig {
         epoch_duration: Duration::from_secs(300),
+        rotation_threshold: 2,
         synchronization_timeout: Duration::from_secs(30),
     };
     EpochRotationCoordinator::new(device_id, current_epoch, config)
@@ -257,11 +250,11 @@ pub async fn verify_journal_consistency(fixture: &MultiDeviceTestFixture) -> Aur
     // This would integrate with actual journal state verification
     // For the integration test, we simulate the verification logic
 
-    let session_id = fixture.create_coordinated_session("verification").await?;
+    let session = fixture.create_coordinated_session("verification").await?;
 
     // Wait for verification to complete
     fixture
-        .wait_for_session_completion(session_id, Duration::from_secs(30))
+        .wait_for_session_completion(&session, Duration::from_secs(30))
         .await?;
 
     // In a real implementation, this would check actual journal state equality

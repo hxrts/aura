@@ -4,7 +4,7 @@ This document provides an overview of Aura's architecture and goals.
 
 ## Project Goals
 
-Aura aims to demonstrate that web-of-trust architectures can be practical and user-aligned. Instead of anchoring trust to a single device or centralized service, Aura treats the network as the platform. Identity is expressed through opaque authorities plus relational contexts. This keeps social relationships at the center of security decisions instead of infrastructure providers.
+Aura aims to demonstrate that web-of-trust architectures can be practical and user-aligned. Instead of anchoring trust to a centralized service or a single device, Aura treats the social network as the platform. Identity is expressed through opaque authorities plus relational contexts. This keeps social relationships at the center of security decisions instead of infrastructure providers.
 
 The target is 20 close friends using the system twice weekly. This constraint forces delivery of something unique and valuable, not just technically interesting. Users must feel confident that their privacy expectations will not be violated, their data is durable, and the system is secure enough to trust with real relationships.
 
@@ -18,21 +18,22 @@ Aura's design solves these problems by combining threshold cryptography, choreog
 
 Aura must meet eight constraints simultaneously. These constraints shape every architectural decision.
 
-**1. Cross-platform deployment:** The system must run on web (Chrome, Firefox, Safari via WebAssembly), mobile (iOS, Android), and desktop (macOS, Linux).
+**Network as platform:** All coordination happens peer-to-peer through the social graph. There is no separate infrastructure layer.
 
-**2. Social-graph-based coordination:** Information flows through your social graph based on explicit choices. Peer discovery and storage are performed by your social network. The system has no servers, not even for peer discovery or bootstrapping.
+**Privacy by design:** Information disclosure must be selective and consent-based.
 
-**3. Offline-first operation:** Latency must not create friction during daily use. The app works in airplane mode and syncs seamlessly when connectivity returns.
+**Cross-platform deployment:** The system must run on web (Chrome, Firefox, Safari via WebAssembly), mobile (iOS, Android), and desktop (macOS, Linux).
 
-**4. Decentralized secrets storage:** Users must be able to store secrets without external backups. Most failure scenarios are recoverable through snapshots.
+**Social-graph-based coordination:** Information flows through your social graph based on explicit choices. Peer discovery and storage are performed by your social network. The system has no servers, not even for peer discovery or bootstrapping.
 
-**5. No single point of failure:** The system must provide real security without depending on any single device or entity.
+**Offline-first operation:** Latency must not create friction during daily use. The app works in airplane mode and syncs seamlessly when connectivity returns.
 
-**6. Version compatibility:** Older clients must interact with newer ones within semantic version compatibility bounds.
+**Decentralized secret storage:** Users must be able to store secrets without external backups. Most failure scenarios are recoverable through snapshots.
 
-**7. Privacy by design:** Information disclosure must be selective and consent-based.
+**No single point of failure:** The system must provide real security without depending on any single device or entity.
 
-**8. Network as platform:** All coordination happens through the social graph. There is no separate infrastructure layer.
+**Version compatibility:** Older clients must interact with newer ones within semantic version compatibility bounds.
+
 
 ## Architectural Solution
 
@@ -119,7 +120,7 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [Authority and Identity](100_authority_and_identity.md) describes the authority-centric identity model with opaque authorities and relational contexts.
 
-[Accounts and Ratchet Tree](101_accounts_and_ratchet_tree.md) covers the ratchet tree structure for threshold identity management.
+[Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) covers the commitment tree structure for threshold identity management.
 
 [Journal System](102_journal.md) documents the fact-based journal, validation rules, and deterministic reduction flows.
 
@@ -179,7 +180,7 @@ Garbage collection runs with statistics tracking and device state cleanup. Over-
 
 Guardian-based recovery implements a four-level dispute escalation system for account recovery scenarios.
 
-Severity levels are Low, Medium, High, and Critical. Each level has different escalation policies and auto-cancel logic. A persistent recovery ledger maintains audit trails of all recovery operations for transparency and accountability.
+Severity levels are Low, Medium, High, and Critical. Each level has different escalation policies and auto-cancel logic. A persistent recovery effect_api maintains audit trails of all recovery operations for transparency and accountability.
 
 Recovery operations can be visualized in the CLI with a recovery status dashboard that shows the current recovery state and evidence.
 
@@ -188,4 +189,3 @@ Recovery operations can be visualized in the CLI with a recovery status dashboar
 The testing framework provides comprehensive tools for verification and property-based validation.
 
 An integration test suite covers multi-device coordination scenarios. Property-based testing works across core systems to catch edge cases. Deterministic simulation enables chaos injection and property verification without real distributed systems complexity.
-

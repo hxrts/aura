@@ -8,7 +8,7 @@
 
 use crate::{AuraError, AuraResult, BiscuitGuardEvaluator, RecoveryType, ResourceScope};
 use aura_core::effects::JournalEffects;
-use aura_core::{hash::hash, AccountId, DeviceId, FlowBudget, Ed25519Signature};
+use aura_core::{hash::hash, AccountId, DeviceId, Ed25519Signature, FlowBudget};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
@@ -565,7 +565,7 @@ where
         match self.execute_guardian_auth_choreography(&request).await {
             Ok(guardian_approvals) => {
                 tracing::info!(
-                    "Guardian authentication successful with {} approvals", 
+                    "Guardian authentication successful with {} approvals",
                     guardian_approvals.len()
                 );
                 Ok(GuardianAuthResponse {
@@ -750,15 +750,18 @@ where
 
         // Integrate network communication with effect system
         let device_id = test_device_id(1); // Deterministic device ID for testing
-        
+
         // Log network communication setup
-        tracing::debug!("Setting up guardian authentication network communication for device {}", device_id);
+        tracing::debug!(
+            "Setting up guardian authentication network communication for device {}",
+            device_id
+        );
 
         // Generate request ID
         let request_id = uuid::Uuid::from_bytes([0u8; 16]).to_string();
 
         // Discover guardians from web of trust
-        // For MVP, we would need to query the ledger/journal for guardian devices
+        // For MVP, we would need to query the effect API/journal for guardian devices
         // For now, we'll use a placeholder guardian list
         tracing::info!(
             "Requesting guardian approvals: {} guardians required",
@@ -785,13 +788,16 @@ where
             };
 
             // Implement network communication via effects
-            match self.send_guardian_request_via_effects(&_approval_request).await {
+            match self
+                .send_guardian_request_via_effects(&_approval_request)
+                .await
+            {
                 Ok(_) => {
                     tracing::info!(
                         "Successfully sent approval request to guardian {}",
                         guardian_id
                     );
-                },
+                }
                 Err(e) => {
                     tracing::warn!(
                         "Failed to send approval request to guardian {}: {}",
@@ -821,21 +827,24 @@ where
                         continue;
                     }
 
-                    // Implement response receiving via effects  
-                    match self.receive_guardian_response_via_effects(*guardian_id).await {
+                    // Implement response receiving via effects
+                    match self
+                        .receive_guardian_response_via_effects(*guardian_id)
+                        .await
+                    {
                         Ok(Some(approval)) => {
                             collected_approvals.push(approval);
                             received_any = true;
                             tracing::info!("Received approval from guardian {}", guardian_id);
-                        },
+                        }
                         Ok(None) => {
                             // No response available yet
-                        },
+                        }
                         Err(e) => {
                             tracing::warn!("Error receiving from guardian {}: {}", guardian_id, e);
                         }
                     }
-                    
+
                     if false {
                         // Keep original placeholder block for reference
                         let message: GuardianAuthMessage = GuardianAuthMessage::ApprovalDecision {
@@ -907,10 +916,13 @@ where
         let success = approved_count >= request.required_guardians;
 
         // Implement journal state tracking via effect system
-        match self.update_journal_state_via_effects(&request_id, &collected_approvals, success).await {
+        match self
+            .update_journal_state_via_effects(&request_id, &collected_approvals, success)
+            .await
+        {
             Ok(_) => {
                 tracing::debug!("Successfully journaled guardian auth result");
-            },
+            }
             Err(e) => {
                 tracing::warn!("Failed to journal guardian auth result: {}", e);
                 // Don't fail the entire operation due to journaling issues
@@ -1303,11 +1315,16 @@ where
         request: &GuardianAuthMessage,
     ) -> AuraResult<()> {
         // Serialize the request
-        let serialized_request = serde_json::to_vec(request)
-            .map_err(|e| AuraError::serialization(e.to_string()))?;
+        let serialized_request =
+            serde_json::to_vec(request).map_err(|e| AuraError::serialization(e.to_string()))?;
 
         // Log the request being sent (placeholder for actual network effects)
-        if let GuardianAuthMessage::ApprovalRequest { guardian_id, request_id, .. } = request {
+        if let GuardianAuthMessage::ApprovalRequest {
+            guardian_id,
+            request_id,
+            ..
+        } = request
+        {
             tracing::info!(
                 "Sending guardian approval request {} to guardian {} ({} bytes)",
                 request_id,
@@ -1330,36 +1347,37 @@ where
         // For now, simulate receiving responses for testing
 
         // Simulate random approval responses for demo
-        if rand::random::<f64>() < 0.1 {  // 10% chance of receiving a response per call
+        if rand::random::<f64>() < 0.1 {
+            // 10% chance of receiving a response per call
             let approved = rand::random::<bool>();
-            
+
             // Create a placeholder signature for simulation
             let placeholder_signature = Ed25519Signature::from_bytes(&[0u8; 64]);
-            
+
             // Create the identity proof - guardian signature variant
             let identity_proof = IdentityProof::Guardian {
                 guardian_id: aura_core::GuardianId(guardian_id.0.clone()),
                 signature: placeholder_signature,
             };
-            
+
             // Create verified identity with the proof and a placeholder message hash
             let verified_identity = VerifiedIdentity {
                 proof: identity_proof,
                 message_hash: [0u8; 32], // Placeholder message hash
             };
-            
+
             let justification = if approved {
                 "Simulated approval - request appears valid".to_string()
             } else {
                 "Simulated denial - request validation failed".to_string()
             };
-            
+
             let approval = GuardianApproval {
                 guardian_id,
                 verified_identity,
                 approved,
                 justification,
-                signature: vec![],  // Placeholder signature
+                signature: vec![], // Placeholder signature
                 timestamp: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
@@ -1422,8 +1440,10 @@ where
         // Phase 2: Collect identity proofs from guardians
         let identity_proofs = self.collect_guardian_proofs(&guardian_challenges).await?;
 
-        // Phase 3: Process guardian decisions 
-        let guardian_approvals = self.process_guardian_decisions(&identity_proofs, request).await?;
+        // Phase 3: Process guardian decisions
+        let guardian_approvals = self
+            .process_guardian_decisions(&identity_proofs, request)
+            .await?;
 
         // Phase 4: Verify threshold and aggregate results
         if guardian_approvals.len() >= request.required_guardians {
@@ -1449,7 +1469,7 @@ where
     ) -> AuraResult<ApprovalRequest> {
         let request_id = uuid::Uuid::new_v4().to_string();
         let guardian_id = aura_core::test_utils::test_device_id(1); // Simulate a guardian device ID
-        
+
         Ok(ApprovalRequest {
             guardian_id,
             account_id: request.account_id,
@@ -1466,18 +1486,19 @@ where
         // For simulation, create challenge requests for required number of guardians
         // In production, this would discover actual guardians from the web of trust
         let mut challenges = Vec::new();
-        
-        for i in 0..3 { // Simulate 3 guardians for testing
+
+        for i in 0..3 {
+            // Simulate 3 guardians for testing
             let challenge_bytes = self.effect_system.random_bytes(32).await;
             let expires_at = aura_core::current_unix_timestamp() + 300; // 5 minutes
-            
+
             challenges.push(ChallengeRequest {
                 request_id: approval_request.request_id.clone(),
                 challenge: challenge_bytes,
                 expires_at,
             });
         }
-        
+
         Ok(challenges)
     }
 
@@ -1487,39 +1508,39 @@ where
         challenges: &[ChallengeRequest],
     ) -> AuraResult<Vec<IdentitySubmission>> {
         let mut proofs = Vec::new();
-        
+
         // Simulate guardian responses
         for (i, challenge) in challenges.iter().enumerate() {
             let device_id = aura_core::test_utils::test_device_id(i as u64 + 1);
-            
+
             // Generate simulated signature
             let signature_bytes = self.effect_system.random_bytes(64).await;
             let mut signature = [0u8; 64];
             signature.copy_from_slice(&signature_bytes[..64]);
-            
+
             let identity_proof = IdentityProof::Device {
                 device_id,
                 signature: signature.into(),
             };
-            
+
             // Create key material for verification
             let public_key_bytes = self.effect_system.random_bytes(32).await;
             let mut public_key_array = [0u8; 32];
             public_key_array.copy_from_slice(&public_key_bytes[..32]);
-            
+
             let public_key = aura_core::crypto::Ed25519VerifyingKey::from_bytes(&public_key_array)
                 .map_err(|e| AuraError::crypto(format!("Invalid public key: {}", e)))?;
-            
+
             let mut key_material = KeyMaterial::new();
             key_material.add_device_key(device_id, public_key);
-            
+
             proofs.push(IdentitySubmission {
                 request_id: challenge.request_id.clone(),
                 identity_proof,
                 key_material,
             });
         }
-        
+
         Ok(proofs)
     }
 
@@ -1531,23 +1552,27 @@ where
     ) -> AuraResult<Vec<GuardianApproval>> {
         let mut approvals = Vec::new();
         let current_time = aura_core::current_unix_timestamp();
-        
+
         // Process each guardian's identity proof
         for (i, proof) in identity_proofs.iter().enumerate() {
             // Simulate guardian approval decision
             let approved = i < request.required_guardians; // Approve first N guardians
-            
-            if let IdentityProof::Device { device_id, signature: _ } = proof.identity_proof {
+
+            if let IdentityProof::Device {
+                device_id,
+                signature: _,
+            } = proof.identity_proof
+            {
                 // Create verified identity for the guardian
                 let message_hash = aura_core::hash::hash(&proof.request_id.as_bytes());
                 let verified_identity = VerifiedIdentity {
                     proof: proof.identity_proof.clone(),
                     message_hash,
                 };
-                
+
                 // Generate guardian decision signature
                 let signature_bytes = self.effect_system.random_bytes(64).await;
-                
+
                 let approval = GuardianApproval {
                     guardian_id: device_id,
                     verified_identity,
@@ -1560,13 +1585,13 @@ where
                     signature: signature_bytes,
                     timestamp: current_time,
                 };
-                
+
                 if approved {
                     approvals.push(approval);
                 }
             }
         }
-        
+
         Ok(approvals)
     }
 }
@@ -1667,7 +1692,8 @@ mod tests {
         );
 
         // Verify with timestamp before expiration
-        let verified_challenge = state.verify_guardian_challenge(&request_id, guardian_id, expires_at - 1000);
+        let verified_challenge =
+            state.verify_guardian_challenge(&request_id, guardian_id, expires_at - 1000);
         assert_eq!(verified_challenge, Some(&challenge));
 
         assert!(!state.has_sufficient_approvals(&request_id, 1));
@@ -1696,7 +1722,7 @@ mod tests {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
 
-        let coordinator = GuardianAuthCoordinator::new(fixture.effect_system());
+        let coordinator = GuardianAuthCoordinator::new(fixture.effect_system_arc());
         assert!(!coordinator.has_active_choreography());
 
         // Just test basic coordinator creation and state

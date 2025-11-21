@@ -3,14 +3,13 @@
 //! This module provides journal synchronization for the authority-centric model,
 //! removing all device ID references and using authority IDs instead.
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::{SyncError, SyncResult};
+use crate::core::SyncResult;
 use crate::infrastructure::RetryPolicy;
-use aura_core::{AuraError, Authority, AuthorityId, Result};
+use aura_core::{Authority, AuthorityId};
 use aura_journal::{Fact, FactId, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
 

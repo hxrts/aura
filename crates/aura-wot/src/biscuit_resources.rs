@@ -1,3 +1,10 @@
+//! Resource scope definitions for Biscuit tokens.
+//!
+//! Defines the hierarchical resource model
+//! (storage, journal, relay, recovery, admin)
+//! and provides Datalog pattern generation for
+//! capability-based access control.
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

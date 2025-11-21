@@ -1,4 +1,4 @@
-//! Invitation ledger semilattice used by aura-invitation.
+//! Invitation registry semilattice used by aura-invitation.
 
 use aura_core::semilattice::{Bottom, JoinSemilattice};
 use serde::{Deserialize, Serialize};
@@ -33,12 +33,12 @@ impl InvitationStatus {
     }
 }
 
-/// Ledger record for a specific invitation.
+/// Registry record for a specific invitation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InvitationRecord {
     /// Invitation identifier.
     pub invitation_id: String,
-    /// Current ledger status.
+    /// Current registry status.
     pub status: InvitationStatus,
     /// Timestamp of the last update.
     pub updated_at: u64,
@@ -80,14 +80,14 @@ impl JoinSemilattice for InvitationRecord {
     }
 }
 
-/// Ledger storing invitation records with join semantics.
+/// Registry storing invitation records with join semantics.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct InvitationLedger {
+pub struct InvitationRecordRegistry {
     entries: BTreeMap<String, InvitationRecord>,
 }
 
-impl InvitationLedger {
-    /// Create an empty ledger.
+impl InvitationRecordRegistry {
+    /// Create an empty registry.
     pub fn new() -> Self {
         Self {
             entries: BTreeMap::new(),
@@ -120,9 +120,19 @@ impl InvitationLedger {
             record.set_status(InvitationStatus::Expired, timestamp);
         }
     }
+
+    /// Get the number of records in the registry.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Check if the registry is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
-impl JoinSemilattice for InvitationLedger {
+impl JoinSemilattice for InvitationRecordRegistry {
     fn join(&self, other: &Self) -> Self {
         let mut merged = self.entries.clone();
         for (id, record) in &other.entries {
@@ -135,7 +145,7 @@ impl JoinSemilattice for InvitationLedger {
     }
 }
 
-impl Bottom for InvitationLedger {
+impl Bottom for InvitationRecordRegistry {
     fn bottom() -> Self {
         Self::new()
     }

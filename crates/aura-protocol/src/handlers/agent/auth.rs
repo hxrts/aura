@@ -7,6 +7,8 @@ use crate::effects::{
     AuraEffectSystem, AuthMethod, AuthenticationEffects, AuthenticationResult, BiometricType,
     ConsoleEffects, HealthStatus, StorageEffects, TimeEffects,
 };
+// TODO: Use BiometricEffects for platform biometric API integration
+use aura_core::effects::BiometricEffects;
 use async_trait::async_trait;
 use aura_core::hash::hash;
 use aura_core::{identifiers::DeviceId, AuraError, AuraResult as Result};
@@ -239,8 +241,12 @@ impl AuthenticationEffects for AuthenticationHandler {
             .log_info(&format!("Enrolling biometric: {:?}", biometric_type))
             .await?;
 
-        // TODO fix - In a real implementation, this would interface with platform biometric APIs
-        // TODO fix - For now, we simulate the enrollment process
+        // TODO: Use BiometricEffects for real platform integration:
+        // biometric_effects.enroll_biometric(
+        //     BiometricConfig::balanced(biometric_type),
+        //     "Please enroll your biometric"
+        // ).await
+        // For now, we simulate the enrollment process
 
         // Generate a biometric template (simulated)
         let template_data = effects.random_bytes(64).await;

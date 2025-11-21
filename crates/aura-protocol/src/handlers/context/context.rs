@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use crate::handlers::{AuraHandlerError, ExecutionMode};
 use crate::{effects::choreographic::ChoreographicRole, guards::flow::FlowHint};
-use aura_core::{AccountId, DeviceId, SessionId};
+use aura_core::{AccountId, SessionId};
+use aura_core::identifiers::DeviceId;
 
 /// Context for choreographic operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -529,7 +530,7 @@ impl AuraContext {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use aura_core::DeviceId;
+    use aura_core::identifiers::DeviceId;
     use uuid::Uuid;
 
     #[test]

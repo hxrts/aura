@@ -8,7 +8,7 @@ use super::{
     selection::{PrivacyAwareSelectionCriteria, RelationshipScopedDiscovery},
 };
 use crate::types::{PrivacyLevel, TransportConfig};
-use aura_core::{DeviceId, ContextId};
+use aura_core::{identifiers::DeviceId, ContextId};
 use std::collections::HashMap;
 
 #[cfg(test)]

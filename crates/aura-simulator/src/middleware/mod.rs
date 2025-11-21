@@ -18,9 +18,6 @@ pub use handler::{
 };
 pub use stateless_effects::{PerformanceMetrics, StatelessEffectsMiddleware};
 
-// Export the middleware trait (deprecated but still used)
-// pub use self::SimulatorMiddleware; // Already defined in this module
-
 /// Simulator execution context that provides runtime information
 #[derive(Debug, Clone)]
 pub struct SimulatorContext {
@@ -290,10 +287,7 @@ pub enum PropertyViolationType {
     Security { description: String, threat: String },
 }
 
-/// Legacy middleware trait for simulator operations
-///
-/// This trait is deprecated in favor of the effect system.
-/// Use SimulationEffectComposer and effect handlers instead.
+/// Middleware trait for simulator operations
 pub trait SimulatorMiddleware: Send + Sync {
     /// Process a simulator operation through the middleware layer
     fn process(

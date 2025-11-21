@@ -26,7 +26,7 @@
 //! - **Atomic Updates**: Either all participants get new shares or none do
 
 use aura_core::frost::PublicKeyPackage;
-use aura_core::{AccountId, DeviceId};
+use aura_core::{AccountId, identifiers::AuthorityId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 
@@ -134,8 +134,8 @@ pub struct SharePreparation {
     pub session_id: String,
     /// Prepared share data
     pub share_data: Vec<u8>,
-    /// Participant who prepared this share
-    pub participant_id: DeviceId,
+    /// Authority who prepared this share
+    pub participant_id: AuthorityId,
 }
 
 /// New share package message
@@ -154,8 +154,8 @@ pub struct VerificationResult {
     pub session_id: String,
     /// Whether verification was successful
     pub verified: bool,
-    /// Participant who performed verification
-    pub participant_id: DeviceId,
+    /// Authority who performed verification
+    pub participant_id: AuthorityId,
 }
 
 /// Key resharing request
@@ -170,9 +170,9 @@ pub struct ResharingRequest {
     /// New threshold configuration
     pub new_threshold: usize,
     /// Current participants
-    pub old_participants: Vec<DeviceId>,
+    pub old_participants: Vec<AuthorityId>,
     /// New participant set
-    pub new_participants: Vec<DeviceId>,
+    pub new_participants: Vec<AuthorityId>,
     /// Session timeout in seconds
     pub timeout_seconds: u64,
 }
@@ -185,7 +185,7 @@ pub struct ResharingResponse {
     /// Resharing successful
     pub success: bool,
     /// New participants
-    pub participants: Vec<DeviceId>,
+    pub participants: Vec<AuthorityId>,
     /// Error message if any
     pub error: Option<String>,
 }
@@ -197,8 +197,8 @@ pub struct SharePackage {
     pub session_id: String,
     /// Encrypted share data
     pub share_data: Vec<u8>,
-    /// Target participant for this share
-    pub target_participant: DeviceId,
+    /// Target authority for this share
+    pub target_participant: AuthorityId,
 }
 
 // The choreography macro generates these types and functions automatically:
@@ -209,7 +209,7 @@ pub struct SharePackage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::test_utils::test_device_id;
+    use aura_core::test_utils::test_authority_id;
 
     #[test]
     fn test_resharing_request_serialization() {
@@ -218,8 +218,8 @@ mod tests {
             account_id: AccountId::new(),
             old_threshold: 2,
             new_threshold: 3,
-            old_participants: vec![test_device_id(1), test_device_id(2)],
-            new_participants: vec![test_device_id(3), test_device_id(4), test_device_id(5)],
+            old_participants: vec![test_authority_id(1), test_authority_id(2)],
+            new_participants: vec![test_authority_id(3), test_authority_id(4), test_authority_id(5)],
             timeout_seconds: 300,
         };
 
@@ -244,7 +244,7 @@ mod tests {
         let package = SharePackage {
             session_id: "test_session".to_string(),
             share_data: vec![1, 2, 3, 4],
-            target_participant: test_device_id(6),
+            target_participant: test_authority_id(6),
         };
 
         let serialized = serde_json::to_vec(&package).unwrap();
@@ -260,7 +260,7 @@ mod tests {
         let result = VerificationResult {
             session_id: "test_session".to_string(),
             verified: true,
-            participant_id: test_device_id(7),
+            participant_id: test_authority_id(7),
         };
 
         let serialized = serde_json::to_vec(&result).unwrap();

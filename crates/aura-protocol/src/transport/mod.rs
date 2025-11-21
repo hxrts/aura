@@ -5,15 +5,57 @@
 //! NO choreography - for local effect composition and simple orchestration.
 //! Target: Each choreographic protocol <250 lines.
 
-pub mod choreography;
+pub mod channel_management;
+pub mod websocket;
 
 #[cfg(all(test, feature = "transport_legacy_tests"))]
 mod tests;
 
-pub use choreography::{
-    ChannelEstablishmentCoordinator, ChannelTeardownCoordinator, ChoreographicConfig,
-    ChoreographicError, WebSocketHandshakeCoordinator, WebSocketSessionCoordinator,
-};
+pub use channel_management::{ChannelEstablishmentCoordinator, ChannelTeardownCoordinator};
+pub use websocket::{WebSocketHandshakeCoordinator, WebSocketSessionCoordinator};
+
+/// Choreographic coordination configuration
+#[derive(Debug, Clone)]
+pub struct ChoreographicConfig {
+    /// Protocol execution timeout
+    pub execution_timeout: std::time::Duration,
+    /// Maximum concurrent protocols
+    pub max_concurrent_protocols: usize,
+    /// Default flow budget per protocol
+    pub default_flow_budget: u32,
+    /// Capability requirements
+    pub required_capabilities: Vec<String>,
+}
+
+impl Default for ChoreographicConfig {
+    fn default() -> Self {
+        Self {
+            execution_timeout: std::time::Duration::from_secs(60),
+            max_concurrent_protocols: 10,
+            default_flow_budget: 1000,
+            required_capabilities: vec!["choreographic_coordination".to_string()],
+        }
+    }
+}
+
+/// Choreographic protocol error types
+#[derive(Debug, thiserror::Error)]
+pub enum ChoreographicError {
+    #[error("Protocol execution failed: {0}")]
+    ExecutionFailed(String),
+    #[error("Session type violation: {0}")]
+    SessionTypeViolation(String),
+    #[error("Capability requirement not met: {0}")]
+    CapabilityNotMet(String),
+    #[error("Flow budget exceeded: required {required}, available {available}")]
+    FlowBudgetExceeded { required: u32, available: u32 },
+    #[error("Journal synchronization failed: {0}")]
+    JournalSyncFailed(String),
+    #[error("Transport coordination error: {0}")]
+    TransportCoordination(#[from] TransportCoordinationError),
+}
+
+type ChoreographicResult<T> = Result<T, ChoreographicError>;
 
 /// Transport coordination configuration
 #[derive(Debug, Clone)]

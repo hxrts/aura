@@ -13,9 +13,5 @@ pub use aura_core::{AuraError, Result as AuraResult};
 /// This type alias is maintained for backward compatibility.
 pub type QuintResult<T> = AuraResult<T>;
 
-/// DEPRECATED: Legacy QuintError type, replaced with unified AuraError
-///
-/// This type is maintained for backward compatibility. All variants now map
-/// to appropriate AuraError variants. New code should use AuraError directly.
-#[deprecated(since = "0.1.0", note = "Use AuraError directly instead")]
-pub type QuintError = AuraError;
+// QuintError removed - use AuraError directly instead
+// Legacy type alias has been superseded by unified error system

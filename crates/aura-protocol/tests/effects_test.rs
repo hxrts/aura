@@ -9,7 +9,7 @@ use aura_testkit::{test_key_pair, TestEffectsBuilder};
 /// Test crypto effects through testkit
 #[tokio::test]
 async fn test_crypto_effects() {
-    let device_id = aura_core::DeviceId::new();
+    let device_id = aura_core::identifiers::DeviceId::new();
     let effects = TestEffectsBuilder::for_unit_tests(device_id)
         .with_seed(42) // Deterministic
         .build()
@@ -33,7 +33,7 @@ async fn test_deterministic_keys() {
 /// Test different execution modes
 #[tokio::test]
 async fn test_execution_modes() {
-    let device_id = aura_core::DeviceId::new();
+    let device_id = aura_core::identifiers::DeviceId::new();
 
     // Unit test mode (full mocking)
     let unit_effects = TestEffectsBuilder::for_unit_tests(device_id)
@@ -67,7 +67,7 @@ async fn test_execution_modes() {
 /// Test time acceleration for faster tests
 #[tokio::test]
 async fn test_time_acceleration() {
-    let device_id = aura_core::DeviceId::new();
+    let device_id = aura_core::identifiers::DeviceId::new();
 
     let effects = TestEffectsBuilder::for_integration_tests(device_id)
         .with_time_acceleration(10.0) // 10x faster
@@ -84,7 +84,7 @@ async fn test_time_acceleration() {
 /// Test storage configuration
 #[tokio::test]
 async fn test_storage_config() {
-    let device_id = aura_core::DeviceId::new();
+    let device_id = aura_core::identifiers::DeviceId::new();
 
     // Test with mock storage (default for unit tests)
     let mock_effects = TestEffectsBuilder::for_unit_tests(device_id)
@@ -110,7 +110,7 @@ async fn test_storage_config() {
 /// Test network mocking configuration
 #[tokio::test]
 async fn test_network_config() {
-    let device_id = aura_core::DeviceId::new();
+    let device_id = aura_core::identifiers::DeviceId::new();
 
     // Test with mock network (default for unit tests)
     let mock_effects = TestEffectsBuilder::for_unit_tests(device_id)

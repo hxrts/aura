@@ -5,14 +5,14 @@
 //! scattered patterns they replace. Tests validate API compatibility, performance,
 //! and behavioral equivalence during the refactoring process.
 
-use aura_core::{DeviceId, SessionId};
+use aura_core::{AuraError, DeviceId, SessionId};
 use aura_sync::core::{
     config::{BatchConfig, NetworkConfig, RetryConfig, SyncConfig},
     errors::{
         sync_authorization_error, sync_biscuit_authorization_error, sync_biscuit_guard_error,
         sync_consistency_error, sync_network_error, sync_protocol_error, sync_protocol_with_peer,
         sync_resource_with_limit, sync_serialization_error, sync_session_error, sync_timeout_error,
-        sync_timeout_with_peer, sync_validation_field_error, SyncError, SyncResult,
+        sync_timeout_with_peer, sync_validation_field_error, SyncError, SyncResult as ErrorSyncResult,
     },
     messages::{
         BatchMessage, ProgressMessage, RequestMessage, ResponseMessage, SessionMessage,
@@ -49,7 +49,7 @@ fn test_unified_error_hierarchy_compatibility() {
     let network_err = sync_network_error("Connection failed");
     assert_eq!(network_err.category(), "network");
     assert!(network_err.is_retryable());
-    assert!(network_err.user_message().contains("Network"));
+    assert!(network_err.to_string().contains("Network"));
 
     // Protocol errors (choreographic violations)
     let protocol_err = sync_protocol_error("anti_entropy", "Invalid digest");
@@ -152,7 +152,7 @@ fn test_request_response_correlation() {
     assert_eq!(response.into_success(), Some("pong".to_string()));
 
     // Test error response
-    let error_response = ResponseMessage::error(&request, "Service unavailable".to_string());
+    let error_response: ResponseMessage<String> = ResponseMessage::error(&request, "Service unavailable".to_string());
     assert!(!error_response.is_success());
     assert_eq!(error_response.into_success(), None);
 }
@@ -166,13 +166,13 @@ fn test_sync_result_pattern() {
     assert_eq!(success_result.duration_ms, 5000);
     assert!(success_result.data.is_some());
 
-    let failure_result = MessageSyncResult::failure("Network timeout".to_string(), 3000);
+    let failure_result: MessageSyncResult<String> = MessageSyncResult::failure("Network timeout".to_string(), 3000);
     assert!(!failure_result.success);
     assert_eq!(failure_result.operations_synced, 0);
     assert_eq!(failure_result.duration_ms, 3000);
     assert!(failure_result.error.is_some());
 
-    let partial_result = MessageSyncResult::partial(75, "Incomplete transfer".to_string(), 8000);
+    let partial_result: MessageSyncResult<String> = MessageSyncResult::partial(75, "Incomplete transfer".to_string(), 8000);
     assert!(!partial_result.success);
     assert_eq!(partial_result.operations_synced, 75);
     assert!(partial_result.error.is_some());
@@ -395,13 +395,13 @@ fn test_prometheus_export_format() {
 fn test_unified_session_management() {
     // Test session manager handles all sync session patterns
     #[allow(clippy::disallowed_methods)]
-    let now = Instant::now();
+    let _now = Instant::now();
     let config = SessionConfig::default();
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, now);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
     // Test session creation and activation
     let participants = vec![DeviceId::new(), DeviceId::new()];
-    let session_id = manager.create_session(participants.clone(), now).unwrap();
+    let session_id = manager.create_session(participants.clone(), 1000001).unwrap();
 
     let initial_state = TestSyncProtocolState {
         phase: "initialization".to_string(),
@@ -449,11 +449,11 @@ fn test_unified_session_management() {
 fn test_session_failure_handling() {
     // Test session failure scenarios
     #[allow(clippy::disallowed_methods)]
-    let now = Instant::now();
+    let _now = Instant::now();
     let config = SessionConfig::default();
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, now);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
-    let session_id = manager.create_session(vec![DeviceId::new()], now).unwrap();
+    let session_id = manager.create_session(vec![DeviceId::new()], 1000001).unwrap();
     let state = TestSyncProtocolState {
         phase: "test".to_string(),
         operations_pending: 50,
@@ -495,19 +495,19 @@ fn test_session_failure_handling() {
 fn test_session_resource_limits() {
     // Test session resource management
     #[allow(clippy::disallowed_methods)]
-    let now = Instant::now();
+    let _now = Instant::now();
     let config = SessionConfig {
         max_concurrent_sessions: 2,
         max_participants: 3,
         ..SessionConfig::default()
     };
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, now);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
     // Test participant limit
     let too_many_participants = vec![DeviceId::new(); 5];
-    let result = manager.create_session(too_many_participants, now);
+    let result = manager.create_session(too_many_participants, 1000001);
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), SyncError::Validation { .. }));
+    assert!(matches!(result.unwrap_err(), AuraError::Invalid { .. }));
 
     // Test concurrent session limit
     let state = TestSyncProtocolState {
@@ -516,17 +516,17 @@ fn test_session_resource_limits() {
         bytes_transferred: 0,
     };
 
-    let session1 = manager.create_session(vec![DeviceId::new()], now).unwrap();
-    let session2 = manager.create_session(vec![DeviceId::new()], now).unwrap();
+    let session1 = manager.create_session(vec![DeviceId::new()], 1000001).unwrap();
+    let session2 = manager.create_session(vec![DeviceId::new()], 1000002).unwrap();
     manager.activate_session(session1, state.clone()).unwrap();
     manager.activate_session(session2, state).unwrap();
 
     // Third session should exceed limit
-    let result = manager.create_session(vec![DeviceId::new()], now);
+    let result = manager.create_session(vec![DeviceId::new()], 1000003);
     assert!(result.is_err());
     assert!(matches!(
         result.unwrap_err(),
-        SyncError::ResourceExhausted { .. }
+        AuraError::Internal { .. }
     ));
 }
 
@@ -534,9 +534,9 @@ fn test_session_resource_limits() {
 fn test_session_statistics() {
     // Test session statistics collection
     #[allow(clippy::disallowed_methods)]
-    let now = Instant::now();
+    let _now = Instant::now();
     let config = SessionConfig::default();
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, now);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
     // Create various session outcomes
     let state = TestSyncProtocolState {
@@ -546,14 +546,14 @@ fn test_session_statistics() {
     };
 
     // Successful session
-    let session1 = manager.create_session(vec![DeviceId::new()], now).unwrap();
+    let session1 = manager.create_session(vec![DeviceId::new()], 1000001).unwrap();
     manager.activate_session(session1, state.clone()).unwrap();
     manager
         .complete_session(session1, 50, 1000, HashMap::new())
         .unwrap();
 
     // Failed session
-    let session2 = manager.create_session(vec![DeviceId::new()], now).unwrap();
+    let session2 = manager.create_session(vec![DeviceId::new()], 1000002).unwrap();
     manager.activate_session(session2, state.clone()).unwrap();
     let error = SessionError::Timeout { duration_ms: 5000 };
     manager.fail_session(session2, error, None).unwrap();
@@ -578,13 +578,12 @@ fn test_cross_module_integration() {
     let metrics = MetricsCollector::new();
 
     let session_config = SessionConfig::from(&config);
-    let now = 1000000;
     let mut session_manager =
-        SessionManager::<TestSyncProtocolState>::with_metrics(session_config, metrics.clone(), now);
+        SessionManager::<TestSyncProtocolState>::with_metrics(session_config, metrics.clone(), 1000000);
 
     // Perform a complete sync session workflow
     let session_id = session_manager
-        .create_session(vec![DeviceId::new()], now)
+        .create_session(vec![DeviceId::new()], 1000001)
         .unwrap();
 
     let state = TestSyncProtocolState {
@@ -655,13 +654,13 @@ fn test_backwards_compatibility_surface() {
 
     // Basic session management
     #[allow(clippy::disallowed_methods)]
-    let now = Instant::now();
+    let _now = Instant::now();
     let _session_manager =
-        SessionManager::<TestSyncProtocolState>::new(SessionConfig::default(), now);
+        SessionManager::<TestSyncProtocolState>::new(SessionConfig::default(), 1000000);
 
     // Basic message patterns
     let _session_msg = SessionMessage::new(SessionId::new(), "test");
-    let _request_msg = RequestMessage::new(DeviceId::new(), DeviceId::new(), "ping");
+    let _request_msg = RequestMessage::new(DeviceId::new(), DeviceId::new(), "ping", Uuid::new_v4());
 
     // If this test compiles and runs, basic API compatibility is maintained
 }

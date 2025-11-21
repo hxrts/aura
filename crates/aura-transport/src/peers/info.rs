@@ -3,7 +3,7 @@
 //! Essential peer management with built-in capability blinding and relationship scoping.
 //! Target: <180 lines (concise implementation).
 
-use aura_core::{DeviceId, RelationshipId};
+use aura_core::{identifiers::DeviceId, RelationshipId};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;

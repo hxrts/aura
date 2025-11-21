@@ -4,7 +4,6 @@
 name = "network_stress_mixin"
 description = "Add network stress conditions to any scenario"
 version = "1.0.0"
-author = "Aura Team"
 tags = ["mixin", "network", "stress"]
 
 [setup]
@@ -28,4 +27,3 @@ actions = [
 [[properties]]
 name = "protocol_resilient_under_stress"
 property_type = "safety"
-

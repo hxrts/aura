@@ -41,14 +41,7 @@ name = "message_agreement"
 description = "P2P agreement on message to sign"
 timeout_seconds = 3
 actions = [
-    { 
-        type = "run_choreography", 
-        choreography = "commit_reveal", 
-        participants = ["alice", "bob", "carol", "david", "eve"],
-        parameters = {
-            message = "Transaction: Send 100 AURA to 0xABCD..."
-        }
-    }
+    { type = "run_choreography", choreography = "commit_reveal", participants = ["alice", "bob", "carol", "david", "eve"] }
 ]
 
 [[phases]]
@@ -56,9 +49,9 @@ name = "coordinator_selection"
 description = "Select signing coordinator via lottery"
 timeout_seconds = 2
 actions = [
-    { 
-        type = "run_choreography", 
-        choreography = "decentralized_lottery", 
+    {
+        type = "run_choreography",
+        choreography = "decentralized_lottery",
         participants = ["alice", "bob", "carol", "david", "eve"]
     }
 ]
@@ -68,15 +61,7 @@ name = "commitment_round"
 description = "All participants broadcast commitments"
 timeout_seconds = 4
 actions = [
-    { 
-        type = "run_choreography", 
-        choreography = "frost_commitment", 
-        participants = ["alice", "bob", "carol", "david", "eve"],
-        parameters = {
-            round = 1,
-            binding_factor_seed = "deterministic_seed"
-        }
-    }
+    { type = "run_choreography", choreography = "frost_commitment", participants = ["alice", "bob", "carol", "david", "eve"] }
 ]
 
 [[phases]]
@@ -84,14 +69,7 @@ name = "signing_round"
 description = "Generate and exchange signature shares"
 timeout_seconds = 5
 actions = [
-    { 
-        type = "run_choreography", 
-        choreography = "frost_signing", 
-        participants = ["alice", "bob", "carol", "david", "eve"],
-        parameters = {
-            required_signers = 3
-        }
-    }
+    { type = "run_choreography", choreography = "frost_signing", participants = ["alice", "bob", "carol", "david", "eve"] }
 ]
 
 [[phases]]
@@ -99,9 +77,9 @@ name = "aggregation"
 description = "Aggregate signature shares"
 timeout_seconds = 3
 actions = [
-    { 
-        type = "run_choreography", 
-        choreography = "frost_aggregation", 
+    {
+        type = "run_choreography",
+        choreography = "frost_aggregation",
         participants = ["alice", "bob", "carol", "david", "eve"]
     }
 ]

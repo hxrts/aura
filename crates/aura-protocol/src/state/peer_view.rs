@@ -4,7 +4,7 @@
 //! in the tree synchronization network. PeerView monotonically grows as
 //! new peers are discovered through anti-entropy or gossip.
 
-#![allow(clippy::disallowed_methods)] // TODO: Replace direct UUID calls with effect system
+// UUID generation now uses RandomEffects for deterministic testing
 //!
 //! ## Design Principles
 //!
@@ -132,32 +132,42 @@ impl Bottom for PeerView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::effects::RandomEffects;
+    use aura_effects::random::MockRandomHandler;
 
-    #[test]
-    fn test_add_peer() {
+    /// Create a deterministic random handler for tests
+    fn test_random_handler() -> MockRandomHandler {
+        MockRandomHandler::new_with_seed(42)
+    }
+
+    #[tokio::test]
+    async fn test_add_peer() {
         let mut view = PeerView::new();
-        let peer = Uuid::new_v4();
+        let random = test_random_handler();
+        let peer = random.random_uuid().await;
 
         view.add_peer(peer);
         assert!(view.contains(&peer));
         assert_eq!(view.len(), 1);
     }
 
-    #[test]
-    fn test_add_peer_idempotent() {
+    #[tokio::test]
+    async fn test_add_peer_idempotent() {
         let mut view = PeerView::new();
-        let peer = Uuid::new_v4();
+        let random = test_random_handler();
+        let peer = random.random_uuid().await;
 
         view.add_peer(peer);
         view.add_peer(peer); // Add twice
         assert_eq!(view.len(), 1); // Still only one
     }
 
-    #[test]
-    fn test_join_associative() {
-        let peer_a = Uuid::new_v4();
-        let peer_b = Uuid::new_v4();
-        let peer_c = Uuid::new_v4();
+    #[tokio::test]
+    async fn test_join_associative() {
+        let random = test_random_handler();
+        let peer_a = random.random_uuid().await;
+        let peer_b = random.random_uuid().await;
+        let peer_c = random.random_uuid().await;
 
         let view_a = PeerView::from_peers(vec![peer_a]);
         let view_b = PeerView::from_peers(vec![peer_b]);
@@ -169,10 +179,11 @@ mod tests {
         assert_eq!(left, right);
     }
 
-    #[test]
-    fn test_join_commutative() {
-        let peer_a = Uuid::new_v4();
-        let peer_b = Uuid::new_v4();
+    #[tokio::test]
+    async fn test_join_commutative() {
+        let random = test_random_handler();
+        let peer_a = random.random_uuid().await;
+        let peer_b = random.random_uuid().await;
 
         let view_a = PeerView::from_peers(vec![peer_a]);
         let view_b = PeerView::from_peers(vec![peer_b]);
@@ -180,9 +191,10 @@ mod tests {
         assert_eq!(view_a.join(&view_b), view_b.join(&view_a));
     }
 
-    #[test]
-    fn test_join_idempotent() {
-        let peer = Uuid::new_v4();
+    #[tokio::test]
+    async fn test_join_idempotent() {
+        let random = test_random_handler();
+        let peer = random.random_uuid().await;
         let view = PeerView::from_peers(vec![peer]);
 
         assert_eq!(view.join(&view), view);
@@ -195,9 +207,10 @@ mod tests {
         assert_eq!(view.len(), 0);
     }
 
-    #[test]
-    fn test_join_with_bottom() {
-        let peer = Uuid::new_v4();
+    #[tokio::test]
+    async fn test_join_with_bottom() {
+        let random = test_random_handler();
+        let peer = random.random_uuid().await;
         let view = PeerView::from_peers(vec![peer]);
         let bottom = PeerView::bottom();
 

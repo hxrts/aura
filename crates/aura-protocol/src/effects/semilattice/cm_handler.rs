@@ -183,7 +183,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::DeviceId;
+    use aura_core::identifiers::DeviceId;
     use std::collections::HashSet;
 
     // Test operation type
@@ -315,8 +315,9 @@ mod tests {
             causal_ctx: op1_ctx.clone(),
         };
 
-        // op2 depends on op1
-        let op2_ctx = CausalContext::after(actor, &op1_ctx);
+        // op2 depends on op1 - use explicit dependency
+        let op1_id = OperationId::new(actor, 1);
+        let op2_ctx = CausalContext::after(actor, &op1_ctx).with_dependency(op1_id);
         let op2 = TestOp {
             id: 2,
             value: 3,

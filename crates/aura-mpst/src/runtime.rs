@@ -8,7 +8,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use aura_core::effects::NetworkEffects;
-use aura_core::{Cap, ContextId, DeviceId, Journal, JournalEffects};
+use aura_core::{Cap, ContextId, Journal, JournalEffects, identifiers::DeviceId};
 use rumpsteak_aura_choreography::effects::{
     ChoreoHandler, ChoreographyError, ExtensibleHandler, ExtensionRegistry, Label,
     Result as ChoreoResult,
@@ -387,7 +387,7 @@ impl Default for ProtocolRequirements {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::DeviceId;
+    use aura_core::identifiers::DeviceId;
 
     #[test]
     fn test_aura_runtime_creation() {

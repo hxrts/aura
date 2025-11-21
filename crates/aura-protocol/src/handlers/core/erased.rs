@@ -54,21 +54,21 @@ pub struct AuraHandlerFactory;
 
 impl AuraHandlerFactory {
     /// Create a handler for testing
-    pub fn for_testing(device_id: aura_core::DeviceId) -> Box<dyn AuraHandler> {
+    pub fn for_testing(device_id: aura_core::identifiers::DeviceId) -> Box<dyn AuraHandler> {
         let handler = crate::handlers::CompositeHandler::for_testing(device_id.into());
         Box::new(handler)
     }
 
     /// Create a handler for production
     pub fn for_production(
-        device_id: aura_core::DeviceId,
+        device_id: aura_core::identifiers::DeviceId,
     ) -> Result<Box<dyn AuraHandler>, AuraHandlerError> {
         let handler = crate::handlers::CompositeHandler::for_production(device_id.into());
         Ok(Box::new(handler))
     }
 
     /// Create a handler for simulation
-    pub fn for_simulation(device_id: aura_core::DeviceId, _seed: u64) -> Box<dyn AuraHandler> {
+    pub fn for_simulation(device_id: aura_core::identifiers::DeviceId, _seed: u64) -> Box<dyn AuraHandler> {
         let handler = crate::handlers::CompositeHandler::for_simulation(device_id.into());
         Box::new(handler)
     }

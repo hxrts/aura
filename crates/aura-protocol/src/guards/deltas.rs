@@ -5,9 +5,9 @@
 //! monotonic fact accumulation following join-semilattice laws.
 
 use super::effect_system_trait::GuardEffectSystem;
-use aura_core::{AuraError, AuraResult, Fact, FactValue, Journal, TimeEffects};
+use aura_core::{AuraError, AuraResult, Fact, FactValue, Journal};
 use serde_json::Value as JsonValue;
-use std::{collections::BTreeSet, time::Instant};
+use std::collections::BTreeSet;
 use tracing::{debug, error, info, warn};
 
 /// Apply delta facts to the journal atomically

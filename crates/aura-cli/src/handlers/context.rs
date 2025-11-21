@@ -1,7 +1,7 @@
 //! Context inspection handlers.
 
 use crate::commands::context::ContextAction;
-use anyhow::{bail, Context as AnyhowContext, Result};
+use anyhow::{Context as AnyhowContext, Result};
 use blake3::Hasher;
 use serde::Deserialize;
 use std::fs;
@@ -146,6 +146,7 @@ struct ContextSnapshot {
 
 #[derive(Debug, Default, Deserialize)]
 struct RendezvousEnvelopeDebug {
+    #[allow(dead_code)]
     pub envelope_id: Option<String>,
     pub role: Option<String>,
     pub transport: Option<String>,

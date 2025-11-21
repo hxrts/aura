@@ -105,7 +105,7 @@ pub type Result<T> = std::result::Result<T, AuthenticationError>;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KeyMaterial {
     /// Device public keys indexed by DeviceId
-    device_keys: std::collections::HashMap<aura_core::DeviceId, aura_core::Ed25519VerifyingKey>,
+    device_keys: std::collections::HashMap<aura_core::identifiers::DeviceId, aura_core::Ed25519VerifyingKey>,
 
     /// Guardian public keys indexed by GuardianId
     guardian_keys: std::collections::HashMap<aura_core::GuardianId, aura_core::Ed25519VerifyingKey>,
@@ -127,7 +127,7 @@ impl KeyMaterial {
     /// Get the public key for a device
     pub fn get_device_public_key(
         &self,
-        device_id: &aura_core::DeviceId,
+        device_id: &aura_core::identifiers::DeviceId,
     ) -> Result<&Ed25519VerifyingKey> {
         self.device_keys.get(device_id).ok_or_else(|| {
             AuthenticationError::InvalidDeviceSignature(format!("Unknown device: {}", device_id))
@@ -137,7 +137,7 @@ impl KeyMaterial {
     /// Add a device public key
     pub fn add_device_key(
         &mut self,
-        device_id: aura_core::DeviceId,
+        device_id: aura_core::identifiers::DeviceId,
         public_key: Ed25519VerifyingKey,
     ) {
         self.device_keys.insert(device_id, public_key);
@@ -199,7 +199,7 @@ impl Default for KeyMaterial {
 pub enum IdentityProof {
     /// Single device identity proof
     Device {
-        device_id: aura_core::DeviceId,
+        device_id: aura_core::identifiers::DeviceId,
         signature: Ed25519Signature,
     },
     /// Guardian identity proof
@@ -255,7 +255,7 @@ impl SimpleIdentityVerifier {
     /// Add a device key for verification
     pub fn add_device_key(
         &mut self,
-        device_id: aura_core::DeviceId,
+        device_id: aura_core::identifiers::DeviceId,
         public_key: Ed25519VerifyingKey,
     ) {
         self.key_material.add_device_key(device_id, public_key);
@@ -399,12 +399,45 @@ pub fn verify_identity_proof(
             let public_key = key_material.get_guardian_public_key(guardian_id)?;
             verify_guardian_signature(*guardian_id, message, signature, public_key)?;
         }
-        IdentityProof::Threshold(_threshold_sig) => {
-            // Note: This needs the group public key to be derivable from the message context
-            // TODO fix - For now, we'll need an account_id to look up the group key
-            return Err(AuthenticationError::InvalidThresholdSignature(
-                "Threshold verification requires account context".to_string(),
-            ));
+        IdentityProof::Threshold(threshold_sig) => {
+            // Extract account_id from the message context for threshold verification
+            // Try to parse the message as an AccountId (32-byte UUID)
+            let account_id = if message.len() == 16 {
+                // Message is a UUID in bytes - convert to AccountId
+                let uuid_bytes: [u8; 16] = message.try_into().map_err(|_| {
+                    AuthenticationError::InvalidThresholdSignature(
+                        "Invalid message format for threshold verification".to_string(),
+                    )
+                })?;
+                aura_core::AccountId(uuid::Uuid::from_bytes(uuid_bytes))
+            } else {
+                // Try to parse message as string representation of UUID
+                let message_str = std::str::from_utf8(message).map_err(|_| {
+                    AuthenticationError::InvalidThresholdSignature(
+                        "Message is not valid UTF-8".to_string(),
+                    )
+                })?;
+                
+                // Try to parse as UUID string
+                let uuid = uuid::Uuid::parse_str(message_str).map_err(|_| {
+                    AuthenticationError::InvalidThresholdSignature(
+                        "Message does not contain a valid AccountId".to_string(),
+                    )
+                })?;
+                aura_core::AccountId(uuid)
+            };
+
+            let group_key = key_material.get_group_public_key(&account_id)?;
+
+            // Calculate minimum signers from the signature shares  
+            let min_signers = threshold_sig.signers.len().max(1);
+
+            verify_threshold_signature(
+                message,
+                &threshold_sig.signature,
+                group_key,
+                min_signers,
+            )?;
         }
     }
 

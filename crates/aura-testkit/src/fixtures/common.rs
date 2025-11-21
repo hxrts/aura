@@ -42,13 +42,11 @@ impl ProtocolTestFixture {
     /// * `seed` - Random seed for deterministic generation
     pub async fn with_config(threshold: u16, total_devices: u16, seed: u64) -> Self {
         let account_state = test_account_with_threshold(seed, threshold, total_devices).await;
-        let device_id = account_state
-            .devices()
-            .keys()
-            .next()
-            .cloned()
-            .unwrap_or_else(DeviceId::new);
-        let all_device_ids: Vec<_> = account_state.devices().keys().cloned().collect();
+
+        // TODO: Rewrite for authority-centric model
+        // Journal no longer has .devices() - need to query authority tree state
+        let device_id = DeviceId::new();
+        let all_device_ids: Vec<_> = vec![device_id]; // Stub: should query tree state
 
         Self {
             account_state,
@@ -128,20 +126,33 @@ impl ProtocolTestFixture {
         threshold: u16,
         total_devices: u16,
     ) -> Result<Self, StatelessFixtureError> {
-        // For now, create using traditional method
-        let _device_id = effects_builder.device_id();
+        let device_id = effects_builder.device_id();
         let seed = effects_builder.seed();
-        let fixture = Self::with_config(threshold, total_devices, seed).await;
 
-        // Use stateless effect system integration
+        // Build stateless effect system for account creation
         let stateless_effects = effects_builder
             .build()
             .map_err(|e| StatelessFixtureError::EffectSystemError(e.to_string()))?;
 
-        // TODO: Integrate account creation with stateless effects in future iteration
-        let _account_effects = stateless_effects;
+        // Integrate account creation with stateless effects
+        let account_state = create_test_account_with_stateless_effects(
+            &stateless_effects,
+            seed,
+            threshold,
+            total_devices,
+        )
+        .await
+        .map_err(|e| StatelessFixtureError::AccountCreationError(e.to_string()))?;
 
-        Ok(fixture)
+        // TODO: Rewrite for authority-centric model
+        let all_device_ids: Vec<_> = vec![device_id]; // Stub: should query tree state
+
+        Ok(Self {
+            account_state,
+            device_id,
+            all_device_ids,
+            seed,
+        })
     }
 
     /// Create fixture for unit testing (convenience method)
@@ -256,13 +267,10 @@ impl AccountTestFixture {
     pub async fn with_seed(seed: u64, total_devices: u16, threshold: u16) -> Self {
         let account_state = test_account_with_threshold(seed, threshold, total_devices).await;
         let account_id = account_state.account_id();
-        let primary_device = account_state
-            .devices()
-            .keys()
-            .next()
-            .cloned()
-            .unwrap_or_else(DeviceId::new);
-        let all_devices: Vec<_> = account_state.devices().keys().cloned().collect();
+
+        // TODO: Rewrite for authority-centric model
+        let primary_device = DeviceId::new();
+        let all_devices: Vec<_> = vec![primary_device]; // Stub: should query tree state
 
         Self {
             account_id,
@@ -448,6 +456,53 @@ impl AccountTestFixture {
         let config = StatelessFixtureConfig::for_integration_tests();
         Self::with_stateless_effects(config).await
     }
+}
+
+/// Create a test account using stateless effect system integration
+///
+/// This function demonstrates how to create test accounts using the stateless effect
+/// architecture, providing proper effect injection for deterministic testing.
+async fn create_test_account_with_stateless_effects<E>(
+    effects: &E,
+    _seed: u64,
+    threshold: u16,
+    total_devices: u16,
+) -> aura_core::AuraResult<Journal>
+where
+    E: aura_core::effects::CryptoEffects + aura_core::effects::RandomEffects,
+{
+    use aura_core::effects::{CryptoEffects, RandomEffects};
+
+    // Generate device IDs using the effect system
+    let mut device_ids = Vec::new();
+    for _ in 0..total_devices {
+        let device_uuid = effects.random_uuid().await;
+        device_ids.push(DeviceId::from_uuid(device_uuid));
+    }
+
+    // Generate cryptographic keys using the effect system
+    let mut device_keys = Vec::new();
+    for _device_id in &device_ids {
+        let (signing_key, verify_key) = effects.ed25519_generate_keypair().await.map_err(|e| {
+            aura_core::AuraError::crypto(format!("Failed to generate keypair: {}", e))
+        })?;
+        device_keys.push((signing_key, verify_key));
+    }
+
+    // Create account journal using the first device ID to generate a unique AccountId
+    let device_uuid: uuid::Uuid = device_ids[0].into();
+    let account_id = AccountId::from_uuid(device_uuid);
+    let account_state = Journal::new(account_id);
+
+    // TODO: Implement proper fact-based device addition using AttestedOps
+    // The DeviceMetadata and add_device APIs have been removed in favor of
+    // fact-based journal operations. This function needs to be rewritten to use
+    // the new authority-centric model with AttestedOps for tree updates.
+    // For now, return an empty journal as a placeholder.
+    let _ = device_keys;
+    let _ = threshold;
+
+    Ok(account_state)
 }
 
 #[cfg(test)]

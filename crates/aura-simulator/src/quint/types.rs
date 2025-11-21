@@ -486,7 +486,7 @@ pub enum ViolationPattern {
     SessionConsistency,
     /// Byzantine resistance violation patterns
     ByzantineResistance,
-    /// Ledger consistency violation patterns
+    /// Effect API consistency violation patterns
     LedgerConsistency,
     /// Network partition tolerance violation patterns
     PartitionTolerance,

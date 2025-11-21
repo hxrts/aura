@@ -3,8 +3,8 @@
 //! Types for managing relay capabilities and flow budget enforcement
 //! in the privacy-preserving communication system.
 
-use aura_core::session_epochs::Epoch;
-use aura_core::{DeviceId, FlowBudget};
+use aura_core::identifiers::DeviceId;
+use aura_core::FlowBudget;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::time::Duration;
@@ -241,7 +241,7 @@ impl RelayCapability {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::FlowBudget;
+    use aura_core::{FlowBudget, session_epochs::Epoch};
 
     #[test]
     fn test_relay_capability_creation() {

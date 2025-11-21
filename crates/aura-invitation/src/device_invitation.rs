@@ -7,19 +7,18 @@ use crate::{transport::deliver_via_rendezvous, InvitationError, InvitationResult
 use aura_core::effects::{NetworkEffects, TimeEffects};
 use aura_core::hash;
 use aura_core::{AccountId, DeviceId};
-use aura_journal::semilattice::{InvitationLedger, InvitationRecord};
+use aura_journal::semilattice::{InvitationRecordRegistry, InvitationRecord};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_wot::SerializableBiscuit;
-use biscuit_auth::Biscuit;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-static GLOBAL_INVITATION_LEDGER: Lazy<Arc<Mutex<InvitationLedger>>> =
-    Lazy::new(|| Arc::new(Mutex::new(InvitationLedger::new())));
+static GLOBAL_INVITATION_REGISTRY: Lazy<Arc<Mutex<InvitationRecordRegistry>>> =
+    Lazy::new(|| Arc::new(Mutex::new(InvitationRecordRegistry::new())));
 
 /// Device invitation request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -243,13 +242,13 @@ mod invitation_rejection_protocol {
     }
 }
 
-/// Device invitation coordinator with in-memory ledger.
+/// Device invitation coordinator with in-memory effect API.
 pub struct DeviceInvitationCoordinator<E>
 where
     E: AuraEffects + ?Sized,
 {
     effects: Arc<E>,
-    ledger: Arc<Mutex<InvitationLedger>>,
+    registry: Arc<Mutex<InvitationRecordRegistry>>,
     default_ttl_secs: u64,
 }
 
@@ -261,16 +260,19 @@ where
     pub fn new(effect_system: Arc<E>) -> Self {
         Self {
             effects: effect_system,
-            ledger: Arc::clone(&GLOBAL_INVITATION_LEDGER),
+            registry: Arc::clone(&GLOBAL_INVITATION_REGISTRY),
             default_ttl_secs: 3600,
         }
     }
 
-    /// Create coordinator with shared ledger reference.
-    pub fn with_ledger(effect_system: Arc<E>, ledger: Arc<Mutex<InvitationLedger>>) -> Self {
+    /// Create coordinator with shared registry reference.
+    pub fn with_registry(
+        effect_system: Arc<E>,
+        registry: Arc<Mutex<InvitationRecordRegistry>>,
+    ) -> Self {
         Self {
             effects: effect_system,
-            ledger,
+            registry,
             default_ttl_secs: 3600,
         }
     }
@@ -333,8 +335,8 @@ where
             envelope.expires_at,
             envelope.created_at,
         );
-        let mut ledger = self.ledger.lock().await;
-        ledger.upsert(record);
+        let mut registry = self.registry.lock().await;
+        registry.upsert(record);
         Ok(())
     }
 
@@ -365,13 +367,13 @@ where
         Ok(())
     }
 
-    /// Access the shared ledger (mainly for tests/status).
-    pub async fn ledger_snapshot(&self) -> InvitationLedger {
-        self.ledger.lock().await.clone()
+    /// Access the shared registry (mainly for tests/status).
+    pub async fn registry_snapshot(&self) -> InvitationRecordRegistry {
+        self.registry.lock().await.clone()
     }
 }
 
-/// Access the shared invitation ledger used by other modules.
-pub fn shared_invitation_ledger() -> Arc<Mutex<InvitationLedger>> {
-    Arc::clone(&GLOBAL_INVITATION_LEDGER)
+/// Access the shared invitation registry used by other modules.
+pub fn shared_invitation_registry() -> Arc<Mutex<InvitationRecordRegistry>> {
+    Arc::clone(&GLOBAL_INVITATION_REGISTRY)
 }

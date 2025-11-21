@@ -3,7 +3,7 @@
 //! Core WebSocket protocol messages for aura-macros choreography! macro.
 //! Target: <100 lines (simple implementation).
 
-use aura_core::DeviceId;
+use aura_core::identifiers::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::time::SystemTime;
 use uuid::Uuid;

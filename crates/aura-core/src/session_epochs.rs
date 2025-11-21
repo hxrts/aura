@@ -4,7 +4,8 @@
 //! session lifecycle status, and outcomes across distributed protocols.
 
 // Session identifiers will be imported when needed
-use crate::{DeviceId, GuardianId};
+use crate::identifiers::DeviceId;
+use crate::GuardianId;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use uuid::Uuid;
@@ -70,7 +71,7 @@ impl fmt::Display for ParticipantId {
 ///
 /// All epoch counters in Aura share the same semantics: they are monotonic
 /// `u64` values that start at zero and advance by one. Subsidiary modules
-/// (ledger session epochs, logical clocks, etc.) should alias this struct
+/// (effect API session epochs, logical clocks, etc.) should alias this struct
 /// to make their intent clear while keeping behaviour uniform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Epoch(pub u64);
@@ -124,7 +125,7 @@ impl Default for Epoch {
 /// Session-specific epoch counter.
 ///
 /// This is an alias for [`Epoch`] that callers can use when they specifically
-/// mean the session epoch maintained by the ledger. Retaining the alias keeps
+/// mean the session epoch maintained by the effect API. Retaining the alias keeps
 /// call sites readable without introducing divergent implementations.
 pub type SessionEpoch = Epoch;
 

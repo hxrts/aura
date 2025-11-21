@@ -16,7 +16,7 @@ use crate::{
 use aura_core::effects::ConsoleEffects;
 use aura_core::{AccountId, DeviceId};
 use aura_macros::choreography;
-use aura_protocol::effect_traits::LedgerEffects;
+use aura_protocol::effect_traits::EffectApiEffects;
 use aura_protocol::orchestration::ChoreographicRole;
 use aura_protocol::effects::{SessionManagementEffects, SessionType};
 use serde::{Deserialize, Serialize};
@@ -403,7 +403,7 @@ impl SessionOperations {
             .unwrap_or(SessionManagementRole::Participant(DeviceId::new(), 1));
 
         // Execute session creation using choreographic protocol simulation
-        let timestamp = LedgerEffects::current_timestamp(&*effects)
+        let timestamp = EffectApiEffects::current_timestamp(&*effects)
             .await
             .unwrap_or(0);
 
@@ -621,7 +621,7 @@ impl SessionOperations {
             serde_json::Value::String("self_rotation".to_string()),
         );
 
-        let timestamp = LedgerEffects::current_timestamp(&*effects)
+        let timestamp = EffectApiEffects::current_timestamp(&*effects)
             .await
             .unwrap_or(0);
 
@@ -716,7 +716,7 @@ impl SessionOperations {
         // 3. Clean up session resources
         
         // For now, return a terminated session handle
-        let current_time = LedgerEffects::current_timestamp(effects)
+        let current_time = EffectApiEffects::current_timestamp(effects)
             .await
             .map_err(|e| AuraError::internal(format!("Failed to get timestamp: {}", e)))?;
         
@@ -755,7 +755,7 @@ impl SessionOperations {
 
     /// Get session statistics via effects system
     async fn get_session_stats_via_effects(&self, effects: &AuraEffectSystem) -> Result<SessionStats> {
-        let current_time = LedgerEffects::current_timestamp(effects)
+        let current_time = EffectApiEffects::current_timestamp(effects)
             .await
             .map_err(|e| AuraError::internal(format!("Failed to get timestamp: {}", e)))?;
         

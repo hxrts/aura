@@ -511,7 +511,7 @@ where
     /// Check if the membership change request is authorized using Biscuit tokens
     async fn check_membership_authorization(
         &self,
-        request: &MembershipChangeRequest,
+        _request: &MembershipChangeRequest,
     ) -> Result<(), String> {
         let (token_manager, guard_evaluator) = match (&self.token_manager, &self.guard_evaluator) {
             (Some(tm), Some(ge)) => (tm, ge),

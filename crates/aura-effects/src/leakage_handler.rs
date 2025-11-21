@@ -6,8 +6,7 @@
 use async_trait::async_trait;
 use aura_core::{
     effects::{LeakageBudget, LeakageEffects, LeakageEvent, ObserverClass},
-    identifiers::ContextId,
-    AuraError, Result,
+    identifiers::ContextId, Result,
 };
 use std::collections::HashMap;
 use std::sync::Arc;

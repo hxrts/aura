@@ -18,7 +18,7 @@ pub use aura_core::effects::{
 
 // Re-export individual effect traits
 pub use aura_protocol::effect_traits::{
-    LedgerEffects,
+    EffectApiEffects,
 };
 
 // Re-export orchestration types

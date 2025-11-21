@@ -47,7 +47,7 @@ fn test_effect_coverage_completeness() {
         EffectType::Time,
         EffectType::Console,
         EffectType::Random,
-        EffectType::Ledger,
+        EffectType::EffectApi,
         EffectType::Choreographic,
         EffectType::System,
         EffectType::Journal,

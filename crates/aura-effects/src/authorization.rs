@@ -5,7 +5,7 @@
 //! and other Aura components.
 
 use aura_core::effects::{AuthorizationEffects, AuthorizationError};
-use aura_core::{Cap, DeviceId};
+use aura_core::{Cap, AuthorityId};
 use aura_macros::aura_effect_handlers;
 use std::collections::HashMap;
 
@@ -39,7 +39,7 @@ aura_effect_handlers! {
                 // Return default behavior
                 Ok(self.default_allow)
             },
-            delegate_capabilities(_source_capabilities: &Cap, requested_capabilities: &Cap, target_device: &DeviceId) -> Result<Cap, AuthorizationError> => {
+            delegate_capabilities(_source_capabilities: &Cap, requested_capabilities: &Cap, target_device: &AuthorityId) -> Result<Cap, AuthorizationError> => {
                 // Check for specific delegation response
                 let key = format!("{}:{}", target_device, "delegate");
                 if let Some(&allowed) = self.delegation_responses.get(&key) {
@@ -96,7 +96,7 @@ aura_effect_handlers! {
 
                 Ok(allowed)
             },
-            delegate_capabilities(source_capabilities: &Cap, requested_capabilities: &Cap, target_device: &DeviceId) -> Result<Cap, AuthorizationError> => {
+            delegate_capabilities(source_capabilities: &Cap, requested_capabilities: &Cap, target_device: &AuthorityId) -> Result<Cap, AuthorizationError> => {
                 // Check temporal validity of source capabilities
                 let current_time = aura_core::current_unix_timestamp();
                 if !source_capabilities.is_valid_at(current_time) {
@@ -169,8 +169,8 @@ impl MockAuthorizationHandler {
         self
     }
 
-    /// Configure delegation response for a specific device
-    pub fn with_delegation_response(mut self, target_device: &DeviceId, allowed: bool) -> Self {
+    /// Configure delegation response for a specific authority
+    pub fn with_delegation_response(mut self, target_device: &AuthorityId, allowed: bool) -> Self {
         let key = format!("{}:{}", target_device, "delegate");
         self.delegation_responses.insert(key, allowed);
         self
@@ -296,7 +296,7 @@ impl AuthorizationEffects for StorageAuthorizationHandler {
         &self,
         source_capabilities: &Cap,
         requested_capabilities: &Cap,
-        target_device: &DeviceId,
+        target_device: &AuthorityId,
     ) -> Result<Cap, AuthorizationError> {
         self.auth_handler
             .delegate_capabilities(source_capabilities, requested_capabilities, target_device)
@@ -360,7 +360,7 @@ impl AuthorizationEffects for TreeAuthorizationHandler {
         &self,
         source_capabilities: &Cap,
         requested_capabilities: &Cap,
-        target_device: &DeviceId,
+        target_device: &AuthorityId,
     ) -> Result<Cap, AuthorizationError> {
         self.auth_handler
             .delegate_capabilities(source_capabilities, requested_capabilities, target_device)

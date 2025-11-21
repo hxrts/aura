@@ -3,7 +3,7 @@
 //! Provides essential connection types with built-in relationship scoping and privacy context.
 //! Target: <120 lines (minimal scoping implementation).
 
-use aura_core::{DeviceId, RelationshipId};
+use aura_core::{identifiers::DeviceId, RelationshipId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};

@@ -11,7 +11,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionTicket {
     pub session_id: Uuid,
-    pub issuer_device_id: aura_core::DeviceId,
+    pub issuer_device_id: aura_core::identifiers::DeviceId,
     pub issued_at: u64,  // Epoch timestamp
     pub expires_at: u64, // Epoch timestamp
     pub scope: SessionScope,
@@ -170,13 +170,13 @@ fn serialize_session_ticket(ticket: &SessionTicket) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use aura_core::Effects;
-    use aura_core::DeviceId;
+    use aura_core::identifiers::DeviceId;
     use uuid::Uuid;
 
     fn create_test_ticket(effects: &Effects) -> SessionTicket {
         SessionTicket {
             session_id: Uuid::new_v4(),
-            issuer_device_id: DeviceId(Uuid::new_v4()),
+            issuer_device_id: aura_core::identifiers::DeviceId::from_uuid(Uuid::new_v4()),
             issued_at: 1000,
             expires_at: 2000,
             scope: SessionScope::Dkd {

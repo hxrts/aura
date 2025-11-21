@@ -1,12 +1,46 @@
-# Aura Integration Tests
+# Aura Test Suite
 
-This directory contains integration tests that verify cross-crate functionality and end-to-end system behavior.
+This directory contains a comprehensive test suite organized by purpose and scope, aligned with the current AuthorityId-centric architecture.
 
-## Test Structure
+## Test Organization
 
-### `smoke_test.rs` - End-to-End Smoke Tests
+### End-to-End Tests (`e2e/`)
 
-Smoke tests validate that the core system functionality works by loading and executing scenario files from the `scenarios/` directory.
+Complete system workflows using real effect handlers and current architecture:
+
+- **`01_authority_lifecycle.rs`** - Authority creation, contexts, journal operations
+- **`02_threshold_operations.rs`** - FROST signatures, threshold protocols, recovery
+- **`04_storage_authorization.rs`** - Biscuit-based storage access and permissions
+
+### Property Tests (`properties/`)
+
+Mathematical and architectural correctness validation:
+
+- **`architecture_compliance.rs`** - 8-layer dependency enforcement  
+- **`crdt_convergence.rs`** - CRDT consistency and convergence properties
+
+### CLI Tests (`cli/`)
+
+User interface testing with real CLI commands:
+
+- **`authority_commands.rs`** - Authority management CLI operations
+
+### Integration Tests (`integration/`)
+
+Cross-component interaction testing (planned):
+
+- **`effect_system.rs`** - Effect handler composition
+- **`guard_chain.rs`** - Authorization pipeline
+- **`transport_protocols.rs`** - Network protocol testing
+
+## Architecture Compliance
+
+All tests in this suite:
+- ✅ Use **AuthorityId** (not legacy DeviceId)
+- ✅ Integrate with **aura-agent** effect system
+- ✅ Follow **8-layer architecture** boundaries  
+- ✅ Use **current APIs** (no deprecated functions)
+- ✅ Test **real functionality** (minimal mocking)
 
 **Purpose:**
 - Quick validation that the system is working

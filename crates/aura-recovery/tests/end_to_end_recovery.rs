@@ -65,7 +65,7 @@ async fn test_guardian_setup() -> aura_core::AuraResult<()> {
     let account_id = AccountId::new();
     let (token_manager, guard_evaluator) = create_biscuit_components(device_id, account_id);
     let coordinator = GuardianSetupCoordinator::new_with_biscuit(
-        fixture.effect_system(),
+        fixture.effect_system().into(),
         token_manager,
         guard_evaluator,
     );
@@ -108,7 +108,7 @@ async fn test_guardian_key_recovery() -> aura_core::AuraResult<()> {
     let account_id = AccountId::new();
     let (token_manager, guard_evaluator) = create_biscuit_components(device_id, account_id);
     let coordinator = GuardianKeyRecoveryCoordinator::new_with_biscuit(
-        fixture.effect_system(),
+        fixture.effect_system().into(),
         token_manager,
         guard_evaluator,
     );
@@ -155,7 +155,7 @@ async fn test_guardian_membership_add() -> aura_core::AuraResult<()> {
     let account_id = AccountId::new();
     let (token_manager, guard_evaluator) = create_biscuit_components(device_id, account_id);
     let coordinator = GuardianMembershipCoordinator::new_with_biscuit(
-        fixture.effect_system(),
+        fixture.effect_system().into(),
         token_manager,
         guard_evaluator,
     );
@@ -206,7 +206,7 @@ async fn test_guardian_membership_remove() -> aura_core::AuraResult<()> {
     let account_id = AccountId::new();
     let (token_manager, guard_evaluator) = create_biscuit_components(device_id, account_id);
     let coordinator = GuardianMembershipCoordinator::new_with_biscuit(
-        fixture.effect_system(),
+        fixture.effect_system().into(),
         token_manager,
         guard_evaluator,
     );
@@ -256,7 +256,7 @@ async fn test_insufficient_threshold_failure() -> aura_core::AuraResult<()> {
     let account_id = AccountId::new();
     let (token_manager, guard_evaluator) = create_biscuit_components(device_id, account_id);
     let coordinator = GuardianKeyRecoveryCoordinator::new_with_biscuit(
-        fixture.effect_system(),
+        fixture.effect_system().into(),
         token_manager,
         guard_evaluator,
     );

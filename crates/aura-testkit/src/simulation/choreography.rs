@@ -6,7 +6,7 @@
 //!
 //! Enhanced for stateless effect system architecture (work/021.md).
 
-use crate::foundation::SimpleTestContext;
+use crate::foundation::{CompositeTestHandler, SimpleTestContext};
 use crate::{DeviceTestFixture, TestEffectsBuilder, TestExecutionMode};
 use aura_core::DeviceId;
 use std::collections::HashMap;
@@ -20,7 +20,7 @@ use tokio::sync::RwLock;
 /// and provides infrastructure for testing distributed choreographic protocols.
 pub struct ChoreographyTestHarness {
     /// Test devices with their foundation-based contexts
-    devices: Vec<(DeviceTestFixture, SimpleTestContext)>,
+    devices: Vec<(DeviceTestFixture, CompositeTestHandler)>,
     /// Transport coordinator for inter-device communication
     transport: Arc<MockChoreographyTransport>,
     /// Role mappings for choreographic execution
@@ -32,7 +32,7 @@ pub struct ChoreographyTestHarness {
 impl ChoreographyTestHarness {
     /// Create a new choreography test harness with the specified number of devices
     pub fn with_devices(count: usize) -> Self {
-        let devices: Vec<(DeviceTestFixture, SimpleTestContext)> = (0..count)
+        let devices: Vec<(DeviceTestFixture, CompositeTestHandler)> = (0..count)
             .map(|i| {
                 let device_fixture = DeviceTestFixture::new(i);
                 let device_id = device_fixture.device_id();
@@ -60,7 +60,7 @@ impl ChoreographyTestHarness {
 
     /// Create a harness with specific device labels for easier testing
     pub fn with_labeled_devices(labels: Vec<&str>) -> Self {
-        let devices: Vec<(DeviceTestFixture, SimpleTestContext)> = labels
+        let devices: Vec<(DeviceTestFixture, CompositeTestHandler)> = labels
             .into_iter()
             .enumerate()
             .map(|(i, label)| {
@@ -141,7 +141,7 @@ impl ChoreographyTestHarness {
     /// This provides a clean interface for creating choreography harnesses with
     /// the new stateless effect system architecture.
     pub async fn new_with_stateless_effects(
-        devices: Vec<(DeviceTestFixture, SimpleTestContext)>,
+        devices: Vec<(DeviceTestFixture, CompositeTestHandler)>,
     ) -> Result<Self, TestError> {
         let device_ids: Vec<DeviceId> = devices
             .iter()
@@ -210,7 +210,7 @@ impl ChoreographyTestHarness {
     }
 
     /// Get a device's test context by index
-    pub fn device_context(&self, device_index: usize) -> Option<&SimpleTestContext> {
+    pub fn device_context(&self, device_index: usize) -> Option<&CompositeTestHandler> {
         self.devices.get(device_index).map(|(_, context)| context)
     }
 
@@ -220,7 +220,10 @@ impl ChoreographyTestHarness {
     }
 
     /// Get a device's test context for choreographic execution
-    pub fn get_device_context(&self, device_index: usize) -> Result<&SimpleTestContext, TestError> {
+    pub fn get_device_context(
+        &self,
+        device_index: usize,
+    ) -> Result<&CompositeTestHandler, TestError> {
         if device_index >= self.devices.len() {
             return Err(TestError::InvalidDeviceIndex {
                 index: device_index,
@@ -236,7 +239,7 @@ impl ChoreographyTestHarness {
     where
         F: Fn(
             usize,
-            &SimpleTestContext,
+            &CompositeTestHandler,
         )
             -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<R, TestError>> + Send>>,
         R: Send,
@@ -600,7 +603,7 @@ impl std::error::Error for TransportError {}
 /// and the aura-simulator effect system.
 pub struct SimulatorCompatibleContext {
     /// Test devices and their foundation test contexts
-    pub devices: Vec<(DeviceTestFixture, SimpleTestContext)>,
+    pub devices: Vec<(DeviceTestFixture, CompositeTestHandler)>,
     /// Mock transport layer for choreography
     pub transport: Arc<MockChoreographyTransport>,
     /// Mock session coordinator
@@ -622,7 +625,7 @@ impl SimulatorCompatibleContext {
     }
 
     /// Get test context for a device
-    pub fn device_context(&self, device_id: DeviceId) -> Option<&SimpleTestContext> {
+    pub fn device_context(&self, device_id: DeviceId) -> Option<&CompositeTestHandler> {
         self.devices
             .iter()
             .find(|(fixture, _)| fixture.device_id() == device_id)

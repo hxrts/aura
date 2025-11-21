@@ -4,7 +4,7 @@
 //!
 //! Tests validating choreographic execution following unified effect system architecture
 
-use aura_core::DeviceId;
+use aura_core::identifiers::DeviceId;
 use aura_protocol::{effects::*, handlers::CompositeHandler};
 use std::time::Duration;
 use tokio::time::timeout;

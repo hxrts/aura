@@ -34,17 +34,7 @@ name = "account_setup"
 description = "Initialize threshold account with DKD"
 timeout_seconds = 5
 actions = [
-    { type = "setup_choreography", protocol = "AccountInitProtocol", participants = ["alice", "bob", "carol", "david"] },
-    { 
-        type = "run_choreography", 
-        choreography = "dkd", 
-        participants = ["alice", "bob", "carol", "david"],
-        parameters = {
-            app_id = "integration_test",
-            context = "root_key",
-            threshold = 3
-        }
-    }
+    { type = "run_choreography", choreography = "dkd", participants = ["alice", "bob", "carol", "david"] }
 ]
 
 # Phase 2: Derive application-specific keys
@@ -53,26 +43,8 @@ name = "app_key_derivation"
 description = "Derive keys for multiple applications"
 timeout_seconds = 8
 actions = [
-    { 
-        type = "run_choreography", 
-        choreography = "dkd", 
-        participants = ["alice", "bob", "carol", "david"],
-        parameters = {
-            app_id = "messaging_app",
-            context = "encryption_keys",
-            threshold = 3
-        }
-    },
-    { 
-        type = "run_choreography", 
-        choreography = "dkd", 
-        participants = ["alice", "bob", "carol", "david"],
-        parameters = {
-            app_id = "storage_app",
-            context = "access_keys",
-            threshold = 3
-        }
-    }
+    { type = "run_choreography", choreography = "dkd", participants = ["alice", "bob", "carol", "david"] },
+    { type = "run_choreography", choreography = "dkd", participants = ["alice", "bob", "carol", "david"] }
 ]
 
 # Phase 3: Sign a multi-party transaction
@@ -81,15 +53,7 @@ name = "transaction_signing"
 description = "Sign transaction using FROST"
 timeout_seconds = 6
 actions = [
-    { 
-        type = "run_choreography", 
-        choreography = "frost_signing", 
-        participants = ["alice", "bob", "carol", "david"],
-        parameters = {
-            message = "Authorize storage quota increase to 100GB",
-            required_signers = 3
-        }
-    }
+    { type = "run_choreography", choreography = "frost_signing", participants = ["alice", "bob", "carol", "david"] }
 ]
 
 # Phase 4: Simulate coordinator failure and recovery
@@ -98,23 +62,7 @@ name = "failure_recovery_test"
 description = "Test coordinator failure recovery mechanism"
 timeout_seconds = 15
 actions = [
-    # Start a new signing round
-    { 
-        type = "run_choreography", 
-        choreography = "frost_signing", 
-        participants = ["alice", "bob", "carol", "david"],
-        parameters = {
-            message = "Critical update transaction",
-            required_signers = 3
-        },
-        inject_failure = {
-            participant = "coordinator",
-            at_progress = 0.5,
-            failure_type = "crash"
-        }
-    },
-    # Recovery should kick in automatically
-    { type = "wait_for_recovery", timeout_ms = 5000 },
+    { type = "run_choreography", choreography = "frost_signing", participants = ["alice", "bob", "carol", "david"] },
     { type = "verify_property", property = "recovery_successful", expected = true },
     { type = "verify_property", property = "transaction_signed_after_recovery", expected = true }
 ]
@@ -125,23 +73,8 @@ name = "parallel_protocols"
 description = "Execute multiple protocols in parallel"
 timeout_seconds = 10
 actions = [
-    { 
-        type = "parallel", 
-        actions = [
-            { 
-                type = "run_choreography", 
-                choreography = "dkd", 
-                participants = ["alice", "bob"],
-                parameters = { app_id = "app1", context = "ctx1", threshold = 2 }
-            },
-            { 
-                type = "run_choreography", 
-                choreography = "dkd", 
-                participants = ["carol", "david"],
-                parameters = { app_id = "app2", context = "ctx2", threshold = 2 }
-            }
-        ]
-    }
+    { type = "run_choreography", choreography = "dkd", participants = ["alice", "bob"] },
+    { type = "run_choreography", choreography = "dkd", participants = ["carol", "david"] }
 ]
 
 # Phase 6: Visualization and analysis

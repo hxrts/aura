@@ -4,7 +4,7 @@
 //! signed a message, proving collective identity.
 
 use crate::{AuthenticationError, Result};
-use aura_core::DeviceId;
+use aura_core::identifiers::DeviceId;
 use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 
 /// Verify that a threshold of devices signed a message
@@ -101,7 +101,7 @@ pub fn verify_threshold_signature_with_signers(
 mod tests {
     use super::*;
     use aura_core::Effects;
-    use aura_core::DeviceId;
+    use aura_core::identifiers::DeviceId;
     use uuid::Uuid;
 
     #[test]

@@ -48,13 +48,11 @@ pub mod biscuit_authorization;
 pub use aura_core::{ChunkId, ContentId, ContentSize};
 
 // Re-export main APIs
-pub use capabilities::{
-    AccessDecision, StorageCapability, StorageCapabilitySet, StoragePermission, StorageResource,
-};
+pub use capabilities::{AccessDecision, StorageCapability, StoragePermission, StorageResource};
 pub use chunk::{compute_chunk_layout, ChunkLayout, ChunkManifest, ContentManifest, ErasureConfig};
 pub use crdt::{StorageIndex, StorageOpLog, StorageState};
 pub use errors::StorageError;
-pub use search::{FilteredResults, SearchIndexEntry, SearchQuery, SearchResults, SearchScope};
+pub use search::{SearchIndexEntry, SearchQuery, SearchResults, SearchScope};
 
 // Re-export Biscuit authorization APIs
 pub use biscuit_authorization::{

@@ -9,13 +9,13 @@ use tokio::sync::RwLock;
 
 use aura_core::ContextId;
 use aura_core::session_epochs::Epoch;
-use aura_core::{AuraError, AuraResult, DeviceId, FlowBudget};
+use aura_core::{AuraError, AuraResult, AuthorityId, FlowBudget};
 
 /// Key for identifying a unique budget
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct BudgetKey {
     pub context: ContextId,
-    pub peer: DeviceId,
+    pub peer: AuthorityId,
 }
 
 /// Manages flow budgets in isolation from effect execution
@@ -40,7 +40,7 @@ impl FlowBudgetManager {
     pub async fn can_charge(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
         cost: u32,
     ) -> AuraResult<bool> {
         let key = BudgetKey {
@@ -64,7 +64,7 @@ impl FlowBudgetManager {
     pub async fn charge(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
         cost: u32,
     ) -> AuraResult<FlowBudget> {
         let key = BudgetKey {
@@ -91,7 +91,7 @@ impl FlowBudgetManager {
     pub async fn set_budget(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
         budget: FlowBudget,
     ) -> AuraResult<()> {
         let key = BudgetKey {
@@ -108,7 +108,7 @@ impl FlowBudgetManager {
     pub async fn get_budget(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
     ) -> AuraResult<Option<FlowBudget>> {
         let key = BudgetKey {
             context: context.clone(),
@@ -123,7 +123,7 @@ impl FlowBudgetManager {
     pub async fn initialize_budget(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
         limit: u64,
         epoch: Epoch,
     ) -> AuraResult<FlowBudget> {
@@ -152,7 +152,7 @@ impl FlowBudgetManager {
     pub async fn remove_budget(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
     ) -> AuraResult<Option<FlowBudget>> {
         let key = BudgetKey {
             context: context.clone(),
@@ -191,7 +191,7 @@ impl FlowBudgetManager {
     pub async fn charge_or_init(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
         cost: u32,
         default_limit: u64,
         epoch: Epoch,
@@ -234,7 +234,7 @@ mod tests {
         let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
         let context = ContextId::new();
-        let peer = fixture.device_id();
+        let peer = AuthorityId::from_uuid((fixture.device_id()).0);
         let epoch = Epoch::from(1);
 
         // Initialize budget with limit of 1000
@@ -269,7 +269,7 @@ mod tests {
         let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
         let context = ContextId::new();
-        let peer = fixture.device_id();
+        let peer = AuthorityId::from_uuid(fixture.device_id().into());
         let epoch1 = Epoch::from(1);
         let epoch2 = Epoch::from(2);
 
@@ -298,7 +298,7 @@ mod tests {
         let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
         let context = ContextId::new();
-        let peer = fixture.device_id();
+        let peer = AuthorityId::from_uuid(fixture.device_id().into());
         let epoch = Epoch::from(1);
 
         // Charge without initialization
@@ -324,7 +324,7 @@ mod tests {
         let fixture = TestFixture::new().await?;
         let manager = FlowBudgetManager::new();
         let context = ContextId::new();
-        let peer = fixture.device_id();
+        let peer = AuthorityId::from_uuid(fixture.device_id().into());
         let epoch = Epoch::from(1);
 
         // Initialize budget

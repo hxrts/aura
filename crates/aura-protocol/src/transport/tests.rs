@@ -14,7 +14,7 @@ use super::{
     secure_channel::SecureChannelCoordinator,
     TransportCoordinationConfig, TransportCoordinationError,
 };
-use aura_core::{ContextId, DeviceId};
+use aura_core::{ContextId, identifiers::DeviceId};
 use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 use tokio::time::timeout;

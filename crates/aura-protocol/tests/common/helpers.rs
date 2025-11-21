@@ -5,7 +5,7 @@
 //!
 //! NOTE: Many functions are disabled as they depend on modules not yet implemented.
 
-use aura_core::{AccountId, DeviceId, SessionId};
+use aura_core::{AccountId, identifiers::{DeviceId, SessionId}};
 use aura_protocol::{
     handlers::CompositeHandler,
     // Note: middleware and runtime modules not yet fully implemented

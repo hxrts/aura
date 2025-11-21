@@ -18,9 +18,9 @@ Authorities can interact with other authorities through relational contexts. The
 
 ## 2. Account Authorities
 
-An account authority is an authority with long term state. An account maintains device membership through its ratchet tree. An account contains its own journal namespace. An account evolves through attested operations stored as facts.
+An account authority is an authority with long term state. An account maintains device membership through its commitment tree. An account contains its own journal namespace. An account evolves through attested operations stored as facts.
 
-An account authority uses a ratchet tree to define its internal threshold structure. The ratchet tree stores device leaves and branch policies. The ratchet tree determines which devices can sign operations under the account root. The account root commitment identifies the current state of the ratchet tree.
+An account authority uses a commitment tree to define its internal threshold structure. The commitment tree stores device leaves and branch policies. The commitment tree determines which devices can sign operations under the account root. The account root commitment identifies the current state of the commitment tree.
 
 ```rust
 pub struct AccountAuthority {
@@ -37,7 +37,7 @@ An account authority derives context specific keys using deterministic key deriv
 
 An operator controls an authority by operating its devices. An operator is not represented in the protocol. Devices are internal to the authority. Devices hold share material required for signing. Devices produce partial signatures during threshold signing.
 
-The ratchet tree manages device membership. The `AddLeaf` and `RemoveLeaf` operations modify device presence in the authority. Device identifiers do not appear outside the authority. No external party can link devices to authorities.
+The commitment tree manages device membership. The `AddLeaf` and `RemoveLeaf` operations modify device presence in the authority. Device identifiers do not appear outside the authority. No external party can link devices to authorities.
 
 ```rust
 pub struct LeafNode {
@@ -47,7 +47,7 @@ pub struct LeafNode {
 }
 ```
 
-This leaf type is internal to the ratchet tree. It is not visible outside the account authority. Leaf nodes support threshold signing but do not identify operators.
+This leaf type is internal to the commitment tree. It is not visible outside the account authority. Leaf nodes support threshold signing but do not identify operators.
 
 ## 4. Relational Identity Model
 
@@ -85,4 +85,4 @@ Every relationship is private to its participants. Each relationship forms its o
 
 ## 7. Summary
 
-Authorities are cryptographic actors with private internal state. Accounts are authorities with ratchet tree based state machines. Operators control devices that implement authority operations. Identity emerges only inside relational contexts. No identifier in Aura encodes global identity. Each context defines its own small scope of identity and relationship meaning.
+Authorities are cryptographic actors with private internal state. Accounts are authorities with commitment tree based state machines. Operators control devices that implement authority operations. Identity emerges only inside relational contexts. No identifier in Aura encodes global identity. Each context defines its own small scope of identity and relationship meaning.

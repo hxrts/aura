@@ -6,7 +6,7 @@ This contract specifies Aura's distributed systems model. It defines the safety,
 
 The contract applies to the following aspects of the system.
 
-Effect handlers and protocols operate within the 8-layer architecture described in [System Architecture](001_system_architecture.md). Journals and reducers are covered by this contract. The journal specification appears in [Accounts and Ratchet Tree](101_accounts_and_ratchet_tree.md) and [Journal System](102_journal.md). Aura Consensus is documented in [Consensus](104_consensus.md).
+Effect handlers and protocols operate within the 8-layer architecture described in [System Architecture](001_system_architecture.md). Journals and reducers are covered by this contract. The journal specification appears in [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) and [Journal System](102_journal.md). Aura Consensus is documented in [Consensus](104_consensus.md).
 
 Relational contexts and rendezvous flows fall under this contract. Relational contexts are specified in [Relational Contexts](103_relational_contexts.md). Transport semantics appear in [Transport and Information Flow](108_transport_and_information_flow.md). Rendezvous flows are detailed in [Rendezvous Architecture](110_rendezvous.md).
 
@@ -30,7 +30,7 @@ Messages scoped to `ContextId` never leak into other contexts. Contexts may be e
 
 ### Deterministic reduction order
 
-Ratchet tree operations resolve conflicts using the stable ordering described in [Accounts and Ratchet Tree](101_accounts_and_ratchet_tree.md). This ordering is derived from the cryptographic identifiers and facts stored in the journal. Conflicts are always resolved in the same way across all replicas.
+Commitment tree operations resolve conflicts using the stable ordering described in [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md). This ordering is derived from the cryptographic identifiers and facts stored in the journal. Conflicts are always resolved in the same way across all replicas.
 
 ### Receipts chain
 
@@ -139,7 +139,7 @@ Monitor receipt acceptance rates, consensus backlog, and budget utilization. See
 
 [Theoretical Model](002_theoretical_model.md) covers the formal calculus and semilattice laws.
 
-[Accounts and Ratchet Tree](101_accounts_and_ratchet_tree.md) documents reduction ordering.
+[Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) documents reduction ordering.
 
 [Journal System](102_journal.md) and [Maintenance](111_maintenance.md) cover fact storage and convergence.
 

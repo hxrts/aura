@@ -1,6 +1,6 @@
 #![cfg(feature = "fixture_effects")]
 
-//! Scalability tests for ratchet tree implementation.
+//! Scalability tests for commitment tree implementation.
 //!
 //! These tests verify that the system handles large-scale scenarios:
 //! - Tree with 100+ devices
@@ -16,7 +16,7 @@ use aura_core::tree::{
     snapshot::Snapshot, AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
 };
 use aura_core::{DeviceId, Hash32, JoinSemilattice};
-use aura_journal::ratchet_tree::{compaction::compact, reduction::reduce};
+use aura_journal::commitment_tree::{compaction::compact, reduction::reduce};
 use aura_journal::semilattice::OpLog;
 use aura_protocol::sync::PeerView;
 use std::collections::BTreeMap;

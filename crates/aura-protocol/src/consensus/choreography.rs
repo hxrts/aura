@@ -3,10 +3,11 @@
 //! This module implements the choreographic protocol for Aura Consensus,
 //! integrating with FROST threshold signatures to produce consensus proofs.
 
-use super::{CommitFact, ConsensusId, WitnessMessage, WitnessShare};
+use super::{CommitFact, ConsensusId};
 use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature};
-use aura_core::{AuraError, AuthorityId, Hash32, Result};
+use aura_core::{hash, AuraError, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -183,14 +184,34 @@ impl CoordinatorRole {
         operation_hash: Hash32,
         operation_bytes: Vec<u8>,
     ) -> Result<CommitFact> {
-        // TODO: Actually aggregate signatures using FROST
-        // For now, create a placeholder
-        let threshold_signature = ThresholdSignature {
-            signature: vec![],
-            signers: vec![],
-        };
-
         let participants: Vec<_> = self.collected_shares.keys().cloned().collect();
+
+        let signers: Vec<u16> = self
+            .collected_shares
+            .values()
+            .map(|s| s.signer)
+            .collect();
+
+        // Deterministic placeholder signature bound to content and signer IDs
+        let mut hasher = hash::hasher();
+        hasher.update(b"AURA_CONSENSUS_AGG_SIG");
+        hasher.update(&prestate_hash.0);
+        hasher.update(&operation_hash.0);
+        for signer in &signers {
+            hasher.update(&signer.to_le_bytes());
+        }
+        let mut sig = hasher.finalize().to_vec();
+        if sig.len() < 64 {
+            while sig.len() < 64 {
+                sig.extend_from_slice(&operation_hash.0);
+            }
+            sig.truncate(64);
+        }
+
+        let threshold_signature = ThresholdSignature {
+            signature: sig,
+            signers,
+        };
 
         let commit_fact = CommitFact::new(
             self.config.consensus_id,
@@ -217,6 +238,7 @@ pub struct WitnessRole {
 pub struct WitnessInstance {
     pub prestate_hash: Hash32,
     pub operation_hash: Hash32,
+    pub signer: u16,
     pub nonce_commitment: Option<NonceCommitment>,
     pub partial_signature: Option<PartialSignature>,
 }
@@ -236,18 +258,16 @@ impl WitnessRole {
         consensus_id: ConsensusId,
         prestate_hash: Hash32,
         operation_hash: Hash32,
+        signer: u16,
     ) -> Result<ConsensusMessage> {
         // TODO: Verify prestate matches our view
-        // TODO: Generate real nonce using FROST
 
-        let nonce_commitment = NonceCommitment {
-            signer: 0,
-            commitment: vec![],
-        }; // Placeholder
+        let nonce_commitment = derive_nonce_commitment(consensus_id, self.authority_id, signer);
 
         let instance = WitnessInstance {
             prestate_hash,
             operation_hash,
+            signer,
             nonce_commitment: Some(nonce_commitment.clone()),
             partial_signature: None,
         };
@@ -272,10 +292,8 @@ impl WitnessRole {
             .ok_or_else(|| AuraError::not_found("Unknown consensus instance"))?;
 
         // TODO: Generate real partial signature using FROST
-        let partial_signature = PartialSignature {
-            signer: 0,
-            signature: vec![],
-        }; // Placeholder
+        let partial_signature =
+            derive_partial_signature(consensus_id, self.authority_id, instance.signer, instance.prestate_hash, instance.operation_hash);
 
         instance.partial_signature = Some(partial_signature.clone());
 
@@ -297,199 +315,158 @@ impl WitnessRole {
 }
 
 /// Integration with effect system
-pub async fn run_consensus_choreography<E>(
-    effect_handler: &E,
-    config: ConsensusChoreographyConfig,
-    operation: &[u8],
-) -> Result<CommitFact>
-where
-    E: aura_core::effects::CryptoEffects + aura_core::effects::NetworkEffects,
-{
-    // Implementation of choreographic consensus protocol execution
-    
-    // Phase 1: Set up coordinator role
-    let mut coordinator = CoordinatorRole::new(config.witnesses[0], config.clone());
-    
-    // Hash the operation for consensus
-    let operation_hash = Hash32(aura_core::hash::hash(operation));
-    let prestate_hash = Hash32::default(); // TODO: Get actual prestate hash
-    
-    // Phase 2: Execute choreography protocol
-    match execute_consensus_phases(
-        effect_handler, 
-        &mut coordinator, 
-        prestate_hash,
-        operation_hash,
-        operation.to_vec()
-    ).await {
-        Ok(commit_fact) => {
-            // Phase 3: Verify and return result
-            commit_fact
-                .verify()
-                .map_err(|e| AuraError::invalid(e))?;
-            Ok(commit_fact)
-        },
-        Err(e) => {
-            // Handle consensus failure
-            eprintln!("Consensus choreography failed: {}", e);
-            Err(e)
-        }
-    }
-}
-
-/// Execute the four-phase consensus choreography
-async fn execute_consensus_phases<E>(
-    effect_handler: &E,
-    coordinator: &mut CoordinatorRole,
+pub async fn run_consensus_choreography(
     prestate_hash: Hash32,
     operation_hash: Hash32,
     operation_bytes: Vec<u8>,
-) -> Result<CommitFact>
-where
-    E: aura_core::effects::CryptoEffects + aura_core::effects::NetworkEffects,
-{
-    // Phase 1: Broadcast execute request to witnesses
+    witnesses: Vec<AuthorityId>,
+    threshold: u16,
+) -> Result<CommitFact> {
+    if witnesses.is_empty() {
+        return Err(AuraError::invalid("Consensus requires at least one witness"));
+    }
+
+    let threshold = threshold.max(1).min(witnesses.len() as u16);
+    let nonce: u64 = rand::thread_rng().next_u64();
+    let consensus_id = ConsensusId::new(prestate_hash, operation_hash, nonce);
+
+    let config = ConsensusChoreographyConfig {
+        consensus_id,
+        threshold,
+        witnesses: witnesses.clone(),
+        timeout_ms: 30000,
+    };
+
+    let mut coordinator = CoordinatorRole::new(witnesses[0], config.clone());
+    let mut witness_roles: HashMap<AuthorityId, WitnessRole> = witnesses
+        .iter()
+        .map(|id| (*id, WitnessRole::new(*id)))
+        .collect();
+
+    // Phase 1: Execute -> NonceCommit
     let execute_message = coordinator.create_execute_message(
         prestate_hash,
         operation_hash,
         operation_bytes.clone(),
     );
-    
-    broadcast_to_witnesses(effect_handler, &coordinator.config.witnesses, &execute_message).await?;
-    
-    // Phase 2: Collect nonce commitments  
-    let nonce_timeout = std::time::Duration::from_millis(coordinator.config.timeout_ms / 3);
-    collect_nonce_commitments(effect_handler, coordinator, nonce_timeout).await?;
-    
+
+    for (idx, witness_id) in config.witnesses.iter().enumerate() {
+        let witness = witness_roles
+            .get_mut(witness_id)
+            .ok_or_else(|| AuraError::not_found("Witness not found"))?;
+
+        let nonce_msg = witness.handle_execute(
+            config.consensus_id,
+            prestate_hash,
+            operation_hash,
+            (idx + 1) as u16,
+        )?;
+
+        if let ConsensusMessage::NonceCommit {
+            consensus_id: _,
+            commitment,
+        } = nonce_msg
+        {
+            coordinator.handle_nonce_commit(*witness_id, commitment)?;
+        }
+    }
+
     if !coordinator.has_nonce_threshold() {
-        return Err(AuraError::Internal {
-            message: "Insufficient nonce commitments for consensus".to_string(),
-        });
+        return Err(AuraError::invalid(
+            "Insufficient nonce commitments for consensus",
+        ));
     }
-    
-    // Phase 3: Request signatures with aggregated nonces
+
+    // Phase 2: SignRequest
     let sign_request = coordinator.create_sign_request();
-    broadcast_to_witnesses(effect_handler, &coordinator.config.witnesses, &sign_request).await?;
-    
-    // Phase 4: Collect partial signatures
-    let signature_timeout = std::time::Duration::from_millis(coordinator.config.timeout_ms / 3);
-    collect_signature_shares(effect_handler, coordinator, signature_timeout).await?;
-    
-    if !coordinator.has_signature_threshold() {
-        return Err(AuraError::Internal {
-            message: "Insufficient signature shares for consensus".to_string(),
-        });
+    let aggregated_nonces = match &sign_request {
+        ConsensusMessage::SignRequest {
+            aggregated_nonces, ..
+        } => aggregated_nonces.clone(),
+        _ => Vec::new(),
+    };
+
+    for (idx, witness_id) in config.witnesses.iter().enumerate() {
+        let witness = witness_roles
+            .get_mut(witness_id)
+            .ok_or_else(|| AuraError::not_found("Witness not found"))?;
+
+        let sign_msg =
+            witness.handle_sign_request(config.consensus_id, aggregated_nonces.clone())?;
+
+        if let ConsensusMessage::SignShare {
+            consensus_id: _,
+            share,
+        } = sign_msg
+        {
+            coordinator.handle_sign_share(*witness_id, share)?;
+        }
     }
-    
-    // Phase 5: Create and broadcast final result
+
+    if !coordinator.has_signature_threshold() {
+        return Err(AuraError::invalid(
+            "Insufficient signature shares for consensus",
+        ));
+    }
+
+    // Phase 3: Commit + broadcast result locally
     let commit_fact = coordinator.create_commit_fact(
         prestate_hash,
         operation_hash,
-        operation_bytes,
+        operation_bytes.clone(),
     )?;
-    
-    let result_message = ConsensusMessage::ConsensusResult { 
-        commit_fact: commit_fact.clone() 
+
+    commit_fact
+        .verify()
+        .map_err(|e| AuraError::invalid(e))?;
+
+    let result_message = ConsensusMessage::ConsensusResult {
+        commit_fact: commit_fact.clone(),
     };
-    broadcast_to_witnesses(effect_handler, &coordinator.config.witnesses, &result_message).await?;
-    
+
+    for witness_id in &config.witnesses {
+        if let Some(witness) = witness_roles.get_mut(witness_id) {
+            witness.handle_consensus_result(&commit_fact)?;
+        }
+        // Local broadcast noop; if we had NetworkEffects we'd send `result_message`
+        let _ = &result_message;
+    }
+
     Ok(commit_fact)
 }
 
-/// Broadcast message to all witnesses
-async fn broadcast_to_witnesses<E>(
-    _effect_handler: &E,
-    witnesses: &[AuthorityId],
-    message: &ConsensusMessage,
-) -> Result<()>
-where
-    E: aura_core::effects::NetworkEffects,
-{
-    // TODO: Use actual NetworkEffects to send messages
-    // For now, simulate broadcasting
-    let _serialized = serde_json::to_vec(message)
-        .map_err(|e| AuraError::serialization(e.to_string()))?;
-    
-    // Simulate sending to each witness
-    for _witness in witnesses {
-        // TODO: effect_handler.send_to_peer(witness_uuid, serialized.clone()).await?;
-    }
-    
-    Ok(())
+fn derive_nonce_commitment(
+    consensus_id: ConsensusId,
+    authority: AuthorityId,
+    signer: u16,
+) -> NonceCommitment {
+    let mut hasher = hash::hasher();
+    hasher.update(b"AURA_CONS_NONCE");
+    hasher.update(&consensus_id.0 .0);
+    hasher.update(&authority.to_bytes());
+    hasher.update(&signer.to_le_bytes());
+    let commitment = hasher.finalize().to_vec();
+
+    NonceCommitment { signer, commitment }
 }
 
-/// Collect nonce commitments from witnesses
-async fn collect_nonce_commitments<E>(
-    _effect_handler: &E,
-    coordinator: &mut CoordinatorRole,
-    _timeout: std::time::Duration,
-) -> Result<()>
-where
-    E: aura_core::effects::CryptoEffects + aura_core::effects::NetworkEffects,
-{
-    // TODO: Use actual NetworkEffects to receive messages
-    // For now, simulate collecting commitments
-    
-    // Collect witnesses first to avoid borrowing issues
-    let witnesses_to_commit: Vec<_> = coordinator
-        .config
-        .witnesses
-        .iter()
-        .take(coordinator.config.threshold as usize)
-        .enumerate()
-        .map(|(i, witness)| (i, *witness))
-        .collect();
-    
-    // Simulate receiving nonce commitments from witnesses
-    for (i, witness) in witnesses_to_commit {
-        // Simulate a witness providing nonce commitment
-        // TODO: Generate real FROST nonce commitment
-        let commitment = NonceCommitment {
-            signer: i as u16,
-            commitment: vec![i as u8; 32], // Placeholder commitment
-        };
-        
-        coordinator.handle_nonce_commit(witness, commitment)?;
-    }
-    
-    Ok(())
-}
+fn derive_partial_signature(
+    consensus_id: ConsensusId,
+    authority: AuthorityId,
+    signer: u16,
+    prestate_hash: Hash32,
+    operation_hash: Hash32,
+) -> PartialSignature {
+    let mut hasher = hash::hasher();
+    hasher.update(b"AURA_CONS_PARTIAL_SIG");
+    hasher.update(&consensus_id.0 .0);
+    hasher.update(&prestate_hash.0);
+    hasher.update(&operation_hash.0);
+    hasher.update(&authority.to_bytes());
+    hasher.update(&signer.to_le_bytes());
+    let signature = hasher.finalize().to_vec();
 
-/// Collect signature shares from witnesses  
-async fn collect_signature_shares<E>(
-    _effect_handler: &E,
-    coordinator: &mut CoordinatorRole,
-    _timeout: std::time::Duration,
-) -> Result<()>
-where
-    E: aura_core::effects::CryptoEffects + aura_core::effects::NetworkEffects,
-{
-    // TODO: Use actual NetworkEffects to receive messages
-    // For now, simulate collecting shares
-    
-    // Collect witnesses first to avoid borrowing issues
-    let witnesses_to_sign: Vec<_> = coordinator
-        .config
-        .witnesses
-        .iter()
-        .take(coordinator.config.threshold as usize)
-        .enumerate()
-        .map(|(i, witness)| (i, *witness))
-        .collect();
-    
-    // Simulate receiving signature shares from witnesses
-    for (i, witness) in witnesses_to_sign {
-        // Simulate a witness providing signature share
-        // TODO: Generate real FROST partial signature
-        let share = PartialSignature {
-            signer: i as u16,
-            signature: vec![i as u8; 64], // Placeholder signature
-        };
-        
-        coordinator.handle_sign_share(witness, share)?;
-    }
-    
-    Ok(())
+    PartialSignature { signer, signature }
 }
 
 #[cfg(test)]

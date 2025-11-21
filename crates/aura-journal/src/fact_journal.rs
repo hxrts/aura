@@ -142,7 +142,7 @@ pub struct Fact {
 /// Types of facts that can be stored in the journal
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum FactContent {
-    /// Attested operation on the ratchet tree
+    /// Attested operation on the commitment tree
     AttestedOp(AttestedOp),
     /// Relational fact for cross-authority coordination
     Relational(RelationalFact),
@@ -152,9 +152,13 @@ pub enum FactContent {
     FlowBudget(FlowBudgetFact),
     /// Rendezvous receipt for tracking message flow
     RendezvousReceipt {
+        /// Unique identifier of the envelope
         envelope_id: [u8; 32],
+        /// Authority that issued this receipt
         authority_id: AuthorityId,
+        /// Timestamp when the receipt was created
         timestamp: u64,
+        /// Signature over the receipt data
         signature: Vec<u8>,
     },
 }
@@ -175,16 +179,21 @@ impl FactContent {
 /// Enumeration of fact types for filtering
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FactType {
+    /// Attested operation on the commitment tree
     AttestedOp,
+    /// Relational fact for cross-authority coordination
     Relational,
+    /// Snapshot marker for garbage collection
     Snapshot,
+    /// Flow budget spent counter update
     FlowBudget,
+    /// Rendezvous receipt for tracking message flow
     RendezvousReceipt,
 }
 
 /// Attested operation fact
 ///
-/// Represents a threshold-signed operation on the ratchet tree.
+/// Represents a threshold-signed operation on the commitment tree.
 /// These facts drive the authority's internal state transitions.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct AttestedOp {
@@ -203,51 +212,64 @@ pub struct AttestedOp {
 /// Tree operation types that can be attested
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum TreeOpKind {
-    /// Add a new device/leaf
+    /// Add a new device/leaf to the tree
     AddLeaf {
         /// Public key of the new device (opaque bytes)
         public_key: Vec<u8>,
     },
-    /// Remove a device/leaf
+    /// Remove a device/leaf from the tree
     RemoveLeaf {
         /// Index of the leaf to remove
         leaf_index: u32,
     },
-    /// Update threshold policy
+    /// Update the threshold policy for the tree
     UpdatePolicy {
-        /// New threshold value
+        /// New threshold value required for operations
         threshold: u16,
     },
-    /// Rotate epoch (invalidates old shares)
+    /// Rotate the epoch (invalidates old key shares)
     RotateEpoch,
 }
 
 /// Relational fact for cross-authority relationships
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RelationalFact {
-    /// Guardian binding between authorities
+    /// Guardian binding established between two authorities
     GuardianBinding {
+        /// Account being bound to a guardian
         account_id: AuthorityId,
+        /// Guardian authority
         guardian_id: AuthorityId,
+        /// Hash of the binding agreement
         binding_hash: Hash32,
     },
-    /// Recovery grant approval
+    /// Recovery grant issued by a guardian
     RecoveryGrant {
+        /// Account that can be recovered
         account_id: AuthorityId,
+        /// Guardian granting recovery capability
         guardian_id: AuthorityId,
+        /// Hash of the grant details
         grant_hash: Hash32,
     },
     /// Consensus result from Aura Consensus
     Consensus {
-        consensus_id: Hash32, // ConsensusId as Hash32 to avoid circular dependency
+        /// Consensus operation identifier (as Hash32 to avoid circular dependency)
+        consensus_id: Hash32,
+        /// Hash of the operation being consensus'd
         operation_hash: Hash32,
+        /// Whether consensus threshold was met
         threshold_met: bool,
+        /// Number of participants in the consensus
         participant_count: u16,
     },
-    /// Generic relational binding
+    /// Generic relational binding for extensibility
     Generic {
+        /// Context in which this binding exists
         context_id: ContextId,
+        /// Type of binding (domain-specific)
         binding_type: String,
+        /// Serialized binding data
         binding_data: Vec<u8>,
     },
 }
@@ -269,15 +291,15 @@ pub struct SnapshotFact {
 /// at runtime from Biscuit token evaluation.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FlowBudgetFact {
-    /// Context where budget was spent
+    /// Relational context where budget was spent
     pub context_id: ContextId,
-    /// Source authority
+    /// Source authority that initiated the spending
     pub source: AuthorityId,
-    /// Destination authority
+    /// Destination authority that received the flow
     pub destination: AuthorityId,
-    /// Amount spent (incremental)
+    /// Amount spent in this transaction (incremental counter)
     pub spent_amount: u64,
-    /// Epoch for this spending
+    /// Epoch number for this spending (for rotation tracking)
     pub epoch: u64,
 }
 

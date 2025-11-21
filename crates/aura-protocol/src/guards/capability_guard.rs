@@ -3,9 +3,9 @@
 //! This module provides guard evaluation for authority operations,
 //! integrating with Biscuit tokens for authorization.
 
-use super::{GuardError, GuardResult};
+use super::GuardResult;
 use crate::authorization::BiscuitAuthorizationBridge;
-use aura_core::{AuraError, AuthorityId, ContextId, Epoch, FlowBudget, Result};
+use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, Result};
 use aura_wot::{AuthorityOp, ContextOp, ResourceScope};
 use biscuit_auth::Biscuit;
 
@@ -194,7 +194,7 @@ impl CapabilityGuardExt for CapabilityGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::DeviceId;
+    use aura_core::{identifiers::DeviceId, session_epochs::Epoch};
     use biscuit_auth::PublicKey;
 
     #[tokio::test]

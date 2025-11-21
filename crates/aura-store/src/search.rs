@@ -3,7 +3,7 @@
 //! This module defines pure types and functions for storage search operations,
 //! capability-based result filtering, and privacy-preserving search.
 
-use crate::{StorageCapability, StorageCapabilitySet};
+use crate::StorageCapability;
 use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -134,10 +134,7 @@ impl SearchResultItem {
         self
     }
 
-    /// Check if user capabilities can access this result
-    pub fn is_accessible(&self, user_capabilities: &StorageCapabilitySet) -> bool {
-        user_capabilities.satisfies_all(&self.required_capabilities)
-    }
+    // Removed is_accessible method - authorization now handled by Biscuit tokens
 }
 
 /// Complete search results with metadata
@@ -190,49 +187,8 @@ impl SearchResults {
     }
 }
 
-/// Capability-filtered search results
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FilteredResults {
-    /// Original search results
-    pub original_results: SearchResults,
-    /// Filtered items (only accessible ones)
-    pub filtered_items: Vec<SearchResultItem>,
-    /// Number of items filtered out
-    pub filtered_count: usize,
-    /// Filtering capabilities used
-    pub filter_capabilities: StorageCapabilitySet,
-}
-
-impl FilteredResults {
-    /// Create new filtered results
-    pub fn new(
-        original_results: SearchResults,
-        filtered_items: Vec<SearchResultItem>,
-        filtered_count: usize,
-        filter_capabilities: StorageCapabilitySet,
-    ) -> Self {
-        Self {
-            original_results,
-            filtered_items,
-            filtered_count,
-            filter_capabilities,
-        }
-    }
-
-    /// Number of accessible results
-    pub fn accessible_count(&self) -> usize {
-        self.filtered_items.len()
-    }
-
-    /// Get accessibility ratio (accessible / total)
-    pub fn accessibility_ratio(&self) -> f64 {
-        if self.original_results.result_count() == 0 {
-            1.0
-        } else {
-            self.accessible_count() as f64 / self.original_results.result_count() as f64
-        }
-    }
-}
+// FilteredResults removed - capability-based filtering superseded by Biscuit tokens
+// Authorization checks now handled at effect system layer
 
 /// Search index entry for CRDT-based search
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -293,29 +249,7 @@ impl SearchIndexEntry {
     }
 }
 
-/// Pure function to filter search results by capabilities
-pub fn filter_search_results(
-    results: SearchResults,
-    user_capabilities: &StorageCapabilitySet,
-) -> FilteredResults {
-    let mut filtered_items = Vec::new();
-    let mut filtered_count = 0;
-
-    for item in &results.items {
-        if item.is_accessible(user_capabilities) {
-            filtered_items.push(item.clone());
-        } else {
-            filtered_count += 1;
-        }
-    }
-
-    FilteredResults::new(
-        results,
-        filtered_items,
-        filtered_count,
-        user_capabilities.clone(),
-    )
-}
+// Removed filter_search_results function - capability-based filtering superseded by Biscuit tokens
 
 /// Pure function to build search index from content
 pub fn build_search_index(
@@ -340,57 +274,8 @@ pub fn build_search_index(
     Ok(index_entries)
 }
 
-/// Pure function to search within an index
-pub fn search_index(
-    index: &[SearchIndexEntry],
-    query: &SearchQuery,
-    user_capabilities: &StorageCapabilitySet,
-) -> Result<SearchResults, AuraError> {
-    let mut matching_items = Vec::new();
-
-    for entry in index {
-        // Check scope
-        if !query.scope.contains_content(&entry.content_id) {
-            continue;
-        }
-
-        // Check if user can access this content
-        if !user_capabilities.satisfies_all(&entry.required_capabilities) {
-            continue;
-        }
-
-        // Check term matching
-        if entry.matches_terms(&query.terms) {
-            let score = entry.calculate_score(&query.terms);
-            let item = SearchResultItem::new(
-                entry.content_id.clone(),
-                score,
-                entry.required_capabilities.clone(),
-            );
-            matching_items.push(item);
-        }
-    }
-
-    // Sort by score (highest first)
-    matching_items.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    let total_count = matching_items.len();
-
-    // Apply limit
-    if let Some(limit) = query.limit {
-        matching_items.truncate(limit);
-    }
-
-    Ok(SearchResults::new(
-        query.clone(),
-        matching_items,
-        total_count,
-    ))
-}
+// Removed search_index function - capability-based access checks superseded by Biscuit tokens
+// Use filter and score functions separately, with authorization handled by effect system
 
 #[cfg(test)]
 mod tests {
@@ -437,28 +322,7 @@ mod tests {
         assert_eq!(score3, 0.0);
     }
 
-    #[test]
-    fn test_filter_search_results() {
-        let cap = StorageCapability::read(StorageResource::Global);
-        let user_caps = StorageCapabilitySet::from_capabilities(vec![cap.clone()]);
-
-        let accessible_item = SearchResultItem::new("accessible".to_string(), 1.0, vec![cap]);
-
-        let restricted_item = SearchResultItem::new(
-            "restricted".to_string(),
-            1.0,
-            vec![StorageCapability::admin(StorageResource::Global)],
-        );
-
-        let query = SearchQuery::new("test".to_string(), SearchScope::Global);
-        let results = SearchResults::new(query, vec![accessible_item.clone(), restricted_item], 2);
-
-        let filtered = filter_search_results(results, &user_caps);
-
-        assert_eq!(filtered.accessible_count(), 1);
-        assert_eq!(filtered.filtered_count, 1);
-        assert_eq!(filtered.filtered_items[0], accessible_item);
-    }
+    // Removed test_filter_search_results - FilteredResults and filter_search_results removed
 
     #[test]
     fn test_build_search_index() {

@@ -9,7 +9,7 @@ use super::{
     config::{TransportConfig, PrivacyLevel, ConnectionTimeout},
     connection::{ConnectionId, ScopedConnectionId, ConnectionState, ConnectionInfo},
 };
-use aura_core::{DeviceId, ContextId};
+use aura_core::{identifiers::DeviceId, ContextId};
 use std::collections::HashMap;
 use std::time::{SystemTime, Duration};
 

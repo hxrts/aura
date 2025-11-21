@@ -1,57 +1,38 @@
 //! # Aura Web of Trust
 //!
-//! Capability-based authorization implementing meet-semilattice laws for
-//! monotonic capability restriction and delegation chains.
+//! Authority-based authorization system using Biscuit tokens for 
+//! cryptographically verifiable capability delegation.
 //!
 //! This crate implements the Web of Trust layer from Aura's architectural
-//! model, providing concrete realizations of the theoretical foundations
-//! described in docs/002_theoretical_model.md.
+//! model, providing Biscuit-based authorization with authority-centric
+//! resource scopes described in docs/002_theoretical_model.md.
 //!
-//! ## Theoretical Foundations
-//!
-//! This implementation directly corresponds to the mathematical model in:
-//! - §2.1 Foundation Objects: Capabilities as meet-semilattice elements (C, ⊓, ⊤)
-//! - §2.4 Semantic Laws: Meet operations that are associative, commutative, and idempotent
-//! - §5.2 Web-of-Trust Model: Delegation composition via meet operations
+//! ## Authorization System
 //!
 //! The crate provides:
-//! - Meet-semilattice capability objects that can only shrink (⊓)
-//! - Capability delegation chains with proper attenuation
-//! - Policy enforcement via capability intersection
-//! - Formal verification of semilattice laws
-//!
-//! ## Core Concepts
-//!
-//! Capabilities follow meet-semilattice laws from §1.4 Algebraic Laws:
-//! - **Associative**: (a ⊓ b) ⊓ c = a ⊓ (b ⊓ c)
-//! - **Commutative**: a ⊓ b = b ⊓ a
-//! - **Idempotent**: a ⊓ a = a
-//! - **Monotonic**: a ⊓ b ⪯ a and a ⊓ b ⪯ b (Monotonic Restriction)
+//! - Biscuit token management with cryptographic verification
+//! - Authority-centric resource scopes (AuthorityOp, ContextOp)
+//! - Token delegation with built-in attenuation 
+//! - Datalog-based policy enforcement
 //!
 //! ## Usage
 //!
 //! ```rust
-//! use aura_wot::{Capability, CapabilitySet, MeetSemiLattice};
-//!
-//! // Capabilities only shrink via meet operation
-//! let base_policy = CapabilitySet::from_permissions(&["read:docs", "write:data"]);
-//! let delegation = CapabilitySet::from_permissions(&["read:docs"]);
-
-//!
-//! // Effective capabilities = intersection (can only get smaller)
-//! let effective = base_policy.meet(&delegation);
-//! assert!(effective.permits("read:docs"));
-//! assert!(!effective.permits("write:data")); // Lost via intersection
+//! use aura_wot::{ResourceScope, AuthorityOp};
+//! use aura_core::{AuthorityId};
+//! 
+//! // Authority-based resource authorization  
+//! let resource = ResourceScope::Authority {
+//!     authority_id: AuthorityId::new(),
+//!     operation: AuthorityOp::UpdateTree,
+//! };
+//! // Token verification handles cryptographic delegation chains
 //! ```
 
 pub mod errors;
 
-// Legacy capability system (for backward compatibility with tests)
-// TODO: Remove in Phase 4 of authorization unification
-#[deprecated(note = "Legacy capability system. Use Biscuit tokens instead.")]
-pub mod capability;
-#[deprecated(note = "Legacy device-centric policy. Use authority-based ResourceScope instead.")]
-pub mod tree_policy;
+// Legacy capability system removed - Phase 4 of authorization unification complete
+// Use Biscuit tokens via BiscuitTokenManager instead
 
 // Biscuit-based authorization (new implementation)
 pub mod biscuit_resources;
@@ -60,18 +41,8 @@ pub mod resource_scope; // Authority-based resource scopes
 
 pub use errors::{AuraError, AuraResult, WotError, WotResult};
 
-// Export legacy capability types
-#[deprecated(note = "Legacy capability system. Use Biscuit tokens instead.")]
-pub use capability::{
-    evaluate_capabilities, Capability, CapabilitySet, DelegationChain, DelegationLink,
-    EvaluationContext, LocalChecks, Policy,
-};
-
-// Export tree policy types
-#[deprecated(
-    note = "Legacy device-centric policy. Use authority-based ResourceScope instead."
-)]
-pub use tree_policy::Policy as TreePolicy;
+// Legacy capability types removed - use Biscuit tokens instead
+// Legacy tree policy types removed - use authority-based ResourceScope instead
 
 // Re-export semilattice traits for convenience
 pub use aura_core::semilattice::{MeetSemiLattice, Top};

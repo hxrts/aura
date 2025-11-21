@@ -4,16 +4,28 @@
 //! functionality to ensure the entire authorization system works correctly
 //! as an integrated whole.
 
-use aura_core::{AccountId, DeviceId};
-use aura_protocol::authorization::biscuit_bridge::BiscuitAuthorizationBridge;
+use aura_core::{AccountId, AuthorityId, ContextId, DeviceId};
+use aura_protocol::authorization::BiscuitAuthorizationBridge;
 use aura_testkit::{
     create_delegation_scenario, create_multi_device_scenario, create_recovery_scenario,
     create_security_test_scenario, BiscuitTestFixture,
 };
 use aura_wot::{
-    biscuit_resources::{AdminOperation, JournalOp, RecoveryType, ResourceScope, StorageCategory},
+    biscuit_resources::{AdminOperation, JournalOp, RecoveryType, ResourceScope as LegacyResourceScope, StorageCategory},
     biscuit_token::BiscuitError,
+    ResourceScope,
 };
+
+/// Helper function to convert legacy ResourceScope to new ResourceScope for bridge authorization
+fn convert_legacy_scope(legacy_scope: &LegacyResourceScope) -> ResourceScope {
+    let authority_id = AuthorityId::new();
+    let context_id = ContextId::new();
+    aura_wot::resource_scope::legacy::convert_legacy_resource_scope(
+        legacy_scope,
+        authority_id,
+        context_id,
+    )
+}
 
 /// Comprehensive test result summary
 #[derive(Debug)]
@@ -205,10 +217,11 @@ async fn comprehensive_biscuit_integration_test() -> Result<(), Box<dyn std::err
         let token_manager = fixture.get_device_token(&device_id).unwrap();
         let token = token_manager.current_token();
 
-        let storage_scope = ResourceScope::Storage {
+        let legacy_storage_scope = LegacyResourceScope::Storage {
             category: StorageCategory::Personal,
             path: "test_file.txt".to_string(),
         };
+        let storage_scope = convert_legacy_scope(&legacy_storage_scope);
 
         let result = bridge.authorize(token, "read", &storage_scope)?;
         assert!(
@@ -231,9 +244,10 @@ async fn comprehensive_biscuit_integration_test() -> Result<(), Box<dyn std::err
         let bridge = BiscuitAuthorizationBridge::new(fixture.root_public_key(), guardian_device);
         let guardian_token = fixture.get_guardian_token(&guardian_device).unwrap();
 
-        let recovery_scope = ResourceScope::Recovery {
+        let legacy_recovery_scope = LegacyResourceScope::Recovery {
             recovery_type: RecoveryType::DeviceKey,
         };
+        let recovery_scope = convert_legacy_scope(&legacy_recovery_scope);
 
         let result = bridge.authorize(guardian_token, "recovery_approve", &recovery_scope)?;
         assert!(
@@ -264,10 +278,11 @@ async fn comprehensive_biscuit_integration_test() -> Result<(), Box<dyn std::err
             let bridge = BiscuitAuthorizationBridge::new(fixture.root_public_key(), *device_id);
             let token = token_manager.current_token();
 
-            let storage_scope = ResourceScope::Storage {
+            let legacy_storage_scope = LegacyResourceScope::Storage {
                 category: StorageCategory::Shared,
                 path: "multi_device_test.txt".to_string(),
             };
+            let storage_scope = convert_legacy_scope(&legacy_storage_scope);
 
             let result = bridge.authorize(token, "read", &storage_scope)?;
             assert!(result.authorized, "Multi-device token should work");
@@ -305,7 +320,8 @@ async fn comprehensive_biscuit_integration_test() -> Result<(), Box<dyn std::err
             .zip(chain.resource_scopes.iter())
             .enumerate()
         {
-            let result = bridge.authorize(token, "read", scope)?;
+            let converted_scope = convert_legacy_scope(scope);
+            let result = bridge.authorize(token, "read", &converted_scope)?;
             assert!(
                 result.authorized,
                 "Delegation level {} should be authorized",
@@ -402,10 +418,11 @@ async fn comprehensive_biscuit_integration_test() -> Result<(), Box<dyn std::err
 
         // Verify deserialized token works
         let bridge = BiscuitAuthorizationBridge::new(fixture.root_public_key(), device_id);
-        let storage_scope = ResourceScope::Storage {
+        let legacy_storage_scope = LegacyResourceScope::Storage {
             category: StorageCategory::Personal,
             path: "serialization_test.txt".to_string(),
         };
+        let storage_scope = convert_legacy_scope(&legacy_storage_scope);
 
         let result = bridge.authorize(&deserialized, "read", &storage_scope)?;
         assert!(result.authorized, "Deserialized token should work");
@@ -493,26 +510,26 @@ async fn comprehensive_biscuit_integration_test() -> Result<(), Box<dyn std::err
             AdminOperation, JournalOp, RecoveryType, StorageCategory,
         };
 
-        // Test all resource scope types
-        let scopes = vec![
-            ResourceScope::Storage {
+        // Test all resource scope types using the legacy API (for consistency with fixture)
+        let legacy_scopes = vec![
+            LegacyResourceScope::Storage {
                 category: StorageCategory::Personal,
                 path: "test/".to_string(),
             },
-            ResourceScope::Journal {
+            LegacyResourceScope::Journal {
                 account_id: "account123".to_string(),
                 operation: JournalOp::Read,
             },
-            ResourceScope::Relay {
-                channel_id: "channel456".to_string(),
-            },
-            ResourceScope::Recovery {
+            LegacyResourceScope::Recovery {
                 recovery_type: RecoveryType::DeviceKey,
             },
-            ResourceScope::Admin {
+            LegacyResourceScope::Admin {
                 operation: AdminOperation::AddGuardian,
             },
         ];
+        
+        // Convert to new API for testing datalog patterns
+        let scopes: Vec<ResourceScope> = legacy_scopes.iter().map(|s| convert_legacy_scope(s)).collect();
 
         for scope in &scopes {
             let pattern = scope.resource_pattern();
@@ -590,10 +607,11 @@ async fn biscuit_performance_baseline() -> Result<(), Box<dyn std::error::Error>
     let token_manager = fixture.get_device_token(&device_id).unwrap();
     let token = token_manager.current_token();
 
-    let storage_scope = ResourceScope::Storage {
+    let legacy_storage_scope = LegacyResourceScope::Storage {
         category: StorageCategory::Personal,
         path: "performance_test.txt".to_string(),
     };
+    let storage_scope = convert_legacy_scope(&legacy_storage_scope);
 
     // Measure authorization performance
     let iterations = 1000;
@@ -644,11 +662,11 @@ async fn biscuit_memory_usage_baseline() -> Result<(), Box<dyn std::error::Error
     // Create delegation chains
     for device_id in devices.iter().take(10) {
         let scopes = vec![
-            ResourceScope::Storage {
+            LegacyResourceScope::Storage {
                 category: StorageCategory::Personal,
                 path: format!("device_{}/", device_id),
             },
-            ResourceScope::Storage {
+            LegacyResourceScope::Storage {
                 category: StorageCategory::Personal,
                 path: format!("device_{}/restricted/", device_id),
             },
@@ -663,10 +681,11 @@ async fn biscuit_memory_usage_baseline() -> Result<(), Box<dyn std::error::Error
 
     // Verify all tokens are functional
     let mut working_tokens = 0;
-    let storage_scope = ResourceScope::Storage {
+    let legacy_storage_scope = LegacyResourceScope::Storage {
         category: StorageCategory::Personal,
         path: "memory_test.txt".to_string(),
     };
+    let storage_scope = convert_legacy_scope(&legacy_storage_scope);
 
     for device_id in &devices {
         if let Some(token_manager) = fixture.get_device_token(device_id) {

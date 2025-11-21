@@ -12,7 +12,7 @@ use std::time::SystemTime;
 use aura_core::{hash_canonical, serialization::to_vec, AccountId, AuraError, AuthorityId, DeviceId, Hash32};
 use aura_core::tree::{Epoch as TreeEpoch, LeafId, NodeIndex, Policy, Snapshot};
 use crate::runtime::AuraEffectSystem;
-use aura_protocol::effect_traits::{ConsoleEffects, LedgerEffects, StorageEffects};
+use aura_protocol::effect_traits::{ConsoleEffects, EffectApiEffects, StorageEffects};
 use aura_protocol::effects::TreeEffects;
 use aura_sync::protocols::snapshots::{SnapshotConfig, SnapshotProtocol as SnapshotManager};
 use aura_sync::protocols::WriterFence;
@@ -315,20 +315,20 @@ impl MaintenanceController {
         let effects = self.effects.read().await;
         let effects = &*effects;
 
-        // TODO: Box<dyn AuraEffects> doesn't implement LedgerEffects trait
+        // TODO: Box<dyn AuraEffects> doesn't implement EffectApiEffects trait
         // Use placeholder epoch for now
         let target_epoch = 1u64;
-        // let target_epoch = LedgerEffects::current_epoch(&effects)
+        // let target_epoch = EffectApiEffects::current_epoch(&effects)
         //     .await
         //     .map_err(|e| AuraError::internal(format!("Failed to get current epoch: {}", e)))?;
-        // TODO: Box<dyn AuraEffects> doesn't implement LedgerEffects trait
+        // TODO: Box<dyn AuraEffects> doesn't implement EffectApiEffects trait
         // Use current system time for now
         #[allow(clippy::disallowed_methods)]
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        // let timestamp = LedgerEffects::current_timestamp(&effects)
+        // let timestamp = EffectApiEffects::current_timestamp(&effects)
         //     .await
         //     .map_err(|e| AuraError::internal(format!("Failed to get current timestamp: {}", e)))?;
         // TODO: Box<dyn AuraEffects> doesn't implement TreeEffects trait
@@ -520,7 +520,7 @@ impl MaintenanceController {
     ) -> Result<()> {
         let bytes =
             to_vec(event).map_err(|e| AuraError::serialization(format!("encode event: {}", e)))?;
-        LedgerEffects::append_event(effects, bytes)
+        EffectApiEffects::append_event(effects, bytes)
             .await
             .map_err(|e| AuraError::coordination_failed(format!("append event: {}", e)))?;
         Ok(())

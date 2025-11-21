@@ -1,6 +1,6 @@
 # Coordination Systems Guide
 
-This guide covers distributed coordination and privacy systems in Aura. You will learn CRDT programming patterns, ratchet tree operations, web of trust relationships, flow budget management, session types, and basic choreographic programming.
+This guide covers distributed coordination and privacy systems in Aura. You will learn CRDT programming patterns, commitment tree operations, web of trust relationships, flow budget management, session types, and basic choreographic programming.
 
 ## CRDT Programming
 
@@ -86,24 +86,24 @@ let synchronized_state = updated_coordinator.cv_handler().get_state();
 
 Protocols consume and return coordinators with updated state. This enables immutable data flow patterns where protocol execution produces new state versions.
 
-## Ratchet Tree Operations
+## Commitment Tree Operations
 
-Ratchet trees provide forward secrecy for group communication. The tree structure enables efficient key updates when group membership changes.
+Commitment trees provide forward secrecy for group communication. The tree structure enables efficient key updates when group membership changes.
 
 ### Tree Structure
 
-Ratchet trees organize group members in a binary tree:
+Commitment trees organize group members in a binary tree:
 
 ```rust
-use aura_journal::ratchet_tree::{RatchetTree, TreePosition};
+use aura_journal::commitment_tree::{CommitmentTree, TreePosition};
 
-pub struct GroupRatchetTree {
-    tree: RatchetTree,
+pub struct GroupCommitmentTree {
+    tree: CommitmentTree,
     device_id: aura_core::DeviceId,
     position: TreePosition,
 }
 
-impl GroupRatchetTree {
+impl GroupCommitmentTree {
     pub fn add_member(&mut self, new_member: aura_core::DeviceId) -> Result<TreeUpdate, RatchetError> {
         let new_position = self.tree.find_empty_leaf()?;
         let update = self.tree.insert_member(new_position, new_member)?;
@@ -133,7 +133,7 @@ Derive group encryption keys from tree state:
 ```rust
 use aura_core::DerivedKeyContext;
 
-impl GroupRatchetTree {
+impl GroupCommitmentTree {
     pub async fn derive_group_key<E: CryptoEffects>(
         &self,
         effects: &E,
@@ -161,11 +161,11 @@ Key derivation uses tree root secrets and epoch information. Each epoch produces
 Synchronize tree state across group members:
 
 ```rust
-use aura_journal::ratchet_tree::TreeOperation;
+use aura_journal::commitment_tree::TreeOperation;
 
-pub async fn synchronize_ratchet_tree<E: NetworkEffects + CryptoEffects>(
+pub async fn synchronize_commitment_tree<E: NetworkEffects + CryptoEffects>(
     effects: &E,
-    local_tree: &mut GroupRatchetTree,
+    local_tree: &mut GroupCommitmentTree,
     peers: Vec<aura_core::DeviceId>,
 ) -> Result<(), SynchronizationError> {
     let tree_state = local_tree.export_state();
@@ -534,7 +534,7 @@ Protocol composition enables building complex distributed operations. Extensions
 
 ## Integration Patterns
 
-Coordination systems integrate to provide comprehensive distributed functionality. CRDTs handle state consistency. Ratchet trees provide forward secrecy. Web of trust enables authorization. Flow budgets control privacy and performance.
+Coordination systems integrate to provide comprehensive distributed functionality. CRDTs handle state consistency. Commitment trees provide forward secrecy. Web of trust enables authorization. Flow budgets control privacy and performance.
 
 Combine these systems for robust distributed applications:
 

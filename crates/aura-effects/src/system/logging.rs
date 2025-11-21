@@ -8,7 +8,8 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{SystemEffects, SystemError};
-use aura_core::{DeviceId, SessionId};
+use aura_core::identifiers::DeviceId;
+use aura_core::SessionId;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -20,26 +21,42 @@ use uuid::Uuid;
 /// Log entry with structured metadata
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LogEntry {
+    /// Unix timestamp of the log entry
     pub timestamp: u64,
+    /// Log level (info, warn, error, debug, etc.)
     pub level: String,
+    /// Log message content
     pub message: String,
+    /// Source component that generated the log
     pub component: String,
+    /// Associated session ID if applicable
     pub session_id: Option<SessionId>,
+    /// Associated device ID if applicable
     pub device_id: Option<DeviceId>,
+    /// Structured metadata fields
     pub metadata: HashMap<String, Value>,
+    /// Trace ID for distributed tracing correlation
     pub trace_id: Option<Uuid>,
 }
 
 /// Audit log entry for security-critical events
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AuditEntry {
+    /// Unix timestamp of the audit event
     pub timestamp: u64,
+    /// Type of security event (login, permission_change, etc.)
     pub event_type: String,
+    /// Device/actor that initiated the event
     pub actor: Option<DeviceId>,
+    /// Resource affected by the event
     pub resource: String,
+    /// Action performed on the resource
     pub action: String,
+    /// Outcome of the action (success, failure, denied, etc.)
     pub outcome: String,
+    /// Additional audit metadata
     pub metadata: HashMap<String, Value>,
+    /// Associated session ID if applicable
     pub session_id: Option<SessionId>,
 }
 
@@ -88,11 +105,17 @@ impl LogBuffer {
 /// Configuration for logging system
 #[derive(Debug, Clone)]
 pub struct LoggingConfig {
+    /// Maximum number of log entries to keep in memory
     pub max_log_entries: usize,
+    /// Maximum number of audit entries to keep in memory
     pub max_audit_entries: usize,
+    /// Whether to enable file-based logging
     pub enable_file_logging: bool,
+    /// Whether to enable remote logging (e.g., syslog)
     pub enable_remote_logging: bool,
+    /// Minimum log level to record (debug, info, warn, error)
     pub log_level: String,
+    /// Whether to record audit events
     pub audit_enabled: bool,
 }
 
@@ -112,13 +135,21 @@ impl Default for LoggingConfig {
 /// Statistics for the logging system
 #[derive(Debug, Clone, Default)]
 pub struct LoggingStats {
+    /// Total number of log entries processed
     pub total_logs: u64,
+    /// Total number of audit log entries processed
     pub total_audit_logs: u64,
+    /// Number of error-level logs recorded
     pub error_logs: u64,
+    /// Number of warn-level logs recorded
     pub warn_logs: u64,
+    /// Number of info-level logs recorded
     pub info_logs: u64,
+    /// Number of debug-level logs recorded
     pub debug_logs: u64,
+    /// Number of logs dropped due to buffer overflow
     pub dropped_logs: u64,
+    /// Logging system uptime in seconds
     pub uptime_seconds: u64,
 }
 
@@ -128,6 +159,7 @@ pub struct LoggingSystemHandler {
     log_buffer: Arc<RwLock<LogBuffer>>,
     audit_buffer: Arc<RwLock<LogBuffer>>,
     stats: Arc<RwLock<LoggingStats>>,
+    #[allow(dead_code)]
     start_time: SystemTime,
     log_sender: Arc<RwLock<Option<mpsc::UnboundedSender<LogEntry>>>>,
     audit_sender: Arc<RwLock<Option<mpsc::UnboundedSender<AuditEntry>>>>,

@@ -55,3 +55,4 @@ chrono = { workspace = true }
 [dev-dependencies]
 # tokio-test = { workspace = true } # removed - unused
 tempfile = { workspace = true }
+aura-macros = { path = "../aura-macros" }

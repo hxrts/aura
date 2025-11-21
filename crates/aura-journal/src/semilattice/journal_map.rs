@@ -4,11 +4,11 @@
 //! from `aura-core`. The journal becomes a standard `CvState` that can
 //! participate in choreographic synchronization protocols.
 
-use crate::ledger::{
+use crate::commitment_tree::TreeState as CommitmentTree;
+use crate::effect_api::{
     intent::{Intent, IntentId, IntentStatus},
     journal_types::{JournalError, JournalStats},
 };
-use crate::ratchet_tree::TreeState as RatchetTree;
 use aura_core::tree::{AttestedOp as TreeOpRecord, Epoch};
 use aura_core::Hash32 as Commitment;
 
@@ -25,7 +25,7 @@ fn get_root_commitment(attested_op: &TreeOpRecord) -> Option<Commitment> {
 }
 
 fn verify_threshold(attested_op: &TreeOpRecord) -> bool {
-    // FROST signature verification is implemented in ratchet_tree::application::verify_aggregate_signature
+    // FROST signature verification is implemented in commitment_tree::application::verify_aggregate_signature
     // This function provides a simplified threshold check for the journal CRDT layer
     // Full verification should be done using the application.rs verify_aggregate_signature function
     !attested_op.agg_sig.is_empty() && attested_op.signer_count > 0
@@ -54,7 +54,7 @@ pub struct JournalMap {
 
     /// Current tree state (cached, rebuilt from ops on demand)
     #[serde(skip)]
-    tree_cache: Option<RatchetTree>,
+    tree_cache: Option<CommitmentTree>,
 }
 
 impl JoinSemilattice for JournalMap {
@@ -250,10 +250,10 @@ impl JournalMap {
 
     /// Get the cached tree or rebuild it
     ///
-    /// Note: Tree reconstruction should use reduce() from the ratchet_tree module
-    pub fn get_tree(&mut self) -> Result<&RatchetTree, JournalError> {
+    /// Note: Tree reconstruction should use reduce() from the commitment_tree module
+    pub fn get_tree(&mut self) -> Result<&CommitmentTree, JournalError> {
         if self.tree_cache.is_none() {
-            self.tree_cache = Some(RatchetTree::new());
+            self.tree_cache = Some(CommitmentTree::new());
         }
         #[allow(clippy::unwrap_used)]
         Ok(self.tree_cache.as_ref().unwrap())
@@ -398,7 +398,7 @@ mod tests {
     #[test]
     #[allow(clippy::disallowed_methods)]
     fn test_intent_observed_remove_semantics() {
-        use crate::ledger::intent::{Intent, Priority};
+        use crate::effect_api::intent::{Intent, Priority};
         use aura_core::tree::{LeafNode, TreeOpKind};
 
         let mut journal1 = JournalMap::new();

@@ -12,7 +12,7 @@ Aura combines threshold signatures with social networks to create a new model fo
 
 Aura uses choreographic programming with session types to coordinate distributed protocols across peer devices. Threshold cryptography eliminates single points of failure while social networks provide natural trust relationships for recovery and storage replication.
 
-The system coordinates multi-device threshold protocols through choreographic programming. Session types provide compile-time safety for distributed state machines while runtime witnesses verify global conditions like quorum thresholds. A unified CRDT ledger maintains eventual consistency across all devices without requiring centralized coordination.
+The system coordinates multi-device threshold protocols through choreographic programming. Session types provide compile-time safety for distributed state machines while runtime witnesses verify global conditions like quorum thresholds. A unified CRDT Effect API maintains eventual consistency across all devices without requiring centralized coordination.
 
 ### Authorization Model
 

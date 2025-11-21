@@ -1,12 +1,12 @@
 //! Dummy tree handler used for wiring tests and composite handlers.
 //!
-//! The real ratchet-tree logic lives in higher layers. For unit tests and
+//! The real commitment tree logic lives in higher layers. For unit tests and
 //! placeholder contexts we only need a handler that satisfies the trait
 //! signatures without performing any work.
 
 use async_trait::async_trait;
 use aura_core::{AttestedOp, AuraError, Hash32, LeafId, LeafNode, NodeIndex, Policy, TreeOpKind};
-use aura_journal::ratchet_tree::TreeState;
+use aura_journal::commitment_tree::TreeState;
 
 use crate::effects::tree::{Cut, Partial, ProposalId, Snapshot, TreeEffects};
 

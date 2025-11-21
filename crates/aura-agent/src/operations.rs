@@ -73,10 +73,9 @@
 //! - **Error Forensics**: Include sufficient detail for security analysis
 
 use crate::errors::{AuraError, Result as AgentResult};
-use aura_core::{AccountId, DeviceId, GuardianId};
 use aura_core::tree::{LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
+use aura_core::{AccountId, DeviceId, GuardianId};
 use aura_verify::{IdentityProof, KeyMaterial, SimpleIdentityVerifier};
-use aura_wot::CapabilitySet;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -213,88 +212,37 @@ impl AuthorizedAgentOperations {
     ) -> AgentResult<AgentOperationResult> {
         // Step 1: Verify identity proof using simplified verifier
         let verified_identity = match &request.identity_proof {
-            IdentityProof::Device { .. } => {
-                self.verifier.verify_device_signature(&request.identity_proof)
-            }
-            IdentityProof::Threshold(_) => {
-                self.verifier.verify_threshold_signature(&request.identity_proof, self.account_id)
-            }
-            IdentityProof::Guardian { .. } => {
-                self.verifier.verify_guardian_signature(&request.identity_proof, &request.signed_message)
-            }
+            IdentityProof::Device { .. } => self
+                .verifier
+                .verify_device_signature(&request.identity_proof),
+            IdentityProof::Threshold(_) => self
+                .verifier
+                .verify_threshold_signature(&request.identity_proof, self.account_id),
+            IdentityProof::Guardian { .. } => self
+                .verifier
+                .verify_guardian_signature(&request.identity_proof, &request.signed_message),
         }
         .map_err(|e| {
             AuraError::permission_denied(format!("Identity verification failed: {}", e))
         })?;
 
-        // Step 2: Check if operation requires authorization
-        let required_capabilities = self.get_operation_capabilities(&request.operation);
+        // Step 2: Evaluate authorization using bridge pattern (TODO: implement with Biscuit tokens)
+        let authz_result = self
+            .authorize_operation(&verified_identity, &request.operation, &request.context)
+            .await?;
 
-        // Step 3: Evaluate authorization using bridge pattern
-        if required_capabilities.capabilities().next().is_some() {
-            let authz_result = self
-                .authorize_operation(
-                    &verified_identity,
-                    &request.operation,
-                    &request.context,
-                    required_capabilities,
-                )
-                .await?;
-
-            if !authz_result.authorized {
-                return Err(AuraError::permission_denied(format!(
-                    "Operation not authorized: {}",
-                    authz_result
-                        .denial_reason
-                        .unwrap_or_else(|| "Permission denied".to_string())
-                )));
-            }
+        if !authz_result.authorized {
+            return Err(AuraError::permission_denied(format!(
+                "Operation not authorized: {}",
+                authz_result
+                    .denial_reason
+                    .unwrap_or_else(|| "Permission denied".to_string())
+            )));
         }
 
-        // Step 4: Execute the operation
+        // Step 3: Execute the operation
         self.perform_operation(&request.operation, &request.context)
             .await
-    }
-
-    /// Get required capabilities for an operation
-    fn get_operation_capabilities(&self, operation: &AgentOperation) -> CapabilitySet {
-        match operation {
-            AgentOperation::Storage { operation, .. } => match operation {
-                StorageOperation::Store { .. } => {
-                    CapabilitySet::from_permissions(&["storage:write"])
-                }
-                StorageOperation::Retrieve { .. } => {
-                    CapabilitySet::from_permissions(&["storage:read"])
-                }
-                StorageOperation::Delete { .. } => {
-                    CapabilitySet::from_permissions(&["storage:write"])
-                }
-                StorageOperation::List { .. } => CapabilitySet::from_permissions(&["storage:read"]),
-                StorageOperation::ClearNamespace => {
-                    CapabilitySet::from_permissions(&["storage:admin"])
-                }
-            },
-            AgentOperation::TreeOperation { .. } => {
-                CapabilitySet::from_permissions(&["tree:write", "tree:propose"])
-            }
-            AgentOperation::Session { operation } => match operation {
-                SessionOperation::Create { .. } => {
-                    CapabilitySet::from_permissions(&["session:create"])
-                }
-                SessionOperation::Join { .. } => CapabilitySet::from_permissions(&["session:join"]),
-                SessionOperation::End { .. } => {
-                    CapabilitySet::from_permissions(&["session:manage"])
-                }
-                SessionOperation::UpdateMetadata { .. } => {
-                    CapabilitySet::from_permissions(&["session:manage"])
-                }
-            },
-            AgentOperation::Authentication { .. } => {
-                // Authentication operations typically don't require additional authorization
-                // as they are self-authorizing through identity proof
-                CapabilitySet::empty()
-            }
-        }
     }
 
     /// Authorize operation using bridge pattern
@@ -306,7 +254,6 @@ impl AuthorizedAgentOperations {
         _verified_identity: &aura_verify::VerifiedIdentity,
         _operation: &AgentOperation,
         _context: &AgentOperationContext,
-        _required_capabilities: CapabilitySet,
     ) -> AgentResult<PermissionGrant> {
         // TODO: Implement authorization using Biscuit tokens from aura-protocol/authorization
         // For now, return a placeholder that allows all operations
@@ -488,65 +435,4 @@ pub enum AuthResult {
     Verified { valid: bool },
     BiometricEnrolled,
     BiometricRemoved,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_operation_capabilities_mapping() {
-        let auth_ops = create_test_handler();
-
-        // Test storage operations
-        let store_op = AgentOperation::Storage {
-            operation: StorageOperation::Store {
-                key: "test".to_string(),
-                data: vec![1, 2, 3],
-            },
-            namespace: "test".to_string(),
-        };
-        let caps = auth_ops.get_operation_capabilities(&store_op);
-        assert!(caps.permits("storage:write"));
-
-        // Test tree operations
-        let tree_op = AgentOperation::TreeOperation {
-            operation: TreeOp {
-                parent_epoch: 1,
-                parent_commitment: [0u8; 32],
-                op: TreeOpKind::AddLeaf {
-                    leaf: LeafNode {
-                        leaf_id: LeafId(0),
-                        device_id: DeviceId::new(),
-                        role: LeafRole::Device,
-                        public_key: vec![],
-                        meta: vec![],
-                    },
-                    under: NodeIndex(0),
-                },
-                version: 1,
-            },
-        };
-        let caps = auth_ops.get_operation_capabilities(&tree_op);
-        assert!(caps.permits("tree:write"));
-        assert!(caps.permits("tree:propose"));
-
-        // Test authentication operations (should be empty)
-        let auth_op = AgentOperation::Authentication {
-            operation: AuthenticationOperation::Authenticate,
-        };
-        let caps = auth_ops.get_operation_capabilities(&auth_op);
-        assert_eq!(caps, CapabilitySet::empty());
-    }
-
-    fn create_test_handler() -> AuthorizedAgentOperations {
-        let device_id = DeviceId::from_bytes([1u8; 32]);
-        let account_id = AccountId::from_bytes([1u8; 32]);
-
-        AuthorizedAgentOperations::new(
-            KeyMaterial::new(),
-            TreeAuthzContext::new(account_id, 1),
-            device_id,
-        )
-    }
 }

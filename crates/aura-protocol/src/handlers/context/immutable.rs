@@ -12,7 +12,8 @@ use uuid::Uuid;
 
 use crate::effects::choreographic::ChoreographicRole;
 use crate::handlers::{AuraHandlerError, ExecutionMode};
-use aura_core::{AccountId, DeviceId, SessionId};
+use aura_core::{AccountId, SessionId};
+use aura_core::identifiers::DeviceId;
 
 /// Immutable context for choreographic operations
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -743,7 +744,7 @@ impl Default for AuraContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::DeviceId;
+    use aura_core::identifiers::DeviceId;
 
     #[test]
     fn test_immutable_choreographic_context() {

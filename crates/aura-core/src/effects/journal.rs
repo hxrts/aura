@@ -1,7 +1,7 @@
 //! Journal effect interface for CRDT operations
 
 use crate::{
-    identifiers::{ContextId, DeviceId},
+    identifiers::{AuthorityId, ContextId},
     AuraError, FlowBudget, Journal,
 };
 use async_trait::async_trait;
@@ -29,14 +29,14 @@ pub trait JournalEffects: Send + Sync {
     async fn get_flow_budget(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
     ) -> Result<FlowBudget, AuraError>;
 
     /// Update FlowBudget for a (context, peer) pair using CRDT merge
     async fn update_flow_budget(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
         budget: &FlowBudget,
     ) -> Result<FlowBudget, AuraError>;
 
@@ -45,7 +45,7 @@ pub trait JournalEffects: Send + Sync {
     async fn charge_flow_budget(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
         cost: u32,
     ) -> Result<FlowBudget, AuraError>;
 }

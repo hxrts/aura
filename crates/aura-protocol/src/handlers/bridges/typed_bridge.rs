@@ -29,7 +29,7 @@ use crate::handlers::{context::immutable::AuraContext, AuraHandler, EffectType, 
 use async_trait::async_trait;
 use aura_core::effects::crypto::FrostKeyGenResult;
 use aura_core::effects::CryptoError;
-use aura_core::{AuraError, DeviceId};
+use aura_core::{AuraError, identifiers::DeviceId};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;

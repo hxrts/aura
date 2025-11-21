@@ -1,10 +1,10 @@
 //! Tree Effects
 //!
-//! Placeholder module for ratchet tree effects.
-//! These handle TreeKEM ratchet tree operations.
+//! Placeholder module for commitment tree effects.
+//! These handle TreeKEM commitment tree operations.
 
-use aura_core::{AuraError, AuraResult, Hash32};
 use async_trait::async_trait;
+use aura_core::{AuraError, AuraResult, Hash32};
 use serde::{Deserialize, Serialize};
 
 /// Proposal ID for tree operations

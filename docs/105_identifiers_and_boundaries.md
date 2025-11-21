@@ -6,7 +6,7 @@ This reference defines the identifiers that appear in Aura documents. Every othe
 
 ## AuthorityId
 
-`AuthorityId` is a random UUID assigned to an authority journal namespace. It does not leak operator or membership metadata. All public keys, ratchet trees, and attested operations reduce under this namespace. When a relationship references an account it uses the `AuthorityId` only.
+`AuthorityId` is a random UUID assigned to an authority journal namespace. It does not leak operator or membership metadata. All public keys, commitment trees, and attested operations reduce under this namespace. When a relationship references an account it uses the `AuthorityId` only.
 
 ## ContextId
 
@@ -26,4 +26,4 @@ This reference defines the identifiers that appear in Aura documents. Every othe
 
 ## Derived Keys
 
-Aura derives per-context cryptographic keys from reduced account state and `ContextId`. Derived keys never surface on the wire. They only exist inside effect handlers to encrypt payloads, generate ratchet secrets, or run DKD. The derivation inputs never include device identifiers, so derived keys inherit the privacy guarantees of `AuthorityId` and `ContextId`.
+Aura derives per-context cryptographic keys from reduced account state and `ContextId`. Derived keys never surface on the wire. They only exist inside effect handlers to encrypt payloads, generate commitment tree secrets, or run DKD. The derivation inputs never include device identifiers, so derived keys inherit the privacy guarantees of `AuthorityId` and `ContextId`.

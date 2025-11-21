@@ -20,6 +20,6 @@
 1. **Trace Fidelity** – Every LocalSignal/transition emitted by Rust lifecycles must have an equivalent action. Specs should model successful and aborted completions, and capture the generated outputs/effects.
 2. **Effect Validation** – For each protocol, ensure emitted `ProtocolEffect`s match spec-defined expectations (e.g., counter reservations must produce `UpdateCounter`, group operations emit `Trace`).
 3. **Outcome Typing** – Define typed representations of results (commit payloads, reserved ranges) so specs verify final payloads.
-4. **Environment Constraints** – Tie ledger updates, timers, evidence rehydration, and counter increments to invariants preventing invalid state (e.g., nonce uniqueness, active timers for non-final states).
+4. **Environment Constraints** – Tie effect_api updates, timers, evidence rehydration, and counter increments to invariants preventing invalid state (e.g., nonce uniqueness, active timers for non-final states).
 5. **Composable Harness** – Provide standard action entry points (`recordInput`, `advance`, `signalAbort`, etc.) to let the simulator forward real inputs to the specs.
 6. **Executable Specification** – When plugged into the simulator, the modules should allow `quint run/typecheck/verify` to act as an end-to-end specification runtime for any protocol built on `protocol-core`.

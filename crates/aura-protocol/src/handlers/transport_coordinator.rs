@@ -14,7 +14,7 @@
 //! - Enforces global connection limits and cleanup policies
 
 use aura_core::effects::{NetworkEffects, StorageEffects, TimeEffects};
-use aura_core::{ContextId, DeviceId};
+use aura_core::{ContextId, identifiers::DeviceId};
 use aura_effects::transport::{TransportConfig, TransportError};
 use std::collections::HashMap;
 

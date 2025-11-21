@@ -3,8 +3,7 @@
 //! This module contains message types for social protocols:
 //! - Rendezvous and peer discovery
 
-use crate::messages::social_rendezvous::*;
-use aura_core::DeviceId;
+use aura_core::identifiers::DeviceId;
 use serde::{Deserialize, Serialize};
 
 // Re-export social message types

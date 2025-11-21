@@ -48,14 +48,14 @@ pub async fn handle_init(
     create_directory_through_effects(effects, output).await?;
     create_directory_through_effects(effects, &configs_dir).await?;
 
-    // Create placeholder ledger through storage effects
-    let ledger_path = output.join("ledger.cbor");
-    let ledger_data = create_placeholder_ledger(effects, threshold, num_devices).await?;
+    // Create placeholder effect API through storage effects
+    let effect_api_path = output.join("effect_api.cbor");
+    let effect_api_data = create_placeholder_effect_api(effects, threshold, num_devices).await?;
 
     effects
-        .store(&ledger_path.display().to_string(), ledger_data)
+        .store(&effect_api_path.display().to_string(), effect_api_data)
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to create ledger: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to create effect_api: {}", e))?;
 
     // Create device config files through storage effects
     for i in 1..=num_devices {
@@ -95,8 +95,8 @@ async fn create_directory_through_effects(effects: &AuraEffectSystem, path: &Pat
         .map_err(|e| anyhow::anyhow!("Failed to create directory {}: {}", path.display(), e))
 }
 
-/// Create placeholder ledger data
-async fn create_placeholder_ledger(
+/// Create placeholder effect API data
+async fn create_placeholder_effect_api(
     effects: &AuraEffectSystem,
     threshold: u32,
     num_devices: u32,
@@ -104,14 +104,14 @@ async fn create_placeholder_ledger(
     let timestamp = effects.current_timestamp().await;
 
     // Create a simple CBOR-like structure
-    let ledger_data = format!(
-        "placeholder_ledger:threshold={},devices={},created={}",
+    let effect_api_data = format!(
+        "placeholder_effect_api:threshold={},devices={},created={}",
         threshold, num_devices, timestamp
     );
 
-    let _ = effects.log_info("Created placeholder ledger").await;
+    let _ = effects.log_info("Created placeholder effect API").await;
 
-    Ok(ledger_data.into_bytes())
+    Ok(effect_api_data.into_bytes())
 }
 
 /// Create device configuration content

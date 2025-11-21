@@ -40,7 +40,7 @@ pub enum ResourceScope {
 /// Operations that can be performed on an authority
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuthorityOp {
-    /// Update the ratchet tree structure
+    /// Update the commitment tree structure
     UpdateTree,
     /// Add a new device to the authority
     AddDevice,

@@ -8,7 +8,6 @@
 
 use aura_core::identifiers::ContextId;
 use aura_core::AuthorityId;
-use aura_wot::Capability;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 
@@ -27,23 +26,38 @@ pub struct ContextTransportSession {
     pub protocol: TransportProtocol,
     /// Session state
     pub state: SessionState,
-    /// Capabilities for this session
-    pub capabilities: Vec<Capability>,
+    /// Authorization level for this session (actual authorization via Biscuit tokens in protocol layer)
+    pub authorization_level: String,
     /// Flow budget remaining
     pub flow_budget: i64,
 }
+
+#[allow(missing_docs)]
+impl ContextTransportSession {}
 
 /// Transport protocol types
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TransportProtocol {
     /// QUIC transport
-    Quic { endpoint: SocketAddr },
+    Quic {
+        /// Socket address for QUIC endpoint
+        endpoint: SocketAddr,
+    },
     /// TCP transport
-    Tcp { endpoint: SocketAddr },
+    Tcp {
+        /// Socket address for TCP endpoint
+        endpoint: SocketAddr,
+    },
     /// WebRTC transport
-    WebRTC { peer_id: String },
+    WebRTC {
+        /// Peer identifier for WebRTC connection
+        peer_id: String,
+    },
     /// Relay transport via another authority
-    Relay { relay_authority: AuthorityId },
+    Relay {
+        /// Authority to relay through
+        relay_authority: AuthorityId,
+    },
 }
 
 /// Session state
@@ -105,26 +119,38 @@ pub struct ContextTransportEndpoint {
 pub enum ContextTransportMessage {
     /// Session establishment request
     SessionRequest {
+        /// Context ID for the session
         context_id: ContextId,
+        /// Authority requesting the session
         authority_id: AuthorityId,
+        /// Supported transport protocols
         protocols: Vec<TransportProtocol>,
-        capabilities: Vec<Capability>,
+        /// Authorization level requested
+        authorization_level: String,
     },
     /// Session establishment response
     SessionResponse {
+        /// Identifier for the established session
         session_id: String,
+        /// Selected transport protocol
         selected_protocol: TransportProtocol,
+        /// Initial flow budget granted
         flow_budget: i64,
     },
     /// Data message
     Data {
+        /// Session identifier
         session_id: String,
+        /// Sequence number for ordering
         sequence: u64,
+        /// Message payload
         payload: Vec<u8>,
     },
     /// Session control
     Control {
+        /// Session identifier
         session_id: String,
+        /// Control command
         command: SessionControl,
     },
 }

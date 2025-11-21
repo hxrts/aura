@@ -5,7 +5,7 @@
 
 use crate::UnlinkableCredential;
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
-use aura_wot::Capability;
+use aura_journal::Capability;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

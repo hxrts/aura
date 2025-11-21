@@ -5,21 +5,20 @@
 //! depending on concrete runtime implementations.
 
 use crate::guards::LeakageBudget;
-use async_trait::async_trait;
-use aura_core::effects::ExecutionMode;
 use aura_core::identifiers::ContextId;
-use aura_core::DeviceId;
-use aura_wot::Capability;
+use aura_core::identifiers::DeviceId;
+// use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
 use rumpsteak_aura_choreography::effects::{
     ChoreoHandler, ChoreographyError, Label, Result as ChoreoResult,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
+use async_trait::async_trait;
 
 /// Guard profile for message sending operations
 #[derive(Debug, Clone)]
 pub struct SendGuardProfile {
-    pub capabilities: Vec<Capability>,
+    pub authorization_tokens: Vec<String>, // TODO: Use proper Biscuit token type
     pub leakage_budget: LeakageBudget,
     pub delta_facts: Vec<Value>,
     pub flow_cost: u32,
@@ -28,9 +27,7 @@ pub struct SendGuardProfile {
 impl Default for SendGuardProfile {
     fn default() -> Self {
         Self {
-            capabilities: vec![Capability::Execute {
-                operation: "choreography_send".to_string(),
-            }],
+            authorization_tokens: vec!["choreography_send".to_string()],
             leakage_budget: LeakageBudget::zero(),
             delta_facts: vec![],
             flow_cost: 1,

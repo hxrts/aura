@@ -2,7 +2,7 @@
 
 ## Overview
 
-Aura maintains two replicated state machines. Account journals describe ratchet trees for authorities. Relational context journals describe cross-authority coordination. Both use the same fact-only semilattice and deterministic reducers. This document explains the full path from fact creation to reduced state so that implementations remain aligned.
+Aura maintains two replicated state machines. Account journals describe commitment trees for authorities. Relational context journals describe cross-authority coordination. Both use the same fact-only semilattice and deterministic reducers. This document explains the full path from fact creation to reduced state so that implementations remain aligned.
 
 ## Fact Production
 
@@ -22,4 +22,4 @@ Ledger append writes facts durably. Journal merge unions the fact set. Reducers 
 
 ## Coupling With Budgets And Receipts
 
-Flow budgets replicate only the `spent` counter as facts. When FlowGuard charges a send it emits a fact that increases `spent`. Policy changes and Biscuit evaluation shrink the effective `limit` at runtime without emitting new facts, which keeps authority decisions local but deterministic. Receipts reference the current epoch commitment so reducers can reject stale receipts automatically. This coupling ensures that budget convergence follows the same semilattice as ratchet operations without introducing extra mutation paths.
+Flow budgets replicate only the `spent` counter as facts. When FlowGuard charges a send it emits a fact that increases `spent`. Policy changes and Biscuit evaluation shrink the effective `limit` at runtime without emitting new facts, which keeps authority decisions local but deterministic. Receipts reference the current epoch commitment so reducers can reject stale receipts automatically. This coupling ensures that budget convergence follows the same semilattice as commitment tree operations without introducing extra mutation paths.

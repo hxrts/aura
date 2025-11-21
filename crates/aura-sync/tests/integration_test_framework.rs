@@ -4,14 +4,11 @@
 //! using aura-testkit. It provides examples of all the requested test scenarios while working
 //! with the current API state.
 
-use aura_core::{AuraError, AuraResult, DeviceId};
+use aura_core::{AuraResult, DeviceId};
 use aura_sync::core::SyncConfig;
-use aura_testkit::{
-    foundation::ExecutionMode,
-    simulation::{
-        choreography::{test_device_trio, ChoreographyTestHarness},
-        network::{NetworkCondition, NetworkSimulator},
-    },
+use aura_testkit::simulation::{
+    choreography::{test_device_trio, ChoreographyTestHarness},
+    network::{NetworkCondition, NetworkSimulator},
 };
 use std::time::Duration;
 use tokio::time::timeout;
@@ -46,11 +43,11 @@ mod integration_tests {
         let session_result = harness
             .create_coordinated_session("anti_entropy_normal")
             .await;
-        let session_id = match session_result {
-            Ok(id) => id,
+        let _session = match session_result {
+            Ok(session) => Some(session),
             Err(_) => {
                 println!("  Mock session for anti-entropy test");
-                aura_core::SessionId::new()
+                None
             }
         };
 
@@ -72,7 +69,7 @@ mod integration_tests {
             println!("  Phase 4: Verifying final consistency");
             tokio::time::sleep(Duration::from_millis(200)).await;
 
-            Ok(())
+            Ok::<(), Box<dyn std::error::Error>>(())
         })
         .await;
 
@@ -117,17 +114,17 @@ mod integration_tests {
 
         // Step 2: Heal partition
         println!("  Step 2: Healing partition to allow convergence");
-        network.heal_all_partitions().await;
+        network.heal_partition().await;
 
         // Step 3: Journal sync resolves divergence
         let session_result = harness
             .create_coordinated_session("journal_divergent")
             .await;
-        let session_id = match session_result {
-            Ok(id) => id,
+        let _session = match session_result {
+            Ok(session) => Some(session),
             Err(_) => {
                 println!("  Mock session for journal sync test");
-                aura_core::SessionId::new()
+                None
             }
         };
 
@@ -141,7 +138,7 @@ mod integration_tests {
             println!("  Step 5: Propagating merged state");
             tokio::time::sleep(Duration::from_millis(400)).await;
 
-            Ok(())
+            Ok::<(), Box<dyn std::error::Error>>(())
         })
         .await;
 
@@ -158,7 +155,7 @@ mod integration_tests {
     #[tokio::test]
     async fn test_ota_threshold_approval() -> AuraResult<()> {
         // Use a larger device set for threshold testing
-        let device_labels: Vec<String> = (0..5).map(|i| format!("device_{}", i)).collect();
+        let device_labels = vec!["device_0", "device_1", "device_2", "device_3", "device_4"];
         let harness = ChoreographyTestHarness::with_labeled_devices(device_labels);
         let network = NetworkSimulator::new();
 
@@ -174,11 +171,11 @@ mod integration_tests {
         let required_approvers = 3; // 3-of-5 threshold
 
         let session_result = harness.create_coordinated_session("ota_threshold").await;
-        let session_id = match session_result {
-            Ok(id) => id,
+        let _session = match session_result {
+            Ok(session) => Some(session),
             Err(_) => {
                 println!("  Mock session for OTA test");
-                aura_core::SessionId::new()
+                None
             }
         };
 
@@ -205,7 +202,7 @@ mod integration_tests {
             println!("  Phase 4: Verifying upgrade completion");
             tokio::time::sleep(Duration::from_millis(400)).await;
 
-            Ok(())
+            Ok::<(), Box<dyn std::error::Error>>(())
         })
         .await;
 
@@ -222,7 +219,7 @@ mod integration_tests {
     #[tokio::test]
     async fn test_network_partition_behavior() -> AuraResult<()> {
         // Use 5 devices to test quorum behavior
-        let device_labels: Vec<String> = (0..5).map(|i| format!("device_{}", i)).collect();
+        let device_labels = vec!["device_0", "device_1", "device_2", "device_3", "device_4"];
         let harness = ChoreographyTestHarness::with_labeled_devices(device_labels);
         let mut network = NetworkSimulator::new();
 
@@ -237,11 +234,11 @@ mod integration_tests {
         let session_result = harness
             .create_coordinated_session("partition_behavior")
             .await;
-        let session_id = match session_result {
-            Ok(id) => id,
+        let _session = match session_result {
+            Ok(session) => Some(session),
             Err(_) => {
                 println!("  Mock session for partition test");
-                aura_core::SessionId::new()
+                None
             }
         };
 
@@ -278,14 +275,14 @@ mod integration_tests {
 
             // Phase 5: Heal partition
             println!("  Phase 5: Healing network partition");
-            network.heal_all_partitions().await;
+            network.heal_partition().await;
             tokio::time::sleep(Duration::from_millis(1000)).await;
 
             // Phase 6: Recovery and resync
             println!("  Phase 6: Recovery and state resynchronization");
             tokio::time::sleep(Duration::from_millis(1200)).await;
 
-            Ok(())
+            Ok::<(), Box<dyn std::error::Error>>(())
         })
         .await;
 
@@ -314,11 +311,11 @@ mod integration_tests {
         let session_result = harness
             .create_coordinated_session("partition_healing")
             .await;
-        let session_id = match session_result {
-            Ok(id) => id,
+        let _session = match session_result {
+            Ok(session) => Some(session),
             Err(_) => {
                 println!("  Mock session for healing test");
-                aura_core::SessionId::new()
+                None
             }
         };
 
@@ -410,7 +407,7 @@ mod integration_tests {
             println!("  Phase 3: Verifying complete recovery");
             tokio::time::sleep(Duration::from_millis(1000)).await;
 
-            Ok(())
+            Ok::<(), Box<dyn std::error::Error>>(())
         })
         .await;
 
@@ -426,7 +423,7 @@ mod integration_tests {
     /// Test 6: Complex multi-protocol scenario
     #[tokio::test]
     async fn test_multi_protocol_coordination() -> AuraResult<()> {
-        let device_labels: Vec<String> = (0..4).map(|i| format!("device_{}", i)).collect();
+        let device_labels = vec!["device_0", "device_1", "device_2", "device_3"];
         let harness = ChoreographyTestHarness::with_labeled_devices(device_labels);
         let mut network = NetworkSimulator::new();
 
@@ -435,11 +432,11 @@ mod integration_tests {
         let devices = harness.device_ids();
 
         let session_result = harness.create_coordinated_session("multi_protocol").await;
-        let session_id = match session_result {
-            Ok(id) => id,
+        let _session = match session_result {
+            Ok(session) => Some(session),
             Err(_) => {
                 println!("  Mock session for multi-protocol test");
-                aura_core::SessionId::new()
+                None
             }
         };
 
@@ -507,7 +504,7 @@ mod integration_tests {
             println!("    System state fully consistent");
             tokio::time::sleep(Duration::from_millis(300)).await;
 
-            Ok(())
+            Ok::<(), Box<dyn std::error::Error>>(())
         })
         .await;
 
@@ -540,7 +537,7 @@ mod integration_tests {
         );
 
         // Test network simulator
-        let mut network = NetworkSimulator::new();
+        let network = NetworkSimulator::new();
         let condition = NetworkCondition::wan();
         network.set_conditions(device1, device2, condition).await;
 
@@ -555,7 +552,7 @@ mod integration_tests {
         // Test session creation
         let session_result = harness.create_coordinated_session("utility_test").await;
         match session_result {
-            Ok(session_id) => println!("  ✓ Created test session: {:?}", session_id),
+            Ok(session) => println!("  ✓ Created test session: {}", session.session_id()),
             Err(_) => println!("  ! Session creation failed (acceptable for framework test)"),
         }
 
@@ -586,12 +583,7 @@ mod framework_documentation {
 
         // For custom scenarios, create specific device sets
         let device_labels = vec!["coordinator", "participant1", "participant2"];
-        let custom_harness = ChoreographyTestHarness::with_labeled_devices(
-            device_labels
-                .into_iter()
-                .map(String::from)
-                .collect::<Vec<String>>(),
-        );
+        let custom_harness = ChoreographyTestHarness::with_labeled_devices(device_labels);
 
         // === STEP 2: Set up network simulation ===
         let mut network = NetworkSimulator::new();
@@ -608,12 +600,15 @@ mod framework_documentation {
 
         // === STEP 3: Create coordinated test session ===
         let session_result = harness.create_coordinated_session("example_test").await;
-        let session_id = match session_result {
-            Ok(id) => id,
+        let _session = match session_result {
+            Ok(session) => {
+                println!("✓ Created session: {}", session.session_id());
+                Some(session)
+            }
             Err(e) => {
-                // For testing purposes, we create a mock session ID
+                // For testing purposes, we create a mock session
                 println!("Mock session created for testing: {:?}", e);
-                aura_core::SessionId::new()
+                None
             }
         };
 
@@ -622,7 +617,7 @@ mod framework_documentation {
             // Your test logic here
             println!("Executing example test scenario");
             tokio::time::sleep(Duration::from_millis(100)).await;
-            Ok(())
+            Ok::<(), Box<dyn std::error::Error>>(())
         })
         .await;
 

@@ -1,7 +1,7 @@
 //! Privacy observer models for tree protocol analysis.
 //!
 //! This module implements different observer models to measure information
-//! leakage in the ratchet tree protocols:
+//! leakage in the commitment tree protocols:
 //!
 //! - **External Observer**: Only sees encrypted traffic (timing, sizes)
 //! - **Neighbor Observer**: Can see envelope metadata (sender, receiver)

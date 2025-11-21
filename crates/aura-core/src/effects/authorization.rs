@@ -4,7 +4,8 @@
 //! the Aura system. These effects enable verification of permissions, delegation
 //! of authority, and enforcement of security policies.
 
-use crate::{AuraError, Cap, DeviceId};
+use crate::{AuraError, Cap};
+use crate::identifiers::AuthorityId;
 use async_trait::async_trait;
 
 /// Authorization operations for capability-based access control
@@ -41,7 +42,7 @@ pub trait AuthorizationEffects {
     /// # Arguments
     /// * `source_capabilities` - The capabilities to delegate from
     /// * `requested_capabilities` - The capabilities being requested
-    /// * `target_device` - The device receiving the delegation
+    /// * `target_authority` - The authority receiving the delegation
     ///
     /// # Returns
     /// The intersection of source and requested capabilities (source ⊓ requested)
@@ -49,7 +50,7 @@ pub trait AuthorizationEffects {
         &self,
         source_capabilities: &Cap,
         requested_capabilities: &Cap,
-        target_device: &DeviceId,
+        target_authority: &AuthorityId,
     ) -> Result<Cap, AuthorizationError>;
 }
 

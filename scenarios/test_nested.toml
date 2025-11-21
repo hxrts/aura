@@ -2,23 +2,18 @@
 name = "test_nested"
 description = "Test nested tables"
 version = "1.0.0"
+author = "Aura Team"
 
 [setup]
 participants = 2
 threshold = 2
 seed = 1
-
 expected_outcome = "success"
 
 [[phases]]
 name = "phase1"
 description = "Test phase"
-
-[[phases.actions]]
-type = "wait_ticks"
-ticks = 10
-
-[[phases.actions]]
-type = "run_choreography"
-choreography = "test"
-participants = ["p1", "p2"]
+actions = [
+    { type = "wait_ticks", ticks = 10 },
+    { type = "run_choreography", choreography = "test", participants = ["p1", "p2"] }
+]

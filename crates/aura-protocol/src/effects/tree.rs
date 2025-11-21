@@ -1,4 +1,4 @@
-//! Tree Effects for Ratchet Tree Operations
+//! Tree Effects for Commitment Tree Operations
 //!
 //! This module provides the effect interface for tree operations following
 //! the algebraic effects pattern. It defines what tree operations can be
@@ -19,11 +19,11 @@
 //! ## References
 //!
 //! - [`docs/002_system_architecture.md`](../../../docs/002_system_architecture.md) - Effect system architecture
-//! - [`docs/123_ratchet_tree.md`](../../../docs/123_ratchet_tree.md) - Tree operations
+//! - [`docs/123_commitment_tree.md`](../../../docs/123_commitment_tree.md) - Tree operations
 
 use async_trait::async_trait;
 use aura_core::{AttestedOp, AuraError, Hash32, LeafId, LeafNode, NodeIndex, Policy, TreeOpKind};
-use aura_journal::ratchet_tree::TreeState;
+use aura_journal::commitment_tree::TreeState;
 use serde::{Deserialize, Serialize};
 
 // Snapshot-related types for Phase 5.4
@@ -43,7 +43,7 @@ pub struct ProposalId(pub Hash32);
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Partial {
     pub signature_share: Vec<u8>,
-    pub participant_id: aura_core::DeviceId,
+    pub participant_id: aura_core::identifiers::DeviceId,
 }
 
 /// Immutable snapshot containing compacted tree state
@@ -56,7 +56,7 @@ pub struct Snapshot {
 
 /// Tree effects interface
 ///
-/// Provides all operations needed for ratchet tree management:
+/// Provides all operations needed for commitment tree management:
 /// - State queries (current tree, commitments)
 /// - Operation application (append attested ops)
 /// - Signature verification (FROST aggregates)
@@ -84,7 +84,7 @@ pub trait TreeEffects: Send + Sync {
     /// Returns the materialized tree state at the latest epoch. This is
     /// computed on-demand via reduction from the OpLog - it is never stored.
     ///
-    /// ## Critical Invariants (from docs/123_ratchet_tree.md)
+    /// ## Critical Invariants (from docs/123_commitment_tree.md)
     ///
     /// - TreeState is **derived**, never persisted
     /// - Computed via `reduce(oplog)` from OpLog CRDT
@@ -127,7 +127,7 @@ pub trait TreeEffects: Send + Sync {
     /// - Have correct parent binding (epoch + commitment)
     /// - Be signed by sufficient threshold
     ///
-    /// ## Behavior (from docs/123_ratchet_tree.md)
+    /// ## Behavior (from docs/123_commitment_tree.md)
     ///
     /// - Stores `AttestedOp` in OpLog CRDT
     /// - Does **NOT** store shares, transcripts, or author identities

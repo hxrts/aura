@@ -3,7 +3,7 @@
 //! This module provides coordination for replication strategies,
 //! erasure coding, and distributed storage reliability.
 
-use aura_core::{AuraResult, ChunkId, DeviceId};
+use aura_core::{AuraResult, ChunkId, identifiers::DeviceId};
 use aura_store::{ChunkLayout, ErasureConfig};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

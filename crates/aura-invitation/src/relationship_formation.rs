@@ -111,6 +111,25 @@ pub enum RelationshipFormationError {
     Core(#[from] aura_core::AuraError),
 }
 
+/// Convert RelationshipFormationError to AuraError
+impl From<RelationshipFormationError> for aura_core::AuraError {
+    fn from(err: RelationshipFormationError) -> Self {
+        match err {
+            RelationshipFormationError::InvalidConfig(msg) => aura_core::AuraError::invalid(msg),
+            RelationshipFormationError::Communication(msg) => aura_core::AuraError::network(msg),
+            RelationshipFormationError::KeyDerivation(msg) => aura_core::AuraError::crypto(msg),
+            RelationshipFormationError::ValidationFailed(msg) => aura_core::AuraError::crypto(msg),
+            RelationshipFormationError::TrustRecordFailed(msg) => {
+                aura_core::AuraError::internal(msg)
+            }
+            RelationshipFormationError::Timeout => {
+                aura_core::AuraError::network("Operation timeout".to_string())
+            }
+            RelationshipFormationError::Core(aura_err) => aura_err,
+        }
+    }
+}
+
 /// Message types for relationship formation choreography
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -939,10 +958,10 @@ impl<E: RelationshipFormationEffects> RelationshipFormationCoordinator<E> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::{AuraError, AuthorityId};
     use aura_core::effects::crypto::{
         FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext,
     };
-    use aura_core::AuraError;
 
     // Mock implementation for testing
     #[derive(Debug)]
@@ -1314,7 +1333,7 @@ mod tests {
         async fn get_flow_budget(
             &self,
             _context: &ContextId,
-            _peer: &DeviceId,
+            _peer: &AuthorityId,
         ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
             Ok(aura_core::FlowBudget::default())
         }
@@ -1322,7 +1341,7 @@ mod tests {
         async fn update_flow_budget(
             &self,
             _context: &ContextId,
-            _peer: &DeviceId,
+            _peer: &AuthorityId,
             _budget: &aura_core::FlowBudget,
         ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
             Ok(aura_core::FlowBudget::default())
@@ -1331,7 +1350,7 @@ mod tests {
         async fn charge_flow_budget(
             &self,
             _context: &ContextId,
-            _peer: &DeviceId,
+            _peer: &AuthorityId,
             _cost: u32,
         ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
             Ok(aura_core::FlowBudget::default())

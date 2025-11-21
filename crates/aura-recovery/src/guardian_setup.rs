@@ -7,7 +7,7 @@ use crate::{
     types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
     RecoveryResult,
 };
-use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
+use aura_authenticate::guardian_auth::RecoveryContext;
 use aura_core::effects::TimeEffects;
 use aura_core::frost::ThresholdSignature;
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
@@ -402,7 +402,7 @@ where
     }
 
     /// Check if the setup request is authorized using Biscuit tokens
-    async fn check_setup_authorization(&self, request: &RecoveryRequest) -> Result<(), String> {
+    async fn check_setup_authorization(&self, _request: &RecoveryRequest) -> Result<(), String> {
         let (token_manager, guard_evaluator) = match (&self.token_manager, &self.guard_evaluator) {
             (Some(tm), Some(ge)) => (tm, ge),
             _ => return Err("Biscuit authorization components not available".to_string()),

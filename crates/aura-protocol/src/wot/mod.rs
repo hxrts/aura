@@ -1,12 +1,6 @@
 //! Web-of-Trust Integration for Protocol Layer
 //!
-//! **Layer 4 (aura-protocol)**: Effect-dependent orchestration of capability evaluation.
+//! **Layer 4 (aura-protocol)**: Biscuit token authorization integration.
 //!
-//! This module provides effect-dependent wrappers around aura-wot's pure capability
-//! evaluation logic. It adds caching, metrics, and effect system integration.
-
-pub mod capability_evaluator;
-
-pub use capability_evaluator::{
-    CacheStats, CapabilityEvaluator, EffectSystemInterface, EffectiveCapabilitySet,
-};
+//! This module provides Biscuit token authorization integration for the protocol layer.
+//! Legacy capability evaluator removed - use BiscuitAuthorizationBridge instead.

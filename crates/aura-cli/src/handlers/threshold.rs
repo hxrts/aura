@@ -14,7 +14,7 @@ use uuid::Uuid;
 pub async fn handle_threshold(
     effects: &AuraEffectSystem,
     configs: &str,
-    threshold: u32,
+    _threshold: u32,
     mode: &str,
 ) -> Result<()> {
     let config_paths: Vec<&str> = configs.split(',').collect();
@@ -23,7 +23,7 @@ pub async fn handle_threshold(
         .log_info(&format!(
             "Running threshold operation with {} configs (threshold: {}, mode: {})",
             config_paths.len(),
-            threshold,
+            _threshold,
             mode
         ))
         .await;
@@ -58,14 +58,14 @@ pub async fn handle_threshold(
     }
 
     // Validate threshold parameters
-    validate_threshold_params(effects, &valid_configs, threshold).await?;
+    validate_threshold_params(effects, &valid_configs, _threshold).await?;
 
     // Execute threshold operation based on mode
     match mode {
-        "sign" => execute_threshold_signing(effects, &valid_configs, threshold).await,
-        "verify" => execute_threshold_verification(effects, &valid_configs, threshold).await,
-        "keygen" => execute_threshold_keygen(effects, &valid_configs, threshold).await,
-        "dkd" => execute_dkd_protocol(effects, &valid_configs, threshold).await,
+        "sign" => execute_threshold_signing(effects, &valid_configs, _threshold).await,
+        "verify" => execute_threshold_verification(effects, &valid_configs, _threshold).await,
+        "keygen" => execute_threshold_keygen(effects, &valid_configs, _threshold).await,
+        "dkd" => execute_dkd_protocol(effects, &valid_configs, _threshold).await,
         _ => {
             let _ = effects
                 .log_error(&format!("Unknown threshold mode: {}", mode))
@@ -240,7 +240,7 @@ async fn execute_threshold_keygen(
 async fn execute_dkd_protocol(
     effects: &AuraEffectSystem,
     configs: &[(PathBuf, ThresholdConfig)],
-    threshold: u32,
+    _threshold: u32,
 ) -> Result<()> {
     let _ = effects
         .log_info("Executing DKD (Distributed Key Derivation) protocol")
@@ -315,7 +315,7 @@ pub async fn handle_dkd_test(
         .await;
 
     // Create test participants
-    let participants: Vec<DeviceId> = (0..total)
+    let _participants: Vec<DeviceId> = (0..total)
         .map(|i| {
             let mut uuid_bytes = [0u8; 16];
             uuid_bytes[0] = i as u8 + 1;

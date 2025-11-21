@@ -4,7 +4,7 @@
 //! Target: <200 lines (focused implementation).
 
 use super::info::{PeerInfo, ReliabilityLevel};
-use aura_core::{DeviceId, RelationshipId};
+use aura_core::{identifiers::DeviceId, RelationshipId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 

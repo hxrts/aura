@@ -4,7 +4,6 @@
 name = "byzantine_tolerance_mixin"
 description = "Add byzantine behavior to test fault tolerance"
 version = "1.0.0"
-author = "Aura Team"
 tags = ["mixin", "byzantine", "tolerance"]
 
 [setup]
@@ -32,4 +31,3 @@ actions = [
 [[properties]]
 name = "tolerates_f_byzantine"
 property_type = "safety"
-

@@ -9,7 +9,7 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use tokio::runtime::Runtime;
 
-use aura_core::{DeviceId, FlowBudget};
+use aura_core::{FlowBudget, identifiers::DeviceId};
 use aura_effects::handlers::MockNetworkHandler;
 use aura_protocol::effects::{
     context::{EffectContext, TraceContext, WithContext},

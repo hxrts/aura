@@ -7,7 +7,7 @@ use crate::effects::JournalEffects;
 use crate::guards::flow::FlowBudgetEffects;
 use async_trait::async_trait;
 use aura_core::effects::StorageEffects;
-use aura_core::{DeviceId, TimeEffects};
+use aura_core::{identifiers::AuthorityId, TimeEffects};
 
 /// Minimal interface that guards need from an effect system
 ///
@@ -19,8 +19,8 @@ use aura_core::{DeviceId, TimeEffects};
 pub trait GuardEffectSystem:
     JournalEffects + StorageEffects + FlowBudgetEffects + TimeEffects + Send + Sync
 {
-    /// Get the device ID for this effect system
-    fn device_id(&self) -> DeviceId;
+    /// Get the authority ID for this effect system
+    fn authority_id(&self) -> AuthorityId;
 
     /// Get the execution mode
     fn execution_mode(&self) -> aura_core::effects::ExecutionMode;
@@ -35,8 +35,8 @@ pub trait GuardEffectSystem:
 /// Security context for guard operations
 #[derive(Debug, Clone)]
 pub struct SecurityContext {
-    /// Device performing the operation
-    pub device_id: DeviceId,
+    /// Authority performing the operation
+    pub authority_id: AuthorityId,
 
     /// Current security level
     pub security_level: SecurityLevel,
@@ -59,7 +59,7 @@ pub enum SecurityLevel {
 impl Default for SecurityContext {
     fn default() -> Self {
         Self {
-            device_id: DeviceId::default(),
+            authority_id: AuthorityId::default(),
             security_level: SecurityLevel::Normal,
             hardware_secure: false,
         }
@@ -71,10 +71,10 @@ use crate::effects::AuraEffects;
 use aura_core::effects::ExecutionMode;
 
 impl GuardEffectSystem for Box<dyn AuraEffects> {
-    fn device_id(&self) -> DeviceId {
+    fn authority_id(&self) -> AuthorityId {
         // TODO: This should come from the actual effect system
-        // For now, return a dummy device ID to make compilation work
-        DeviceId::new()
+        // For now, return a dummy authority ID to make compilation work
+        AuthorityId::new()
     }
 
     fn execution_mode(&self) -> ExecutionMode {
@@ -101,7 +101,7 @@ impl FlowBudgetEffects for Box<dyn AuraEffects> {
     async fn charge_flow(
         &self,
         context: &aura_core::identifiers::ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
         cost: u32,
     ) -> aura_core::AuraResult<aura_core::Receipt> {
         // Use the journal-backed flow budget charge to honor charge-before-send
@@ -114,7 +114,7 @@ impl FlowBudgetEffects for Box<dyn AuraEffects> {
         let epoch = updated_budget.epoch;
         Ok(aura_core::Receipt::new(
             context.clone(),
-            DeviceId::new(), // source is unknown from the boxed trait object
+            AuthorityId::new(), // source is unknown from the boxed trait object
             *peer,
             epoch,
             cost,
@@ -296,7 +296,7 @@ impl crate::effects::JournalEffects for Box<dyn AuraEffects> {
     async fn get_flow_budget(
         &self,
         context: &aura_core::identifiers::ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
     ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
         (**self).get_flow_budget(context, peer).await
     }
@@ -304,7 +304,7 @@ impl crate::effects::JournalEffects for Box<dyn AuraEffects> {
     async fn update_flow_budget(
         &self,
         context: &aura_core::identifiers::ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
         budget: &aura_core::FlowBudget,
     ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
         (**self).update_flow_budget(context, peer, budget).await
@@ -313,7 +313,7 @@ impl crate::effects::JournalEffects for Box<dyn AuraEffects> {
     async fn charge_flow_budget(
         &self,
         context: &aura_core::identifiers::ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
         cost: u32,
     ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
         (**self).charge_flow_budget(context, peer, cost).await

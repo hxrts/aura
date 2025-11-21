@@ -101,7 +101,7 @@ Secure channels follow a lifecycle aligned with rendezvous and epoch semantics:
    - FlowBudget receipts created on each hop are inserted into the relational context journal so downstream peers can audit path compliance.
 
 3. **Re-keying on epoch change**:
-   - When the account or context epoch changes (as recorded in `101_accounts_and_ratchet_tree.md` / `103_relational_contexts.md`), the channel detects the mismatch, tears down the existing Noise session, and triggers rendezvous to derive fresh keys.
+   - When the account or context epoch changes (as recorded in `101_accounts_and_commitment_tree.md` / `103_relational_contexts.md`), the channel detects the mismatch, tears down the existing Noise session, and triggers rendezvous to derive fresh keys.
    - Existing receipts are marked invalid for the new epoch, preventing replay.
 
 4. **Teardown**:

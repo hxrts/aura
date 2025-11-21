@@ -15,7 +15,7 @@ use tokio::time::timeout;
 async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("partition_healing_recovery")
         .await?;
 
@@ -76,7 +76,7 @@ async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
         println!("  System returned to normal operation");
         tokio::time::sleep(Duration::from_millis(400)).await;
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -86,7 +86,7 @@ async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
     );
 
     fixture
-        .wait_for_session_completion(session_id, Duration::from_secs(360))
+        .wait_for_session_completion(&session, Duration::from_secs(360))
         .await?;
 
     // Verify final consistency across all devices
@@ -104,7 +104,7 @@ async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
 async fn test_multi_protocol_coordination() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("multi_protocol_coordination")
         .await?;
 
@@ -167,7 +167,7 @@ async fn test_multi_protocol_coordination() -> AuraResult<()> {
         println!("Phase 7: Verifying multi-protocol success");
         tokio::time::sleep(Duration::from_millis(400)).await;
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -177,7 +177,7 @@ async fn test_multi_protocol_coordination() -> AuraResult<()> {
     );
 
     fixture
-        .wait_for_session_completion(session_id, Duration::from_secs(300))
+        .wait_for_session_completion(&session, Duration::from_secs(300))
         .await?;
 
     // Verify system is in a good state after multi-protocol operations
@@ -196,7 +196,7 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
     // Create larger device set for stress testing
     let mut fixture = MultiDeviceTestFixture::new(8).await?; // 8 devices
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("large_scale_coordination")
         .await?;
 
@@ -262,7 +262,7 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
         );
         tokio::time::sleep(Duration::from_millis(800)).await;
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -272,7 +272,7 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
     );
 
     fixture
-        .wait_for_session_completion(session_id, Duration::from_secs(420))
+        .wait_for_session_completion(&session, Duration::from_secs(420))
         .await?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -289,7 +289,7 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
 async fn test_concurrent_failure_recovery() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("concurrent_failure_recovery")
         .await?;
 
@@ -414,7 +414,7 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
         println!("  System fully recovered");
         tokio::time::sleep(Duration::from_millis(600)).await;
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -424,7 +424,7 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
     );
 
     fixture
-        .wait_for_session_completion(session_id, Duration::from_secs(360))
+        .wait_for_session_completion(&session, Duration::from_secs(360))
         .await?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -441,7 +441,7 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
 async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
 
-    let session_id = fixture
+    let session = fixture
         .create_coordinated_session("complete_e2e_workflow")
         .await?;
 
@@ -557,7 +557,7 @@ async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
 
         println!("  End-to-end workflow completed successfully");
 
-        Ok(())
+        Ok::<(), AuraError>(())
     })
     .await;
 
@@ -567,7 +567,7 @@ async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
     );
 
     fixture
-        .wait_for_session_completion(session_id, Duration::from_secs(480))
+        .wait_for_session_completion(&session, Duration::from_secs(480))
         .await?;
 
     let consistency = verify_journal_consistency(&fixture).await?;

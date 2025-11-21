@@ -83,7 +83,7 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 
 Aura now models identity via opaque authorities (`AuthorityId`) and relational contexts (`ContextId`). Key points:
 
-- Ratchet tree updates and device membership are expressed as fact-based AttestedOps (`aura-journal/src/fact_journal.rs`). No graph-based `journal_ops` remain.
+- commitment tree updates and device membership are expressed as fact-based AttestedOps (`aura-journal/src/fact_journal.rs`). No graph-based `journal_ops` remain.
 - Relational contexts (guardian bindings, recovery grants, rendezvous receipts) live in their own journals (`docs/103_relational_contexts.md`).
 - Aura Consensus is the sole strong-agreement mechanism (`docs/104_consensus.md`). Fast path + fallback gossip integrate with the guard chain.
 - Guard chain sequence: `AuthorizationEffects` (Biscuit/capabilities) → `FlowBudgetEffects` (charge-before-send) → `LeakageEffects` (`docs/003_information_flow_contract.md`) → `JournalEffects` (fact commit) → `TransportEffects`.
@@ -122,4 +122,4 @@ Reference `docs/003_information_flow_contract.md` for the unified flow-budget/me
 ## Legacy Cleanup Status
 
 - Graph-based `journal_ops` directory removed; guard/tests now track fact deltas.
-- `DeviceMetadata`/`DeviceType` removal in progress (see work plan in `refactor.md`). Until the new authority-derived device view lands, legacy structs remain in `aura-journal::types`, ledger APIs, and testkit builders.
+- `DeviceMetadata`/`DeviceType` removal in progress (see work plan in `refactor.md`). Until the new authority-derived device view lands, legacy structs remain in `aura-journal::types`, Effect APIs, and testkit builders.

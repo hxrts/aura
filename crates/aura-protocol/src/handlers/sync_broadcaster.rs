@@ -265,7 +265,7 @@ mod tests {
                 op: TreeOpKind::AddLeaf {
                     leaf: LeafNode {
                         leaf_id: LeafId(1),
-                        device_id: aura_core::DeviceId::new(),
+                        device_id: aura_core::identifiers::DeviceId::new(),
                         role: LeafRole::Device,
                         public_key: vec![1, 2, 3],
                         meta: vec![],

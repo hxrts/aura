@@ -3,10 +3,10 @@
 //! This module implements the recovery protocol using RelationalContexts,
 //! replacing the device-centric recovery model with authority-based recovery.
 
-use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
+use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
 use aura_relational::{
-    ConsensusProof, Prestate, RecoveryGrant, RecoveryOp, RelationalContext, RelationalFact,
+    ConsensusProof, Prestate, RecoveryGrant, RecoveryOp, RelationalContext,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

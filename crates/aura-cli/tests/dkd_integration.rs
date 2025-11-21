@@ -41,7 +41,7 @@ async fn test_dkd_integration() -> Result<()> {
     assert!(!result.session_id.0.is_empty());
 
     // Verify combined commitment is deterministic
-    assert_eq!(result.combined_commitment.len(), 32);
+    assert_eq!(result.combined_commitment.0.len(), 32);
 
     Ok(())
 }

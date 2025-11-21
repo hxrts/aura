@@ -12,7 +12,7 @@
 use aura_core::tree::{
     AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind,
 };
-use aura_core::DeviceId;
+use aura_core::identifiers::DeviceId;
 use std::collections::BTreeMap;
 
 // ============================================================================

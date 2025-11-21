@@ -5,7 +5,8 @@
 
 use aura_core::{
     tree::{AttestedOp, TreeOp, TreeOpKind},
-    AccountId, AuraError, AuraResult, Cap, DeviceId, Policy,
+    AccountId, AuraError, AuraResult, Cap, Policy,
+    identifiers::DeviceId,
 };
 use std::collections::HashMap;
 
@@ -308,7 +309,7 @@ impl Default for IdentityVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{Cap, DeviceId};
+    use aura_core::{Cap, identifiers::DeviceId};
 
     #[test]
     fn test_device_registration() {

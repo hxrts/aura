@@ -525,7 +525,7 @@ mod tests {
     use super::*;
     use aura_core::{
         semilattice::{Bottom, JoinSemilattice},
-        AuraResult,
+        AuraResult, DeviceId,
     };
     use aura_macros::aura_test;
     use aura_testkit::TestFixture;
@@ -591,7 +591,7 @@ mod tests {
         fn ctx(&self) -> &Self::Ctx {
             use std::sync::LazyLock;
             static DUMMY_CTX: LazyLock<CausalContext> =
-                LazyLock::new(|| CausalContext::new(AuthorityId::new()));
+                LazyLock::new(|| CausalContext::new(DeviceId::new()));
             &DUMMY_CTX
         }
     }
@@ -712,7 +712,8 @@ mod tests {
     #[aura_test]
     async fn test_sync_request_creation() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
-        let authority_id = AuthorityId::from(fixture.device_id());
+        let device_uuid: uuid::Uuid = fixture.device_id().into();
+        let authority_id = AuthorityId::from_uuid(device_uuid);
         let coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
@@ -733,7 +734,8 @@ mod tests {
     #[aura_test]
     async fn test_cv_sync_request_handling() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
-        let authority_id = AuthorityId::from(fixture.device_id());
+        let device_uuid: uuid::Uuid = fixture.device_id().into();
+        let authority_id = AuthorityId::from_uuid(device_uuid);
         let mut coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
@@ -761,7 +763,8 @@ mod tests {
     #[aura_test]
     async fn test_cv_sync_response_handling() -> AuraResult<()> {
         let fixture = TestFixture::new().await?;
-        let authority_id = AuthorityId::from(fixture.device_id());
+        let device_uuid: uuid::Uuid = fixture.device_id().into();
+        let authority_id = AuthorityId::from_uuid(device_uuid);
         let mut coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,

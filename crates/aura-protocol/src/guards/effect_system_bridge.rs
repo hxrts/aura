@@ -5,37 +5,14 @@
 //! This module implements the bridge interface that allows aura-wot to evaluate
 //! capabilities without directly depending on a concrete effect system implementation.
 
-use super::effect_system_trait::GuardEffectSystem;
-use crate::wot::EffectSystemInterface;
-use aura_core::DeviceId;
-use std::collections::HashMap;
+use super::effect_system_trait::{GuardEffectSystem, SecurityContext};
+// use crate::wot::EffectSystemInterface; // Legacy interface removed
 
 /// Wrapper type to avoid coherence issues
 pub struct GuardEffectSystemWrapper<E>(pub E);
 
-/// Implementation of EffectSystemInterface for the wrapper
-impl<E: GuardEffectSystem> EffectSystemInterface for GuardEffectSystemWrapper<E> {
-    /// Get the authority ID for this effect system
-    fn device_id(&self) -> DeviceId {
-        GuardEffectSystem::device_id(&self.0)
-    }
-
-    /// Query metadata from the effect system
-    fn get_metadata(&self, key: &str) -> Option<String> {
-        GuardEffectSystem::get_metadata(&self.0, key)
-    }
-}
-
-/// Implementation for the concrete type we use
-impl EffectSystemInterface for Box<dyn crate::effects::AuraEffects> {
-    fn device_id(&self) -> DeviceId {
-        GuardEffectSystem::device_id(self)
-    }
-
-    fn get_metadata(&self, key: &str) -> Option<String> {
-        GuardEffectSystem::get_metadata(self, key)
-    }
-}
+// Legacy EffectSystemInterface implementations removed - use BiscuitAuthorizationBridge instead
+// TODO: Implement Biscuit-based authorization integration when available
 
 /// Extension methods for GuardEffectSystem to support guard operations
 pub trait GuardExtensions {
@@ -53,66 +30,29 @@ impl<E: GuardEffectSystem> GuardExtensions for E {
 
     fn get_security_context(&self) -> SecurityContext {
         SecurityContext {
-            device_id: self.device_id(),
-            execution_mode: format!("{:?}", self.execution_mode()),
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            metadata: HashMap::new(),
+            authority_id: self.authority_id(),
+            security_level: super::effect_system_trait::SecurityLevel::Normal,
+            hardware_secure: false,
         }
     }
 }
 
-/// Security context for capability evaluation
-#[derive(Debug, Clone)]
-pub struct SecurityContext {
-    pub device_id: DeviceId,
-    pub execution_mode: String,
-    pub timestamp: u64,
-    pub metadata: HashMap<String, String>,
-}
-
-impl SecurityContext {
-    /// Check if the context allows a specific operation
-    pub fn allows_operation(&self, operation: &str) -> bool {
-        // Placeholder: would implement actual security policy checks
-        match operation {
-            "network_send" => true,
-            "crypto_sign" => true,
-            "journal_write" => true,
-            _ => false,
-        }
-    }
-
-    /// Get context-specific restrictions
-    pub fn get_restrictions(&self) -> Vec<String> {
-        let mut restrictions = Vec::new();
-
-        // Example restrictions based on execution mode
-        if self.execution_mode == "Testing" {
-            restrictions.push("no_network_access".to_string());
-        }
-
-        restrictions
-    }
-}
 
 #[cfg(all(test, feature = "fixture_effects"))]
 mod tests {
     use super::*;
-    use aura_core::identifiers::DeviceId;
+    use aura_core::identifiers::AuthorityId;
     use aura_macros::aura_test;
     use aura_testkit::*;
 
     #[aura_test]
     async fn test_effect_system_interface() -> aura_core::AuraResult<()> {
         let fixture = create_test_fixture().await?;
-        let device_id = fixture.device_id();
+        let authority_id = AuthorityId::from_uuid((fixture.device_id()).0);
         let effect_system = fixture.effects();
 
-        // Test device ID retrieval
-        assert_eq!(effect_system.device_id(), device_id);
+        // Test authority ID retrieval
+        assert_eq!(effect_system.device_id(), authority_id);
 
         // Test metadata retrieval
         assert_eq!(
@@ -127,7 +67,7 @@ mod tests {
     #[aura_test]
     async fn test_guard_extensions() -> aura_core::AuraResult<()> {
         let fixture = create_test_fixture().await?;
-        let device_id = fixture.device_id();
+        let authority_id = AuthorityId::from_uuid((fixture.device_id()).0);
         let effect_system = fixture.effects();
 
         // Test operation permissions
@@ -136,9 +76,7 @@ mod tests {
 
         // Test security context
         let context = effect_system.get_security_context();
-        assert_eq!(context.device_id, device_id);
-        assert_eq!(context.execution_mode, "Testing");
-        assert!(context.allows_operation("network_send"));
+        assert_eq!(context.authority_id, authority_id);
         Ok(())
     }
 }

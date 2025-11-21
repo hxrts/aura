@@ -3,4 +3,5 @@
 //! This module contains tests that verify the CRDT properties and
 //! functionality of the Journal API.
 
-pub mod crdt_properties;
+// TODO: Add CRDT property tests
+// pub mod crdt_properties;

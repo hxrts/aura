@@ -3,7 +3,8 @@
 //! This module implements the G_auth choreography for distributed device
 //! authentication using the rumpsteak-aura choreographic programming framework.
 
-use crate::{AccountId, AuraError, AuraResult, BiscuitGuardEvaluator, DeviceId, ResourceScope};
+use crate::{AccountId, AuraError, AuraResult, BiscuitGuardEvaluator, ResourceScope};
+use aura_core::DeviceId;
 use aura_core::TimeEffects;
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
@@ -237,7 +238,10 @@ where
         // Execute device authentication choreography
         match self.execute_device_auth_choreography(&request).await {
             Ok((verified_identity, session_ticket)) => {
-                tracing::info!("Device authentication successful for device: {}", request.device_id);
+                tracing::info!(
+                    "Device authentication successful for device: {}",
+                    request.device_id
+                );
                 Ok(DeviceAuthResponse {
                     verified_identity: Some(verified_identity),
                     session_ticket: Some(session_ticket),
@@ -246,7 +250,11 @@ where
                 })
             }
             Err(e) => {
-                tracing::error!("Device authentication failed for device {}: {}", request.device_id, e);
+                tracing::error!(
+                    "Device authentication failed for device {}: {}",
+                    request.device_id,
+                    e
+                );
                 Ok(DeviceAuthResponse {
                     verified_identity: None,
                     session_ticket: None,
@@ -263,52 +271,64 @@ where
         request: &DeviceAuthRequest,
     ) -> AuraResult<(VerifiedIdentity, SessionTicket)> {
         // Phase 1: Challenge Request
-        tracing::debug!("Phase 1: Sending challenge request for device {}", request.device_id);
-        
+        tracing::debug!(
+            "Phase 1: Sending challenge request for device {}",
+            request.device_id
+        );
+
         let challenge_request = ChallengeRequest {
             device_id: request.device_id,
             account_id: request.account_id,
             scope: request.requested_scope.clone(),
         };
-        
+
         // Phase 2: Challenge Response - Generate challenge
         let challenge_response = self.generate_challenge(&challenge_request).await?;
-        
+
         // Phase 3: Proof Submission - Create identity proof
-        let identity_proof = self.create_identity_proof(request, &challenge_response).await?;
+        let identity_proof = self
+            .create_identity_proof(request, &challenge_response)
+            .await?;
         let proof_submission = ProofSubmission {
             session_id: challenge_response.session_id.clone(),
             identity_proof: identity_proof.clone(),
             key_material: self.create_key_material(&request.device_id).await?,
         };
-        
+
         // Phase 4: Authentication Result - Verify proof
-        let auth_result = self.verify_proof(&challenge_response, &proof_submission).await?;
-        
+        let auth_result = self
+            .verify_proof(&challenge_response, &proof_submission)
+            .await?;
+
         match auth_result.success {
             true => {
-                let verified_identity = auth_result.verified_identity
-                    .ok_or_else(|| AuraError::invalid("Missing verified identity in successful auth"))?;
-                let session_ticket = auth_result.session_ticket
-                    .ok_or_else(|| AuraError::invalid("Missing session ticket in successful auth"))?;
+                let verified_identity = auth_result.verified_identity.ok_or_else(|| {
+                    AuraError::invalid("Missing verified identity in successful auth")
+                })?;
+                let session_ticket = auth_result.session_ticket.ok_or_else(|| {
+                    AuraError::invalid("Missing session ticket in successful auth")
+                })?;
                 Ok((verified_identity, session_ticket))
             }
-            false => {
-                Err(AuraError::invalid(&format!(
-                    "Authentication verification failed: {}", 
-                    auth_result.error.unwrap_or_else(|| "Unknown error".to_string())
-                )))
-            }
+            false => Err(AuraError::invalid(&format!(
+                "Authentication verification failed: {}",
+                auth_result
+                    .error
+                    .unwrap_or_else(|| "Unknown error".to_string())
+            ))),
         }
     }
 
     /// Generate challenge for device authentication
-    async fn generate_challenge(&self, request: &ChallengeRequest) -> AuraResult<ChallengeResponse> {
+    async fn generate_challenge(
+        &self,
+        request: &ChallengeRequest,
+    ) -> AuraResult<ChallengeResponse> {
         // Generate random challenge
         let challenge_bytes = self.effects.random_bytes(32).await;
         let current_time = TimeEffects::current_timestamp(self.effects.as_ref()).await;
         let expires_at = current_time + 300; // 5 minute expiry
-        
+
         Ok(ChallengeResponse {
             challenge: challenge_bytes,
             expires_at,
@@ -326,14 +346,14 @@ where
         let mut message = Vec::new();
         message.extend_from_slice(&challenge_response.challenge);
         message.extend_from_slice(request.device_id.to_string().as_bytes());
-        
+
         // Generate signature using effect system
         // In a real implementation, this would use the device's private key
         // For simulation, we'll generate a deterministic signature
         let signature_bytes = self.effects.random_bytes(64).await;
         let mut signature = [0u8; 64];
         signature.copy_from_slice(&signature_bytes[..64]);
-        
+
         Ok(IdentityProof::Device {
             device_id: request.device_id,
             signature: signature.into(),
@@ -347,15 +367,15 @@ where
         let public_key_bytes = self.effects.random_bytes(32).await;
         let mut public_key_array = [0u8; 32];
         public_key_array.copy_from_slice(&public_key_bytes[..32]);
-        
+
         // Create Ed25519VerifyingKey from bytes
         use aura_core::crypto::Ed25519VerifyingKey;
         let public_key = Ed25519VerifyingKey::from_bytes(&public_key_array)
             .map_err(|e| AuraError::crypto(format!("Invalid public key: {}", e)))?;
-        
+
         let mut key_material = KeyMaterial::new();
         key_material.add_device_key(*device_id, public_key);
-        
+
         Ok(key_material)
     }
 
@@ -380,7 +400,10 @@ where
         // For simulation, we'll assume successful verification
         // In production, this would verify the signature against the challenge
         let verified_identity = match &proof_submission.identity_proof {
-            IdentityProof::Device { device_id, signature: _ } => {
+            IdentityProof::Device {
+                device_id,
+                signature: _,
+            } => {
                 // Create verified identity
                 VerifiedIdentity {
                     proof: proof_submission.identity_proof.clone(),
@@ -399,7 +422,9 @@ where
         };
 
         // Create session ticket
-        let session_ticket = self.create_session_ticket(&proof_submission.session_id, &verified_identity).await?;
+        let session_ticket = self
+            .create_session_ticket(&proof_submission.session_id, &verified_identity)
+            .await?;
 
         Ok(AuthResult {
             session_id: proof_submission.session_id.clone(),
@@ -418,21 +443,24 @@ where
     ) -> AuraResult<SessionTicket> {
         let current_time = TimeEffects::current_timestamp(self.effects.as_ref()).await;
         let expires_at = current_time + 3600; // 1 hour session
-        
+
         // Generate nonce for session ticket
         let nonce_bytes = self.effects.random_bytes(16).await;
         let mut nonce = [0u8; 16];
         nonce.copy_from_slice(&nonce_bytes[..16]);
-        
+
         // Extract device ID from verified identity
         let issuer_device_id = match &verified_identity.proof {
             IdentityProof::Device { device_id, .. } => *device_id,
-            _ => return Err(AuraError::invalid("Cannot extract device ID from identity proof")),
+            _ => {
+                return Err(AuraError::invalid(
+                    "Cannot extract device ID from identity proof",
+                ))
+            }
         };
-        
+
         Ok(SessionTicket {
-            session_id: uuid::Uuid::parse_str(session_id)
-                .unwrap_or_else(|_| uuid::Uuid::new_v4()),
+            session_id: uuid::Uuid::parse_str(session_id).unwrap_or_else(|_| uuid::Uuid::new_v4()),
             issuer_device_id,
             scope: SessionScope::Protocol {
                 protocol_type: "device_auth".to_string(),
@@ -455,7 +483,7 @@ mod tests {
     use aura_core::test_utils::test_device_id;
     use aura_core::{AccountId, DeviceId};
     use aura_macros::aura_test;
-    use aura_protocol::LedgerEffects;
+    use aura_protocol::EffectApiEffects;
     use aura_verify::session::SessionScope;
 
     #[test]
@@ -482,13 +510,13 @@ mod tests {
         assert_eq!(request.account_id, deserialized.account_id);
     }
 
-    // Note: This test is disabled due to runtime context issues in the effect system builder
+    // TODO: This test is disabled due to runtime context issues in the effect system builder
     // The effect system initialization requires careful async runtime management
     #[aura_test]
     async fn test_coordinator_creation() -> aura_core::AuraResult<()> {
         let device_id = test_device_id(2);
         let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-        let coordinator = DeviceAuthCoordinator::new(fixture.effect_system());
+        let coordinator = DeviceAuthCoordinator::new(fixture.effect_system_arc());
 
         // Just verify the coordinator was created successfully
         // Test passes if we can create and access the coordinator

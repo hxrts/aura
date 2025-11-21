@@ -12,10 +12,8 @@
 use async_trait::async_trait;
 use aura_core::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 use aura_core::AuraError;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{broadcast, RwLock};
 use tokio::time;
 use uuid::Uuid;
 

@@ -4,7 +4,7 @@
 //! for all tree operations. The OpLog is an OR-set (Observed-Remove Set) that stores
 //! AttestedOp instances with deterministic conflict resolution.
 //!
-//! ## Key Properties (from docs/123_ratchet_tree.md):
+//! ## Key Properties (from docs/123_commitment_tree.md):
 //!
 //! - **OR-set semantics**: Operations are added but never removed
 //! - **Join-semilattice**: Supports merge operations with associativity/commutativity
@@ -12,10 +12,11 @@
 //! - **Deterministic ordering**: For reduction reproducibility
 
 use aura_core::hash;
+use aura_core::identifiers::DeviceId;
 use aura_core::semilattice::JoinSemilattice;
 use aura_core::{
     tree::{AttestedOp, TreeHash32},
-    DeviceId, Hash32,
+    Hash32,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};

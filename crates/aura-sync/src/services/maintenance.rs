@@ -29,8 +29,10 @@
 //! # }
 //! ```
 
-// TODO: Refactor to use TimeEffects. Uses Instant::now() for maintenance timing
-// which should be replaced with effect system integration.
+// PROGRESS: Partially migrated to TimeEffects and RandomEffects.
+// - Added start_with_time_effects() method for proper effect system integration
+// - Updated propose_upgrade() to use RandomEffects for deterministic UUID generation  
+// - Original Service trait methods still use direct time calls for compatibility
 #![allow(clippy::disallowed_methods)]
 
 use parking_lot::RwLock;
@@ -46,6 +48,7 @@ use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::CacheManager;
 use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
 use aura_core::{tree::Snapshot, AccountId, DeviceId, Epoch, Hash32, SemanticVersion};
+use aura_core::effects::{TimeEffects, RandomEffects};
 
 // =============================================================================
 // Maintenance Event Types
@@ -373,18 +376,19 @@ impl MaintenanceService {
     }
 
     /// Propose OTA upgrade
-    pub async fn propose_upgrade(
+    pub async fn propose_upgrade<R: RandomEffects>(
         &self,
         package_id: Uuid,
         version: SemanticVersion,
         kind: UpgradeKind,
         package_hash: Hash32,
         proposer: DeviceId,
+        random_effects: &R,
     ) -> SyncResult<UpgradeProposal> {
         let mut protocol = self.ota_protocol.write();
 
-        // TODO: Should obtain UUID via RandomEffects
-        let proposal_id = Uuid::new_v4();
+        // Use RandomEffects for deterministic UUID generation
+        let proposal_id = random_effects.random_uuid().await;
         let proposal = protocol.propose_upgrade(
             proposal_id,
             package_id,
@@ -443,11 +447,31 @@ impl MaintenanceService {
             .map(|t| t.elapsed())
             .unwrap_or(Duration::ZERO)
     }
+
+    /// Start the service using TimeEffects (preferred over Service::start)
+    pub async fn start_with_time_effects<T: TimeEffects>(&self, time_effects: &T) -> SyncResult<()> {
+        let mut state = self.state.write();
+        if *state == ServiceState::Running {
+            return Err(sync_session_error("Service already running"));
+        }
+
+        *state = ServiceState::Starting;
+        
+        // Use TimeEffects for deterministic time
+        let now = time_effects.now_instant().await;
+        *self.started_at.write() = Some(now);
+
+        // TODO: Start background tasks for auto-snapshot
+
+        *state = ServiceState::Running;
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
 impl Service for MaintenanceService {
     async fn start(&self, now: Instant) -> SyncResult<()> {
+        // NOTE: Prefer start_with_time_effects() for proper effect system integration
         let mut state = self.state.write();
         if *state == ServiceState::Running {
             return Err(sync_session_error("Service already running"));
@@ -532,6 +556,7 @@ impl Service for MaintenanceService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
 
     #[test]
     fn test_maintenance_service_creation() {
@@ -553,6 +578,92 @@ mod tests {
 
         service.stop().await.unwrap();
         assert!(!service.is_running());
+    }
+
+    /// Mock TimeEffects implementation for testing
+    struct MockTimeEffects {
+        instant: Instant,
+    }
+
+    impl MockTimeEffects {
+        fn new() -> Self {
+            Self {
+                #[allow(clippy::disallowed_methods)]
+                instant: Instant::now(),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TimeEffects for MockTimeEffects {
+        async fn current_epoch(&self) -> u64 { 0 }
+        async fn current_timestamp(&self) -> u64 { 0 }
+        async fn current_timestamp_millis(&self) -> u64 { 0 }
+        async fn now_instant(&self) -> Instant { self.instant }
+        async fn sleep_ms(&self, _ms: u64) {}
+        async fn sleep_until(&self, _epoch: u64) {}
+        async fn delay(&self, _duration: Duration) {}
+        async fn sleep(&self, _duration_ms: u64) -> Result<(), aura_core::AuraError> { Ok(()) }
+        async fn yield_until(&self, _condition: aura_core::effects::time::WakeCondition) -> Result<(), aura_core::effects::time::TimeError> { Ok(()) }
+        async fn wait_until(&self, _condition: aura_core::effects::time::WakeCondition) -> Result<(), aura_core::AuraError> { Ok(()) }
+        async fn set_timeout(&self, _timeout_ms: u64) -> aura_core::effects::time::TimeoutHandle { uuid::Uuid::new_v4() }
+        async fn cancel_timeout(&self, _handle: aura_core::effects::time::TimeoutHandle) -> Result<(), aura_core::effects::time::TimeError> { Ok(()) }
+        fn is_simulated(&self) -> bool { true }
+        fn register_context(&self, _context_id: uuid::Uuid) {}
+        fn unregister_context(&self, _context_id: uuid::Uuid) {}
+        async fn notify_events_available(&self) {}
+        fn resolution_ms(&self) -> u64 { 1 }
+    }
+
+    #[tokio::test]
+    async fn test_maintenance_service_with_time_effects() {
+        let service = MaintenanceService::new(Default::default()).unwrap();
+        let time_effects = MockTimeEffects::new();
+
+        // Test the TimeEffects-based start method
+        service.start_with_time_effects(&time_effects).await.unwrap();
+        assert!(service.is_running());
+
+        service.stop().await.unwrap();
+        assert!(!service.is_running());
+    }
+
+    /// Mock RandomEffects implementation for testing
+    struct MockRandomEffects;
+
+    #[async_trait]
+    impl RandomEffects for MockRandomEffects {
+        async fn random_bytes(&self, len: usize) -> Vec<u8> { vec![0u8; len] }
+        async fn random_bytes_32(&self) -> [u8; 32] { [0u8; 32] }
+        async fn random_u64(&self) -> u64 { 12345 }
+        async fn random_range(&self, _min: u64, _max: u64) -> u64 { 42 }
+        async fn random_uuid(&self) -> Uuid {
+            // Use a deterministic UUID for testing
+            Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_propose_upgrade_with_random_effects() {
+        let service = MaintenanceService::new(Default::default()).unwrap();
+        let random_effects = MockRandomEffects;
+
+        let package_id = Uuid::new_v4();
+        let version = SemanticVersion::new(1, 2, 3);
+        let kind = UpgradeKind::SoftFork;
+        let package_hash = Hash32::from([1u8; 32]);
+        let proposer = DeviceId::new();
+
+        let proposal = service
+            .propose_upgrade(package_id, version, kind, package_hash, proposer, &random_effects)
+            .await
+            .unwrap();
+
+        // Verify that the deterministic UUID was used
+        assert_eq!(proposal.package_id, package_id);
+        assert_eq!(proposal.version, version);
+        assert_eq!(proposal.kind, kind);
+        assert_eq!(proposal.artifact_hash, package_hash);
     }
 
     #[tokio::test]

@@ -26,7 +26,6 @@ aura-transport = { path = "../aura-transport" }
 aura-mpst = { path = "../aura-mpst" }
 aura-macros = { path = "../aura-macros" }
 aura-store = { path = "../aura-store" }
-aura-relational = { path = "../aura-relational" }
 # aura-frost = { path = "../aura-frost" }  # Temporarily excluded - has FROST API issues
 
 # Curve operations

@@ -44,7 +44,7 @@ pub mod key_resharing;
 pub mod signature_aggregation;
 
 // Re-export core types
-pub use aura_core::{AccountId, AuraError, AuraResult, Cap, DeviceId, Journal};
+pub use aura_core::{AccountId, AuraError, AuraResult, Cap, Journal};
 
 // Re-export crypto types
 pub use aura_core::frost::{

@@ -1,7 +1,7 @@
 //! Core Tree Data Types
 //!
-//! Fundamental data structures for the ratchet tree, following the specification
-//! in `docs/123_ratchet_tree.md`.
+//! Fundamental data structures for the commitment tree, following the specification
+//! in `docs/123_commitment_tree.md`.
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -68,7 +68,7 @@ pub struct LeafNode {
     pub leaf_id: LeafId,
 
     /// Device identifier for this leaf
-    pub device_id: crate::DeviceId,
+    pub device_id: crate::identifiers::DeviceId,
 
     /// Role (device or guardian)
     pub role: LeafRole,
@@ -83,7 +83,11 @@ pub struct LeafNode {
 
 impl LeafNode {
     /// Create a new device leaf node
-    pub fn new_device(leaf_id: LeafId, device_id: crate::DeviceId, public_key: Vec<u8>) -> Self {
+    pub fn new_device(
+        leaf_id: LeafId,
+        device_id: crate::identifiers::DeviceId,
+        public_key: Vec<u8>,
+    ) -> Self {
         Self {
             leaf_id,
             device_id,
@@ -94,7 +98,11 @@ impl LeafNode {
     }
 
     /// Create a new guardian leaf node
-    pub fn new_guardian(leaf_id: LeafId, device_id: crate::DeviceId, public_key: Vec<u8>) -> Self {
+    pub fn new_guardian(
+        leaf_id: LeafId,
+        device_id: crate::identifiers::DeviceId,
+        public_key: Vec<u8>,
+    ) -> Self {
         Self {
             leaf_id,
             device_id,

@@ -6,7 +6,7 @@
 // Re-export all foundation functionality from the context module
 pub use crate::infrastructure::context::{
     create_integration_context, create_mock_test_context, create_simulation_context,
-    SimpleTestContext, TestEffectComposer,
+    CompositeTestHandler, SimpleTestContext, TestEffectComposer,
 };
 
 // Re-export ExecutionMode from aura-core

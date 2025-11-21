@@ -11,21 +11,21 @@
 //! by creating multiple accounts, establishing guardian relationships,
 //! and executing recovery ceremonies.
 
-use aura_agent::{AgentOperations, runtime::AuraEffectSystem};
-use aura_core::{AccountId, Cap, DeviceId, TrustLevel, Top, AuraResult};
+use aura_agent::{runtime::AuraEffectSystem, AgentOperations};
+use aura_core::{AccountId, AuraResult, DeviceId, TrustLevel};
 use aura_crypto::key_derivation::DkdEngine;
-use aura_verify::registry::IdentityVerifier;
-use aura_macros::aura_test;
 use aura_invitation::{
-    device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest},
-    guardian_invitation::{GuardianInvitationRequest, GuardianInvitationCoordinator},
+    device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest, InvitationEnvelope},
+    guardian_invitation::{GuardianInvitationCoordinator, GuardianInvitationRequest},
     invitation_acceptance::{AcceptanceProtocolConfig, InvitationAcceptanceCoordinator},
 };
-use aura_journal::semilattice::InvitationLedger;
+use aura_journal::semilattice::InvitationRecordRegistry;
+use aura_macros::aura_test;
 use aura_recovery::{
+    account_recovery::{AccountRecoveryCoordinator, AccountRecoveryRequest},
     guardian_recovery::GuardianRecoveryCoordinator,
-    account_recovery::{AccountRecoveryRequest, AccountRecoveryCoordinator},
 };
+use aura_verify::registry::IdentityVerifier;
 use aura_wot::CapabilitySet;
 use serde_json::json;
 use std::{collections::HashMap, sync::Arc, time::Duration};
@@ -106,10 +106,9 @@ impl TestParticipant {
         let threshold_config = aura_core::protocols::ThresholdConfig::new(2, 3)
             .expect("Valid threshold configuration");
 
-        self.identity_ops.initialize_account(
-            self.account_id,
-            threshold_config
-        ).await?;
+        self.identity_ops
+            .initialize_account(self.account_id, threshold_config)
+            .await?;
 
         // Create initial journal entry
         let init_fact = serde_json::json!({
@@ -121,9 +120,7 @@ impl TestParticipant {
         });
 
         let fact_bytes = serde_json::to_vec(&init_fact)?;
-        self.journal
-            .append_fact_bytes(fact_bytes)
-            .await?;
+        self.journal.append_fact_bytes(fact_bytes).await?;
 
         println!("✓ Account initialized for {}", self.name);
         Ok(())
@@ -133,8 +130,8 @@ impl TestParticipant {
     async fn invite_guardian(
         &self,
         guardian: &TestParticipant,
-        ledger: Arc<Mutex<InvitationLedger>>,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        registry: Arc<Mutex<InvitationRecordRegistry>>,
+    ) -> Result<InvitationEnvelope, Box<dyn std::error::Error + Send + Sync>> {
         println!("{} inviting {} as guardian", self.name, guardian.name);
 
         let invitation_request = GuardianInvitationRequest {
@@ -146,16 +143,17 @@ impl TestParticipant {
             ttl_secs: Some(3600), // 1 hour
         };
 
-        let coordinator = GuardianInvitationCoordinator::with_ledger(
-            self.effects.clone(),
-            ledger,
-        );
+        let coordinator =
+            GuardianInvitationCoordinator::with_registry(std::sync::Arc::new(self.effects.clone()), registry);
 
         let response = coordinator.invite_guardian(invitation_request).await?;
 
         if response.success {
-            println!("✓ Guardian invitation created: {}", response.invitation.invitation_id);
-            Ok(response.invitation.invitation_id)
+            println!(
+                "✓ Guardian invitation created: {}",
+                response.invitation.invitation_id
+            );
+            Ok(response.invitation)
         } else {
             Err(format!("Guardian invitation failed: {:?}", response.error).into())
         }
@@ -164,17 +162,12 @@ impl TestParticipant {
     /// Accept guardian invitation
     async fn accept_guardian_invitation(
         &self,
-        invitation_id: String,
-        ledger: Arc<Mutex<InvitationLedger>>,
+        invitation_envelope: InvitationEnvelope,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        println!("{} accepting guardian invitation {}", self.name, invitation_id);
-
-        // Retrieve invitation from ledger
-        let invitation_envelope = {
-            let ledger_lock = ledger.lock().await;
-            ledger_lock.get_invitation(&invitation_id)
-                .ok_or("Invitation not found")?
-        };
+        println!(
+            "{} accepting guardian invitation {}",
+            self.name, invitation_envelope.invitation_id
+        );
 
         let acceptance_config = AcceptanceProtocolConfig {
             auto_establish_relationship: true,
@@ -183,10 +176,8 @@ impl TestParticipant {
             protocol_timeout_secs: 60,
         };
 
-        let coordinator = InvitationAcceptanceCoordinator::with_config(
-            self.effects.clone(),
-            acceptance_config,
-        );
+        let coordinator =
+            InvitationAcceptanceCoordinator::with_config(std::sync::Arc::new(self.effects.clone()), acceptance_config);
 
         let acceptance = coordinator.accept_invitation(invitation_envelope).await?;
 
@@ -194,7 +185,11 @@ impl TestParticipant {
             println!("✓ {} accepted guardian invitation", self.name);
             Ok(())
         } else {
-            Err(format!("Guardian invitation acceptance failed: {:?}", acceptance.error_message).into())
+            Err(format!(
+                "Guardian invitation acceptance failed: {:?}",
+                acceptance.error_message
+            )
+            .into())
         }
     }
 
@@ -203,29 +198,39 @@ impl TestParticipant {
         &self,
         device: &TestParticipant,
         role: &str,
-        ledger: Arc<Mutex<InvitationLedger>>,
-    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-        println!("{} inviting {} as device ({})", self.name, device.name, role);
+        registry: Arc<Mutex<InvitationRecordRegistry>>,
+    ) -> Result<InvitationEnvelope, Box<dyn std::error::Error + Send + Sync>> {
+        println!(
+            "{} inviting {} as device ({})",
+            self.name, device.name, role
+        );
+
+        // Create token for the device
+        let authority = aura_wot::AccountAuthority::new(self.account_id);
+        let device_token = authority.create_device_token(device.device_id).unwrap();
+        let root_key = authority.root_public_key();
+        let serializable_token = aura_wot::SerializableBiscuit::new(device_token, root_key);
 
         let invitation_request = DeviceInvitationRequest {
             inviter: self.device_id,
             invitee: device.device_id,
             account_id: self.account_id,
-            granted_capabilities: Cap::top(),
+            granted_token: serializable_token,
             device_role: role.to_string(),
             ttl_secs: Some(3600),
         };
 
-        let coordinator = DeviceInvitationCoordinator::with_ledger(
-            self.effects.clone(),
-            ledger,
-        );
+        let coordinator =
+            DeviceInvitationCoordinator::with_registry(std::sync::Arc::new(self.effects.clone()), registry);
 
         let response = coordinator.invite_device(invitation_request).await?;
 
         if response.success {
-            println!("✓ Device invitation created: {}", response.invitation.invitation_id);
-            Ok(response.invitation.invitation_id)
+            println!(
+                "✓ Device invitation created: {}",
+                response.invitation.invitation_id
+            );
+            Ok(response.invitation)
         } else {
             Err(format!("Device invitation failed: {:?}", response.error).into())
         }
@@ -235,7 +240,7 @@ impl TestParticipant {
 /// Test network representing multiple friends
 struct TestNetwork {
     participants: HashMap<String, TestParticipant>,
-    invitation_ledger: Arc<Mutex<InvitationLedger>>,
+    invitation_registry: Arc<Mutex<InvitationRecordRegistry>>,
 }
 
 impl TestNetwork {
@@ -250,7 +255,7 @@ impl TestNetwork {
 
         Ok(Self {
             participants,
-            invitation_ledger: Arc::new(Mutex::new(InvitationLedger::new())),
+            invitation_registry: Arc::new(Mutex::new(InvitationRecordRegistry::new())),
         })
     }
 
@@ -280,12 +285,15 @@ async fn test_threshold_identity_complete_workflow() -> AuraResult<()> {
             "charlie".to_string(),
             "diana".to_string(),
             "eve".to_string(),
-        ]).await?;
+        ])
+        .await?;
 
         // Phase 1: Account initialization
         println!("\nPhase 1: Account Initialization");
         for (name, participant) in network.participants.iter_mut() {
-            participant.initialize_account().await
+            participant
+                .initialize_account()
+                .await
                 .expect(&format!("Failed to initialize account for {}", name));
         }
 
@@ -297,12 +305,19 @@ async fn test_threshold_identity_complete_workflow() -> AuraResult<()> {
         let bob = network.get("bob").unwrap();
         let charlie = network.get("charlie").unwrap();
 
-        let bob_invitation = alice.invite_guardian(bob, network.invitation_ledger.clone()).await?;
-        let charlie_invitation = alice.invite_guardian(charlie, network.invitation_ledger.clone()).await?;
+        let bob_invitation = alice
+            .invite_guardian(bob, network.invitation_registry.clone())
+            .await?;
+        let charlie_invitation = alice
+            .invite_guardian(charlie, network.invitation_registry.clone())
+            .await?;
 
         // Bob and Charlie accept guardian invitations
-        bob.accept_guardian_invitation(bob_invitation, network.invitation_ledger.clone()).await?;
-        charlie.accept_guardian_invitation(charlie_invitation, network.invitation_ledger.clone()).await?;
+        bob.accept_guardian_invitation(bob_invitation)
+            .await?;
+        charlie
+            .accept_guardian_invitation(charlie_invitation)
+            .await?;
 
         // Phase 3: Device additions
         println!("\nPhase 3: Device Additions");
@@ -311,12 +326,23 @@ async fn test_threshold_identity_complete_workflow() -> AuraResult<()> {
         let eve = network.get("eve").unwrap();
 
         // Alice invites additional devices to her account
-        let diana_invitation = alice.invite_device(diana, "tablet", network.invitation_ledger.clone()).await?;
-        let eve_invitation = alice.invite_device(eve, "mobile", network.invitation_ledger.clone()).await?;
+        let diana_invitation = alice
+            .invite_device(diana, "tablet", network.invitation_registry.clone())
+            .await?;
+        let eve_invitation = alice
+            .invite_device(eve, "mobile", network.invitation_registry.clone())
+            .await?;
 
-        // Devices accept invitations
-        diana.accept_guardian_invitation(diana_invitation, network.invitation_ledger.clone()).await?;
-        eve.accept_guardian_invitation(eve_invitation, network.invitation_ledger.clone()).await?;
+        // Devices accept invitations (using device acceptance flow)
+        let acceptance_coordinator = InvitationAcceptanceCoordinator::new(std::sync::Arc::new(diana.effects.clone()));
+        acceptance_coordinator
+            .accept_invitation(diana_invitation)
+            .await?;
+
+        let acceptance_coordinator = InvitationAcceptanceCoordinator::new(std::sync::Arc::new(eve.effects.clone()));
+        acceptance_coordinator
+            .accept_invitation(eve_invitation)
+            .await?;
 
         // Phase 4: Recovery ceremony
         println!("\nPhase 4: Recovery Ceremony");
@@ -331,20 +357,27 @@ async fn test_threshold_identity_complete_workflow() -> AuraResult<()> {
             timestamp: alice.effects.current_timestamp().await,
         };
 
-        let recovery_coordinator = AccountRecoveryCoordinator::new(alice.effects.clone());
-        let recovery_result = recovery_coordinator.initiate_recovery(recovery_request).await?;
+        let recovery_coordinator = AccountRecoveryCoordinator::new(std::sync::Arc::new(alice.effects.clone()));
+        let recovery_result = recovery_coordinator
+            .initiate_recovery(recovery_request)
+            .await?;
 
         if recovery_result.success {
-            println!("✓ Recovery ceremony initiated: {}", recovery_result.ceremony_id);
+            println!(
+                "✓ Recovery ceremony initiated: {}",
+                recovery_result.ceremony_id
+            );
 
             // Guardians approve recovery
-            let guardian_coordinator = GuardianRecoveryCoordinator::new(bob.effects.clone());
+            let guardian_coordinator = GuardianRecoveryCoordinator::new(std::sync::Arc::new(bob.effects.clone()));
 
-            let approval_result = guardian_coordinator.approve_recovery(
-                recovery_result.ceremony_id.clone(),
-                bob.device_id,
-                "approved".to_string(),
-            ).await?;
+            let approval_result = guardian_coordinator
+                .approve_recovery(
+                    recovery_result.ceremony_id.clone(),
+                    bob.device_id,
+                    "approved".to_string(),
+                )
+                .await?;
 
             if approval_result.success {
                 println!("✓ Guardian {} approved recovery", bob.name);
@@ -358,33 +391,48 @@ async fn test_threshold_identity_complete_workflow() -> AuraResult<()> {
         for (name, participant) in &network.participants {
             // Check journal state
             let facts_count = participant.journal.fact_count().await;
-            assert!(facts_count > 0, "Participant {} should have facts in journal", name);
+            assert!(
+                facts_count > 0,
+                "Participant {} should have facts in journal",
+                name
+            );
 
             // Check identity state
             let identity_status = participant.identity_ops.get_identity_status().await?;
-            assert!(identity_status.initialized, "Participant {} should have initialized identity", name);
+            assert!(
+                identity_status.initialized,
+                "Participant {} should have initialized identity",
+                name
+            );
 
             println!("✓ {} has valid system state", name);
         }
 
-        // Verify invitation ledger state
-        let ledger_snapshot = network.invitation_ledger.lock().await;
-        println!("Final invitation ledger has {} entries", ledger_snapshot.len());
+        // Verify invitation registry state
+        let registry_snapshot = network.invitation_registry.lock().await;
+        println!(
+            "Final invitation registry has {} entries",
+            registry_snapshot.len()
+        );
 
         println!("Complete threshold identity workflow test passed!");
 
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
-    }).await;
+    })
+    .await;
 
     match result {
         Ok(inner_result) => {
             inner_result.map_err(|e| aura_core::AuraError::External(e.to_string()))?;
         }
         Err(_) => {
-            return Err(aura_core::AuraError::External(format!("Threshold identity test timed out after {:?}", test_timeout)));
+            return Err(aura_core::AuraError::External(format!(
+                "Threshold identity test timed out after {:?}",
+                test_timeout
+            )));
         }
     }
-    
+
     Ok(())
 }
 
@@ -397,20 +445,15 @@ async fn test_multi_account_concurrent_operations() -> AuraResult<()> {
         println!("Starting multi-account concurrent operations test");
 
         // Create three separate friend groups
-        let mut network1 = TestNetwork::with_participants(vec![
-            "alice".to_string(),
-            "bob".to_string(),
-        ]).await?;
+        let mut network1 =
+            TestNetwork::with_participants(vec!["alice".to_string(), "bob".to_string()]).await?;
 
-        let mut network2 = TestNetwork::with_participants(vec![
-            "charlie".to_string(),
-            "diana".to_string(),
-        ]).await?;
+        let mut network2 =
+            TestNetwork::with_participants(vec!["charlie".to_string(), "diana".to_string()])
+                .await?;
 
-        let mut network3 = TestNetwork::with_participants(vec![
-            "eve".to_string(),
-            "frank".to_string(),
-        ]).await?;
+        let mut network3 =
+            TestNetwork::with_participants(vec!["eve".to_string(), "frank".to_string()]).await?;
 
         // Initialize all accounts concurrently
         let mut initialization_tasks = vec![];
@@ -419,7 +462,9 @@ async fn test_multi_account_concurrent_operations() -> AuraResult<()> {
             for (name, participant) in network.participants.iter_mut() {
                 let name_clone = name.clone();
                 let init_task = async move {
-                    participant.initialize_account().await
+                    participant
+                        .initialize_account()
+                        .await
                         .map_err(|e| format!("Failed to initialize {}: {}", name_clone, e))
                 };
                 initialization_tasks.push(init_task);
@@ -442,29 +487,35 @@ async fn test_multi_account_concurrent_operations() -> AuraResult<()> {
 
         // Create guardian relationships concurrently
         let guardian_tasks = vec![
-            alice.invite_guardian(bob, network1.invitation_ledger.clone()),
-            charlie.invite_guardian(diana, network2.invitation_ledger.clone()),
-            eve.invite_guardian(frank, network3.invitation_ledger.clone()),
+            alice.invite_guardian(bob, network1.invitation_registry.clone()),
+            charlie.invite_guardian(diana, network2.invitation_registry.clone()),
+            eve.invite_guardian(frank, network3.invitation_registry.clone()),
         ];
 
         let guardian_results = futures::future::try_join_all(guardian_tasks).await?;
 
         // Accept invitations concurrently
         let acceptance_tasks = vec![
-            bob.accept_guardian_invitation(guardian_results[0].clone(), network1.invitation_ledger.clone()),
-            diana.accept_guardian_invitation(guardian_results[1].clone(), network2.invitation_ledger.clone()),
-            frank.accept_guardian_invitation(guardian_results[2].clone(), network3.invitation_ledger.clone()),
+            bob.accept_guardian_invitation(guardian_results[0].clone()),
+            diana.accept_guardian_invitation(guardian_results[1].clone()),
+            frank.accept_guardian_invitation(guardian_results[2].clone()),
         ];
 
         let _acceptance_results = futures::future::try_join_all(acceptance_tasks).await?;
 
         // Verify state across all networks
-        for (network_name, network) in [("Network1", &network1), ("Network2", &network2), ("Network3", &network3)] {
+        for (network_name, network) in [
+            ("Network1", &network1),
+            ("Network2", &network2),
+            ("Network3", &network3),
+        ] {
             for (participant_name, participant) in &network.participants {
                 let identity_status = participant.identity_ops.get_identity_status().await?;
-                assert!(identity_status.initialized,
+                assert!(
+                    identity_status.initialized,
                     "Participant {} in {} should have initialized identity",
-                    participant_name, network_name);
+                    participant_name, network_name
+                );
 
                 println!("✓ {} in {} has valid state", participant_name, network_name);
             }
@@ -473,17 +524,21 @@ async fn test_multi_account_concurrent_operations() -> AuraResult<()> {
         println!("Multi-account concurrent operations test passed!");
 
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
-    }).await;
+    })
+    .await;
 
     match result {
         Ok(inner_result) => {
             inner_result.map_err(|e| aura_core::AuraError::External(e.to_string()))?;
         }
         Err(_) => {
-            return Err(aura_core::AuraError::External(format!("Multi-account test timed out after {:?}", test_timeout)));
+            return Err(aura_core::AuraError::External(format!(
+                "Multi-account test timed out after {:?}",
+                test_timeout
+            )));
         }
     }
-    
+
     Ok(())
 }
 
@@ -495,10 +550,8 @@ async fn test_error_scenarios_and_resilience() -> AuraResult<()> {
     let result = timeout(test_timeout, async {
         println!("Starting error scenarios and resilience test");
 
-        let mut network = TestNetwork::with_participants(vec![
-            "alice".to_string(),
-            "bob".to_string(),
-        ]).await?;
+        let mut network =
+            TestNetwork::with_participants(vec!["alice".to_string(), "bob".to_string()]).await?;
 
         // Initialize accounts
         for (name, participant) in network.participants.iter_mut() {
@@ -515,14 +568,19 @@ async fn test_error_scenarios_and_resilience() -> AuraResult<()> {
             inviter: alice.device_id,
             invitee: bob.device_id,
             account_id: alice.account_id,
-            granted_capabilities: Cap::top(),
+            granted_token: {
+                let authority = aura_wot::AccountAuthority::new(alice.account_id);
+                let device_token = authority.create_device_token(bob.device_id).unwrap();
+                let root_key = authority.root_public_key();
+                aura_wot::SerializableBiscuit::new(device_token, root_key)
+            },
             device_role: "test".to_string(),
             ttl_secs: Some(0), // Invalid TTL
         };
 
-        let coordinator = DeviceInvitationCoordinator::with_ledger(
-            alice.effects.clone(),
-            network.invitation_ledger.clone(),
+        let coordinator = DeviceInvitationCoordinator::with_registry(
+            std::sync::Arc::new(alice.effects.clone()),
+            network.invitation_registry.clone(),
         );
 
         let invalid_result = coordinator.invite_device(invalid_request).await;
@@ -541,8 +599,10 @@ async fn test_error_scenarios_and_resilience() -> AuraResult<()> {
             timestamp: alice.effects.current_timestamp().await,
         };
 
-        let recovery_coordinator = AccountRecoveryCoordinator::new(alice.effects.clone());
-        let recovery_result = recovery_coordinator.initiate_recovery(insufficient_recovery).await;
+        let recovery_coordinator = AccountRecoveryCoordinator::new(std::sync::Arc::new(alice.effects.clone()));
+        let recovery_result = recovery_coordinator
+            .initiate_recovery(insufficient_recovery)
+            .await;
 
         // Should handle gracefully (either succeed with empty guardian set or fail appropriately)
         match recovery_result {
@@ -578,17 +638,21 @@ async fn test_error_scenarios_and_resilience() -> AuraResult<()> {
         println!("Error scenarios and resilience test passed!");
 
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
-    }).await;
+    })
+    .await;
 
     match result {
         Ok(inner_result) => {
             inner_result.map_err(|e| aura_core::AuraError::External(e.to_string()))?;
         }
         Err(_) => {
-            return Err(aura_core::AuraError::External(format!("Error scenarios test timed out after {:?}", test_timeout)));
+            return Err(aura_core::AuraError::External(format!(
+                "Error scenarios test timed out after {:?}",
+                test_timeout
+            )));
         }
     }
-    
+
     Ok(())
 }
 
@@ -601,9 +665,7 @@ async fn test_scaling_characteristics() -> AuraResult<()> {
         println!("Starting scaling characteristics test");
 
         // Create larger friend group (simulating "20 friends" scenario)
-        let participant_names: Vec<String> = (0..10)
-            .map(|i| format!("friend_{:02}", i))
-            .collect();
+        let participant_names: Vec<String> = (0..10).map(|i| format!("friend_{:02}", i)).collect();
 
         let mut network = TestNetwork::with_participants(participant_names.clone()).await?;
 
@@ -616,7 +678,11 @@ async fn test_scaling_characteristics() -> AuraResult<()> {
         }
 
         let init_duration = start_time.elapsed();
-        println!("✓ Initialized {} accounts in {:?}", participant_names.len(), init_duration);
+        println!(
+            "✓ Initialized {} accounts in {:?}",
+            participant_names.len(),
+            init_duration
+        );
 
         // Phase 2: Create mesh of guardian relationships
         println!("Creating guardian relationships...");
@@ -634,7 +700,8 @@ async fn test_scaling_characteristics() -> AuraResult<()> {
                 let guardian_name = &participant_names[guardian_idx];
                 let guardian = network.get(guardian_name).unwrap();
 
-                let invitation_task = inviter.invite_guardian(guardian, network.invitation_ledger.clone());
+                let invitation_task =
+                    inviter.invite_guardian(guardian, network.invitation_registry.clone());
                 invitation_tasks.push(invitation_task);
             }
         }
@@ -642,8 +709,11 @@ async fn test_scaling_characteristics() -> AuraResult<()> {
         let invitation_results = futures::future::try_join_all(invitation_tasks).await?;
         let guardian_duration = guardian_start.elapsed();
 
-        println!("✓ Created {} guardian invitations in {:?}",
-                invitation_results.len(), guardian_duration);
+        println!(
+            "✓ Created {} guardian invitations in {:?}",
+            invitation_results.len(),
+            guardian_duration
+        );
 
         // Phase 3: Performance verification
         println!("Verifying performance characteristics...");
@@ -668,8 +738,11 @@ async fn test_scaling_characteristics() -> AuraResult<()> {
         let _operation_results = futures::future::try_join_all(operation_tasks).await?;
         let perf_duration = perf_start.elapsed();
 
-        println!("✓ Completed concurrent operations across {} participants in {:?}",
-                participant_names.len(), perf_duration);
+        println!(
+            "✓ Completed concurrent operations across {} participants in {:?}",
+            participant_names.len(),
+            perf_duration
+        );
 
         // Phase 4: Memory and resource verification
         println!("Verifying resource usage...");
@@ -678,16 +751,28 @@ async fn test_scaling_characteristics() -> AuraResult<()> {
         let total_invitations = invitation_results.len();
 
         // Basic sanity checks for scaling
-        assert!(total_participants >= 10, "Should test with sufficient participants");
-        assert!(total_invitations >= 20, "Should create sufficient guardian relationships");
+        assert!(
+            total_participants >= 10,
+            "Should test with sufficient participants"
+        );
+        assert!(
+            total_invitations >= 20,
+            "Should create sufficient guardian relationships"
+        );
 
         // Performance should be reasonable
-        assert!(init_duration < Duration::from_secs(30),
-               "Account initialization should complete quickly");
-        assert!(guardian_duration < Duration::from_secs(60),
-               "Guardian relationships should establish quickly");
-        assert!(perf_duration < Duration::from_secs(10),
-               "Concurrent operations should be fast");
+        assert!(
+            init_duration < Duration::from_secs(30),
+            "Account initialization should complete quickly"
+        );
+        assert!(
+            guardian_duration < Duration::from_secs(60),
+            "Guardian relationships should establish quickly"
+        );
+        assert!(
+            perf_duration < Duration::from_secs(10),
+            "Concurrent operations should be fast"
+        );
 
         println!("Scaling test summary:");
         println!("  Participants: {}", total_participants);
@@ -699,16 +784,20 @@ async fn test_scaling_characteristics() -> AuraResult<()> {
         println!("Scaling characteristics test passed!");
 
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
-    }).await;
+    })
+    .await;
 
     match result {
         Ok(inner_result) => {
             inner_result.map_err(|e| aura_core::AuraError::External(e.to_string()))?;
         }
         Err(_) => {
-            return Err(aura_core::AuraError::External(format!("Scaling test timed out after {:?}", test_timeout)));
+            return Err(aura_core::AuraError::External(format!(
+                "Scaling test timed out after {:?}",
+                test_timeout
+            )));
         }
     }
-    
+
     Ok(())
 }

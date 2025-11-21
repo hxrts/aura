@@ -16,9 +16,8 @@ use aura_invitation::{
         RelationshipFormationCoordinator, RelationshipFormationRequest, RelationshipType,
     },
 };
-use aura_journal::semilattice::{InvitationLedger, InvitationStatus};
+use aura_journal::semilattice::{InvitationRecordRegistry, InvitationStatus};
 use aura_macros::aura_test;
-use aura_testkit::effects_integration::TestEffectsBuilder;
 use aura_wot::{AccountAuthority, SerializableBiscuit};
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -31,58 +30,48 @@ struct InvitationIntegrationTest {
     account_id: AccountId,
     inviter_effects: AuraEffectSystem,
     invitee_effects: AuraEffectSystem,
-    shared_ledger: Arc<Mutex<InvitationLedger>>,
+    registry: Arc<Mutex<InvitationRecordRegistry>>,
 }
 
 impl InvitationIntegrationTest {
     #[allow(dead_code)]
-    fn new() -> Self {
+    async fn new() -> Self {
         // Use deterministic UUIDs to avoid conflicts
         let inviter_device = DeviceId(Uuid::from_bytes([0x01; 16]));
         let invitee_device = DeviceId(Uuid::from_bytes([0x02; 16]));
         let account_id = AccountId(Uuid::from_bytes([0x03; 16]));
-        let shared_ledger = Arc::new(Mutex::new(InvitationLedger::new()));
+        let registry = Arc::new(Mutex::new(InvitationRecordRegistry::new()));
+
+        let inviter_fixture = aura_testkit::create_test_fixture_with_device_id(inviter_device).await.unwrap();
+        let invitee_fixture = aura_testkit::create_test_fixture_with_device_id(invitee_device).await.unwrap();
 
         Self {
             inviter_device,
             invitee_device,
             account_id,
-            inviter_effects: TestEffectsBuilder::for_unit_tests(inviter_device)
-                .with_seed(42)
-                .with_initial_timestamp(1_000_000)
-                .build()
-                .unwrap(),
-            invitee_effects: TestEffectsBuilder::for_unit_tests(invitee_device)
-                .with_seed(43)
-                .with_initial_timestamp(1_000_000)
-                .build()
-                .unwrap(),
-            shared_ledger,
+            inviter_effects: (*inviter_fixture.effect_system().0).clone(),
+            invitee_effects: (*invitee_fixture.effect_system().0).clone(),
+            registry,
         }
     }
 
-    fn new_with_seed(seed: u8) -> Self {
+    async fn new_with_seed(seed: u8) -> Self {
         // Use deterministic UUIDs based on seed to avoid conflicts between tests
         let inviter_device = DeviceId(Uuid::from_bytes([seed; 16]));
         let invitee_device = DeviceId(Uuid::from_bytes([seed + 1; 16]));
         let account_id = AccountId(Uuid::from_bytes([seed + 2; 16]));
-        let shared_ledger = Arc::new(Mutex::new(InvitationLedger::new()));
+        let registry = Arc::new(Mutex::new(InvitationRecordRegistry::new()));
+
+        let inviter_fixture = aura_testkit::create_test_fixture_with_device_id(inviter_device).await.unwrap();
+        let invitee_fixture = aura_testkit::create_test_fixture_with_device_id(invitee_device).await.unwrap();
 
         Self {
             inviter_device,
             invitee_device,
             account_id,
-            inviter_effects: TestEffectsBuilder::for_unit_tests(inviter_device)
-                .with_seed(seed as u64)
-                .with_initial_timestamp(1_000_000)
-                .build()
-                .unwrap(),
-            invitee_effects: TestEffectsBuilder::for_unit_tests(invitee_device)
-                .with_seed((seed + 1) as u64)
-                .with_initial_timestamp(1_000_000)
-                .build()
-                .unwrap(),
-            shared_ledger,
+            inviter_effects: (*inviter_fixture.effect_system().0).clone(),
+            invitee_effects: (*invitee_fixture.effect_system().0).clone(),
+            registry,
         }
     }
 
@@ -108,13 +97,13 @@ impl InvitationIntegrationTest {
 async fn test_device_invitation_coordinator_integration() -> aura_core::AuraResult<()> {
     println!("Testing device invitation coordinator integration...");
 
-    let test = InvitationIntegrationTest::new_with_seed(10);
+    let test = InvitationIntegrationTest::new_with_seed(10).await;
     let request = test.create_invitation_request("tablet", Some(7200));
 
     // Create coordinator and send invitation
-    let coordinator = DeviceInvitationCoordinator::with_ledger(
-        test.inviter_effects.clone(),
-        test.shared_ledger.clone(),
+    let coordinator = DeviceInvitationCoordinator::with_registry(
+        std::sync::Arc::new(test.inviter_effects.clone()),
+        test.registry.clone(),
     );
 
     let response = coordinator.invite_device(request.clone()).await?;
@@ -124,10 +113,10 @@ async fn test_device_invitation_coordinator_integration() -> aura_core::AuraResu
     assert_eq!(response.invitation.invitee, test.invitee_device);
     assert_eq!(response.invitation.device_role, "tablet");
 
-    // Verify ledger state
-    let ledger = test.shared_ledger.lock().await;
+    // Verify registry state
+    let registry = test.registry.lock().await;
     assert_eq!(
-        ledger
+        registry
             .get(&response.invitation.invitation_id)
             .map(|r| r.status),
         Some(InvitationStatus::Pending)
@@ -141,13 +130,13 @@ async fn test_device_invitation_coordinator_integration() -> aura_core::AuraResu
 async fn test_invitation_acceptance_coordinator_integration() -> aura_core::AuraResult<()> {
     println!("Testing invitation acceptance coordinator integration...");
 
-    let test = InvitationIntegrationTest::new_with_seed(20);
+    let test = InvitationIntegrationTest::new_with_seed(20).await;
     let request = test.create_invitation_request("laptop", Some(3600));
 
     // Create invitation first
-    let invitation_coordinator = DeviceInvitationCoordinator::with_ledger(
-        test.inviter_effects.clone(),
-        test.shared_ledger.clone(),
+    let invitation_coordinator = DeviceInvitationCoordinator::with_registry(
+        std::sync::Arc::new(test.inviter_effects.clone()),
+        test.registry.clone(),
     );
 
     let invitation_response = invitation_coordinator.invite_device(request).await?;
@@ -160,11 +149,11 @@ async fn test_invitation_acceptance_coordinator_integration() -> aura_core::Aura
         protocol_timeout_secs: 120,
     };
 
-    // Create acceptance coordinator with shared ledger and accept invitation
-    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_config_and_ledger(
-        test.invitee_effects.clone(),
+    // Create acceptance coordinator with shared effect_api and accept invitation
+    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_config_and_registry(
+        std::sync::Arc::new(test.invitee_effects.clone()),
         acceptance_config,
-        test.shared_ledger.clone(),
+        test.registry.clone(),
     );
 
     let acceptance = acceptance_coordinator
@@ -179,9 +168,9 @@ async fn test_invitation_acceptance_coordinator_integration() -> aura_core::Aura
     assert_eq!(acceptance.device_role, "laptop");
     assert!(acceptance.relationship_id.is_some());
 
-    // Verify ledger state after acceptance
-    let ledger = test.shared_ledger.lock().await;
-    let record = ledger.get(&acceptance.invitation_id);
+    // Verify registry state after acceptance
+    let registry = test.registry.lock().await;
+    let record = registry.get(&acceptance.invitation_id);
     assert!(record.is_some());
     assert_eq!(record.unwrap().status, InvitationStatus::Accepted);
 
@@ -193,7 +182,7 @@ async fn test_invitation_acceptance_coordinator_integration() -> aura_core::Aura
 async fn test_relationship_formation_coordinator_integration() -> aura_core::AuraResult<()> {
     println!("Testing relationship formation coordinator integration...");
 
-    let test = InvitationIntegrationTest::new_with_seed(30);
+    let test = InvitationIntegrationTest::new_with_seed(30).await;
 
     // Test legacy relationship formation
     let formation_request = RelationshipFormationRequest {
@@ -243,13 +232,13 @@ async fn test_relationship_formation_coordinator_integration() -> aura_core::Aur
 async fn test_full_invitation_to_relationship_flow() -> aura_core::AuraResult<()> {
     println!("Testing full invitation to relationship flow integration...");
 
-    let test = InvitationIntegrationTest::new_with_seed(40);
+    let test = InvitationIntegrationTest::new_with_seed(40).await;
     let request = test.create_invitation_request("guardian-device", Some(1800));
 
     // Step 1: Create invitation
-    let invitation_coordinator = DeviceInvitationCoordinator::with_ledger(
-        test.inviter_effects.clone(),
-        test.shared_ledger.clone(),
+    let invitation_coordinator = DeviceInvitationCoordinator::with_registry(
+        std::sync::Arc::new(test.inviter_effects.clone()),
+        test.registry.clone(),
     );
 
     let invitation_response = invitation_coordinator.invite_device(request).await?;
@@ -267,10 +256,10 @@ async fn test_full_invitation_to_relationship_flow() -> aura_core::AuraResult<()
         protocol_timeout_secs: 180,
     };
 
-    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_config_and_ledger(
-        test.invitee_effects.clone(),
+    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_config_and_registry(
+        std::sync::Arc::new(test.invitee_effects.clone()),
         acceptance_config,
-        test.shared_ledger.clone(),
+        test.registry.clone(),
     );
 
     let acceptance = acceptance_coordinator
@@ -287,9 +276,9 @@ async fn test_full_invitation_to_relationship_flow() -> aura_core::AuraResult<()
     assert_eq!(acceptance.device_role, "guardian-device");
     assert!(acceptance.relationship_id.is_some());
 
-    // Verify ledger state
-    let ledger = test.shared_ledger.lock().await;
-    let record = ledger.get(&acceptance.invitation_id);
+    // Verify registry state
+    let registry = test.registry.lock().await;
+    let record = registry.get(&acceptance.invitation_id);
     assert!(record.is_some());
     assert!(matches!(
         record.unwrap().status,
@@ -342,19 +331,19 @@ async fn test_full_invitation_to_relationship_flow() -> aura_core::AuraResult<()
 async fn test_concurrent_invitation_processing() -> aura_core::AuraResult<()> {
     println!("Testing concurrent invitation processing integration...");
 
-    let test = InvitationIntegrationTest::new_with_seed(50);
+    let test = InvitationIntegrationTest::new_with_seed(50).await;
 
     // Create multiple invitations concurrently
-    let _invitation_coordinator = DeviceInvitationCoordinator::with_ledger(
-        test.inviter_effects.clone(),
-        test.shared_ledger.clone(),
+    let _invitation_coordinator = DeviceInvitationCoordinator::with_registry(
+        std::sync::Arc::new(test.inviter_effects.clone()),
+        test.registry.clone(),
     );
 
     let mut invitation_tasks = Vec::new();
     for i in 0..3 {
-        let coordinator = DeviceInvitationCoordinator::with_ledger(
-            test.inviter_effects.clone(),
-            test.shared_ledger.clone(),
+        let coordinator = DeviceInvitationCoordinator::with_registry(
+            std::sync::Arc::new(test.inviter_effects.clone()),
+            test.registry.clone(),
         );
         let request = test.create_invitation_request(&format!("device-{}", i), Some(3600));
 
@@ -379,9 +368,9 @@ async fn test_concurrent_invitation_processing() -> aura_core::AuraResult<()> {
     // Accept all invitations concurrently
     let mut acceptance_tasks = Vec::new();
     for envelope in envelopes {
-        let coordinator = InvitationAcceptanceCoordinator::with_ledger(
-            test.invitee_effects.clone(),
-            test.shared_ledger.clone(),
+        let coordinator = InvitationAcceptanceCoordinator::with_registry(
+            std::sync::Arc::new(test.invitee_effects.clone()),
+            test.registry.clone(),
         );
 
         let task = async move { coordinator.accept_invitation(envelope).await };
@@ -402,8 +391,8 @@ async fn test_concurrent_invitation_processing() -> aura_core::AuraResult<()> {
         );
     }
 
-    // Verify ledger consistency
-    let _ledger = test.shared_ledger.lock().await;
+    // Verify registry consistency
+    let _registry = test.registry.lock().await;
     // All invitations should be accepted, none pending or expired
     println!("✓ Concurrent invitation processing integration successful");
     Ok(())
@@ -413,7 +402,7 @@ async fn test_concurrent_invitation_processing() -> aura_core::AuraResult<()> {
 async fn test_error_handling_integration() -> aura_core::AuraResult<()> {
     println!("Testing error handling integration across components...");
 
-    let test = InvitationIntegrationTest::new_with_seed(60);
+    let test = InvitationIntegrationTest::new_with_seed(60).await;
 
     // Test invalid invitation creation
     let authority = AccountAuthority::new(test.account_id);
@@ -430,9 +419,9 @@ async fn test_error_handling_integration() -> aura_core::AuraResult<()> {
         ttl_secs: Some(0), // Invalid TTL
     };
 
-    let coordinator = DeviceInvitationCoordinator::with_ledger(
-        test.inviter_effects.clone(),
-        test.shared_ledger.clone(),
+    let coordinator = DeviceInvitationCoordinator::with_registry(
+        std::sync::Arc::new(test.inviter_effects.clone()),
+        test.registry.clone(),
     );
 
     let invalid_result = coordinator.invite_device(invalid_request).await;
@@ -446,9 +435,9 @@ async fn test_error_handling_integration() -> aura_core::AuraResult<()> {
     // Wait for expiration using mock time advancement
     test.invitee_effects.sleep_ms(2000).await;
 
-    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_ledger(
-        test.invitee_effects.clone(),
-        test.shared_ledger.clone(),
+    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_registry(
+        std::sync::Arc::new(test.invitee_effects.clone()),
+        test.registry.clone(),
     );
 
     let expired_acceptance = acceptance_coordinator

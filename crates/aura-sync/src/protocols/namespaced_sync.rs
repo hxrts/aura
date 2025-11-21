@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 //! Namespace-aware Synchronization Protocol
 //!
 //! This module implements synchronization for the fact-based journal model
@@ -49,7 +51,7 @@ pub struct SyncResponse {
 pub struct SyncStats {
     /// Facts sent
     pub facts_sent: usize,
-    /// Facts received  
+    /// Facts received
     pub facts_received: usize,
     /// Sync duration in ms
     pub duration_ms: u64,
@@ -184,9 +186,7 @@ impl NamespacedSync {
 
         // Verify namespace matches
         if response.namespace != self.namespace {
-            return Err(AuraError::invalid(
-                "Response namespace mismatch",
-            ));
+            return Err(AuraError::invalid("Response namespace mismatch"));
         }
 
         // Apply facts to journal (merge operation with write lock)
@@ -275,7 +275,7 @@ mod tests {
     async fn test_namespace_sync_creation() {
         let authority_id = AuthorityId::new();
         let namespace = JournalNamespace::Authority(authority_id);
-        let journal = Arc::new(Journal::new(namespace.clone()));
+        let journal = Arc::new(RwLock::new(Journal::new(namespace.clone())));
 
         let sync = NamespacedSync::new(namespace, journal);
 

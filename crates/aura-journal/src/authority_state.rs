@@ -4,15 +4,13 @@
 //! from the fact-based journal, implementing the Authority trait.
 
 use crate::{
-    fact::{Fact, FactContent},
+    commitment_tree::authority_state::AuthorityTreeState,
+    fact::FactContent,
     fact_journal::Journal,
-    ratchet_tree::authority_state::AuthorityTreeState,
-    reduction::reduce_authority,
 };
 use async_trait::async_trait;
 use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
 use ed25519_dalek::{Signature, VerifyingKey as PublicKey};
-use std::sync::Arc;
 
 /// Authority state derived from facts
 #[derive(Debug, Clone)]
@@ -28,20 +26,26 @@ impl AuthorityState {
     /// Sign with threshold - internal implementation
     pub async fn sign_with_threshold(&self, data: &[u8]) -> Result<Signature> {
         // Get the root public key for signing context
-        let public_key_bytes = self.tree_state.root_public_key()
-            .ok_or_else(|| AuraError::Internal {
-                message: "No public key available for threshold signing".to_string(),
-            })?;
+        let public_key_bytes =
+            self.tree_state
+                .root_public_key()
+                .ok_or_else(|| AuraError::Internal {
+                    message: "No public key available for threshold signing".to_string(),
+                })?;
 
         // Convert to ed25519 public key for validation context
-        let public_key_array: [u8; 32] = public_key_bytes.try_into()
-            .map_err(|_| AuraError::Internal {
-                message: "Invalid public key length for threshold signing".to_string(),
-            })?;
-            
-        let _public_key = ed25519_dalek::VerifyingKey::from_bytes(&public_key_array)
-            .map_err(|e| AuraError::Internal {
-                message: format!("Invalid ed25519 public key: {}", e),
+        let public_key_array: [u8; 32] =
+            public_key_bytes
+                .try_into()
+                .map_err(|_| AuraError::Internal {
+                    message: "Invalid public key length for threshold signing".to_string(),
+                })?;
+
+        let _public_key =
+            ed25519_dalek::VerifyingKey::from_bytes(&public_key_array).map_err(|e| {
+                AuraError::Internal {
+                    message: format!("Invalid ed25519 public key: {}", e),
+                }
             })?;
 
         // TODO: Implement actual FROST threshold signing coordination
@@ -50,11 +54,11 @@ impl AuthorityState {
         // 2. Distribute partial signatures
         // 3. Aggregate into final signature
         // For now, create a deterministic placeholder signature for testing
-        
+
         use ed25519_dalek::Signer;
         let signing_key = ed25519_dalek::SigningKey::from_bytes(&[42u8; 32]);
         let signature = signing_key.sign(data);
-        
+
         Ok(signature)
     }
 }
@@ -113,10 +117,21 @@ impl Authority for DerivedAuthority {
         // Delegate to internal threshold signing
         self.state.sign_with_threshold(operation).await
     }
+
+    fn get_threshold(&self) -> u16 {
+        self.state.tree_state.get_threshold()
+    }
+
+    fn active_device_count(&self) -> usize {
+        self.state.tree_state.active_leaf_count()
+    }
 }
 
 /// Reduce journal facts to authority state
-fn reduce_authority_state(_authority_id: AuthorityId, journal: &Journal) -> Result<AuthorityState> {
+pub fn reduce_authority_state(
+    _authority_id: AuthorityId,
+    journal: &Journal,
+) -> Result<AuthorityState> {
     // Start with empty tree state
     let mut tree_state = AuthorityTreeState::new();
 

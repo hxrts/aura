@@ -14,7 +14,7 @@
 //!
 //! ## Effect Interfaces (Pure Signatures)
 //! - `JournalEffects`: `merge_facts`, `refine_caps`
-//! - `CryptoEffects`: `sign_threshold`, `aead_seal`, `ratchet_step`
+//! - `CryptoEffects`: `sign_threshold`, `aead_seal`, `commitment_step`
 //! - `TransportEffects`: `send`, `recv`, `connect`
 //! - `TimeEffects`, `RandEffects`: Simulation/testing support
 //!
@@ -84,6 +84,9 @@ pub mod flow;
 /// Authority abstraction (new architecture)
 pub mod authority;
 
+/// Core consensus types and prestate management
+pub mod consensus;
+
 /// Type conversion utilities (internal helpers)
 #[doc(hidden)]
 pub mod conversions;
@@ -118,11 +121,22 @@ pub use context_derivation::{
     GroupContextDerivation, RelayContextDerivation,
 };
 #[doc = "stable: Core identifier types with semver guarantees"]
-pub use identifiers::*;
+pub use identifiers::{
+    AccountId, AuthorityId, ContextId, DataId, DeviceId, DkdContextId, EventId, EventNonce,
+    GroupId, GuardianId, IndividualId, IndividualIdExt, MemberId, MessageContext, OperationId,
+    RelayId, SessionId,
+};
+
+// DeviceId is now internal to aura-journal/src/commitment_tree/ only
+// For migration: use AuthorityId for external APIs, DeviceId only within commitment tree
 
 // Authority abstraction (new architecture)
 #[doc = "unstable: Authority model is under active development - migration from AccountId ongoing"]
 pub use authority::{Authority, AuthorityRef, AuthorityState, TreeState};
+
+// Consensus types
+#[doc = "stable: Core consensus types with semver guarantees"]
+pub use consensus::{Prestate, PrestateBuilder};
 
 // Messages and versioning
 #[doc = "stable: Core message types with semver guarantees"]
@@ -203,7 +217,7 @@ pub use relationships::*;
 #[doc = "internal: Session epoch management is moving to aura-agent"]
 pub use session_epochs::*;
 #[deprecated(
-    note = "Tree types moved to aura-journal::ratchet_tree. Use `aura_journal::{AttestedOp, TreeOp, etc}` instead"
+    note = "Tree types moved to aura-journal::commitment_tree. Use `aura_journal::{AttestedOp, TreeOp, etc}` instead"
 )]
 pub use tree::{
     commit_branch, commit_leaf, compute_root_commitment, policy_hash, AttestedOp, BranchNode,

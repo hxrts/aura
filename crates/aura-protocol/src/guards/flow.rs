@@ -7,19 +7,19 @@
 //! `docs/103_information_flow_budget.md`.
 
 use async_trait::async_trait;
-use aura_core::{identifiers::ContextId, AuraResult, DeviceId, Receipt};
+use aura_core::{identifiers::{ContextId, AuthorityId}, AuraResult, Receipt};
 use serde::{Deserialize, Serialize};
 
 /// Hint describing which flow bucket should be charged before a send.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FlowHint {
     pub context: ContextId,
-    pub peer: DeviceId,
+    pub peer: AuthorityId,
     pub cost: u32,
 }
 
 impl FlowHint {
-    pub fn new(context: ContextId, peer: DeviceId, cost: u32) -> Self {
+    pub fn new(context: ContextId, peer: AuthorityId, cost: u32) -> Self {
         Self {
             context,
             peer,
@@ -34,7 +34,7 @@ pub trait FlowBudgetEffects: Send + Sync {
     async fn charge_flow(
         &self,
         context: &ContextId,
-        peer: &DeviceId,
+        peer: &AuthorityId,
         cost: u32,
     ) -> AuraResult<Receipt>;
 }
@@ -46,7 +46,7 @@ pub struct FlowGuard {
 }
 
 impl FlowGuard {
-    pub fn new(context: ContextId, peer: DeviceId, cost: u32) -> Self {
+    pub fn new(context: ContextId, peer: AuthorityId, cost: u32) -> Self {
         Self {
             hint: FlowHint::new(context, peer, cost),
         }

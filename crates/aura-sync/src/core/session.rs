@@ -7,13 +7,12 @@
 use crate::core::metrics::ErrorCategory;
 use crate::core::{
     sync_resource_with_limit, sync_session_error, sync_timeout_error, sync_validation_error,
-    MetricsCollector, SyncConfig, SyncError, SyncResult,
+    MetricsCollector, SyncConfig, SyncResult,
 };
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use uuid::Uuid;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Unified session state machine following choreographic patterns
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -749,6 +748,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SyncError;
     use aura_core::test_utils::test_device_id;
     use std::thread;
     use std::time::Duration as StdDuration;

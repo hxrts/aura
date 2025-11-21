@@ -7,12 +7,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use super::trace_converter::{ExecutionTrace, QuintTrace, TraceConversionConfig, TraceConverter};
-use super::types::{PropertyEvaluationResult, ValidationResult};
 use super::{ChaosGenerator, PropertyEvaluator, QuintCliRunner};
-use crate::quint::cli_runner::QuintCliResult;
 use aura_core::AuraError;
 
 /// ITF trace with Model-Based Testing metadata
@@ -1890,6 +1887,7 @@ pub struct CoverageSummary {
 
 /// Result of checking a single property
 #[derive(Debug)]
+#[allow(dead_code)]
 struct PropertyCheckResult {
     property_name: String,
     satisfied: bool,

@@ -3,7 +3,7 @@
 //! This module defines CRDT types for storage state management,
 //! implementing join and meet semilattice operations for convergence.
 
-use crate::{SearchIndexEntry, StorageCapabilitySet};
+use crate::SearchIndexEntry;
 use aura_core::{ChunkId, ContentId, JoinSemilattice};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -246,15 +246,17 @@ pub enum StorageOpType {
     },
 }
 
-/// Complete storage state combining index and capabilities
+/// Complete storage state combining index and operations
+///
+/// Authorization is now handled by Biscuit tokens via the effect system.
+/// Legacy capability field has been removed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StorageState {
     /// Content search index
     pub index: StorageIndex,
-    /// Access control capabilities
-    pub capabilities: StorageCapabilitySet,
     /// Operation log for causal consistency
     pub op_log: StorageOpLog,
+    // Removed: capabilities field - use Biscuit tokens for authorization
 }
 
 impl StorageState {
@@ -262,7 +264,6 @@ impl StorageState {
     pub fn new() -> Self {
         Self {
             index: StorageIndex::new(),
-            capabilities: StorageCapabilitySet::new(),
             op_log: StorageOpLog::new(),
         }
     }
@@ -296,10 +297,7 @@ impl StorageState {
         self.index.remove_entry(&content_id);
     }
 
-    /// Update capabilities (meet operation)
-    pub fn refine_capabilities(&mut self, new_capabilities: StorageCapabilitySet) {
-        self.capabilities = self.capabilities.meet(&new_capabilities);
-    }
+    // Removed: refine_capabilities method - authorization now handled by Biscuit tokens
 }
 
 impl Default for StorageState {
@@ -308,12 +306,11 @@ impl Default for StorageState {
     }
 }
 
-/// Join semilattice implementation for StorageState (merge index and op log, meet capabilities)
+/// Join semilattice implementation for StorageState (merge index and op log)
 impl JoinSemilattice for StorageState {
     fn join(&self, other: &Self) -> Self {
         Self {
             index: self.index.join(&other.index),
-            capabilities: self.capabilities.meet(&other.capabilities), // Meet for capabilities
             op_log: self.op_log.join(&other.op_log),
         }
     }
@@ -410,7 +407,6 @@ impl JoinSemilattice for ChunkAvailability {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{StorageCapability, StorageResource};
 
     #[test]
     fn test_storage_index_join() {
@@ -492,23 +488,6 @@ mod tests {
         assert!(locations.contains("node2"));
     }
 
-    #[test]
-    fn test_storage_state_capabilities_meet() {
-        let cap1 = StorageCapability::read(StorageResource::Global);
-        let cap2 = StorageCapability::write(StorageResource::namespace("test"));
-
-        let mut state1 = StorageState::new();
-        state1.capabilities.add(cap1.clone());
-        state1.capabilities.add(cap2.clone());
-
-        let mut state2 = StorageState::new();
-        state2.capabilities.add(cap1.clone());
-
-        let merged = state1.join(&state2);
-
-        // Should only have the intersection (cap1)
-        assert_eq!(merged.capabilities.len(), 1);
-        assert!(merged.capabilities.contains(&cap1));
-        assert!(!merged.capabilities.contains(&cap2));
-    }
+    // Removed test_storage_state_capabilities_meet - capabilities field removed
+    // Authorization is now handled by Biscuit tokens
 }

@@ -347,7 +347,7 @@ impl HandshakeTranscript {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PskHandshakeConfig {
     pub k_psk: [u8; 32],
-    pub expected_peer_device_id: aura_core::DeviceId,
+    pub expected_peer_device_id: aura_core::identifiers::DeviceId,
     pub local_device_cert: Vec<u8>,
     pub transport_descriptor: TransportDescriptor,
 }

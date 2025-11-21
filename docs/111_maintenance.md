@@ -9,7 +9,7 @@ This document captures the operational practices required to keep Aura deploymen
 
 ## Epoch and Key Rotation
 
-- **Account epochs**: As defined in `101_accounts_and_ratchet_tree.md`, rotate the ratchet tree epoch whenever device membership changes, recovery completes, or stale capability exposure is suspected. Rotation invalidates derived context keys and forces FlowBudget counters to reset.
+- **Account epochs**: As defined in `101_accounts_and_commitment tree.md`, rotate the commitment tree epoch whenever device membership changes, recovery completes, or stale capability exposure is suspected. Rotation invalidates derived context keys and forces FlowBudget counters to reset.
 - **Context epochs**: Relational contexts from `103_relational_contexts.md` should bump epochs when guardian membership changes or when rendezvous descriptors leak. All participants must renegotiate secure channels after the bump.
 
 ## Capability and Budget Refresh

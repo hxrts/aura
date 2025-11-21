@@ -91,9 +91,7 @@ pub use aura_core::{
 };
 
 // Re-export WoT types (using Biscuit tokens instead of legacy capabilities)
-pub use aura_wot::{
-    AccountAuthority, BiscuitError, BiscuitTokenManager, TreePolicy as TrustPolicy,
-};
+pub use aura_wot::{AccountAuthority, BiscuitError, BiscuitTokenManager};
 pub use biscuit_auth::Biscuit as BiscuitToken;
 
 // Re-export auth types

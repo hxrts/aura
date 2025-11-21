@@ -654,8 +654,8 @@ impl QuintBridge {
             patterns.push(ViolationPattern::ByzantineResistance);
         }
 
-        // Ledger consistency patterns
-        if name_lower.contains("ledger") || name_lower.contains("state") {
+        // Effect API consistency patterns
+        if name_lower.contains("effect_api") || name_lower.contains("state") {
             patterns.push(ViolationPattern::LedgerConsistency);
         }
 
@@ -747,7 +747,7 @@ impl QuintBridge {
                 self.create_byzantine_resistance_violation_scenario(spec, invariant)
             }
             ViolationPattern::LedgerConsistency => {
-                self.create_ledger_consistency_violation_scenario(spec, invariant)
+                self.create_effect_api_consistency_violation_scenario(spec, invariant)
             }
             ViolationPattern::PartitionTolerance => {
                 self.create_partition_tolerance_violation_scenario(spec, invariant)
@@ -896,7 +896,7 @@ impl QuintBridge {
         self.create_general_violation_scenario(spec, invariant)
     }
 
-    fn create_ledger_consistency_violation_scenario(
+    fn create_effect_api_consistency_violation_scenario(
         &self,
         spec: &QuintSpec,
         invariant: &QuintInvariant,

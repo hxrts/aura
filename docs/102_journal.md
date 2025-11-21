@@ -1,6 +1,6 @@
 # Journal
 
-This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes integration with the ledger layer and defines the invariants that ensure correctness. See [Maintenance](111_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
+This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes integration with the effect_api layer and defines the invariants that ensure correctness. See [Maintenance](111_maintenance.md) for the end-to-end snapshot and garbage collection pipeline.
 
 ## 1. Journal Namespaces
 
@@ -53,7 +53,7 @@ This merge function demonstrates set union across two fact sets. The result is m
 
 ## 4. Account Journal Reduction
 
-Account journals store attested operations for ratchet tree updates. Reduction computes a `TreeState` from the fact set. Reduction applies only valid operations and resolves conflicts deterministically.
+Account journals store attested operations for commitment tree updates. Reduction computes a `TreeState` from the fact set. Reduction applies only valid operations and resolves conflicts deterministically.
 
 Reduction follows these steps.
 
@@ -105,9 +105,9 @@ This structure defines a snapshot. The digest represents a summary of the fact s
 
 ## 7. Ledger Integration
 
-The ledger layer stores facts durably. The ledger exposes minimal operations such as append and read. The ledger does not define logical meaning. The journal and reduction logic provide semantics.
+The effect_api layer stores facts durably. The effect_api exposes minimal operations such as append and read. The effect_api does not define logical meaning. The journal and reduction logic provide semantics.
 
-The ledger writes facts to persistent storage. Replica synchronization loads facts from the ledger into journal memory. The ledger guarantees durability but does not affect CRDT merge semantics.
+The effect_api writes facts to persistent storage. Replica synchronization loads facts from the effect_api into journal memory. The effect_api guarantees durability but does not affect CRDT merge semantics.
 
 ```rust
 #[async_trait]

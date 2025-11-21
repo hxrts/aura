@@ -7,10 +7,10 @@
 //! # Architecture Constraints
 //!
 //! **IMPORTANT**: This testkit is designed for testing **Layer 4 and higher** crates only:
-//! - ✅ Layer 4: aura-protocol (orchestration)
-//! - ✅ Layer 5: aura-frost, aura-invitation, aura-recovery, aura-sync, etc. (protocols)
-//! - ✅ Layer 6: aura-agent, aura-simulator (runtime)
-//! - ✅ Layer 7: aura-cli (UI)
+//! - Layer 4: aura-protocol (orchestration)
+//! - Layer 5: aura-frost, aura-invitation, aura-recovery, aura-sync, etc. (protocols)
+//! - Layer 6: aura-agent, aura-simulator (runtime)
+//! - Layer 7: aura-cli (UI)
 //!
 //! **DO NOT use aura-testkit in foundation/specification layers** (would create circular dependencies):
 //! - ❌ Layer 1: aura-core (foundation)
@@ -54,7 +54,7 @@ pub mod configuration;
 pub mod fixtures;
 pub mod foundation;
 pub mod infrastructure;
-pub mod ledger;
+pub mod effect_api;
 pub mod mocks;
 pub mod simulation;
 pub mod time;
@@ -71,19 +71,18 @@ pub use configuration::TestConfig as ConfigTestConfig;
 pub use fixtures::*;
 pub use foundation::*;
 pub use infrastructure::*;
-pub use ledger::*;
+pub use effect_api::*;
 pub use mocks::*;
 pub use simulation::*;
 pub use time::*;
 pub use verification::*;
 
 // Re-export commonly used external types for convenience
-pub use aura_core::{AccountId, DeviceId};
+pub use aura_core::AccountId;
 pub use aura_journal::journal_api::{AccountSummary, Journal};
 
 // Re-export Journal as AccountState for backward compatibility in tests
 pub type AccountState = Journal;
-pub use aura_journal::{DeviceMetadata, DeviceType};
 pub use ed25519_dalek::{SigningKey, VerifyingKey};
 pub use std::collections::BTreeMap;
 pub use uuid::Uuid;
@@ -104,9 +103,6 @@ pub fn test_key_pair(seed: u64) -> (SigningKey, VerifyingKey) {
 }
 
 /// Create a test fixture with pre-configured effect system
-///
-/// Convenience function that replaces the deprecated monolithic effect runtime pattern.
-/// This function creates a TestFixture with the effect system already initialized.
 pub async fn create_test_fixture() -> aura_core::AuraResult<infrastructure::harness::TestFixture> {
     infrastructure::harness::TestFixture::new().await
 }
@@ -114,8 +110,9 @@ pub async fn create_test_fixture() -> aura_core::AuraResult<infrastructure::harn
 /// Create a test fixture with a specific device ID (deterministic)
 ///
 /// This is useful for tests that need predictable device IDs.
+/// Note: DeviceId parameter is ignored in authority-centric model
 pub async fn create_test_fixture_with_device_id(
-    _device_id: DeviceId,
+    _device_id: aura_core::DeviceId,
 ) -> aura_core::AuraResult<infrastructure::harness::TestFixture> {
     // Use the harness TestConfig directly to avoid ambiguity
     let config = infrastructure::harness::TestConfig {

@@ -10,7 +10,7 @@ use aura_core::{AuraResult, DeviceId};
 use std::path::PathBuf;
 
 // Use foundation-based approach instead of orchestration layer
-use crate::foundation::SimpleTestContext;
+use crate::{CompositeTestHandler, SimpleTestContext};
 
 /// Configuration for mock handlers in test scenarios
 #[derive(Debug, Clone)]
@@ -153,19 +153,23 @@ impl TestEffectsBuilder {
     }
 
     /// Build the foundation-based test context
-    pub fn build(self) -> AuraResult<SimpleTestContext> {
-        Ok(SimpleTestContext::with_device_id(
-            self.determine_execution_mode(),
-            self.device_id,
-        ))
+    pub fn build(self) -> AuraResult<CompositeTestHandler> {
+        let execution_mode = self.determine_execution_mode();
+        if self.mock_config.mock_network && self.mock_config.mock_storage {
+            CompositeTestHandler::new_mock(execution_mode, self.device_id)
+        } else {
+            CompositeTestHandler::new_real(execution_mode, self.device_id)
+        }
     }
 
     /// Build the context for a specific execution mode
-    pub fn build_for_mode(self, mode: TestExecutionMode) -> AuraResult<SimpleTestContext> {
-        Ok(SimpleTestContext::with_device_id(
-            mode.to_execution_mode(self.seed),
-            self.device_id,
-        ))
+    pub fn build_for_mode(self, mode: TestExecutionMode) -> AuraResult<CompositeTestHandler> {
+        let execution_mode = mode.to_execution_mode(self.seed);
+        if self.mock_config.mock_network && self.mock_config.mock_storage {
+            CompositeTestHandler::new_mock(execution_mode, self.device_id)
+        } else {
+            CompositeTestHandler::new_real(execution_mode, self.device_id)
+        }
     }
 
     /// Determine the appropriate execution mode from configuration

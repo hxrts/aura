@@ -219,7 +219,7 @@ mod tests {
     use super::*;
     use aura_core::session_epochs::Epoch;
     use aura_core::AuraResult;
-    use aura_core::DeviceId;
+    use aura_core::{AuthorityId, DeviceId};
     use aura_macros::aura_test;
     use aura_testkit::{ TestFixture};
 
@@ -232,8 +232,8 @@ mod tests {
     ) -> Receipt {
         Receipt {
             ctx: context,
-            src,
-            dst,
+            src: AuthorityId::from_uuid(src.into()),
+            dst: AuthorityId::from_uuid(dst.into()),
             epoch: Epoch::from(1),
             cost: 100,
             nonce,

@@ -25,7 +25,7 @@ pub trait Authority: Send + Sync {
     /// Get the current public key for this authority
     ///
     /// This represents the root public key of the authority's internal
-    /// threshold structure, derived from the current ratchet tree state.
+    /// threshold structure, derived from the current commitment tree state.
     fn public_key(&self) -> PublicKey;
 
     /// Get the current root commitment for this authority
@@ -39,6 +39,16 @@ pub trait Authority: Send + Sync {
     /// This triggers internal threshold signing without exposing
     /// which devices participated or the threshold structure.
     async fn sign_operation(&self, operation: &[u8]) -> Result<Signature>;
+
+    /// Get the current threshold for this authority
+    ///
+    /// Returns the minimum number of devices required for threshold operations.
+    fn get_threshold(&self) -> u16;
+
+    /// Get the number of active devices in this authority
+    ///
+    /// Returns the count of currently active (non-removed) devices.
+    fn active_device_count(&self) -> usize;
 }
 
 /// Type alias for shared authority references
@@ -49,15 +59,15 @@ pub type AuthorityRef = Arc<dyn Authority>;
 /// This is computed deterministically from the authority's journal facts.
 #[derive(Debug, Clone)]
 pub struct AuthorityState {
-    /// Current ratchet tree state (internal structure)
+    /// Current commitment tree state (internal structure)
     pub tree_state: TreeState,
     /// Placeholder for journal facts - will be replaced with actual fact types
     pub facts: std::collections::BTreeSet<String>, // TODO: Replace with Fact type
 }
 
-/// Placeholder for ratchet tree state
+/// Placeholder for commitment tree state
 ///
-/// TODO: This will be replaced with the actual ratchet tree implementation
+/// TODO: This will be replaced with the actual commitment tree implementation
 /// from aura-journal when integrating with existing code.
 #[derive(Debug, Clone)]
 pub struct TreeState {
@@ -85,8 +95,10 @@ impl TreeState {
         // For now, derive a deterministic key from commitment
         let bytes = self.commitment.as_bytes();
         let mut key_bytes = [0u8; 32];
-        key_bytes[..std::cmp::min(32, bytes.len())].copy_from_slice(&bytes[..std::cmp::min(32, bytes.len())]);
-        PublicKey::from_bytes(&key_bytes).unwrap_or_else(|_| PublicKey::from_bytes(&[0; 32]).unwrap())
+        key_bytes[..std::cmp::min(32, bytes.len())]
+            .copy_from_slice(&bytes[..std::cmp::min(32, bytes.len())]);
+        PublicKey::from_bytes(&key_bytes)
+            .unwrap_or_else(|_| PublicKey::from_bytes(&[0; 32]).unwrap())
     }
 
     /// Get the root commitment hash for the current tree state

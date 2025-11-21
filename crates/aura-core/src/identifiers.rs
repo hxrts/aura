@@ -60,7 +60,7 @@ impl From<SessionId> for Uuid {
 
 /// Event identifier for journal events
 ///
-/// Uniquely identifies events within the journal/ledger system.
+/// Uniquely identifies events within the journal/effect API system.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct EventId(pub Uuid);
 

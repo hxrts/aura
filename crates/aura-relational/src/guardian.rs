@@ -66,7 +66,7 @@ pub struct RecoveryGrant {
 /// Types of recovery operations
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RecoveryOp {
-    /// Replace the entire ratchet tree
+    /// Replace the entire commitment tree
     ReplaceTree {
         /// New tree root commitment
         new_tree_root: Hash32,

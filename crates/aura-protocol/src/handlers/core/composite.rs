@@ -20,19 +20,43 @@ use aura_effects::{
 };
 // Import from local crate for extended effect traits
 use crate::effects::{
-    AuraError, ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
-    ChoreographyMetrics, ConsoleEffects, ConsoleEvent, CryptoEffects, CryptoError, DeviceMetadata,
-    LedgerEffects, LedgerError, LedgerEventStream, NetworkEffects, NetworkError, PeerEventStream,
-    RandomEffects, StorageEffects, StorageError, StorageStats, SystemEffects, SystemError,
-    TimeEffects, TimeError, TimeoutHandle, TreeEffects, WakeCondition,
+    AuraError,
+    ChoreographicEffects,
+    ChoreographicRole,
+    ChoreographyError,
+    ChoreographyEvent,
+    ChoreographyMetrics,
+    ConsoleEffects,
+    ConsoleEvent,
+    CryptoEffects,
+    CryptoError,
+    EffectApiEffects,
+    EffectApiError,
+    EffectApiEventStream,
+    NetworkEffects,
+    NetworkError,
+    PeerEventStream, // DeviceMetadata removed
+    RandomEffects,
+    StorageEffects,
+    StorageError,
+    StorageStats,
+    SystemEffects,
+    SystemError,
+    TimeEffects,
+    TimeError,
+    TimeoutHandle,
+    TreeEffects,
+    WakeCondition,
 };
 use async_trait::async_trait;
-use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext};
+use aura_core::effects::crypto::FrostKeyGenResult;
 use aura_core::effects::JournalEffects;
 use aura_core::hash::hash;
-use aura_core::{identifiers::{AuthorityId, ContextId, DeviceId}, FlowBudget, LocalSessionType};
+use aura_core::{
+    identifiers::{AuthorityId, ContextId},
+    FlowBudget, LocalSessionType,
+};
 use serde_json;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 // Console handlers now imported from aura-effects (MockConsoleHandler, RealConsoleHandler)
@@ -50,7 +74,7 @@ pub struct CompositeHandler {
     console: Box<dyn ConsoleEffects>,
     journal: Box<dyn JournalEffects>,
     tree: Box<dyn TreeEffects>,
-    // Note: LedgerEffects and ChoreographicEffects will be added when their handlers are implemented
+    // Note: EffectApiEffects and ChoreographicEffects will be added when their handlers are implemented
 }
 
 impl CompositeHandler {
@@ -631,68 +655,61 @@ impl CompositeHandlerBuilder {
     }
 }
 
-// Implement LedgerEffects with placeholder delegation
+// Implement EffectApiEffects with placeholder delegation
 #[async_trait]
-impl LedgerEffects for CompositeHandler {
+impl EffectApiEffects for CompositeHandler {
     // Removed old methods that are no longer part of the trait
 
-    async fn append_event(&self, _event: Vec<u8>) -> Result<(), LedgerError> {
-        Err(LedgerError::NotAvailable)
+    async fn append_event(&self, _event: Vec<u8>) -> Result<(), EffectApiError> {
+        Err(EffectApiError::NotAvailable)
     }
 
-    async fn current_epoch(&self) -> Result<u64, LedgerError> {
+    async fn current_epoch(&self) -> Result<u64, EffectApiError> {
         Ok(self.time.current_epoch().await)
     }
 
-    async fn events_since(&self, _epoch: u64) -> Result<Vec<Vec<u8>>, LedgerError> {
-        Err(LedgerError::NotAvailable)
+    async fn events_since(&self, _epoch: u64) -> Result<Vec<Vec<u8>>, EffectApiError> {
+        Err(EffectApiError::NotAvailable)
     }
 
     async fn is_device_authorized(
         &self,
-        _device_id: aura_core::DeviceId,
+        _device_id: aura_core::identifiers::DeviceId,
         _operation: &str,
-    ) -> Result<bool, LedgerError> {
+    ) -> Result<bool, EffectApiError> {
         Ok(true) // Placeholder - always authorized
-    }
-
-    async fn get_device_metadata(
-        &self,
-        _device_id: aura_core::DeviceId,
-    ) -> Result<Option<DeviceMetadata>, LedgerError> {
-        Ok(None)
     }
 
     async fn update_device_activity(
         &self,
-        _device_id: aura_core::DeviceId,
-    ) -> Result<(), LedgerError> {
+        _device_id: aura_core::identifiers::DeviceId,
+    ) -> Result<(), EffectApiError> {
         Ok(())
     }
 
-    async fn subscribe_to_events(&self) -> Result<LedgerEventStream, LedgerError> {
-        Err(LedgerError::NotAvailable)
+    async fn subscribe_to_events(&self) -> Result<EffectApiEventStream, EffectApiError> {
+        Err(EffectApiError::NotAvailable)
     }
 
     async fn would_create_cycle(
         &self,
         _edges: &[(Vec<u8>, Vec<u8>)],
         _new_edge: (Vec<u8>, Vec<u8>),
-    ) -> Result<bool, LedgerError> {
+    ) -> Result<bool, EffectApiError> {
         Ok(false) // Stub implementation
     }
 
     async fn find_connected_components(
         &self,
         _edges: &[(Vec<u8>, Vec<u8>)],
-    ) -> Result<Vec<Vec<Vec<u8>>>, LedgerError> {
+    ) -> Result<Vec<Vec<Vec<u8>>>, EffectApiError> {
         Ok(vec![]) // Stub implementation
     }
 
     async fn topological_sort(
         &self,
         _edges: &[(Vec<u8>, Vec<u8>)],
-    ) -> Result<Vec<Vec<u8>>, LedgerError> {
+    ) -> Result<Vec<Vec<u8>>, EffectApiError> {
         Ok(vec![]) // Stub implementation
     }
 
@@ -701,30 +718,30 @@ impl LedgerEffects for CompositeHandler {
         _edges: &[(Vec<u8>, Vec<u8>)],
         _start: Vec<u8>,
         _end: Vec<u8>,
-    ) -> Result<Option<Vec<Vec<u8>>>, LedgerError> {
+    ) -> Result<Option<Vec<Vec<u8>>>, EffectApiError> {
         Ok(None) // Stub implementation
     }
 
-    async fn generate_secret(&self, length: usize) -> Result<Vec<u8>, LedgerError> {
+    async fn generate_secret(&self, length: usize) -> Result<Vec<u8>, EffectApiError> {
         let random_bytes = self.crypto.random_bytes(length).await;
         Ok(random_bytes)
     }
 
-    async fn hash_data(&self, _data: &[u8]) -> Result<[u8; 32], LedgerError> {
+    async fn hash_data(&self, _data: &[u8]) -> Result<[u8; 32], EffectApiError> {
         let hash_result = hash(_data);
         Ok(hash_result)
     }
 
-    async fn current_timestamp(&self) -> Result<u64, LedgerError> {
+    async fn current_timestamp(&self) -> Result<u64, EffectApiError> {
         let timestamp = self.time.current_timestamp().await;
         Ok(timestamp)
     }
 
-    async fn ledger_device_id(&self) -> Result<aura_core::DeviceId, LedgerError> {
+    async fn effect_api_device_id(&self) -> Result<aura_core::identifiers::DeviceId, EffectApiError> {
         Ok(self.device_id.into())
     }
 
-    async fn new_uuid(&self) -> Result<Uuid, LedgerError> {
+    async fn new_uuid(&self) -> Result<Uuid, EffectApiError> {
         Ok(Uuid::new_v4())
     }
 }
@@ -819,8 +836,6 @@ impl ChoreographicEffects for CompositeHandler {
     }
 }
 
-// REMOVED: ProtocolJournalEffects implementation - violates crate boundaries
-// All the deprecated methods from local JournalEffects trait have been removed
 // Core JournalEffects is implemented below
 
 // Implement aura-core's JournalEffects for flow budget operations
@@ -869,7 +884,7 @@ impl JournalEffects for CompositeHandler {
     async fn get_flow_budget(
         &self,
         context: &ContextId,
-        peer: &aura_core::identifiers::AuthorityId,
+        peer: &AuthorityId,
     ) -> Result<FlowBudget, aura_core::AuraError> {
         self.journal
             .get_flow_budget(context, peer)
@@ -880,7 +895,7 @@ impl JournalEffects for CompositeHandler {
     async fn update_flow_budget(
         &self,
         context: &ContextId,
-        peer: &aura_core::identifiers::AuthorityId,
+        peer: &AuthorityId,
         budget: &FlowBudget,
     ) -> Result<FlowBudget, aura_core::AuraError> {
         self.journal
@@ -894,7 +909,7 @@ impl JournalEffects for CompositeHandler {
     async fn charge_flow_budget(
         &self,
         context: &ContextId,
-        peer: &aura_core::identifiers::AuthorityId,
+        peer: &AuthorityId,
         cost: u32,
     ) -> Result<FlowBudget, aura_core::AuraError> {
         self.journal
@@ -911,7 +926,7 @@ impl JournalEffects for CompositeHandler {
 impl TreeEffects for CompositeHandler {
     async fn get_current_state(
         &self,
-    ) -> Result<aura_journal::ratchet_tree::TreeState, aura_core::AuraError> {
+    ) -> Result<aura_journal::commitment_tree::TreeState, aura_core::AuraError> {
         self.tree.get_current_state().await
     }
 
@@ -933,7 +948,7 @@ impl TreeEffects for CompositeHandler {
     async fn verify_aggregate_sig(
         &self,
         op: &aura_core::AttestedOp,
-        state: &aura_journal::ratchet_tree::TreeState,
+        state: &aura_journal::commitment_tree::TreeState,
     ) -> Result<bool, aura_core::AuraError> {
         self.tree.verify_aggregate_sig(op, state).await
     }
@@ -1177,7 +1192,7 @@ impl AuraHandler for CompositeHandler {
             EffectType::Crypto => self.execute_crypto_effect(operation, parameters).await,
             EffectType::Time => self.execute_time_effect(operation, parameters).await,
             EffectType::Console => self.execute_console_effect(operation, parameters).await,
-            EffectType::Ledger => self.execute_ledger_effect(operation, parameters).await,
+            EffectType::EffectApi => self.execute_effect_api_effect(operation, parameters).await,
             EffectType::Choreographic => {
                 self.execute_choreographic_effect(operation, parameters)
                     .await
@@ -1211,7 +1226,7 @@ impl AuraHandler for CompositeHandler {
                 | EffectType::Crypto
                 | EffectType::Time
                 | EffectType::Console
-                | EffectType::Ledger
+                | EffectType::EffectApi
                 | EffectType::Choreographic
                 | EffectType::System
                 | EffectType::Journal
@@ -1585,8 +1600,8 @@ impl CompositeHandler {
         }
     }
 
-    /// Execute ledger effects through serialized interface
-    async fn execute_ledger_effect(
+    /// Execute effect_api effects through serialized interface
+    async fn execute_effect_api_effect(
         &self,
         operation: &str,
         _parameters: &[u8],
@@ -1597,7 +1612,7 @@ impl CompositeHandler {
                 Ok(serde_json::to_vec(&result).unwrap_or_default())
             }
             _ => Err(AuraHandlerError::UnknownOperation {
-                effect_type: EffectType::Ledger,
+                effect_type: EffectType::EffectApi,
                 operation: operation.to_string(),
             }),
         }

@@ -60,10 +60,9 @@ petgraph = { workspace = true }
 # biscuit-auth = { workspace = true } # removed - unused
 
 [dev-dependencies]
-# Test utilities
-aura-testkit = { path = "../aura-testkit" }
+# Test utilities - avoiding aura-testkit which creates architectural violations
 # Note: Cannot add aura-protocol directly due to circular dependency (aura-protocol depends on aura-journal)
-# aura-protocol types are available through aura-testkit which includes aura-protocol
+# Layer 2 tests should be self-contained and not depend on higher layers like aura-agent
 async-trait = { workspace = true }
 # tokio-test = { workspace = true } # removed - unused
 rand_chacha = { workspace = true }

@@ -3,7 +3,7 @@
 //! Provides essential message wrappers with built-in privacy preservation, relationship scoping,
 //! and minimal framing metadata. Target: <150 lines (concise implementation).
 
-use aura_core::{AuraResult, DeviceId, RelationshipId};
+use aura_core::{AuraResult, identifiers::DeviceId, RelationshipId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 

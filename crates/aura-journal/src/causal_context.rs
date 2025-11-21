@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 // Import from aura-core for types and hash
-use aura_core::{hash, DeviceId};
+use aura_core::identifiers::DeviceId;
+use aura_core::hash;
 
 /// Device/Actor identifier for vector clocks
 pub type ActorId = DeviceId;

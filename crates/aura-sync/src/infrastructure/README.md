@@ -310,12 +310,11 @@ use aura_sync::cache::CacheEpochFloors;
 use aura_sync::infrastructure::CacheEpochTracker;
 ```
 
-### Deprecation Timeline
+### Migration Timeline
 
-- **Phase 2**: Infrastructure available, legacy deprecated
-- **Phase 3**: Protocol migration uses new infrastructure
-- **Phase 4**: Service layer adopts infrastructure
-- **Phase 5**: All legacy code removed
+- Infrastructure provides modern peer management APIs
+- Service layer adopts infrastructure patterns
+- Legacy code gradually replaced with infrastructure implementations
 
 ## Contributing Guidelines
 

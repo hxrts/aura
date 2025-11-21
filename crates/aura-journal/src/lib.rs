@@ -8,32 +8,31 @@
 //! - **Facts**: Immutable, attested operations that form the journal
 //! - **Reduction**: Deterministic state computation from facts
 //! - **Namespaces**: Authority and context-scoped journals
-//! - **Integration**: Bridge with ratchet tree for AttestedOp support
+//! - **Integration**: Bridge with commitment tree for AttestedOp support
 
 // Core modules
 mod error;
-pub mod middleware;
 mod operations;
 mod types;
 
 // Domain modules moved from aura-core
 pub mod journal;
-pub mod ledger;
+pub mod effect_api;
 pub mod semilattice;
 
 // CRDT causal context module moved from aura-core
 pub mod causal_context;
 
-// New ratchet tree implementation (Phase 2)
-pub mod ratchet_tree;
+// New commitment tree implementation (Phase 2)
+pub mod commitment_tree;
 
 // Clean Journal API (Phase 1 API cleanup)
 pub mod journal_api;
 
 // New fact-based journal implementation (Phase 2)
+pub mod commitment_integration;
 pub mod fact;
 pub mod fact_journal;
-pub mod ratchet_integration;
 pub mod reduction;
 
 // Authority state derivation (Phase 5)
@@ -53,7 +52,7 @@ pub use aura_core::Hash32;
 
 // Domain re-exports
 pub use journal::*; // Now re-exports fact-based types
-pub use ledger::{
+pub use effect_api::{
     CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus, JournalMap, Priority,
 };
 
@@ -72,12 +71,18 @@ pub use journal_api::{AccountSummary, Journal, JournalFact};
 // CRDT Implementation Details (INTERNAL - subject to change without notice)
 #[doc(hidden)]
 pub use semilattice::{
-    integration, DeviceRegistry, EpochLog, GuardianRegistry, IntentPool,
-    JournalMap as CRDTJournalMap, MaxCounter, ModernAccountState as AccountState, OpLog,
+    integration,
+    EpochLog,
+    GuardianRegistry,
+    IntentPool, // DeviceRegistry removed - use authority-based TreeState instead
+    JournalMap as CRDTJournalMap,
+    MaxCounter,
+    ModernAccountState as AccountState,
+    OpLog,
 };
 
-// New ratchet tree re-exports (tree types moved from aura-core)
-pub use ratchet_tree::{
+// New commitment tree re-exports (tree types moved from aura-core)
+pub use commitment_tree::{
     // Re-export tree types for consumers that expect them from aura-journal
     commit_branch,
     commit_leaf,
@@ -102,8 +107,10 @@ pub use ratchet_tree::{
 pub use causal_context::{ActorId, CausalContext, OperationId, VectorClock};
 
 // Selective re-exports to avoid conflicts
-pub use middleware::JournalContext;
-pub use types::{DeviceMetadata, DeviceType, GuardianMetadata, Session};
+pub use types::{GuardianMetadata, Session};
+
+// DeviceMetadata and DeviceType are deprecated - use authority-derived views instead
+// See docs/100_authority_and_identity.md for migration guidance
 
 // Tests
 #[cfg(test)]

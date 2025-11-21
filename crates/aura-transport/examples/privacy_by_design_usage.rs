@@ -8,7 +8,7 @@
 //! - Default behavior preserves privacy
 //! - Relationship scoping is fundamental to all operations
 
-use aura_core::{DeviceId, RelationshipId};
+use aura_core::{identifiers::DeviceId, RelationshipId};
 use aura_transport::{
     ConnectionId, Envelope, HolePunchMessage, PeerInfo, PrivacyAwareSelectionCriteria,
     PrivacyLevel, StunMessage, TransportConfig,
@@ -244,8 +244,8 @@ fn protocol_privacy_example() {
     // Hole punch message with basic construction
     let target_addr: SocketAddr = std::net::SocketAddr::from(([192, 168, 1, 100], 12345));
     let _hole_punch_msg = HolePunchMessage::coordination_request(
-        aura_core::DeviceId::new(),
-        aura_core::DeviceId::new(),
+        aura_core::identifiers::DeviceId::new(),
+        aura_core::identifiers::DeviceId::new(),
         target_addr,
     );
 

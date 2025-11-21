@@ -349,7 +349,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::handlers::{EffectType, ExecutionMode};
-use aura_core::DeviceId;
+use aura_core::identifiers::DeviceId;
 
 /// Error type for factory operations
 #[derive(Debug, Error)]

@@ -1,15 +1,15 @@
-//! Invitation acceptance helpers that interact with the shared ledger.
+//! Invitation acceptance helpers that interact with the shared registry.
 
 use crate::{
-    device_invitation::{shared_invitation_ledger, InvitationEnvelope},
+    device_invitation::{shared_invitation_registry, InvitationEnvelope},
     relationship_formation::{RelationshipFormationRequest, RelationshipType},
     transport::deliver_via_rendezvous,
     InvitationError, InvitationResult,
 };
 use aura_core::effects::{NetworkEffects, TimeEffects};
 use aura_core::{AccountId, DeviceId, RelationshipId, TrustLevel};
-use aura_journal::semilattice::InvitationLedger;
-use aura_protocol::effect_traits::LedgerEffects;
+use aura_journal::semilattice::InvitationRecordRegistry;
+use aura_protocol::effect_traits::EffectApiEffects;
 use aura_protocol::effects::AuraEffects;
 use aura_wot::SerializableBiscuit;
 use serde::{Deserialize, Serialize};
@@ -71,7 +71,7 @@ where
     E: AuraEffects + ?Sized,
 {
     effects: Arc<E>,
-    ledger: Arc<Mutex<InvitationLedger>>,
+    registry: Arc<Mutex<InvitationRecordRegistry>>,
     config: AcceptanceProtocolConfig,
 }
 
@@ -83,16 +83,19 @@ where
     pub fn new(effect_system: Arc<E>) -> Self {
         Self {
             effects: effect_system,
-            ledger: shared_invitation_ledger(),
+            registry: shared_invitation_registry(),
             config: AcceptanceProtocolConfig::default(),
         }
     }
 
-    /// Create with explicit ledger reference (useful for tests).
-    pub fn with_ledger(effect_system: Arc<E>, ledger: Arc<Mutex<InvitationLedger>>) -> Self {
+    /// Create with explicit registry reference (useful for tests).
+    pub fn with_registry(
+        effect_system: Arc<E>,
+        registry: Arc<Mutex<InvitationRecordRegistry>>,
+    ) -> Self {
         Self {
             effects: effect_system,
-            ledger,
+            registry,
             config: AcceptanceProtocolConfig::default(),
         }
     }
@@ -101,20 +104,20 @@ where
     pub fn with_config(effect_system: Arc<E>, config: AcceptanceProtocolConfig) -> Self {
         Self {
             effects: effect_system,
-            ledger: shared_invitation_ledger(),
+            registry: shared_invitation_registry(),
             config,
         }
     }
 
-    /// Create with custom configuration and explicit ledger reference (useful for tests).
-    pub fn with_config_and_ledger(
+    /// Create with custom configuration and explicit registry reference (useful for tests).
+    pub fn with_config_and_registry(
         effect_system: Arc<E>,
         config: AcceptanceProtocolConfig,
-        ledger: Arc<Mutex<InvitationLedger>>,
+        registry: Arc<Mutex<InvitationRecordRegistry>>,
     ) -> Self {
         Self {
             effects: effect_system,
-            ledger,
+            registry,
             config,
         }
     }
@@ -128,8 +131,8 @@ where
 
         // Validate invitation
         if now > envelope.expires_at {
-            let mut ledger = self.ledger.lock().await;
-            ledger.mark_expired(&envelope.invitation_id, now);
+            let mut registry = self.registry.lock().await;
+            registry.mark_expired(&envelope.invitation_id, now);
             return Ok(InvitationAcceptance {
                 invitation_id: envelope.invitation_id.clone(),
                 invitee: envelope.invitee,
@@ -144,10 +147,10 @@ where
             });
         }
 
-        // Mark as accepted in ledger
+        // Mark as accepted in registry
         {
-            let mut ledger = self.ledger.lock().await;
-            ledger.mark_accepted(&envelope.invitation_id, now);
+            let mut registry = self.registry.lock().await;
+            registry.mark_accepted(&envelope.invitation_id, now);
         }
 
         let mut acceptance = InvitationAcceptance {
@@ -229,7 +232,7 @@ where
         };
 
         // This would normally use the relationship formation choreography
-        // For now, we record it in the ledger
+        // For now, we record it in the registry
         let relationship_event = serde_json::json!({
             "type": "relationship_established",
             "relationship_id": relationship_id,
@@ -243,11 +246,11 @@ where
         let event_bytes = serde_json::to_vec(&relationship_event)
             .map_err(|e| InvitationError::serialization(e.to_string()))?;
 
-        // Skip ledger append for testing to avoid effect system deadlock
+        // Skip registry append for testing to avoid effect system deadlock
         if cfg!(test) {
-            tracing::debug!("Skipping ledger append in test mode");
+            tracing::debug!("Skipping registry append in test mode");
         } else {
-            LedgerEffects::append_event(self.effects.as_ref(), event_bytes)
+            EffectApiEffects::append_event(self.effects.as_ref(), event_bytes)
                 .await
                 .map_err(|e| InvitationError::internal(e.to_string()))?;
         }
@@ -271,7 +274,7 @@ where
         let event_bytes = serde_json::to_vec(&device_addition_event)
             .map_err(|e| InvitationError::serialization(e.to_string()))?;
 
-        LedgerEffects::append_event(self.effects.as_ref(), event_bytes)
+        EffectApiEffects::append_event(self.effects.as_ref(), event_bytes)
             .await
             .map_err(|e| InvitationError::internal(e.to_string()))?;
 

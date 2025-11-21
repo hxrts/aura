@@ -87,12 +87,12 @@ pub enum EffectType {
     Console,
     /// Random number generation
     Random,
-    /// Ledger operations (transaction log, state)
-    Ledger,
+    /// Effect API operations (transaction log, state)
+    EffectApi,
     /// Journal operations (event log, snapshots)
     Journal,
 
-    /// Tree operations (ratchet tree, MLS)
+    /// Tree operations (commitment tree, MLS)
     Tree,
 
     /// Choreographic protocol coordination
@@ -131,7 +131,7 @@ impl fmt::Display for EffectType {
             Self::Time => write!(f, "time"),
             Self::Console => write!(f, "console"),
             Self::Random => write!(f, "random"),
-            Self::Ledger => write!(f, "ledger"),
+            Self::EffectApi => write!(f, "effect_api"),
             Self::Journal => write!(f, "journal"),
             Self::Tree => write!(f, "tree"),
             Self::Choreographic => write!(f, "choreographic"),
@@ -308,7 +308,7 @@ impl EffectType {
             Self::Time,
             Self::Console,
             Self::Random,
-            Self::Ledger,
+            Self::EffectApi,
             Self::Journal,
             Self::Tree,
             Self::Choreographic,
@@ -335,7 +335,7 @@ impl EffectType {
                 | Self::Time
                 | Self::Console
                 | Self::Random
-                | Self::Ledger
+                | Self::EffectApi
                 | Self::Journal
                 | Self::Choreographic
                 | Self::System

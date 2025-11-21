@@ -94,7 +94,7 @@ impl From<[u8; 32]> for Hash32 {
 /// May be chunked for storage into multiple ChunkIds.
 ///
 /// # Use Cases
-/// - Journal entries, ledger records
+/// - Journal entries, effect API records
 /// - User files and documents
 /// - Encrypted payloads
 /// - CRDT state snapshots

@@ -126,7 +126,7 @@ pub mod integration_docs {
 // =============================================================================
 
 // Re-export essential foundation types from Layer 1 (aura-core)
-pub use aura_core::{AuraError, AuraResult, DeviceId, SessionId};
+pub use aura_core::{AuraError, AuraResult, SessionId};
 
 // Note: Other layer dependencies are imported as needed but not re-exported
 // to maintain clean API boundaries and avoid dependency pollution.
@@ -152,11 +152,6 @@ pub use aura_core::{AuraError, AuraResult, DeviceId, SessionId};
 // Removed in Phase 4:
 // - sync_service.rs → services/sync.rs
 //
-// Removed in Phase 5:
-// - maintenance.rs → services/maintenance.rs (types migrated)
-// - All deprecated re-exports removed
-// - All legacy compatibility code removed
-
 // =============================================================================
 // Migration Notes
 // =============================================================================

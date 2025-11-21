@@ -6,7 +6,6 @@
 //! - Gossip ticking for periodic synchronization
 
 use aura_core::identifiers::{DeviceId, SessionId};
-use aura_journal::CausalContext;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -183,6 +182,7 @@ impl Default for GossipStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_journal::CausalContext;
 
     #[test]
     fn test_topic_id_creation() {

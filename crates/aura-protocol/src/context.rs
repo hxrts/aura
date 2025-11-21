@@ -6,8 +6,8 @@
 use crate::guards::flow::FlowHint;
 use aura_core::{
     effects::{RandomEffects, TimeEffects},
-    identifiers::SessionId,
-    AccountId, DeviceId,
+    identifiers::{DeviceId, SessionId},
+    AccountId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

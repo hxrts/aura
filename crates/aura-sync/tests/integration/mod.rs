@@ -49,7 +49,7 @@ pub async fn setup_test_trio() -> (ChoreographyTestHarness, NetworkSimulator) {
 }
 
 /// Create session manager for testing
-pub fn test_session_manager() -> SessionManager {
+pub fn test_session_manager() -> SessionManager<()> {
     let config = aura_sync::core::session::SessionConfig::default();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

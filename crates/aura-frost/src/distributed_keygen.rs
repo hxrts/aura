@@ -26,7 +26,7 @@
 //! - **Timeout Protection**: Built-in timeout handling prevents DoS attacks
 
 use aura_core::frost::PublicKeyPackage;
-use aura_core::{AccountId, DeviceId};
+use aura_core::{AccountId, identifiers::AuthorityId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 
@@ -44,8 +44,8 @@ pub struct ShareCommitment {
     pub session_id: String,
     /// Commitment data from participant
     pub commitment_data: Vec<u8>,
-    /// Participant who created this commitment
-    pub participant_id: DeviceId,
+    /// Authority who created this commitment
+    pub participant_id: AuthorityId,
 }
 
 /// Share revelation message
@@ -55,8 +55,8 @@ pub struct ShareRevelation {
     pub session_id: String,
     /// Revealed share data
     pub share_data: Vec<u8>,
-    /// Participant who revealed this share
-    pub participant_id: DeviceId,
+    /// Authority who revealed this share
+    pub participant_id: AuthorityId,
 }
 
 /// Verification result message
@@ -66,8 +66,8 @@ pub struct VerificationResult {
     pub session_id: String,
     /// Whether verification was successful
     pub verified: bool,
-    /// Participant who performed verification
-    pub participant_id: DeviceId,
+    /// Authority who performed verification
+    pub participant_id: AuthorityId,
 }
 
 /// DKG success message
@@ -99,8 +99,8 @@ pub struct DkgRequest {
     pub threshold: usize,
     /// Total number of participants
     pub total_participants: usize,
-    /// Participating devices
-    pub participants: Vec<DeviceId>,
+    /// Participating authorities
+    pub participants: Vec<AuthorityId>,
     /// Session timeout in seconds
     pub timeout_seconds: u64,
 }
@@ -110,8 +110,8 @@ pub struct DkgRequest {
 pub struct DkgResponse {
     /// Generated public key package
     pub public_key_package: Option<PublicKeyPackage>,
-    /// Participating devices
-    pub participants: Vec<DeviceId>,
+    /// Participating authorities
+    pub participants: Vec<AuthorityId>,
     /// Individual shares distributed to participants
     pub shares_distributed: usize,
     /// Key generation successful
@@ -127,8 +127,8 @@ pub struct DkgCommitmentBundle {
     pub session_id: String,
     /// All collected commitments
     pub commitments: Vec<Vec<u8>>,
-    /// Participant order
-    pub participant_order: Vec<DeviceId>,
+    /// Authority order
+    pub participant_order: Vec<AuthorityId>,
 }
 
 // FROST distributed key generation choreography protocol
@@ -199,7 +199,7 @@ choreography! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::test_utils::test_device_id;
+    use aura_core::test_utils::test_authority_id;
 
     #[test]
     fn test_dkg_request_serialization() {
@@ -208,7 +208,7 @@ mod tests {
             account_id: AccountId::new(),
             threshold: 2,
             total_participants: 3,
-            participants: vec![test_device_id(1), test_device_id(2), test_device_id(3)],
+            participants: vec![test_authority_id(1), test_authority_id(2), test_authority_id(3)],
             timeout_seconds: 120,
         };
 

@@ -17,8 +17,7 @@ use aura_effects::{
     time::SimulatedTimeHandler as MockTimeHandler, transport::InMemoryTransportHandler,
 };
 use aura_protocol::handlers::{
-    MemoryChoreographicHandler, MemoryLedgerHandler,
-    tree::DummyTreeHandler,
+    tree::DummyTreeHandler, MemoryChoreographicHandler, MemoryLedgerHandler,
 };
 
 use super::{
@@ -98,7 +97,10 @@ impl ParallelInitBuilder {
     /// # Parameters
     /// - `start_time`: Current time point for metrics (pass from TimeEffects on non-WASM)
     #[cfg(not(target_arch = "wasm32"))]
-    pub async fn build(self, start_time: TimePoint) -> AuraResult<(AuraEffectSystem, Option<InitializationMetrics>)> {
+    pub async fn build(
+        self,
+        start_time: TimePoint,
+    ) -> AuraResult<(AuraEffectSystem, Option<InitializationMetrics>)> {
         let start_time = start_time;
         let mut metrics = if self.enable_metrics {
             Some(InitializationMetrics {
@@ -284,11 +286,11 @@ impl ParallelInitBuilder {
                 (EffectType::Console, handler)
             }
             .boxed(),
-            // Ledger handler
+            // Effect API  handler
             async move {
                 let handler = Arc::new(LedgerHandlerAdapter::new(MemoryLedgerHandler::new(), mode))
                     as Arc<dyn crate::handlers::AuraHandler>;
-                (EffectType::Ledger, handler)
+                (EffectType::EffectApi, handler)
             }
             .boxed(),
             // Tree handler
@@ -455,7 +457,7 @@ mod tests {
     use super::*;
     use aura_core::AuraResult;
     use aura_macros::aura_test;
-    use aura_testkit::{ TestFixture};
+    use aura_testkit::TestFixture;
 
     #[aura_test]
     async fn test_parallel_initialization() -> AuraResult<()> {

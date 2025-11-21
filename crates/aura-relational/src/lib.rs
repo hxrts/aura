@@ -7,17 +7,17 @@ use aura_core::{
     identifiers::{AuthorityId, ContextId},
     Hash32, Result,
 };
-use aura_journal::fact_journal::{Journal, JournalNamespace};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 pub mod consensus;
 pub mod guardian;
-pub mod prestate;
+// prestate module removed - now in aura-core
 
-pub use consensus::{run_consensus, ConsensusProof};
+pub use consensus::{run_consensus, run_consensus_with_config, ConsensusProof};
 pub use guardian::{GuardianBinding, GuardianParameters, RecoveryGrant, RecoveryOp};
-pub use prestate::Prestate;
+// Re-export Prestate from aura-core for compatibility
+pub use aura_core::Prestate;
 
 /// RelationalContext manages cross-authority relationships
 ///
@@ -99,11 +99,11 @@ impl RelationalContext {
     }
 
     /// Compute the current prestate for consensus
-    pub fn compute_prestate(&self, authority_commitments: Vec<(AuthorityId, Hash32)>) -> Prestate {
-        Prestate {
+    pub fn compute_prestate(&self, authority_commitments: Vec<(AuthorityId, Hash32)>) -> aura_core::Prestate {
+        aura_core::Prestate::new(
             authority_commitments,
-            context_commitment: self.journal.compute_commitment(),
-        }
+            self.journal.compute_commitment(),
+        )
     }
 }
 

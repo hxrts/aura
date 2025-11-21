@@ -10,7 +10,7 @@
 //! - Guard capabilities, flow costs, and journal facts
 //! - Extension effects through aura-macros and AuraRuntime
 
-use aura_core::{ContextId, DeviceId};
+use aura_core::{ContextId, identifiers::DeviceId};
 use aura_macros::choreography;
 use aura_protocol::{
     prelude::*,
@@ -21,7 +21,7 @@ use aura_protocol::{
 };
 use aura_transport::{
     protocols::{HolePunchMessage, WebSocketMessage},
-    types::{PrivacyLevel, TransportConfig},
+    PrivacyLevel, TransportConfig,
 };
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -52,7 +52,7 @@ async fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>>
 
     let initiator_id = DeviceId::new();
     let responder_id = DeviceId::new();
-    let context_id = ContextId::new("example_context");
+    let context_id = ContextId::new();
 
     // Create choreographic configuration
     let choreo_config = ChoreographicConfig {
@@ -126,7 +126,7 @@ async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error
     let coordinator_id = DeviceId::new();
     let participant1_id = DeviceId::new();
     let participant2_id = DeviceId::new();
-    let context_id = ContextId::new("example_context");
+    let context_id = ContextId::new();
 
     let choreo_config = ChoreographicConfig {
         max_concurrent_protocols: 5,
@@ -208,7 +208,7 @@ async fn receipt_verification_example() -> Result<(), Box<dyn std::error::Error>
     let coordinator_id = DeviceId::new();
     let verifier1_id = DeviceId::new();
     let verifier2_id = DeviceId::new();
-    let context_id = ContextId::new("example_context");
+    let context_id = ContextId::new();
 
     let choreo_config = ChoreographicConfig {
         max_concurrent_protocols: 15,

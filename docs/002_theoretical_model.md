@@ -210,7 +210,7 @@ class CryptoEffects m where
   sign_threshold  :: Bytes -> m SigWitness
   aead_seal       :: K_box -> Plain -> m Cipher
   aead_open       :: K_box -> Cipher -> m (Maybe Plain)
-  ratchet_step    :: ContextId -> m ContextId
+  commitment_step    :: ContextId -> m ContextId
 
 -- Transport (unified)
 class TransportEffects m where
@@ -251,17 +251,20 @@ class LeakageEffects m where
 
 The `TimeEffects` and `RandEffects` families support simulation and testing. The `LeakageEffects` family enforces privacy budget constraints.
 
-The `LeakageEffects` implementation is the runtime hook that enforces the $`[\text{leak}: (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})]`$ annotations introduced in the session grammar. Its concrete implementation lives in [`crates/aura-protocol/src/guards/privacy.rs`](../crates/aura-protocol/src/guards/privacy.rs). The system wires it through the effect system so choreographies cannot exceed configured budgets.
+The `LeakageEffects` implementation is the runtime hook that enforces the $`[\text{leak}: (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})]`$ annotations introduced in the session grammar. The system wires it through the effect system so choreographies cannot exceed configured budgets.
 
 ### Information Flow Budgets (Spam + Privacy)
 
-Each context pair $`(\text{Ctx}, \text{Peer})`$ carries a flow budget to couple spam resistance with privacy guarantees.
+Each context/peer-authority pair $`(\text{Ctx}, \text{Authority})`$ carries a flow budget to couple spam resistance with privacy guarantees. Keys and receipts are authority-scoped; devices are internal to an authority and never appear in flow-budget state.
 
 ```rust
 struct FlowBudget {
     spent: u64,   // monotone counter (join = max)
     limit: u64,   // capability-style guard (meet = min)
 }
+
+// Logical key: (ContextId, AuthorityId) -> FlowBudget
+// Receipts: (ctx, src_authority, dst_authority, epoch, cost, nonce)
 ```
 
 The `FlowBudget` struct tracks message emission through two components:
@@ -272,7 +275,7 @@ Only `spent` counters live in the journal as facts, inheriting join-semilattice 
 
 Sending a message deducts a fixed `flow_cost` from the local budget before the effect executes. If $`\text{spent} + \text{flow\_cost} > \text{limit}`$, the effect runtime blocks the send.
 
-Budget charge facts (incrementing `spent`) are emitted to the journal during send operations. The `limit` value is deterministically computed from the current capability frontier, ensuring all replicas with the same tokens and policy derive the same limit.
+Budget charge facts (incrementing `spent`) are emitted to the journal during send operations. The `limit` value is deterministically computed from the current capability frontier, ensuring all replicas with the same tokens and policy derive the same limit. Receipts bind to `AuthorityId` for both src/dst and use nonce chains per `(ctx, src, epoch)` to maintain charge-before-send proofs without leaking device structure.
 
 Multi-hop forwarding charges budgets hop-by-hop. Relays attach a signed `Receipt` that proves the previous hop still had headroom. Receipts are scoped to the same context so they never leak to unrelated observers.
 
@@ -496,7 +499,7 @@ The "free" (initial) property is what keeps this modular. Because the choreograp
 
 The system treats computation and communication symmetrically. A step is the same transform whether it happens locally or across the network. If the sender and receiver are the same role, the projection collapses the step into a local effect call. If they differ, it becomes a message exchange with the same surrounding journal/guard/leak actions. Protocol authors write global transforms, the interpreter decides local versus remote at time of projection.
 
-### 3.9 Algebraic Effects and the Interpreter
+### 3.8 Algebraic Effects and the Interpreter
 
 Aura treats protocol execution as interpretation over an algebraic effect interface. After projecting a global choreography to each role, a polymorphic interpreter walks the role's AST and dispatches each operation to `AuraEffectSystem` via explicit effect handlers. The core actions are exactly the ones defined by the calculus and effect signatures in this document: $`\text{merge}`$ (facts grow by $`\sqcup`$), $`\text{refine}`$ (caps shrink by $`\sqcap`$), $`\text{send}/\text{recv}`$ (context-scoped communication), and leakage/budget metering. The interpreter enforces the lattice laws and guard predicates while executing these actions in the order dictated by the session type.
 
@@ -554,7 +557,7 @@ Meet-CRDT Convergence: All replicas converge to the greatest lower bound of thei
 
 ### 4.3 Authority-Specific Applications
 
-Authority journals use join-semilattice facts for evidence accumulation. Facts include `AttestedOp` records proving ratchet tree operations occurred. Multiple attestations of the same operation join to the same fact.
+Authority journals use join-semilattice facts for evidence accumulation. Facts include `AttestedOp` records proving commitment tree operations occurred. Multiple attestations of the same operation join to the same fact.
 
 RelationalContext journals use both join operations for shared facts and meet operations for consensus constraints. The prestate model ensures all authorities agree on initial conditions before applying operations.
 

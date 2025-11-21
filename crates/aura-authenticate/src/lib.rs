@@ -31,16 +31,16 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
-/// Device authentication coordinator (deprecated - use authority_auth)
+/// Device authentication coordinator
 pub mod device_auth;
 
-/// Authority authentication coordinator (new authority-centric model)
+/// Authority authentication coordinator
 pub mod authority_auth;
 
 /// Session establishment coordinator
 pub mod session_creation;
 
-/// Guardian authentication coordinator for recovery operations (device-centric, deprecated)
+/// Guardian authentication coordinator for recovery operations
 pub mod guardian_auth;
 
 /// Guardian authentication via relational contexts (new model)
@@ -50,7 +50,7 @@ pub mod guardian_auth_relational;
 pub mod dkd;
 
 // Re-export core types from aura-core (Layer 1)
-pub use aura_core::{AccountId, AuraError, AuraResult, DeviceId, Journal};
+pub use aura_core::{AccountId, AuraError, AuraResult, Journal};
 
 // Re-export verification types from aura-verify (Layer 2)
 pub use aura_verify::session::{SessionScope, SessionTicket};

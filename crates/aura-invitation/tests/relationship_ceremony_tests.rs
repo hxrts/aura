@@ -2,7 +2,6 @@
 
 #![allow(clippy::disallowed_methods)]
 
-use aura_agent::runtime::AuraEffectSystem;
 use aura_core::{AccountId, ContextId, DeviceId};
 use aura_invitation::relationship_formation::{
     execute_relationship_formation, RelationshipFormationConfig, RelationshipFormationError,
@@ -39,7 +38,7 @@ async fn test_successful_relationship_formation() -> aura_core::AuraResult<()> {
         initiator_id,
         config.clone(),
         true, // is_initiator
-        initiator_effects.as_ref(),
+        &*initiator_effects.0,
     )
     .await;
 
@@ -87,7 +86,7 @@ async fn test_invalid_configuration() -> aura_core::AuraResult<()> {
     };
 
     let result =
-        execute_relationship_formation(device_id, config, true, effect_system.as_ref()).await;
+        execute_relationship_formation(device_id, config, true, &*effect_system.0).await;
 
     assert!(result.is_err());
     assert!(matches!(

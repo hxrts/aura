@@ -9,7 +9,7 @@
 //! - Mock handlers for isolated testing
 //! - Integration testing for choreographic protocols
 
-use aura_core::{DeviceId, RelationshipId};
+use aura_core::{identifiers::DeviceId, RelationshipId};
 use aura_transport::{
     ConnectionId, Envelope, HolePunchMessage, PeerInfo, PrivacyAwareSelectionCriteria,
     PrivacyLevel, StunMessage, TransportConfig,
@@ -218,8 +218,8 @@ fn protocol_message_testing() {
     // Test hole punch message creation
     let target_addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8080));
     let _hole_punch_message = HolePunchMessage::coordination_request(
-        aura_core::DeviceId::new(),
-        aura_core::DeviceId::new(),
+        aura_core::identifiers::DeviceId::new(),
+        aura_core::identifiers::DeviceId::new(),
         target_addr,
     );
 
@@ -228,7 +228,7 @@ fn protocol_message_testing() {
 
     // Test WebSocket message creation
     let _websocket_message = aura_transport::WebSocketMessage::handshake_request(
-        aura_core::DeviceId::new(),
+        aura_core::identifiers::DeviceId::new(),
         vec!["test_capability".to_string()],
     );
 

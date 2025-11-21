@@ -43,7 +43,7 @@
 //! - **CryptoEffects**: Cryptographic operations, secure randomness
 //! - **TimeEffects**: Scheduling, timeouts, temporal coordination
 //! - **ConsoleEffects**: Logging, debugging, visualization
-//! - **LedgerEffects**: Account state, event sourcing
+//! - **EffectApiEffects**: Account state, event sourcing
 //! - **ChoreographicEffects**: Distributed protocol coordination
 //!
 //! ### Handlers (`handlers/`)
@@ -96,8 +96,7 @@
 //! ```
 
 // Core modules following unified effect system architecture
-pub mod authorization; // New Biscuit-based authorization
-                       // pub mod authorization_bridge; // Removed - replaced by authorization module
+pub mod authorization; // Biscuit-based authorization (moved up from authorization/ subdirectory)
 pub mod choreography;
 pub mod consensus; // Real Aura Consensus implementation
 pub mod context;
@@ -109,6 +108,9 @@ pub mod messages;
 pub mod state;
 pub mod transport;
 pub mod wot;
+
+// Re-export authorization types for convenient access
+pub use authorization::{AuthorizationResult, BiscuitAuthorizationBridge};
 
 // Unified AuraEffectSystem architecture only
 
@@ -140,7 +142,7 @@ pub mod orchestration {
     };
 
     // Configuration and coordination
-    pub use crate::effects::{AntiEntropyConfig, BloomDigest, DeviceMetadata};
+    pub use crate::effects::{AntiEntropyConfig, BloomDigest};
 
     // Context and execution
     pub use crate::handlers::{AuraContext, ExecutionMode};
@@ -193,14 +195,14 @@ pub mod composition {
 pub mod effect_traits {
     // Core traits
     pub use crate::effects::{
-        ConsoleEffects, CryptoEffects, JournalEffects, LedgerEffects, NetworkEffects,
+        ConsoleEffects, CryptoEffects, EffectApiEffects, JournalEffects, NetworkEffects,
         RandomEffects, StorageEffects, SyncEffects, TimeEffects,
     };
 
     // Associated types and errors
     pub use crate::effects::{
-        LedgerError, LedgerEvent, LedgerEventStream, NetworkAddress, NetworkError, StorageError,
-        StorageLocation, SyncError, WakeCondition,
+        EffectApiError, EffectApiEvent, EffectApiEventStream, NetworkAddress, NetworkError,
+        StorageError, StorageLocation, SyncError, WakeCondition,
     };
 }
 
@@ -216,30 +218,12 @@ pub mod internal {
     pub use crate::VERSION;
 }
 
-// ============================================================================
-// BACKWARD COMPATIBILITY: Flat exports (Phase 2.2 - will be deprecated in Phase 2.3)
-// ============================================================================
-
 // Core effect trait - for protocol interfaces
 pub use effects::AuraEffects;
 
-// NOTE: AuraEffectSystem, EffectRegistry, and effect bundles moved to aura-agent runtime
-// Use aura_agent::runtime::{AuraEffectSystem, EffectRegistry, BasicProtocolBundle} instead
-
-// NOTE: Legacy aura_agent re-exports removed
+// Note: AuraEffectSystem, EffectRegistry, and effect bundles are in aura-agent runtime
 // aura-protocol (Layer 4) should not depend on aura-agent (Layer 6)
-// Effect system builders and registries are now owned by aura-agent
-// See: docs_2/001_system_architecture.md for correct layering
-//
-// Deprecated flat exports - Use grouped interfaces instead (Phase 2.3)
-// #[deprecated(since = "0.2.0", note = "Use `aura_agent::runtime::EffectBuilder` instead")]
-// pub use aura_agent::runtime::EffectBuilder;
-// #[deprecated(since = "0.2.0", note = "Use `aura_agent::runtime::EffectBundle` instead")]
-// pub use aura_agent::runtime::EffectBundle;
-// #[deprecated(since = "0.2.0", note = "Use `aura_agent::runtime::EffectRegistryError` instead")]
-// pub use aura_agent::runtime::EffectRegistryError;
-// #[deprecated(since = "0.2.0", note = "Use `aura_agent::runtime::EffectRegistryExt` instead")]
-// pub use aura_agent::runtime::EffectRegistryExt;
+// See: docs/001_system_architecture.md for correct layering
 #[deprecated(
     since = "0.2.0",
     note = "Use `aura_protocol::orchestration::AntiEntropyConfig` instead"
@@ -282,34 +266,29 @@ pub use effects::ConsoleEffects;
 pub use effects::CryptoEffects;
 #[deprecated(
     since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::DeviceMetadata` instead"
+    note = "Use `aura_protocol::effect_traits::EffectApiEffects` instead"
 )]
-pub use effects::DeviceMetadata;
+pub use effects::EffectApiEffects;
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `aura_protocol::effect_traits::EffectApiError` instead"
+)]
+pub use effects::EffectApiError;
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `aura_protocol::effect_traits::EffectApiEvent` instead"
+)]
+pub use effects::EffectApiEvent;
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `aura_protocol::effect_traits::EffectApiEventStream` instead"
+)]
+pub use effects::EffectApiEventStream;
 #[deprecated(
     since = "0.2.0",
     note = "Use `aura_protocol::effect_traits::JournalEffects` instead"
 )]
 pub use effects::JournalEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::LedgerEffects` instead"
-)]
-pub use effects::LedgerEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::LedgerError` instead"
-)]
-pub use effects::LedgerError;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::LedgerEvent` instead"
-)]
-pub use effects::LedgerEvent;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::LedgerEventStream` instead"
-)]
-pub use effects::LedgerEventStream;
 #[deprecated(
     since = "0.2.0",
     note = "Use `aura_protocol::effect_traits::NetworkAddress` instead"

@@ -352,7 +352,7 @@ mod tests {
 
         assert_eq!(stats.total_calls, 3);
         assert_eq!(stats.contextual_calls, 2);
-        assert_eq!(stats.completion_percentage(), 66.66666666666667);
+        assert!((stats.completion_percentage() - 66.66666666666667).abs() < 0.000001);
     }
 
     #[test]

@@ -3,8 +3,7 @@
 //! This module provides journal-specific CRDT types built on the
 //! harmonized foundation from `aura-core`.
 
-use crate::ledger::intent::{Intent, IntentId};
-use aura_core::identifiers::DeviceId;
+use crate::effect_api::intent::{Intent, IntentId};
 use aura_core::semilattice::{Bottom, CvState, JoinSemilattice};
 use aura_core::{AttestedOp, Hash32};
 use serde::{Deserialize, Serialize};
@@ -113,7 +112,7 @@ impl Default for IntentPool {
 /// The OpLog is the **source of truth** for all attested tree operations.
 /// It implements a grow-only OR-set keyed by operation hash (CID).
 ///
-/// ## Key Properties (from docs/123_ratchet_tree.md):
+/// ## Key Properties (from docs/123_commitment_tree.md):
 ///
 /// - **Append-Only**: Operations are never removed, only added
 /// - **OR-Set Semantics**: Union of all seen operations across replicas
@@ -308,142 +307,9 @@ impl<T: Clone> Default for EpochLog<T> {
     }
 }
 
-/// Device registry CRDT
-///
-/// **DEPRECATED**: This type is part of the legacy device-centric architecture.
-/// Device registry should be replaced with fact-derived views from TreeState.
-///
-/// **Migration Path**:
-/// - Query device information from TreeState via TreeEffects::get_current_state()
-/// - Iterate over LeafNodes in the tree to get device public keys
-/// - Use authority-derived snapshots instead of grow-only registry
-/// - Device membership is implicit from tree structure, not explicit metadata
-///
-/// Maintains a grow-only set of registered devices with metadata.
-#[deprecated(
-    since = "0.1.0",
-    note = "Replace with fact-derived device views from TreeState. Query devices via TreeEffects instead."
-)]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DeviceRegistry {
-    /// Registered devices with their metadata
-    pub devices: BTreeMap<DeviceId, crate::types::DeviceMetadata>,
-}
-
-impl DeviceRegistry {
-    /// Create a new empty registry
-    pub fn new() -> Self {
-        Self {
-            devices: BTreeMap::new(),
-        }
-    }
-
-    /// Register a device
-    pub fn register_device(&mut self, metadata: crate::types::DeviceMetadata) {
-        self.devices.insert(metadata.device_id, metadata);
-    }
-
-    /// Get device metadata
-    pub fn get_device(&self, id: &DeviceId) -> Option<&crate::types::DeviceMetadata> {
-        self.devices.get(id)
-    }
-
-    /// List all registered devices
-    pub fn list_devices(&self) -> Vec<&crate::types::DeviceMetadata> {
-        self.devices.values().collect()
-    }
-
-    /// Check if device is registered
-    pub fn is_registered(&self, id: &DeviceId) -> bool {
-        self.devices.contains_key(id)
-    }
-
-    /// Get number of registered devices
-    pub fn len(&self) -> usize {
-        self.devices.len()
-    }
-
-    /// Check if registry is empty
-    pub fn is_empty(&self) -> bool {
-        self.devices.is_empty()
-    }
-}
-
-impl JoinSemilattice for DeviceRegistry {
-    fn join(&self, other: &Self) -> Self {
-        let mut result = self.clone();
-
-        // Merge devices (later registration timestamp wins)
-        for (id, metadata) in &other.devices {
-            if let Some(existing) = result.devices.get(id) {
-                if metadata.added_at > existing.added_at {
-                    result.devices.insert(*id, metadata.clone());
-                }
-            } else {
-                result.devices.insert(*id, metadata.clone());
-            }
-        }
-
-        result
-    }
-}
-
-impl Bottom for DeviceRegistry {
-    fn bottom() -> Self {
-        Self::new()
-    }
-}
-
-impl CvState for DeviceRegistry {}
-
-impl Default for DeviceRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ledger::intent::{Intent, Priority};
-    use aura_core::tree::{LeafNode, TreeOpKind as TreeOperation};
-    use aura_core::NodeIndex;
-
-    #[test]
-    #[allow(clippy::disallowed_methods)]
-    fn test_intent_pool_join_semantics() {
-        let mut pool1 = IntentPool::new();
-        let mut pool2 = IntentPool::new();
-
-        let intent = Intent::new(
-            IntentId::new(uuid::Uuid::new_v4()),
-            TreeOperation::AddLeaf {
-                leaf: LeafNode::new_device(
-                    aura_core::tree::LeafId(0),
-                    aura_core::DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
-                    vec![0u8; 32],
-                ),
-                under: NodeIndex(0),
-            },
-            vec![],
-            aura_core::Hash32([0u8; 32]),
-            Priority::default_priority(),
-            DeviceId(uuid::Uuid::from_bytes([2u8; 16])),
-            1000,
-        );
-
-        let intent_id = intent.intent_id;
-
-        // Add intent to pool1
-        pool1.add_intent(intent);
-
-        // Remove intent from pool2 (tombstone)
-        pool2.remove_intent(intent_id);
-
-        // Join should result in intent being removed (tombstone wins)
-        let joined = pool1.join(&pool2);
-        assert!(!joined.contains(&intent_id));
-    }
 
     #[test]
     fn test_epoch_log_conflict_resolution() {
@@ -459,12 +325,6 @@ mod tests {
         // Higher value should win (lexicographic ordering)
         assert_eq!(joined.get(1), Some(&"value_b".to_string()));
     }
-
-    // Note: DeviceRegistry test requires types that may not exist yet
-    // Skipping TODO fix - For now - can be added when DeviceMetadata is available
-
-    // #[test]
-    // fn test_device_registry_registration_conflict() { ... }
 
     #[test]
     fn test_crdt_laws() {

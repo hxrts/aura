@@ -85,6 +85,13 @@ test-verbose:
 test-crate crate:
     cargo test -p {{crate}} --verbose
 
+# Run tests for a specific crate avoiding architectural violations
+test-crate-isolated crate:
+    #!/usr/bin/env bash
+    echo "Testing {{crate}} in isolation (lib + unit tests only)..."
+    # Test just the library code with unit tests, avoiding dev dependencies that may violate architecture
+    cd "crates/{{crate}}" && cargo test --lib --verbose
+
 # Check code without building
 check:
     cargo check --workspace --verbose
@@ -155,10 +162,10 @@ smoke-test:
     echo "OK Account initialized"
     echo ""
 
-    echo "2. Verifying ledger and config files creation..."
-    if [ -f ".aura-test/ledger.cbor" ]; then
-        echo "OK Ledger file created successfully"
-        echo "Ledger size: $(stat -c%s .aura-test/ledger.cbor 2>/dev/null || stat -f%z .aura-test/ledger.cbor) bytes"
+    echo "2. Verifying effect_api and config files creation..."
+    if [ -f ".aura-test/effect_api.cbor" ]; then
+        echo "OK Effect API file created successfully"
+        echo "Ledger size: $(stat -c%s .aura-test/effect_api.cbor 2>/dev/null || stat -f%z .aura-test/effect_api.cbor) bytes"
     else
         echo "ERROR: Ledger file not found"
         exit 1

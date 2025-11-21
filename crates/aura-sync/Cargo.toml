@@ -37,33 +37,7 @@ tokio = { workspace = true }
 criterion = { version = "0.5", features = ["html_reports"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-[[bench]]
-name = "sync_throughput"
-harness = false
 
-[[bench]]
-name = "memory_usage"
-harness = false
-
-[[bench]]
-name = "protocol_latency"
-harness = false
-
-[[bench]]
-name = "scaling_behavior"
-harness = false
-
-[[bench]]
-name = "performance_report"
-harness = false
-
-[[bench]]
-name = "protocol_performance"
-harness = false
-
-[[bench]]
-name = "simple_benchmarks"
-harness = false
 
 [lints]
 workspace = true

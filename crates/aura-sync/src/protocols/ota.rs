@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 //! Over-the-air (OTA) upgrade coordination protocol
 //!
 //! Provides threshold-based upgrade coordination with epoch fencing

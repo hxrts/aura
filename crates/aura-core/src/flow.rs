@@ -6,13 +6,13 @@
 
 use crate::{
     content::Hash32,
-    identifiers::{ContextId, DeviceId},
+    identifiers::{ContextId, AuthorityId},
     semilattice::{Bottom, CvState, JoinSemilattice},
     session_epochs::Epoch,
 };
 use serde::{Deserialize, Serialize};
 
-/// Ledger-backed flow budget for a `(context, peer)` pair.
+/// Effect API-backed flow budget for a `(context, peer)` pair.
 ///
 /// `limit` behaves like a meet-semilattice (shrinks via min), while `spent`
 /// behaves like a join-semilattice (grows via max). `epoch` gates replenishment.
@@ -126,13 +126,13 @@ impl CvState for FlowBudget {}
 pub struct FlowBudgetKey {
     /// Context identifier for the operation
     pub context: ContextId,
-    /// Peer device identifier
-    pub peer: DeviceId,
+    /// Peer authority identifier
+    pub peer: AuthorityId,
 }
 
 impl FlowBudgetKey {
     /// Create a new FlowBudgetKey from context and peer
-    pub fn new(context: ContextId, peer: DeviceId) -> Self {
+    pub fn new(context: ContextId, peer: AuthorityId) -> Self {
         Self { context, peer }
     }
 }
@@ -142,10 +142,10 @@ impl FlowBudgetKey {
 pub struct Receipt {
     /// Context the observable event belongs to.
     pub ctx: ContextId,
-    /// Sender that spent the budget.
-    pub src: DeviceId,
-    /// Receiver that can verify the receipt.
-    pub dst: DeviceId,
+    /// Sender authority that spent the budget.
+    pub src: AuthorityId,
+    /// Receiver authority that can verify the receipt.
+    pub dst: AuthorityId,
     /// Epoch binding the receipt to a FlowBudget row.
     pub epoch: Epoch,
     /// Cost that was charged.
@@ -163,8 +163,8 @@ impl Receipt {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ContextId,
-        src: DeviceId,
-        dst: DeviceId,
+        src: AuthorityId,
+        dst: AuthorityId,
         epoch: Epoch,
         cost: u32,
         nonce: u64,

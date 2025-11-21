@@ -5,9 +5,10 @@
 
 use crate::fact_journal::{Fact, FactContent, FactId, Journal as FactJournal, JournalNamespace};
 use crate::semilattice::*;
+
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::semilattice::JoinSemilattice;
-use aura_core::{AccountId, AuraError, DeviceId};
+use aura_core::{AccountId, AuraError};
 use serde::{Deserialize, Serialize};
 
 /// Simplified Journal interface hiding CRDT internals
@@ -61,12 +62,6 @@ impl Journal {
         }
     }
 
-    /// Add a device to the account (for testing)
-    pub fn add_device(&mut self, device: crate::DeviceMetadata) -> Result<(), AuraError> {
-        self.account_state.add_device(device);
-        Ok(())
-    }
-
     /// Merge with another journal (CRDT join operation)
     pub fn merge(&mut self, other: &Journal) -> Result<(), AuraError> {
         // Hide the CRDT implementation details
@@ -82,8 +77,7 @@ impl Journal {
 
     /// Add a fact to the journal
     pub fn add_fact(&mut self, journal_fact: JournalFact) -> Result<(), AuraError> {
-        // Convert DeviceId to AuthorityId (placeholder - in real implementation would lookup authority)
-        let source_authority = AuthorityId::from_uuid(journal_fact.source_device.0);
+        let source_authority = journal_fact.source_authority;
 
         // Convert JournalFact to proper Fact with FactContent
         let fact = Fact {
@@ -102,19 +96,11 @@ impl Journal {
         Ok(())
     }
 
-    /// Get current capabilities for a context
-    pub fn get_capabilities(&self, _context: &ContextId) -> CapabilitySet {
-        // Return default capability set
-        // In a full implementation, this would query facts and compute
-        // the capability frontier from Biscuit tokens and policy
-        CapabilitySet::read_only(vec!["*".to_string()])
-    }
-
     /// Get account state summary
     pub fn account_summary(&self) -> AccountSummary {
         AccountSummary {
             account_id: self.account_state.account_id,
-            device_count: self.account_state.device_registry.devices.len(),
+            device_count: 0, // TODO: Derive device count from authority facts in TreeState
             guardian_count: self.account_state.guardian_registry.guardians.len(),
             last_epoch: self.account_state.epoch_counter.value,
         }
@@ -123,11 +109,6 @@ impl Journal {
     /// Get account ID
     pub fn account_id(&self) -> AccountId {
         self.account_state.account_id
-    }
-
-    /// Get devices for testing purposes
-    pub fn devices(&self) -> &std::collections::BTreeMap<DeviceId, crate::DeviceMetadata> {
-        &self.account_state.device_registry.devices
     }
 
     /// Get fact journal for advanced usage
@@ -139,9 +120,12 @@ impl Journal {
 /// Fact to be added to the journal
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JournalFact {
+    /// Content of the fact being recorded
     pub content: String,
+    /// Unix timestamp when the fact was created
     pub timestamp: u64,
-    pub source_device: DeviceId,
+    /// Authority that originated this fact
+    pub source_authority: AuthorityId,
 }
 
 // Use ContextId from aura-core instead of defining our own
@@ -149,9 +133,13 @@ pub struct JournalFact {
 /// Simplified account summary
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountSummary {
+    /// The account identifier
     pub account_id: AccountId,
+    /// Number of devices in the account
     pub device_count: usize,
+    /// Number of guardians configured for the account
     pub guardian_count: usize,
+    /// Latest epoch number for this account
     pub last_epoch: u64,
 }
 

@@ -10,7 +10,7 @@
 //!   - Protocol coordination for testing scenarios
 //!   - Fast, stateful choreography execution
 //!
-//! - **Ledger Memory**: In-memory ledger operations
+//! - **Effect API Memory**: In-memory effect_api operations
 //!   - Event storage without persistence
 //!   - Device authorization tracking
 //!   - Audit trail for testing scenarios
@@ -28,8 +28,8 @@
 
 pub mod choreographic_memory;
 // pub mod guardian_authorization; // Removed - replaced by Biscuit-based authorization
-pub mod ledger_memory;
+pub mod effect_api_memory;
 
 pub use choreographic_memory::MemoryChoreographicHandler;
 // pub use guardian_authorization::GuardianAuthorizationHandler; // Removed
-pub use ledger_memory::MemoryLedgerHandler;
+pub use effect_api_memory::MemoryLedgerHandler;

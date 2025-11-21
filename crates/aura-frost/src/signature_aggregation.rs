@@ -7,7 +7,7 @@
 
 use crate::FrostResult;
 use aura_core::frost::{PartialSignature, ThresholdSignature};
-use aura_core::{AuraError, DeviceId};
+use aura_core::{AuraError, identifiers::AuthorityId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 
@@ -88,7 +88,7 @@ pub struct AggregationRequest {
     /// Required threshold
     pub threshold: usize,
     /// Participating signers
-    pub signers: Vec<DeviceId>,
+    pub signers: Vec<AuthorityId>,
     /// Session timeout in seconds
     pub timeout_seconds: u64,
 }
@@ -101,7 +101,7 @@ pub struct AggregationResponse {
     /// Aggregation successful
     pub success: bool,
     /// Participating signers
-    pub signers: Vec<DeviceId>,
+    pub signers: Vec<AuthorityId>,
     /// Error message if any
     pub error: Option<String>,
 }
@@ -111,8 +111,8 @@ pub struct AggregationResponse {
 pub struct PartialSignatureSubmission {
     /// Session identifier
     pub session_id: String,
-    /// Signer device ID
-    pub signer_id: DeviceId,
+    /// Signer authority ID
+    pub signer_id: AuthorityId,
     /// Partial signature data
     pub partial_signature: PartialSignature,
     /// Signature index
@@ -206,7 +206,7 @@ pub async fn perform_frost_aggregation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::test_utils::test_device_id;
+    use aura_core::test_utils::test_authority_id;
 
     #[test]
     fn test_aggregation_config_validation() {
@@ -214,7 +214,7 @@ mod tests {
             session_id: "test_session".to_string(),
             message: b"test message".to_vec(),
             threshold: 2,
-            signers: vec![test_device_id(1), test_device_id(2), test_device_id(3)],
+            signers: vec![test_authority_id(1), test_authority_id(2), test_authority_id(3)],
             timeout_seconds: 60,
         };
         assert!(validate_aggregation_config(&valid_request).is_ok());
@@ -223,7 +223,7 @@ mod tests {
             session_id: "test_session".to_string(),
             message: b"test message".to_vec(),
             threshold: 0, // Invalid threshold
-            signers: vec![test_device_id(4), test_device_id(5)],
+            signers: vec![test_authority_id(4), test_authority_id(5)],
             timeout_seconds: 60,
         };
         assert!(validate_aggregation_config(&invalid_request).is_err());
@@ -235,7 +235,7 @@ mod tests {
             session_id: "test_session".to_string(),
             message: b"test message".to_vec(),
             threshold: 2,
-            signers: vec![test_device_id(6), test_device_id(7), test_device_id(8)],
+            signers: vec![test_authority_id(6), test_authority_id(7), test_authority_id(8)],
             timeout_seconds: 60,
         };
 
@@ -281,7 +281,7 @@ mod tests {
     fn test_partial_signature_submission_serialization() {
         let submission = PartialSignatureSubmission {
             session_id: "test_session".to_string(),
-            signer_id: test_device_id(9),
+            signer_id: test_authority_id(9),
             partial_signature: PartialSignature::from_bytes(vec![1; 32]).unwrap(), // 32-byte signature as required
             signature_index: 1,
         };

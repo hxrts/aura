@@ -15,7 +15,7 @@ pub mod resharing;
 // pub use frost::*; // REMOVED: Use aura-frost crate
 pub use resharing::*;
 
-use aura_core::{DeviceId, SessionId};
+use aura_core::identifiers::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 
 /// Unified cryptographic protocol message envelope

@@ -195,6 +195,33 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for AuraError {
     }
 }
 
+impl From<biscuit_auth::error::Token> for AuraError {
+    fn from(err: biscuit_auth::error::Token) -> Self {
+        Self::permission_denied(format!("Biscuit token error: {}", err))
+    }
+}
+
+impl From<uuid::Error> for AuraError {
+    fn from(err: uuid::Error) -> Self {
+        Self::invalid(format!("UUID error: {}", err))
+    }
+}
+
+impl From<hex::FromHexError> for AuraError {
+    fn from(err: hex::FromHexError) -> Self {
+        Self::serialization(format!("Hex decoding error: {}", err))
+    }
+}
+
+impl From<base64::DecodeError> for AuraError {
+    fn from(err: base64::DecodeError) -> Self {
+        Self::serialization(format!("Base64 decoding error: {}", err))
+    }
+}
+
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

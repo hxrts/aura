@@ -17,7 +17,7 @@
 //! ### Send Guard Chain (Primary Interface)
 //! ```rust,ignore
 //! use crate::guards::{create_send_guard, SendGuardChain};
-//! use aura_wot::Capability;
+//! // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
 //!
 //! // Create send guard with complete predicate enforcement
 //! let send_guard = create_send_guard(
@@ -57,7 +57,7 @@
 pub mod deltas;
 pub mod effect_system_bridge;
 pub mod effect_system_trait;
-pub mod evaluation;
+// pub mod evaluation; // Legacy capability evaluation removed - use BiscuitAuthorizationBridge instead
 pub mod execution;
 pub mod flow;
 pub mod journal_coupler;
@@ -69,23 +69,23 @@ pub mod biscuit_evaluator;
 pub mod capability_guard; // Authority-based capability guards
 
 pub use effect_system_trait::GuardEffectSystem;
-pub use evaluation::{GuardEvaluationMetrics, GuardEvaluationResult, GuardEvaluator};
+// Legacy guard evaluation removed - use BiscuitAuthorizationBridge instead
 pub use flow::{FlowBudgetEffects, FlowGuard, FlowHint};
 pub use journal_coupler::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
 pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 
-use crate::wot::EffectSystemInterface;
+// use crate::wot::EffectSystemInterface; // Legacy interface removed - use Biscuit authorization instead
 use aura_core::AuraResult;
-use aura_wot::Capability;
+// use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
 use std::future::Future;
 
-/// Protocol execution guard combining capability checking, delta application, and privacy tracking
+/// Protocol execution guard combining authorization checking, delta application, and privacy tracking
 #[derive(Debug, Clone)]
 pub struct ProtocolGuard {
-    /// Required capabilities for this operation
-    pub required_capabilities: Vec<Capability>,
+    /// Required Biscuit authorization tokens for this operation
+    pub required_tokens: Vec<String>, // TODO: Use proper Biscuit token type when available
     /// Facts to be merged into the journal after successful execution
     pub delta_facts: Vec<serde_json::Value>, // Placeholder for actual fact types
     /// Privacy leakage budget for this operation
@@ -129,8 +129,8 @@ pub struct ExecutionMetrics {
     pub delta_apply_time_us: u64,
     /// Total execution time (microseconds)
     pub total_execution_time_us: u64,
-    /// Number of capabilities checked
-    pub capabilities_checked: usize,
+    /// Number of authorization checks performed
+    pub authorization_checks: usize,
     /// Number of facts applied
     pub facts_applied: usize,
 }
@@ -139,22 +139,22 @@ impl ProtocolGuard {
     /// Create a new protocol guard with no requirements
     pub fn new(operation_id: impl Into<String>) -> Self {
         Self {
-            required_capabilities: Vec::new(),
+            required_tokens: Vec::new(),
             delta_facts: Vec::new(),
             leakage_budget: LeakageBudget::zero(),
             operation_id: operation_id.into(),
         }
     }
 
-    /// Add a required capability to this guard
-    pub fn require_capability(mut self, cap: Capability) -> Self {
-        self.required_capabilities.push(cap);
+    /// Add a required authorization token to this guard
+    pub fn require_token(mut self, token: String) -> Self {
+        self.required_tokens.push(token);
         self
     }
 
-    /// Add multiple required capabilities to this guard
-    pub fn require_capabilities(mut self, caps: Vec<Capability>) -> Self {
-        self.required_capabilities.extend(caps);
+    /// Add multiple required authorization tokens to this guard
+    pub fn require_tokens(mut self, tokens: Vec<String>) -> Self {
+        self.required_tokens.extend(tokens);
         self
     }
 
@@ -177,7 +177,7 @@ impl ProtocolGuard {
         operation: F,
     ) -> AuraResult<GuardedExecutionResult<T>>
     where
-        E: GuardEffectSystem + EffectSystemInterface,
+        E: GuardEffectSystem,
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
@@ -242,14 +242,10 @@ macro_rules! guard {
 }
 
 // Re-export submodules
-// pub use capability::*; // Removed - replaced by biscuit_evaluator
 pub use deltas::*;
 pub use effect_system_bridge::*;
-// pub use evaluation::*; // Disabled - needs Capability type rewrite
 pub use execution::*;
-// pub use middleware::*; // REMOVED: Uses deprecated JournalEffects methods
 pub use privacy::*;
-// pub use send_guard::*; // Disabled - needs Capability type rewrite
 
 // Re-export Biscuit guard types
 pub use biscuit_evaluator::{BiscuitGuardEvaluator, GuardError, GuardResult};

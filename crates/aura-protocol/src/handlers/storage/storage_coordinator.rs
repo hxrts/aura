@@ -4,7 +4,7 @@
 //! enabling composition of different storage backends and capabilities.
 
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
-use aura_core::{AuraResult, DeviceId};
+use aura_core::{AuraResult, identifiers::DeviceId};
 use aura_effects::{EncryptedStorageHandler, FilesystemStorageHandler, MemoryStorageHandler};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -342,7 +342,7 @@ impl StorageCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::DeviceId;
+    use aura_core::identifiers::DeviceId;
 
     #[tokio::test]
     async fn test_coordinator_basic_operations() {

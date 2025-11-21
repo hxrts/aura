@@ -1,7 +1,7 @@
 //! FROST Threshold Signing Primitives for Tree Operations
 //!
 //! This module provides pure cryptographic primitives for FROST threshold signatures
-//! used in ratchet tree operations. It contains **NO** tree logic or business logic.
+//! used in commitment tree operations. It contains **NO** tree logic or business logic.
 //!
 //! ## Design Principles (from work/015.md)
 //!
@@ -20,10 +20,11 @@
 //!
 //! ## References
 //!
-//! - [`docs/123_ratchet_tree.md`](../../../../docs/123_ratchet_tree.md) - Tree operations
+//! - [`docs/123_commitment_tree.md`](../../../../docs/123_commitment_tree.md) - Tree operations
 //! - FROST paper: https://eprint.iacr.org/2020/852
 
 use crate::hash;
+// use crate::effects::SecureStorageLocation; // TODO: Import when using SecureStorageEffects
 use frost_ed25519 as frost;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -100,9 +101,13 @@ impl Nonce {
         #[allow(clippy::expect_used)]
         getrandom::getrandom(&mut id).expect("Failed to generate nonce ID");
 
-        // In a real implementation, nonces would be stored in a secure enclave
-        // or regenerated deterministically when needed. For now, we use a hash
-        // of the nonce commitment as a placeholder.
+        // TODO: Use SecureStorageEffects to store nonces securely
+        // For now, we use a hash of the nonce commitment as a placeholder.
+        // Real implementation should use:
+        // secure_storage.secure_store(
+        //     &SecureStorageLocation::frost_nonce(&session_id, signer_id),
+        //     &nonce_bytes, &[SecureStorageCapability::Read, SecureStorageCapability::Delete]
+        // ).await
         let mut h = hash::hasher();
         h.update(&id);
         let value = h.finalize().to_vec();
@@ -344,7 +349,12 @@ pub fn binding_message(ctx: &TreeSigningContext, op_bytes: &[u8]) -> Vec<u8> {
 /// Generate nonce with a signing share for FROST operations
 ///
 /// This function requires a signing share to properly generate FROST nonces.
-/// In a real implementation, this would use the device's signing share from DKG.
+/// TODO: Use SecureStorageEffects to retrieve signing share from secure storage.
+/// Real implementation should retrieve from:
+/// secure_storage.secure_retrieve(
+///     &SecureStorageLocation::signing_share(&account_id, epoch, signer_id),
+///     &[SecureStorageCapability::Read]
+/// ).await
 pub fn generate_nonce_with_share(
     signer_id: u16,
     signing_share: &frost::keys::SigningShare,
@@ -368,7 +378,9 @@ pub fn generate_nonce_with_share(
 
     // Note: FROST SigningNonces don't have a serialize method because they contain
     // secret data. We'll store a placeholder and reconstruct when needed.
-    // In a real implementation, nonces would be stored securely and not serialized.
+    // TODO: Use SecureStorageEffects for secure nonce storage
+    // Real implementation should store nonces using time-bound tokens:
+    // secure_storage.secure_store(&location, &nonce_bytes, &capabilities).await
     let nonce = Nonce::from_frost(frost_nonce);
 
     let commitment = NonceCommitment::from_frost(identifier, frost_commitment);

@@ -6,13 +6,14 @@
 
 pub use account_state::{AccountState as ModernAccountState, GuardianRegistry, MaxCounter};
 pub use capability::{BudgetDecayPolicy, RelayCapability};
-pub use concrete_types::{DeviceRegistry, EpochLog, IntentPool};
-pub use invitations::{InvitationLedger, InvitationRecord, InvitationStatus};
+pub use concrete_types::{EpochLog, IntentPool}; // DeviceRegistry removed - use authority-based TreeState instead
+pub use invitations::{InvitationRecordRegistry, InvitationRecord, InvitationStatus};
 pub use journal_map::JournalMap;
 pub use meet_types::{
-    CapabilitySet, ConsensusConstraint, DeviceCapability, ResourceQuota, SecurityPolicy, TimeWindow,
+    ConsensusConstraint, DeviceCapability, ResourceQuota, SecurityPolicy, TimeWindow,
 };
 pub use op_log::{OpLog, OpLogSummary};
+pub use types::{GCounter, GSet, LwwRegister, Replica};
 
 pub mod account_state;
 pub mod capability;
@@ -21,6 +22,7 @@ pub mod invitations;
 pub mod journal_map;
 pub mod meet_types;
 pub mod op_log;
+pub mod types;
 
 // Re-export foundation types for convenience
 pub use aura_core::semilattice::{

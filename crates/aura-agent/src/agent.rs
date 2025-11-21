@@ -35,7 +35,7 @@ use uuid;
 pub struct AuraAgent {
     /// Authority ID for this agent runtime (public identity)
     authority_id: AuthorityId,
-    /// Device ID for internal ratchet tree operations (private)
+    /// Device ID for internal commitment tree operations (private)
     /// TODO: In multi-device authorities, this should be looked up from authority state
     device_id: DeviceId,
     /// Agent effect system handler that unifies all agent operations
@@ -60,7 +60,6 @@ pub struct DeviceInfo {
     /// Authority identifier (public identity)
     pub authority_id: AuthorityId,
     /// Account this authority belongs to
-    /// NOTE: Deprecated - authority_id is the primary identifier
     pub account_id: Option<AccountId>,
     /// Authority display name
     pub device_name: String,
@@ -128,9 +127,7 @@ impl AuraAgent {
     }
 
     /// Create agent for testing with mock effects
-    ///
-    /// Note: This method is deprecated. Use `aura_testkit::create_test_fixture().await`
-    /// and construct agent via `AuraAgent::new()` in new code.
+    /// Create agent for testing
     pub fn for_testing(authority_id: AuthorityId) -> Self {
         // Derive device_id for EffectRegistry (still uses device_id internally)
         let device_id = DeviceId(authority_id.0);
@@ -141,8 +138,7 @@ impl AuraAgent {
             .build()
             .expect("Failed to create test effect system");
         // Unwrap the Arc - we're the only owner at this point
-        let effects = Arc::try_unwrap(effects_arc)
-            .unwrap_or_else(|arc| (*arc).clone());
+        let effects = Arc::try_unwrap(effects_arc).unwrap_or_else(|arc| (*arc).clone());
         Self::new(effects, authority_id)
     }
 
@@ -154,7 +150,7 @@ impl AuraAgent {
     /// Get device ID (internal identifier)
     ///
     /// NOTE: This method is for internal use only. External code should use authority_id().
-    /// Device IDs are implementation details of the ratchet tree and should not be exposed
+    /// Device IDs are implementation details of the commitment tree and should not be exposed
     /// in public APIs.
     #[doc(hidden)]
     pub fn device_id(&self) -> DeviceId {
@@ -206,7 +202,10 @@ impl AuraAgent {
         // Log initialization completion
         let effects = self.core_effects.read().await;
         let _ = effects
-            .log_info(&format!("Agent initialized for authority {}", self.authority_id))
+            .log_info(&format!(
+                "Agent initialized for authority {}",
+                self.authority_id
+            ))
             .await;
 
         Ok(())
@@ -519,7 +518,10 @@ impl AuraAgent {
         let effects = self.core_effects.read().await;
         ConsoleEffects::log_debug(
             &*effects,
-            &format!("Session management ready for authority {}", self.authority_id),
+            &format!(
+                "Session management ready for authority {}",
+                self.authority_id
+            ),
         )
         .await
         .ok();
@@ -619,7 +621,7 @@ mod tests {
     async fn test_config_management() -> aura_core::AuraResult<()> {
         let device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let effects = AuraEffectSystem::new();
-        let agent = AuraAgent::new(effects, device_id);
+        let agent = AuraAgent::new(effects, AuthorityId::from_uuid(device_id.into()));
 
         agent.initialize().await?;
 

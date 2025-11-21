@@ -3,21 +3,26 @@
 //! This is a minimal stub to allow aura-agent to compile while the full
 //! coordinator is being refactored to use the new authority-centric architecture.
 
+use async_trait::async_trait;
+use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext};
 use aura_core::effects::*;
-use aura_core::effects::crypto::{KeyDerivationContext, FrostKeyGenResult, FrostSigningPackage};
-use aura_core::identifiers::{AuthorityId, ContextId, DeviceId};
-use aura_core::{AuraError, Cap, FlowBudget, Journal, Hash32, Policy, Receipt};
+use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::{AuraError, Cap, DeviceId, FlowBudget, Hash32, Journal, Policy, Receipt};
 use aura_effects::*;
-use aura_protocol::effects::ledger::{LedgerEffects, LedgerError, DeviceMetadata, LedgerEventStream};
+use aura_journal::commitment_tree::{
+    AttestedOp, LeafId, LeafNode, NodeIndex, TreeOpKind, TreeState,
+};
+use aura_protocol::effects::choreographic::{
+    ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
+    ChoreographyMetrics,
+};
+use aura_protocol::effects::effect_api::{EffectApiEffects, EffectApiError, EffectApiEventStream};
 use aura_protocol::effects::tree::TreeEffects;
-use aura_protocol::effects::choreographic::{ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent, ChoreographyMetrics};
-use aura_journal::ratchet_tree::{TreeState, AttestedOp, LeafNode, NodeIndex, LeafId, TreeOpKind};
-use aura_protocol::effects::tree::{Cut, ProposalId, Partial, Snapshot};
+use aura_protocol::effects::tree::{Cut, Partial, ProposalId, Snapshot};
 use aura_protocol::guards::flow::FlowBudgetEffects;
 use aura_protocol::guards::GuardEffectSystem;
-use aura_protocol::handlers::tree::DummyTreeHandler;
 use aura_protocol::handlers::memory::MemoryChoreographicHandler;
-use async_trait::async_trait;
+use aura_protocol::handlers::tree::DummyTreeHandler;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -26,7 +31,7 @@ use uuid::Uuid;
 /// Minimal stub effect system that composes handlers from aura-effects
 #[derive(Clone)]
 pub struct AuraEffectSystem {
-    device_id: DeviceId,
+    authority_id: AuthorityId,
     console: Arc<RealConsoleHandler>,
     crypto: Arc<RealCryptoHandler>,
     random: Arc<RealRandomHandler>,
@@ -56,7 +61,7 @@ impl AuraEffectSystem {
     /// Create a new stub effect system
     pub fn new() -> Self {
         Self {
-            device_id: DeviceId::new(),
+            authority_id: AuthorityId::new(),
             console: Arc::new(RealConsoleHandler::new()),
             crypto: Arc::new(RealCryptoHandler::new()),
             random: Arc::new(RealRandomHandler::new()),
@@ -68,10 +73,10 @@ impl AuraEffectSystem {
         }
     }
 
-    /// Create a stub effect system seeded with a specific device ID
-    pub fn with_device_id(device_id: DeviceId) -> Self {
+    /// Create a stub effect system seeded with a specific authority ID
+    pub fn with_authority_id(authority_id: AuthorityId) -> Self {
         Self {
-            device_id,
+            authority_id,
             console: Arc::new(RealConsoleHandler::new()),
             crypto: Arc::new(RealCryptoHandler::new()),
             random: Arc::new(RealRandomHandler::new()),
@@ -99,11 +104,12 @@ impl FlowBudgetEffects for AuraEffectSystem {
         cost: u32,
     ) -> Result<Receipt, AuraError> {
         // Use the journal handler to perform an atomic charge
-        let updated_budget = JournalEffects::charge_flow_budget(self.journal.as_ref(), context, peer, cost).await?;
+        let updated_budget =
+            JournalEffects::charge_flow_budget(self.journal.as_ref(), context, peer, cost).await?;
         let nonce = updated_budget.spent;
         Ok(Receipt::new(
             context.clone(),
-            self.device_id,
+            self.authority_id,
             *peer,
             updated_budget.epoch,
             cost,
@@ -116,8 +122,8 @@ impl FlowBudgetEffects for AuraEffectSystem {
 
 // Guard integration for send guard chain / leakage tracking
 impl GuardEffectSystem for AuraEffectSystem {
-    fn device_id(&self) -> DeviceId {
-        self.device_id
+    fn authority_id(&self) -> AuthorityId {
+        self.authority_id
     }
 
     fn execution_mode(&self) -> aura_core::effects::ExecutionMode {
@@ -254,7 +260,8 @@ impl CryptoEffects for AuraEffectSystem {
         key_share: &[u8],
         nonces: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
-        CryptoEffects::frost_sign_share(self.crypto.as_ref(), signing_package, key_share, nonces).await
+        CryptoEffects::frost_sign_share(self.crypto.as_ref(), signing_package, key_share, nonces)
+            .await
     }
 
     async fn frost_aggregate_signatures(
@@ -262,7 +269,12 @@ impl CryptoEffects for AuraEffectSystem {
         signing_package: &FrostSigningPackage,
         signature_shares: &[Vec<u8>],
     ) -> Result<Vec<u8>, CryptoError> {
-        CryptoEffects::frost_aggregate_signatures(self.crypto.as_ref(), signing_package, signature_shares).await
+        CryptoEffects::frost_aggregate_signatures(
+            self.crypto.as_ref(),
+            signing_package,
+            signature_shares,
+        )
+        .await
     }
 
     async fn frost_verify(
@@ -271,7 +283,8 @@ impl CryptoEffects for AuraEffectSystem {
         signature: &[u8],
         group_public_key: &[u8],
     ) -> Result<bool, CryptoError> {
-        CryptoEffects::frost_verify(self.crypto.as_ref(), message, signature, group_public_key).await
+        CryptoEffects::frost_verify(self.crypto.as_ref(), message, signature, group_public_key)
+            .await
     }
 
     async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
@@ -377,7 +390,9 @@ impl TimeEffects for AuraEffectSystem {
     }
 
     async fn delay(&self, duration: Duration) {
-        TimeEffects::sleep(self.time.as_ref(), duration.as_millis() as u64).await.ok();
+        TimeEffects::sleep(self.time.as_ref(), duration.as_millis() as u64)
+            .await
+            .ok();
     }
 
     async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
@@ -451,7 +466,10 @@ impl StorageEffects for AuraEffectSystem {
         StorageEffects::store_batch(self.storage.as_ref(), pairs).await
     }
 
-    async fn retrieve_batch(&self, keys: &[String]) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
         StorageEffects::retrieve_batch(self.storage.as_ref(), keys).await
     }
 
@@ -471,7 +489,11 @@ impl JournalEffects for AuraEffectSystem {
         JournalEffects::merge_facts(self.journal.as_ref(), target, delta).await
     }
 
-    async fn refine_caps(&self, target: &Journal, refinement: &Journal) -> Result<Journal, AuraError> {
+    async fn refine_caps(
+        &self,
+        target: &Journal,
+        refinement: &Journal,
+    ) -> Result<Journal, AuraError> {
         JournalEffects::refine_caps(self.journal.as_ref(), target, refinement).await
     }
 
@@ -483,7 +505,11 @@ impl JournalEffects for AuraEffectSystem {
         JournalEffects::persist_journal(self.journal.as_ref(), journal).await
     }
 
-    async fn get_flow_budget(&self, context: &ContextId, peer: &AuthorityId) -> Result<FlowBudget, AuraError> {
+    async fn get_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+    ) -> Result<FlowBudget, AuraError> {
         JournalEffects::get_flow_budget(self.journal.as_ref(), context, peer).await
     }
 
@@ -523,11 +549,11 @@ impl AuthorizationEffects for AuraEffectSystem {
         &self,
         _source_capabilities: &Cap,
         _requested_capabilities: &Cap,
-        _target_device: &DeviceId,
+        _target_authority: &AuthorityId,
     ) -> Result<Cap, AuthorizationError> {
-        Err(AuthorizationError::SystemError(
-            AuraError::internal("AuthorizationEffects::delegate_capabilities not implemented in stub")
-        ))
+        Err(AuthorizationError::SystemError(AuraError::internal(
+            "AuthorizationEffects::delegate_capabilities not implemented in stub",
+        )))
     }
 }
 
@@ -596,70 +622,85 @@ impl NetworkEffects for AuraEffectSystem {
     }
 }
 
-// Implement LedgerEffects with stub implementations
+// Implement EffectApiEffects with stub implementations
 #[async_trait]
-impl LedgerEffects for AuraEffectSystem {
-    async fn append_event(&self, _event: Vec<u8>) -> Result<(), LedgerError> {
-        Err(LedgerError::NotAvailable)
+impl EffectApiEffects for AuraEffectSystem {
+    async fn append_event(&self, _event: Vec<u8>) -> Result<(), EffectApiError> {
+        Err(EffectApiError::NotAvailable)
     }
 
-    async fn current_epoch(&self) -> Result<u64, LedgerError> {
+    async fn current_epoch(&self) -> Result<u64, EffectApiError> {
         Ok(0)
     }
 
-    async fn events_since(&self, _epoch: u64) -> Result<Vec<Vec<u8>>, LedgerError> {
+    async fn events_since(&self, _epoch: u64) -> Result<Vec<Vec<u8>>, EffectApiError> {
         Ok(Vec::new())
     }
 
-    async fn is_device_authorized(&self, _device_id: DeviceId, _operation: &str) -> Result<bool, LedgerError> {
+    async fn is_device_authorized(
+        &self,
+        _device_id: DeviceId,
+        _operation: &str,
+    ) -> Result<bool, EffectApiError> {
         Ok(true)
     }
 
-    async fn get_device_metadata(&self, _device_id: DeviceId) -> Result<Option<DeviceMetadata>, LedgerError> {
-        Ok(None)
-    }
-
-    async fn update_device_activity(&self, _device_id: DeviceId) -> Result<(), LedgerError> {
+    async fn update_device_activity(&self, _device_id: DeviceId) -> Result<(), EffectApiError> {
         Ok(())
     }
 
-    async fn subscribe_to_events(&self) -> Result<LedgerEventStream, LedgerError> {
-        Err(LedgerError::NotAvailable)
+    async fn subscribe_to_events(&self) -> Result<EffectApiEventStream, EffectApiError> {
+        Err(EffectApiError::NotAvailable)
     }
 
-    async fn would_create_cycle(&self, _edges: &[(Vec<u8>, Vec<u8>)], _new_edge: (Vec<u8>, Vec<u8>)) -> Result<bool, LedgerError> {
+    async fn would_create_cycle(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+        _new_edge: (Vec<u8>, Vec<u8>),
+    ) -> Result<bool, EffectApiError> {
         Ok(false)
     }
 
-    async fn find_connected_components(&self, _edges: &[(Vec<u8>, Vec<u8>)]) -> Result<Vec<Vec<Vec<u8>>>, LedgerError> {
+    async fn find_connected_components(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<Vec<Vec<Vec<u8>>>, EffectApiError> {
         Ok(Vec::new())
     }
 
-    async fn topological_sort(&self, _edges: &[(Vec<u8>, Vec<u8>)]) -> Result<Vec<Vec<u8>>, LedgerError> {
+    async fn topological_sort(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<Vec<Vec<u8>>, EffectApiError> {
         Ok(Vec::new())
     }
 
-    async fn shortest_path(&self, _edges: &[(Vec<u8>, Vec<u8>)], _start: Vec<u8>, _end: Vec<u8>) -> Result<Option<Vec<Vec<u8>>>, LedgerError> {
+    async fn shortest_path(
+        &self,
+        _edges: &[(Vec<u8>, Vec<u8>)],
+        _start: Vec<u8>,
+        _end: Vec<u8>,
+    ) -> Result<Option<Vec<Vec<u8>>>, EffectApiError> {
         Ok(None)
     }
 
-    async fn generate_secret(&self, length: usize) -> Result<Vec<u8>, LedgerError> {
+    async fn generate_secret(&self, length: usize) -> Result<Vec<u8>, EffectApiError> {
         Ok(RandomEffects::random_bytes(self, length).await)
     }
 
-    async fn hash_data(&self, data: &[u8]) -> Result<[u8; 32], LedgerError> {
+    async fn hash_data(&self, data: &[u8]) -> Result<[u8; 32], EffectApiError> {
         Ok(aura_core::hash::hash(data))
     }
 
-    async fn current_timestamp(&self) -> Result<u64, LedgerError> {
+    async fn current_timestamp(&self) -> Result<u64, EffectApiError> {
         Ok(TimeEffects::current_timestamp(self).await)
     }
 
-    async fn ledger_device_id(&self) -> Result<DeviceId, LedgerError> {
-        Err(LedgerError::NotAvailable)
+    async fn effect_api_device_id(&self) -> Result<DeviceId, EffectApiError> {
+        Ok(DeviceId::new()) // Return a stub device ID for compatibility
     }
 
-    async fn new_uuid(&self) -> Result<Uuid, LedgerError> {
+    async fn new_uuid(&self) -> Result<Uuid, EffectApiError> {
         Ok(Uuid::new_v4())
     }
 }
@@ -787,12 +828,412 @@ impl ChoreographicEffects for AuraEffectSystem {
     }
 }
 
+/// Arc wrapper for AuraEffectSystem that implements effect traits
+/// This is a newtype to work around orphan rules while providing shared access
+#[derive(Debug, Clone)]
+pub struct SharedAuraEffectSystem(pub Arc<AuraEffectSystem>);
+
+impl SharedAuraEffectSystem {
+    /// Create a new shared effect system
+    pub fn new(system: AuraEffectSystem) -> Self {
+        Self(Arc::new(system))
+    }
+
+    /// Create a new shared effect system from Arc
+    pub fn from_arc(arc: Arc<AuraEffectSystem>) -> Self {
+        Self(arc)
+    }
+
+    /// Get the underlying Arc
+    pub fn into_arc(self) -> Arc<AuraEffectSystem> {
+        self.0
+    }
+}
+
+impl std::ops::Deref for SharedAuraEffectSystem {
+    type Target = AuraEffectSystem;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+// Implement effect traits for SharedAuraEffectSystem by delegating to the inner type
+#[async_trait]
+impl ConsoleEffects for SharedAuraEffectSystem {
+    async fn log_info(&self, message: &str) -> Result<(), AuraError> {
+        ConsoleEffects::log_info(self.0.as_ref(), message).await
+    }
+
+    async fn log_warn(&self, message: &str) -> Result<(), AuraError> {
+        ConsoleEffects::log_warn(self.0.as_ref(), message).await
+    }
+
+    async fn log_error(&self, message: &str) -> Result<(), AuraError> {
+        ConsoleEffects::log_error(self.0.as_ref(), message).await
+    }
+
+    async fn log_debug(&self, message: &str) -> Result<(), AuraError> {
+        ConsoleEffects::log_debug(self.0.as_ref(), message).await
+    }
+}
+
+#[async_trait]
+impl CryptoEffects for SharedAuraEffectSystem {
+    async fn hkdf_derive(
+        &self,
+        ikm: &[u8],
+        salt: &[u8],
+        info: &[u8],
+        output_len: usize,
+    ) -> Result<Vec<u8>, CryptoError> {
+        CryptoEffects::hkdf_derive(self.0.as_ref(), ikm, salt, info, output_len).await
+    }
+
+    async fn derive_key(
+        &self,
+        master_key: &[u8],
+        context: &KeyDerivationContext,
+    ) -> Result<Vec<u8>, CryptoError> {
+        CryptoEffects::derive_key(self.0.as_ref(), master_key, context).await
+    }
+
+    async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+        CryptoEffects::ed25519_generate_keypair(self.0.as_ref()).await
+    }
+
+    async fn ed25519_sign(
+        &self,
+        message: &[u8],
+        private_key: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        CryptoEffects::ed25519_sign(self.0.as_ref(), message, private_key).await
+    }
+
+    async fn ed25519_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, CryptoError> {
+        CryptoEffects::ed25519_verify(self.0.as_ref(), message, signature, public_key).await
+    }
+
+    async fn frost_generate_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<FrostKeyGenResult, CryptoError> {
+        CryptoEffects::frost_generate_keys(self.0.as_ref(), threshold, max_signers).await
+    }
+
+    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
+        CryptoEffects::frost_generate_nonces(self.0.as_ref()).await
+    }
+
+    async fn frost_create_signing_package(
+        &self,
+        message: &[u8],
+        nonces: &[Vec<u8>],
+        participants: &[u16],
+        public_key_package: &[u8],
+    ) -> Result<FrostSigningPackage, CryptoError> {
+        CryptoEffects::frost_create_signing_package(
+            self.0.as_ref(),
+            message,
+            nonces,
+            participants,
+            public_key_package,
+        )
+        .await
+    }
+
+    async fn frost_sign_share(
+        &self,
+        signing_package: &FrostSigningPackage,
+        key_share: &[u8],
+        nonces: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        CryptoEffects::frost_sign_share(self.0.as_ref(), signing_package, key_share, nonces).await
+    }
+
+    async fn frost_aggregate_signatures(
+        &self,
+        signing_package: &FrostSigningPackage,
+        signature_shares: &[Vec<u8>],
+    ) -> Result<Vec<u8>, CryptoError> {
+        CryptoEffects::frost_aggregate_signatures(
+            self.0.as_ref(),
+            signing_package,
+            signature_shares,
+        )
+        .await
+    }
+
+    async fn frost_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        group_public_key: &[u8],
+    ) -> Result<bool, CryptoError> {
+        CryptoEffects::frost_verify(self.0.as_ref(), message, signature, group_public_key).await
+    }
+
+    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        CryptoEffects::ed25519_public_key(self.0.as_ref(), private_key).await
+    }
+
+    async fn chacha20_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        CryptoEffects::chacha20_encrypt(self.0.as_ref(), plaintext, key, nonce).await
+    }
+
+    async fn chacha20_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        CryptoEffects::chacha20_decrypt(self.0.as_ref(), ciphertext, key, nonce).await
+    }
+
+    async fn aes_gcm_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        CryptoEffects::aes_gcm_encrypt(self.0.as_ref(), plaintext, key, nonce).await
+    }
+
+    async fn aes_gcm_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        CryptoEffects::aes_gcm_decrypt(self.0.as_ref(), ciphertext, key, nonce).await
+    }
+
+    async fn frost_rotate_keys(
+        &self,
+        old_shares: &[Vec<u8>],
+        old_threshold: u16,
+        new_threshold: u16,
+        new_max_signers: u16,
+    ) -> Result<FrostKeyGenResult, CryptoError> {
+        CryptoEffects::frost_rotate_keys(
+            self.0.as_ref(),
+            old_shares,
+            old_threshold,
+            new_threshold,
+            new_max_signers,
+        )
+        .await
+    }
+
+    fn is_simulated(&self) -> bool {
+        CryptoEffects::is_simulated(self.0.as_ref())
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        CryptoEffects::crypto_capabilities(self.0.as_ref())
+    }
+
+    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+        CryptoEffects::constant_time_eq(self.0.as_ref(), a, b)
+    }
+
+    fn secure_zero(&self, data: &mut [u8]) {
+        CryptoEffects::secure_zero(self.0.as_ref(), data)
+    }
+}
+
+#[async_trait]
+impl NetworkEffects for SharedAuraEffectSystem {
+    async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
+        NetworkEffects::send_to_peer(self.0.as_ref(), peer_id, message).await
+    }
+
+    async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError> {
+        NetworkEffects::broadcast(self.0.as_ref(), message).await
+    }
+
+    async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
+        NetworkEffects::receive(self.0.as_ref()).await
+    }
+
+    async fn receive_from(&self, peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
+        NetworkEffects::receive_from(self.0.as_ref(), peer_id).await
+    }
+
+    async fn connected_peers(&self) -> Vec<Uuid> {
+        NetworkEffects::connected_peers(self.0.as_ref()).await
+    }
+
+    async fn is_peer_connected(&self, peer_id: Uuid) -> bool {
+        NetworkEffects::is_peer_connected(self.0.as_ref(), peer_id).await
+    }
+
+    async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
+        NetworkEffects::subscribe_to_peer_events(self.0.as_ref()).await
+    }
+}
+
+#[async_trait]
+impl TimeEffects for SharedAuraEffectSystem {
+    async fn current_epoch(&self) -> u64 {
+        TimeEffects::current_epoch(self.0.as_ref()).await
+    }
+
+    async fn current_timestamp(&self) -> u64 {
+        TimeEffects::current_timestamp(self.0.as_ref()).await
+    }
+
+    async fn current_timestamp_millis(&self) -> u64 {
+        TimeEffects::current_timestamp_millis(self.0.as_ref()).await
+    }
+
+    async fn now_instant(&self) -> Instant {
+        TimeEffects::now_instant(self.0.as_ref()).await
+    }
+
+    async fn sleep_ms(&self, ms: u64) {
+        TimeEffects::sleep_ms(self.0.as_ref(), ms).await
+    }
+
+    async fn sleep_until(&self, epoch: u64) {
+        TimeEffects::sleep_until(self.0.as_ref(), epoch).await
+    }
+
+    async fn delay(&self, duration: Duration) {
+        TimeEffects::delay(self.0.as_ref(), duration).await
+    }
+
+    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
+        TimeEffects::sleep(self.0.as_ref(), duration_ms).await
+    }
+
+    async fn yield_until(&self, condition: WakeCondition) -> Result<(), TimeError> {
+        TimeEffects::yield_until(self.0.as_ref(), condition).await
+    }
+
+    async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
+        TimeEffects::wait_until(self.0.as_ref(), condition).await
+    }
+
+    async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
+        TimeEffects::set_timeout(self.0.as_ref(), timeout_ms).await
+    }
+
+    async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
+        TimeEffects::cancel_timeout(self.0.as_ref(), handle).await
+    }
+
+    fn is_simulated(&self) -> bool {
+        TimeEffects::is_simulated(self.0.as_ref())
+    }
+
+    fn register_context(&self, context_id: Uuid) {
+        TimeEffects::register_context(self.0.as_ref(), context_id)
+    }
+
+    fn unregister_context(&self, context_id: Uuid) {
+        TimeEffects::unregister_context(self.0.as_ref(), context_id)
+    }
+
+    async fn notify_events_available(&self) {
+        TimeEffects::notify_events_available(self.0.as_ref()).await
+    }
+
+    fn resolution_ms(&self) -> u64 {
+        TimeEffects::resolution_ms(self.0.as_ref())
+    }
+}
+
+#[async_trait]
+impl JournalEffects for SharedAuraEffectSystem {
+    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
+        JournalEffects::merge_facts(self.0.as_ref(), target, delta).await
+    }
+
+    async fn refine_caps(
+        &self,
+        target: &Journal,
+        refinement: &Journal,
+    ) -> Result<Journal, AuraError> {
+        JournalEffects::refine_caps(self.0.as_ref(), target, refinement).await
+    }
+
+    async fn get_journal(&self) -> Result<Journal, AuraError> {
+        JournalEffects::get_journal(self.0.as_ref()).await
+    }
+
+    async fn persist_journal(&self, journal: &Journal) -> Result<(), AuraError> {
+        JournalEffects::persist_journal(self.0.as_ref(), journal).await
+    }
+
+    async fn get_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+    ) -> Result<FlowBudget, AuraError> {
+        JournalEffects::get_flow_budget(self.0.as_ref(), context, peer).await
+    }
+
+    async fn update_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+        budget: &FlowBudget,
+    ) -> Result<FlowBudget, AuraError> {
+        JournalEffects::update_flow_budget(self.0.as_ref(), context, peer, budget).await
+    }
+
+    async fn charge_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+        cost: u32,
+    ) -> Result<FlowBudget, AuraError> {
+        JournalEffects::charge_flow_budget(self.0.as_ref(), context, peer, cost).await
+    }
+}
+
+#[async_trait]
+impl RandomEffects for SharedAuraEffectSystem {
+    async fn random_bytes(&self, count: usize) -> Vec<u8> {
+        RandomEffects::random_bytes(self.0.as_ref(), count).await
+    }
+
+    async fn random_bytes_32(&self) -> [u8; 32] {
+        RandomEffects::random_bytes_32(self.0.as_ref()).await
+    }
+
+    async fn random_u64(&self) -> u64 {
+        RandomEffects::random_u64(self.0.as_ref()).await
+    }
+
+    async fn random_range(&self, min: u64, max: u64) -> u64 {
+        RandomEffects::random_range(self.0.as_ref(), min, max).await
+    }
+
+    async fn random_uuid(&self) -> Uuid {
+        RandomEffects::random_uuid(self.0.as_ref()).await
+    }
+}
+
 // Implement SystemEffects with stub implementations
 #[async_trait]
 impl SystemEffects for AuraEffectSystem {
     async fn log(&self, level: &str, component: &str, message: &str) -> Result<(), SystemError> {
         // Stub: log to console
-        let _ = ConsoleEffects::log_info(self, &format!("[{}] {}: {}", level, component, message)).await;
+        let _ = ConsoleEffects::log_info(self, &format!("[{}] {}: {}", level, component, message))
+            .await;
         Ok(())
     }
 
@@ -809,7 +1250,11 @@ impl SystemEffects for AuraEffectSystem {
             .map(|(k, v)| format!("{}={}", k, v))
             .collect::<Vec<_>>()
             .join(", ");
-        let _ = ConsoleEffects::log_info(self, &format!("[{}] {}: {} [{}]", level, component, message, context_str)).await;
+        let _ = ConsoleEffects::log_info(
+            self,
+            &format!("[{}] {}: {} [{}]", level, component, message, context_str),
+        )
+        .await;
         Ok(())
     }
 

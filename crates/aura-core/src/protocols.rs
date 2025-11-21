@@ -25,7 +25,7 @@ pub enum ProtocolType {
     Locking,
     /// Lock acquisition protocol
     LockAcquisition,
-    /// Ledger compaction protocol for state optimization
+    /// Effect API compaction protocol for state optimization
     Compaction,
 }
 
@@ -100,7 +100,7 @@ pub enum OperationType {
     Locking,
     /// Counter reservation operation
     Counter,
-    /// Ledger compaction operation
+    /// Effect API compaction operation
     Compaction,
 }
 

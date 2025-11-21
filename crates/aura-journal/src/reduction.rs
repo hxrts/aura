@@ -55,7 +55,7 @@ fn apply_add_leaf(tree_state: &TreeState, public_key: &[u8]) -> TreeState {
     new_state
 }
 
-/// Apply remove leaf operation to tree state  
+/// Apply remove leaf operation to tree state
 fn apply_remove_leaf(tree_state: &TreeState, leaf_index: u32) -> TreeState {
     // Create new tree state with removed leaf
     let mut new_state = tree_state.clone();
@@ -102,29 +102,30 @@ fn apply_rotate_epoch(tree_state: &TreeState) -> TreeState {
 /// Compute deterministic hash of authority state
 fn compute_authority_state_hash(state: &AuthorityState) -> Hash32 {
     let mut hasher = hash::hasher();
-    
+
     // Hash tree state commitment
     hasher.update(b"TREE_STATE");
     hasher.update(state.tree_state.root_commitment().as_bytes());
-    
+
     // Hash fact set (deterministic order via BTreeSet)
     hasher.update(b"FACTS");
     for fact in &state.facts {
         hasher.update(fact.as_bytes());
     }
-    
+
     Hash32::new(hasher.finalize())
 }
 
 /// Compute deterministic hash of relational state
 fn compute_relational_state_hash(state: &RelationalState) -> Hash32 {
     let mut hasher = hash::hasher();
-    
+
     // Hash bindings (sorted for deterministic order)
     hasher.update(b"BINDINGS");
     let mut sorted_bindings = state.bindings.clone();
     sorted_bindings.sort_by(|a, b| {
-        a.context_id.cmp(&b.context_id)
+        a.context_id
+            .cmp(&b.context_id)
             .then(format!("{:?}", a.binding_type).cmp(&format!("{:?}", b.binding_type)))
     });
     for binding in &sorted_bindings {
@@ -132,8 +133,8 @@ fn compute_relational_state_hash(state: &RelationalState) -> Hash32 {
         hasher.update(format!("{:?}", binding.binding_type).as_bytes());
         hasher.update(&binding.data);
     }
-    
-    // Hash flow budgets (sorted for deterministic order)  
+
+    // Hash flow budgets (sorted for deterministic order)
     hasher.update(b"FLOW_BUDGETS");
     for ((source, dest, epoch), amount) in &state.flow_budgets {
         hasher.update(source.0.as_bytes());
@@ -141,7 +142,7 @@ fn compute_relational_state_hash(state: &RelationalState) -> Hash32 {
         hasher.update(&epoch.to_le_bytes());
         hasher.update(&amount.to_le_bytes());
     }
-    
+
     Hash32::new(hasher.finalize())
 }
 
@@ -205,7 +206,9 @@ pub fn reduce_authority_with_validation(journal: &Journal) -> Result<AuthoritySt
 
             // Sort operations by parent commitment to ensure proper ordering
             attested_ops.sort_by(|a, b| {
-                a.parent_commitment.as_bytes().cmp(b.parent_commitment.as_bytes())
+                a.parent_commitment
+                    .as_bytes()
+                    .cmp(b.parent_commitment.as_bytes())
             });
 
             let mut tree_state = TreeState::default();
@@ -264,14 +267,21 @@ pub struct RelationalBinding {
 /// Types of relational bindings
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RelationalBindingType {
+    /// Guardian relationship between two authorities
     GuardianBinding {
+        /// The primary account authority
         account_id: AuthorityId,
+        /// The guardian authority
         guardian_id: AuthorityId,
     },
+    /// Recovery grant from a guardian to an account
     RecoveryGrant {
+        /// The account receiving the grant
         account_id: AuthorityId,
+        /// The guardian issuing the grant
         guardian_id: AuthorityId,
     },
+    /// Generic relational binding type
     Generic(String),
 }
 
@@ -319,7 +329,9 @@ pub fn reduce_context(journal: &Journal) -> RelationalState {
                                 threshold_met: _,
                                 participant_count: _,
                             } => RelationalBinding {
-                                binding_type: RelationalBindingType::Generic("consensus".to_string()),
+                                binding_type: RelationalBindingType::Generic(
+                                    "consensus".to_string(),
+                                ),
                                 context_id: *context_id,
                                 data: [consensus_id.0.to_vec(), operation_hash.0.to_vec()].concat(),
                             },
@@ -394,6 +406,7 @@ pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<crate:
 mod tests {
     use super::*;
     use crate::fact::{FactId, SnapshotFact};
+    use crate::fact_journal::{Fact, FlowBudgetFact};
 
     #[test]
     fn test_reduce_empty_authority_journal() {

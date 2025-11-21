@@ -9,7 +9,7 @@
 #![cfg(test)]
 #![allow(dead_code)]
 
-use aura_core::DeviceId;
+use aura_core::identifiers::DeviceId;
 use aura_mpst::{
     context::{ContextIsolation, ContextType},
     leakage::{LeakageBudget, LeakageTracker, LeakageType, PrivacyContract},

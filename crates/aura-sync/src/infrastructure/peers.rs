@@ -34,13 +34,11 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use biscuit_auth::Biscuit;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{sync_config_error, sync_peer_error, SyncResult};
 use aura_core::DeviceId;
-use aura_protocol::guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
-use aura_wot::{BiscuitError, BiscuitTokenManager, ResourceScope};
+use aura_protocol::guards::BiscuitGuardEvaluator;
 
 // =============================================================================
 // Configuration

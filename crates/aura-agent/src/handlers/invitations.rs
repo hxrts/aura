@@ -1,16 +1,16 @@
 //! Invitation orchestration exposed by the agent.
 
 use crate::errors::{AuraError, Result};
+use crate::runtime::AuraEffectSystem;
+use aura_core::hash;
+use aura_core::{RelationshipId, TrustLevel};
 use aura_invitation::{
     device_invitation::{
-        shared_invitation_ledger, DeviceInvitationCoordinator, DeviceInvitationRequest,
+        shared_invitation_registry, DeviceInvitationCoordinator, DeviceInvitationRequest,
         DeviceInvitationResponse, InvitationEnvelope,
     },
     invitation_acceptance::{InvitationAcceptance, InvitationAcceptanceCoordinator},
 };
-use aura_core::{RelationshipId, TrustLevel};
-use aura_core::hash;
-use crate::runtime::AuraEffectSystem;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -39,13 +39,13 @@ impl InvitationOperations {
                 error: Some(validation_error),
             });
         }
-        
+
         // Create the invitation envelope
         let invitation = self.create_invitation_envelope(&request).await?;
-        
+
         // Simulate sending the invitation
         let send_result = self.send_invitation(&invitation).await;
-        
+
         match send_result {
             Ok(()) => Ok(DeviceInvitationResponse {
                 invitation,
@@ -80,13 +80,13 @@ impl InvitationOperations {
                 error_message: Some(validation_error),
             });
         }
-        
+
         // Process the invitation acceptance
         let acceptance = self.process_invitation_acceptance(envelope).await?;
-        
+
         Ok(acceptance)
     }
-    
+
     /// Validate an invitation request
     async fn validate_invitation_request(
         &self,
@@ -96,21 +96,22 @@ impl InvitationOperations {
         if request.inviter == request.invitee {
             return Err("Cannot invite yourself".to_string());
         }
-        
+
         // Validate TTL
         let ttl_secs = request.ttl_secs.unwrap_or(86400); // Default 24 hours
-        if ttl_secs == 0 || ttl_secs > 604800 { // Max 1 week
+        if ttl_secs == 0 || ttl_secs > 604800 {
+            // Max 1 week
             return Err("Invalid TTL: must be between 1 second and 1 week".to_string());
         }
-        
+
         // Check if device role is valid
         if request.device_role.trim().is_empty() {
             return Err("Device role cannot be empty".to_string());
         }
-        
+
         Ok(())
     }
-    
+
     /// Create invitation envelope from request
     async fn create_invitation_envelope(
         &self,
@@ -120,7 +121,7 @@ impl InvitationOperations {
         let ttl_secs = request.ttl_secs.unwrap_or(86400); // Default 24 hours
         let expires_at = created_at + ttl_secs;
         let invitation_id = format!("invitation-{}", Uuid::new_v4());
-        
+
         // Create content hash
         let mut hasher = hash::hasher();
         hasher.update(invitation_id.as_bytes());
@@ -130,7 +131,7 @@ impl InvitationOperations {
         hasher.update(&expires_at.to_be_bytes());
         hasher.update(request.device_role.as_bytes());
         let content_hash = hasher.finalize().to_vec();
-        
+
         Ok(InvitationEnvelope {
             invitation_id,
             inviter: request.inviter,
@@ -143,14 +144,14 @@ impl InvitationOperations {
             content_hash,
         })
     }
-    
+
     /// Create placeholder envelope for error cases
     async fn create_placeholder_envelope(
         &self,
         request: &DeviceInvitationRequest,
     ) -> InvitationEnvelope {
         let created_at = chrono::Utc::now().timestamp() as u64;
-        
+
         InvitationEnvelope {
             invitation_id: "error-invitation".to_string(),
             inviter: request.inviter,
@@ -163,27 +164,30 @@ impl InvitationOperations {
             content_hash: vec![],
         }
     }
-    
+
     /// Simulate sending invitation
     async fn send_invitation(&self, _invitation: &InvitationEnvelope) -> Result<()> {
         // In a real implementation, this would:
-        // 1. Store the invitation in the shared ledger
+        // 1. Store the invitation in the shared effect API
         // 2. Send the invitation through the transport layer
         // 3. Handle delivery confirmation
-        
+
         // For now, simulate successful sending
         Ok(())
     }
-    
+
     /// Validate invitation envelope
-    async fn validate_invitation_envelope(&self, envelope: &InvitationEnvelope) -> std::result::Result<(), String> {
+    async fn validate_invitation_envelope(
+        &self,
+        envelope: &InvitationEnvelope,
+    ) -> std::result::Result<(), String> {
         let current_time = chrono::Utc::now().timestamp() as u64;
-        
+
         // Check if invitation has expired
         if current_time > envelope.expires_at {
             return Err("Invitation has expired".to_string());
         }
-        
+
         // Validate content hash integrity
         let mut hasher = hash::hasher();
         hasher.update(envelope.invitation_id.as_bytes());
@@ -193,34 +197,34 @@ impl InvitationOperations {
         hasher.update(&envelope.expires_at.to_be_bytes());
         hasher.update(envelope.device_role.as_bytes());
         let expected_hash = hasher.finalize().to_vec();
-        
+
         if expected_hash != envelope.content_hash {
             return Err("Invalid invitation: content hash mismatch".to_string());
         }
-        
+
         Ok(())
     }
-    
+
     /// Process invitation acceptance
     async fn process_invitation_acceptance(
         &self,
         envelope: InvitationEnvelope,
     ) -> Result<InvitationAcceptance> {
         let accepted_at = chrono::Utc::now().timestamp() as u64;
-        
+
         // In a real implementation, this would:
         // 1. Create device relationship in the journal
         // 2. Add capabilities to the device
-        // 3. Update the invitation ledger
+        // 3. Update the invitation effect API
         // 4. Send confirmation back to inviter
-        
+
         // Simulate relationship creation
         let uuid = Uuid::new_v4();
         let uuid_bytes = uuid.as_bytes();
         let mut relationship_bytes = [0u8; 32];
         relationship_bytes[..16].copy_from_slice(uuid_bytes);
         let relationship_id = Some(RelationshipId(relationship_bytes));
-        
+
         // Simulate successful acceptance
         let acceptance = InvitationAcceptance {
             invitation_id: envelope.invitation_id,
@@ -234,7 +238,7 @@ impl InvitationOperations {
             success: true,
             error_message: None,
         };
-        
+
         Ok(acceptance)
     }
 }

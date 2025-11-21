@@ -33,7 +33,7 @@ quint run <spec>.qnt
 - `deterministic_key_derivation.qnt` - DKD protocol for context-specific keys
 - `session_epochs.qnt` - Session epoch and presence ticket management
 - `counter_coordination.qnt` - SSB counter coordination choreography
-- `journal_ledger.qnt` - CRDT-based account ledger with threshold-signed events
+- `journal_effect_api.qnt` - CRDT-based account effect_api with threshold-signed events
 - `choreographic_coordination.qnt` - Session types and protocol state machines
 - `social_bulletin_board.qnt` - SBB web-of-trust and peer discovery
 - `group_communication.qnt` - BeeKEM/CGKA group messaging protocols
@@ -45,13 +45,13 @@ quint run <spec>.qnt
 | P2P Deterministic Key Derivation | `deterministic_key_derivation.qnt` | [OK] Core |
 | Session Management & Presence | `session_epochs.qnt` | [OK] Core |
 | Distributed Counter Coordination | `counter_coordination.qnt` | [OK] Core |
-| CRDT Journal & Capabilities | `journal_ledger.qnt` | [OK] Core |
+| CRDT Journal & Capabilities | `journal_effect_api.qnt` | [OK] Core |
 | Session Types & Choreographies | `choreographic_coordination.qnt` | [CRITICAL] Critical |
 | Social Web-of-Trust & P2P Discovery | `social_bulletin_board.qnt` | [CRITICAL] Critical |
 | BeeKEM Group Communication | `group_communication.qnt` | [CRITICAL] Critical |
 | Key Resharing & Recovery | Covered in `threshold_signatures.qnt` | [OK] Integrated |
 | Transport & Network Protocols | Covered in `social_bulletin_board.qnt` | [OK] Integrated |
-| Storage & Replication | Covered in `journal_ledger.qnt` | [OK] Integrated |
+| Storage & Replication | Covered in `journal_effect_api.qnt` | [OK] Integrated |
 | Device Authentication | Covered in `session_epochs.qnt` | [OK] Integrated |
 | Error Recovery & Byzantine Faults | Cross-cutting in all specs | [OK] Integrated |
 

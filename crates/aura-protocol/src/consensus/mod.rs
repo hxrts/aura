@@ -19,34 +19,36 @@ pub mod witness;
 // Re-export core types
 pub use commit_fact::{CommitFact, ConsensusId};
 pub use coordinator::{ConsensusCoordinator, ConsensusInstance};
+pub use choreography::run_consensus_choreography;
 pub use witness::{WitnessMessage, WitnessSet, WitnessShare};
 
-use aura_core::{AuthorityId, Hash32, Result};
-use aura_relational::prestate::Prestate;
+use aura_core::{hash, AuthorityId, Hash32, Result, Prestate};
+use serde_json;
 use serde::Serialize;
 
 /// Run consensus on an operation with the specified witnesses
 ///
-/// This is the main entry point for running Aura Consensus on an operation.
-/// It replaces the stub implementation in aura-relational.
+/// This is the main entry point for running Aura Consensus on an operation
+/// using the choreography-defined protocol.
 pub async fn run_consensus<T: Serialize>(
     prestate: &Prestate,
     operation: &T,
     witnesses: Vec<AuthorityId>,
     threshold: u16,
 ) -> Result<CommitFact> {
-    // Create coordinator
-    let mut coordinator = ConsensusCoordinator::new();
+    let prestate_hash = prestate.compute_hash();
+    let operation_bytes =
+        serde_json::to_vec(operation).map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
+    let operation_hash = hash_operation(&operation_bytes)?;
 
-    // Start consensus instance
-    let instance_id = coordinator
-        .start_consensus(prestate.clone(), operation, witnesses, threshold)
-        .await?;
-
-    // Run the consensus protocol
-    let commit_fact = coordinator.run_protocol(instance_id).await?;
-
-    Ok(commit_fact)
+    run_consensus_choreography(
+        prestate_hash,
+        operation_hash,
+        operation_bytes,
+        witnesses,
+        threshold,
+    )
+    .await
 }
 
 /// Consensus configuration
@@ -77,6 +79,13 @@ impl ConsensusConfig {
     pub fn has_quorum(&self) -> bool {
         self.witness_set.len() >= self.threshold as usize
     }
+}
+
+fn hash_operation(bytes: &[u8]) -> Result<Hash32> {
+    let mut hasher = hash::hasher();
+    hasher.update(b"AURA_CONSENSUS_OP");
+    hasher.update(bytes);
+    Ok(Hash32(hasher.finalize()))
 }
 
 #[cfg(test)]

@@ -330,11 +330,11 @@ impl AuraEffectSystemBuilder {
                         )),
                     );
                 }
-                if !self.custom_handlers.contains_key(&EffectType::Ledger) {
+                if !self.custom_handlers.contains_key(&EffectType::EffectApi) {
                     builder = builder.with_handler(
-                        EffectType::Ledger,
-                        Arc::new(LedgerHandlerAdapter::new(
-                            crate::handlers::ledger::memory::MemoryLedgerHandler::new(),
+                        EffectType::EffectApi,
+                        Arc::new(EffectApiHandlerAdapter::new(
+                            crate::handlers::effect_api::memory::MemoryLedgerHandler::new(),
                             mode,
                         )),
                     );

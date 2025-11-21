@@ -3,10 +3,10 @@
 //! This module implements the coordinator role for Aura Consensus,
 //! managing consensus instances and orchestrating the protocol flow.
 
-use super::{CommitFact, ConsensusConfig, ConsensusId, WitnessMessage, WitnessSet, WitnessShare};
+use super::{CommitFact, ConsensusId, WitnessMessage, WitnessSet, WitnessShare};
 use aura_core::frost::{ThresholdSignature, NonceCommitment, PartialSignature};
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
-use aura_relational::prestate::Prestate;
+use aura_core::Prestate;
 use serde::Serialize;
 use std::collections::BTreeMap;
 use tokio::time::{timeout, Duration};

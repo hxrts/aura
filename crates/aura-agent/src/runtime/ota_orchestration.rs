@@ -31,8 +31,8 @@
 //! - Soft forks allow gradual adoption without forced gates
 //! - Security patches can be mandatory via policies
 //! - Cache invalidation events synchronize protocol state
-//! - Forward compatibility for deprecated protocol versions
 
+use crate::runtime::choreographic::ChoreographyError;
 use crate::runtime::AuraHandlerAdapter;
 use aura_core::effects::TimeEffects;
 use aura_core::{
@@ -42,7 +42,6 @@ use aura_core::{
     Hash32,
     SemanticVersion,
 };
-use crate::runtime::choreographic::ChoreographyError;
 use aura_protocol::AuraHandlerError;
 
 // TODO: These types should be moved to aura-core maintenance module when it's created
@@ -296,8 +295,7 @@ impl UpgradeOrchestrator {
         adapter: &AuraHandlerAdapter,
         proposal: &UpgradeProposal,
     ) -> Result<(), OtaError> {
-        let timestamp =
-            aura_core::effects::TimeEffects::current_timestamp(adapter.effects()).await;
+        let timestamp = aura_core::effects::TimeEffects::current_timestamp(adapter.effects()).await;
 
         let message = UpgradeMessage {
             proposal_id: Uuid::parse_str(&proposal.package_id).map_err(|e| {
@@ -367,8 +365,7 @@ impl UpgradeOrchestrator {
         proposal: &UpgradeProposal,
         quorum_count: u16,
     ) -> Result<(), OtaError> {
-        let timestamp =
-            aura_core::effects::TimeEffects::current_timestamp(adapter.effects()).await;
+        let timestamp = aura_core::effects::TimeEffects::current_timestamp(adapter.effects()).await;
 
         let activation_epoch = proposal.activation_fence;
 

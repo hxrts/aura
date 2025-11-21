@@ -59,7 +59,7 @@ impl UnifiedAuraHandlerBridge {
                     | EffectType::Time
                     | EffectType::Console
                     | EffectType::Random
-                    | EffectType::Ledger
+                    | EffectType::EffectApi
                     | EffectType::Journal
                     | EffectType::Tree
                     | EffectType::Choreographic
@@ -88,7 +88,7 @@ impl UnifiedAuraHandlerBridge {
                 | EffectType::Time
                 | EffectType::Console
                 | EffectType::Random
-                | EffectType::Ledger
+                | EffectType::EffectApi
                 | EffectType::Journal
                 | EffectType::Tree
                 | EffectType::Choreographic
@@ -189,8 +189,8 @@ impl AuraHandler for UnifiedAuraHandlerBridge {
                 self.execute_random_effect(&*effects_guard, operation, parameters)
                     .await
             }
-            EffectType::Ledger => {
-                self.execute_ledger_effect(&*effects_guard, operation, parameters)
+            EffectType::EffectApi => {
+                self.execute_effect_api_effect(&*effects_guard, operation, parameters)
                     .await
             }
             EffectType::Journal => {
@@ -539,8 +539,8 @@ impl UnifiedAuraHandlerBridge {
         }
     }
 
-    /// Execute ledger effects through the wrapped implementation
-    async fn execute_ledger_effect(
+    /// Execute effect_api effects through the wrapped implementation
+    async fn execute_effect_api_effect(
         &self,
         effects: &dyn AuraEffects,
         operation: &str,
@@ -548,7 +548,7 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "current_epoch" => {
-                let result = crate::effects::ledger::LedgerEffects::current_epoch(effects)
+                let result = crate::effects::effect_api::EffectApiEffects::current_epoch(effects)
                     .await
                     .map_err(|e| AuraHandlerError::ExecutionFailed {
                         source: Box::new(e),
@@ -556,7 +556,7 @@ impl UnifiedAuraHandlerBridge {
                 Ok(bincode::serialize(&result).unwrap_or_default())
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {
-                effect_type: EffectType::Ledger,
+                effect_type: EffectType::EffectApi,
                 operation: operation.to_string(),
             }),
         }

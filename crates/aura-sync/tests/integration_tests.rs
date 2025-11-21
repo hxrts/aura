@@ -52,12 +52,12 @@ mod integration_test_examples {
         // Test should be able to create devices and sessions
         assert_eq!(fixture.devices.len(), 3);
 
-        let session_id = fixture.create_coordinated_session("example").await?;
-        println!("Created test session: {:?}", session_id);
+        let session = fixture.create_coordinated_session("example").await?;
+        println!("Created test session");
 
         // Clean completion
         fixture
-            .wait_for_session_completion(session_id, Duration::from_secs(10))
+            .wait_for_session_completion(&session, Duration::from_secs(10))
             .await?;
 
         Ok(())
