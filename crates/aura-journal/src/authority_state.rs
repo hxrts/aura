@@ -11,6 +11,20 @@ use crate::{
 use async_trait::async_trait;
 use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
 use ed25519_dalek::{Signature, VerifyingKey as PublicKey};
+use std::sync::LazyLock;
+
+/// Fallback public key for when key derivation fails
+#[allow(clippy::incompatible_msrv)] // LazyLock is fine for this fallback code
+#[allow(clippy::expect_used)] // Hard-coded valid key - expect is safe here
+static FALLBACK_PUBLIC_KEY: LazyLock<PublicKey> = LazyLock::new(|| {
+    const VALID_PUBKEY_BYTES: [u8; 32] = [
+        0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+        0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+        0x66, 0x66,
+    ];
+    PublicKey::from_bytes(&VALID_PUBKEY_BYTES)
+        .expect("Hard-coded valid Ed25519 public key should parse successfully")
+});
 
 /// Authority state derived from facts
 #[derive(Debug, Clone)]
@@ -104,9 +118,9 @@ impl Authority for DerivedAuthority {
             .unwrap_or_else(|| vec![0; 32]);
 
         // Convert to PublicKey (ed25519_dalek::VerifyingKey)
-        let array: [u8; 32] = key_bytes.try_into().unwrap_or_else(|_| [0; 32]);
+        let array: [u8; 32] = key_bytes.try_into().unwrap_or([0; 32]);
 
-        PublicKey::from_bytes(&array).unwrap_or_else(|_| PublicKey::from_bytes(&[0; 32]).unwrap())
+        PublicKey::from_bytes(&array).unwrap_or(*FALLBACK_PUBLIC_KEY)
     }
 
     fn root_commitment(&self) -> Hash32 {

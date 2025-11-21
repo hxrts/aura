@@ -907,7 +907,7 @@ impl MonitoringSystemHandler {
 
     #[cfg(target_os = "linux")]
     fn parse_memory_line(line: &str) -> Result<u64, SystemError> {
-        let parts: Vec<&str> = line.trim().split_whitespace().collect();
+        let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.is_empty() {
             return Err(SystemError::OperationFailed {
                 message: "parse memory line failed: Empty line".to_string(),

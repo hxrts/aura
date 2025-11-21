@@ -27,6 +27,7 @@ impl TcpTransportHandler {
     }
 
     /// Create with default configuration
+    #[allow(clippy::should_implement_trait)] // Method provides default config, not implementing Default trait
     pub fn default() -> Self {
         Self::new(TransportConfig::default())
     }
@@ -100,7 +101,7 @@ impl TcpTransportHandler {
 
     /// Send data over TCP stream
     pub async fn send(&self, stream: &mut TcpStream, data: &[u8]) -> TransportResult<usize> {
-        let _ = timeout(self.config.write_timeout, stream.write_all(data))
+        timeout(self.config.write_timeout, stream.write_all(data))
             .await
             .map_err(|_| TransportError::Timeout("TCP write timeout".to_string()))?
             .map_err(TransportError::Io)?;

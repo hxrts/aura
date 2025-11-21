@@ -184,20 +184,17 @@ impl LeakageBudget {
 
 /// Policy for handling undefined budgets
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum UndefinedBudgetPolicy {
     /// Allow unlimited access (legacy behavior, less secure)
     Allow,
     /// Deny access (secure default)
+    #[default]
     Deny,
     /// Use a default budget with specified limit
     DefaultBudget(u64),
 }
 
-impl Default for UndefinedBudgetPolicy {
-    fn default() -> Self {
-        Self::Deny // Secure by default
-    }
-}
 
 /// Leakage tracker for privacy contract enforcement
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -1,11 +1,14 @@
 use aura_agent::runtime::AuthorityManager;
 use aura_core::AuthorityId;
+use aura_effects::random::MockRandomHandler;
 
 #[tokio::test]
 async fn creates_and_lists_authorities() {
     let mut manager = AuthorityManager::new("/tmp/aura-authority-tests".into());
+    let random = MockRandomHandler::new_with_seed(42);
+
     let authority_id = manager
-        .create_authority(Vec::new(), 1)
+        .create_authority(&random, Vec::new(), 1)
         .await
         .expect("create authority");
 

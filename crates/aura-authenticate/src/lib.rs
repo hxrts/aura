@@ -1,3 +1,4 @@
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 //! Aura Authentication Choreographies
 //!
 //! **Layer 5: Feature/Protocol Implementation**

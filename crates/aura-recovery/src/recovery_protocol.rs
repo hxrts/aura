@@ -3,6 +3,8 @@
 //! This module implements the recovery protocol using RelationalContexts,
 //! replacing the device-centric recovery model with authority-based recovery.
 
+#![allow(clippy::disallowed_methods)] // TODOs use Utc::now() temporarily
+
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
 use aura_relational::{

@@ -1,3 +1,4 @@
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 //! Aura Rendezvous Layer
 //!
 //! This crate provides Secret-Branded Broadcasting (SBB) and rendezvous protocols

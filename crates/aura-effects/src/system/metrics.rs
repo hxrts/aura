@@ -585,7 +585,7 @@ impl MetricsSystemHandler {
         let variance = ((counter % 47) as f64 * 0.5).sin() * 8.0; // Sine wave for variance
         let random_factor = (counter % 13) as f64 * 0.3; // Small random component
 
-        let cpu_usage = (base_usage + variance + random_factor).max(5.0).min(85.0);
+        let cpu_usage = (base_usage + variance + random_factor).clamp(5.0, 85.0);
         Ok(cpu_usage)
     }
 
@@ -687,7 +687,7 @@ impl MetricsSystemHandler {
 
     #[cfg(target_os = "linux")]
     fn parse_memory_line(line: &str) -> Result<u64, SystemError> {
-        let parts: Vec<&str> = line.trim().split_whitespace().collect();
+        let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.is_empty() {
             return Err(SystemError::OperationFailed {
                 message: "parse memory line failed: Empty line".to_string(),

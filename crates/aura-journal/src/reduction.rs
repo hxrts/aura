@@ -405,7 +405,7 @@ pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<crate:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fact::{FactId, SnapshotFact};
+    use crate::fact::FactId;
     use crate::fact_journal::{Fact, FlowBudgetFact};
 
     #[test]
@@ -424,7 +424,7 @@ mod tests {
 
         // Add a guardian binding fact
         let fact = Fact {
-            fact_id: FactId::new(),
+            fact_id: FactId::from_bytes([1u8; 16]),
             content: FactContent::Relational(RelationalFact::GuardianBinding {
                 account_id: AuthorityId::new(),
                 guardian_id: AuthorityId::new(),
@@ -453,8 +453,10 @@ mod tests {
 
         // Add multiple flow budget facts
         for i in 1..=3 {
+            let mut fact_bytes = [0u8; 16];
+            fact_bytes[0] = i as u8;
             let fact = Fact {
-                fact_id: FactId::new(),
+                fact_id: FactId::from_bytes(fact_bytes),
                 content: FactContent::FlowBudget(FlowBudgetFact {
                     context_id: ctx_id,
                     source,

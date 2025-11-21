@@ -346,8 +346,14 @@ impl ContextRendezvousCoordinator {
 
     /// Store receipt as journal fact
     async fn store_receipt_fact(&self, receipt: RendezvousReceipt) -> AuraResult<()> {
+        use aura_core::effects::RandomEffects;
+        use aura_journal::FactId;
+
+        // Generate random fact ID using effect system
+        let fact_id = FactId::generate(self.effects.as_ref()).await;
+
         let fact = Fact {
-            fact_id: aura_journal::FactId::new(),
+            fact_id,
             content: FactContent::RendezvousReceipt {
                 envelope_id: receipt.envelope_id,
                 authority_id: receipt.authority_id,

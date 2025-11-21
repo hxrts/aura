@@ -7,6 +7,8 @@
 //! These utilities should remain minimal and focused only on creating deterministic instances
 //! of core types for testing purposes.
 
+#![allow(clippy::expect_used)] // Test utilities use expect for fixed-size slice conversions
+
 use crate::hash::hash;
 use crate::{AccountId, SessionId};
 use crate::identifiers::DeviceId;
@@ -29,7 +31,9 @@ use uuid::Uuid;
 pub fn test_device_id(seed: u64) -> DeviceId {
     let hash_input = format!("device-{}", seed);
     let hash_bytes = hash(hash_input.as_bytes());
-    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    let uuid_bytes: [u8; 16] = hash_bytes[..16]
+        .try_into()
+        .expect("Slice of exactly 16 bytes should convert to [u8; 16]");
     DeviceId(Uuid::from_bytes(uuid_bytes))
 }
 
@@ -48,7 +52,9 @@ pub fn test_device_id(seed: u64) -> DeviceId {
 pub fn test_authority_id(seed: u64) -> AuthorityId {
     let hash_input = format!("authority-{}", seed);
     let hash_bytes = hash(hash_input.as_bytes());
-    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    let uuid_bytes: [u8; 16] = hash_bytes[..16]
+        .try_into()
+        .expect("Slice of exactly 16 bytes should convert to [u8; 16]");
     AuthorityId(Uuid::from_bytes(uuid_bytes))
 }
 
@@ -67,7 +73,9 @@ pub fn test_authority_id(seed: u64) -> AuthorityId {
 pub fn test_account_id(seed: u64) -> AccountId {
     let hash_input = format!("account-{}", seed);
     let hash_bytes = hash(hash_input.as_bytes());
-    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    let uuid_bytes: [u8; 16] = hash_bytes[..16]
+        .try_into()
+        .expect("Slice of exactly 16 bytes should convert to [u8; 16]");
     AccountId(Uuid::from_bytes(uuid_bytes))
 }
 
@@ -86,7 +94,9 @@ pub fn test_account_id(seed: u64) -> AccountId {
 pub fn test_session_id(seed: u64) -> SessionId {
     let hash_input = format!("session-{}", seed);
     let hash_bytes = hash(hash_input.as_bytes());
-    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    let uuid_bytes: [u8; 16] = hash_bytes[..16]
+        .try_into()
+        .expect("Slice of exactly 16 bytes should convert to [u8; 16]");
     SessionId(Uuid::from_bytes(uuid_bytes))
 }
 

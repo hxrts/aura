@@ -16,11 +16,9 @@
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_placeholder() {
         // Tests will be added once the type system migration is complete
-        assert!(true);
+        // Placeholder test - nothing to validate yet
     }
 }

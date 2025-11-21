@@ -384,7 +384,6 @@ impl Default for CapabilityStatistics {
 }
 
 /// Helper functions for common capability token operations
-
 impl CapabilityTokenRequest {
     /// Create a standard token request with common settings
     pub fn standard(subject: &str, permissions: &[String]) -> Self {

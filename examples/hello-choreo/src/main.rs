@@ -146,7 +146,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("✓ Type-safe role system and builder pattern");
     println!("✓ Rumpsteak-aura session types integration");
     println!("✓ Choreographic projection and deadlock freedom");
-    println!("");
+    println!();
     println!("Note: This example now uses the complete aura-macros choreography macro!");
     println!("The macro generates both Aura effects and rumpsteak session types.");
 

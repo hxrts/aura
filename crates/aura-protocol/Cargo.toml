@@ -83,6 +83,7 @@ biscuit-auth = { workspace = true }
 [dev-dependencies]
 # Testing infrastructure (Layer 4 can use testkit)
 aura-testkit = { path = "../aura-testkit" }
+aura-agent = { path = "../aura-agent" }
 
 # Property testing and benchmarking
 proptest = { workspace = true }

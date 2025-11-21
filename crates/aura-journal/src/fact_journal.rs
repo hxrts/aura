@@ -5,6 +5,7 @@
 //! CRDT using set union for convergence.
 
 use aura_core::{
+    effects::RandomEffects,
     identifiers::{AuthorityId, ContextId},
     semilattice::JoinSemilattice,
     Hash32, Result,
@@ -106,24 +107,59 @@ impl Journal {
 }
 
 /// Unique identifier for facts
+///
+/// # Effect System Integration
+///
+/// FactId should be created using UUIDs from `RandomEffects::random_uuid()` to maintain
+/// the effect system boundaries. Direct construction with `new_v4()` bypasses the effect
+/// system and prevents deterministic testing.
+///
+/// # Example
+/// ```ignore
+/// // Correct: Use RandomEffects
+/// let uuid = random_effects.random_uuid().await;
+/// let fact_id = FactId::from_uuid(uuid);
+///
+/// // Incorrect: Direct random generation (disallowed)
+/// // let fact_id = FactId::new(); // This method has been removed
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FactId(pub uuid::Uuid);
 
 impl FactId {
-    /// Create a new random fact ID
-    pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4())
+    /// Generate a new random FactId using the effect system
+    ///
+    /// This is the preferred method for creating FactIds in production code.
+    /// It uses RandomEffects to ensure deterministic testing and proper effect boundaries.
+    ///
+    /// # Example
+    /// ```ignore
+    /// use aura_core::effects::RandomEffects;
+    /// use aura_journal::FactId;
+    ///
+    /// async fn create_fact(random: &dyn RandomEffects) {
+    ///     let fact_id = FactId::generate(random).await;
+    ///     // use fact_id...
+    /// }
+    /// ```
+    pub async fn generate(random: &dyn RandomEffects) -> Self {
+        let uuid = random.random_uuid().await;
+        Self(uuid)
     }
 
-    /// Create from a UUID
+    /// Create a FactId from a UUID
+    ///
+    /// The UUID should be obtained from `RandomEffects::random_uuid()` to maintain
+    /// effect system boundaries and enable deterministic testing.
     pub fn from_uuid(uuid: uuid::Uuid) -> Self {
         Self(uuid)
     }
-}
 
-impl Default for FactId {
-    fn default() -> Self {
-        Self::new()
+    /// Create a deterministic FactId from bytes (for testing)
+    ///
+    /// This should only be used in tests or when you have a deterministic UUID source.
+    pub fn from_bytes(bytes: [u8; 16]) -> Self {
+        Self(uuid::Uuid::from_bytes(bytes))
     }
 }
 
@@ -327,7 +363,7 @@ mod tests {
 
         // Add different facts to each journal
         let fact1 = Fact {
-            fact_id: FactId::new(),
+            fact_id: FactId::from_bytes([1u8; 16]),
             content: FactContent::Snapshot(SnapshotFact {
                 state_hash: Hash32::default(),
                 superseded_facts: vec![],
@@ -336,7 +372,7 @@ mod tests {
         };
 
         let fact2 = Fact {
-            fact_id: FactId::new(),
+            fact_id: FactId::from_bytes([2u8; 16]),
             content: FactContent::Snapshot(SnapshotFact {
                 state_hash: Hash32::default(),
                 superseded_facts: vec![],

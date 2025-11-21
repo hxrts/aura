@@ -3,6 +3,13 @@
 //! This module provides standard implementations of the `RandomEffects` trait
 //! defined in `aura-core`. These handlers can be used by choreographic applications
 //! and other Aura components.
+//!
+//! Note: This module legitimately uses `rand::thread_rng()` as it implements the
+//! RandomEffects trait - this is the effect handler layer where actual system
+//! randomness is provided.
+
+// Allow disallowed methods in effect handler implementations
+#![allow(clippy::disallowed_methods)]
 
 use aura_core::effects::RandomEffects;
 use aura_macros::aura_effect_handlers;

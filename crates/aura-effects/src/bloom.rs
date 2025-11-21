@@ -411,7 +411,7 @@ impl BloomEffects for RealBloomHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::effects::{BloomConfig, BloomFilter};
+    use aura_core::effects::BloomConfig;
 
     #[tokio::test]
     async fn test_mock_bloom_basic_operations() {
@@ -543,7 +543,7 @@ mod tests {
 
         let estimated = handler.bloom_estimate_count(&filter).await.unwrap();
         // Should be close to 10, but may not be exact due to estimation
-        assert!(estimated >= 5 && estimated <= 20);
+        assert!((5..=20).contains(&estimated));
     }
 
     #[tokio::test]

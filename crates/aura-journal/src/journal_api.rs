@@ -31,6 +31,7 @@ impl Journal {
     /// Create a new journal for an account
     pub fn new(account_id: AccountId) -> Self {
         // Use proper constructors for the CRDT types
+        #[allow(clippy::unwrap_used)] // Placeholder zero key - will be replaced with actual authority key
         let ed25519_key = ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap(); // placeholder
 
         // Create authority ID from account ID for namespace
@@ -80,8 +81,9 @@ impl Journal {
         let source_authority = journal_fact.source_authority;
 
         // Convert JournalFact to proper Fact with FactContent
+        // TODO: This function should be async and accept RandomEffects to generate proper FactIds
         let fact = Fact {
-            fact_id: FactId::new(),
+            fact_id: FactId::from_bytes([0u8; 16]), // Placeholder - should use RandomEffects::random_uuid()
             content: FactContent::FlowBudget(crate::fact_journal::FlowBudgetFact {
                 context_id: ContextId::new(), // placeholder - should come from journal_fact or context
                 source: source_authority,

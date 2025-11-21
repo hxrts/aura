@@ -336,6 +336,7 @@ pub trait BiometricEffects: Send + Sync {
 
 /// Statistics about biometric authentication usage
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct BiometricStatistics {
     /// Total number of verification attempts
     pub total_attempts: u64,
@@ -355,23 +356,8 @@ pub struct BiometricStatistics {
     pub false_rejection_rate: Option<f32>,
 }
 
-impl Default for BiometricStatistics {
-    fn default() -> Self {
-        Self {
-            total_attempts: 0,
-            successful_verifications: 0,
-            failed_attempts: 0,
-            average_verification_time_ms: 0,
-            enrolled_templates_by_type: std::collections::HashMap::new(),
-            last_verification_at: None,
-            false_acceptance_rate: None,
-            false_rejection_rate: None,
-        }
-    }
-}
 
 /// Helper functions for common biometric operations
-
 impl BiometricCapability {
     /// Check if this biometric can be used for authentication
     pub fn is_usable(&self) -> bool {
@@ -380,16 +366,16 @@ impl BiometricCapability {
 
     /// Check if this biometric meets a minimum security level
     pub fn meets_security_level(&self, required_level: BiometricSecurityLevel) -> bool {
-        match (required_level, &self.security_level) {
-            (BiometricSecurityLevel::Low, _) => true,
-            (BiometricSecurityLevel::Medium, BiometricSecurityLevel::Medium) => true,
-            (BiometricSecurityLevel::Medium, BiometricSecurityLevel::High) => true,
-            (BiometricSecurityLevel::Medium, BiometricSecurityLevel::VeryHigh) => true,
-            (BiometricSecurityLevel::High, BiometricSecurityLevel::High) => true,
-            (BiometricSecurityLevel::High, BiometricSecurityLevel::VeryHigh) => true,
-            (BiometricSecurityLevel::VeryHigh, BiometricSecurityLevel::VeryHigh) => true,
-            _ => false,
-        }
+        matches!(
+            (required_level, &self.security_level),
+            (BiometricSecurityLevel::Low, _)
+                | (BiometricSecurityLevel::Medium, BiometricSecurityLevel::Medium)
+                | (BiometricSecurityLevel::Medium, BiometricSecurityLevel::High)
+                | (BiometricSecurityLevel::Medium, BiometricSecurityLevel::VeryHigh)
+                | (BiometricSecurityLevel::High, BiometricSecurityLevel::High)
+                | (BiometricSecurityLevel::High, BiometricSecurityLevel::VeryHigh)
+                | (BiometricSecurityLevel::VeryHigh, BiometricSecurityLevel::VeryHigh)
+        )
     }
 }
 
@@ -397,7 +383,7 @@ impl BiometricVerificationResult {
     /// Check if verification was successful with sufficient confidence
     pub fn is_verified_with_confidence(&self, minimum_confidence: f32) -> bool {
         self.verified && 
-        self.confidence_score.map_or(false, |score| score >= minimum_confidence)
+        self.confidence_score.is_some_and(|score| score >= minimum_confidence)
     }
 
     /// Check if liveness was properly detected (when required)

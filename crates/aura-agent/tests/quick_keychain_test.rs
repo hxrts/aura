@@ -85,9 +85,10 @@ fn test_macos_backend_selection() {
     */
 }
 
-/// Test hardware UUID extraction capability
+/// Test hardware UUID extraction capability (macOS only)
 /// DISABLED: Module refactored - see file header
 #[test]
+#[cfg(target_os = "macos")]
 #[allow(dead_code)]
 fn test_hardware_uuid_extraction() {
     use std::process::Command;
@@ -114,8 +115,9 @@ fn test_hardware_uuid_extraction() {
     println!("[OK] Hardware UUID extraction capability verified");
 }
 
-/// Test SIP (System Integrity Protection) detection
+/// Test SIP (System Integrity Protection) detection (macOS only)
 #[test]
+#[cfg(target_os = "macos")]
 fn test_sip_detection() {
     use std::process::Command;
 

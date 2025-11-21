@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn test_authority_centric_content_access() {
         let evaluator = setup_test_evaluator();
-        let authority_id = AuthorityId::new();
+        let _authority_id = AuthorityId::new();
 
         // Test content resource scope conversion
         let content_resource = StorageResource::content("personal/user123/doc");

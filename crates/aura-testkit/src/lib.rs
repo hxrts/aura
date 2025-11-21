@@ -22,6 +22,7 @@
 
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
+#![allow(clippy::disallowed_methods)] // Testkit needs SystemTime::now() for mock implementations
 #![allow(missing_docs)]
 //!
 //! # Usage

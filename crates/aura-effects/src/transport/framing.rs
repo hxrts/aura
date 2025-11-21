@@ -56,6 +56,7 @@ impl FramingHandler {
     }
 
     /// Create with default configuration (1MB max frame)
+    #[allow(clippy::should_implement_trait)] // Method provides default config, not implementing Default trait
     pub fn default() -> Self {
         Self::new(1024 * 1024)
     }

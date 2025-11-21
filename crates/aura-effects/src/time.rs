@@ -26,6 +26,12 @@ pub struct SimulatedTimeHandler {
     time_scale: f64,
 }
 
+impl Default for SimulatedTimeHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SimulatedTimeHandler {
     /// Create a new simulated time handler
     pub fn new() -> Self {

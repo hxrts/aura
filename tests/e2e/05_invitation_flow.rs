@@ -4,15 +4,17 @@
 
 use aura_agent::runtime::AuthorityManager;
 use aura_core::{AuthorityId, Result};
+use aura_effects::random::MockRandomHandler;
 
 /// Test invitation context creation
 #[tokio::test]
 async fn test_invitation_context_setup() -> Result<()> {
     let mut manager = AuthorityManager::new("/tmp/aura-invitation-test".into());
+    let random = MockRandomHandler::new_with_seed(53);
 
     // Create inviter and invitee authorities
-    let inviter_id = manager.create_authority(vec![], 1).await?;
-    let invitee_id = manager.create_authority(vec![], 1).await?;
+    let inviter_id = manager.create_authority(&random, vec![], 1).await?;
+    let invitee_id = manager.create_authority(&random, vec![], 1).await?;
 
     // Create invitation context
     let context_id = manager
@@ -34,15 +36,16 @@ async fn test_invitation_context_setup() -> Result<()> {
 #[tokio::test]
 async fn test_multiple_invitations() -> Result<()> {
     let mut manager = AuthorityManager::new("/tmp/aura-multi-invitation-test".into());
+    let random = MockRandomHandler::new_with_seed(54);
 
     // Create inviter authority
-    let inviter_id = manager.create_authority(vec![], 1).await?;
+    let inviter_id = manager.create_authority(&random, vec![], 1).await?;
 
     // Create multiple invitation contexts
     let mut context_ids = Vec::new();
 
     for _ in 0..3 {
-        let invitee_id = manager.create_authority(vec![], 1).await?;
+        let invitee_id = manager.create_authority(&random, vec![], 1).await?;
 
         let context_id = manager
             .create_context(vec![inviter_id, invitee_id], "invitation".to_string())
@@ -66,17 +69,18 @@ async fn test_multiple_invitations() -> Result<()> {
 #[tokio::test]
 async fn test_invitation_acceptance() -> Result<()> {
     let mut manager = AuthorityManager::new("/tmp/aura-invitation-accept-test".into());
+    let random = MockRandomHandler::new_with_seed(55);
 
     // Create inviter with device
-    let inviter_id = manager.create_authority(vec![], 1).await?;
+    let inviter_id = manager.create_authority(&random, vec![], 1).await?;
     manager
-        .add_device_to_authority(inviter_id, vec![1, 2, 3, 4])
+        .add_device_to_authority(&random, inviter_id, vec![1, 2, 3, 4])
         .await?;
 
     // Create invitee with device
-    let invitee_id = manager.create_authority(vec![], 1).await?;
+    let invitee_id = manager.create_authority(&random, vec![], 1).await?;
     manager
-        .add_device_to_authority(invitee_id, vec![5, 6, 7, 8])
+        .add_device_to_authority(&random, invitee_id, vec![5, 6, 7, 8])
         .await?;
 
     // Create invitation context

@@ -11,6 +11,12 @@
 //! - Deterministic behavior for testing
 //! - Support for multiple biometric types
 //! - Template storage simulation
+//!
+//! Note: This module may use `rand::random()` and similar functions in effect
+//! handler implementations. This is legitimate as it's in the effect handler layer.
+
+// Allow disallowed methods in effect handler implementations
+#![allow(clippy::disallowed_methods)]
 
 use async_trait::async_trait;
 use aura_core::effects::{
@@ -273,7 +279,7 @@ impl BiometricEffects for MockBiometricHandler {
             let enrolled = templates
                 .values()
                 .any(|t| &t.biometric_type == biometric_type);
-            let platform_features = self.get_platform_features(&biometric_type);
+            let platform_features = self.get_platform_features(biometric_type);
 
             capabilities.push(BiometricCapability {
                 biometric_type: biometric_type.clone(),

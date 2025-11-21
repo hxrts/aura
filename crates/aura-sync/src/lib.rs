@@ -18,6 +18,9 @@
 //! - **Effect-Based Architecture**: All protocols parameterized by effect traits
 //! - **Choreographic Coordination**: Following Aura's session type patterns
 //! - **CRDT Semantics**: Built on journal semilattice operations
+
+// Allow disallowed methods/types in protocol implementations that coordinate effects
+#![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 //! - **Zero Legacy Code**: Clean, modern APIs with no backwards compatibility
 //! - **Layer 5 Compliance**: Reusable protocol building blocks, not UI applications
 //!

@@ -94,9 +94,11 @@ impl Default for ContextTransportConfig {
             default_flow_budget: 10000,
             supported_protocols: vec![
                 TransportProtocol::Quic {
+                    #[allow(clippy::unwrap_used)] // Valid IPv6 address literal
                     endpoint: "[::]:0".parse().unwrap(),
                 },
                 TransportProtocol::Tcp {
+                    #[allow(clippy::unwrap_used)] // Valid IPv6 address literal
                     endpoint: "[::]:0".parse().unwrap(),
                 },
             ],
