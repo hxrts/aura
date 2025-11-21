@@ -17,6 +17,8 @@ type Signature = ed25519_dalek::Signature;
 /// This is a known valid Ed25519 public key used as a fallback when
 /// key derivation from commitment bytes fails. This is temporary code
 /// until proper tree-based key derivation is implemented.
+#[allow(clippy::incompatible_msrv)] // LazyLock is fine for this temporary fallback code
+#[allow(clippy::expect_used)] // Hard-coded valid key - expect is safe here
 static FALLBACK_PUBLIC_KEY: LazyLock<PublicKey> = LazyLock::new(|| {
     // Using Ed25519 basepoint as a valid public key
     const VALID_PUBKEY_BYTES: [u8; 32] = [

@@ -7,6 +7,8 @@
 //! These utilities should remain minimal and focused only on creating deterministic instances
 //! of core types for testing purposes.
 
+#![allow(clippy::expect_used)] // Test utilities use expect for fixed-size slice conversions
+
 use crate::hash::hash;
 use crate::{AccountId, SessionId};
 use crate::identifiers::DeviceId;

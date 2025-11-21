@@ -45,7 +45,7 @@ impl BloomConfig {
     pub fn optimal(expected_elements: u64, false_positive_rate: f64) -> Self {
         // Calculate optimal bit vector size: m = -n * ln(p) / (ln(2)^2)
         let n = expected_elements as f64;
-        let p = false_positive_rate.max(0.00001).min(0.99999); // Clamp to reasonable range
+        let p = false_positive_rate.clamp(0.00001, 0.99999); // Clamp to reasonable range
         let m = (-n * p.ln() / (2.0_f64.ln().powi(2))).ceil() as u64;
 
         // Calculate optimal number of hash functions: k = (m/n) * ln(2)
@@ -54,7 +54,7 @@ impl BloomConfig {
         Self {
             expected_elements,
             false_positive_rate,
-            num_hash_functions: k.max(1).min(32), // Reasonable bounds
+            num_hash_functions: k.clamp(1, 32), // Reasonable bounds
             bit_vector_size: m.max(64),           // Minimum size
         }
     }
@@ -290,7 +290,6 @@ pub trait BloomEffects: Send + Sync {
 }
 
 /// Helper functions for common Bloom filter operations
-
 impl BloomConfig {
     /// Standard configuration for OpLog sync operations
     pub fn oplog_sync() -> Self {

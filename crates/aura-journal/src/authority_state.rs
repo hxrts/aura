@@ -14,6 +14,8 @@ use ed25519_dalek::{Signature, VerifyingKey as PublicKey};
 use std::sync::LazyLock;
 
 /// Fallback public key for when key derivation fails
+#[allow(clippy::incompatible_msrv)] // LazyLock is fine for this fallback code
+#[allow(clippy::expect_used)] // Hard-coded valid key - expect is safe here
 static FALLBACK_PUBLIC_KEY: LazyLock<PublicKey> = LazyLock::new(|| {
     const VALID_PUBKEY_BYTES: [u8; 32] = [
         0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,

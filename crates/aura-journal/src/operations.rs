@@ -97,6 +97,7 @@ pub struct Capability {
     since = "0.1.0",
     note = "Use TreeEffects and RelationalContext instead. Operations are now fact-based AttestedOps."
 )]
+#[allow(clippy::large_enum_variant)] // Deprecated enum - will be removed
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Operation {
     /// Add a new guardian to the account
@@ -192,6 +193,7 @@ pub enum ValidationError {
     since = "0.1.0",
     note = "Use TreeEffects for device operations and RelationalContext for guardian operations. See migration path in doc comments."
 )]
+#[allow(clippy::large_enum_variant)] // Deprecated enum - will be removed
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum JournalOperation {
     /// Add a guardian to the account
@@ -212,6 +214,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(deprecated)] // Testing deprecated Operation enum for backward compatibility
     fn test_operation_id_deterministic() {
         let op1 = Operation::IncrementEpoch;
         let op2 = Operation::IncrementEpoch;

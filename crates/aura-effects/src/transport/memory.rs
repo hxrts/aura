@@ -38,6 +38,7 @@ impl InMemoryTransportHandler {
     }
 
     /// Create with default configuration
+    #[allow(clippy::should_implement_trait)] // Method provides default config, not implementing Default trait
     pub fn default() -> Self {
         Self::new(TransportConfig::default())
     }

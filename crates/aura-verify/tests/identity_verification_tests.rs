@@ -3,6 +3,8 @@
 //! Tests for the clean authentication layer that only verifies WHO signed something.
 //! These tests ensure authentication is stateless and contains no authorization logic.
 
+#![allow(deprecated)] // Tests use deprecated verify_identity_proof for backwards compatibility testing
+
 use aura_core::Ed25519SigningKey;
 use aura_core::{identifiers::DeviceId, GuardianId};
 use aura_verify::{verify_identity_proof, IdentityProof, KeyMaterial};

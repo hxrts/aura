@@ -405,7 +405,7 @@ pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<crate:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fact::{FactId, SnapshotFact};
+    use crate::fact::FactId;
     use crate::fact_journal::{Fact, FlowBudgetFact};
 
     #[test]

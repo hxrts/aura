@@ -186,8 +186,8 @@ impl RandomEffects for MockCryptoHandler {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         let mut bytes = vec![0u8; len];
         let mut counter = self.counter.lock().unwrap();
-        for i in 0..len {
-            bytes[i] = ((self.seed.wrapping_add(*counter).wrapping_add(i as u64)) % 256) as u8;
+        for (i, byte) in bytes.iter_mut().enumerate() {
+            *byte = ((self.seed.wrapping_add(*counter).wrapping_add(i as u64)) % 256) as u8;
             *counter = counter.wrapping_add(1);
         }
         bytes

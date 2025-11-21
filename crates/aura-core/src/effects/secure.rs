@@ -250,7 +250,6 @@ pub trait SecureStorageEffects: Send + Sync {
 }
 
 /// Helper functions for common secure storage operations
-
 impl SecureStorageLocation {
     /// Create a location for storing FROST nonces
     pub fn frost_nonce(session_id: &str, participant_id: u16) -> Self {

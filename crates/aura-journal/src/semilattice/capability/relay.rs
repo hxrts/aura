@@ -242,7 +242,7 @@ mod tests {
 
     #[test]
     fn test_relay_capability_creation() {
-        let device_id = DeviceId::try_from("relay-1").unwrap();
+        let device_id = DeviceId::from("relay-1");
         let budget = FlowBudget::new(1000, Epoch::initial());
         let capability = RelayCapability::new(device_id, budget, 10, 1000000);
 
@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_flow_budget_consumption() {
-        let device_id = DeviceId::try_from("relay-1").unwrap();
+        let device_id = DeviceId::from("relay-1");
         let budget = FlowBudget::new(1000, Epoch::initial());
         let mut capability = RelayCapability::new(device_id, budget, 10, 1000000);
 
@@ -267,10 +267,10 @@ mod tests {
 
     #[test]
     fn test_destination_restrictions() {
-        let device_id = DeviceId::try_from("relay-1").unwrap();
-        let dest1 = DeviceId::try_from("dest-1").unwrap();
-        let dest2 = DeviceId::try_from("dest-2").unwrap();
-        let dest3 = DeviceId::try_from("dest-3").unwrap();
+        let device_id = DeviceId::from("relay-1");
+        let dest1 = DeviceId::from("dest-1");
+        let dest2 = DeviceId::from("dest-2");
+        let dest3 = DeviceId::from("dest-3");
 
         let budget = FlowBudget::new(1000, Epoch::initial());
         let mut allowed = HashSet::new();
@@ -287,7 +287,7 @@ mod tests {
 
     #[test]
     fn test_capability_meet() {
-        let device_id = DeviceId::try_from("relay-1").unwrap();
+        let device_id = DeviceId::from("relay-1");
         let budget1 = FlowBudget::new(1000, Epoch::initial());
         let budget2 = FlowBudget::new(500, Epoch::initial());
 
@@ -304,7 +304,7 @@ mod tests {
 
     #[test]
     fn test_expiration() {
-        let device_id = DeviceId::try_from("relay-1").unwrap();
+        let device_id = DeviceId::from("relay-1");
         let budget = FlowBudget::new(1000, Epoch::initial());
         let capability = RelayCapability::new(device_id, budget, 10, 1000000);
 

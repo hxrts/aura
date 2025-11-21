@@ -358,7 +358,6 @@ pub struct BiometricStatistics {
 
 
 /// Helper functions for common biometric operations
-
 impl BiometricCapability {
     /// Check if this biometric can be used for authentication
     pub fn is_usable(&self) -> bool {
@@ -367,16 +366,16 @@ impl BiometricCapability {
 
     /// Check if this biometric meets a minimum security level
     pub fn meets_security_level(&self, required_level: BiometricSecurityLevel) -> bool {
-        match (required_level, &self.security_level) {
-            (BiometricSecurityLevel::Low, _) => true,
-            (BiometricSecurityLevel::Medium, BiometricSecurityLevel::Medium) => true,
-            (BiometricSecurityLevel::Medium, BiometricSecurityLevel::High) => true,
-            (BiometricSecurityLevel::Medium, BiometricSecurityLevel::VeryHigh) => true,
-            (BiometricSecurityLevel::High, BiometricSecurityLevel::High) => true,
-            (BiometricSecurityLevel::High, BiometricSecurityLevel::VeryHigh) => true,
-            (BiometricSecurityLevel::VeryHigh, BiometricSecurityLevel::VeryHigh) => true,
-            _ => false,
-        }
+        matches!(
+            (required_level, &self.security_level),
+            (BiometricSecurityLevel::Low, _)
+                | (BiometricSecurityLevel::Medium, BiometricSecurityLevel::Medium)
+                | (BiometricSecurityLevel::Medium, BiometricSecurityLevel::High)
+                | (BiometricSecurityLevel::Medium, BiometricSecurityLevel::VeryHigh)
+                | (BiometricSecurityLevel::High, BiometricSecurityLevel::High)
+                | (BiometricSecurityLevel::High, BiometricSecurityLevel::VeryHigh)
+                | (BiometricSecurityLevel::VeryHigh, BiometricSecurityLevel::VeryHigh)
+        )
     }
 }
 
