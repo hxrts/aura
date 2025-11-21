@@ -4,19 +4,21 @@
 
 use aura_agent::runtime::AuthorityManager;
 use aura_core::{AuthorityId, Result};
+use aura_effects::random::MockRandomHandler;
 
 /// Test storage context creation
 #[tokio::test]
 async fn test_storage_context_setup() -> Result<()> {
     let test_id = AuthorityId::new();
     let mut manager = AuthorityManager::new(format!("/tmp/aura-storage-test-{}", test_id));
+    let random = MockRandomHandler::new_with_seed(50);
 
     // Create authority for storage access
-    let authority_id = manager.create_authority(vec![], 1).await?;
+    let authority_id = manager.create_authority(&random, vec![], 1).await?;
 
     // Add device to authority
     manager
-        .add_device_to_authority(authority_id, vec![1, 2, 3, 4])
+        .add_device_to_authority(&random, authority_id, vec![1, 2, 3, 4])
         .await?;
 
     // Create storage access context
@@ -44,9 +46,10 @@ async fn test_storage_context_setup() -> Result<()> {
 async fn test_multiple_storage_contexts() -> Result<()> {
     let test_id = AuthorityId::new();
     let mut manager = AuthorityManager::new(format!("/tmp/aura-multi-storage-test-{}", test_id));
+    let random = MockRandomHandler::new_with_seed(51);
 
     // Create user authority
-    let user_id = manager.create_authority(vec![], 1).await?;
+    let user_id = manager.create_authority(&random, vec![], 1).await?;
 
     // Create different storage contexts
     let storage_types = vec!["documents", "photos", "backups"];
@@ -81,17 +84,18 @@ async fn test_storage_with_threshold() -> Result<()> {
     let test_id = AuthorityId::new();
     let mut manager =
         AuthorityManager::new(format!("/tmp/aura-storage-threshold-test-{}", test_id));
+    let random = MockRandomHandler::new_with_seed(52);
 
     // Create authority with multiple devices
-    let authority_id = manager.create_authority(vec![], 1).await?;
+    let authority_id = manager.create_authority(&random, vec![], 1).await?;
     for i in 0..3 {
         manager
-            .add_device_to_authority(authority_id, vec![i; 4])
+            .add_device_to_authority(&random, authority_id, vec![i; 4])
             .await?;
     }
 
     // Set threshold for storage operations
-    manager.update_authority_threshold(authority_id, 2).await?;
+    manager.update_authority_threshold(&random, authority_id, 2).await?;
 
     // Create storage context
     let storage_authority = AuthorityId::new();

@@ -5,15 +5,17 @@
 
 use aura_agent::runtime::AuthorityManager;
 use aura_core::{AuthorityId, ContextId, Result};
+use aura_effects::random::MockRandomHandler;
 
 /// Test complete authority lifecycle from creation to usage
 #[tokio::test]
 async fn test_authority_lifecycle_end_to_end() -> Result<()> {
     let mut manager = AuthorityManager::new("/tmp/aura-lifecycle-test".into());
+    let random = MockRandomHandler::new_with_seed(42);
 
     // Phase 1: Authority Creation
     let device_key = vec![1, 2, 3, 4]; // Mock public key
-    let authority_id = manager.create_authority(device_key, 2).await?;
+    let authority_id = manager.create_authority(&random, device_key, 2).await?;
 
     // Verify authority is listed
     let authorities = manager.list_authorities();
@@ -22,12 +24,12 @@ async fn test_authority_lifecycle_end_to_end() -> Result<()> {
     // Phase 2: Add Devices to Authority
     let second_device_key = vec![5, 6, 7, 8];
     manager
-        .add_device_to_authority(authority_id, second_device_key)
+        .add_device_to_authority(&random, authority_id, second_device_key)
         .await?;
 
     let third_device_key = vec![9, 10, 11, 12];
     manager
-        .add_device_to_authority(authority_id, third_device_key)
+        .add_device_to_authority(&random, authority_id, third_device_key)
         .await?;
 
     // Phase 3: Relational Context Creation
@@ -45,12 +47,12 @@ async fn test_authority_lifecycle_end_to_end() -> Result<()> {
     assert!(context.participants.contains(&guardian_id));
 
     // Phase 4: Rotate Authority Epoch
-    manager.rotate_authority_epoch(authority_id).await?;
+    manager.rotate_authority_epoch(&random, authority_id).await?;
 
     // Phase 5: Update Authority Threshold (we now have 2 devices after rotation)
     // TODO: There's a reduction pipeline issue where only 1 leaf is visible
     // Skip threshold update for now until journal reduction is fixed
-    // manager.update_authority_threshold(authority_id, 2).await?;
+    // manager.update_authority_threshold(&random, authority_id, 2).await?;
 
     // Phase 6: Get Authority Tree Info
     let (threshold, device_count, _root_commitment) =
@@ -68,8 +70,9 @@ async fn test_authority_lifecycle_end_to_end() -> Result<()> {
 #[tokio::test]
 async fn test_multi_context_authority() -> Result<()> {
     let mut manager = AuthorityManager::new("/tmp/aura-multi-context-test".into());
+    let random = MockRandomHandler::new_with_seed(43);
 
-    let authority_id = manager.create_authority(vec![1, 2, 3], 2).await?;
+    let authority_id = manager.create_authority(&random, vec![1, 2, 3], 2).await?;
 
     // Create multiple contexts for the same authority
     let contexts = vec![
@@ -105,9 +108,10 @@ async fn test_multi_context_authority() -> Result<()> {
 #[tokio::test]
 async fn test_authority_device_management() -> Result<()> {
     let mut manager = AuthorityManager::new("/tmp/aura-device-mgmt-test".into());
+    let random = MockRandomHandler::new_with_seed(44);
 
     // Create authority (currently doesn't add initial device)
-    let authority_id = manager.create_authority(vec![1, 2, 3, 4], 2).await?;
+    let authority_id = manager.create_authority(&random, vec![1, 2, 3, 4], 2).await?;
     println!("Created authority: {}", authority_id);
 
     // Add multiple devices (4 devices total)
@@ -115,7 +119,7 @@ async fn test_authority_device_management() -> Result<()> {
         let device_key = vec![10 + i, 20 + i, 30 + i, 40 + i];
         println!("Adding device {}", i);
         manager
-            .add_device_to_authority(authority_id, device_key)
+            .add_device_to_authority(&random, authority_id, device_key)
             .await?;
     }
 
@@ -128,7 +132,7 @@ async fn test_authority_device_management() -> Result<()> {
 
     // Remove a device (leaf index 1), leaving 3 active devices
     println!("Removing device at leaf index 1");
-    match manager.remove_device_from_authority(authority_id, 1).await {
+    match manager.remove_device_from_authority(&random, authority_id, 1).await {
         Ok(_) => println!("Successfully removed device at leaf 1"),
         Err(e) => {
             println!("Error removing device: {:?}", e);
@@ -145,7 +149,7 @@ async fn test_authority_device_management() -> Result<()> {
 
     // Update threshold after device changes (3 devices, threshold 3 should work)
     println!("Updating threshold to 3");
-    manager.update_authority_threshold(authority_id, 3).await?;
+    manager.update_authority_threshold(&random, authority_id, 3).await?;
 
     Ok(())
 }

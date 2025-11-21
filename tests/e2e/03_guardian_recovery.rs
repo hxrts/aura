@@ -5,16 +5,18 @@
 use aura_agent::runtime::AuthorityManager;
 use aura_core::{hash, Hash32};
 use aura_core::{AuthorityId, Result};
+use aura_effects::random::MockRandomHandler;
 use aura_relational::{GuardianBinding, GuardianParameters, RelationalContext, RelationalFact};
 
 /// Test guardian binding creation
 #[tokio::test]
 async fn test_guardian_binding_setup() -> Result<()> {
     let mut manager = AuthorityManager::new("/tmp/aura-guardian-test".into());
+    let random = MockRandomHandler::new_with_seed(48);
 
     // Create account and guardian authorities
-    let account_id = manager.create_authority(vec![], 1).await?;
-    let guardian_id = manager.create_authority(vec![], 1).await?;
+    let account_id = manager.create_authority(&random, vec![], 1).await?;
+    let guardian_id = manager.create_authority(&random, vec![], 1).await?;
 
     // Create relational context for guardian relationship
     let context_id = manager
@@ -36,16 +38,17 @@ async fn test_guardian_binding_setup() -> Result<()> {
 #[tokio::test]
 async fn test_multiple_guardians() -> Result<()> {
     let mut manager = AuthorityManager::new("/tmp/aura-multi-guardian-test".into());
+    let random = MockRandomHandler::new_with_seed(49);
 
     // Create account authority
-    let account_id = manager.create_authority(vec![], 1).await?;
+    let account_id = manager.create_authority(&random, vec![], 1).await?;
 
     // Create multiple guardians
     let mut guardian_ids = Vec::new();
     let mut context_ids = Vec::new();
 
     for _ in 0..3 {
-        let guardian_id = manager.create_authority(vec![], 1).await?;
+        let guardian_id = manager.create_authority(&random, vec![], 1).await?;
         guardian_ids.push(guardian_id);
 
         // Create context for each guardian relationship
