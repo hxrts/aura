@@ -52,7 +52,6 @@ pub mod discovery;
 /// Rendezvous-specific errors
 pub mod error;
 
-
 // Keep legacy top-level modules for backward compatibility during transition
 // These will be removed once all imports are updated
 #[doc(hidden)]
@@ -79,7 +78,7 @@ pub use aura_core::{AccountId, AuraError, AuraResult, Cap, RelationshipId, Trust
 pub use crypto::{BlindSignature, SecretBrand, UnlinkableCredential};
 
 // Re-export capability types from journal
-pub use aura_journal::Capability;
+pub use aura_journal::CapabilityRef;
 
 // Re-export SBB types
 pub use sbb::{

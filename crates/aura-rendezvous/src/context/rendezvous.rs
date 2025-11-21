@@ -434,10 +434,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_rendezvous_creation() {
-        use aura_agent::AuraEffectSystem;
+        use aura_agent::{AuraEffectSystem, AgentConfig};
 
         let authority = AuthorityId::new();
-        let effects = Arc::new(AuraEffectSystem::new());
+        let effects = Arc::new(AuraEffectSystem::testing(&AgentConfig::default()));
 
         let coordinator =
             ContextRendezvousCoordinator::new(authority, effects as Arc<dyn AuraEffects>);

@@ -17,7 +17,7 @@ members = [
     "crates/aura-simulator",
     "crates/aura-wot",
     "crates/aura-mpst",
-    "crates/aura-quint-api",
+    "crates/aura-quint",
     "crates/aura-core",
     "crates/aura-authenticate",
     "crates/aura-sync",

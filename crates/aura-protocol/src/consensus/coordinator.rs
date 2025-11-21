@@ -4,9 +4,9 @@
 //! managing consensus instances and orchestrating the protocol flow.
 
 use super::{CommitFact, ConsensusId, WitnessMessage, WitnessSet, WitnessShare};
-use aura_core::frost::{ThresholdSignature, NonceCommitment, PartialSignature};
-use aura_core::{AuraError, AuthorityId, Hash32, Result};
+use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature};
 use aura_core::Prestate;
+use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use tokio::time::{timeout, Duration};
@@ -38,8 +38,8 @@ impl ConsensusCoordinator {
         threshold: u16,
     ) -> Result<Hash32> {
         // Serialize operation
-        let operation_bytes = serde_json::to_vec(operation)
-            .map_err(|e| AuraError::serialization(e.to_string()))?;
+        let operation_bytes =
+            serde_json::to_vec(operation).map_err(|e| AuraError::serialization(e.to_string()))?;
 
         // Compute hashes
         let prestate_hash = prestate.compute_hash();
@@ -90,10 +90,9 @@ impl ConsensusCoordinator {
         // Run fast path first
         match self.run_fast_path(instance_id).await {
             Ok(commit_fact) => {
-                self.completed
-                    .insert(consensus_id, commit_fact.clone());
+                self.completed.insert(consensus_id, commit_fact.clone());
                 self.instances.remove(&instance_id);
-                return Ok(commit_fact);
+                Ok(commit_fact)
             }
             Err(_) => {
                 // Fast path failed, try epidemic gossip
@@ -145,8 +144,8 @@ impl ConsensusCoordinator {
 
         // TODO: Aggregate signatures using FROST
         let threshold_signature = ThresholdSignature {
-            signature: vec![],  // Placeholder - will be filled by FROST aggregation
-            signers: vec![],    // Placeholder - will contain signer IDs
+            signature: vec![], // Placeholder - will be filled by FROST aggregation
+            signers: vec![],   // Placeholder - will contain signer IDs
         };
 
         // Create commit fact
@@ -162,9 +161,7 @@ impl ConsensusCoordinator {
         );
 
         // Verify before returning
-        commit_fact
-            .verify()
-            .map_err(|e| AuraError::invalid(e))?;
+        commit_fact.verify().map_err(|e| AuraError::invalid(e))?;
 
         Ok(commit_fact)
     }
@@ -172,7 +169,14 @@ impl ConsensusCoordinator {
     /// Run epidemic gossip protocol (fallback)
     async fn run_epidemic_gossip(&mut self, instance_id: Hash32) -> Result<CommitFact> {
         // Extract all needed data upfront to avoid borrowing issues
-        let (witness_set_clone, consensus_id_copy, operation_hash_copy, timeout_ms, prestate_hash, operation_bytes) = {
+        let (
+            witness_set_clone,
+            consensus_id_copy,
+            operation_hash_copy,
+            timeout_ms,
+            prestate_hash,
+            operation_bytes,
+        ) = {
             let instance = self
                 .instances
                 .get_mut(&instance_id)
@@ -203,12 +207,16 @@ impl ConsensusCoordinator {
                 instance.operation_bytes.clone(),
             )
         };
-        
-        // Phase 2: Collect gossip responses with longer timeout  
+
+        // Phase 2: Collect gossip responses with longer timeout
         let gossip_timeout = Duration::from_millis(timeout_ms);
         let responses = timeout(gossip_timeout, async {
             // Simulate gossip collection without self reference
-            Self::simulate_gossip_collection(witness_set_clone, consensus_id_copy, operation_hash_copy)
+            Self::simulate_gossip_collection(
+                witness_set_clone,
+                consensus_id_copy,
+                operation_hash_copy,
+            )
         })
         .await
         .map_err(|_| AuraError::Internal {
@@ -234,16 +242,15 @@ impl ConsensusCoordinator {
             );
 
             // Verify before returning
-            commit_fact
-                .verify()
-                .map_err(|e| AuraError::invalid(e))?;
+            commit_fact.verify().map_err(|e| AuraError::invalid(e))?;
 
             // Mark as completed and clean up
             if let Some(instance) = self.instances.get_mut(&instance_id) {
                 instance.state = InstanceState::Completed;
             }
-            self.completed.insert(consensus_id_copy, commit_fact.clone());
-            
+            self.completed
+                .insert(consensus_id_copy, commit_fact.clone());
+
             Ok(commit_fact)
         } else {
             // Not enough responses for consensus
@@ -262,9 +269,9 @@ impl ConsensusCoordinator {
 
     /// Simulate gossip collection (static method to avoid borrow issues)
     fn simulate_gossip_collection(
-        mut witness_set: WitnessSet, 
+        mut witness_set: WitnessSet,
         consensus_id: ConsensusId,
-        operation_hash: Hash32
+        operation_hash: Hash32,
     ) -> Result<WitnessSet> {
         // TODO: In production, this would:
         // 1. Reach out to backup witnesses beyond the original set
@@ -280,38 +287,37 @@ impl ConsensusCoordinator {
         for authority in &witnesses_to_try {
             // TODO: Send gossip messages via NetworkEffects
             // TODO: Receive and validate responses
-            
+
             // Simulate some witnesses responding via gossip
-            if rand::random::<f64>() < 0.8 {  // 80% success rate for gossip
+            if rand::random::<f64>() < 0.8 {
+                // 80% success rate for gossip
                 let nonce_commitment = NonceCommitment {
-                    signer: 0, // TODO: Use actual signer ID mapping
+                    signer: 0,          // TODO: Use actual signer ID mapping
                     commitment: vec![], // TODO: Real FROST nonce commitment
                 };
-                
+
                 let _ = witness_set.add_nonce_commitment(*authority, nonce_commitment);
             }
         }
 
-        // Simulate collecting partial signatures via gossip  
-        let witnesses_with_nonces: Vec<AuthorityId> = witness_set
-            .nonce_commitments
-            .keys()
-            .copied()
-            .collect();
-            
+        // Simulate collecting partial signatures via gossip
+        let witnesses_with_nonces: Vec<AuthorityId> =
+            witness_set.nonce_commitments.keys().copied().collect();
+
         for authority in witnesses_with_nonces {
             // Only create shares for authorities that provided nonces
-            if rand::random::<f64>() < 0.9 {  // 90% conversion rate nonce -> signature
+            if rand::random::<f64>() < 0.9 {
+                // 90% conversion rate nonce -> signature
                 let witness_share = WitnessShare::new(
                     consensus_id,
                     authority,
                     PartialSignature {
-                        signer: 0, // TODO: Real signer ID  
+                        signer: 0,         // TODO: Real signer ID
                         signature: vec![], // TODO: Real FROST signature
                     },
                     operation_hash,
                 );
-                
+
                 let _ = witness_set.add_share(authority, witness_share);
             }
         }

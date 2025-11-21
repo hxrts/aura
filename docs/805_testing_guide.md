@@ -120,13 +120,14 @@ async fn test_with_custom_config() -> aura_core::AuraResult<()> {
 
 ```rust
 use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AgentConfig;
 
 #[aura_test]
 async fn test_with_effects() -> aura_core::AuraResult<()> {
     let fixture = create_test_fixture().await?;
 
     // Create effect system - uses real handlers with in-memory storage
-    let effects = AuraEffectSystem::new();
+    let effects = AuraEffectSystem::testing(&AgentConfig::default());
 
     // Use effect system through trait methods
     // (specific effect traits like CryptoEffects, StorageEffects, etc.)
@@ -145,6 +146,7 @@ Integration testing validates complete system behavior across multiple protocol 
 use aura_macros::aura_test;
 use aura_testkit::*;
 use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AgentConfig;
 
 #[aura_test]
 async fn test_threshold_signing_workflow() -> aura_core::AuraResult<()> {
@@ -155,7 +157,7 @@ async fn test_threshold_signing_workflow() -> aura_core::AuraResult<()> {
 
     // Create effect systems for each participant
     let effect_systems: Vec<_> = (0..5)
-        .map(|_| AuraEffectSystem::new())
+        .map(|_| AuraEffectSystem::testing(&AgentConfig::default()))
         .collect();
 
     // Phase 1: Initialize threshold ceremony
@@ -251,12 +253,14 @@ proptest! {
 ```rust
 use aura_macros::aura_test;
 use aura_testkit::*;
+use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AgentConfig;
 
 #[aura_test]
 async fn test_structured_protocol() -> aura_core::AuraResult<()> {
     // Setup
     let fixture = create_test_fixture().await?;
-    let effects = AuraEffectSystem::new();
+    let effects = AuraEffectSystem::testing(&AgentConfig::default());
 
     // Execute
     let result = execute_protocol(&effects).await?;

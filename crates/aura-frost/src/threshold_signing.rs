@@ -352,6 +352,9 @@ pub enum SigningPhase {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_macros::aura_test;
+    use aura_testkit::simulation::choreography::ChoreographyTestHarness;
+    use aura_testkit::{create_test_fixture, TestEffectsBuilder};
 
     #[test]
     fn test_threshold_signing_config_validation() {
@@ -372,13 +375,142 @@ mod tests {
         assert!(config.validate().is_err());
     }
 
+    #[aura_test]
+    async fn test_threshold_signing_choreography() -> aura_core::AuraResult<()> {
+        // Create multi-device test environment for threshold signing
+        let mut harness = ChoreographyTestHarness::with_devices(5);
+        
+        // Set up threshold signing roles
+        harness.assign_role("Coordinator", 0);
+        harness.assign_role("Signers", &[1, 2, 3, 4]);
+
+        let fixture = create_test_fixture();
+        let effects_builder = TestEffectsBuilder::for_unit_tests(fixture.device_id(0));
+        let effects = effects_builder.build()?;
+
+        // Test threshold signing configuration with testkit-generated data
+        let config = ThresholdSigningConfig::new(3, 4, 300);
+        assert!(config.validate().is_ok());
+
+        let context = TreeSigningContext::new(1, 0, [42u8; 32]);
+        let message = b"threshold signing test message";
+
+        // Test nonce commitment generation
+        let nonce_commitment = FrostCrypto::generate_nonce_commitment(
+            1,
+            &*effects.random_effects(),
+        ).await?;
+
+        assert_eq!(nonce_commitment.signer, 1);
+        assert!(!nonce_commitment.commitment.is_empty());
+
+        // Test partial signature generation
+        let partial_signature = FrostCrypto::generate_partial_signature(
+            &context,
+            message,
+            1,
+            &*effects.random_effects(),
+        ).await?;
+
+        assert_eq!(partial_signature.signer, 1);
+        assert!(!partial_signature.signature.is_empty());
+
+        println!("✓ Threshold signing choreography test completed");
+        Ok(())
+    }
+
+    #[aura_test]
+    async fn test_full_threshold_signing_workflow() -> aura_core::AuraResult<()> {
+        // Create comprehensive test environment for complete threshold signing workflow
+        let mut harness = ChoreographyTestHarness::with_devices(7);
+        
+        // Test a 4-of-6 threshold scheme
+        harness.assign_role("Coordinator", 0);
+        harness.assign_role("Signers", &[1, 2, 3, 4, 5, 6]);
+
+        let fixture = create_test_fixture();
+        let effects_builder = TestEffectsBuilder::for_unit_tests(fixture.device_id(0));
+        let effects = effects_builder.build()?;
+
+        let config = ThresholdSigningConfig::new(4, 6, 300);
+        let context = TreeSigningContext::new(2, 1, [123u8; 32]);
+        let message = b"comprehensive threshold signing test";
+
+        // Phase 1: Generate nonce commitments from all signers
+        let mut nonce_commitments = std::collections::HashMap::new();
+        for signer_index in 1..=6 {
+            let commitment = FrostCrypto::generate_nonce_commitment(
+                signer_index,
+                &*effects.random_effects(),
+            ).await?;
+            
+            let device_id = fixture.device_id(signer_index as usize);
+            nonce_commitments.insert(device_id, commitment);
+        }
+
+        // Phase 2: Generate partial signatures from threshold number of signers
+        let mut partial_signatures = std::collections::HashMap::new();
+        for signer_index in 1..=4 { // Only threshold number need to sign
+            let partial_sig = FrostCrypto::generate_partial_signature(
+                &context,
+                message,
+                signer_index,
+                &*effects.random_effects(),
+            ).await?;
+            
+            let device_id = fixture.device_id(signer_index as usize);
+            partial_signatures.insert(device_id, partial_sig);
+        }
+
+        // Phase 3: Test aggregation with sufficient signatures
+        let threshold_result = aggregate_threshold_signature(
+            &config,
+            &context,
+            message,
+            &partial_signatures,
+            &nonce_commitments,
+            &*effects.random_effects(),
+        ).await;
+
+        assert!(threshold_result.is_ok());
+        
+        let threshold_sig = threshold_result?;
+        assert_eq!(threshold_sig.participating_signers().len(), 4);
+
+        // Phase 4: Test insufficient signatures scenario
+        let mut insufficient_signatures = std::collections::HashMap::new();
+        for signer_index in 1..=2 { // Only 2 signatures (less than threshold of 4)
+            let partial_sig = FrostCrypto::generate_partial_signature(
+                &context,
+                message,
+                signer_index,
+                &*effects.random_effects(),
+            ).await?;
+            
+            let device_id = fixture.device_id(signer_index as usize);
+            insufficient_signatures.insert(device_id, partial_sig);
+        }
+
+        let insufficient_result = aggregate_threshold_signature(
+            &config,
+            &context,
+            message,
+            &insufficient_signatures,
+            &nonce_commitments,
+            &*effects.random_effects(),
+        ).await;
+
+        assert!(insufficient_result.is_err());
+        assert!(insufficient_result.unwrap_err().to_string().contains("Insufficient partial signatures"));
+
+        println!("✓ Full threshold signing workflow test completed");
+        Ok(())
+    }
+
     #[test]
     fn test_frost_crypto_compile() {
         // Test that the FrostCrypto struct compiles and has the expected methods
-        // We don't call the actual methods because they require real key material
-        // from a DKG ceremony, which is beyond the scope of unit tests.
-
-        // This test ensures the API is correctly defined
+        // This test ensures the API is correctly defined for testkit usage
         fn _check_api_exists() {
             async fn _test() {
                 use aura_effects::random::MockRandomHandler;

@@ -98,6 +98,7 @@
 //! ```
 
 // Core modules following unified effect system architecture
+pub mod amp;
 pub mod authorization; // Biscuit-based authorization (moved up from authorization/ subdirectory)
 pub mod choreography;
 pub mod consensus; // Real Aura Consensus implementation
@@ -109,7 +110,6 @@ pub mod handlers;
 pub mod messages;
 pub mod state;
 pub mod transport;
-pub mod wot;
 
 // Re-export authorization types for convenient access
 pub use authorization::{AuthorizationResult, BiscuitAuthorizationBridge};

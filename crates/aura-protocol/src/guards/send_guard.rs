@@ -5,9 +5,7 @@
 //! that enforces both authorization and budget constraints at every protocol send site.
 
 use super::effect_system_trait::GuardEffectSystem;
-use crate::guards::{
-        privacy::track_leakage_consumption, JournalCoupler, LeakageBudget,
-    };
+use crate::guards::{privacy::track_leakage_consumption, JournalCoupler, LeakageBudget};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, Receipt};
 use biscuit_auth::Biscuit;
@@ -260,7 +258,6 @@ impl SendGuardChain {
         use crate::authorization::BiscuitAuthorizationBridge;
         use crate::guards::BiscuitGuardEvaluator;
         use aura_wot::ResourceScope;
-        
 
         debug!(
             authorization = %self.message_authorization,
@@ -362,8 +359,6 @@ impl SendGuardChain {
         &self,
         effect_system: &E,
     ) -> AuraResult<Receipt> {
-        use crate::guards::flow::FlowBudgetEffects;
-
         debug!(
             context = ?self.context,
             peer = ?self.peer,

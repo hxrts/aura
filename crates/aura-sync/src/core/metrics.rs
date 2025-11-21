@@ -825,7 +825,12 @@ mod tests {
             let handle = thread::spawn(move || {
                 let now = 1000000u64 + i as u64;
                 collector_clone.record_sync_start(&format!("session_{}", i), now);
-                collector_clone.record_sync_completion(&format!("session_{}", i), i, i * 100, now + 50);
+                collector_clone.record_sync_completion(
+                    &format!("session_{}", i),
+                    i,
+                    i * 100,
+                    now + 50,
+                );
             });
             handles.push(handle);
         }

@@ -99,7 +99,7 @@ impl CvState for GCounter {}
 /// the elements from both sets. Only supports elements that implement Clone,
 /// Eq, and Hash traits.
 ///
-/// TODO fix - Simplified version of OR-Set from docs/001_theoretical_foundations.md Section 4
+/// Grow-only set CRDT. Elements can only be added, never removed.
 #[derive(Debug, Clone)]
 pub struct GSet<T: Clone + Eq + std::hash::Hash>(pub HashSet<T>);
 

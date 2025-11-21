@@ -2,7 +2,7 @@
 //!
 //! Provides a unified envelope format for all message types.
 
-use aura_core::{identifiers::{DeviceId, SessionId}};
+use aura_core::identifiers::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 
 /// Generic message envelope for wire protocol communication

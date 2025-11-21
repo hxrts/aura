@@ -3,15 +3,16 @@
 //! This module implements deterministic reduction of facts to produce
 //! authority state and relational state from journal facts.
 
-use crate::{
-    fact::{AttestedOp, FactContent, RelationalFact},
-    fact_journal::{Journal, JournalNamespace},
+use crate::fact::{
+    AttestedOp, ChannelBumpReason, ChannelCheckpoint, ChannelPolicy, CommittedChannelEpochBump,
+    FactContent, Journal, JournalNamespace, ProposedChannelEpochBump, RelationalFact,
 };
 use aura_core::{
     authority::{AuthorityState, TreeState},
     hash,
-    identifiers::{AuthorityId, ContextId},
-    Hash32,
+    identifiers::{AuthorityId, ChannelId, ContextId},
+    tree::{commit_leaf, policy_hash, LeafId, Policy},
+    Hash32, session_epochs::Epoch,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -21,19 +22,19 @@ use std::collections::{BTreeMap, BTreeSet};
 /// updates the tree state accordingly.
 fn apply_attested_op(tree_state: &TreeState, op: &AttestedOp) -> TreeState {
     match &op.tree_op {
-        crate::fact_journal::TreeOpKind::AddLeaf { public_key } => {
+        crate::fact::TreeOpKind::AddLeaf { public_key } => {
             // Add a new leaf to the tree
             apply_add_leaf(tree_state, public_key)
         }
-        crate::fact_journal::TreeOpKind::RemoveLeaf { leaf_index } => {
+        crate::fact::TreeOpKind::RemoveLeaf { leaf_index } => {
             // Remove a leaf from the tree
             apply_remove_leaf(tree_state, *leaf_index)
         }
-        crate::fact_journal::TreeOpKind::UpdatePolicy { threshold } => {
+        crate::fact::TreeOpKind::UpdatePolicy { threshold } => {
             // Update the tree policy
             apply_update_policy(tree_state, *threshold)
         }
-        crate::fact_journal::TreeOpKind::RotateEpoch => {
+        crate::fact::TreeOpKind::RotateEpoch => {
             // Rotate to new epoch
             apply_rotate_epoch(tree_state)
         }
@@ -42,61 +43,123 @@ fn apply_attested_op(tree_state: &TreeState, op: &AttestedOp) -> TreeState {
 
 /// Apply add leaf operation to tree state
 fn apply_add_leaf(tree_state: &TreeState, public_key: &[u8]) -> TreeState {
-    // Create new tree state with added leaf
-    let mut new_state = tree_state.clone();
-    // Convert to bytes to create a simple commitment update
-    // In a real implementation, this would use proper tree node creation
+    // For a proper implementation, we would need to:
+    // 1. Maintain the actual tree structure (branches and leaves)
+    // 2. Find the appropriate branch to add the leaf to
+    // 3. Recompute commitments up the tree
+    // Since we don't have the full tree structure in TreeState, we'll compute
+    // a leaf commitment and use it to update the root
+    
+    let new_leaf_id = LeafId(tree_state.device_count());
+    let leaf_commitment = commit_leaf(new_leaf_id, tree_state.epoch().0, public_key);
+    
+    // In a full implementation, we'd update the tree structure and recompute
+    // branch commitments. For now, we'll create a new root commitment that
+    // incorporates the leaf commitment
     let mut hasher = hash::hasher();
-    hasher.update(b"add_leaf");
-    hasher.update(public_key);
+    hasher.update(b"ROOT_WITH_LEAF");
+    hasher.update(&leaf_commitment);
     hasher.update(tree_state.root_commitment().as_bytes());
+    hasher.update(&tree_state.device_count().to_le_bytes());
     let new_commitment = hasher.finalize();
-    new_state._update_commitment(Hash32::new(new_commitment));
-    new_state
+    
+    TreeState::with_values(
+        tree_state.epoch(),
+        Hash32::new(new_commitment),
+        tree_state.threshold(),
+        tree_state.device_count() + 1,
+    )
 }
 
 /// Apply remove leaf operation to tree state
 fn apply_remove_leaf(tree_state: &TreeState, leaf_index: u32) -> TreeState {
-    // Create new tree state with removed leaf
-    let mut new_state = tree_state.clone();
-    // Create deterministic commitment update for leaf removal
+    // For leaf removal, we would normally:
+    // 1. Mark the leaf as removed in the tree structure
+    // 2. Recompute commitments up the tree
+    // Since we don't maintain full tree structure, we create a deterministic
+    // commitment that reflects the removal
+    
+    let removed_leaf_id = LeafId(leaf_index);
+    
+    // Create a deterministic commitment for the removal operation
     let mut hasher = hash::hasher();
-    hasher.update(b"remove_leaf");
-    hasher.update(&leaf_index.to_le_bytes());
+    hasher.update(b"ROOT_REMOVE_LEAF");
+    hasher.update(&removed_leaf_id.0.to_le_bytes());
     hasher.update(tree_state.root_commitment().as_bytes());
+    hasher.update(&tree_state.epoch().0.to_le_bytes());
     let new_commitment = hasher.finalize();
-    new_state._update_commitment(Hash32::new(new_commitment));
-    new_state
+    
+    TreeState::with_values(
+        tree_state.epoch(),
+        Hash32::new(new_commitment),
+        tree_state.threshold(),
+        tree_state.device_count().saturating_sub(1),
+    )
 }
 
 /// Apply policy update operation to tree state
 fn apply_update_policy(tree_state: &TreeState, threshold: u16) -> TreeState {
-    // Create new tree state with updated policy threshold
-    let mut new_state = tree_state.clone();
-    // Create deterministic commitment update for policy update
+    // Policy updates affect branch nodes. We compute a new commitment
+    // that incorporates the policy change
+    
+    let new_policy = Policy::Threshold {
+        m: threshold,
+        n: tree_state.device_count() as u16,
+    };
+    
+    // Compute policy hash for the new threshold
+    let new_policy_hash = policy_hash(&new_policy);
+    
+    // Create a deterministic root commitment incorporating the policy
     let mut hasher = hash::hasher();
-    hasher.update(b"update_policy");
-    hasher.update(&threshold.to_le_bytes());
+    hasher.update(b"ROOT_WITH_POLICY");
+    hasher.update(&new_policy_hash);
     hasher.update(tree_state.root_commitment().as_bytes());
+    hasher.update(&tree_state.epoch().0.to_le_bytes());
     let new_commitment = hasher.finalize();
-    new_state._update_commitment(Hash32::new(new_commitment));
-    new_state
+    
+    TreeState::with_values(
+        tree_state.epoch(),
+        Hash32::new(new_commitment),
+        threshold,
+        tree_state.device_count(),
+    )
 }
 
 /// Apply epoch rotation operation to tree state
 fn apply_rotate_epoch(tree_state: &TreeState) -> TreeState {
-    // Create new tree state with rotated epoch
-    let mut new_state = tree_state.clone();
-    // Create deterministic commitment update for epoch rotation
-    // Use a fixed deterministic value instead of timestamp for reproducibility
+    // Epoch rotation requires recomputing all commitments in the tree
+    // with the new epoch value
+    
+    let new_epoch = Epoch(tree_state.epoch().0 + 1);
+    
+    // In a full implementation, we would:
+    // 1. Iterate through all leaves and recompute their commitments with new epoch
+    // 2. Recompute all branch commitments bottom-up with new epoch
+    // 3. Compute new root commitment
+    
+    // For now, create a deterministic commitment that reflects the epoch change
+    let current_policy = Policy::Threshold {
+        m: tree_state.threshold(),
+        n: tree_state.device_count() as u16,
+    };
+    
+    // Use the merkle tree utilities to compute a proper epoch-rotated commitment
+    let policy_commitment = policy_hash(&current_policy);
+    
     let mut hasher = hash::hasher();
-    hasher.update(b"rotate_epoch");
+    hasher.update(b"ROOT_EPOCH_ROTATE");
+    hasher.update(&new_epoch.0.to_le_bytes());
+    hasher.update(&policy_commitment);
     hasher.update(tree_state.root_commitment().as_bytes());
-    // Include epoch increment marker
-    hasher.update(&1u64.to_le_bytes()); // Epoch increment by 1
     let new_commitment = hasher.finalize();
-    new_state._update_commitment(Hash32::new(new_commitment));
-    new_state
+    
+    TreeState::with_values(
+        new_epoch,
+        Hash32::new(new_commitment),
+        tree_state.threshold(),
+        tree_state.device_count(),
+    )
 }
 
 /// Compute deterministic hash of authority state
@@ -143,6 +206,21 @@ fn compute_relational_state_hash(state: &RelationalState) -> Hash32 {
         hasher.update(&amount.to_le_bytes());
     }
 
+    hasher.update(b"CHANNEL_EPOCHS");
+    for (channel_id, epoch_state) in &state.channel_epochs {
+        hasher.update(channel_id.as_bytes());
+        hasher.update(&epoch_state.chan_epoch.to_le_bytes());
+        hasher.update(&epoch_state.last_checkpoint_gen.to_le_bytes());
+        hasher.update(&epoch_state.current_gen.to_le_bytes());
+        hasher.update(&epoch_state.skip_window.to_le_bytes());
+        if let Some(pending) = &epoch_state.pending_bump {
+            hasher.update(&pending.parent_epoch.to_le_bytes());
+            hasher.update(&pending.new_epoch.to_le_bytes());
+            hasher.update(pending.bump_id.as_bytes());
+            hasher.update(&(pending.reason as u8).to_le_bytes());
+        }
+    }
+
     Hash32::new(hasher.finalize())
 }
 
@@ -185,6 +263,14 @@ pub fn reduce_authority(journal: &Journal) -> AuthorityState {
             panic!("Cannot reduce context journal as authority state");
         }
     }
+}
+
+/// Reduce account facts to tree state
+///
+/// This is the main entry point for reducing journal facts to a TreeState.
+/// It delegates to reduce_authority for the actual work.
+pub fn reduce_account_facts(journal: &Journal) -> TreeState {
+    reduce_authority(journal).tree_state
 }
 
 /// Enhanced reduction with state ordering validation
@@ -251,7 +337,39 @@ pub struct RelationalState {
     pub bindings: Vec<RelationalBinding>,
     /// Flow budget state by context
     pub flow_budgets: BTreeMap<(AuthorityId, AuthorityId, u64), u64>,
+    /// AMP channel epoch state keyed by channel id
+    pub channel_epochs: BTreeMap<ChannelId, ChannelEpochState>,
 }
+
+/// Pending bump state for a channel
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingBump {
+    /// Current epoch being transitioned from
+    pub parent_epoch: u64,
+    /// New epoch being transitioned to
+    pub new_epoch: u64,
+    /// Unique identifier for this bump proposal
+    pub bump_id: Hash32,
+    /// Reason for proposing this epoch bump
+    pub reason: ChannelBumpReason,
+}
+
+/// Derived AMP channel epoch state
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChannelEpochState {
+    /// Canonical channel epoch
+    pub chan_epoch: u64,
+    /// Pending bump if one exists (e→e+1)
+    pub pending_bump: Option<PendingBump>,
+    /// Base generation from the last checkpoint
+    pub last_checkpoint_gen: u64,
+    /// Current generation derived from facts (not a local counter)
+    pub current_gen: u64,
+    /// Skip window size in generations
+    pub skip_window: u32,
+}
+
+const DEFAULT_SKIP_WINDOW: u32 = 1024;
 
 /// A relational binding between authorities
 #[derive(Debug, Clone)]
@@ -294,6 +412,11 @@ pub fn reduce_context(journal: &Journal) -> RelationalState {
         JournalNamespace::Context(context_id) => {
             let mut bindings = Vec::new();
             let mut flow_budgets = BTreeMap::new();
+            let mut channel_checkpoints: BTreeMap<(ChannelId, u64), Vec<ChannelCheckpoint>> =
+                BTreeMap::new();
+            let mut proposed_bumps = Vec::new();
+            let mut committed_bumps = Vec::new();
+            let mut channel_policies: BTreeMap<ChannelId, ChannelPolicy> = BTreeMap::new();
 
             for fact in &journal.facts {
                 match &fact.content {
@@ -335,6 +458,35 @@ pub fn reduce_context(journal: &Journal) -> RelationalState {
                                 context_id: *context_id,
                                 data: [consensus_id.0.to_vec(), operation_hash.0.to_vec()].concat(),
                             },
+                            RelationalFact::AmpChannelCheckpoint(cp) => {
+                                channel_checkpoints
+                                    .entry((cp.channel, cp.chan_epoch))
+                                    .or_default()
+                                    .push(cp.clone());
+                                continue;
+                            }
+                            RelationalFact::AmpProposedChannelEpochBump(bump) => {
+                                proposed_bumps.push(bump.clone());
+                                continue;
+                            }
+                            RelationalFact::AmpCommittedChannelEpochBump(bump) => {
+                                committed_bumps.push(bump.clone());
+                                continue;
+                            }
+                            RelationalFact::AmpChannelPolicy(policy) => {
+                                channel_policies
+                                    .entry(policy.channel)
+                                    .and_modify(|existing| {
+                                        // Prefer policies that specify a skip window override
+                                        if existing.skip_window.is_none()
+                                            && policy.skip_window.is_some()
+                                        {
+                                            *existing = policy.clone();
+                                        }
+                                    })
+                                    .or_insert_with(|| policy.clone());
+                                continue;
+                            }
                             RelationalFact::Generic {
                                 context_id: _,
                                 binding_type,
@@ -357,15 +509,117 @@ pub fn reduce_context(journal: &Journal) -> RelationalState {
                 }
             }
 
+            let mut channel_epochs = BTreeMap::new();
+            let mut channel_ids = BTreeSet::new();
+            channel_ids.extend(channel_checkpoints.keys().map(|(channel, _)| *channel));
+            channel_ids.extend(proposed_bumps.iter().map(|b| b.channel));
+            channel_ids.extend(committed_bumps.iter().map(|b| b.channel));
+            channel_ids.extend(channel_policies.keys().copied());
+
+            for channel in channel_ids {
+                let chan_epoch = highest_committed_epoch(channel, &committed_bumps);
+                // Find the latest checkpoint from any epoch <= current epoch
+                let checkpoint = (0..=chan_epoch)
+                    .rev()
+                    .find_map(|epoch| canonical_checkpoint(channel, epoch, &channel_checkpoints))
+                    .cloned();
+                let last_checkpoint_gen = checkpoint.as_ref().map(|c| c.base_gen).unwrap_or(0);
+                let skip_window = checkpoint
+                    .as_ref()
+                    .and_then(|c| c.skip_window_override)
+                    .or_else(|| channel_policies.get(&channel).and_then(|p| p.skip_window))
+                    .unwrap_or(DEFAULT_SKIP_WINDOW);
+                let current_gen = last_checkpoint_gen;
+                let pending_bump = select_pending_bump(
+                    channel,
+                    chan_epoch,
+                    last_checkpoint_gen,
+                    current_gen,
+                    skip_window,
+                    &proposed_bumps,
+                );
+
+                channel_epochs.insert(
+                    channel,
+                    ChannelEpochState {
+                        chan_epoch,
+                        pending_bump,
+                        last_checkpoint_gen,
+                        current_gen,
+                        skip_window,
+                    },
+                );
+            }
+
             RelationalState {
                 bindings,
                 flow_budgets,
+                channel_epochs,
             }
         }
         JournalNamespace::Authority(_) => {
             panic!("Cannot reduce authority journal as relational state");
         }
     }
+}
+
+fn highest_committed_epoch(
+    channel: ChannelId,
+    committed_bumps: &[CommittedChannelEpochBump],
+) -> u64 {
+    let mut committed: Vec<&CommittedChannelEpochBump> = committed_bumps
+        .iter()
+        .filter(|b| b.channel == channel)
+        .collect();
+    committed.sort_by_key(|b| (b.parent_epoch, b.new_epoch, b.chosen_bump_id));
+
+    let mut epoch = 0u64;
+    for bump in committed {
+        if bump.new_epoch == bump.parent_epoch + 1 && bump.parent_epoch == epoch {
+            epoch = bump.new_epoch;
+        }
+    }
+    epoch
+}
+
+fn canonical_checkpoint(
+    channel: ChannelId,
+    epoch: u64,
+    checkpoints: &BTreeMap<(ChannelId, u64), Vec<ChannelCheckpoint>>,
+) -> Option<&ChannelCheckpoint> {
+    // Select the checkpoint with the highest base_gen; tie-break with commitment bytes to make ordering deterministic.
+    checkpoints.get(&(channel, epoch)).and_then(|cps| {
+        cps.iter()
+            .max_by(|a, b| (a.base_gen, &a.ck_commitment).cmp(&(b.base_gen, &b.ck_commitment)))
+    })
+}
+
+fn select_pending_bump(
+    channel: ChannelId,
+    chan_epoch: u64,
+    base_gen: u64,
+    current_gen: u64,
+    skip_window: u32,
+    proposed: &[ProposedChannelEpochBump],
+) -> Option<PendingBump> {
+    let spacing_needed = (skip_window / 2) as u64;
+    let spacing_met = current_gen.saturating_sub(base_gen) >= spacing_needed;
+
+    let mut candidates: Vec<&ProposedChannelEpochBump> = proposed
+        .iter()
+        .filter(|b| b.channel == channel)
+        .filter(|b| b.parent_epoch == chan_epoch && b.new_epoch == chan_epoch + 1)
+        .filter(|b| b.reason.bypass_spacing() || spacing_met)
+        .collect();
+
+    candidates.sort_by_key(|b| (b.bump_id, b.new_epoch, b.parent_epoch));
+
+    candidates.into_iter().next().map(|b| PendingBump {
+        parent_epoch: b.parent_epoch,
+        new_epoch: b.new_epoch,
+        bump_id: b.bump_id,
+        reason: b.reason,
+    })
 }
 
 /// Compute snapshot state for garbage collection
@@ -406,7 +660,9 @@ pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<crate:
 mod tests {
     use super::*;
     use crate::fact::FactId;
-    use crate::fact_journal::{Fact, FlowBudgetFact};
+    use crate::fact::{Fact, FlowBudgetFact};
+    use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+    use aura_core::Hash32;
 
     #[test]
     fn test_reduce_empty_authority_journal() {
@@ -478,10 +734,163 @@ mod tests {
     }
 
     #[test]
+    fn amp_routine_bump_respects_spacing_rule() {
+        let ctx_id = ContextId::new();
+        let channel = ChannelId::from_bytes([1u8; 32]);
+        let mut journal = Journal::new(JournalNamespace::Context(ctx_id));
+
+        let checkpoint = ChannelCheckpoint {
+            context: ctx_id,
+            channel,
+            chan_epoch: 0,
+            base_gen: 0,
+            window: 1024,
+            ck_commitment: Hash32::default(),
+            skip_window_override: None,
+        };
+
+        let proposed = ProposedChannelEpochBump {
+            context: ctx_id,
+            channel,
+            parent_epoch: 0,
+            new_epoch: 1,
+            bump_id: Hash32::new([2u8; 32]),
+            reason: ChannelBumpReason::Routine,
+        };
+
+        journal
+            .add_fact(Fact {
+                fact_id: FactId::from_bytes([9u8; 16]),
+                content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(checkpoint)),
+            })
+            .unwrap();
+        journal
+            .add_fact(Fact {
+                fact_id: FactId::from_bytes([10u8; 16]),
+                content: FactContent::Relational(RelationalFact::AmpProposedChannelEpochBump(
+                    proposed,
+                )),
+            })
+            .unwrap();
+
+        let state = reduce_context(&journal);
+        let ch_state = state
+            .channel_epochs
+            .get(&channel)
+            .expect("channel state should exist");
+        assert!(ch_state.pending_bump.is_none());
+        assert_eq!(ch_state.chan_epoch, 0);
+        assert_eq!(ch_state.skip_window, 1024);
+    }
+
+    #[test]
+    fn amp_emergency_bump_bypasses_spacing_rule() {
+        let ctx_id = ContextId::new();
+        let channel = ChannelId::from_bytes([3u8; 32]);
+        let mut journal = Journal::new(JournalNamespace::Context(ctx_id));
+
+        let checkpoint = ChannelCheckpoint {
+            context: ctx_id,
+            channel,
+            chan_epoch: 0,
+            base_gen: 0,
+            window: 1024,
+            ck_commitment: Hash32::default(),
+            skip_window_override: None,
+        };
+
+        let emergency = ProposedChannelEpochBump {
+            context: ctx_id,
+            channel,
+            parent_epoch: 0,
+            new_epoch: 1,
+            bump_id: Hash32::new([4u8; 32]),
+            reason: ChannelBumpReason::SuspiciousActivity,
+        };
+
+        journal
+            .add_fact(Fact {
+                fact_id: FactId::from_bytes([11u8; 16]),
+                content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(checkpoint)),
+            })
+            .unwrap();
+        journal
+            .add_fact(Fact {
+                fact_id: FactId::from_bytes([12u8; 16]),
+                content: FactContent::Relational(RelationalFact::AmpProposedChannelEpochBump(
+                    emergency,
+                )),
+            })
+            .unwrap();
+
+        let state = reduce_context(&journal);
+        let ch_state = state
+            .channel_epochs
+            .get(&channel)
+            .expect("channel state should exist");
+        let pending = ch_state
+            .pending_bump
+            .as_ref()
+            .expect("pending bump should exist");
+        assert_eq!(pending.new_epoch, 1);
+        assert_eq!(pending.reason, ChannelBumpReason::SuspiciousActivity);
+    }
+
+    #[test]
     #[should_panic(expected = "Cannot reduce context journal as authority state")]
     fn test_reduce_wrong_namespace_type() {
         let ctx_id = ContextId::new();
         let journal = Journal::new(JournalNamespace::Context(ctx_id));
         let _ = reduce_authority(&journal);
+    }
+
+    #[test]
+    fn amp_reduction_order_independent() {
+        let ctx = ContextId::new();
+        let channel = ChannelId::from_bytes([7u8; 32]);
+
+        let checkpoint = Fact {
+            fact_id: FactId::from_bytes([1u8; 16]),
+            content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(
+                ChannelCheckpoint {
+                    context: ctx,
+                    channel,
+                    chan_epoch: 0,
+                    base_gen: 10,
+                    window: 16,
+                    ck_commitment: Hash32::new([8u8; 32]),
+                    skip_window_override: Some(16),
+                },
+            )),
+        };
+
+        let proposed = Fact {
+            fact_id: FactId::from_bytes([2u8; 16]),
+            content: FactContent::Relational(RelationalFact::AmpProposedChannelEpochBump(
+                ProposedChannelEpochBump {
+                    context: ctx,
+                    channel,
+                    parent_epoch: 0,
+                    new_epoch: 1,
+                    bump_id: Hash32::new([9u8; 32]),
+                    reason: ChannelBumpReason::Routine,
+                },
+            )),
+        };
+
+        let mut journal_a = Journal::new(JournalNamespace::Context(ctx));
+        journal_a.add_fact(checkpoint.clone()).unwrap();
+        journal_a.add_fact(proposed.clone()).unwrap();
+
+        let mut journal_b = Journal::new(JournalNamespace::Context(ctx));
+        journal_b.add_fact(proposed).unwrap();
+        journal_b.add_fact(checkpoint).unwrap();
+
+        let state_a = reduce_context(&journal_a);
+        let state_b = reduce_context(&journal_b);
+        assert_eq!(
+            state_a.channel_epochs.get(&channel),
+            state_b.channel_epochs.get(&channel)
+        );
     }
 }

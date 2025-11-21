@@ -18,28 +18,34 @@ pub mod handlers;
 pub mod visualization;
 
 // Re-export CLI handler and command enums
-pub use commands::{AuthorityCommands, ContextAction};
+pub use commands::{AmpAction, AuthorityCommands, ContextAction};
 pub use handlers::CliHandler;
+
+// Action types defined in this module (no re-export needed)
 
 // Action types are defined in this module and automatically available
 
-use aura_agent::runtime::EffectSystemBuilder;
-use aura_core::{identifiers::DeviceId, AuraError};
+use aura_agent::AgentBuilder;
+use aura_core::{identifiers::{DeviceId, AuthorityId}, AuraError};
 
 /// Create a CLI handler for the given device ID
 pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
-    let effect_system = EffectSystemBuilder::new()
-        .with_device_id(device_id)
-        .build_sync()?;
-    Ok(CliHandler::new(effect_system, device_id))
+    let authority_id = AuthorityId::new();
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing()
+        .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
+    Ok(CliHandler::new(agent.runtime().effects().clone(), device_id))
 }
 
 /// Create a test CLI handler for the given device ID
 pub fn create_test_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
-    let effect_system = EffectSystemBuilder::new()
-        .with_device_id(device_id)
-        .build_sync()?;
-    Ok(CliHandler::new(effect_system, device_id))
+    let authority_id = AuthorityId::new();
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing()
+        .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
+    Ok(CliHandler::new(agent.runtime().effects().clone(), device_id))
 }
 
 /// Create a CLI handler with a generated device ID
@@ -48,7 +54,17 @@ pub fn create_default_cli_handler() -> Result<CliHandler, AuraError> {
     create_cli_handler(device_id)
 }
 
-/// Create a test CLI handler with a generated device ID
+/// Create a test CLI handler with a deterministic device ID
+#[cfg(test)]
+pub fn create_default_test_cli_handler() -> Result<CliHandler, AuraError> {
+    use aura_testkit::DeviceTestFixture;
+    let fixture = DeviceTestFixture::new(0);
+    let device_id = fixture.device_id();
+    create_test_cli_handler(device_id)
+}
+
+/// Create a test CLI handler with a deterministic device ID (fallback for non-test builds)
+#[cfg(not(test))]
 pub fn create_default_test_cli_handler() -> Result<CliHandler, AuraError> {
     let device_id = DeviceId::new();
     create_test_cli_handler(device_id)

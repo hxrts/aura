@@ -4,7 +4,7 @@
 //! enabling composition of different storage backends and capabilities.
 
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
-use aura_core::{AuraResult, identifiers::DeviceId};
+use aura_core::{identifiers::DeviceId, AuraResult};
 use aura_effects::{EncryptedStorageHandler, FilesystemStorageHandler, MemoryStorageHandler};
 use std::collections::HashMap;
 use std::sync::Arc;

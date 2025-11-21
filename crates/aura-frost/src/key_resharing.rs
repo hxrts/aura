@@ -26,7 +26,7 @@
 //! - **Atomic Updates**: Either all participants get new shares or none do
 
 use aura_core::frost::PublicKeyPackage;
-use aura_core::{AccountId, identifiers::AuthorityId};
+use aura_core::{identifiers::AuthorityId, AccountId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 
@@ -219,7 +219,11 @@ mod tests {
             old_threshold: 2,
             new_threshold: 3,
             old_participants: vec![test_authority_id(1), test_authority_id(2)],
-            new_participants: vec![test_authority_id(3), test_authority_id(4), test_authority_id(5)],
+            new_participants: vec![
+                test_authority_id(3),
+                test_authority_id(4),
+                test_authority_id(5),
+            ],
             timeout_seconds: 300,
         };
 

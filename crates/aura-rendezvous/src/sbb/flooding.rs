@@ -318,11 +318,12 @@ impl SbbFlooding for SbbFloodingCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+    use aura_agent::AuraEffectSystem;
+    use aura_agent::AgentConfig;
 
-    fn create_test_effects(device_id: DeviceId) -> SharedEffects {
-        let _config = EffectSystemConfig::for_testing(device_id);
-        let system = AuraEffectSystem::new();
+    fn create_test_effects(_device_id: DeviceId) -> SharedEffects {
+        let config = AgentConfig::default();
+        let system = AuraEffectSystem::testing(&config);
         Arc::new(system)
     }
 

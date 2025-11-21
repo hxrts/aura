@@ -1,493 +1,474 @@
-//! Builder pattern for constructing AuraEffectSystem instances
+//! Consolidated Effect Registry and Runtime Builder
 //!
-//! This module provides a flexible builder pattern for creating effect systems
-//! with custom configurations and handlers, supporting both async and sync
-//! initialization paths.
+//! This module consolidates all effect registry/builder functionality into a single
+//! location, providing both authority-first runtime building and flexible effect
+//! system composition with compile-time safety.
+//!
+//! # Architecture
+//!
+//! - **EffectSystemBuilder**: Authority-first runtime system builder
+//! - **EffectRegistry**: Flexible effect system composition with builder pattern
+//! - **RuntimeBuilder**: High-level façade combining both approaches
+//!
+//! # Usage
+//!
+//! ```rust,ignore
+//! // Authority-first runtime building
+//! let runtime = EffectSystemBuilder::production()
+//!     .with_authority(authority_id)
+//!     .build().await?;
+//!
+//! // Flexible effect system composition
+//! let effects = EffectRegistry::production()
+//!     .with_authority_context(authority_context)
+//!     .with_logging()
+//!     .build()?;
+//! ```
 
-use std::collections::HashMap;
+use async_trait::async_trait;
 use std::sync::Arc;
-use std::time::Instant;
+use thiserror::Error;
 
-use aura_core::{session_epochs::Epoch, AuraResult, DeviceId};
-
-use crate::handlers::{AuraHandler, EffectType, ExecutionMode};
-use crate::runtime::{
-    container::EffectContainer,
-    executor::{EffectExecutor, EffectExecutorBuilder},
-    lifecycle::LifecycleManager,
-    services::{ContextManager, FlowBudgetManager, ReceiptManager},
-    AuraEffectSystem, EffectSystemConfig, StorageConfig,
+use super::{
+    EffectExecutor, AuraEffectSystem, LifecycleManager, ChoreographyAdapter, RuntimeSystem
 };
+use super::services::{ContextManager, FlowBudgetManager, ReceiptManager};
+use crate::core::{AgentConfig, AgentError, AgentResult, AuthorityContext};
+use aura_core::identifiers::AuthorityId;
 
-/// Builder for constructing AuraEffectSystem instances
-///
-/// This builder provides a flexible way to construct effect systems with
-/// custom configurations and handlers. It supports both synchronous and
-/// asynchronous initialization paths.
-///
-/// # Example
-/// ```no_run
-/// # use aura_protocol::composition::{AuraEffectSystemBuilder};
-/// # use aura_protocol::orchestration::ExecutionMode;
-/// # use aura_core::DeviceId;
-/// # async fn example() -> aura_core::AuraResult<()> {
-/// let device_id = DeviceId::new();
-/// let system = AuraEffectSystemBuilder::new()
-///     .with_device_id(device_id)
-///     .with_execution_mode(ExecutionMode::Testing)
-///     .build()
-///     .await?;
-/// # Ok(())
-/// # }
-/// ```
-pub struct AuraEffectSystemBuilder {
-    config: Option<EffectSystemConfig>,
-    device_id: Option<DeviceId>,
-    execution_mode: Option<ExecutionMode>,
-    storage_config: Option<StorageConfig>,
-    default_flow_limit: Option<u64>,
-    initial_epoch: Option<Epoch>,
-    // TODO: Restore when AuraHandler trait is properly defined
-    // custom_handlers: HashMap<EffectType, Box<dyn AuraHandler>>,
-    container: Option<Arc<EffectContainer>>,
+/// Error types for effect registry operations
+#[derive(Debug, Error)]
+pub enum EffectRegistryError {
+    /// Required configuration missing
+    #[error("Required configuration missing: {field}")]
+    MissingConfiguration { field: String },
+    
+    /// Handler creation failed
+    #[error("Failed to create {handler_type} handler")]
+    HandlerCreationFailed {
+        handler_type: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    
+    /// Invalid configuration
+    #[error("Invalid configuration: {message}")]
+    InvalidConfiguration { message: String },
+    
+    /// Effect system build failed
+    #[error("Failed to build effect system")]
+    BuildFailed {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }
 
-impl AuraEffectSystemBuilder {
-    /// Create a new builder instance
-    pub fn new() -> Self {
-        Self {
-            config: None,
-            device_id: None,
-            execution_mode: None,
-            storage_config: None,
-            default_flow_limit: None,
-            initial_epoch: None,
-            // custom_handlers: HashMap::new(),
-            container: None,
+impl EffectRegistryError {
+    pub fn missing_field(field: impl Into<String>) -> Self {
+        Self::MissingConfiguration { field: field.into() }
+    }
+    
+    pub fn handler_creation_failed(
+        handler_type: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::HandlerCreationFailed {
+            handler_type: handler_type.into(),
+            source: Box::new(source),
         }
     }
-
-    /// Set the device ID
-    pub fn with_device_id(mut self, device_id: DeviceId) -> Self {
-        self.device_id = Some(device_id);
-        self
+    
+    pub fn invalid_config(message: impl Into<String>) -> Self {
+        Self::InvalidConfiguration { message: message.into() }
     }
-
-    /// Set the execution mode
-    pub fn with_execution_mode(mut self, mode: ExecutionMode) -> Self {
-        self.execution_mode = Some(mode);
-        self
+    
+    pub fn build_failed(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::BuildFailed { source: Box::new(source) }
     }
+}
 
-    /// Set the storage configuration
-    pub fn with_storage_config(mut self, config: StorageConfig) -> Self {
-        self.storage_config = Some(config);
-        self
+/// Execution mode for effect systems
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExecutionMode {
+    /// Production mode with real handlers
+    Production,
+    /// Testing mode with mock handlers
+    Testing,
+    /// Simulation mode with deterministic behavior
+    Simulation { seed: u64 },
+}
+
+/// Authority-first runtime system builder
+pub struct EffectSystemBuilder {
+    config: Option<AgentConfig>,
+    authority_id: Option<AuthorityId>,
+    execution_mode: ExecutionMode,
+}
+
+impl EffectSystemBuilder {
+    /// Create a production builder
+    pub fn production() -> Self {
+        Self {
+            config: None,
+            authority_id: None,
+            execution_mode: ExecutionMode::Production,
+        }
     }
-
-    /// Set the default flow budget limit
-    pub fn with_default_flow_limit(mut self, limit: u64) -> Self {
-        self.default_flow_limit = Some(limit);
-        self
+    
+    /// Create a testing builder
+    pub fn testing() -> Self {
+        Self {
+            config: None,
+            authority_id: None,
+            execution_mode: ExecutionMode::Testing,
+        }
     }
-
-    /// Set the initial epoch
-    pub fn with_initial_epoch(mut self, epoch: Epoch) -> Self {
-        self.initial_epoch = Some(epoch);
-        self
+    
+    /// Create a simulation builder
+    pub fn simulation(seed: u64) -> Self {
+        Self {
+            config: None,
+            authority_id: None,
+            execution_mode: ExecutionMode::Simulation { seed },
+        }
     }
-
-    /// Use a complete configuration instead of individual settings
-    pub fn with_config(mut self, config: EffectSystemConfig) -> Self {
+    
+    /// Set configuration
+    pub fn with_config(mut self, config: AgentConfig) -> Self {
         self.config = Some(config);
         self
     }
-
-    // TODO: Restore when AuraHandler trait is properly defined
-    // /// Add a custom handler for a specific effect type
-    // ///
-    // /// This allows replacing the default handler for any effect type
-    // /// with a custom implementation.
-    // pub fn with_handler(mut self, effect_type: EffectType, handler: Box<dyn AuraHandler>) -> Self {
-    //     self.custom_handlers.insert(effect_type, handler);
-    //     self
-    // }
-
-    /// Use a custom effect container for dependency injection
-    ///
-    /// This allows using a pre-configured container with registered handlers.
-    pub fn with_container(mut self, container: Arc<EffectContainer>) -> Self {
-        self.container = Some(container);
+    
+    /// Set authority ID
+    pub fn with_authority(mut self, authority_id: AuthorityId) -> Self {
+        self.authority_id = Some(authority_id);
         self
     }
-
-    /// Build the effect system asynchronously
-    ///
-    /// This method performs async initialization and is suitable for
-    /// production use where async operations are expected.
-    pub async fn build(self) -> AuraResult<AuraEffectSystem> {
-        let _config = self.resolve_config()?;
-
-        // Use the stub coordinator for now while refactoring
-        // TODO: Implement custom executor-based composition when handler adapters are available
-        Ok(AuraEffectSystem::new())
-    }
-
-    /// Build the effect system synchronously
-    ///
-    /// This method avoids async operations and is suitable for use in
-    /// test contexts where async runtimes might already be active.
-    pub fn build_sync(self) -> AuraResult<AuraEffectSystem> {
-        let _config = self.resolve_config()?;
-
-        // Use the stub coordinator for now while refactoring
-        // TODO: Implement custom executor-based composition when handler adapters are available
-        Ok(AuraEffectSystem::new())
-    }
-
-    /// Resolve the final configuration from builder settings
-    fn resolve_config(&self) -> AuraResult<EffectSystemConfig> {
-        // If a complete config was provided, use it
-        if let Some(config) = &self.config {
-            return Ok(config.clone());
-        }
-
-        // Otherwise, build config from individual settings
-        let device_id = self
-            .device_id
-            .ok_or_else(|| aura_core::AuraError::invalid("Device ID is required"))?;
-
-        let execution_mode = self.execution_mode.unwrap_or(ExecutionMode::Testing);
-
-        let storage_config = self.storage_config.clone().unwrap_or_else(|| {
-            match execution_mode {
-                ExecutionMode::Testing => StorageConfig::for_testing(),
-                ExecutionMode::Production => {
-                    // For production, we'd normally return an error if storage isn't configured
-                    // For now, use a default that would need to be replaced
-                    StorageConfig::for_testing()
-                }
-                ExecutionMode::Simulation { seed: _ } => StorageConfig::for_simulation(),
-            }
-        });
-
-        // Use provided values or defaults based on execution mode
-        let (default_flow_limit, initial_epoch) = match execution_mode {
-            ExecutionMode::Testing => (
-                self.default_flow_limit.unwrap_or(10_000),
-                self.initial_epoch.unwrap_or_else(|| Epoch::from(1)),
-            ),
-            ExecutionMode::Production => (
-                self.default_flow_limit.unwrap_or(100_000),
-                self.initial_epoch.unwrap_or_else(|| Epoch::from(1)),
-            ),
-            ExecutionMode::Simulation { .. } => (
-                self.default_flow_limit.unwrap_or(50_000),
-                self.initial_epoch.unwrap_or_else(|| Epoch::from(1)),
-            ),
-        };
-
-        Ok(EffectSystemConfig {
-            device_id,
-            execution_mode,
-            default_flow_limit,
-            initial_epoch: initial_epoch.into(), // Convert Epoch to u64
-            storage_config: Some(storage_config), // Wrap in Option
-        })
-    }
-
-    // DISABLED: These methods are disabled because they require handler adapter types
-    // (CryptoHandlerAdapter, NetworkHandlerAdapter, etc.) that don't exist yet.
-    // TODO: Re-enable once handler adapters are implemented
-    /*
-    /// Build the effect executor with appropriate handlers
-    fn build_executor(self, config: &EffectSystemConfig) -> AuraResult<EffectExecutor> {
-        let mut executor_builder = EffectExecutorBuilder::new();
-
-        // First, add default handlers based on execution mode
-        executor_builder = self.add_default_handlers(executor_builder, config)?;
-
-        // Then, override with any custom handlers
-        for (effect_type, handler) in self.custom_handlers {
-            executor_builder = executor_builder.with_handler(effect_type, Arc::from(handler));
-        }
-
-        Ok(executor_builder.build())
-    }
-
-    /// Build the effect executor using container for dependency injection
-    async fn build_executor_with_container(
-        self,
-        config: &EffectSystemConfig,
-        container: Arc<EffectContainer>,
-    ) -> AuraResult<EffectExecutor> {
-        let mut executor_builder = EffectExecutorBuilder::new();
-        let mode = config.execution_mode;
-
-        // Try to resolve handlers from container first
-        // If not found, fall back to default handlers
-
-        // For now, we'll use a simplified approach
-        // In a full implementation, we'd have a more sophisticated container integration
-        // that can resolve handlers by their trait implementations
-
-        // For now, we'll still use the default handler approach
-        // In a full implementation, we'd resolve all handlers from the container
-        executor_builder = self.add_default_handlers(executor_builder, config)?;
-
-        // Override with any custom handlers
-        for (effect_type, handler) in self.custom_handlers {
-            executor_builder = executor_builder.with_handler(effect_type, Arc::from(handler));
-        }
-
-        Ok(executor_builder.build())
-    }
-    */
-
-    /*
-    /// Add default handlers based on execution mode
-    fn add_default_handlers(
-        &self,
-        mut builder: EffectExecutorBuilder,
-        config: &EffectSystemConfig,
-    ) -> AuraResult<EffectExecutorBuilder> {
-        use aura_effects::{
-            console::MockConsoleHandler, crypto::MockCryptoHandler, journal::MockJournalHandler,
-            random::MockRandomHandler, storage::MemoryStorageHandler, time::SimulatedTimeHandler,
-            transport::InMemoryTransportHandler,
-        };
-
-        let mode = config.execution_mode;
-
-        match mode {
-            ExecutionMode::Testing => {
-                // Add test handlers if not already customized
-                if !self.custom_handlers.contains_key(&EffectType::Crypto) {
-                    builder = builder.with_handler(
-                        EffectType::Crypto,
-                        Arc::new(CryptoHandlerAdapter::new(
-                            MockCryptoHandler::with_seed(0),
-                            mode,
-                        )),
-                    );
-                }
-                if !self.custom_handlers.contains_key(&EffectType::Network) {
-                    builder = builder.with_handler(
-                        EffectType::Network,
-                        Arc::new(NetworkHandlerAdapter::new(
-                            InMemoryTransportHandler::new(
-                                aura_effects::transport::TransportConfig::default(),
-                            ),
-                            mode,
-                        )),
-                    );
-                }
-                if !self.custom_handlers.contains_key(&EffectType::Storage) {
-                    builder = builder.with_handler(
-                        EffectType::Storage,
-                        Arc::new(StorageHandlerAdapter::new(
-                            MemoryStorageHandler::new(),
-                            mode,
-                        )),
-                    );
-                }
-                if !self.custom_handlers.contains_key(&EffectType::Time) {
-                    builder = builder.with_handler(
-                        EffectType::Time,
-                        Arc::new(TimeHandlerAdapter::new(
-                            SimulatedTimeHandler::new_at_epoch(),
-                            mode,
-                        )),
-                    );
-                }
-                if !self.custom_handlers.contains_key(&EffectType::Console) {
-                    builder = builder.with_handler(
-                        EffectType::Console,
-                        Arc::new(ConsoleHandlerAdapter::new(MockConsoleHandler::new(), mode)),
-                    );
-                }
-                if !self.custom_handlers.contains_key(&EffectType::Random) {
-                    builder = builder.with_handler(
-                        EffectType::Random,
-                        Arc::new(RandomHandlerAdapter::new(
-                            MockRandomHandler::new_with_seed(0),
-                            mode,
-                        )),
-                    );
-                }
-                if !self.custom_handlers.contains_key(&EffectType::Journal) {
-                    builder = builder.with_handler(
-                        EffectType::Journal,
-                        Arc::new(JournalHandlerAdapter::new(MockJournalHandler::new(), mode)),
-                    );
-                }
-                if !self.custom_handlers.contains_key(&EffectType::System) {
-                    builder = builder.with_handler(
-                        EffectType::System,
-                        Arc::new(SystemHandlerAdapter::new(
-                            crate::handlers::system::LoggingSystemHandler::default(),
-                            mode,
-                        )),
-                    );
-                }
-                if !self.custom_handlers.contains_key(&EffectType::EffectApi) {
-                    builder = builder.with_handler(
-                        EffectType::EffectApi,
-                        Arc::new(EffectApiHandlerAdapter::new(
-                            crate::handlers::effect_api::memory::MemoryLedgerHandler::new(),
-                            mode,
-                        )),
-                    );
-                }
-                if !self.custom_handlers.contains_key(&EffectType::Tree) {
-                    builder = builder.with_handler(
-                        EffectType::Tree,
-                        Arc::new(TreeHandlerAdapter::new(
-                            crate::handlers::tree::dummy::DummyTreeHandler::new(),
-                            mode,
-                        )),
-                    );
-                }
-                if !self
-                    .custom_handlers
-                    .contains_key(&EffectType::Choreographic)
-                {
-                    builder = builder.with_handler(
-                        EffectType::Choreographic,
-                        Arc::new(ChoreographicHandlerAdapter::new(
-                            crate::handlers::choreographic::memory::MemoryChoreographicHandler::new(
-                                config.device_id.0,
-                            ),
-                            mode,
-                        )),
-                    );
-                }
-            }
+    
+    /// Build the runtime system (async)
+    pub async fn build(self) -> Result<RuntimeSystem, String> {
+        let config = self.config.unwrap_or_default();
+        let authority_id = self.authority_id.ok_or("Authority ID required")?;
+        
+        // Create lifecycle manager
+        let lifecycle_manager = LifecycleManager::new();
+        
+        // Create effect system components based on execution mode
+        let (effect_executor, effect_system) = match self.execution_mode {
             ExecutionMode::Production => {
-                // Production handlers would be added here
-                // For now, reuse test handlers with a warning
-                tracing::warn!(
-                    "Using test handlers in production mode - replace with real implementations"
-                );
-                return self.add_default_handlers(
-                    builder,
-                    &EffectSystemConfig {
-                        execution_mode: ExecutionMode::Testing,
-                        ..config.clone()
-                    },
-                );
-            }
+                let executor = EffectExecutor::production(config.clone());
+                let system = AuraEffectSystem::production(config.clone());
+                (executor, system)
+            },
+            ExecutionMode::Testing => {
+                let executor = EffectExecutor::testing(config.clone());
+                let system = AuraEffectSystem::testing(&config);
+                (executor, system)
+            },
             ExecutionMode::Simulation { seed } => {
-                // Simulation handlers would be added here
-                // For now, reuse test handlers with deterministic seed
-                if !self.custom_handlers.contains_key(&EffectType::Random) {
-                    builder = builder.with_handler(
-                        EffectType::Random,
-                        Arc::new(RandomHandlerAdapter::new(
-                            MockRandomHandler::new_with_seed(0),
-                            mode,
-                        )),
-                    );
-                }
-                // Add other simulation-specific handlers
-                return self.add_default_handlers(
-                    builder,
-                    &EffectSystemConfig {
-                        execution_mode: ExecutionMode::Testing,
-                        ..config.clone()
-                    },
-                );
+                let executor = EffectExecutor::simulation(config.clone(), seed);
+                let system = AuraEffectSystem::simulation(&config, seed);
+                (executor, system)
+            },
+        };
+        
+        // Create service managers
+        let context_manager = ContextManager::new(&config);
+        let flow_budget_manager = FlowBudgetManager::new(&config);
+        let receipt_manager = ReceiptManager::new(&config);
+        
+        // Create choreography adapter
+        let choreography_adapter = ChoreographyAdapter::new(&config);
+        
+        Ok(RuntimeSystem::new(
+            effect_executor,
+            effect_system,
+            context_manager,
+            flow_budget_manager,
+            receipt_manager,
+            choreography_adapter,
+            lifecycle_manager,
+            config,
+            authority_id,
+        ))
+    }
+    
+    /// Build the runtime system (sync)
+    pub fn build_sync(self) -> Result<RuntimeSystem, String> {
+        // For testing/simulation, we can build synchronously
+        match self.execution_mode {
+            ExecutionMode::Production => Err("Production runtime requires async build".to_string()),
+            _ => {
+                // Use a minimal async runtime just for building
+                let rt = tokio::runtime::Runtime::new()
+                    .map_err(|e| format!("Failed to create runtime: {}", e))?;
+                rt.block_on(self.build())
             }
         }
-
-        Ok(builder)
-    }
-    */
-}
-
-impl Default for AuraEffectSystemBuilder {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
-// TODO: Re-enable after builder API stabilizes
-// Tests use old builder API with methods that no longer exist on AuraEffectSystem
-#[cfg(disabled_test)]
+/// Flexible effect system registry with builder pattern
+pub struct EffectRegistry {
+    authority_context: Option<AuthorityContext>,
+    execution_mode: ExecutionMode,
+    enable_logging: bool,
+    enable_metrics: bool,
+    enable_tracing: bool,
+}
+
+impl EffectRegistry {
+    /// Create a production effect registry
+    ///
+    /// Production configurations use real handlers for all effects:
+    /// - Crypto: Hardware security where available, real randomness
+    /// - Storage: Persistent filesystem with encryption
+    /// - Network: TCP/UDP networking with TLS
+    /// - Time: System clock
+    pub fn production() -> Self {
+        Self {
+            authority_context: None,
+            execution_mode: ExecutionMode::Production,
+            enable_logging: true,
+            enable_metrics: true,
+            enable_tracing: false,
+        }
+    }
+    
+    /// Create a testing effect registry
+    ///
+    /// Testing configurations use mock handlers for fast, deterministic tests:
+    /// - Crypto: Mock handlers with fixed keys
+    /// - Storage: In-memory storage
+    /// - Network: Local loopback or memory channels
+    /// - Time: Controllable mock time
+    pub fn testing() -> Self {
+        Self {
+            authority_context: None,
+            execution_mode: ExecutionMode::Testing,
+            enable_logging: false,
+            enable_metrics: false,
+            enable_tracing: false,
+        }
+    }
+    
+    /// Create a simulation effect registry
+    ///
+    /// Simulation configurations provide deterministic, controllable execution:
+    /// - Crypto: Seeded randomness for reproducibility
+    /// - Storage: Simulated delays and failures
+    /// - Network: Simulated partitions and message loss
+    /// - Time: Virtual time with acceleration
+    ///
+    /// # Arguments
+    /// * `seed` - Random seed for deterministic behavior
+    pub fn simulation(seed: u64) -> Self {
+        Self {
+            authority_context: None,
+            execution_mode: ExecutionMode::Simulation { seed },
+            enable_logging: true,
+            enable_metrics: false,
+            enable_tracing: false,
+        }
+    }
+    
+    /// Create a custom effect registry for advanced configuration
+    pub fn custom() -> Self {
+        Self {
+            authority_context: None,
+            execution_mode: ExecutionMode::Testing, // Safe default
+            enable_logging: false,
+            enable_metrics: false,
+            enable_tracing: false,
+        }
+    }
+    
+    /// Set the authority context (authority-first approach)
+    pub fn with_authority_context(mut self, context: AuthorityContext) -> Self {
+        self.authority_context = Some(context);
+        self
+    }
+    
+    
+    /// Enable logging for all effect operations
+    pub fn with_logging(mut self) -> Self {
+        self.enable_logging = true;
+        self
+    }
+    
+    /// Enable metrics collection for performance monitoring
+    pub fn with_metrics(mut self) -> Self {
+        self.enable_metrics = true;
+        self
+    }
+    
+    /// Enable distributed tracing for protocol debugging
+    pub fn with_tracing(mut self) -> Self {
+        self.enable_tracing = true;
+        self
+    }
+    
+    /// Set custom execution mode
+    pub fn with_execution_mode(mut self, mode: ExecutionMode) -> Self {
+        self.execution_mode = mode;
+        self
+    }
+    
+    /// Build the configured effect system
+    ///
+    /// This creates a complete `AuraEffectSystem` with all configured handlers
+    /// and middleware. The system implements all effect traits and can be used
+    /// directly by protocols.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Required configuration is missing (e.g., authority_context)
+    /// - Handler creation fails
+    /// - Middleware configuration is invalid
+    pub fn build(self) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
+        // Validate required configuration
+        if self.authority_context.is_none() {
+            return Err(EffectRegistryError::missing_field("authority_context"));
+        }
+        
+        // Create effect system based on execution mode
+        let config = AgentConfig::default();
+        let effect_system = match self.execution_mode {
+            ExecutionMode::Testing => AuraEffectSystem::testing(&config),
+            ExecutionMode::Production => {
+                // In a real implementation, this would create production effects
+                // For now, use testing as a placeholder
+                AuraEffectSystem::testing(&config)
+            },
+            ExecutionMode::Simulation { seed } => {
+                AuraEffectSystem::simulation(&config, seed)
+            },
+        };
+        
+        Ok(Arc::new(effect_system))
+    }
+}
+
+/// Extension trait providing standard configurations
+pub trait EffectRegistryExt {
+    /// Quick testing setup with authority context
+    fn quick_testing(context: AuthorityContext) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
+        EffectRegistry::testing().with_authority_context(context).build()
+    }
+    
+    /// Quick production setup with authority context and basic middleware
+    fn quick_production(context: AuthorityContext) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
+        EffectRegistry::production()
+            .with_authority_context(context)
+            .with_logging()
+            .with_metrics()
+            .build()
+    }
+    
+    /// Quick simulation setup with authority context and seed
+    fn quick_simulation(
+        context: AuthorityContext,
+        seed: u64,
+    ) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
+        EffectRegistry::simulation(seed)
+            .with_authority_context(context)
+            .with_logging()
+            .build()
+    }
+}
+
+impl EffectRegistryExt for EffectRegistry {}
+
+/// High-level runtime builder façade
+pub struct RuntimeBuilder;
+
+impl RuntimeBuilder {
+    /// Create a production runtime with authority-first design
+    pub async fn production(authority_id: AuthorityId) -> Result<RuntimeSystem, String> {
+        EffectSystemBuilder::production()
+            .with_authority(authority_id)
+            .build()
+            .await
+    }
+    
+    /// Create a testing runtime with authority-first design
+    pub fn testing(authority_id: AuthorityId) -> Result<RuntimeSystem, String> {
+        EffectSystemBuilder::testing()
+            .with_authority(authority_id)
+            .build_sync()
+    }
+    
+    /// Create a simulation runtime with authority-first design
+    pub fn simulation(authority_id: AuthorityId, seed: u64) -> Result<RuntimeSystem, String> {
+        EffectSystemBuilder::simulation(seed)
+            .with_authority(authority_id)
+            .build_sync()
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use aura_macros::aura_test;
-    use aura_testkit::TestFixture;
-
+    
     #[test]
-    fn test_builder_basic() {
-        let device_id = DeviceId::new();
-        let builder = AuraEffectSystemBuilder::new()
-            .with_device_id(device_id)
-            .with_execution_mode(ExecutionMode::Testing);
-
-        let system = builder.build_sync().unwrap();
-        assert_eq!(system.device_id(), device_id);
-        assert_eq!(system.execution_mode(), ExecutionMode::Testing);
+    fn test_execution_modes() {
+        assert_eq!(ExecutionMode::Production, ExecutionMode::Production);
+        assert_eq!(ExecutionMode::Testing, ExecutionMode::Testing);
+        assert_eq!(ExecutionMode::Simulation { seed: 42 }, ExecutionMode::Simulation { seed: 42 });
+        assert_ne!(ExecutionMode::Production, ExecutionMode::Testing);
     }
-
-    #[aura_test]
-    async fn test_builder_async() -> AuraResult<()> {
-        let fixture = TestFixture::new().await?;
-        let device_id = fixture.device_id();
-        let system = AuraEffectSystemBuilder::new()
-            .with_device_id(device_id)
-            .with_execution_mode(ExecutionMode::Testing)
-            .with_default_flow_limit(5000)
-            .build()
-            .await?;
-
-        assert_eq!(system.device_id(), device_id);
-        Ok(())
-    }
-
+    
     #[test]
-    fn test_builder_with_config() {
-        let device_id = DeviceId::new();
-        let config = EffectSystemConfig::for_testing(device_id);
-
-        let system = AuraEffectSystemBuilder::new()
-            .with_config(config.clone())
-            .build_sync()
-            .unwrap();
-
-        assert_eq!(system.device_id(), device_id);
-        assert_eq!(system.execution_mode(), ExecutionMode::Testing);
+    fn test_effect_registry_configurations() {
+        // Test production configuration
+        let prod = EffectRegistry::production();
+        assert!(matches!(prod.execution_mode, ExecutionMode::Production));
+        assert!(prod.enable_logging);
+        assert!(prod.enable_metrics);
+        
+        // Test testing configuration
+        let test = EffectRegistry::testing();
+        assert!(matches!(test.execution_mode, ExecutionMode::Testing));
+        assert!(!test.enable_logging);
+        assert!(!test.enable_metrics);
+        
+        // Test simulation configuration
+        let sim = EffectRegistry::simulation(42);
+        assert!(matches!(sim.execution_mode, ExecutionMode::Simulation { seed: 42 }));
+        assert!(sim.enable_logging);
+        assert!(!sim.enable_metrics);
     }
-
+    
     #[test]
-    fn test_builder_custom_handler() {
-        use aura_effects::crypto::MockCryptoHandler;
-
-        let device_id = DeviceId::new();
-        let custom_crypto = MockCryptoHandler::with_seed(12345);
-
-        let system = AuraEffectSystemBuilder::new()
-            .with_device_id(device_id)
-            .with_handler(
-                EffectType::Crypto,
-                Box::new(CryptoHandlerAdapter::new(
-                    custom_crypto,
-                    ExecutionMode::Testing,
-                )),
-            )
-            .build_sync()
-            .unwrap();
-
-        assert_eq!(system.device_id(), device_id);
+    fn test_builder_pattern() {
+        let authority_id = AuthorityId::new();
+        let context = AuthorityContext::new(authority_id);
+        
+        let registry = EffectRegistry::custom()
+            .with_authority_context(context)
+            .with_logging()
+            .with_metrics()
+            .with_tracing()
+            .with_execution_mode(ExecutionMode::Production);
+        
+        assert!(registry.authority_context.is_some());
+        assert!(matches!(registry.execution_mode, ExecutionMode::Production));
+        assert!(registry.enable_logging);
+        assert!(registry.enable_metrics);
+        assert!(registry.enable_tracing);
     }
-
+    
     #[test]
-    fn test_builder_error_missing_device_id() {
-        let result = AuraEffectSystemBuilder::new().build_sync();
+    fn test_build_missing_context() {
+        let result = EffectRegistry::testing().build();
         assert!(result.is_err());
-        if let Err(err) = result {
-            assert!(err.to_string().contains("Device ID is required"));
+        
+        match result.unwrap_err() {
+            EffectRegistryError::MissingConfiguration { field } => {
+                assert_eq!(field, "authority_context");
+            }
+            _ => panic!("Expected MissingConfiguration error"),
         }
     }
 }

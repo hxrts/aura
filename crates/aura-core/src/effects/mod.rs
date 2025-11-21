@@ -53,9 +53,11 @@ pub mod journal;
 pub mod leakage; // Privacy leakage tracking
 pub mod migration; // Empty module - migration complete
 pub mod network;
+pub mod quint;
 pub mod random;
 pub mod reliability;
 pub mod secure;
+pub mod simulation;
 pub mod storage;
 pub mod supertraits;
 pub mod system;
@@ -92,6 +94,11 @@ pub use leakage::{
 #[allow(deprecated)]
 // Migration utilities removed - middleware transition complete
 pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
+pub use quint::{
+    Counterexample, EvaluationResult, EvaluationStatistics, Property, PropertyEvaluator,
+    PropertyId, PropertyKind, PropertySpec, QuintEvaluationEffects, QuintVerificationEffects,
+    VerificationId, VerificationResult,
+};
 pub use random::RandomEffects;
 pub use reliability::{
     // Unified retry types
@@ -110,6 +117,12 @@ pub use reliability::{
 };
 pub use secure::{
     SecureStorageCapability, SecureStorageEffects, SecureStorageError, SecureStorageLocation,
+};
+pub use simulation::{
+    ByzantineFault, CheckpointId, ComputationFault, ExportFormat, FaultInjectionConfig,
+    FaultInjectionEffects, FaultType, NetworkFault, OperationStats, ScenarioId, ScenarioState,
+    SimulationCheckpoint, SimulationControlEffects, SimulationEffects, SimulationMetrics,
+    SimulationObservationEffects, SimulationScenario, SimulationTime, StorageFault, TimeFault,
 };
 pub use storage::{StorageEffects, StorageError, StorageLocation, StorageStats};
 pub use supertraits::{

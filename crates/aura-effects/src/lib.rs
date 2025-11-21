@@ -80,6 +80,7 @@ pub mod journal;
 pub mod leakage_handler;
 pub mod random;
 pub mod secure;
+pub mod simulation;
 pub mod storage;
 pub mod system;
 pub mod time;
@@ -96,6 +97,7 @@ pub use journal::{MockJournalHandler, StandardJournalHandler};
 pub use leakage_handler::{NoOpLeakageHandler, ProductionLeakageHandler, TestLeakageHandler};
 pub use random::{MockRandomHandler, RealRandomHandler};
 pub use secure::{MockSecureStorageHandler, RealSecureStorageHandler};
+pub use simulation::{MockSimulationHandler, StatelessSimulationHandler};
 pub use storage::{EncryptedStorageHandler, FilesystemStorageHandler, MemoryStorageHandler};
 pub use time::{RealTimeHandler, SimulatedTimeHandler};
 // Transport effect handlers - organized by functionality

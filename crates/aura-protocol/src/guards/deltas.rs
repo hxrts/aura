@@ -216,7 +216,7 @@ fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOperation
             // Parse flow budget update fact
             let context_id = parse_context_id_from_fact(fact).unwrap_or_else(|_| "default_context".to_string());
             let peer_id = parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
-            let new_limit = parse_budget_limit_from_fact(fact).unwrap_or_else(|_| 10000);
+            let new_limit = parse_budget_limit_from_fact(fact).unwrap_or(10000);
             let cost = parse_budget_cost_from_fact(fact).ok();
 
             Ok(JournalOperation::UpdateFlowBudget {
@@ -231,7 +231,7 @@ fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOperation
             let recovery_id = parse_recovery_id_from_fact(fact).unwrap_or_else(|_| "recovery_session".to_string());
             let account_id = parse_account_id_from_fact(fact).unwrap_or_else(|_| "unknown_account".to_string());
             let requester = parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
-            let guardians_required = parse_guardian_threshold_from_fact(fact).unwrap_or_else(|_| 2);
+            let guardians_required = parse_guardian_threshold_from_fact(fact).unwrap_or(2);
 
             Ok(JournalOperation::InitiateRecovery {
                 recovery_id,
@@ -243,7 +243,7 @@ fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOperation
         "storage_commitment" => {
             // Parse storage commitment fact (content-addressed storage)
             let content_hash = parse_content_hash_from_fact(fact).unwrap_or_else(|_| "unknown_hash".to_string());
-            let size = parse_content_size_from_fact(fact).unwrap_or_else(|_| 0);
+            let size = parse_content_size_from_fact(fact).unwrap_or(0);
             let storage_nodes = parse_storage_nodes_from_fact(fact)
                 .unwrap_or_else(|_| vec!["local_node".to_string()]);
 
@@ -256,7 +256,7 @@ fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOperation
         "ota_deployment" => {
             // Parse OTA deployment fact
             let version = parse_ota_version_from_fact(fact).unwrap_or_else(|_| "unknown_version".to_string());
-            let target_epoch = parse_target_epoch_from_fact(fact).unwrap_or_else(|_| 1);
+            let target_epoch = parse_target_epoch_from_fact(fact).unwrap_or(1);
             let deployment_hash = parse_deployment_hash_from_fact(fact).unwrap_or_else(|_| "unknown_hash".to_string());
 
             Ok(JournalOperation::DeployOta {

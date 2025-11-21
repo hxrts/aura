@@ -5,7 +5,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use anyhow::{Context, Result};
-use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AuraEffectSystem;
 use aura_core::{Hash32, SemanticVersion};
 use aura_protocol::effect_traits::ConsoleEffects;
 use aura_sync::maintenance::UpgradeProposal;
@@ -50,12 +50,10 @@ async fn propose_upgrade(
     download_url: &str,
     description: &str,
 ) -> Result<()> {
-    let _ = effects
-        .log_info(&format!(
-            "Proposing {} upgrade to version {}: {}",
-            upgrade_type, to_version, description
-        ))
-        .await;
+    println!(
+        "Proposing {} upgrade to version {}: {}",
+        upgrade_type, to_version, description
+    );
 
     let kind = match upgrade_type {
         "soft" => UpgradeKind::SoftFork,
@@ -91,12 +89,10 @@ async fn propose_upgrade(
 
     proposal.validate().context("Invalid upgrade proposal")?;
 
-    let _ = effects
-        .log_info(&format!(
-            "Created upgrade proposal with ID: {}",
-            proposal.package_id
-        ))
-        .await;
+    println!(
+        "Created upgrade proposal with ID: {}",
+        proposal.package_id
+    );
     println!("Upgrade proposal created successfully");
     println!("Package ID: {}", proposal.package_id);
     println!("Version: {}", proposal.version);
@@ -106,39 +102,35 @@ async fn propose_upgrade(
 }
 
 async fn set_policy(effects: &AuraEffectSystem, policy: &str) -> Result<()> {
-    let _ = effects
-        .log_info(&format!("Setting OTA policy to: {}", policy))
-        .await;
+    println!("Setting OTA policy to: {}", policy);
     println!("OTA policy set to: {}", policy);
     // TODO: Store policy in agent configuration
     Ok(())
 }
 
 async fn get_status(effects: &AuraEffectSystem) -> Result<()> {
-    let _ = effects.log_info("Checking OTA status").await;
+    println!("Checking OTA status");
     println!("OTA Status: No active upgrades");
     // TODO: Query actual upgrade status from agent
     Ok(())
 }
 
 async fn opt_in(effects: &AuraEffectSystem, proposal_id: &str) -> Result<()> {
-    let _ = effects
-        .log_info(&format!("Opting into upgrade proposal: {}", proposal_id))
-        .await;
+    println!("Opting into upgrade proposal: {}", proposal_id);
     println!("Opted into proposal: {}", proposal_id);
     // TODO: Send opt-in to coordinator
     Ok(())
 }
 
 async fn list_proposals(effects: &AuraEffectSystem) -> Result<()> {
-    let _ = effects.log_info("Listing upgrade proposals").await;
+    println!("Listing upgrade proposals");
     println!("No upgrade proposals found");
     // TODO: Query actual proposals from agent
     Ok(())
 }
 
 async fn get_stats(effects: &AuraEffectSystem) -> Result<()> {
-    let _ = effects.log_info("Getting OTA statistics").await;
+    println!("Getting OTA statistics");
     println!("OTA Statistics:");
     println!("  Total upgrades: 0");
     println!("  Successful: 0");

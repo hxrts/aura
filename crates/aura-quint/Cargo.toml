@@ -1,0 +1,38 @@
+[package]
+name = "aura-quint"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Core Quint formal verification integration for Aura - Layer 3: Implementation"
+
+[dependencies]
+# Core dependencies
+aura-core = { path = "../aura-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+
+# Session types integration - temporarily removed during refactor
+
+# Native Quint evaluator from official repository
+quint_evaluator = { git = "https://github.com/informalsystems/quint", tag = "v0.29.0" }
+
+# For development and testing
+[dev-dependencies]
+tempfile = "3.0"
+hex = "0.4"
+
+# Logging and tracing (for tests)
+tracing-subscriber = { workspace = true }
+
+# Aura types for error handling
+
+[lib]
+crate-type = ["rlib"]

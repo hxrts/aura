@@ -1,6 +1,6 @@
 //! Example demonstrating various ways to use the EffectRegistry
 
-use aura_core::{AuraResult, DeviceId, effects::ExecutionMode};
+use aura_core::{effects::ExecutionMode, AuraResult, DeviceId};
 use aura_protocol::handlers::EffectRegistry;
 
 #[tokio::main]

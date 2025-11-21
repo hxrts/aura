@@ -10,9 +10,9 @@
 #![allow(clippy::expect_used)] // Test utilities use expect for fixed-size slice conversions
 
 use crate::hash::hash;
-use crate::{AccountId, SessionId};
-use crate::identifiers::DeviceId;
 use crate::identifiers::AuthorityId;
+use crate::identifiers::DeviceId;
+use crate::{AccountId, SessionId};
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use uuid::Uuid;
 

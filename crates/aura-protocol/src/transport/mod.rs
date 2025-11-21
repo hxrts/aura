@@ -5,11 +5,12 @@
 //! NO choreography - for local effect composition and simple orchestration.
 //! Target: Each choreographic protocol <250 lines.
 
+pub mod amp;
+pub mod amp_choreo;
 pub mod channel_management;
 pub mod websocket;
 
-#[cfg(all(test, feature = "transport_legacy_tests"))]
-mod tests;
+// Legacy tests removed - contained references to non-existent modules
 
 pub use channel_management::{ChannelEstablishmentCoordinator, ChannelTeardownCoordinator};
 pub use websocket::{WebSocketHandshakeCoordinator, WebSocketSessionCoordinator};

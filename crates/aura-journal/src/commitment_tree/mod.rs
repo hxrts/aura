@@ -54,7 +54,7 @@ pub mod tree_types;
 pub use application::{
     apply_verified, apply_verified_sync, validate_invariants, ApplicationError, ApplicationResult,
 };
-pub use compaction::{compact, CompactionError}; // TODO: Fix verify_join_preserving, verify_retraction exports
+pub use compaction::{compact, CompactionError};
 pub use operations::{
     BatchProcessor, OperationProcessorError, ProcessedOperation, ProcessingStats,
     TreeOperationProcessor, TreeStateQuery,

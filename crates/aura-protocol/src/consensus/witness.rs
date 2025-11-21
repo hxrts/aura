@@ -214,8 +214,8 @@ impl WitnessRole {
             consensus_id,
             authority: self.authority_id,
             commitment: NonceCommitment {
-                signer: 0,  // TODO: Real signer ID
-                commitment: vec![],  // TODO: Real FROST commitment
+                signer: 0,          // TODO: Real signer ID
+                commitment: vec![], // TODO: Real FROST commitment
             },
         })
     }
@@ -249,10 +249,13 @@ mod tests {
 
             // Add nonce commitment first
             witness_set
-                .add_nonce_commitment(*auth, NonceCommitment {
-                    signer: 0,
-                    commitment: vec![],
-                })
+                .add_nonce_commitment(
+                    *auth,
+                    NonceCommitment {
+                        signer: 0,
+                        commitment: vec![],
+                    },
+                )
                 .unwrap();
 
             // Now share should succeed

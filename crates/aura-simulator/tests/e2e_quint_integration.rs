@@ -2,22 +2,19 @@
 //!
 //! This test validates the basic simulator effect system
 
-use aura_core::DeviceId;
 use aura_macros::aura_test;
-use aura_simulator::{Duration, Result, SimulationEffectComposer, SimulatorContext};
+use aura_core::effects::TimeEffects;
+use aura_testkit::{DeviceTestFixture, TestEffectsBuilder};
 
 #[aura_test]
-async fn test_simulator_effect_composition_basic() -> Result<()> {
-    // Create a basic simulation environment
-    let device_id = DeviceId::new();
-    let environment = SimulationEffectComposer::for_testing(device_id)
-        .map_err(|e| aura_simulator::SimulatorError::OperationFailed(e.to_string()))?;
+async fn test_simulator_effect_composition_basic() -> aura_core::AuraResult<()> {
+    // Create a basic effect system for testing
+    let fixture = DeviceTestFixture::new(0);
+    let effects_builder = TestEffectsBuilder::for_unit_tests(fixture.device_id());
+    let effects = effects_builder.build()?;
 
     // Test basic time effect
-    let timestamp = environment
-        .current_timestamp()
-        .await
-        .map_err(|e| aura_simulator::SimulatorError::TimeControlError(e.to_string()))?;
+    let timestamp = effects.current_timestamp().await;
 
     assert!(timestamp >= 0);
 
@@ -27,32 +24,31 @@ async fn test_simulator_effect_composition_basic() -> Result<()> {
 }
 
 #[aura_test]
-async fn test_simulator_full_effect_composition() -> Result<()> {
+async fn test_simulator_full_effect_composition() -> aura_core::AuraResult<()> {
     // Test all effect handlers together
-    let device_id = DeviceId::new();
-    let environment = SimulationEffectComposer::for_simulation(device_id, 123)
-        .map_err(|e| aura_simulator::SimulatorError::OperationFailed(e.to_string()))?;
+    let fixture = DeviceTestFixture::new(1);
+    let effects_builder = TestEffectsBuilder::for_unit_tests(fixture.device_id());
+    let effects = effects_builder.build()?;
 
     // Test time effects
-    let timestamp = environment
-        .current_timestamp()
-        .await
-        .map_err(|e| aura_simulator::SimulatorError::TimeControlError(e.to_string()))?;
+    let timestamp = effects.current_timestamp().await;
     assert!(timestamp >= 0);
 
-    // Test fault injection
-    environment
-        .inject_network_delay((Duration::from_millis(10), Duration::from_millis(50)), None)
-        .await
-        .map_err(|e| aura_simulator::SimulatorError::FaultInjectionFailed(e.to_string()))?;
+    // Test crypto effects
+    use aura_core::effects::CryptoEffects;
+    let (private_key, public_key) = effects.ed25519_generate_keypair().await?;
+    assert!(!private_key.is_empty());
+    assert!(!public_key.is_empty());
 
-    // Test scenario management
-    let mut event_data = std::collections::HashMap::new();
-    event_data.insert("test_key".to_string(), "test_value".to_string());
-    environment
-        .record_test_event("integration_test", event_data)
-        .await
-        .map_err(|e| aura_simulator::SimulatorError::OperationFailed(e.to_string()))?;
+    // Test storage effects
+    use aura_core::effects::StorageEffects;
+    let test_key = "test_key";
+    let test_value = b"test_value".to_vec();
+    effects.store(test_key, test_value.clone()).await?;
+
+    // Test console effects  
+    use aura_core::effects::ConsoleEffects;
+    effects.log_info("Integration test completed successfully").await?;
 
     println!("[OK] Full effect composition test completed");
     Ok(())

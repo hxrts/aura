@@ -26,7 +26,7 @@
 //! - **Timeout Protection**: Built-in timeout handling prevents DoS attacks
 
 use aura_core::frost::PublicKeyPackage;
-use aura_core::{AccountId, identifiers::AuthorityId};
+use aura_core::{identifiers::AuthorityId, AccountId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 
@@ -199,16 +199,23 @@ choreography! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::test_utils::test_authority_id;
+    use aura_macros::aura_test;
+    use aura_testkit::simulation::choreography::ChoreographyTestHarness;
+    use aura_testkit::{create_test_fixture, DeviceTestFixture};
 
     #[test]
     fn test_dkg_request_serialization() {
+        let fixture = create_test_fixture();
         let request = DkgRequest {
             session_id: "test_session".to_string(),
             account_id: AccountId::new(),
             threshold: 2,
             total_participants: 3,
-            participants: vec![test_authority_id(1), test_authority_id(2), test_authority_id(3)],
+            participants: vec![
+                fixture.authority_id(0),
+                fixture.authority_id(1),
+                fixture.authority_id(2),
+            ],
             timeout_seconds: 120,
         };
 
@@ -218,5 +225,118 @@ mod tests {
         assert_eq!(request.session_id, deserialized.session_id);
         assert_eq!(request.threshold, deserialized.threshold);
         assert_eq!(request.total_participants, deserialized.total_participants);
+    }
+
+    #[aura_test]
+    async fn test_dkg_choreography_basic() -> aura_core::AuraResult<()> {
+        // Create multi-device test harness for distributed key generation
+        let mut harness = ChoreographyTestHarness::with_devices(3);
+        
+        // Assign choreographic roles
+        harness.assign_role("Coordinator", 0);
+        harness.assign_role("Participants", &[0, 1, 2]);
+
+        // Create DKG request with testkit-generated authorities
+        let fixture = create_test_fixture();
+        let dkg_request = DkgRequest {
+            session_id: "test_dkg_session".to_string(),
+            account_id: AccountId::new(),
+            threshold: 2,
+            total_participants: 3,
+            participants: vec![
+                fixture.authority_id(0),
+                fixture.authority_id(1),
+                fixture.authority_id(2),
+            ],
+            timeout_seconds: 120,
+        };
+
+        // Test that DKG init message can be created and serialized
+        let dkg_init = DkgInit { request: dkg_request };
+        
+        // Verify choreography message structure
+        let serialized = serde_json::to_vec(&dkg_init)?;
+        let deserialized: DkgInit = serde_json::from_slice(&serialized)
+            .map_err(|e| aura_core::AuraError::parse(e.to_string()))?;
+        
+        assert_eq!(dkg_init.request.session_id, deserialized.request.session_id);
+        assert_eq!(dkg_init.request.threshold, deserialized.request.threshold);
+
+        println!("✓ DKG choreography basic test completed");
+        Ok(())
+    }
+
+    #[aura_test]
+    async fn test_dkg_multi_device_workflow() -> aura_core::AuraResult<()> {
+        // Create comprehensive multi-device test environment
+        let mut harness = ChoreographyTestHarness::with_devices(5);
+        
+        // Set up threshold scheme: 3-of-5
+        harness.assign_role("Coordinator", 0);
+        harness.assign_role("Participants", &[0, 1, 2, 3, 4]);
+
+        let fixture = create_test_fixture();
+        
+        // Test complete DKG workflow with all message types
+        let session_id = "integration_test_session".to_string();
+        
+        // Phase 1: DKG Initialization
+        let dkg_request = DkgRequest {
+            session_id: session_id.clone(),
+            account_id: AccountId::new(),
+            threshold: 3,
+            total_participants: 5,
+            participants: (0..5).map(|i| fixture.authority_id(i)).collect(),
+            timeout_seconds: 300,
+        };
+        
+        // Phase 2: Simulate share commitments from participants
+        let mut share_commitments = Vec::new();
+        for i in 0..3 {
+            let commitment = ShareCommitment {
+                session_id: session_id.clone(),
+                commitment_data: vec![42u8 + i as u8; 32], // Mock commitment data
+                participant_id: fixture.authority_id(i),
+            };
+            share_commitments.push(commitment);
+        }
+        
+        // Phase 3: Simulate share revelations
+        let mut share_revelations = Vec::new();
+        for i in 0..3 {
+            let revelation = ShareRevelation {
+                session_id: session_id.clone(),
+                share_data: vec![100u8 + i as u8; 64], // Mock share data
+                participant_id: fixture.authority_id(i),
+            };
+            share_revelations.push(revelation);
+        }
+        
+        // Phase 4: Simulate verification results
+        let mut verification_results = Vec::new();
+        for i in 0..3 {
+            let result = VerificationResult {
+                session_id: session_id.clone(),
+                verified: true,
+                participant_id: fixture.authority_id(i),
+            };
+            verification_results.push(result);
+        }
+        
+        // Phase 5: Test successful completion
+        let dkg_success = DkgSuccess {
+            session_id: session_id.clone(),
+            public_key_package: PublicKeyPackage::default(),
+        };
+
+        // Verify all message types serialize correctly
+        assert!(serde_json::to_vec(&dkg_request).is_ok());
+        assert!(serde_json::to_vec(&share_commitments[0]).is_ok());
+        assert!(serde_json::to_vec(&share_revelations[0]).is_ok());
+        assert!(serde_json::to_vec(&verification_results[0]).is_ok());
+        assert!(serde_json::to_vec(&dkg_success).is_ok());
+
+        println!("✓ DKG multi-device workflow test completed successfully");
+        Ok(())
     }
 }

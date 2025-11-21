@@ -74,16 +74,12 @@ impl Default for CliConfig {
 }
 
 /// Output format options for CLI commands
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub enum OutputFormat {
     /// Human-readable output
+    #[default]
     Human,
     /// JSON output for scripting
     Json,
 }
 
-impl Default for OutputFormat {
-    fn default() -> Self {
-        OutputFormat::Human
-    }
-}

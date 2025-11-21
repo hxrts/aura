@@ -15,13 +15,16 @@ use aura_effects::{
     network::{MemoryNetworkHandler, TcpNetworkHandler as RealNetworkHandler},
     storage::{FilesystemStorageHandler, MemoryStorageHandler},
 };
-use common::helpers::*;
+// Import testkit instead of legacy helpers
+use aura_testkit::{DeviceTestFixture, TestEffectsBuilder};
 use std::collections::HashMap;
 
 /// Test that composite handlers implement all required effect traits
 #[tokio::test]
 async fn test_composite_handler_implements_all_effects() {
-    let handler = create_test_handler();
+    // Use testkit instead of legacy helper
+    let fixture = DeviceTestFixture::new(0);
+    let handler = CompositeHandler::for_testing(fixture.device_id().into());
 
     // Test that handler can be used as each effect type
     let network_effect: &dyn NetworkEffects = &handler;
@@ -46,11 +49,13 @@ async fn test_composite_handler_implements_all_effects() {
 /// Test network effects with different handler types
 #[tokio::test]
 async fn test_network_effects() {
-    // Test with memory handler
-    let device_id = create_test_device_id();
+    // Test with memory handler - use testkit
+    let fixture = DeviceTestFixture::new(0);
+    let device_id = fixture.device_id();
     let memory_handler = MemoryNetworkHandler::new(device_id.into());
-    let peer_id = create_deterministic_uuid(1);
-    let test_message = create_test_data(10);
+    let peer_fixture = DeviceTestFixture::new(1);
+    let peer_id = peer_fixture.device_id().0; // Convert to Uuid
+    let test_message = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]; // Replace create_test_data(10)
 
     // Test send to peer - memory handler may validate peer connectivity
     let result = memory_handler
@@ -79,7 +84,7 @@ async fn test_storage_effects() {
     // Test with memory handler
     let memory_handler = MemoryStorageHandler::new();
     let test_key = "test_key";
-    let test_value = create_test_data(20);
+    let test_value = vec![42u8; 20]; // Replace create_test_data(20)
 
     // Test store and retrieve
     memory_handler
@@ -220,7 +225,8 @@ async fn test_console_effects() {
     // Test event emission
     use aura_protocol::effects::ConsoleEvent;
 
-    let _device_id = create_test_device_id();
+    let fixture = DeviceTestFixture::new(0);
+    let _device_id = fixture.device_id();
     let _event = ConsoleEvent::ProtocolStarted {
         protocol_id: "test_protocol".to_string(),
         protocol_type: "DKD".to_string(),
@@ -242,7 +248,8 @@ async fn test_choreographic_effects() {
     use aura_protocol::effects::{ChoreographicRole, ChoreographyEvent};
     use uuid::Uuid;
 
-    let device_id = create_deterministic_uuid(1);
+    let fixture = DeviceTestFixture::new(1);
+    let device_id = fixture.device_id().0; // Convert to Uuid
     let memory_handler = MemoryChoreographicHandler::new(device_id);
 
     // Test role information
@@ -252,7 +259,8 @@ async fn test_choreographic_effects() {
     // Test session management - roles are populated after session starts
     let session_id = Uuid::from_u128(12345);
     let role1 = ChoreographicRole::new(device_id, 0);
-    let role2 = ChoreographicRole::new(create_deterministic_uuid(2), 1);
+    let fixture2 = DeviceTestFixture::new(2);
+    let role2 = ChoreographicRole::new(fixture2.device_id().0, 1);
     let participants = vec![role1, role2];
 
     memory_handler
@@ -269,14 +277,14 @@ async fn test_choreographic_effects() {
     assert!(is_active);
 
     // Test message sending
-    let test_data = create_test_data(10);
+    let test_data = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]; // Replace create_test_data(10)
     memory_handler
         .send_to_role_bytes(role2, test_data.clone())
         .await
         .unwrap();
 
     // Test broadcast
-    let broadcast_data = create_test_data(5);
+    let broadcast_data = vec![1, 2, 3, 4, 5]; // Replace create_test_data(5)
     memory_handler
         .broadcast_bytes(broadcast_data)
         .await
@@ -312,11 +320,13 @@ async fn test_handler_error_conditions() {
     let removed = memory_storage.remove("nonexistent").await.unwrap();
     assert!(!removed);
 
-    let device_id = create_test_device_id();
+    let fixture = DeviceTestFixture::new(0);
+    let device_id = fixture.device_id();
     let memory_network = MemoryNetworkHandler::new(device_id.into());
 
     // Test sending to non-connected peer
-    let peer_id = create_deterministic_uuid(999);
+    let peer_fixture = DeviceTestFixture::new(999);
+    let peer_id = peer_fixture.device_id().0;
     let result = memory_network.send_to_peer(peer_id, vec![1, 2, 3]).await;
     // Memory handler may validate peer connectivity
     // The behavior depends on implementation - we just verify it can be called
@@ -351,7 +361,8 @@ async fn test_handler_polymorphism() {
 /// Test that composite handlers properly delegate to sub-handlers
 #[tokio::test]
 async fn test_composite_handler_delegation() {
-    let composite = create_test_handler();
+    let fixture = DeviceTestFixture::new(0);
+    let composite = CompositeHandler::for_testing(fixture.device_id().into());
 
     // Test network delegation
     let peers = composite.connected_peers().await;

@@ -12,7 +12,7 @@
 
 use async_trait::async_trait;
 use aura_core::{AttestedOp, Hash32};
- // TODO: Use BloomEffects for real implementation
+// TODO: Use BloomEffects for real implementation
 // use aura_journal::semilattice::OpLog;  // Temporarily disabled
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -50,7 +50,6 @@ impl BloomDigest {
         Self { cids }
     }
     */
-
     /// Create an empty digest
     pub fn empty() -> Self {
         Self {

@@ -21,7 +21,7 @@ use aura_core::{
     effects::{CryptoEffects, JournalEffects, RandomEffects},
     AuraResult, AccountId,
 };
-use aura_agent::AuraAgent;
+use aura_agent::{AuraAgent, AgentConfig};
 use aura_journal::{
     journal_api::Journal,
     fact_journal::{FactContent, RelationalFact},
@@ -87,7 +87,7 @@ impl DkdTestHarness {
             let authority_id = AuthorityId::new();
             authorities.push(authority_id);
             
-            let effects = aura_agent::runtime::AuraEffectSystem::new();
+            let effects = aura_agent::runtime::AuraEffectSystem::testing(&AgentConfig::default());
             let agent = AuraAgent::new(effects, authority_id);
             // Note: Seeding removed as it's handled at effect system level
             agents.insert(authority_id, agent);

@@ -122,9 +122,9 @@ pub use context_derivation::{
 };
 #[doc = "stable: Core identifier types with semver guarantees"]
 pub use identifiers::{
-    AccountId, AuthorityId, ContextId, DataId, DeviceId, DkdContextId, EventId, EventNonce,
-    GroupId, GuardianId, IndividualId, IndividualIdExt, MemberId, MessageContext, OperationId,
-    RelayId, SessionId,
+    AccountId, AuthorityId, ChannelId, ContextId, DataId, DeviceId, DkdContextId, EventId,
+    EventNonce, GroupId, GuardianId, IndividualId, IndividualIdExt, MemberId, MessageContext,
+    OperationId, RelayId, SessionId,
 };
 
 // DeviceId is now internal to aura-journal/src/commitment_tree/ only

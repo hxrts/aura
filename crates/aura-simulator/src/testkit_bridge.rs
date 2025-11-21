@@ -6,9 +6,9 @@
 //!
 //! Designed for the stateless effect system architecture (work/021.md).
 
-use crate::middleware::SimulatorConfig;
-use crate::{Result as SimResult, SimulatorContext, SimulatorError};
-use aura_agent::runtime::{AuraEffectSystem, EffectRegistry};
+use crate::types::{SimulatorConfig, SimulatorContext, SimulatorError, Result as SimResult};
+use aura_agent::{AuraEffectSystem, AgentBuilder};
+use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
 use aura_testkit::{DeviceTestFixture, ProtocolTestFixture, TestExecutionMode};
 use std::collections::HashMap;
@@ -32,18 +32,19 @@ impl TestkitSimulatorBridge {
             let device_id = fixture.device_id();
 
             // Create real effect system configured for simulation
-            let effect_system = EffectRegistry::simulation(seed)
-                .with_device_id(device_id)
-                .with_logging()
-                .build()
+            let authority_id = AuthorityId::new();
+            let agent = AgentBuilder::new()
+                .with_authority(authority_id)
+                .build_testing()
                 .map_err(|e| {
                     SimulatorError::OperationFailed(format!(
                         "Effect system creation failed for device {}: {}",
                         device_id, e
                     ))
                 })?;
+            let effect_system = agent.runtime().effects().clone();
 
-            effect_systems.push((device_id, effect_system));
+            effect_systems.push((device_id, Arc::new(effect_system)));
         }
 
         Ok(effect_systems)
@@ -100,23 +101,23 @@ impl TestkitSimulatorBridge {
         seed: u64,
     ) -> SimResult<Arc<AuraEffectSystem>> {
         // Convert test harness to effect system instead of middleware stack
-        let effect_system = EffectRegistry::simulation(seed)
-            .with_device_id(device_id)
-            .with_logging()
-            .build()
+        let authority_id = AuthorityId::new();
+        let agent = AgentBuilder::new()
+            .with_authority(authority_id)
+            .build_testing()
             .map_err(|e| {
                 SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
             })?;
-        Ok(effect_system)
+        Ok(Arc::new(agent.runtime().effects().clone()))
     }
 }
 
-/// Configuration for middleware created from testkit fixtures
+/// Configuration for handler created from testkit fixtures (legacy name for compatibility)
 #[derive(Debug, Clone)]
 pub struct MiddlewareConfig {
-    /// Device ID this middleware serves
+    /// Device ID this handler serves
     pub device_id: DeviceId,
-    /// Execution mode for the middleware
+    /// Execution mode for the handler
     pub execution_mode: String,
     /// Whether to use deterministic time
     pub deterministic_time: bool,
@@ -208,8 +209,9 @@ mod tests {
     }
 
     #[test]
-    fn test_middleware_config_creation() {
-        let device_id = DeviceId::new();
+    fn test_handler_config_creation() {
+        let fixture = aura_testkit::DeviceTestFixture::new(0);
+        let device_id = fixture.device_id();
         let config = MiddlewareConfig::for_simulation(device_id);
 
         assert_eq!(config.device_id, device_id);

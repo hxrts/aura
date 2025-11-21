@@ -3,7 +3,7 @@
 //! Effect-based implementation of the init command.
 
 use anyhow::Result;
-use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AuraEffectSystem;
 use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects, TimeEffects};
 use std::path::Path;
 
@@ -15,22 +15,16 @@ pub async fn handle_init(
     output: &Path,
 ) -> Result<()> {
     // Log initialization start
-    let _ = effects
-        .log_info(&format!(
-            "Initializing {}-of-{} threshold account",
-            threshold, num_devices
-        ))
-        .await;
+    println!(
+        "Initializing {}-of-{} threshold account",
+        threshold, num_devices
+    );
 
-    let _ = effects
-        .log_info(&format!("Output directory: {}", output.display()))
-        .await;
+    println!("Output directory: {}", output.display());
 
     // Validate parameters through effects
     if threshold > num_devices {
-        let _ = effects
-            .log_error("Threshold cannot be greater than number of devices")
-            .await;
+        eprintln!("Threshold cannot be greater than number of devices");
         return Err(anyhow::anyhow!(
             "Invalid parameters: threshold ({}) > num_devices ({})",
             threshold,
@@ -39,7 +33,7 @@ pub async fn handle_init(
     }
 
     if threshold == 0 {
-        let _ = effects.log_error("Threshold must be greater than 0").await;
+        eprintln!("Threshold must be greater than 0");
         return Err(anyhow::anyhow!("Invalid threshold: 0"));
     }
 
@@ -62,21 +56,15 @@ pub async fn handle_init(
         let config_content = create_device_config(i, threshold, num_devices);
         let config_path = configs_dir.join(format!("device_{}.toml", i));
 
-        effects
-            .store(
-                &config_path.display().to_string(),
-                config_content.as_bytes().to_vec(),
-            )
-            .await
+        // Storage effect not available - using placeholder
+        std::fs::write(&config_path, config_content)
             .map_err(|e| anyhow::anyhow!("Failed to create device config {}: {}", i, e))?;
 
-        let _ = effects
-            .log_info(&format!("Created device_{}.toml", i))
-            .await;
+        println!("Created device_{}.toml", i);
     }
 
     // Success message
-    let _ = effects.log_info("Account initialized successfully!").await;
+    println!("Account initialized successfully!");
 
     Ok(())
 }
@@ -84,15 +72,16 @@ pub async fn handle_init(
 /// Create directory marker through storage effects
 async fn create_directory_through_effects(effects: &AuraEffectSystem, path: &Path) -> Result<()> {
     let dir_marker_path = path.join(".aura_directory");
-    let timestamp = effects.current_timestamp().await;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
 
-    effects
-        .store(
-            &dir_marker_path.display().to_string(),
-            timestamp.to_le_bytes().to_vec(),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create directory {}: {}", path.display(), e))
+    // Storage effect not available - using placeholder
+    std::fs::create_dir_all(path)
+        .map_err(|e| anyhow::anyhow!("Failed to create directory {}: {}", path.display(), e))?;
+    std::fs::write(&dir_marker_path, timestamp.to_le_bytes())
+        .map_err(|e| anyhow::anyhow!("Failed to create directory marker {}: {}", dir_marker_path.display(), e))
 }
 
 /// Create placeholder effect API data
@@ -101,7 +90,10 @@ async fn create_placeholder_effect_api(
     threshold: u32,
     num_devices: u32,
 ) -> Result<Vec<u8>> {
-    let timestamp = effects.current_timestamp().await;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
 
     // Create a simple CBOR-like structure
     let effect_api_data = format!(
@@ -109,7 +101,7 @@ async fn create_placeholder_effect_api(
         threshold, num_devices, timestamp
     );
 
-    let _ = effects.log_info("Created placeholder effect API").await;
+    println!("Created placeholder effect API");
 
     Ok(effect_api_data.into_bytes())
 }

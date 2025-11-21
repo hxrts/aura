@@ -11,7 +11,7 @@ use aura_core::GuardianId;
 
 // Re-export consolidated types from aura-core
 pub use aura_core::{
-    OperationType, ParticipantId, ProtocolType, SessionEpoch, SessionId, SessionOutcome,
+    ParticipantId, ProtocolType, SessionId, SessionOutcome,
     SessionStatus,
 };
 
@@ -64,30 +64,6 @@ impl Default for GuardianPolicy {
 // ParticipantId is now imported from aura-core
 
 // SessionId is now imported from aura-core
-// Extensions for journal-specific functionality
-/// Provides effects-based session ID generation for journal operations
-#[allow(dead_code)]
-pub trait SessionIdExt {
-    async fn new_with_effects(effects: &dyn aura_core::effects::CryptoEffects) -> Self;
-}
-
-impl SessionIdExt for SessionId {
-    async fn new_with_effects(effects: &dyn aura_core::effects::CryptoEffects) -> Self {
-        // Generate random bytes for UUID v4 using crypto effects
-        let random_bytes = effects.random_bytes(16).await;
-
-        // Create UUID v4 from random bytes
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&random_bytes);
-
-        // Set version (4) and variant bits for UUID v4
-        uuid_bytes[6] = (uuid_bytes[6] & 0x0f) | 0x40; // Version 4
-        uuid_bytes[8] = (uuid_bytes[8] & 0x3f) | 0x80; // Variant 10
-
-        let uuid = uuid::Uuid::from_bytes(uuid_bytes);
-        SessionId::from_uuid(uuid)
-    }
-}
 
 // OperationType is now imported from aura-core
 
@@ -95,30 +71,6 @@ impl SessionIdExt for SessionId {
 
 // EventNonce is now imported from aura-core
 
-/// Operation lock for distributed coordination
-///
-/// Prevents concurrent execution of the same operation type across devices.
-/// Core to distributed locking protocol documented in 500_distributed_*.md specs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct OperationLock {
-    /// Type of operation being locked
-    pub operation_type: OperationType,
-    /// Session ID associated with this lock
-    pub session_id: SessionId,
-    /// Timestamp when lock was acquired
-    pub acquired_at: u64,
-    /// Timestamp when lock expires (auto-release)
-    pub expires_at: u64,
-    /// Participant ID holding the lock
-    pub holder: ParticipantId,
-    /// Device ID of the lock holder
-    pub holder_device_id: DeviceId,
-    /// Epoch during which lock was granted
-    pub granted_at_epoch: u64,
-    /// Lottery ticket for fair lock acquisition
-    pub lottery_ticket: [u8; 32],
-}
 
 /// Session information
 ///
@@ -230,74 +182,5 @@ impl Session {
 
 // SessionOutcome is now imported from aura-core
 
-/// Ed25519 signature share for threshold signatures
-///
-/// Represents one participant's contribution to a threshold signature.
-/// Actively used in FROST crypto implementation across aura-crypto and aura-protocol.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct SignatureShare {
-    /// ID of the participant who created this share
-    pub participant_id: ParticipantId,
-    /// The signature share bytes
-    pub signature_share: Vec<u8>,
-    /// Commitment value for this share
-    pub commitment: Vec<u8>,
-}
 
-/// Presence ticket cache
-///
-/// Caches presence tickets for efficient session participation.
-/// Part of session management documented in 001_identity_spec.md.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct PresenceTicketCache {
-    /// Device holding this ticket
-    pub device_id: DeviceId,
-    /// Session epoch for which ticket is valid
-    pub session_epoch: SessionEpoch,
-    /// The ticket bytes
-    pub ticket: Vec<u8>,
-    /// Timestamp when ticket expires
-    pub expires_at: u64,
-    /// Timestamp when ticket was issued
-    pub issued_at: u64,
-    /// Blake3 digest of the ticket for verification
-    pub ticket_digest: [u8; 32],
-}
 
-// ========== Storage Types ==========
-
-/// Storage quota tracking for a device
-///
-/// Integrated with error handling system (StorageQuotaExceeded).
-/// Referenced in group storage documentation as foundational infrastructure.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct StorageQuota {
-    /// Device this quota applies to
-    pub device_id: DeviceId,
-    /// Maximum storage allowed in bytes
-    pub max_bytes: u64,
-    /// Currently used storage in bytes
-    pub used_bytes: u64,
-    /// Number of blobs stored
-    pub blob_count: u64,
-    /// Last updated timestamp
-    pub updated_at: u64,
-}
-
-/// Key derivation specification for encryption
-///
-/// Specifies parameters for deriving encryption keys for storage blobs.
-/// Extensively used in crypto tests and core security infrastructure.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct KeyDerivationSpec {
-    /// Context string for key derivation (e.g., blob ID, device ID)
-    pub context: String,
-    /// Key derivation algorithm (e.g., "HKDF-SHA256")
-    pub algorithm: String,
-    /// Additional algorithm-specific parameters
-    pub params: std::collections::BTreeMap<String, String>,
-}

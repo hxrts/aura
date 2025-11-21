@@ -11,20 +11,23 @@
 //! - **Two-path protocol**: Fast path and fallback epidemic gossip
 //! - **Journal integration**: Emits CommitFact for fact journals
 
+pub mod amp;
 pub mod choreography;
 pub mod commit_fact;
 pub mod coordinator;
 pub mod witness;
 
 // Re-export core types
+pub use amp::{finalize_amp_bump_with_journal_default, run_amp_channel_epoch_bump};
+pub use choreography::run_consensus_choreography;
 pub use commit_fact::{CommitFact, ConsensusId};
 pub use coordinator::{ConsensusCoordinator, ConsensusInstance};
-pub use choreography::run_consensus_choreography;
 pub use witness::{WitnessMessage, WitnessSet, WitnessShare};
 
-use aura_core::{hash, AuthorityId, Hash32, Result, Prestate};
-use serde_json;
+use aura_core::{hash, AuthorityId, Hash32, Prestate, Result};
+use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
 use serde::Serialize;
+use serde_json;
 
 /// Run consensus on an operation with the specified witnesses
 ///
@@ -35,10 +38,12 @@ pub async fn run_consensus<T: Serialize>(
     operation: &T,
     witnesses: Vec<AuthorityId>,
     threshold: u16,
+    key_packages: std::collections::HashMap<AuthorityId, KeyPackage>,
+    group_public_key: PublicKeyPackage,
 ) -> Result<CommitFact> {
     let prestate_hash = prestate.compute_hash();
-    let operation_bytes =
-        serde_json::to_vec(operation).map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
+    let operation_bytes = serde_json::to_vec(operation)
+        .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
     let operation_hash = hash_operation(&operation_bytes)?;
 
     run_consensus_choreography(
@@ -47,6 +52,8 @@ pub async fn run_consensus<T: Serialize>(
         operation_bytes,
         witnesses,
         threshold,
+        key_packages,
+        group_public_key,
     )
     .await
 }

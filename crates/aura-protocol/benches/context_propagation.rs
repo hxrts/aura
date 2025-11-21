@@ -5,9 +5,9 @@
 //! - ContextId creation and manipulation
 //! - AuthorityId operations
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use aura_core::identifiers::{DeviceId, AuthorityId};
+use aura_core::identifiers::{AuthorityId, DeviceId};
 use aura_core::ContextId;
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 /// Benchmark DeviceId operations
 fn bench_device_id_operations(c: &mut Criterion) {

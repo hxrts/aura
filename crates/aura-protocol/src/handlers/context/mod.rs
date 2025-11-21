@@ -21,11 +21,11 @@
 //! functional operations (immutable), allowing handlers to choose the appropriate
 //! context type for their execution model.
 
-pub mod context;
+pub mod context_impl;
 pub mod immutable;
 
 // Re-export from context.rs (was the original context.rs file)
-pub use context::{
+pub use context_impl::{
     AgentContext, AuraContext, ChoreographicContext, MetricsContext, PlatformInfo,
     SimulationContext, TracingContext,
 };

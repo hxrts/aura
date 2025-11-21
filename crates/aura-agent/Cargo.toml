@@ -26,12 +26,12 @@ aura-authenticate = { path = "../aura-authenticate" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
 
-# TODO: Re-enable cryptography when dependencies compile
-# frost-ed25519 = { workspace = true }
-# blake3 = { workspace = true }
-# qrcode = { version = "0.13", optional = true }
-# rumpsteak = { workspace = true }
-# rumpsteak-choreography = { git = "https://github.com/hxrts/rumpsteak-aura", package = "rumpsteak-choreography" }
+# Cryptography dependencies
+ed25519-dalek = { workspace = true }
+rand_core = { workspace = true }
+rand = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }
 
 # Choreography dependencies
 rumpsteak-aura-choreography = { workspace = true }

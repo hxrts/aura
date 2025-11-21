@@ -8,7 +8,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use aura_core::effects::NetworkEffects;
-use aura_core::{Cap, ContextId, Journal, JournalEffects, identifiers::DeviceId};
+use aura_core::{identifiers::DeviceId, Cap, ContextId, Journal, JournalEffects};
 use rumpsteak_aura_choreography::effects::{
     ChoreoHandler, ChoreographyError, ExtensibleHandler, ExtensionRegistry, Label,
     Result as ChoreoResult,
@@ -642,7 +642,11 @@ impl AuraHandler {
                     // Store journal fact in endpoint metadata for higher-layer processing
                     // The orchestrator will retrieve this and execute JournalEffects
                     let facts_key = format!("journal_facts_{}", journal_fact.role);
-                    let existing_facts = endpoint.metadata.get(&facts_key).cloned().unwrap_or_default();
+                    let existing_facts = endpoint
+                        .metadata
+                        .get(&facts_key)
+                        .cloned()
+                        .unwrap_or_default();
                     let mut facts: Vec<String> = if existing_facts.is_empty() {
                         Vec::new()
                     } else {
@@ -691,7 +695,11 @@ impl AuraHandler {
                     // Store journal merge request in endpoint metadata for higher-layer processing
                     // The orchestrator will retrieve this and execute journal merge via JournalEffects
                     let merge_key = "journal_merges";
-                    let existing_merges = endpoint.metadata.get(merge_key).cloned().unwrap_or_default();
+                    let existing_merges = endpoint
+                        .metadata
+                        .get(merge_key)
+                        .cloned()
+                        .unwrap_or_default();
                     let mut merges: Vec<String> = if existing_merges.is_empty() {
                         Vec::new()
                     } else {
@@ -705,9 +713,10 @@ impl AuraHandler {
                     });
                     merges.push(merge_entry.to_string());
 
-                    endpoint
-                        .metadata
-                        .insert(merge_key.to_string(), serde_json::to_string(&merges).unwrap_or_default());
+                    endpoint.metadata.insert(
+                        merge_key.to_string(),
+                        serde_json::to_string(&merges).unwrap_or_default(),
+                    );
 
                     tracing::debug!(
                         device_id = ?endpoint.device_id,
@@ -740,7 +749,11 @@ impl AuraHandler {
                     // AuthorizationEffects (Biscuit/capabilities) → FlowBudgetEffects →
                     // LeakageEffects → JournalEffects → TransportEffects
                     let guard_key = format!("guard_chains_{}", guard_chain.role);
-                    let existing_guards = endpoint.metadata.get(&guard_key).cloned().unwrap_or_default();
+                    let existing_guards = endpoint
+                        .metadata
+                        .get(&guard_key)
+                        .cloned()
+                        .unwrap_or_default();
                     let mut guards: Vec<String> = if existing_guards.is_empty() {
                         Vec::new()
                     } else {
@@ -755,9 +768,10 @@ impl AuraHandler {
                     });
                     guards.push(guard_entry.to_string());
 
-                    endpoint
-                        .metadata
-                        .insert(guard_key, serde_json::to_string(&guards).unwrap_or_default());
+                    endpoint.metadata.insert(
+                        guard_key,
+                        serde_json::to_string(&guards).unwrap_or_default(),
+                    );
 
                     tracing::debug!(
                         device_id = ?endpoint.device_id,

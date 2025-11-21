@@ -2,8 +2,9 @@
 
 use crate::InvitationAction;
 use anyhow::{anyhow, Context, Result};
-use aura_agent::runtime::EffectSystemBuilder;
+use aura_agent::AgentBuilder;
 use aura_core::{AccountId, DeviceId};
+use aura_core::identifiers::AuthorityId;
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest, InvitationEnvelope},
     invitation_acceptance::InvitationAcceptanceCoordinator,
@@ -16,7 +17,7 @@ use std::{fs, str::FromStr};
 ///
 /// Processes invitation actions including create, accept, and status operations
 pub async fn handle_invitation(
-    effects: &aura_agent::runtime::AuraEffectSystem,
+    effects: &aura_agent::AuraEffectSystem,
     action: &InvitationAction,
 ) -> Result<()> {
     // Get device_id from context (for now, create a temp one - this should be passed from CLI)
@@ -31,10 +32,11 @@ pub async fn handle_invitation(
         } => {
             let request = build_request(device_id, account, invitee, role, *ttl)?;
 
-            // Create fresh effect system for coordinator
-            let coord_effects = EffectSystemBuilder::new()
-                .with_device_id(device_id)
-                .build_sync()?;
+            // Create fresh agent for coordinator
+            let agent = AgentBuilder::new()
+                .with_authority(AuthorityId::new()) 
+                .build_testing()?;
+            let coord_effects = agent.runtime().effects().clone();
 
             let coordinator = DeviceInvitationCoordinator::new(std::sync::Arc::new(coord_effects));
             let response = coordinator
@@ -42,14 +44,12 @@ pub async fn handle_invitation(
                 .await
                 .context("failed to create invitation")?;
 
-            let _ = effects
-                .log_info(&format!(
-                    "Invitation {} sent to {} (expires at {}).",
-                    response.invitation.invitation_id,
-                    response.invitation.invitee,
-                    response.invitation.expires_at
-                ))
-                .await;
+            println!(
+                "Invitation {} sent to {} (expires at {}).",
+                response.invitation.invitation_id,
+                response.invitation.invitee,
+                response.invitation.expires_at
+            );
             Ok(())
         }
         InvitationAction::Accept { envelope } => {
@@ -58,23 +58,23 @@ pub async fn handle_invitation(
             let envelope: InvitationEnvelope =
                 serde_json::from_str(&contents).context("invalid invitation envelope")?;
 
-            // Create fresh effect system for coordinator
-            let coord_effects = EffectSystemBuilder::new()
-                .with_device_id(device_id)
-                .build_sync()?;
+            // Create fresh agent for coordinator
+            let agent = AgentBuilder::new()
+                .with_authority(AuthorityId::new()) 
+                .build_testing()?;
+            let coord_effects = agent.runtime().effects().clone();
 
-            let coordinator = InvitationAcceptanceCoordinator::new(std::sync::Arc::new(coord_effects));
+            let coordinator =
+                InvitationAcceptanceCoordinator::new(std::sync::Arc::new(coord_effects));
             let acceptance = coordinator
                 .accept_invitation(envelope)
                 .await
                 .context("failed to accept invitation")?;
 
-            let _ = effects
-                .log_info(&format!(
-                    "Accepted invitation {} at {}.",
-                    acceptance.invitation_id, acceptance.accepted_at
-                ))
-                .await;
+            println!(
+                "Accepted invitation {} at {}.",
+                acceptance.invitation_id, acceptance.accepted_at
+            );
             Ok(())
         }
     }

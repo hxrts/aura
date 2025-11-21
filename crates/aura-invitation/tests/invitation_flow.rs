@@ -46,14 +46,12 @@ async fn invitation_lifecycle() -> aura_core::AuraResult<()> {
     let registry = Arc::new(Mutex::new(InvitationRecordRegistry::new()));
 
     let coordinator =
-        DeviceInvitationCoordinator::with_registry(inviter_effects.0.clone(), registry.clone());
+        DeviceInvitationCoordinator::with_registry(inviter_effects.clone(), registry.clone());
     let request = sample_request(DeviceId(Uuid::new_v4()));
     let response = coordinator.invite_device(request.clone()).await?;
 
-    let acceptance_coordinator = InvitationAcceptanceCoordinator::with_registry(
-        invitee_effects.0.clone(),
-        registry.clone(),
-    );
+    let acceptance_coordinator =
+        InvitationAcceptanceCoordinator::with_registry(invitee_effects.clone(), registry.clone());
     let acceptance = acceptance_coordinator
         .accept_invitation(response.invitation.clone())
         .await?;

@@ -5,26 +5,20 @@
 //! verification specifications.
 
 pub mod ast_parser;
-pub mod bridge;
 pub mod byzantine_mapper;
 pub mod chaos_generator;
 pub mod cli_runner;
-pub mod evaluator;
 pub mod itf_fuzzer;
 pub mod properties;
+pub mod simulation_evaluator;
 pub mod trace_converter;
 pub mod types;
 
-pub use bridge::{QuintBridge, QuintBridgeError};
 pub use byzantine_mapper::{ByzantineMapper, ByzantineMappingResult, EnhancedByzantineStrategy};
 pub use chaos_generator::{
     ChaosGenerationConfig, ChaosGenerator, ChaosGeneratorError, ChaosScenario, ChaosType,
 };
 pub use cli_runner::QuintCliRunner;
-pub use evaluator::{
-    EvaluationError, EvaluationMode, EvaluationStatistics, EvaluatorConfig, PropertyEvaluator,
-    StateHistory, StateSnapshot, WorldStateAdapter,
-};
 pub use itf_fuzzer::{
     CIIntegrationConfig,
     CIOutputFormat,
@@ -65,6 +59,10 @@ pub use itf_fuzzer::{
 pub use properties::{
     PropertyError, PropertyExtractionConfig, PropertyExtractor, PropertyMonitor, PropertyPriority,
     PropertyType, VerifiableProperty,
+};
+pub use simulation_evaluator::{
+    NetworkState, ParticipantState, SimulationEvaluatorConfig, SimulationPropertyEvaluator,
+    SimulationWorldState,
 };
 pub use trace_converter::{
     ItfMetadata, ItfState, ItfTrace, ItfTraceConverter, QuintTrace, TraceConversionConfig,

@@ -4,8 +4,8 @@
 //! the Aura system. These effects enable verification of permissions, delegation
 //! of authority, and enforcement of security policies.
 
-use crate::{AuraError, Cap};
 use crate::identifiers::AuthorityId;
+use crate::{AuraError, Cap};
 use async_trait::async_trait;
 
 /// Authorization operations for capability-based access control

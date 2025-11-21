@@ -37,7 +37,6 @@ impl<E: GuardEffectSystem> GuardExtensions for E {
     }
 }
 
-
 #[cfg(all(test, feature = "fixture_effects"))]
 mod tests {
     use super::*;

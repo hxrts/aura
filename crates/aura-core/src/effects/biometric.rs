@@ -1,7 +1,7 @@
 //! Biometric Authentication Effects Trait Definitions
 //!
 //! This module defines trait interfaces for biometric authentication operations
-//! that interface with platform-specific biometric APIs (TouchID, FaceID, 
+//! that interface with platform-specific biometric APIs (TouchID, FaceID,
 //! Windows Hello, fingerprint scanners, etc.).
 //!
 //! ## Security Model
@@ -228,7 +228,10 @@ pub trait BiometricEffects: Send + Sync {
     ///
     /// # Returns
     /// `true` if the biometric is available and has enrolled data
-    async fn is_biometric_available(&self, biometric_type: BiometricType) -> Result<bool, BiometricError>;
+    async fn is_biometric_available(
+        &self,
+        biometric_type: BiometricType,
+    ) -> Result<bool, BiometricError>;
 
     /// Enroll a new biometric template
     ///
@@ -289,7 +292,9 @@ pub trait BiometricEffects: Send + Sync {
     ///
     /// # Returns
     /// List of template IDs and metadata for enrolled biometrics
-    async fn list_enrolled_templates(&self) -> Result<Vec<(String, BiometricType, f32)>, BiometricError>; // (id, type, quality)
+    async fn list_enrolled_templates(
+        &self,
+    ) -> Result<Vec<(String, BiometricType, f32)>, BiometricError>; // (id, type, quality)
 
     /// Test biometric hardware functionality
     ///
@@ -301,7 +306,10 @@ pub trait BiometricEffects: Send + Sync {
     ///
     /// # Returns
     /// `true` if hardware is functioning correctly
-    async fn test_biometric_hardware(&self, biometric_type: BiometricType) -> Result<bool, BiometricError>;
+    async fn test_biometric_hardware(
+        &self,
+        biometric_type: BiometricType,
+    ) -> Result<bool, BiometricError>;
 
     /// Configure biometric security settings
     ///
@@ -312,7 +320,10 @@ pub trait BiometricEffects: Send + Sync {
     ///
     /// # Returns
     /// Success/failure result
-    async fn configure_biometric_security(&self, config: BiometricConfig) -> Result<(), BiometricError>;
+    async fn configure_biometric_security(
+        &self,
+        config: BiometricConfig,
+    ) -> Result<(), BiometricError>;
 
     /// Get biometric authentication statistics
     ///
@@ -335,8 +346,7 @@ pub trait BiometricEffects: Send + Sync {
 }
 
 /// Statistics about biometric authentication usage
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BiometricStatistics {
     /// Total number of verification attempts
     pub total_attempts: u64,
@@ -356,7 +366,6 @@ pub struct BiometricStatistics {
     pub false_rejection_rate: Option<f32>,
 }
 
-
 /// Helper functions for common biometric operations
 impl BiometricCapability {
     /// Check if this biometric can be used for authentication
@@ -369,12 +378,24 @@ impl BiometricCapability {
         matches!(
             (required_level, &self.security_level),
             (BiometricSecurityLevel::Low, _)
-                | (BiometricSecurityLevel::Medium, BiometricSecurityLevel::Medium)
+                | (
+                    BiometricSecurityLevel::Medium,
+                    BiometricSecurityLevel::Medium
+                )
                 | (BiometricSecurityLevel::Medium, BiometricSecurityLevel::High)
-                | (BiometricSecurityLevel::Medium, BiometricSecurityLevel::VeryHigh)
+                | (
+                    BiometricSecurityLevel::Medium,
+                    BiometricSecurityLevel::VeryHigh
+                )
                 | (BiometricSecurityLevel::High, BiometricSecurityLevel::High)
-                | (BiometricSecurityLevel::High, BiometricSecurityLevel::VeryHigh)
-                | (BiometricSecurityLevel::VeryHigh, BiometricSecurityLevel::VeryHigh)
+                | (
+                    BiometricSecurityLevel::High,
+                    BiometricSecurityLevel::VeryHigh
+                )
+                | (
+                    BiometricSecurityLevel::VeryHigh,
+                    BiometricSecurityLevel::VeryHigh
+                )
         )
     }
 }
@@ -382,8 +403,10 @@ impl BiometricCapability {
 impl BiometricVerificationResult {
     /// Check if verification was successful with sufficient confidence
     pub fn is_verified_with_confidence(&self, minimum_confidence: f32) -> bool {
-        self.verified && 
-        self.confidence_score.is_some_and(|score| score >= minimum_confidence)
+        self.verified
+            && self
+                .confidence_score
+                .is_some_and(|score| score >= minimum_confidence)
     }
 
     /// Check if liveness was properly detected (when required)
@@ -405,9 +428,18 @@ mod tests {
 
     #[test]
     fn test_biometric_security_levels() {
-        assert_eq!(BiometricType::Fingerprint.security_level(), BiometricSecurityLevel::High);
-        assert_eq!(BiometricType::Iris.security_level(), BiometricSecurityLevel::VeryHigh);
-        assert_eq!(BiometricType::Voice.security_level(), BiometricSecurityLevel::Medium);
+        assert_eq!(
+            BiometricType::Fingerprint.security_level(),
+            BiometricSecurityLevel::High
+        );
+        assert_eq!(
+            BiometricType::Iris.security_level(),
+            BiometricSecurityLevel::VeryHigh
+        );
+        assert_eq!(
+            BiometricType::Voice.security_level(),
+            BiometricSecurityLevel::Medium
+        );
     }
 
     #[test]

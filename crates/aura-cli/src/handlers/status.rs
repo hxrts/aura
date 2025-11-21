@@ -3,29 +3,23 @@
 //! Effect-based implementation of the status command.
 
 use anyhow::Result;
-use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AuraEffectSystem;
 use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects};
 use std::path::Path;
 
 /// Handle status display through effects
 pub async fn handle_status(effects: &AuraEffectSystem, config_path: &Path) -> Result<()> {
-    let _ = effects
-        .log_info(&format!(
-            "Account status for config: {}",
-            config_path.display()
-        ))
-        .await;
+    println!(
+        "Account status for config: {}",
+        config_path.display()
+    );
 
     // Check if config exists through storage effects
-    let config_exists = effects
-        .exists(&config_path.display().to_string())
-        .await
-        .unwrap_or(false);
+    let config_exists = std::path::Path::new(&config_path.display().to_string())
+        .exists();
 
     if !config_exists {
-        let _ = effects
-            .log_error(&format!("Config file not found: {}", config_path.display()))
-            .await;
+        eprintln!("Config file not found: {}", config_path.display());
         return Err(anyhow::anyhow!(
             "Config file not found: {}",
             config_path.display()
@@ -39,9 +33,7 @@ pub async fn handle_status(effects: &AuraEffectSystem, config_path: &Path) -> Re
             Ok(())
         }
         Err(e) => {
-            let _ = effects
-                .log_error(&format!("Failed to read config: {}", e))
-                .await;
+            eprintln!("Failed to read config: {}", e);
 
             // Show basic status anyway
             display_default_status(effects).await;
@@ -52,59 +44,43 @@ pub async fn handle_status(effects: &AuraEffectSystem, config_path: &Path) -> Re
 
 /// Read configuration through storage effects
 async fn read_config_through_effects(
-    effects: &AuraEffectSystem,
+    _effects: &AuraEffectSystem,
     config_path: &Path,
 ) -> Result<DeviceConfig> {
-    let config_data = effects
-        .retrieve(&config_path.display().to_string())
-        .await
-        .map_err(|e| anyhow::anyhow!("Storage read failed: {}", e))?
-        .ok_or_else(|| anyhow::anyhow!("Config file not found"))?;
-
-    let config_str = String::from_utf8(config_data)
-        .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in config: {}", e))?;
+    let config_str = std::fs::read_to_string(&config_path.display().to_string())
+        .map_err(|e| anyhow::anyhow!("Failed to read config: {}", e))?;
 
     // Parse TOML configuration
     let config: DeviceConfig = toml::from_str(&config_str)
         .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))?;
 
-    let _ = effects.log_info("Configuration loaded successfully").await;
+    println!("Configuration loaded successfully");
 
     Ok(config)
 }
 
 /// Display status information through console effects
-async fn display_status_info(effects: &AuraEffectSystem, config: &DeviceConfig) {
-    let _ = effects.log_info("=== Account Status ===").await;
-    let _ = effects
-        .log_info(&format!("Device ID: {}", config.device_id))
-        .await;
-    let _ = effects.log_info("Status: Active").await;
-    let _ = effects
-        .log_info(&format!("Total Devices: {}", config.total_devices))
-        .await;
-    let _ = effects
-        .log_info(&format!("Threshold: {}", config.threshold))
-        .await;
+async fn display_status_info(_effects: &AuraEffectSystem, config: &DeviceConfig) {
+    println!("=== Account Status ===");
+    println!("Device ID: {}", config.device_id);
+    println!("Status: Active");
+    println!("Total Devices: {}", config.total_devices);
+    println!("Threshold: {}", config.threshold);
 
     if let Some(network) = &config.network {
-        let _ = effects
-            .log_info(&format!("Default Port: {}", network.default_port))
-            .await;
+        println!("Default Port: {}", network.default_port);
     }
 
-    let _ = effects.log_info("=== End Status ===").await;
+    println!("=== End Status ===");
 }
 
 /// Display default status when config can't be read
-async fn display_default_status(effects: &AuraEffectSystem) {
-    let _ = effects.log_info("=== Account Status (Default) ===").await;
-    let _ = effects
-        .log_info("Status: Unknown (config unreadable)")
-        .await;
-    let _ = effects.log_info("Devices: Unknown").await;
-    let _ = effects.log_info("Threshold: Unknown").await;
-    let _ = effects.log_info("=== End Status ===").await;
+async fn display_default_status(_effects: &AuraEffectSystem) {
+    println!("=== Account Status (Default) ===");
+    println!("Status: Unknown (config unreadable)");
+    println!("Devices: Unknown");
+    println!("Threshold: Unknown");
+    println!("=== End Status ===");
 }
 
 /// Device configuration structure for parsing

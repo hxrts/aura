@@ -5,8 +5,8 @@
 //! Effect handlers that integrate aura-crypto are provided by aura-protocol handlers.
 
 use super::RandomEffects;
-use crate::{AccountId, AuraError};
 use crate::identifiers::DeviceId;
+use crate::{AccountId, AuraError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 

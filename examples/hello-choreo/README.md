@@ -71,7 +71,8 @@ let alice_handler = YourTransportHandler::new(...);
 let bob_handler = YourTransportHandler::new(...);
 
 // 2. Integrate with AuraEffectSystem for guard chain + journal
-let effects = AuraEffectSystem::new(...);
+let config = AgentConfig::default();
+let effects = AuraEffectSystem::testing(&config);
 
 // 3. Call interpret to execute the choreography
 interpret(choreography, alice_handler, bob_handler, effects).await?;

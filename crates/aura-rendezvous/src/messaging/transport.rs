@@ -465,17 +465,18 @@ impl crate::sbb::SbbFlooding for SbbTransportBridge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+    use aura_testkit::{DeviceTestFixture, TestEffectsBuilder};
 
-    fn test_effects(device_id: DeviceId) -> Arc<dyn AuraEffects> {
-        let config = EffectSystemConfig::for_testing(device_id);
-        let system = AuraEffectSystem::new();
+    fn test_effects(_device_id: DeviceId) -> Arc<dyn AuraEffects> {
+        let config = aura_agent::AgentConfig::default();
+        let system = aura_agent::AuraEffectSystem::testing(&config);
         Arc::new(system)
     }
 
     #[tokio::test]
     async fn test_sbb_transport_bridge_creation() {
-        let device_id = DeviceId::new();
+        let fixture = DeviceTestFixture::new(0);
+        let device_id = fixture.device_id();
         let effects = test_effects(device_id);
         let bridge = SbbTransportBridge::new(device_id, effects);
 
@@ -485,12 +486,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_relationship_management() {
-        let device_id = DeviceId::new();
+        let fixture = DeviceTestFixture::new(0);
+        let device_id = fixture.device_id();
         let effects = test_effects(device_id);
         let bridge = SbbTransportBridge::new(device_id, effects);
 
-        let friend_id = DeviceId::new();
-        let guardian_id = DeviceId::new();
+        let friend_fixture = DeviceTestFixture::new(1);
+        let friend_id = friend_fixture.device_id();
+        let guardian_fixture = DeviceTestFixture::new(2);
+        let guardian_id = guardian_fixture.device_id();
 
         bridge.add_friend(friend_id).await;
         bridge.add_guardian(guardian_id).await;
@@ -577,8 +581,11 @@ mod tests {
     async fn test_network_transport_sender_creation() {
         use super::NetworkTransport;
 
-        let device_id = DeviceId::new();
-        let effects = Arc::new(AuraEffectSystem::new()) as Arc<dyn NetworkEffects>;
+        let fixture = DeviceTestFixture::new(0);
+        let device_id = fixture.device_id();
+        let builder = TestEffectsBuilder::for_unit_tests(device_id);
+        let system = builder.build().expect("Failed to build test effect system");
+        let effects = Arc::new(system) as Arc<dyn NetworkEffects>;
         let transport = NetworkTransport::new(device_id, effects);
 
         let sender = NetworkTransportSender::new(transport);
@@ -592,12 +599,15 @@ mod tests {
     async fn test_sbb_bridge_with_network_transport() {
         use super::NetworkTransport;
 
-        let device_id = DeviceId::new();
+        let fixture = DeviceTestFixture::new(0);
+        let device_id = fixture.device_id();
         let effects = test_effects(device_id);
         let mut bridge = SbbTransportBridge::new(device_id, effects);
 
-        // Set up real transport sender
-        let network_effects = Arc::new(AuraEffectSystem::new()) as Arc<dyn NetworkEffects>;
+        // Set up real transport sender using testkit
+        let builder = TestEffectsBuilder::for_unit_tests(device_id);
+        let system = builder.build().expect("Failed to build test effect system");
+        let network_effects = Arc::new(system) as Arc<dyn NetworkEffects>;
         let transport = NetworkTransport::new(device_id, network_effects);
         let sender = NetworkTransportSender::new(transport);
 

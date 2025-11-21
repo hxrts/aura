@@ -401,11 +401,12 @@ impl SbbSystemBuilder {
 mod tests {
     use super::*;
     use crate::messaging::TransportMethod;
-    use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+    use aura_agent::AuraEffectSystem;
+    use aura_agent::AgentConfig;
 
-    fn test_effects(device_id: DeviceId) -> Arc<dyn AuraEffects> {
-        let config = EffectSystemConfig::for_testing(device_id);
-        let system = AuraEffectSystem::new();
+    fn test_effects(_device_id: DeviceId) -> Arc<dyn AuraEffects> {
+        let config = AgentConfig::default();
+        let system = AuraEffectSystem::testing(&config);
         Arc::new(system)
     }
 

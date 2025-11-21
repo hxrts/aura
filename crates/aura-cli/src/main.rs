@@ -4,15 +4,15 @@
 //! Uses the unified effect system for all operations.
 
 use anyhow::Result;
-use aura_agent::runtime::EffectSystemBuilder;
+use aura_agent::AgentBuilder;
 use aura_core::effects::ConsoleEffects;
-use aura_core::identifiers::DeviceId;
+use aura_core::identifiers::{DeviceId, AuthorityId};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use aura_cli::{
-    AdminAction, AuthorityCommands, CliHandler, ContextAction, InvitationAction, RecoveryAction,
-    ScenarioAction, SnapshotAction,
+    AdminAction, AmpAction, AuthorityCommands, CliHandler, ContextAction, InvitationAction,
+    RecoveryAction, ScenarioAction, SnapshotAction,
 };
 
 #[derive(Parser)]
@@ -129,6 +129,12 @@ enum Commands {
         #[command(subcommand)]
         action: ContextAction,
     },
+
+    /// AMP channel inspection and bump flows (experimental)
+    Amp {
+        #[command(subcommand)]
+        action: AmpAction,
+    },
 }
 
 #[tokio::main]
@@ -138,19 +144,15 @@ async fn main() -> Result<()> {
     // Create CLI device ID
     let device_id = DeviceId::new();
 
-    // Initialize effect system based on environment
-    let effect_system = EffectSystemBuilder::new()
-        .with_device_id(device_id)
-        .build_sync()?;
+    // Initialize agent based on environment
+    let agent = AgentBuilder::new()
+        .with_authority(AuthorityId::new())
+        .build_testing()?;
+    let effect_system = agent.runtime().effects().clone();
 
     // Initialize logging through effects
     let log_level = if cli.verbose { "debug" } else { "info" };
-    let _ = effect_system
-        .log_info(&format!(
-            "Initializing Aura CLI with log level: {}",
-            log_level
-        ))
-        .await;
+    println!("Initializing Aura CLI with log level: {}", log_level);
 
     // Create CLI handler
     let cli_handler = CliHandler::new(effect_system, device_id);
@@ -196,6 +198,7 @@ async fn main() -> Result<()> {
         Commands::Invite { action } => cli_handler.handle_invitation(action).await,
         Commands::Authority { command } => cli_handler.handle_authority(command).await,
         Commands::Context { action } => cli_handler.handle_context(action).await,
+        Commands::Amp { action } => cli_handler.handle_amp(action).await,
         Commands::Version => cli_handler.handle_version().await,
     }
 }
@@ -213,9 +216,7 @@ async fn resolve_config_path(
         return Ok(config.clone());
     }
 
-    cli_handler
-        .log_error("No config file specified. Use -c or --config to specify a config file.")
-        .await;
+    eprintln!("No config file specified. Use -c or --config to specify a config file.");
     anyhow::bail!("No config file specified")
 }
 

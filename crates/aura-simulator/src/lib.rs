@@ -48,14 +48,20 @@
 //! ```
 #![allow(clippy::disallowed_methods)]
 
-// Core middleware system
-pub mod middleware;
+// Core simulator types following algebraic effects architecture
+pub mod types;
 
 // Simulation effect system
 pub mod effects;
 
 // Simulation handlers
 pub mod handlers;
+
+// Compatibility module for legacy handlers
+pub mod compat;
+
+// AMP scenario helpers
+pub mod amp;
 
 // Privacy analysis and observer models
 pub mod privacy;
@@ -76,22 +82,24 @@ pub mod scenario;
 pub mod testkit_bridge;
 
 // Re-export core types for external usage
-pub use middleware::{
-    ByzantineStrategy, FaultType, LogLevel, NetworkConfig, PerformanceMetrics,
+pub use types::{
+    ByzantineStrategy, ChaosStrategy, FaultType, LogLevel, NetworkConfig,
     PropertyViolationType, Result, SimulationOutcome, SimulatorConfig, SimulatorContext,
-    SimulatorError, SimulatorHandler, SimulatorMiddleware, SimulatorOperation, StateQuery,
-    StatelessEffectsMiddleware, TimeConfig, TimeControlAction,
+    SimulatorError, SimulatorOperation, StateQuery, TimeConfig, TimeControlAction,
 };
 
-// Re-export testkit bridge
-pub use testkit_bridge::{MiddlewareConfig, TestkitSimulatorBridge};
-
-// Re-export handler implementations
+// Re-export effect handlers (pure algebraic effects)
 pub use handlers::{
     ComposedSimulationEnvironment, SimulationEffectComposer, SimulationFaultHandler,
-    SimulationScenarioHandler, SimulationTimeHandler,
+    SimulationScenarioHandler, SimulationTimeHandler, StatelessSimulatorHandler,
+    CoreSimulatorHandler,
 };
-pub use middleware::handler::CoreSimulatorHandler;
+
+// Re-export testkit bridge 
+pub use testkit_bridge::{MiddlewareConfig as HandlerConfig, TestkitSimulatorBridge};
+
+// Legacy compatibility re-exports (deprecated - use pure effect handlers instead)
+pub use compat::{PerformanceMetrics, SimulatorHandler};
 
 // Re-export scenario types for convenience
 pub use handlers::{InjectionAction, ScenarioDefinition, TriggerCondition};

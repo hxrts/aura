@@ -1323,14 +1323,15 @@ impl<N: NetworkEffects> ConnectionManager<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_agent::AuraEffectSystem;
+    use aura_agent::{AuraEffectSystem, AgentConfig};
 
     #[tokio::test]
     async fn test_connection_manager_creation() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let effects = std::sync::Arc::new(AuraEffectSystem::new());
-        let random = std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let effects = std::sync::Arc::new(AuraEffectSystem::testing(&AgentConfig::default()));
+        let random =
+            std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
         let manager = ConnectionManager::new(device_id, stun_config, effects, random);
 
         assert_eq!(manager.device_id, device_id);
@@ -1340,8 +1341,9 @@ mod tests {
     async fn test_connection_priority_logic() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let effects = std::sync::Arc::new(AuraEffectSystem::new());
-        let random = std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let effects = std::sync::Arc::new(AuraEffectSystem::testing(&AgentConfig::default()));
+        let random =
+            std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
         let manager = ConnectionManager::new(device_id, stun_config, effects, random);
 
         let offers = vec![
@@ -1428,8 +1430,9 @@ mod tests {
 
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let effects = std::sync::Arc::new(AuraEffectSystem::new());
-        let random = std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let effects = std::sync::Arc::new(AuraEffectSystem::testing(&AgentConfig::default()));
+        let random =
+            std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
         let manager = ConnectionManager::new(device_id, stun_config, effects, random);
 
         // Create transport with reflexive address

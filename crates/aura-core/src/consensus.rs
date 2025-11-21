@@ -4,9 +4,9 @@
 //! multiple layers of the Aura architecture. These types capture the essential
 //! mathematical properties of consensus without implementation details.
 
+use crate::content::Hash32;
 use crate::hash;
 use crate::identifiers::AuthorityId;
-use crate::content::Hash32;
 use serde::{Deserialize, Serialize};
 
 /// Prestate representing the combined state of authorities

@@ -149,6 +149,7 @@ impl CapabilityGuard {
 }
 
 /// Extension trait for integrating with guard chains
+#[allow(async_fn_in_trait)]
 pub trait CapabilityGuardExt {
     /// Evaluate with guard result
     async fn evaluate_with_result(

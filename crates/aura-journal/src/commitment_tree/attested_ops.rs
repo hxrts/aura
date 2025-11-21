@@ -4,9 +4,7 @@
 //! enabling the commitment tree to integrate with the fact-based journal model.
 
 use crate::fact::{AttestedOp, Fact, FactContent, FactId, TreeOpKind};
-use aura_core::{
-    AuthorityId, Hash32,
-};
+use aura_core::{AuthorityId, Hash32};
 
 /// Tree operation with context for conversion
 pub struct TreeOp {

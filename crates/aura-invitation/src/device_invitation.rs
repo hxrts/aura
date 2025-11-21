@@ -7,7 +7,7 @@ use crate::{transport::deliver_via_rendezvous, InvitationError, InvitationResult
 use aura_core::effects::{NetworkEffects, TimeEffects};
 use aura_core::hash;
 use aura_core::{AccountId, DeviceId};
-use aura_journal::semilattice::{InvitationRecordRegistry, InvitationRecord};
+use aura_journal::semilattice::{InvitationRecord, InvitationRecordRegistry};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_wot::SerializableBiscuit;

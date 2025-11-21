@@ -10,17 +10,16 @@
 //! - Guard capabilities, flow costs, and journal facts
 //! - Extension effects through aura-macros and AuraRuntime
 
-use aura_core::{ContextId, identifiers::DeviceId};
+use aura_core::{identifiers::DeviceId, ContextId};
 use aura_macros::choreography;
-use aura_protocol::transport::{
-    ChannelEstablishmentCoordinator, ChoreographicConfig,
-    WebSocketHandshakeCoordinator,
-};
 use aura_protocol::transport::channel_management::{
     AllocatedResources, ChannelConfirmation, ChannelType, ConfirmationResult,
 };
 use aura_protocol::transport::websocket::{
     WebSocketHandshakeInit, WebSocketHandshakeResponse, WebSocketHandshakeResult,
+};
+use aura_protocol::transport::{
+    ChannelEstablishmentCoordinator, ChoreographicConfig, WebSocketHandshakeCoordinator,
 };
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -137,7 +136,10 @@ async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error
     let mut coordinator = ChannelEstablishmentCoordinator::new(coordinator_id, choreo_config);
 
     println!("Channel establishment coordinator created");
-    println!("  Coordinator: {:?}", &coordinator_id.to_bytes().unwrap()[..4]);
+    println!(
+        "  Coordinator: {:?}",
+        &coordinator_id.to_bytes().unwrap()[..4]
+    );
     println!("  Participants: {} peers", 2);
 
     // Initiate choreographic channel establishment

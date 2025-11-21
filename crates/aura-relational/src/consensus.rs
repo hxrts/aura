@@ -7,7 +7,7 @@
 //! relational facts.
 
 use aura_core::crypto::frost::ThresholdSignature;
-use aura_core::{AuraError, AuthorityId, Hash32, Result, Prestate};
+use aura_core::{AuraError, AuthorityId, Hash32, Prestate, Result};
 use serde::{Deserialize, Serialize};
 
 /// Proof of consensus for an operation
@@ -98,7 +98,7 @@ pub async fn run_consensus_with_config<T: Serialize>(
         }
         Hash32(hasher.finalize())
     };
-    
+
     let threshold_met = config.check_threshold();
     Ok(ConsensusProof {
         prestate_hash,
@@ -138,7 +138,9 @@ impl ConsensusConfig {
 
 fn validate_config(config: &mut ConsensusConfig) -> Result<()> {
     if config.witness_set.is_empty() {
-        return Err(AuraError::invalid("Consensus requires at least one witness"));
+        return Err(AuraError::invalid(
+            "Consensus requires at least one witness",
+        ));
     }
 
     if config.threshold == 0 {

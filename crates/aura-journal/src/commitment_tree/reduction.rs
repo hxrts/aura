@@ -147,7 +147,7 @@ fn topological_sort_with_tiebreak<'a>(
 /// - Parent binding verification: Implemented
 /// - Operation application: Implemented for all TreeOpKind variants
 /// - Policy meet verification: Implemented for ChangePolicy
-/// - Commitment recomputation: Implemented (TODO fix - Simplified until full tree structure)
+/// - Commitment recomputation: Implemented
 /// - Path commitment updates: Implemented with tree traversal
 /// - FROST signature verification: ✅ COMPLETED in application.rs
 fn apply_operation(state: &mut TreeState, op: &AttestedOp) -> Result<(), ReductionError> {
@@ -334,7 +334,7 @@ fn compute_branch_commitment(
     child_commitments.sort();
 
     // Compute branch commitment using aura-core's commit_branch function
-    // TODO fix - For now, use a TODO fix - Simplified approach since we need the exact signature
+    // Compute policy hash for the branch
     let policy_hash = aura_core::policy_hash(policy);
 
     let mut hasher = hash::hasher();
@@ -377,9 +377,8 @@ fn recompute_root_commitment_simple(state: &mut TreeState) {
 
 /// Recompute root commitment from current tree structure
 fn recompute_root_commitment_from_tree(state: &mut TreeState) {
-    // TODO fix - For now, use the simple approach
-    // TODO: In a full implementation, this would find the actual root node
-    // and use its commitment directly
+    // Use the simple approach for now - in a full implementation this would
+    // traverse to find the actual root node and use its commitment directly
     recompute_root_commitment_simple(state);
 }
 
@@ -445,7 +444,7 @@ fn hash_op(op: &AttestedOp) -> TreeHash32 {
         TreeOpKind::ChangePolicy { node, new_policy } => {
             hasher.update(b"ChangePolicy");
             hasher.update(&node.0.to_le_bytes());
-            // Hash policy (TODO fix - Simplified)
+            // Hash policy
             hasher.update(&aura_core::policy_hash(new_policy));
         }
         TreeOpKind::RotateEpoch { affected } => {

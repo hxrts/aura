@@ -105,7 +105,8 @@ pub type Result<T> = std::result::Result<T, AuthenticationError>;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KeyMaterial {
     /// Device public keys indexed by DeviceId
-    device_keys: std::collections::HashMap<aura_core::identifiers::DeviceId, aura_core::Ed25519VerifyingKey>,
+    device_keys:
+        std::collections::HashMap<aura_core::identifiers::DeviceId, aura_core::Ed25519VerifyingKey>,
 
     /// Guardian public keys indexed by GuardianId
     guardian_keys: std::collections::HashMap<aura_core::GuardianId, aura_core::Ed25519VerifyingKey>,
@@ -417,7 +418,7 @@ pub fn verify_identity_proof(
                         "Message is not valid UTF-8".to_string(),
                     )
                 })?;
-                
+
                 // Try to parse as UUID string
                 let uuid = uuid::Uuid::parse_str(message_str).map_err(|_| {
                     AuthenticationError::InvalidThresholdSignature(
@@ -429,15 +430,10 @@ pub fn verify_identity_proof(
 
             let group_key = key_material.get_group_public_key(&account_id)?;
 
-            // Calculate minimum signers from the signature shares  
+            // Calculate minimum signers from the signature shares
             let min_signers = threshold_sig.signers.len().max(1);
 
-            verify_threshold_signature(
-                message,
-                &threshold_sig.signature,
-                group_key,
-                min_signers,
-            )?;
+            verify_threshold_signature(message, &threshold_sig.signature, group_key, min_signers)?;
         }
     }
 

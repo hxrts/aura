@@ -737,7 +737,9 @@ impl EffectApiEffects for CompositeHandler {
         Ok(timestamp)
     }
 
-    async fn effect_api_device_id(&self) -> Result<aura_core::identifiers::DeviceId, EffectApiError> {
+    async fn effect_api_device_id(
+        &self,
+    ) -> Result<aura_core::identifiers::DeviceId, EffectApiError> {
         Ok(self.device_id.into())
     }
 

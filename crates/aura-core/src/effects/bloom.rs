@@ -55,7 +55,7 @@ impl BloomConfig {
             expected_elements,
             false_positive_rate,
             num_hash_functions: k.clamp(1, 32), // Reasonable bounds
-            bit_vector_size: m.max(64),           // Minimum size
+            bit_vector_size: m.max(64),         // Minimum size
         }
     }
 

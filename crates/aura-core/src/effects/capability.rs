@@ -225,7 +225,10 @@ pub trait CapabilityEffects: Send + Sync {
     ///
     /// # Returns
     /// Token information without verification status
-    async fn parse_capability_token(&self, token: &[u8]) -> Result<CapabilityTokenInfo, CapabilityError>;
+    async fn parse_capability_token(
+        &self,
+        token: &[u8],
+    ) -> Result<CapabilityTokenInfo, CapabilityError>;
 
     /// Revoke a capability token
     ///
@@ -284,7 +287,10 @@ pub trait CapabilityEffects: Send + Sync {
     ///
     /// # Returns
     /// List of active token information
-    async fn list_subject_tokens(&self, subject: &str) -> Result<Vec<CapabilityTokenInfo>, CapabilityError>;
+    async fn list_subject_tokens(
+        &self,
+        subject: &str,
+    ) -> Result<Vec<CapabilityTokenInfo>, CapabilityError>;
 
     /// Validate token permissions
     ///
@@ -321,7 +327,8 @@ pub trait CapabilityEffects: Send + Sync {
     ///
     /// # Returns
     /// Success/failure result
-    async fn configure_capabilities(&self, config: CapabilityConfig) -> Result<(), CapabilityError>;
+    async fn configure_capabilities(&self, config: CapabilityConfig)
+        -> Result<(), CapabilityError>;
 
     /// Check what token formats are supported
     ///
@@ -482,14 +489,16 @@ mod chrono {
     impl Utc {
         pub fn now() -> DateTime {
             // Mock implementation for compilation
-            DateTime { timestamp: 1640995200 }
+            DateTime {
+                timestamp: 1640995200,
+            }
         }
     }
-    
+
     pub struct DateTime {
         timestamp: i64,
     }
-    
+
     impl DateTime {
         pub fn timestamp(&self) -> i64 {
             self.timestamp
@@ -505,7 +514,7 @@ mod tests {
     fn test_capability_token_request_creation() {
         let permissions = vec!["read:data".to_string(), "write:logs".to_string()];
         let request = CapabilityTokenRequest::standard("user123", &permissions);
-        
+
         assert_eq!(request.subject, "user123");
         assert_eq!(request.permissions, permissions);
         assert_eq!(request.format, CapabilityTokenFormat::Biscuit);
@@ -516,7 +525,7 @@ mod tests {
     fn test_capability_token_request_short_lived() {
         let permissions = vec!["admin:all".to_string()];
         let request = CapabilityTokenRequest::short_lived("admin", &permissions);
-        
+
         assert_eq!(request.subject, "admin");
         assert_eq!(request.format, CapabilityTokenFormat::Jwt);
         assert!(request.expires_at.is_some());
@@ -525,7 +534,7 @@ mod tests {
     #[test]
     fn test_capability_token_request_read_only() {
         let request = CapabilityTokenRequest::read_only("viewer", "database");
-        
+
         assert_eq!(request.subject, "viewer");
         assert_eq!(request.permissions, vec!["read:database"]);
     }
@@ -536,8 +545,11 @@ mod tests {
             .with_claim("department", "engineering")
             .with_context("development")
             .with_expiry(1234567890);
-        
-        assert_eq!(request.claims.get("department"), Some(&"engineering".to_string()));
+
+        assert_eq!(
+            request.claims.get("department"),
+            Some(&"engineering".to_string())
+        );
         assert_eq!(request.context, Some("development".to_string()));
         assert_eq!(request.expires_at, Some(1234567890));
     }
@@ -554,7 +566,7 @@ mod tests {
             errors: vec![],
             verification_level: VerificationLevel::Standard,
         };
-        
+
         assert!(result.is_valid_and_current());
         assert!(result.has_permissions(&["read:data".to_string()]));
         assert!(result.has_permissions(&["read:data".to_string(), "write:logs".to_string()]));
@@ -566,7 +578,7 @@ mod tests {
         assert!(TokenStatus::Active.is_active());
         assert!(!TokenStatus::Expired.is_active());
         assert!(!TokenStatus::Revoked.is_active());
-        
+
         assert!(TokenStatus::Expired.is_permanently_invalid());
         assert!(TokenStatus::Revoked.is_permanently_invalid());
         assert!(!TokenStatus::Active.is_permanently_invalid());
@@ -576,7 +588,7 @@ mod tests {
     #[test]
     fn test_capability_config_defaults() {
         let config = CapabilityConfig::default();
-        
+
         assert_eq!(config.default_format, CapabilityTokenFormat::Biscuit);
         assert_eq!(config.default_expiry_seconds, 3600);
         assert!(config.strict_verification);
@@ -587,7 +599,7 @@ mod tests {
     #[test]
     fn test_capability_statistics_defaults() {
         let stats = CapabilityStatistics::default();
-        
+
         assert_eq!(stats.total_tokens_created, 0);
         assert_eq!(stats.total_verifications, 0);
         assert_eq!(stats.successful_verifications, 0);

@@ -5,7 +5,10 @@
 //! and other Aura components.
 
 use aura_core::effects::JournalEffects;
-use aura_core::{identifiers::{AuthorityId, ContextId}, AuraError, Epoch, FlowBudget, Journal};
+use aura_core::{
+    identifiers::{AuthorityId, ContextId},
+    AuraError, Epoch, FlowBudget, Journal,
+};
 use aura_macros::aura_effect_handlers;
 
 use std::collections::HashMap;

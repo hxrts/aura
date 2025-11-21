@@ -1,18 +1,11 @@
-//! State management services for the stateless effect system
+//! Runtime Services
 //!
-//! These services provide isolated state management with consistent
-//! lock ordering and atomic operations.
+//! Service components per Layer-6 spec.
 
-pub mod budget_manager;
 pub mod context_manager;
+pub mod flow_budget_manager;
 pub mod receipt_manager;
 
-#[cfg(any(test, feature = "testing"))]
-pub mod sync_context_manager;
-
-pub use budget_manager::{BudgetKey, FlowBudgetManager};
 pub use context_manager::ContextManager;
-pub use receipt_manager::{ReceiptChain, ReceiptManager};
-
-#[cfg(any(test, feature = "testing"))]
-pub use sync_context_manager::SyncContextManager;
+pub use flow_budget_manager::FlowBudgetManager;
+pub use receipt_manager::ReceiptManager;

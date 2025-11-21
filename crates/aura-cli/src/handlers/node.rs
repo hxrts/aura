@@ -3,7 +3,7 @@
 //! Effect-based implementation of the node command.
 
 use anyhow::Result;
-use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AuraEffectSystem;
 use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects, TimeEffects};
 use std::path::Path;
 
@@ -14,16 +14,12 @@ pub async fn handle_node(
     daemon: bool,
     config_path: &Path,
 ) -> Result<()> {
-    let _ = effects
-        .log_info(&format!(
-            "Starting node on port {} (daemon: {})",
-            port, daemon
-        ))
-        .await;
+    println!(
+        "Starting node on port {} (daemon: {})",
+        port, daemon
+    );
 
-    let _ = effects
-        .log_info(&format!("Config: {}", config_path.display()))
-        .await;
+    println!("Config: {}", config_path.display());
 
     // Validate config exists through storage effects
     if effects
@@ -31,9 +27,7 @@ pub async fn handle_node(
         .await
         .map_or(true, |data| data.is_none())
     {
-        let _ = effects
-            .log_error(&format!("Config file not found: {}", config_path.display()))
-            .await;
+        eprintln!("Config file not found: {}", config_path.display());
         return Err(anyhow::anyhow!(
             "Config file not found: {}",
             config_path.display()
@@ -66,57 +60,48 @@ async fn load_node_config(effects: &AuraEffectSystem, config_path: &Path) -> Res
     let config: NodeConfig = toml::from_str(&config_str)
         .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))?;
 
-    let _ = effects.log_info("Node configuration loaded").await;
+    println!("Node configuration loaded");
 
     Ok(config)
 }
 
 /// Run node in daemon mode through effects
 async fn run_daemon_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
-    let _ = effects.log_info("Initializing daemon mode...").await;
+    println!("Initializing daemon mode...");
 
     // Simulate daemon initialization
     let start_time = effects.current_epoch().await;
-    let _ = effects
-        .log_info(&format!("Node started at epoch: {}", start_time))
-        .await;
+    let _ = effects;
+    println!("Node started at epoch: {}", start_time);
 
     // Simulate some startup delay
     simulate_startup_delay(effects).await;
 
-    let _ = effects
-        .log_info(&format!(
-            "Node daemon started successfully on port {}",
-            port
-        ))
-        .await;
+    println!(
+        "Node daemon started successfully on port {}",
+        port
+    );
 
     // TODO fix - In a real implementation, this would start the actual node service
-    let _ = effects
-        .log_info("Daemon is running. Use 'aura status' to check node status.")
-        .await;
+    println!("Daemon is running. Use 'aura status' to check node status.");
 
     Ok(())
 }
 
 /// Run node in interactive mode through effects
 async fn run_interactive_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
-    let _ = effects
-        .log_info(&format!(
-            "Node started in interactive mode on port {}. Press Ctrl+C to stop.",
-            port
-        ))
-        .await;
+    println!(
+        "Node started in interactive mode on port {}. Press Ctrl+C to stop.",
+        port
+    );
 
     let start_time = effects.current_epoch().await;
-    let _ = effects
-        .log_info(&format!("Started at epoch: {}", start_time))
-        .await;
+    println!("Started at epoch: {}", start_time);
 
     // Simulate interactive mode - in real implementation would handle signals
     simulate_interactive_session(effects).await;
 
-    let _ = effects.log_info("Node stopped").await;
+    println!("Node stopped");
 
     Ok(())
 }
@@ -135,7 +120,7 @@ async fn simulate_startup_delay(effects: &AuraEffectSystem) {
         tokio::task::yield_now().await;
     }
 
-    let _ = effects.log_info("Startup complete").await;
+    println!("Startup complete");
 }
 
 /// Simulate interactive session
@@ -145,17 +130,13 @@ async fn simulate_interactive_session(effects: &AuraEffectSystem) {
 
     for i in 1..=3 {
         let current = effects.current_epoch().await;
-        let _ = effects
-            .log_info(&format!("Interactive tick {} at epoch {}", i, current))
-            .await;
+        println!("Interactive tick {} at epoch {}", i, current);
 
         // Simulate some work
         tokio::task::yield_now().await;
     }
 
-    let _ = effects
-        .log_info("Interactive session ended (simulated)")
-        .await;
+    println!("Interactive session ended (simulated)");
 }
 
 /// Node configuration structure

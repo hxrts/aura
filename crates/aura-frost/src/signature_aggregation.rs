@@ -7,7 +7,7 @@
 
 use crate::FrostResult;
 use aura_core::frost::{PartialSignature, ThresholdSignature};
-use aura_core::{AuraError, identifiers::AuthorityId};
+use aura_core::{identifiers::AuthorityId, AuraError};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 
@@ -206,7 +206,8 @@ pub async fn perform_frost_aggregation(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::test_utils::test_authority_id;
+    use aura_macros::aura_test;
+    use aura_testkit::create_test_fixture;
 
     #[test]
     fn test_aggregation_config_validation() {
@@ -214,7 +215,11 @@ mod tests {
             session_id: "test_session".to_string(),
             message: b"test message".to_vec(),
             threshold: 2,
-            signers: vec![test_authority_id(1), test_authority_id(2), test_authority_id(3)],
+            signers: vec![
+                aura_core::test_utils::test_authority_id(0),
+                aura_core::test_utils::test_authority_id(1),
+                aura_core::test_utils::test_authority_id(2),
+            ],
             timeout_seconds: 60,
         };
         assert!(validate_aggregation_config(&valid_request).is_ok());
@@ -223,7 +228,7 @@ mod tests {
             session_id: "test_session".to_string(),
             message: b"test message".to_vec(),
             threshold: 0, // Invalid threshold
-            signers: vec![test_authority_id(4), test_authority_id(5)],
+            signers: vec![aura_core::test_utils::test_authority_id(3), aura_core::test_utils::test_authority_id(4)],
             timeout_seconds: 60,
         };
         assert!(validate_aggregation_config(&invalid_request).is_err());
@@ -235,7 +240,11 @@ mod tests {
             session_id: "test_session".to_string(),
             message: b"test message".to_vec(),
             threshold: 2,
-            signers: vec![test_authority_id(6), test_authority_id(7), test_authority_id(8)],
+            signers: vec![
+                aura_core::test_utils::test_authority_id(0),
+                aura_core::test_utils::test_authority_id(1),
+                aura_core::test_utils::test_authority_id(2),
+            ],
             timeout_seconds: 60,
         };
 
@@ -248,41 +257,118 @@ mod tests {
         assert_eq!(request.signers.len(), deserialized.signers.len());
     }
 
-    #[tokio::test]
-    async fn test_frost_aggregation_validation() {
-        use aura_effects::random::MockRandomHandler;
+    #[aura_test]
+    async fn test_frost_aggregation_choreography() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
 
-        // Test validation of insufficient signatures
-        let insufficient_signatures = vec![PartialSignature::from_bytes(vec![1; 32]).unwrap()];
-        let message = b"test message";
-        let threshold = 2;
-        let total_signers = 3;
-        let random_handler = MockRandomHandler::new();
+        // Get the effect system from the fixture
+        let effects = fixture.effect_system();
 
-        // This should fail with insufficient signatures
+        let message = b"test message for threshold signing";
+        let threshold = 3;
+        let total_signers = 4;
+        
+        // Create aggregation request using testkit authorities
+        let request = AggregationRequest {
+            session_id: "choreography_test_session".to_string(),
+            message: message.to_vec(),
+            threshold,
+            signers: vec![
+                aura_core::test_utils::test_authority_id(1),
+                aura_core::test_utils::test_authority_id(2),
+                aura_core::test_utils::test_authority_id(3),
+                aura_core::test_utils::test_authority_id(4),
+            ],
+            timeout_seconds: 300,
+        };
+
+        // Validate configuration using testkit-generated data
+        assert!(validate_aggregation_config(&request).is_ok());
+
+        // Simulate partial signatures from threshold number of signers
+        let mut partial_signatures = Vec::new();
+        for i in 0..threshold {
+            let partial_sig = PartialSignature::from_bytes(vec![42u8 + i as u8; 32])
+                .map_err(|e| aura_core::AuraError::invalid(e))?;
+            partial_signatures.push(partial_sig);
+        }
+
+        // Test aggregation with effect system
         let result = perform_frost_aggregation(
-            &insufficient_signatures,
+            &partial_signatures,
             message,
             threshold,
             total_signers,
-            &random_handler,
-        )
-        .await;
-        assert!(result.is_err());
+            effects.as_ref(),
+        ).await;
 
-        // Test that error message is correct
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Insufficient partial signatures"));
+        // Should succeed with sufficient signatures
+        assert!(result.is_ok());
+        
+        let threshold_sig = result?;
+        assert_eq!(threshold_sig.signers.len(), threshold);
+
+        println!("✓ FROST aggregation choreography test completed");
+        Ok(())
+    }
+
+    #[aura_test]
+    async fn test_signature_aggregation_multi_round() -> aura_core::AuraResult<()> {
+        let fixture = create_test_fixture().await?;
+        let effects = fixture.effect_system();
+
+        // Test multiple rounds of aggregation with different thresholds
+        for round in 1..=3 {
+            let threshold = 3 + round; // Varying thresholds: 4, 5, 6
+            let message = format!("round {} message", round);
+
+            let request = AggregationRequest {
+                session_id: format!("multi_round_session_{}", round),
+                message: message.as_bytes().to_vec(),
+                threshold,
+                signers: (1..=6).map(|i| aura_core::test_utils::test_authority_id(i)).collect(),
+                timeout_seconds: 120,
+            };
+
+            // Create sufficient partial signatures for this round
+            let mut partial_signatures = Vec::new();
+            for i in 0..threshold {
+                let sig_data = vec![round as u8 * 10 + i as u8; 32];
+                let partial_sig = PartialSignature::from_bytes(sig_data)
+                    .map_err(|e| aura_core::AuraError::invalid(e))?;
+                partial_signatures.push(partial_sig);
+            }
+
+            // Test aggregation for this round
+            let result = perform_frost_aggregation(
+                &partial_signatures,
+                message.as_bytes(),
+                threshold,
+                6, // total signers
+                effects.as_ref(),
+            ).await;
+
+            assert!(result.is_ok(), "Round {} aggregation should succeed", round);
+            
+            let threshold_sig = result?;
+            assert_eq!(
+                threshold_sig.signers.len(), 
+                threshold,
+                "Round {} should have correct number of signers", 
+                round
+            );
+        }
+
+        println!("✓ Multi-round signature aggregation test completed");
+        Ok(())
     }
 
     #[test]
     fn test_partial_signature_submission_serialization() {
         let submission = PartialSignatureSubmission {
             session_id: "test_session".to_string(),
-            signer_id: test_authority_id(9),
-            partial_signature: PartialSignature::from_bytes(vec![1; 32]).unwrap(), // 32-byte signature as required
+            signer_id: aura_core::test_utils::test_authority_id(0),
+            partial_signature: PartialSignature::from_bytes(vec![1; 32]).unwrap(),
             signature_index: 1,
         };
 

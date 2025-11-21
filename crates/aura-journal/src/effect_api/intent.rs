@@ -301,7 +301,7 @@ mod tests {
     use super::*;
     use aura_core::Hash32;
     // Note: Tests commented out - need migration to new TreeOpKind from aura_core
-    // Old TreeOp variants (RotatePath, etc.) don't exist in new implementation
+    // Legacy TreeOp types have been replaced by fact-based AttestedOp
 
     #[test]
     #[allow(clippy::disallowed_methods)]

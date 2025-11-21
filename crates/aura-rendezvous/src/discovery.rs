@@ -5,7 +5,7 @@
 
 use crate::UnlinkableCredential;
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
-use aura_journal::Capability;
+use aura_journal::CapabilityRef;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -152,7 +152,7 @@ pub enum AdvertisementPolicy {
     /// Only specific relationships can advertise
     RelationshipOnly(Vec<RelationshipId>),
     /// Capability-based advertisement
-    CapabilityBased(Vec<Capability>),
+    CapabilityBased(Vec<CapabilityRef>),
 }
 
 /// Query access control
@@ -165,7 +165,7 @@ pub enum QueryPolicy {
     /// Only specific trust levels can query
     TrustLevelRequired(TrustLevel),
     /// Capability-based queries
-    CapabilityBased(Vec<Capability>),
+    CapabilityBased(Vec<CapabilityRef>),
 }
 
 /// Rate limiting configuration

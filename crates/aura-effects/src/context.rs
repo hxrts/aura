@@ -30,8 +30,8 @@
 //! let result = handler.perform_operation(&context, &params).await?;
 //! ```
 
-use aura_core::{AccountId, SessionId};
 use aura_core::identifiers::DeviceId;
+use aura_core::{AccountId, SessionId};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -274,8 +274,8 @@ impl Default for MockContextHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{AccountId, SessionId};
     use aura_core::identifiers::DeviceId;
+    use aura_core::{AccountId, SessionId};
 
     #[test]
     fn test_execution_context_creation() {

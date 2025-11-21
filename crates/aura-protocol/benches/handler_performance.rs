@@ -9,11 +9,13 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
-use aura_core::{identifiers::DeviceId, effects::{RandomEffects, CryptoEffects, StorageEffects}};
+use aura_core::{
+    effects::{CryptoEffects, RandomEffects, StorageEffects},
+    identifiers::DeviceId,
+};
 use aura_effects::{
-    MockRandomHandler, RealRandomHandler,
-    MockCryptoHandler, RealCryptoHandler,
-    MemoryStorageHandler, FilesystemStorageHandler,
+    FilesystemStorageHandler, MemoryStorageHandler, MockCryptoHandler, MockRandomHandler,
+    RealCryptoHandler, RealRandomHandler,
 };
 
 /// Benchmark random handler performance

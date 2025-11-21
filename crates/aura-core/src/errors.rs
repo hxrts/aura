@@ -115,6 +115,13 @@ impl AuraError {
         }
     }
 
+    /// Create an agent error
+    pub fn agent(message: impl Into<String>) -> Self {
+        Self::Internal {
+            message: message.into(),
+        }
+    }
+
     /// Create an internal error
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Internal {
@@ -219,8 +226,11 @@ impl From<base64::DecodeError> for AuraError {
     }
 }
 
-
-
+impl From<crate::effects::StorageError> for AuraError {
+    fn from(err: crate::effects::StorageError) -> Self {
+        Self::storage(format!("Storage error: {}", err))
+    }
+}
 
 #[cfg(test)]
 mod tests {

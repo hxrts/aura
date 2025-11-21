@@ -8,7 +8,7 @@
 
 use super::effect_system_trait::GuardEffectSystem;
 use super::LeakageBudget;
-use aura_core::{AuraError, AuraResult, identifiers::AuthorityId};
+use aura_core::{identifiers::AuthorityId, AuraError, AuraResult};
 use tracing::{debug, info, warn};
 
 /// Privacy budget tracking state for a device
@@ -290,7 +290,6 @@ async fn load_privacy_tracker<E: GuardEffectSystem>(
 ) -> AuraResult<PrivacyBudgetTracker> {
     let storage_key = format!("privacy_budget_{}", authority_id);
 
-    use aura_core::effects::StorageEffects;
     let storage_result = effect_system.retrieve(&storage_key).await;
 
     match storage_result {
@@ -300,7 +299,10 @@ async fn load_privacy_tracker<E: GuardEffectSystem>(
                 AuraError::invalid(format!("Failed to deserialize privacy state: {}", e))
             })?;
 
-            Ok(PrivacyBudgetTracker { authority_id, state })
+            Ok(PrivacyBudgetTracker {
+                authority_id,
+                state,
+            })
         }
         Ok(None) => {
             // Create new tracker with default limits
@@ -334,8 +336,7 @@ async fn save_privacy_tracker<E: GuardEffectSystem>(
     let serialized = serde_json::to_vec(&tracker.state)
         .map_err(|e| AuraError::invalid(format!("Failed to serialize privacy state: {}", e)))?;
 
-    // Use StorageEffects trait method
-    use aura_core::effects::StorageEffects;
+    // Use StorageEffects trait method (inherited via GuardEffectSystem)
     effect_system
         .store(&storage_key, serialized)
         .await

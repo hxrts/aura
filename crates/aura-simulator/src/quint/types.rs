@@ -1,14 +1,17 @@
-//! Quint Type Definitions
+//! Simulation-Specific Quint Type Definitions
 //!
-//! Data structures for representing Quint formal specifications, invariants,
-//! and temporal properties within the Aura simulation framework.
+//! Data structures for simulation-specific aspects of Quint integration,
+//! including chaos generation, Byzantine mapping, and ITF trace conversion.
+//! 
+//! Core Quint types (Property, PropertySpec, EvaluationResult) have been moved
+//! to aura-core and aura-quint for proper architectural separation.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use thiserror::Error;
 
-/// Errors that can occur during Quint operations
+/// Errors that can occur during Quint operations (simulation-specific)
 #[derive(Error, Debug, Clone)]
 pub enum QuintError {
     /// Failed to parse Quint specification file
@@ -32,10 +35,10 @@ pub enum QuintError {
     UnsupportedFeature(String),
 }
 
-/// Complete Quint specification loaded from a .qnt file
+/// Complete Quint specification loaded from a .qnt file (simulation-specific extension)
 ///
-/// Represents a parsed Quint module with all its components including
-/// state variables, actions, invariants, and temporal properties.
+/// Represents a parsed Quint module with simulation-specific enhancements for
+/// chaos generation and Byzantine analysis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuintSpec {
     /// Name of the specification (typically the module name)
@@ -64,10 +67,7 @@ pub struct QuintSpec {
     pub actions: Vec<QuintAction>,
 }
 
-/// Invariant property from a Quint specification
-///
-/// Represents a state invariant that should hold in all reachable states.
-/// These are used for property-based testing and state validation.
+/// Invariant property from a Quint specification (simulation-specific)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuintInvariant {
     /// Name of the invariant
@@ -84,10 +84,7 @@ pub struct QuintInvariant {
     pub tags: Vec<String>,
 }
 
-/// Temporal logic property from a Quint specification
-///
-/// Represents temporal properties (LTL/CTL) that describe behavior over time.
-/// These are used for trace-based validation and liveness checking.
+/// Temporal logic property from a Quint specification (simulation-specific)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuintTemporalProperty {
     /// Name of the temporal property
@@ -106,10 +103,7 @@ pub struct QuintTemporalProperty {
     pub tags: Vec<String>,
 }
 
-/// State variable definition from a Quint specification
-///
-/// Represents a state variable that can be tracked and validated
-/// during simulation execution.
+/// State variable definition from a Quint specification (simulation-specific)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuintStateVariable {
     /// Name of the state variable
@@ -122,10 +116,7 @@ pub struct QuintStateVariable {
     pub description: String,
 }
 
-/// Action/transition definition from a Quint specification
-///
-/// Represents an action that can modify the system state.
-/// These can be used to drive simulation execution.
+/// Action/transition definition from a Quint specification (simulation-specific)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuintAction {
     /// Name of the action
@@ -151,107 +142,6 @@ pub struct QuintParameter {
     pub default_value: Option<String>,
 }
 
-/// Result of evaluating a Quint property against simulation state
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PropertyEvaluationResult {
-    /// Name of the property that was evaluated
-    pub property_name: String,
-    /// Whether the property holds
-    pub holds: bool,
-    /// Details about the evaluation
-    pub details: String,
-    /// Witness or counterexample (if applicable)
-    pub witness: Option<String>,
-    /// Evaluation time in milliseconds
-    pub evaluation_time_ms: u64,
-}
-
-/// Validation result for a set of properties
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidationResult {
-    /// Total number of properties evaluated
-    pub total_properties: usize,
-    /// Number of properties that hold
-    pub satisfied_properties: usize,
-    /// Number of properties that were violated
-    pub violated_properties: usize,
-    /// Individual results for each property
-    pub individual_results: Vec<PropertyEvaluationResult>,
-    /// Total validation time in milliseconds
-    pub total_time_ms: u64,
-}
-
-impl ValidationResult {
-    /// Create a new empty validation result
-    pub fn new() -> Self {
-        Self {
-            total_properties: 0,
-            satisfied_properties: 0,
-            violated_properties: 0,
-            individual_results: Vec::new(),
-            total_time_ms: 0,
-        }
-    }
-
-    /// Add a property evaluation result
-    pub fn add_result(&mut self, result: PropertyEvaluationResult) {
-        self.total_properties += 1;
-        if result.holds {
-            self.satisfied_properties += 1;
-        } else {
-            self.violated_properties += 1;
-        }
-        self.total_time_ms += result.evaluation_time_ms;
-        self.individual_results.push(result);
-    }
-
-    /// Check if all properties are satisfied
-    pub fn all_satisfied(&self) -> bool {
-        self.violated_properties == 0 && self.total_properties > 0
-    }
-
-    /// Get satisfaction rate as a percentage
-    pub fn satisfaction_rate(&self) -> f64 {
-        if self.total_properties == 0 {
-            return 100.0;
-        }
-        (self.satisfied_properties as f64 / self.total_properties as f64) * 100.0
-    }
-
-    /// Get list of violated property names
-    pub fn violated_property_names(&self) -> Vec<String> {
-        self.individual_results
-            .iter()
-            .filter(|r| !r.holds)
-            .map(|r| r.property_name.clone())
-            .collect()
-    }
-}
-
-/// Configuration for Quint property evaluation
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct QuintEvaluationConfig {
-    /// Maximum evaluation time per property (in milliseconds)
-    pub max_evaluation_time_ms: u64,
-    /// Whether to collect witnesses for satisfied properties
-    pub collect_witnesses: bool,
-    /// Whether to collect counterexamples for violated properties
-    pub collect_counterexamples: bool,
-    /// Enable verbose logging during evaluation
-    pub verbose: bool,
-}
-
-impl Default for QuintEvaluationConfig {
-    fn default() -> Self {
-        Self {
-            max_evaluation_time_ms: 5000, // 5 seconds per property
-            collect_witnesses: false,
-            collect_counterexamples: true,
-            verbose: false,
-        }
-    }
-}
-
 /// Abstraction of simulation state for Quint evaluation
 ///
 /// This trait allows the Quint bridge to evaluate properties against
@@ -271,7 +161,7 @@ pub trait SimulationState {
     fn get_metadata(&self) -> std::collections::HashMap<String, QuintValue>;
 }
 
-/// Value type for Quint evaluations
+/// Value type for Quint evaluations (simulation-specific)
 ///
 /// Represents values that can be passed between the simulation and Quint evaluator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -389,12 +279,6 @@ impl QuintValue {
             QuintValue::Map(_) => "map",
             QuintValue::Record(_) => "record",
         }
-    }
-}
-
-impl Default for ValidationResult {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -619,4 +503,90 @@ pub struct ChaosGenerationStats {
     pub high_priority_scenarios: usize,
     /// Coverage of property types
     pub property_type_coverage: HashMap<String, usize>,
+}
+
+// Legacy simulation-specific evaluation types (different from aura-core types)
+// TODO: Eventually migrate to use aura-core types with adapters
+
+/// Result of evaluating a Quint property against simulation state (legacy)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PropertyEvaluationResult {
+    /// Name of the property that was evaluated
+    pub property_name: String,
+    /// Whether the property holds
+    pub holds: bool,
+    /// Details about the evaluation
+    pub details: String,
+    /// Witness or counterexample (if applicable)
+    pub witness: Option<String>,
+    /// Evaluation time in milliseconds
+    pub evaluation_time_ms: u64,
+}
+
+/// Validation result for a set of properties (legacy)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationResult {
+    /// Total number of properties evaluated
+    pub total_properties: usize,
+    /// Number of properties that hold
+    pub satisfied_properties: usize,
+    /// Number of properties that were violated
+    pub violated_properties: usize,
+    /// Individual results for each property
+    pub individual_results: Vec<PropertyEvaluationResult>,
+    /// Total validation time in milliseconds
+    pub total_time_ms: u64,
+}
+
+impl ValidationResult {
+    /// Create a new empty validation result
+    pub fn new() -> Self {
+        Self {
+            total_properties: 0,
+            satisfied_properties: 0,
+            violated_properties: 0,
+            individual_results: Vec::new(),
+            total_time_ms: 0,
+        }
+    }
+
+    /// Add a property evaluation result
+    pub fn add_result(&mut self, result: PropertyEvaluationResult) {
+        self.total_properties += 1;
+        if result.holds {
+            self.satisfied_properties += 1;
+        } else {
+            self.violated_properties += 1;
+        }
+        self.total_time_ms += result.evaluation_time_ms;
+        self.individual_results.push(result);
+    }
+
+    /// Check if all properties are satisfied
+    pub fn all_satisfied(&self) -> bool {
+        self.violated_properties == 0 && self.total_properties > 0
+    }
+
+    /// Get satisfaction rate as a percentage
+    pub fn satisfaction_rate(&self) -> f64 {
+        if self.total_properties == 0 {
+            return 100.0;
+        }
+        (self.satisfied_properties as f64 / self.total_properties as f64) * 100.0
+    }
+
+    /// Get list of violated property names
+    pub fn violated_property_names(&self) -> Vec<String> {
+        self.individual_results
+            .iter()
+            .filter(|r| !r.holds)
+            .map(|r| r.property_name.clone())
+            .collect()
+    }
+}
+
+impl Default for ValidationResult {
+    fn default() -> Self {
+        Self::new()
+    }
 }

@@ -52,10 +52,10 @@
 // Existing modular structure
 pub mod builders;
 pub mod configuration;
+pub mod effect_api;
 pub mod fixtures;
 pub mod foundation;
 pub mod infrastructure;
-pub mod effect_api;
 pub mod mocks;
 pub mod simulation;
 pub mod time;
@@ -69,10 +69,10 @@ pub mod privacy {
 // Re-export commonly used items from modular structure
 pub use builders::*;
 pub use configuration::TestConfig as ConfigTestConfig;
+pub use effect_api::*;
 pub use fixtures::*;
 pub use foundation::*;
 pub use infrastructure::*;
-pub use effect_api::*;
 pub use mocks::*;
 pub use simulation::*;
 pub use time::*;

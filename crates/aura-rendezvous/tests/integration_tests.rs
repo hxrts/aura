@@ -9,17 +9,21 @@
 
 #![allow(clippy::disallowed_methods)]
 
-use aura_rendezvous::messaging::{NetworkConfig, NetworkTransport};
-use aura_rendezvous::{
-    integration::capability_aware::SbbForwardingPolicy,
-    crypto::encryption::PaddingStrategy,
-    integration::sbb_system::{IntegratedSbbSystem, SbbConfig, SbbDiscoveryRequest, SbbSystemBuilder},
-    messaging::{TransportMethod, TransportOfferPayload},
-};
-use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
-use aura_agent::NetworkEffects;
+use aura_agent::{AgentConfig, AuraEffectSystem};
+use aura_core::effects::NetworkEffects;
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
 use aura_protocol::effects::AuraEffects;
+use aura_rendezvous::messaging::{NetworkConfig, NetworkTransport};
+// Use testkit for proper test infrastructure
+use aura_testkit::DeviceTestFixture;
+use aura_rendezvous::{
+    crypto::encryption::PaddingStrategy,
+    integration::capability_aware::SbbForwardingPolicy,
+    integration::sbb_system::{
+        IntegratedSbbSystem, SbbConfig, SbbDiscoveryRequest, SbbSystemBuilder,
+    },
+    messaging::{TransportMethod, TransportOfferPayload},
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -108,8 +112,9 @@ impl TestDevice {
         name: String,
         _config: &E2eTestConfig,
     ) -> AuraResult<Self> {
-        // Create shared effect system
-        let effects = Arc::new(AuraEffectSystem::new());
+        // Create shared effect system using aura-agent
+        let config = aura_agent::AgentConfig::default();
+        let effects = Arc::new(aura_agent::AuraEffectSystem::testing(&config));
         let network_effects = Arc::clone(&effects) as Arc<dyn NetworkEffects>;
 
         // Create network transport
@@ -288,7 +293,8 @@ impl SbbTestNetwork {
 
         // Create devices
         for i in 0..config.device_count {
-            let device_id = DeviceId::new();
+            let fixture = DeviceTestFixture::new(i);
+            let device_id = fixture.device_id();
             let name = match i {
                 0 => "Alice".to_string(),
                 1 => "Bob".to_string(),
@@ -322,10 +328,7 @@ impl SbbTestNetwork {
             let (bob_device_id, bob_name) = {
                 let bob_device = self.devices.get(&bob_id).unwrap();
                 // NetworkTransport no longer exposes config() - it uses network_effects directly
-                (
-                    bob_device.device_id,
-                    bob_device.name.clone(),
-                )
+                (bob_device.device_id, bob_device.name.clone())
             };
 
             // Create a temporary device-like struct with just the needed data
@@ -407,7 +410,7 @@ impl SbbTestNetwork {
                 let (bob_device_id, bob_name, bob_transport_config) = {
                     let bob_device = self.devices.get(&bob_id).unwrap();
                     // NetworkTransport no longer exposes config()
-                let transport_config = NetworkConfig::default();
+                    let transport_config = NetworkConfig::default();
                     (
                         bob_device.device_id,
                         bob_device.name.clone(),

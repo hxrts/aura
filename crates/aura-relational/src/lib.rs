@@ -69,13 +69,11 @@ impl RelationalContext {
 
     /// Get guardian binding for a specific authority
     pub fn get_guardian_binding(&self, authority_id: AuthorityId) -> Option<&GuardianBinding> {
-        self.guardian_bindings()
-            .into_iter()
-            .find(|b| {
-                // Compare authority IDs directly instead of converting to Hash32
-                // since account_commitment should be derived from the authority ID
-                b.account_commitment == Hash32::from_bytes(&authority_id.to_bytes())
-            })
+        self.guardian_bindings().into_iter().find(|b| {
+            // Compare authority IDs directly instead of converting to Hash32
+            // since account_commitment should be derived from the authority ID
+            b.account_commitment == Hash32::from_bytes(&authority_id.to_bytes())
+        })
     }
 
     /// Get all recovery grants in this context
@@ -99,11 +97,11 @@ impl RelationalContext {
     }
 
     /// Compute the current prestate for consensus
-    pub fn compute_prestate(&self, authority_commitments: Vec<(AuthorityId, Hash32)>) -> aura_core::Prestate {
-        aura_core::Prestate::new(
-            authority_commitments,
-            self.journal.compute_commitment(),
-        )
+    pub fn compute_prestate(
+        &self,
+        authority_commitments: Vec<(AuthorityId, Hash32)>,
+    ) -> aura_core::Prestate {
+        aura_core::Prestate::new(authority_commitments, self.journal.compute_commitment())
     }
 }
 

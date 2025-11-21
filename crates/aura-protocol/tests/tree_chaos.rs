@@ -9,10 +9,10 @@
 //! - Concurrent conflicting operations
 //! - State corruption detection
 
+use aura_core::identifiers::DeviceId;
 use aura_core::tree::{
     AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind,
 };
-use aura_core::identifiers::DeviceId;
 use std::collections::BTreeMap;
 
 // ============================================================================

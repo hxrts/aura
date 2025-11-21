@@ -3,7 +3,7 @@
 //! This module provides the fundamental identifier types that uniquely identify
 //! various entities and concepts within the Aura system.
 
-use crate::hash;
+use crate::{hash, Hash32};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -529,6 +529,37 @@ impl From<Uuid> for AuthorityId {
 impl From<AuthorityId> for Uuid {
     fn from(authority_id: AuthorityId) -> Self {
         authority_id.0
+    }
+}
+
+/// Channel identifier for AMP messaging substreams
+///
+/// Channels are scoped under a RelationalContext. The identifier is opaque and
+/// does not reveal membership or topology.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
+pub struct ChannelId(pub Hash32);
+
+impl ChannelId {
+    /// Create a channel identifier from a 32-byte digest
+    pub fn new(id: Hash32) -> Self {
+        Self(id)
+    }
+
+    /// Create an identifier from raw bytes
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(Hash32::new(bytes))
+    }
+
+    /// Get the raw bytes
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        self.0.as_bytes()
+    }
+}
+
+
+impl fmt::Display for ChannelId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "channel:{}", hex::encode(self.0.as_bytes()))
     }
 }
 

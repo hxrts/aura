@@ -7,7 +7,7 @@ use crate::effects::JournalEffects;
 use crate::guards::flow::FlowBudgetEffects;
 use async_trait::async_trait;
 use aura_core::effects::StorageEffects;
-use aura_core::{identifiers::AuthorityId, TimeEffects};
+use aura_core::{identifiers::AuthorityId, TimeEffects, effects::RandomEffects};
 
 /// Minimal interface that guards need from an effect system
 ///
@@ -17,7 +17,7 @@ use aura_core::{identifiers::AuthorityId, TimeEffects};
 /// Note: This trait extends JournalEffects because guards need access to journal operations
 /// for coupling protocol execution with distributed state updates.
 pub trait GuardEffectSystem:
-    JournalEffects + StorageEffects + FlowBudgetEffects + TimeEffects + Send + Sync
+    JournalEffects + StorageEffects + FlowBudgetEffects + TimeEffects + RandomEffects + Send + Sync
 {
     /// Get the authority ID for this effect system
     fn authority_id(&self) -> AuthorityId;
@@ -113,7 +113,7 @@ impl FlowBudgetEffects for Box<dyn AuraEffects> {
         let nonce = updated_budget.spent;
         let epoch = updated_budget.epoch;
         Ok(aura_core::Receipt::new(
-            context.clone(),
+            *context,
             AuthorityId::new(), // source is unknown from the boxed trait object
             *peer,
             epoch,
@@ -122,6 +122,30 @@ impl FlowBudgetEffects for Box<dyn AuraEffects> {
             aura_core::Hash32::default(),
             Vec::new(),
         ))
+    }
+}
+
+// RandomEffects implementation
+#[async_trait]
+impl aura_core::effects::RandomEffects for Box<dyn AuraEffects> {
+    async fn random_bytes(&self, len: usize) -> Vec<u8> {
+        aura_core::effects::RandomEffects::random_bytes(&**self, len).await
+    }
+
+    async fn random_bytes_32(&self) -> [u8; 32] {
+        aura_core::effects::RandomEffects::random_bytes_32(&**self).await
+    }
+
+    async fn random_u64(&self) -> u64 {
+        aura_core::effects::RandomEffects::random_u64(&**self).await
+    }
+
+    async fn random_range(&self, low: u64, high: u64) -> u64 {
+        aura_core::effects::RandomEffects::random_range(&**self, low, high).await
+    }
+
+    async fn random_uuid(&self) -> uuid::Uuid {
+        aura_core::effects::RandomEffects::random_uuid(&**self).await
     }
 }
 

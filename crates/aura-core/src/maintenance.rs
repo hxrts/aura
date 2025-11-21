@@ -2,8 +2,8 @@
 //!
 //! Placeholder types for maintenance operations until the maintenance module is fully implemented.
 
-use crate::AccountId;
 use crate::identifiers::DeviceId;
+use crate::AccountId;
 use serde::{Deserialize, Serialize};
 // uuid::Uuid removed - not used in this module
 

@@ -5,7 +5,7 @@
 //! Target: <250 lines, focused on choreographic channel lifecycle.
 
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
-use aura_core::{ContextId, identifiers::DeviceId};
+use aura_core::{identifiers::DeviceId, ContextId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -49,7 +49,7 @@ struct ChannelTeardownState {
 
 /// Establishment phase enumeration
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum EstablishmentPhase {
+pub enum EstablishmentPhase {
     Initiating,
     GatheringConfirmations,
     ResourceAllocation,
@@ -223,7 +223,7 @@ impl ChannelEstablishmentCoordinator {
 
         let channel_id = format!(
             "channel-{}-{}",
-            format!("{:?}", self.device_id)[..8].to_string(),
+            &format!("{:?}", self.device_id)[..8],
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()

@@ -4,8 +4,9 @@
 //! authority-centric architecture. Authorities are opaque cryptographic actors
 //! that can sign operations and hold state without exposing internal device structure.
 
-use crate::{identifiers::AuthorityId, Hash32, Result};
+use crate::{identifiers::AuthorityId, session_epochs::Epoch, Hash32, Result};
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, LazyLock};
 
 // Type aliases for authority operations
@@ -83,14 +84,20 @@ pub struct AuthorityState {
     pub facts: std::collections::BTreeSet<String>, // TODO: Replace with Fact type
 }
 
-/// Placeholder for commitment tree state
+/// Commitment tree state for authority management
 ///
-/// TODO: This will be replaced with the actual commitment tree implementation
-/// from aura-journal when integrating with existing code.
-#[derive(Debug, Clone)]
+/// This is the canonical tree state type used throughout the system.
+/// It provides a public interface while hiding internal device structure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TreeState {
+    /// Current epoch
+    epoch: Epoch,
     /// Current commitment hash
     commitment: Hash32,
+    /// Threshold for operations
+    threshold: u16,
+    /// Number of active devices
+    device_count: u32,
 }
 
 impl Default for TreeState {
@@ -103,8 +110,36 @@ impl TreeState {
     /// Create a new tree state with zero commitment
     pub fn new() -> Self {
         Self {
+            epoch: Epoch(0),
             commitment: Hash32::new([0; 32]),
+            threshold: 1,
+            device_count: 0,
         }
+    }
+
+    /// Create with specific values
+    pub fn with_values(epoch: Epoch, commitment: Hash32, threshold: u16, device_count: u32) -> Self {
+        Self {
+            epoch,
+            commitment,
+            threshold,
+            device_count,
+        }
+    }
+
+    /// Get the current epoch
+    pub fn epoch(&self) -> Epoch {
+        self.epoch
+    }
+
+    /// Get the threshold
+    pub fn threshold(&self) -> u16 {
+        self.threshold
+    }
+
+    /// Get device count
+    pub fn device_count(&self) -> u32 {
+        self.device_count
     }
 
     /// Get the root public key for the current tree state

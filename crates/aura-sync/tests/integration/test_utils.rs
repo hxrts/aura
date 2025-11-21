@@ -3,16 +3,14 @@
 //! This module provides common utilities, helpers, and fixtures used across
 //! all integration test scenarios.
 
-use aura_core::{AuraError, AuraResult, DeviceId};
 use super::test_device_id;
+use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_sync::{
     core::{SessionManager, SyncConfig, SyncResult},
     protocols::{
-        AntiEntropyProtocol, AntiEntropyConfig,
-        JournalSyncProtocol, JournalSyncConfig,
-        SnapshotProtocol, SnapshotConfig,
-        OTAProtocol, OTAConfig,
-        EpochRotationCoordinator, EpochConfig,
+        AntiEntropyConfig, AntiEntropyProtocol, EpochConfig, EpochRotationCoordinator,
+        JournalSyncConfig, JournalSyncProtocol, OTAConfig, OTAProtocol, SnapshotConfig,
+        SnapshotProtocol,
     },
     services::{MaintenanceService, SyncService},
 };
@@ -20,7 +18,9 @@ use aura_testkit::{
     builders::{account::*, device::*},
     foundation::{create_mock_test_context, TestEffectComposer},
     simulation::{
-        choreography::{ChoreographyTestHarness, CoordinatedSession, TestError, SessionStatus, MockSessionState},
+        choreography::{
+            ChoreographyTestHarness, CoordinatedSession, MockSessionState, SessionStatus, TestError,
+        },
         network::{NetworkCondition, NetworkSimulator},
     },
 };
@@ -109,8 +109,13 @@ impl MultiDeviceTestFixture {
     }
 
     /// Create coordinated session across all devices
-    pub async fn create_coordinated_session(&self, session_type: &str) -> AuraResult<CoordinatedSession> {
-        self.harness.create_coordinated_session(session_type).await
+    pub async fn create_coordinated_session(
+        &self,
+        session_type: &str,
+    ) -> AuraResult<CoordinatedSession> {
+        self.harness
+            .create_coordinated_session(session_type)
+            .await
             .map_err(|e| AuraError::internal(format!("Failed to create session: {}", e)))
     }
 
@@ -122,8 +127,9 @@ impl MultiDeviceTestFixture {
     ) -> AuraResult<()> {
         timeout(timeout_duration, async {
             loop {
-                let status = session.status().await
-                    .map_err(|e| AuraError::internal(format!("Failed to get session status: {}", e)))?;
+                let status = session.status().await.map_err(|e| {
+                    AuraError::internal(format!("Failed to get session status: {}", e))
+                })?;
                 match status.status {
                     SessionStatus::Ended => return Ok(()),
                     SessionStatus::Active => tokio::time::sleep(Duration::from_millis(100)).await,

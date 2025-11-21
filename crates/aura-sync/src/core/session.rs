@@ -898,10 +898,7 @@ mod tests {
         // Try to exceed limit
         let result = manager.create_session(vec![test_device_id(1)], now);
         assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SyncError::Internal { .. }
-        ));
+        assert!(matches!(result.unwrap_err(), SyncError::Internal { .. }));
     }
 
     #[test]

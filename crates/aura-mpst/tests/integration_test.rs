@@ -3,7 +3,7 @@
 //! These tests verify that aura-macros generated code integrates
 //! correctly with the aura-mpst runtime system.
 
-use aura_core::{Cap, ContextId, Journal, identifiers::DeviceId};
+use aura_core::{identifiers::DeviceId, Cap, ContextId, Journal};
 use aura_mpst::{AuraEndpoint, AuraHandler, AuraRuntime, ExecutionContext, MpstResult};
 use rumpsteak_aura_choreography::extensions::ExtensionRegistry;
 

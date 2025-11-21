@@ -26,9 +26,7 @@ pub enum ResourceScope {
     },
     /// Recovery operations (legacy - maps to Context)
     #[deprecated(note = "Use ResourceScope::Context instead")]
-    Recovery {
-        recovery_type: String,
-    },
+    Recovery { recovery_type: String },
     /// Journal operations (legacy - maps to Authority)
     #[deprecated(note = "Use ResourceScope::Authority instead")]
     Journal {
@@ -246,7 +244,10 @@ pub mod legacy {
             crate::biscuit_resources::ResourceScope::Storage { category, path } => {
                 storage_scope(default_authority, category.as_str(), path)
             }
-            crate::biscuit_resources::ResourceScope::Journal { account_id, operation } => {
+            crate::biscuit_resources::ResourceScope::Journal {
+                account_id,
+                operation,
+            } => {
                 if let Some(auth_op) = journal_to_authority_op(operation.as_str()) {
                     ResourceScope::Authority {
                         authority_id: default_authority,
@@ -341,7 +342,10 @@ mod tests {
     fn test_new_context_operations() {
         // Test new recovery operations
         assert_eq!(ContextOp::RecoverDeviceKey.as_str(), "recover_device_key");
-        assert_eq!(ContextOp::RecoverAccountAccess.as_str(), "recover_account_access");
+        assert_eq!(
+            ContextOp::RecoverAccountAccess.as_str(),
+            "recover_account_access"
+        );
         assert_eq!(ContextOp::UpdateGuardianSet.as_str(), "update_guardian_set");
         assert_eq!(ContextOp::EmergencyFreeze.as_str(), "emergency_freeze");
     }
@@ -349,17 +353,26 @@ mod tests {
     #[test]
     fn test_legacy_conversion_helpers() {
         use super::legacy::*;
-        
+
         // Test admin operation mapping
-        assert_eq!(admin_to_authority_op("add_guardian"), Some(AuthorityOp::AddGuardian));
+        assert_eq!(
+            admin_to_authority_op("add_guardian"),
+            Some(AuthorityOp::AddGuardian)
+        );
         assert_eq!(admin_to_authority_op("unknown"), None);
-        
+
         // Test recovery type mapping
-        assert_eq!(recovery_to_context_op("device_key"), Some(ContextOp::RecoverDeviceKey));
+        assert_eq!(
+            recovery_to_context_op("device_key"),
+            Some(ContextOp::RecoverDeviceKey)
+        );
         assert_eq!(recovery_to_context_op("unknown"), None);
-        
+
         // Test journal operation mapping
-        assert_eq!(journal_to_authority_op("write"), Some(AuthorityOp::UpdateTree));
+        assert_eq!(
+            journal_to_authority_op("write"),
+            Some(AuthorityOp::UpdateTree)
+        );
         assert_eq!(journal_to_authority_op("unknown"), None);
     }
 }

@@ -809,8 +809,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_agent::{AuraEffectSystem, AgentConfig};
     use aura_core::DeviceId;
-    use aura_agent::runtime::coordinator_stub::AuraEffectSystem;
 
     #[test]
     #[ignore = "Requires JournalEffects which is not implemented in stub coordinator"]
@@ -822,7 +822,7 @@ mod tests {
 
             let participants = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
 
-            let effects = AuraEffectSystem::new();
+            let effects = AuraEffectSystem::testing(&AgentConfig::default());
             let session_id = protocol
                 .initiate_session(&effects, participants, None)
                 .await
@@ -837,7 +837,7 @@ mod tests {
     async fn test_contribution_generation() {
         let config = create_test_config(2, 3);
         let protocol = DkdProtocol::new(config);
-        let effects = AuraEffectSystem::new();
+        let effects = AuraEffectSystem::testing(&AgentConfig::default());
 
         let session_id = DkdSessionId::deterministic("test");
         let device_id = DeviceId::new();

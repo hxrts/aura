@@ -243,7 +243,10 @@ async fn test_sync_state_transitions() -> AuraResult<()> {
         let states = vec![
             SyncState::Idle,
             SyncState::Syncing,
-            SyncState::Synced { last_sync: 100, operations: 5 },
+            SyncState::Synced {
+                last_sync: 100,
+                operations: 5,
+            },
         ];
 
         // Simulate progression through states
@@ -489,7 +492,10 @@ async fn test_journal_sync_configuration() -> AuraResult<()> {
         ..Default::default()
     };
 
-    assert!(valid_config.batch_size > 0, "Valid config should have positive batch size");
+    assert!(
+        valid_config.batch_size > 0,
+        "Valid config should have positive batch size"
+    );
 
     // Test invalid configurations
     let zero_batch_config = JournalSyncConfig {

@@ -369,7 +369,8 @@ async fn test_concurrent_anti_entropy_sessions() -> AuraResult<()> {
     })
     .await;
 
-    let (result1, result2, result3) = concurrent_result.map_err(|_| AuraError::internal("Timeout".to_string()))?;
+    let (result1, result2, result3) =
+        concurrent_result.map_err(|_| AuraError::internal("Timeout".to_string()))?;
     assert!(result1.is_ok(), "Session 1 should complete successfully");
     assert!(result2.is_ok(), "Session 2 should complete successfully");
     assert!(result3.is_ok(), "Session 3 should complete successfully");

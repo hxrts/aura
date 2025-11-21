@@ -84,14 +84,19 @@ impl GuardianInvitationCoordinator {
         self.send_invitation_via_effects(&request).await?;
 
         // Wait for invitee's decision via effects
-        let accepted = self.receive_invitation_decision_via_effects(&request).await?;
+        let accepted = self
+            .receive_invitation_decision_via_effects(&request)
+            .await?;
 
         if accepted {
             // Exchange cryptographic attestations via effects
-            self.exchange_guardian_attestation_via_effects(&request).await?;
+            self.exchange_guardian_attestation_via_effects(&request)
+                .await?;
 
             // Record relationship in journal via effects
-            let guardian_id = self.record_guardian_relationship_via_effects(&request).await?;
+            let guardian_id = self
+                .record_guardian_relationship_via_effects(&request)
+                .await?;
 
             Ok(GuardianInvitationResponse {
                 guardian_relationship: Some(guardian_id),
@@ -105,7 +110,8 @@ impl GuardianInvitationCoordinator {
             })
         } else {
             // Record rejection in journal via effects
-            self.record_invitation_rejection_via_effects(&request).await?;
+            self.record_invitation_rejection_via_effects(&request)
+                .await?;
 
             Ok(GuardianInvitationResponse {
                 guardian_relationship: None,
@@ -118,7 +124,10 @@ impl GuardianInvitationCoordinator {
     }
 
     /// Send invitation message to invitee via NetworkEffects
-    async fn send_invitation_via_effects(&self, request: &GuardianInvitationRequest) -> InvitationResult<()> {
+    async fn send_invitation_via_effects(
+        &self,
+        request: &GuardianInvitationRequest,
+    ) -> InvitationResult<()> {
         // Serialize the invitation request
         let message_data = serde_json::to_vec(request)
             .map_err(|e| InvitationError::serialization(e.to_string()))?;
@@ -131,7 +140,10 @@ impl GuardianInvitationCoordinator {
     }
 
     /// Wait for and receive invitee's decision via NetworkEffects
-    async fn receive_invitation_decision_via_effects(&self, request: &GuardianInvitationRequest) -> InvitationResult<bool> {
+    async fn receive_invitation_decision_via_effects(
+        &self,
+        request: &GuardianInvitationRequest,
+    ) -> InvitationResult<bool> {
         // TODO: Use actual NetworkEffects to receive response
         // For now, simulate receiving decision based on evaluation
         let decision = self.evaluate_invitation(request);
@@ -143,7 +155,10 @@ impl GuardianInvitationCoordinator {
     }
 
     /// Exchange cryptographic attestations via CryptoEffects
-    async fn exchange_guardian_attestation_via_effects(&self, request: &GuardianInvitationRequest) -> InvitationResult<()> {
+    async fn exchange_guardian_attestation_via_effects(
+        &self,
+        request: &GuardianInvitationRequest,
+    ) -> InvitationResult<()> {
         // Create guardian attestation data
         let attestation_data = serde_json::json!({
             "type": "guardian_attestation",
@@ -164,10 +179,13 @@ impl GuardianInvitationCoordinator {
     }
 
     /// Record guardian relationship in journal via JournalEffects  
-    async fn record_guardian_relationship_via_effects(&self, request: &GuardianInvitationRequest) -> InvitationResult<GuardianId> {
+    async fn record_guardian_relationship_via_effects(
+        &self,
+        request: &GuardianInvitationRequest,
+    ) -> InvitationResult<GuardianId> {
         // Create guardian relationship record
         let guardian_id = GuardianId(uuid::Uuid::new_v4());
-        
+
         let relationship_data = serde_json::json!({
             "type": "guardian_relationship_established",
             "guardian_id": guardian_id,
@@ -188,7 +206,10 @@ impl GuardianInvitationCoordinator {
     }
 
     /// Record invitation rejection in journal via JournalEffects
-    async fn record_invitation_rejection_via_effects(&self, request: &GuardianInvitationRequest) -> InvitationResult<()> {
+    async fn record_invitation_rejection_via_effects(
+        &self,
+        request: &GuardianInvitationRequest,
+    ) -> InvitationResult<()> {
         let rejection_data = serde_json::json!({
             "type": "guardian_invitation_rejected",
             "inviter": request.inviter,

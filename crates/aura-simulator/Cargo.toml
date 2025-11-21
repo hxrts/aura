@@ -18,7 +18,7 @@ aura-journal = { path = "../aura-journal" }
 aura-protocol = { path = "../aura-protocol" }
 aura-testkit = { path = "../aura-testkit" }
 # app-console-types = { path = "../app-console-types" }
-quint_api = { path = "../aura-quint-api", package = "aura-quint-api" }
+aura-quint = { path = "../aura-quint" }
 
 # Cryptography
 blake3 = { workspace = true }
@@ -31,6 +31,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 hex = { workspace = true }
+tracing = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }

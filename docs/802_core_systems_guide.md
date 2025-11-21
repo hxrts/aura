@@ -13,14 +13,12 @@ The effect system follows a clean layered architecture. Interface traits in `aur
 The effect system uses a unified stateless architecture that eliminates shared mutable state:
 
 ```rust
-use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
-use aura_core::DeviceId;
+use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AgentConfig;
 
 // Create a stateless effect system for production
-let device_id = DeviceId::new();
-let config = EffectSystemConfig::for_production(device_id)
-    .expect("Failed to create production configuration");
-let effect_system = AuraEffectSystem::new(config)
+let config = AgentConfig::default();
+let effect_system = AuraEffectSystem::production(&config).await
     .expect("Failed to initialize effect system");
 
 // All effect operations go through the unified system
@@ -63,13 +61,12 @@ Sealed supertraits provide clean type signatures and better error messages. They
 Use testing configuration for deterministic test execution:
 
 ```rust
-use aura_agent::runtime::{AuraEffectSystem, EffectSystemConfig};
+use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AgentConfig;
 
 // Create a stateless effect system for testing
-let device_id = DeviceId::new();
-let config = EffectSystemConfig::for_testing(device_id);
-let effect_system = AuraEffectSystem::new(config)
-    .expect("Failed to initialize test effect system");
+let config = AgentConfig::default();
+let effect_system = AuraEffectSystem::testing(&config);
 
 // Testing operations are deterministic and isolated
 let test_data = b"test data";
@@ -78,9 +75,9 @@ let hash2 = effect_system.hash(test_data).await?;
 assert_eq!(hash1, hash2); // Deterministic in testing mode
 
 // Test error injection through configuration
-let failing_config = EffectSystemConfig::for_testing(device_id)
-    .with_crypto_failures(vec!["ed25519_sign"]);
-let failing_system = AuraEffectSystem::new(failing_config)?;
+// Note: Error injection would be configured through AgentConfig in real implementation
+let config = AgentConfig::default();
+let failing_system = AuraEffectSystem::testing(&config);
 ```
 
 Testing configuration provides mock implementations that eliminate external dependencies and enable deterministic test execution. Error injection capabilities support comprehensive testing of failure scenarios.

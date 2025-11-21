@@ -4,33 +4,18 @@
 //! from the fact-based journal, implementing the Authority trait.
 
 use crate::{
-    commitment_tree::authority_state::AuthorityTreeState,
-    fact::FactContent,
-    fact_journal::Journal,
+    fact::Journal,
+    reduction::reduce_account_facts,
 };
 use async_trait::async_trait;
-use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
+use aura_core::{Authority, AuthorityId, Hash32, Result, authority::TreeState};
 use ed25519_dalek::{Signature, VerifyingKey as PublicKey};
-use std::sync::LazyLock;
-
-/// Fallback public key for when key derivation fails
-#[allow(clippy::incompatible_msrv)] // LazyLock is fine for this fallback code
-#[allow(clippy::expect_used)] // Hard-coded valid key - expect is safe here
-static FALLBACK_PUBLIC_KEY: LazyLock<PublicKey> = LazyLock::new(|| {
-    const VALID_PUBKEY_BYTES: [u8; 32] = [
-        0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-        0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-        0x66, 0x66,
-    ];
-    PublicKey::from_bytes(&VALID_PUBKEY_BYTES)
-        .expect("Hard-coded valid Ed25519 public key should parse successfully")
-});
 
 /// Authority state derived from facts
 #[derive(Debug, Clone)]
 pub struct AuthorityState {
     /// Tree state derived from attested operations
-    pub tree_state: AuthorityTreeState,
+    pub tree_state: TreeState,
 
     /// Threshold signing context (placeholder)
     pub threshold_context: Option<Vec<u8>>,
@@ -40,27 +25,7 @@ impl AuthorityState {
     /// Sign with threshold - internal implementation
     pub async fn sign_with_threshold(&self, data: &[u8]) -> Result<Signature> {
         // Get the root public key for signing context
-        let public_key_bytes =
-            self.tree_state
-                .root_public_key()
-                .ok_or_else(|| AuraError::Internal {
-                    message: "No public key available for threshold signing".to_string(),
-                })?;
-
-        // Convert to ed25519 public key for validation context
-        let public_key_array: [u8; 32] =
-            public_key_bytes
-                .try_into()
-                .map_err(|_| AuraError::Internal {
-                    message: "Invalid public key length for threshold signing".to_string(),
-                })?;
-
-        let _public_key =
-            ed25519_dalek::VerifyingKey::from_bytes(&public_key_array).map_err(|e| {
-                AuraError::Internal {
-                    message: format!("Invalid ed25519 public key: {}", e),
-                }
-            })?;
+        let _public_key = self.tree_state.root_key();
 
         // TODO: Implement actual FROST threshold signing coordination
         // This would:
@@ -111,20 +76,11 @@ impl Authority for DerivedAuthority {
 
     fn public_key(&self) -> PublicKey {
         // Get root public key from tree state
-        let key_bytes = self
-            .state
-            .tree_state
-            .root_public_key()
-            .unwrap_or_else(|| vec![0; 32]);
-
-        // Convert to PublicKey (ed25519_dalek::VerifyingKey)
-        let array: [u8; 32] = key_bytes.try_into().unwrap_or([0; 32]);
-
-        PublicKey::from_bytes(&array).unwrap_or(*FALLBACK_PUBLIC_KEY)
+        self.state.tree_state.root_key()
     }
 
     fn root_commitment(&self) -> Hash32 {
-        Hash32::new(self.state.tree_state.root_commitment)
+        self.state.tree_state.root_commitment()
     }
 
     async fn sign_operation(&self, operation: &[u8]) -> Result<Signature> {
@@ -133,11 +89,11 @@ impl Authority for DerivedAuthority {
     }
 
     fn get_threshold(&self) -> u16 {
-        self.state.tree_state.get_threshold()
+        self.state.tree_state.threshold()
     }
 
     fn active_device_count(&self) -> usize {
-        self.state.tree_state.active_leaf_count()
+        self.state.tree_state.device_count() as usize
     }
 }
 
@@ -146,54 +102,11 @@ pub fn reduce_authority_state(
     _authority_id: AuthorityId,
     journal: &Journal,
 ) -> Result<AuthorityState> {
-    // Start with empty tree state
-    let mut tree_state = AuthorityTreeState::new();
-
-    // Process facts in order
-    // Note: The journal's namespace determines which authority this belongs to
-    for fact in journal.iter_facts() {
-        match &fact.content {
-            FactContent::AttestedOp(op) => {
-                // Apply tree operation
-                apply_tree_op(&mut tree_state, op)?;
-            }
-            _ => {
-                // Other fact types don't affect tree state
-            }
-        }
-    }
+    // Use the reduction function to get tree state from facts
+    let tree_state = reduce_account_facts(journal);
 
     Ok(AuthorityState {
         tree_state,
         threshold_context: None,
     })
-}
-
-/// Apply an attested operation to the tree state
-fn apply_tree_op(tree_state: &mut AuthorityTreeState, op: &crate::fact::AttestedOp) -> Result<()> {
-    use crate::fact::TreeOpKind;
-
-    match &op.tree_op {
-        TreeOpKind::AddLeaf { public_key } => {
-            // Add device without exposing device ID
-            tree_state.add_device(public_key.clone());
-        }
-        TreeOpKind::RemoveLeaf { leaf_index } => {
-            // Remove device by leaf index
-            tree_state.remove_device(*leaf_index)?;
-        }
-        TreeOpKind::UpdatePolicy { threshold } => {
-            // Update threshold policy
-            tree_state.update_threshold(*threshold)?;
-        }
-        TreeOpKind::RotateEpoch => {
-            // Rotate epoch and invalidate old shares
-            tree_state.rotate_epoch()?;
-        }
-    }
-
-    // Update commitment from the attested operation
-    tree_state.root_commitment = op.new_commitment.0;
-
-    Ok(())
 }

@@ -48,7 +48,7 @@ fn test_anti_entropy_configuration_validation() {
         transfer_timeout: std::time::Duration::from_secs(15),
         ..Default::default()
     };
-    
+
     // Custom config should be usable to create a protocol
     let _protocol = AntiEntropyProtocol::new(custom_config);
 }
@@ -139,7 +139,7 @@ fn test_snapshot_configuration_thresholds() {
     assert!(config.approval_threshold > 0);
     assert!(config.quorum_size > 0);
     assert!(config.approval_threshold <= config.quorum_size);
-    
+
     // Test custom configuration
     let custom_config = SnapshotConfig {
         approval_threshold: 3,
@@ -190,7 +190,7 @@ fn test_ota_configuration_safety() {
     // Configuration should have sensible threshold values for safety
     assert!(config.readiness_threshold > 0);
     assert!(config.quorum_size >= config.readiness_threshold);
-    
+
     // Test that epoch fence can be enforced for security
     let secure_config = OTAConfig {
         readiness_threshold: 2,
@@ -238,7 +238,7 @@ fn test_receipt_verification_configuration() {
     let config = ReceiptVerificationConfig::default();
 
     assert!(config.max_chain_depth > 0);
-    
+
     // Test custom configuration
     let custom_config = ReceiptVerificationConfig {
         max_chain_depth: 10,

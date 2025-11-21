@@ -44,6 +44,7 @@ tracing-subscriber = { workspace = true }
 rand = { workspace = true }
 aura-effects = { path = "../aura-effects" }
 aura-agent = { path = "../aura-agent" }
+aura-testkit = { path = "../aura-testkit" }
 
 [features]
 default = []

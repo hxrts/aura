@@ -5,7 +5,7 @@
 //! Target: <250 lines, focused on choreographic coordination.
 
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
-use aura_core::{ContextId, identifiers::DeviceId};
+use aura_core::{identifiers::DeviceId, ContextId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -39,7 +39,7 @@ struct HandshakeState {
 
 /// Session state tracking
 #[derive(Debug, Clone)]
-struct SessionState {
+pub struct SessionState {
     session_id: String,
     peer_id: DeviceId,
     established_at: SystemTime,
@@ -49,7 +49,7 @@ struct SessionState {
 
 /// Handshake phase enumeration
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum HandshakePhase {
+pub enum HandshakePhase {
     Initiated,
     CapabilityNegotiation,
     SecuritySetup,
@@ -143,7 +143,7 @@ impl WebSocketHandshakeCoordinator {
 
         let session_id = format!(
             "ws-session-{}-{}",
-            format!("{:?}", self.device_id)[..8].to_string(),
+            &format!("{:?}", self.device_id)[..8],
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()

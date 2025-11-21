@@ -3,10 +3,10 @@
 //! Effect-based implementation of threshold operations.
 
 use anyhow::Result;
-use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AuraEffectSystem;
 use aura_authenticate::DkdResult;
 use aura_core::DeviceId;
-use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects};
+// Removed unused effect traits
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -19,46 +19,39 @@ pub async fn handle_threshold(
 ) -> Result<()> {
     let config_paths: Vec<&str> = configs.split(',').collect();
 
-    let _ = effects
-        .log_info(&format!(
-            "Running threshold operation with {} configs (threshold: {}, mode: {})",
-            config_paths.len(),
-            _threshold,
-            mode
-        ))
-        .await;
+    println!(
+        "Running threshold operation with {} configs (threshold: {}, mode: {})",
+        config_paths.len(),
+        _threshold,
+        mode
+    );
 
     // Validate all config files exist through storage effects
     let mut valid_configs = Vec::new();
     for config_path in &config_paths {
         let path = PathBuf::from(config_path);
 
-        match effects.retrieve(&path.display().to_string()).await {
-            Ok(Some(data)) => match parse_config_data(&data) {
+        // Simplified config loading without storage effects
+        match std::fs::read_to_string(&path) {
+            Ok(data) => match parse_config_data(data.as_bytes()) {
                 Ok(config) => {
-                    let _ = effects
-                        .log_info(&format!("Loaded config: {}", config_path))
-                        .await;
+                    println!("Loaded config: {}", config_path);
                     valid_configs.push((path, config));
                 }
                 Err(e) => {
-                    let _ = effects
-                        .log_error(&format!("Invalid config {}: {}", config_path, e))
-                        .await;
+                    eprintln!("Invalid config {}: {}", config_path, e);
                     return Err(anyhow::anyhow!("Invalid config {}: {}", config_path, e));
                 }
             },
-            Ok(None) | Err(_) => {
-                let _ = effects
-                    .log_error(&format!("Config file not found: {}", config_path))
-                    .await;
-                return Err(anyhow::anyhow!("Config file not found: {}", config_path));
+            Err(e) => {
+                eprintln!("Config file not found: {}: {}", config_path, e);
+                return Err(anyhow::anyhow!("Config file not found: {}: {}", config_path, e));
             }
         }
     }
 
     // Validate threshold parameters
-    validate_threshold_params(effects, &valid_configs, _threshold).await?;
+    validate_threshold_params(&valid_configs, _threshold).await?;
 
     // Execute threshold operation based on mode
     match mode {
@@ -67,9 +60,7 @@ pub async fn handle_threshold(
         "keygen" => execute_threshold_keygen(effects, &valid_configs, _threshold).await,
         "dkd" => execute_dkd_protocol(effects, &valid_configs, _threshold).await,
         _ => {
-            let _ = effects
-                .log_error(&format!("Unknown threshold mode: {}", mode))
-                .await;
+            eprintln!("Unknown threshold mode: {}", mode);
             Err(anyhow::anyhow!("Unknown threshold mode: {}", mode))
         }
     }
@@ -88,24 +79,21 @@ fn parse_config_data(data: &[u8]) -> Result<ThresholdConfig> {
 
 /// Validate threshold parameters
 async fn validate_threshold_params(
-    effects: &AuraEffectSystem,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
     if configs.is_empty() {
-        let _ = effects.log_error("No valid configurations provided").await;
+        eprintln!("No valid configurations provided");
         return Err(anyhow::anyhow!("No valid configurations"));
     }
 
     let num_devices = configs.len() as u32;
 
     if threshold > num_devices {
-        let _ = effects
-            .log_error(&format!(
-                "Threshold ({}) cannot be greater than number of devices ({})",
-                threshold, num_devices
-            ))
-            .await;
+        eprintln!(
+            "Threshold ({}) cannot be greater than number of devices ({})",
+            threshold, num_devices
+        );
         return Err(anyhow::anyhow!(
             "Invalid threshold: {} > {}",
             threshold,
@@ -114,26 +102,25 @@ async fn validate_threshold_params(
     }
 
     if threshold == 0 {
-        let _ = effects.log_error("Threshold must be greater than 0").await;
+        eprintln!("Threshold must be greater than 0");
         return Err(anyhow::anyhow!("Invalid threshold: 0"));
     }
 
     // Verify all configs have compatible threshold settings
     for (path, config) in configs {
         if config.threshold != configs[0].1.threshold {
-            let _ = effects
-                .log_error(&format!(
+                    eprintln!(
                     "Threshold mismatch in {}: expected {}, got {}",
                     path.display(),
                     configs[0].1.threshold,
                     config.threshold
-                ))
-                .await;
+                )
+                ;
             return Err(anyhow::anyhow!("Threshold mismatch in {}", path.display()));
         }
     }
 
-    let _ = effects.log_info("Threshold parameters validated").await;
+    println!("Threshold parameters validated");
     Ok(())
 }
 
@@ -143,29 +130,25 @@ async fn execute_threshold_signing(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
-    let _ = effects
-        .log_info("Executing threshold signing operation")
-        .await;
+    println!("Executing threshold signing operation")
+        ;
 
     // Simulate threshold signing process
     for (i, (path, config)) in configs.iter().enumerate() {
-        let _ = effects
-            .log_info(&format!(
+            println!(
                 "Signing with device {} ({}): {}",
                 i + 1,
                 config.device_id,
                 path.display()
-            ))
-            .await;
+            )
+            ;
     }
 
-    let _ = effects
-        .log_info(&format!(
-            "Threshold signing completed with {}/{} signatures",
-            configs.len(),
-            threshold
-        ))
-        .await;
+    println!(
+        "Threshold signing completed with {}/{} signatures",
+        configs.len(),
+        threshold
+    );
 
     Ok(())
 }
@@ -176,29 +159,25 @@ async fn execute_threshold_verification(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
-    let _ = effects
-        .log_info("Executing threshold verification operation")
-        .await;
+    println!("Executing threshold verification operation")
+        ;
 
     // Simulate threshold verification process
     for (i, (path, config)) in configs.iter().enumerate() {
-        let _ = effects
-            .log_info(&format!(
+            println!(
                 "Verifying with device {} ({}): {}",
                 i + 1,
                 config.device_id,
                 path.display()
-            ))
-            .await;
+            )
+            ;
     }
 
-    let _ = effects
-        .log_info(&format!(
-            "Threshold verification completed with {}/{} verifications",
-            configs.len(),
-            threshold
-        ))
-        .await;
+    println!(
+        "Threshold verification completed with {}/{} verifications",
+        configs.len(),
+        threshold
+    );
 
     Ok(())
 }
@@ -209,29 +188,25 @@ async fn execute_threshold_keygen(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
-    let _ = effects
-        .log_info("Executing threshold key generation operation")
-        .await;
+    println!("Executing threshold key generation operation")
+        ;
 
     // Simulate threshold key generation process
     for (i, (path, config)) in configs.iter().enumerate() {
-        let _ = effects
-            .log_info(&format!(
+            println!(
                 "Generating keys with device {} ({}): {}",
                 i + 1,
                 config.device_id,
                 path.display()
-            ))
-            .await;
+            )
+            ;
     }
 
-    let _ = effects
-        .log_info(&format!(
-            "Threshold key generation completed with {}/{} participants",
-            configs.len(),
-            threshold
-        ))
-        .await;
+    println!(
+        "Threshold key generation completed with {}/{} participants",
+        configs.len(),
+        threshold
+    );
 
     Ok(())
 }
@@ -242,9 +217,7 @@ async fn execute_dkd_protocol(
     configs: &[(PathBuf, ThresholdConfig)],
     _threshold: u32,
 ) -> Result<()> {
-    let _ = effects
-        .log_info("Executing DKD (Distributed Key Derivation) protocol")
-        .await;
+    println!("Executing DKD (Distributed Key Derivation) protocol");
 
     // Create participant device IDs from configs
     let participants: Vec<DeviceId> = configs
@@ -260,17 +233,15 @@ async fn execute_dkd_protocol(
         })
         .collect();
 
-    let _ = effects
-        .log_info(&format!(
-            "DKD participants: {}",
-            participants
-                .iter()
-                .enumerate()
-                .map(|(i, id)| format!("{}:{}", i + 1, id))
-                .collect::<Vec<_>>()
-                .join(", ")
-        ))
-        .await;
+    println!(
+        "DKD participants: {}",
+        participants
+            .iter()
+            .enumerate()
+            .map(|(i, id)| format!("{}:{}", i + 1, id))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 
     // TODO: Integrate DKD protocol with current effect system architecture
     // The execute_simple_dkd function needs specific effect trait implementations
@@ -279,21 +250,15 @@ async fn execute_dkd_protocol(
     // For now, return a placeholder result to get CLI compiling
     match Result::<DkdResult, String>::Err("DKD integration pending".to_string()) {
         Ok(_result) => {
-            let _ = effects
-                .log_info("DKD protocol completed successfully!")
-                .await;
+                    println!("DKD protocol completed successfully!");
 
             // TODO: Extract result fields when DKD integration is complete
-            let _ = effects
-                .log_info("Session, participants, and key data available")
-                .await;
+                    println!("Session, participants, and key data available");
 
             Ok(())
         }
         Err(e) => {
-            let _ = effects
-                .log_error(&format!("DKD protocol failed: {}", e))
-                .await;
+                    eprintln!("DKD protocol failed: {}", e);
             Err(anyhow::anyhow!("DKD protocol failed: {}", e))
         }
     }
@@ -307,12 +272,10 @@ pub async fn handle_dkd_test(
     threshold: u16,
     total: u16,
 ) -> Result<()> {
-    let _ = effects
-        .log_info(&format!(
-            "Starting DKD test: app_id={}, context={}, threshold={}, total={}",
-            app_id, context, threshold, total
-        ))
-        .await;
+    println!(
+        "Starting DKD test: app_id={}, context={}, threshold={}, total={}",
+        app_id, context, threshold, total
+    );
 
     // Create test participants
     let _participants: Vec<DeviceId> = (0..total)
@@ -331,21 +294,20 @@ pub async fn handle_dkd_test(
     // Execute DKD protocol
     match dkd_result {
         Ok(result) => {
-            let _ = effects.log_info("DKD test completed successfully!").await;
+            println!("DKD test completed successfully!");
 
-            let _ = effects
-                .log_info(&format!(
+                    println!(
                     "Results: session={}, participants={}, key_len={}",
                     result.session_id.0,
                     result.participant_count,
                     result.derived_key.len()
-                ))
-                .await;
+                )
+                ;
 
             Ok(())
         }
         Err(e) => {
-            let _ = effects.log_error(&format!("DKD test failed: {}", e)).await;
+            eprintln!("DKD test failed: {}", e);
             Err(anyhow::anyhow!("DKD test failed: {}", e))
         }
     }

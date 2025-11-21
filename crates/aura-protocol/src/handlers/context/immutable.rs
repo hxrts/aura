@@ -12,8 +12,8 @@ use uuid::Uuid;
 
 use crate::effects::choreographic::ChoreographicRole;
 use crate::handlers::{AuraHandlerError, ExecutionMode};
-use aura_core::{AccountId, SessionId};
 use aura_core::identifiers::DeviceId;
+use aura_core::{AccountId, SessionId};
 
 /// Immutable context for choreographic operations
 #[derive(Debug, Clone, Serialize, Deserialize)]

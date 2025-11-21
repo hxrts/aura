@@ -583,9 +583,11 @@ impl SimulationEffectSystemFactory {
 
     /// Create multiple simulation systems for distributed testing
     pub fn create_network(device_count: usize, base_seed: u64) -> Vec<SimulationEffectSystem> {
+        use aura_testkit::DeviceTestFixture;
         (0..device_count)
             .map(|i| {
-                let device_id = DeviceId::new();
+                let fixture = DeviceTestFixture::new(i);
+                let device_id = fixture.device_id();
                 let seed = base_seed + i as u64;
                 Self::create(device_id, seed)
             })
@@ -646,7 +648,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_simulation_system_creation() {
-        let device_id = DeviceId::new();
+        use aura_testkit::DeviceTestFixture;
+        let fixture = DeviceTestFixture::new(0);
+        let device_id = fixture.device_id();
         let system = SimulationEffectSystem::new(device_id, 12345);
 
         assert_eq!(system.device_id(), device_id);
@@ -656,7 +660,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_fault_injection() {
-        let device_id = DeviceId::new();
+        use aura_testkit::DeviceTestFixture;
+        let fixture = DeviceTestFixture::new(1);
+        let device_id = fixture.device_id();
         let system = SimulationEffectSystem::with_fault_injection(device_id, 42);
 
         // Inject a fault for cryptographic operations
@@ -686,7 +692,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_time_control() {
-        let device_id = DeviceId::new();
+        use aura_testkit::DeviceTestFixture;
+        let fixture = DeviceTestFixture::new(2);
+        let device_id = fixture.device_id();
         let mut system = SimulationEffectSystem::new(device_id, 42);
 
         // Test time advancement
@@ -699,7 +707,9 @@ mod tests {
 
     #[test]
     fn test_factory_creation() {
-        let device_id = DeviceId::new();
+        use aura_testkit::DeviceTestFixture;
+        let fixture = DeviceTestFixture::new(3);
+        let device_id = fixture.device_id();
 
         // Testing mode should work
         let _system = SimulationEffectSystemFactory::for_testing(device_id);

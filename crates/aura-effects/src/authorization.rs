@@ -5,7 +5,7 @@
 //! and other Aura components.
 
 use aura_core::effects::{AuthorizationEffects, AuthorizationError};
-use aura_core::{Cap, AuthorityId};
+use aura_core::{AuthorityId, Cap};
 use aura_macros::aura_effect_handlers;
 use std::collections::HashMap;
 

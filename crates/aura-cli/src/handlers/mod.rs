@@ -3,11 +3,11 @@
 //! Effect-based implementations of CLI commands following the unified effect system.
 
 use crate::{
-    AdminAction, AuthorityCommands, ContextAction, InvitationAction, OtaAction, RecoveryAction,
-    ScenarioAction, SnapshotAction,
+    AdminAction, AmpAction, AuthorityCommands, ContextAction, InvitationAction, OtaAction,
+    RecoveryAction, ScenarioAction, SnapshotAction,
 };
 use anyhow::Result;
-use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AuraEffectSystem;
 use aura_core::identifiers::DeviceId;
 use aura_protocol::effect_traits::ConsoleEffects;
 use std::path::Path;
@@ -25,6 +25,7 @@ pub mod snapshot;
 pub mod status;
 pub mod threshold;
 pub mod version;
+pub mod amp;
 
 /// Main CLI handler that coordinates all operations through effects
 pub struct CliHandler {
@@ -113,13 +114,18 @@ impl CliHandler {
         ota::handle_ota(&self.effect_system, action).await
     }
 
+    /// Handle AMP commands (placeholder wiring).
+    pub async fn handle_amp(&self, action: &AmpAction) -> Result<()> {
+        amp::handle_amp(&self.effect_system, action).await
+    }
+
     /// Log error message through effects
     pub async fn log_error(&self, message: &str) {
-        let _ = self.effect_system.log_error(message).await;
+        eprintln!("ERROR: {}", message);
     }
 
     /// Log info message through effects
     pub async fn log_info(&self, message: &str) {
-        let _ = self.effect_system.log_info(message).await;
+        println!("INFO: {}", message);
     }
 }

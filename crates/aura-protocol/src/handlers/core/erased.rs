@@ -68,7 +68,10 @@ impl AuraHandlerFactory {
     }
 
     /// Create a handler for simulation
-    pub fn for_simulation(device_id: aura_core::identifiers::DeviceId, _seed: u64) -> Box<dyn AuraHandler> {
+    pub fn for_simulation(
+        device_id: aura_core::identifiers::DeviceId,
+        _seed: u64,
+    ) -> Box<dyn AuraHandler> {
         let handler = crate::handlers::CompositeHandler::for_simulation(device_id.into());
         Box::new(handler)
     }

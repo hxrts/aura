@@ -19,7 +19,7 @@
 //! - Device attestation certificates
 //! - Critical configuration data
 
-use crate::{AuraError};
+use crate::AuraError;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -48,7 +48,11 @@ impl SecureStorageLocation {
     }
 
     /// Create with a sub-key for hierarchical organization
-    pub fn with_sub_key(namespace: impl Into<String>, key: impl Into<String>, sub_key: impl Into<String>) -> Self {
+    pub fn with_sub_key(
+        namespace: impl Into<String>,
+        key: impl Into<String>,
+        sub_key: impl Into<String>,
+    ) -> Self {
         Self {
             namespace: namespace.into(),
             key: key.into(),
@@ -159,7 +163,10 @@ pub trait SecureStorageEffects: Send + Sync {
     ///
     /// # Parameters
     /// - `location`: Location to check
-    async fn secure_exists(&self, location: &SecureStorageLocation) -> Result<bool, SecureStorageError>;
+    async fn secure_exists(
+        &self,
+        location: &SecureStorageLocation,
+    ) -> Result<bool, SecureStorageError>;
 
     /// List available keys in a namespace
     ///
@@ -258,7 +265,11 @@ impl SecureStorageLocation {
 
     /// Create a location for storing signing shares
     pub fn signing_share(account_id: &str, epoch: u64, participant_id: u16) -> Self {
-        Self::with_sub_key("signing_shares", account_id, format!("{}_{}", epoch, participant_id))
+        Self::with_sub_key(
+            "signing_shares",
+            account_id,
+            format!("{}_{}", epoch, participant_id),
+        )
     }
 
     /// Create a location for device attestation certificates

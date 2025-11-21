@@ -1,6 +1,6 @@
 //! # Aura Web of Trust
 //!
-//! Authority-based authorization system using Biscuit tokens for 
+//! Authority-based authorization system using Biscuit tokens for
 //! cryptographically verifiable capability delegation.
 //!
 //! This crate implements the Web of Trust layer from Aura's architectural
@@ -12,7 +12,7 @@
 //! The crate provides:
 //! - Biscuit token management with cryptographic verification
 //! - Authority-centric resource scopes (AuthorityOp, ContextOp)
-//! - Token delegation with built-in attenuation 
+//! - Token delegation with built-in attenuation
 //! - Datalog-based policy enforcement
 //!
 //! ## Usage
@@ -20,7 +20,7 @@
 //! ```rust
 //! use aura_wot::{ResourceScope, AuthorityOp};
 //! use aura_core::{AuthorityId};
-//! 
+//!
 //! // Authority-based resource authorization  
 //! let resource = ResourceScope::Authority {
 //!     authority_id: AuthorityId::new(),

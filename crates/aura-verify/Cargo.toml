@@ -29,3 +29,4 @@ blake3 = { workspace = true }
 # tokio-test = { workspace = true } # removed - unused
 signature = { workspace = true }
 tokio = { workspace = true }
+rand = { workspace = true }

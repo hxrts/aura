@@ -77,9 +77,7 @@ pub async fn authenticate_guardian(
         .participants
         .contains(&guardian_authority.authority_id())
     {
-        return Err(AuraError::permission_denied(
-            "Guardian not in context",
-        ));
+        return Err(AuraError::permission_denied("Guardian not in context"));
     }
 
     // Find guardian binding in context facts
@@ -307,7 +305,9 @@ impl GuardianAuthHandler {
                 // This is a safety mechanism that requires no additional checks
                 Ok(true)
             }
-            GuardianOperation::UpdateParameters { recovery_delay_seconds } => {
+            GuardianOperation::UpdateParameters {
+                recovery_delay_seconds,
+            } => {
                 // Check if guardian has parameter update permission
                 // Only allow reasonable parameter changes
 
@@ -315,7 +315,9 @@ impl GuardianAuthHandler {
                 const MIN_DELAY_SECS: u64 = 3600; // 1 hour
                 const MAX_DELAY_SECS: u64 = 30 * 24 * 3600; // 30 days
 
-                if *recovery_delay_seconds < MIN_DELAY_SECS || *recovery_delay_seconds > MAX_DELAY_SECS {
+                if *recovery_delay_seconds < MIN_DELAY_SECS
+                    || *recovery_delay_seconds > MAX_DELAY_SECS
+                {
                     return Ok(false); // Invalid delay range
                 }
 

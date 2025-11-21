@@ -592,7 +592,9 @@ impl CryptoEffects for RealCryptoHandler {
         .map_err(|e| CryptoError::invalid(format!("FROST key generation failed: {}", e)))?;
 
         // Convert key shares to byte vectors
-        let key_packages: Vec<Vec<u8>> = shares.values().map(|key_package| {
+        let key_packages: Vec<Vec<u8>> = shares
+            .values()
+            .map(|key_package| {
                 // Serialize the key package
                 bincode::serialize(key_package).map_err(|e| {
                     CryptoError::invalid(format!("Failed to serialize key package: {}", e))

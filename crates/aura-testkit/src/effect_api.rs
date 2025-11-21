@@ -5,7 +5,7 @@
 
 use aura_core::hash::hash;
 use aura_core::AccountId;
-use aura_journal::semilattice::ModernAccountState as AccountState;
+use aura_journal::semilattice::AccountState;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use uuid::Uuid;

@@ -3,25 +3,23 @@
 //! This module provides a clean, simplified API for journal operations
 //! that hides CRDT implementation details behind user-friendly abstractions.
 
-use crate::fact_journal::{Fact, FactContent, FactId, Journal as FactJournal, JournalNamespace};
-use crate::semilattice::*;
+use crate::fact::{Fact, FactContent, FactId, Journal as FactJournal, JournalNamespace};
+use crate::semilattice::{AccountState, OpLog};
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::semilattice::JoinSemilattice;
-use aura_core::{AccountId, AuraError};
+use aura_core::{AccountId, AuraError, effects::RandomEffects};
 use serde::{Deserialize, Serialize};
 
-/// Simplified Journal interface hiding CRDT internals
+/// Simplified Journal interface using fact-based architecture
 ///
 /// # Stability: STABLE
 /// This is the main journal API with semver guarantees.
 #[derive(Debug, Clone)]
 pub struct Journal {
-    /// Internal CRDT state (hidden from public API)
-    journal_map: JournalMap,
-    /// Internal account state (hidden from public API)
-    account_state: ModernAccountState,
-    /// Internal operation log (hidden from public API)
+    /// Account state for epoch and guardian management
+    account_state: AccountState,
+    /// Operation log for tracking applied operations
     op_log: OpLog,
     /// Fact-based journal for new architecture
     fact_journal: FactJournal,
@@ -31,7 +29,8 @@ impl Journal {
     /// Create a new journal for an account
     pub fn new(account_id: AccountId) -> Self {
         // Use proper constructors for the CRDT types
-        #[allow(clippy::unwrap_used)] // Placeholder zero key - will be replaced with actual authority key
+        #[allow(clippy::unwrap_used)]
+        // Placeholder zero key - will be replaced with actual authority key
         let ed25519_key = ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap(); // placeholder
 
         // Create authority ID from account ID for namespace
@@ -39,8 +38,7 @@ impl Journal {
         let namespace = JournalNamespace::Authority(authority_id);
 
         Self {
-            journal_map: JournalMap::default(),
-            account_state: ModernAccountState::new(account_id, ed25519_key),
+            account_state: AccountState::new(account_id, ed25519_key),
             op_log: OpLog::default(),
             fact_journal: FactJournal::new(namespace),
         }
@@ -56,17 +54,15 @@ impl Journal {
         let namespace = JournalNamespace::Authority(authority_id);
 
         Self {
-            journal_map: JournalMap::default(),
-            account_state: ModernAccountState::new(account_id, group_key),
+            account_state: AccountState::new(account_id, group_key),
             op_log: OpLog::default(),
             fact_journal: FactJournal::new(namespace),
         }
     }
 
-    /// Merge with another journal (CRDT join operation)
+    /// Merge with another journal
     pub fn merge(&mut self, other: &Journal) -> Result<(), AuraError> {
-        // Hide the CRDT implementation details
-        self.journal_map = self.journal_map.join(&other.journal_map);
+        // Merge semilattice components
         self.account_state = self.account_state.join(&other.account_state);
         self.op_log = self.op_log.join(&other.op_log);
 
@@ -77,14 +73,13 @@ impl Journal {
     }
 
     /// Add a fact to the journal
-    pub fn add_fact(&mut self, journal_fact: JournalFact) -> Result<(), AuraError> {
+    pub async fn add_fact(&mut self, journal_fact: JournalFact, random: &dyn RandomEffects) -> Result<(), AuraError> {
         let source_authority = journal_fact.source_authority;
 
         // Convert JournalFact to proper Fact with FactContent
-        // TODO: This function should be async and accept RandomEffects to generate proper FactIds
         let fact = Fact {
-            fact_id: FactId::from_bytes([0u8; 16]), // Placeholder - should use RandomEffects::random_uuid()
-            content: FactContent::FlowBudget(crate::fact_journal::FlowBudgetFact {
+            fact_id: FactId::generate(random).await,
+            content: FactContent::FlowBudget(crate::fact::FlowBudgetFact {
                 context_id: ContextId::new(), // placeholder - should come from journal_fact or context
                 source: source_authority,
                 destination: source_authority, // placeholder

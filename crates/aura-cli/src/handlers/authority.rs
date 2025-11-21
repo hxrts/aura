@@ -2,7 +2,7 @@
 
 use crate::commands::authority::AuthorityCommands;
 use anyhow::Result;
-use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AuraEffectSystem;
 use aura_core::effects::ConsoleEffects;
 
 /// Execute authority management commands.

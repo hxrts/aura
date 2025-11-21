@@ -38,7 +38,7 @@ async fn test_successful_relationship_formation() -> aura_core::AuraResult<()> {
         initiator_id,
         config.clone(),
         true, // is_initiator
-        &*initiator_effects.0,
+        &**initiator_effects,
     )
     .await;
 
@@ -47,10 +47,7 @@ async fn test_successful_relationship_formation() -> aura_core::AuraResult<()> {
     match result {
         Ok(formation_result) => {
             assert!(formation_result.success);
-            assert_ne!(
-                formation_result.context_id,
-                ContextId(Uuid::new_v4())
-            ); // Should be derived
+            assert_ne!(formation_result.context_id, ContextId(Uuid::new_v4())); // Should be derived
             assert_ne!(formation_result.relationship_keys.encryption_key, [0u8; 32]); // Should be generated
             assert_ne!(formation_result.relationship_keys.mac_key, [0u8; 32]); // Should be generated
             assert!(!formation_result
@@ -85,8 +82,7 @@ async fn test_invalid_configuration() -> aura_core::AuraResult<()> {
         timeout_secs: 60,
     };
 
-    let result =
-        execute_relationship_formation(device_id, config, true, &*effect_system.0).await;
+    let result = execute_relationship_formation(device_id, config, true, effect_system.as_ref()).await;
 
     assert!(result.is_err());
     assert!(matches!(
@@ -141,7 +137,7 @@ async fn test_relationship_key_properties() -> aura_core::AuraResult<()> {
         &private_key,
         &peer_public_key,
         &context_id,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await?;
 
@@ -149,7 +145,7 @@ async fn test_relationship_key_properties() -> aura_core::AuraResult<()> {
         &private_key,
         &peer_public_key,
         &context_id,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await?;
 
@@ -163,7 +159,7 @@ async fn test_relationship_key_properties() -> aura_core::AuraResult<()> {
         &private_key,
         &different_peer_key,
         &context_id,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await?;
 

@@ -1,5 +1,5 @@
-use aura_core::AccountId;
 use aura_core::identifiers::DeviceId;
+use aura_core::AccountId;
 use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
 use serde::{Deserialize, Serialize};
 

@@ -19,7 +19,7 @@
 //! }
 //! ```
 
-use aura_core::{AuraError, AuraResult, identifiers::DeviceId};
+use aura_core::{identifiers::DeviceId, AuraError, AuraResult};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -183,8 +183,7 @@ impl LeakageBudget {
 }
 
 /// Policy for handling undefined budgets
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum UndefinedBudgetPolicy {
     /// Allow unlimited access (legacy behavior, less secure)
     Allow,
@@ -194,7 +193,6 @@ pub enum UndefinedBudgetPolicy {
     /// Use a default budget with specified limit
     DefaultBudget(u64),
 }
-
 
 /// Leakage tracker for privacy contract enforcement
 #[derive(Debug, Clone, Serialize, Deserialize)]

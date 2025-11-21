@@ -7,9 +7,7 @@
 
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
-use aura_relational::{
-    ConsensusProof, Prestate, RecoveryGrant, RecoveryOp, RelationalContext,
-};
+use aura_relational::{ConsensusProof, Prestate, RecoveryGrant, RecoveryOp, RelationalContext};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -139,26 +137,26 @@ impl RecoveryProtocol {
     pub async fn initiate_recovery(&mut self, request: RecoveryRequest) -> Result<RecoveryResult> {
         // Validate request
         if request.account_authority != self.account_authority {
-            return Err(AuraError::invalid(
-                "Account authority mismatch",
-            ));
+            return Err(AuraError::invalid("Account authority mismatch"));
         }
 
         // Create recovery operation
         let recovery_op = match &request.operation {
             RecoveryOperation::ReplaceTree { .. } => RecoveryOp::ReplaceTree {
-                new_tree_root: request.new_tree_commitment
+                new_tree_root: request.new_tree_commitment,
             },
             RecoveryOperation::AddDevice { device_public_key } => RecoveryOp::AddDevice {
-                device_public_key: device_public_key.clone()
+                device_public_key: device_public_key.clone(),
             },
             RecoveryOperation::RemoveDevice { leaf_index } => RecoveryOp::RemoveDevice {
-                leaf_index: *leaf_index
+                leaf_index: *leaf_index,
             },
             RecoveryOperation::UpdateGuardians { new_threshold, .. } => {
                 // Map to UpdatePolicy as a placeholder - guardians are managed separately
-                RecoveryOp::UpdatePolicy { new_threshold: *new_threshold as u16 }
-            },
+                RecoveryOp::UpdatePolicy {
+                    new_threshold: *new_threshold as u16,
+                }
+            }
         };
 
         // Run consensus to get proof
@@ -191,9 +189,7 @@ impl RecoveryProtocol {
     pub async fn process_guardian_approval(&mut self, approval: GuardianApproval) -> Result<()> {
         // Verify guardian is in the set
         if !self.guardian_authorities.contains(&approval.guardian_id) {
-            return Err(AuraError::permission_denied(
-                "Guardian not in recovery set",
-            ));
+            return Err(AuraError::permission_denied("Guardian not in recovery set"));
         }
 
         // TODO: Verify signature
@@ -278,7 +274,8 @@ impl RecoveryProtocolHandler {
 
         if threshold_met {
             // Finalize recovery via effects
-            self.finalize_recovery_via_effects(&approval.recovery_id, ceremony_approvals).await?;
+            self.finalize_recovery_via_effects(&approval.recovery_id, ceremony_approvals)
+                .await?;
         }
 
         Ok(threshold_met)
@@ -287,18 +284,20 @@ impl RecoveryProtocolHandler {
     /// Notify guardians about recovery request via NetworkEffects
     async fn notify_guardians_via_effects(&self, request: &RecoveryRequest) -> Result<()> {
         // Serialize the recovery request
-        let message_data = serde_json::to_vec(request)
-            .map_err(|e| AuraError::serialization(e.to_string()))?;
+        let message_data =
+            serde_json::to_vec(request).map_err(|e| AuraError::serialization(e.to_string()))?;
 
         // Send recovery request to each guardian via network effects
         for guardian_id in &self.protocol.guardian_authorities {
             // TODO: Use actual NetworkEffects to send messages
             // For now, simulate sending recovery notification
-            let _notification_sent = self.simulate_guardian_notification(*guardian_id, &message_data);
+            let _notification_sent =
+                self.simulate_guardian_notification(*guardian_id, &message_data);
         }
 
         // Update journal state with recovery initiation
-        self.update_journal_recovery_state_via_effects(&request.recovery_id, "initiated", &[]).await?;
+        self.update_journal_recovery_state_via_effects(&request.recovery_id, "initiated", &[])
+            .await?;
 
         Ok(())
     }
@@ -317,16 +316,17 @@ impl RecoveryProtocolHandler {
             approvals: approvals.to_vec(),
         };
 
-        // Serialize the recovery result  
-        let result_data = serde_json::to_vec(&result)
-            .map_err(|e| AuraError::serialization(e.to_string()))?;
+        // Serialize the recovery result
+        let result_data =
+            serde_json::to_vec(&result).map_err(|e| AuraError::serialization(e.to_string()))?;
 
         // Notify account of recovery completion via network effects
         // TODO: Use actual NetworkEffects to send result back to requesting account
         let _result_sent = self.simulate_account_notification(&result_data);
 
         // Update journal state with recovery completion
-        self.update_journal_recovery_state_via_effects(recovery_id, "completed", approvals).await?;
+        self.update_journal_recovery_state_via_effects(recovery_id, "completed", approvals)
+            .await?;
 
         Ok(())
     }
@@ -354,7 +354,11 @@ impl RecoveryProtocolHandler {
     }
 
     /// Simulate guardian notification (placeholder for NetworkEffects)
-    fn simulate_guardian_notification(&self, guardian_id: AuthorityId, message_data: &[u8]) -> bool {
+    fn simulate_guardian_notification(
+        &self,
+        guardian_id: AuthorityId,
+        message_data: &[u8],
+    ) -> bool {
         // TODO: Replace with actual effect system call
         // effect_handler.send_to_authority(guardian_id, message_data).await
         println!(

@@ -7,7 +7,10 @@
 //! `docs/103_information_flow_budget.md`.
 
 use async_trait::async_trait;
-use aura_core::{identifiers::{ContextId, AuthorityId}, AuraResult, Receipt};
+use aura_core::{
+    identifiers::{AuthorityId, ContextId},
+    AuraResult, Receipt,
+};
 use serde::{Deserialize, Serialize};
 
 /// Hint describing which flow bucket should be charged before a send.

@@ -31,7 +31,7 @@
 
 // PROGRESS: Partially migrated to TimeEffects and RandomEffects.
 // - Added start_with_time_effects() method for proper effect system integration
-// - Updated propose_upgrade() to use RandomEffects for deterministic UUID generation  
+// - Updated propose_upgrade() to use RandomEffects for deterministic UUID generation
 // - Original Service trait methods still use direct time calls for compatibility
 #![allow(clippy::disallowed_methods)]
 
@@ -47,8 +47,8 @@ use super::{HealthCheck, HealthStatus, Service, ServiceState};
 use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::CacheManager;
 use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
+use aura_core::effects::{RandomEffects, TimeEffects};
 use aura_core::{tree::Snapshot, AccountId, DeviceId, Epoch, Hash32, SemanticVersion};
-use aura_core::effects::{TimeEffects, RandomEffects};
 
 // =============================================================================
 // Maintenance Event Types
@@ -449,14 +449,17 @@ impl MaintenanceService {
     }
 
     /// Start the service using TimeEffects (preferred over Service::start)
-    pub async fn start_with_time_effects<T: TimeEffects>(&self, time_effects: &T) -> SyncResult<()> {
+    pub async fn start_with_time_effects<T: TimeEffects>(
+        &self,
+        time_effects: &T,
+    ) -> SyncResult<()> {
         let mut state = self.state.write();
         if *state == ServiceState::Running {
             return Err(sync_session_error("Service already running"));
         }
 
         *state = ServiceState::Starting;
-        
+
         // Use TimeEffects for deterministic time
         let now = time_effects.now_instant().await;
         *self.started_at.write() = Some(now);
@@ -596,23 +599,54 @@ mod tests {
 
     #[async_trait::async_trait]
     impl TimeEffects for MockTimeEffects {
-        async fn current_epoch(&self) -> u64 { 0 }
-        async fn current_timestamp(&self) -> u64 { 0 }
-        async fn current_timestamp_millis(&self) -> u64 { 0 }
-        async fn now_instant(&self) -> Instant { self.instant }
+        async fn current_epoch(&self) -> u64 {
+            0
+        }
+        async fn current_timestamp(&self) -> u64 {
+            0
+        }
+        async fn current_timestamp_millis(&self) -> u64 {
+            0
+        }
+        async fn now_instant(&self) -> Instant {
+            self.instant
+        }
         async fn sleep_ms(&self, _ms: u64) {}
         async fn sleep_until(&self, _epoch: u64) {}
         async fn delay(&self, _duration: Duration) {}
-        async fn sleep(&self, _duration_ms: u64) -> Result<(), aura_core::AuraError> { Ok(()) }
-        async fn yield_until(&self, _condition: aura_core::effects::time::WakeCondition) -> Result<(), aura_core::effects::time::TimeError> { Ok(()) }
-        async fn wait_until(&self, _condition: aura_core::effects::time::WakeCondition) -> Result<(), aura_core::AuraError> { Ok(()) }
-        async fn set_timeout(&self, _timeout_ms: u64) -> aura_core::effects::time::TimeoutHandle { uuid::Uuid::new_v4() }
-        async fn cancel_timeout(&self, _handle: aura_core::effects::time::TimeoutHandle) -> Result<(), aura_core::effects::time::TimeError> { Ok(()) }
-        fn is_simulated(&self) -> bool { true }
+        async fn sleep(&self, _duration_ms: u64) -> Result<(), aura_core::AuraError> {
+            Ok(())
+        }
+        async fn yield_until(
+            &self,
+            _condition: aura_core::effects::time::WakeCondition,
+        ) -> Result<(), aura_core::effects::time::TimeError> {
+            Ok(())
+        }
+        async fn wait_until(
+            &self,
+            _condition: aura_core::effects::time::WakeCondition,
+        ) -> Result<(), aura_core::AuraError> {
+            Ok(())
+        }
+        async fn set_timeout(&self, _timeout_ms: u64) -> aura_core::effects::time::TimeoutHandle {
+            uuid::Uuid::new_v4()
+        }
+        async fn cancel_timeout(
+            &self,
+            _handle: aura_core::effects::time::TimeoutHandle,
+        ) -> Result<(), aura_core::effects::time::TimeError> {
+            Ok(())
+        }
+        fn is_simulated(&self) -> bool {
+            true
+        }
         fn register_context(&self, _context_id: uuid::Uuid) {}
         fn unregister_context(&self, _context_id: uuid::Uuid) {}
         async fn notify_events_available(&self) {}
-        fn resolution_ms(&self) -> u64 { 1 }
+        fn resolution_ms(&self) -> u64 {
+            1
+        }
     }
 
     #[tokio::test]
@@ -621,7 +655,10 @@ mod tests {
         let time_effects = MockTimeEffects::new();
 
         // Test the TimeEffects-based start method
-        service.start_with_time_effects(&time_effects).await.unwrap();
+        service
+            .start_with_time_effects(&time_effects)
+            .await
+            .unwrap();
         assert!(service.is_running());
 
         service.stop().await.unwrap();
@@ -633,10 +670,18 @@ mod tests {
 
     #[async_trait]
     impl RandomEffects for MockRandomEffects {
-        async fn random_bytes(&self, len: usize) -> Vec<u8> { vec![0u8; len] }
-        async fn random_bytes_32(&self) -> [u8; 32] { [0u8; 32] }
-        async fn random_u64(&self) -> u64 { 12345 }
-        async fn random_range(&self, _min: u64, _max: u64) -> u64 { 42 }
+        async fn random_bytes(&self, len: usize) -> Vec<u8> {
+            vec![0u8; len]
+        }
+        async fn random_bytes_32(&self) -> [u8; 32] {
+            [0u8; 32]
+        }
+        async fn random_u64(&self) -> u64 {
+            12345
+        }
+        async fn random_range(&self, _min: u64, _max: u64) -> u64 {
+            42
+        }
         async fn random_uuid(&self) -> Uuid {
             // Use a deterministic UUID for testing
             Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap()
@@ -655,7 +700,14 @@ mod tests {
         let proposer = DeviceId::new();
 
         let proposal = service
-            .propose_upgrade(package_id, version, kind, package_hash, proposer, &random_effects)
+            .propose_upgrade(
+                package_id,
+                version,
+                kind,
+                package_hash,
+                proposer,
+                &random_effects,
+            )
             .await
             .unwrap();
 

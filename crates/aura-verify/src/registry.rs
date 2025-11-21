@@ -4,9 +4,9 @@
 //! and device management. Tracks device lifecycle and organizational status.
 
 use aura_core::{
+    identifiers::DeviceId,
     tree::{AttestedOp, TreeOp, TreeOpKind},
     AccountId, AuraError, AuraResult, Cap, Policy,
-    identifiers::DeviceId,
 };
 use std::collections::HashMap;
 
@@ -309,7 +309,7 @@ impl Default for IdentityVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{Cap, identifiers::DeviceId};
+    use aura_core::{identifiers::DeviceId, Cap};
 
     #[test]
     fn test_device_registration() {

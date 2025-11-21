@@ -6,7 +6,7 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
 
-use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AuraEffectSystem;
 use aura_core::effects::TimeEffects;
 use aura_core::{AccountId, DeviceId, TrustLevel};
 use aura_invitation::{
@@ -42,15 +42,19 @@ impl InvitationIntegrationTest {
         let account_id = AccountId(Uuid::from_bytes([0x03; 16]));
         let registry = Arc::new(Mutex::new(InvitationRecordRegistry::new()));
 
-        let inviter_fixture = aura_testkit::create_test_fixture_with_device_id(inviter_device).await.unwrap();
-        let invitee_fixture = aura_testkit::create_test_fixture_with_device_id(invitee_device).await.unwrap();
+        let inviter_fixture = aura_testkit::create_test_fixture_with_device_id(inviter_device)
+            .await
+            .unwrap();
+        let invitee_fixture = aura_testkit::create_test_fixture_with_device_id(invitee_device)
+            .await
+            .unwrap();
 
         Self {
             inviter_device,
             invitee_device,
             account_id,
-            inviter_effects: (*inviter_fixture.effect_system().0).clone(),
-            invitee_effects: (*invitee_fixture.effect_system().0).clone(),
+            inviter_effects: (*inviter_fixture.effect_system()).clone(),
+            invitee_effects: (*invitee_fixture.effect_system()).clone(),
             registry,
         }
     }
@@ -62,15 +66,19 @@ impl InvitationIntegrationTest {
         let account_id = AccountId(Uuid::from_bytes([seed + 2; 16]));
         let registry = Arc::new(Mutex::new(InvitationRecordRegistry::new()));
 
-        let inviter_fixture = aura_testkit::create_test_fixture_with_device_id(inviter_device).await.unwrap();
-        let invitee_fixture = aura_testkit::create_test_fixture_with_device_id(invitee_device).await.unwrap();
+        let inviter_fixture = aura_testkit::create_test_fixture_with_device_id(inviter_device)
+            .await
+            .unwrap();
+        let invitee_fixture = aura_testkit::create_test_fixture_with_device_id(invitee_device)
+            .await
+            .unwrap();
 
         Self {
             inviter_device,
             invitee_device,
             account_id,
-            inviter_effects: (*inviter_fixture.effect_system().0).clone(),
-            invitee_effects: (*invitee_fixture.effect_system().0).clone(),
+            inviter_effects: (*inviter_fixture.effect_system()).clone(),
+            invitee_effects: (*invitee_fixture.effect_system()).clone(),
             registry,
         }
     }

@@ -14,7 +14,7 @@
 //! - Enforces global connection limits and cleanup policies
 
 use aura_core::effects::{NetworkEffects, StorageEffects, TimeEffects};
-use aura_core::{ContextId, identifiers::DeviceId};
+use aura_core::{identifiers::DeviceId, ContextId};
 use aura_effects::transport::{TransportConfig, TransportError};
 use std::collections::HashMap;
 
@@ -320,7 +320,7 @@ where
 
         for state in connections.values() {
             *connection_count_by_context
-                .entry(state.context_id.clone())
+                .entry(state.context_id)
                 .or_insert(0) += 1;
 
             if oldest_connection.is_none() || state.last_activity < oldest_connection.unwrap() {

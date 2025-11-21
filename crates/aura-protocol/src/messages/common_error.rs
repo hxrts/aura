@@ -14,7 +14,6 @@ pub type MessageResult<T> = Result<T, AuraError>;
 
 /// Convenience functions for message-specific error types.
 /// These now map to unified AuraError variants.
-
 /// Create an unsupported version error (maps to Invalid).
 pub fn unsupported_version_error(found: u16, max_supported: u16) -> AuraError {
     AuraError::invalid(format!(

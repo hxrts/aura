@@ -9,11 +9,18 @@ use aura_core::identifiers::ContextId;
 use aura_core::identifiers::DeviceId;
 // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
 use rumpsteak_aura_choreography::effects::{
-    ChoreoHandler, ChoreographyError, Label, Result as ChoreoResult,
+    ChoreoHandler,
 };
-use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
-use async_trait::async_trait;
+
+#[cfg(test)]
+use {
+    rumpsteak_aura_choreography::{ChoreographyError, Label},
+    serde::{de::DeserializeOwned, Serialize},
+};
+
+#[cfg(test)]
+type ChoreoResult<T> = Result<T, ChoreographyError>;
 
 /// Guard profile for message sending operations
 #[derive(Debug, Clone)]
@@ -123,7 +130,7 @@ impl ChoreographicHandler for MockChoreographicAdapter {
 }
 
 #[cfg(test)]
-#[async_trait]
+#[async_trait::async_trait]
 impl ChoreoHandler for MockChoreographicAdapter {
     type Role = DeviceId;
     type Endpoint = DefaultEndpoint;

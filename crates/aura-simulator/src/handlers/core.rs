@@ -1,6 +1,7 @@
 //! Core simulator handler implementation
 
-use crate::middleware::{Result, SimulatorContext, SimulatorHandler, SimulatorOperation};
+use crate::compat::SimulatorHandler;
+use crate::types::{Result, SimulatorContext, SimulatorOperation};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};

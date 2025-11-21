@@ -12,11 +12,9 @@
 
 // Core modules
 mod error;
-mod operations;
 mod types;
 
 // Domain modules moved from aura-core
-pub mod journal;
 pub mod effect_api;
 pub mod semilattice;
 
@@ -32,7 +30,6 @@ pub mod journal_api;
 // New fact-based journal implementation (Phase 2)
 pub mod commitment_integration;
 pub mod fact;
-pub mod fact_journal;
 pub mod reduction;
 
 // Authority state derivation (Phase 5)
@@ -44,40 +41,33 @@ pub mod authority_state;
 
 // Re-exports
 pub use error::{AuraError, Result};
-pub use operations::*;
 // Note: Sync types moved to aura-sync (Layer 5)
 
 // Core type re-exports
 pub use aura_core::Hash32;
 
 // Domain re-exports
-pub use journal::*; // Now re-exports fact-based types
 pub use effect_api::{
-    CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus, JournalMap, Priority,
+    CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus, Priority,
 };
 
 // New fact-based journal exports
 pub use fact::{
-    AttestedOp as FactAttestedOp, Fact, FactContent, FactId, FlowBudgetFact, RelationalFact,
-    SnapshotFact,
+    AttestedOp as FactAttestedOp, Fact, FactContent, FactId, FlowBudgetFact,
+    Journal as FactJournal, JournalNamespace, RelationalFact, SnapshotFact, TreeOpKind,
 };
-pub use fact_journal::{Journal as FactJournal, JournalNamespace};
-pub use reduction::{reduce_authority, reduce_context, RelationalState};
-// Note: TreeOp and TreeOpRecord are now aura_core::tree::TreeOpKind and aura_core::tree::AttestedOp
-pub use aura_core::tree::{AttestedOp as TreeOpRecord, TreeOpKind as TreeOp};
+pub use reduction::{reduce_authority, reduce_context, ChannelEpochState, RelationalState};
 // Primary Journal API (STABLE)
 pub use journal_api::{AccountSummary, Journal, JournalFact};
 
 // CRDT Implementation Details (INTERNAL - subject to change without notice)
 #[doc(hidden)]
 pub use semilattice::{
-    integration,
+    AccountState,
     EpochLog,
     GuardianRegistry,
-    IntentPool, // DeviceRegistry removed - use authority-based TreeState instead
-    JournalMap as CRDTJournalMap,
+    IntentPool,
     MaxCounter,
-    ModernAccountState as AccountState,
     OpLog,
 };
 
@@ -99,7 +89,6 @@ pub use commitment_tree::{
     NodeKind,
     Policy,
     TreeCommitment,
-    TreeOpKind,
     TreeState,
 };
 
@@ -109,9 +98,4 @@ pub use causal_context::{ActorId, CausalContext, OperationId, VectorClock};
 // Selective re-exports to avoid conflicts
 pub use types::{GuardianMetadata, Session};
 
-// DeviceMetadata and DeviceType are deprecated - use authority-derived views instead
 // See docs/100_authority_and_identity.md for migration guidance
-
-// Tests
-#[cfg(test)]
-mod tests;

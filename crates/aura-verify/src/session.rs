@@ -164,19 +164,15 @@ fn serialize_session_ticket(ticket: &SessionTicket) -> Result<Vec<u8>> {
     })
 }
 
-// Tests commented out due to missing crypto functions in current aura_crypto API
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::Effects;
-    use aura_core::identifiers::DeviceId;
     use uuid::Uuid;
 
-    fn create_test_ticket(effects: &Effects) -> SessionTicket {
+    fn create_test_ticket() -> SessionTicket {
         SessionTicket {
-            session_id: Uuid::new_v4(),
-            issuer_device_id: aura_core::identifiers::DeviceId::from_uuid(Uuid::new_v4()),
+            session_id: Uuid::from_bytes([1u8; 16]),
+            issuer_device_id: aura_core::identifiers::DeviceId::from_bytes([2u8; 32]),
             issued_at: 1000,
             expires_at: 2000,
             scope: SessionScope::Dkd {
@@ -189,16 +185,18 @@ mod tests {
 
     #[test]
     fn test_verify_session_ticket_success() {
-        let effects = Effects::test();
-        let ticket = create_test_ticket(&effects);
+        let ticket = create_test_ticket();
 
-        // Generate a key pair for testing
-        let signing_key = aura_core::generate_ed25519_key();
-        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
+        // Generate a key pair for testing using ed25519-dalek directly
+        use ed25519_dalek::{Signer, SigningKey};
+        use rand::rngs::OsRng;
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
 
         // Sign the ticket
         let ticket_bytes = serialize_session_ticket(&ticket).unwrap();
-        let signature = aura_core::ed25519_sign(&signing_key, &ticket_bytes);
+        let signature = signing_key.sign(&ticket_bytes);
 
         let current_time = 1500; // Between issued_at and expires_at
 
@@ -209,13 +207,15 @@ mod tests {
 
     #[test]
     fn test_verify_session_ticket_expired() {
-        let effects = Effects::test();
-        let ticket = create_test_ticket(&effects);
+        let ticket = create_test_ticket();
 
-        let signing_key = aura_core::generate_ed25519_key();
-        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
+        use ed25519_dalek::{Signer, SigningKey};
+        use rand::rngs::OsRng;
+
+        let signing_key = SigningKey::generate(&mut OsRng);
+        let verifying_key = signing_key.verifying_key();
         let ticket_bytes = serialize_session_ticket(&ticket).unwrap();
-        let signature = aura_core::ed25519_sign(&signing_key, &ticket_bytes);
+        let signature = signing_key.sign(&ticket_bytes);
 
         let current_time = 3000; // After expires_at
 
@@ -230,8 +230,7 @@ mod tests {
 
     #[test]
     fn test_verify_session_authorization_matching_scope() {
-        let effects = Effects::test();
-        let ticket = create_test_ticket(&effects);
+        let ticket = create_test_ticket();
 
         let required_scope = SessionScope::Dkd {
             app_id: "test-app".to_string(),
@@ -244,8 +243,7 @@ mod tests {
 
     #[test]
     fn test_verify_session_authorization_mismatched_scope() {
-        let effects = Effects::test();
-        let ticket = create_test_ticket(&effects);
+        let ticket = create_test_ticket();
 
         let required_scope = SessionScope::Dkd {
             app_id: "different-app".to_string(),
@@ -262,7 +260,6 @@ mod tests {
 
     #[test]
     fn test_scope_matches() {
-        let effects = aura_core::Effects::test();
         let dkd_scope1 = SessionScope::Dkd {
             app_id: "app1".to_string(),
             context: "ctx1".to_string(),
@@ -280,14 +277,14 @@ mod tests {
         assert!(!scope_matches(&dkd_scope1, &dkd_scope3));
 
         let recovery_scope1 = SessionScope::Recovery {
-            recovery_id: effects.gen_uuid(),
+            recovery_id: Uuid::from_bytes([3u8; 16]),
         };
-        let _recovery_scope2 = SessionScope::Recovery {
-            recovery_id: effects.gen_uuid(),
+        let recovery_scope2 = SessionScope::Recovery {
+            recovery_id: Uuid::from_bytes([4u8; 16]),
         };
 
         // Different recovery IDs should not match
+        assert!(!scope_matches(&recovery_scope1, &recovery_scope2));
         assert!(!scope_matches(&dkd_scope1, &recovery_scope1));
     }
 }
-*/

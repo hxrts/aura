@@ -150,6 +150,7 @@ Create a test script for the hello world protocol:
 use aura_macros::aura_test;
 use aura_testkit::*;
 use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AgentConfig;
 
 #[aura_test]
 async fn test_hello_world_protocol() -> aura_core::AuraResult<()> {
@@ -157,8 +158,8 @@ async fn test_hello_world_protocol() -> aura_core::AuraResult<()> {
     let fixture = create_test_fixture().await?;
 
     // Create simple effect systems for testing
-    let alice_effects = AuraEffectSystem::new();
-    let bob_effects = AuraEffectSystem::new();
+    let alice_effects = AuraEffectSystem::testing(&AgentConfig::default());
+    let bob_effects = AuraEffectSystem::testing(&AgentConfig::default());
 
     // Get device IDs for routing
     let alice_device = fixture.create_device_id();

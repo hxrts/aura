@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use aura_authenticate::{create_test_config, execute_simple_dkd, DkdProtocol};
-use aura_core::{hash, DeviceId};
+use aura_core::DeviceId;
 use aura_macros::aura_test;
 use uuid::Uuid;
 
@@ -24,7 +24,7 @@ async fn test_dkd_integration() -> Result<()> {
     let fixture = aura_testkit::create_test_fixture_with_device_id(participants[0])
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
-    let effects = fixture.effect_system();
+    let effects = aura_agent::ArcEffectSystemWrapper(fixture.effect_system());
 
     // Test parameters
     let app_id = "test_app";
@@ -76,7 +76,7 @@ async fn test_dkd_session_lifecycle() -> Result<()> {
     let fixture = aura_testkit::create_test_fixture_with_device_id(participants[0])
         .await
         .map_err(|e| anyhow::anyhow!(e))?;
-    let effects = fixture.effect_system();
+    let effects = aura_agent::ArcEffectSystemWrapper(fixture.effect_system());
 
     let config = create_test_config(2, 2);
     let mut protocol = DkdProtocol::new(config);

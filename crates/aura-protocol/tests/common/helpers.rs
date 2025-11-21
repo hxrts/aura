@@ -1,81 +1,111 @@
-//! Test helper utilities for aura-protocol tests
+//! Test helper utilities for aura-protocol tests - LEGACY
 //!
-//! This module provides common test utilities to reduce duplication across
-//! test modules and standardize test patterns.
+//! DEPRECATED: This module provides legacy test utilities that should be migrated to aura-testkit.
+//! New tests should use aura-testkit patterns instead of these custom helpers.
 //!
-//! NOTE: Many functions are disabled as they depend on modules not yet implemented.
+//! Use aura-testkit instead:
+//! - DeviceTestFixture::new(index) instead of create_test_device_id()
+//! - create_test_fixture() instead of manual ID creation
+//! - TestEffectsBuilder::for_unit_tests() instead of custom handlers
+//! - ChoreographyTestHarness for multi-device scenarios
 
-use aura_core::{AccountId, identifiers::{DeviceId, SessionId}};
+use aura_core::{
+    identifiers::{DeviceId, SessionId},
+    AccountId,
+};
 use aura_protocol::{
     handlers::CompositeHandler,
-    // Note: middleware and runtime modules not yet fully implemented
-    // middleware::{MiddlewareConfig, create_standard_stack},
-    // runtime::{ExecutionContext, ContextBuilder},
-    // effects::ProtocolEffects,
 };
 use uuid::Uuid;
 
-/// Create a test DeviceId
+// === LEGACY FUNCTIONS - Use aura-testkit equivalents instead ===
+
+/// DEPRECATED: Use DeviceTestFixture::new(0).device_id() instead
+#[deprecated(since = "0.1.0", note = "Use aura-testkit DeviceTestFixture::new(0).device_id() instead")]
 #[allow(dead_code)]
 pub fn create_test_device_id() -> DeviceId {
-    DeviceId::from(Uuid::from_u128(12345))
+    // Delegate to testkit for consistency
+    use aura_testkit::DeviceTestFixture;
+    DeviceTestFixture::new(0).device_id()
 }
 
-/// Create a second test DeviceId for multi-device tests
+/// DEPRECATED: Use DeviceTestFixture::new(1).device_id() instead  
+#[deprecated(since = "0.1.0", note = "Use aura-testkit DeviceTestFixture::new(1).device_id() instead")]
 #[allow(dead_code)]
 pub fn create_test_device_id_2() -> DeviceId {
-    DeviceId::from(Uuid::from_u128(67890))
+    // Delegate to testkit for consistency
+    use aura_testkit::DeviceTestFixture;
+    DeviceTestFixture::new(1).device_id()
 }
 
-/// Create a test SessionId
+/// DEPRECATED: Use create_test_fixture().session_id() instead
+#[deprecated(since = "0.1.0", note = "Use aura-testkit create_test_fixture().session_id() instead")]
 #[allow(dead_code)]
 pub fn create_test_session_id() -> SessionId {
-    SessionId::from(Uuid::from_u128(11111))
+    // Delegate to testkit for consistency
+    use aura_testkit::create_test_fixture;
+    create_test_fixture().session_id()
 }
 
-/// Create a test AccountId
+/// DEPRECATED: Use create_test_fixture().account_id() instead
+#[deprecated(since = "0.1.0", note = "Use aura-testkit create_test_fixture().account_id() instead")]
 #[allow(dead_code)]
 pub fn create_test_account_id() -> AccountId {
-    AccountId::from_uuid(Uuid::from_u128(22222))
+    // Delegate to testkit for consistency
+    use aura_testkit::create_test_fixture;
+    create_test_fixture().account_id()
 }
 
-/// Create a list of test participants
+/// DEPRECATED: Use DeviceTestFixture::new(i).device_id() in a loop instead
+#[deprecated(since = "0.1.0", note = "Use aura-testkit DeviceTestFixture::new(i).device_id() in a loop instead")]
 #[allow(dead_code)]
 pub fn create_test_participants(count: usize) -> Vec<DeviceId> {
+    // Delegate to testkit for consistency
+    use aura_testkit::DeviceTestFixture;
     (0..count)
-        .map(|i| DeviceId::from(Uuid::from_u128(1000 + i as u128)))
+        .map(|i| DeviceTestFixture::new(i).device_id())
         .collect()
 }
 
-/// Create a composite handler for testing
+/// DEPRECATED: Use TestEffectsBuilder::for_unit_tests() instead
+#[deprecated(since = "0.1.0", note = "Use aura-testkit TestEffectsBuilder::for_unit_tests() instead")]
 #[allow(dead_code)]
 pub fn create_test_handler() -> CompositeHandler {
-    CompositeHandler::for_testing(create_test_device_id().into())
+    use aura_testkit::DeviceTestFixture;
+    CompositeHandler::for_testing(DeviceTestFixture::new(0).device_id().into())
 }
 
-/// Create a composite handler for simulation
+/// DEPRECATED: Use TestEffectsBuilder with simulation mode instead
+#[deprecated(since = "0.1.0", note = "Use aura-testkit TestEffectsBuilder with simulation mode instead")]
 #[allow(dead_code)]
 pub fn create_simulation_handler() -> CompositeHandler {
-    CompositeHandler::for_simulation(create_test_device_id().into())
+    use aura_testkit::DeviceTestFixture;
+    CompositeHandler::for_simulation(DeviceTestFixture::new(0).device_id().into())
 }
 
-/// Create deterministic UUIDs for testing
+/// DEPRECATED: Use testkit's deterministic builders instead
+#[deprecated(since = "0.1.0", note = "Use aura-testkit's deterministic builders instead")]
 #[allow(dead_code)]
 pub fn create_deterministic_uuid(seed: u128) -> Uuid {
     Uuid::from_u128(seed + 0x1234567890abcdef)
 }
 
-/// Create test data of specified size
+/// DEPRECATED: Use testkit's data builders instead
+#[deprecated(since = "0.1.0", note = "Use aura-testkit's data builders instead")]
 #[allow(dead_code)]
 pub fn create_test_data(size: usize) -> Vec<u8> {
     (0..size).map(|i| (i % 256) as u8).collect()
 }
 
-/// Create a test keypair (returns dummy values TODO fix - For now)
+/// DEPRECATED: Use testkit's KeyTestFixture instead
+#[deprecated(since = "0.1.0", note = "Use aura-testkit's KeyTestFixture instead")]
 #[allow(dead_code)]
 pub fn create_test_keypair() -> ([u8; 32], [u8; 32]) {
-    let private_key = [0u8; 32];
-    let public_key = [1u8; 32];
+    // Delegate to testkit for proper key generation
+    use aura_testkit::builders::keys::KeyTestFixture;
+    let fixture = KeyTestFixture::from_seed_string("test_keypair");
+    let private_key = fixture.signing_key().to_bytes();
+    let public_key = fixture.verifying_key().to_bytes();
     (private_key, public_key)
 }
 

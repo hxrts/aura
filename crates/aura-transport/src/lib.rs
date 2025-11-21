@@ -57,6 +57,9 @@ pub mod types {
     pub mod envelope;
 }
 
+/// AMP ratchet helpers
+pub mod amp;
+
 /// Privacy-aware peer management
 ///
 /// This module provides peer discovery, information management, and privacy-preserving

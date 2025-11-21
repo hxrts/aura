@@ -1,55 +1,26 @@
-# Quint Property Evaluation Engine
+# Quint Integration for Aura Simulator
 
-This module provides a production-ready, high-performance property evaluation engine for real-time validation of Quint specifications against simulation state.
+This module provides Quint integration for the Aura simulator. It includes property evaluation, trace conversion, and formal verification support.
 
-## Features
+## Overview
+
+The Quint integration enables formal verification of protocol implementations through property evaluation and trace analysis. The module supports real-time property validation during simulation and bidirectional conversion between Aura traces and ITF format for external verification tools.
+
+## Property Evaluation Engine
+
+The property evaluator validates Quint specifications against simulation state in real time. It supports multiple property types including safety, liveness, invariant, temporal, security, consensus, and performance properties.
 
 ### Core Capabilities
 
-- **Real-time Property Evaluation**: Continuous evaluation of properties as simulation state changes
-- **Temporal Logic Support**: Full support for LTL/CTL temporal properties with state history tracking
-- **Multiple Property Types**: Support for safety, liveness, invariant, temporal, security, consensus, and performance properties
-- **High-Performance Caching**: LRU-based result caching with configurable eviction policies
-- **State History Management**: Efficient storage and querying of historical states for temporal properties
+The evaluator provides continuous property evaluation as simulation state changes. It maintains efficient state history for temporal properties and implements high-performance caching with LRU eviction. Properties can be evaluated in batch mode, streaming mode, or on-demand.
 
-### Evaluation Modes
+The engine supports short-circuit evaluation for early termination and parallel evaluation of independent properties. State indexing enables fast lookups by timestamp or tick for historical queries.
 
-1. **Batch Mode**: Evaluate all properties once against current state
-2. **Streaming Mode**: Continuously evaluate properties as state changes
-3. **On-Demand Mode**: Evaluate specific properties when requested
-
-### Optimization Features
-
-- **Short-circuit Evaluation**: Early termination for obvious results
-- **Parallel Evaluation**: Concurrent evaluation of independent properties
-- **Result Caching**: Avoid re-evaluation of identical states
-- **Efficient State Indexing**: Fast lookup of historical states by timestamp or tick
-
-## Architecture
-
-### Key Components
-
-1. **PropertyEvaluator**: Main evaluation engine
-2. **StateHistory**: Manages temporal state snapshots
-3. **EvaluationCache**: High-performance result caching
-4. **WorldStateAdapter**: Adapter for simulation state integration
-
-### Property Types Supported
-
-- **Invariant Properties**: Always hold in reachable states
-- **Safety Properties**: Something bad never happens
-- **Liveness Properties**: Something good eventually happens
-- **Temporal Properties**: Complex temporal logic (LTL/CTL)
-- **Security Properties**: Cryptographic and access control
-- **Consensus Properties**: Agreement and consistency
-- **Performance Properties**: Timing and resource constraints
-
-## Usage
+### Usage Example
 
 ```rust
-use aura_simulator::quint::{PropertyEvaluator, EvaluatorConfig, VerifiableProperty, PropertyType};
+use aura_simulator::quint::{PropertyEvaluator, EvaluatorConfig, VerifiableProperty};
 
-// Create evaluator with custom configuration
 let config = EvaluatorConfig {
     max_evaluation_time_ms: 5000,
     max_history_length: 1000,
@@ -59,8 +30,13 @@ let config = EvaluatorConfig {
 };
 
 let mut evaluator = PropertyEvaluator::with_config(config);
+```
 
-// Register properties for evaluation
+The example creates an evaluator with custom performance settings. The configuration specifies timeouts, history limits, and parallel execution options.
+
+### Property Registration
+
+```rust
 let property = VerifiableProperty {
     id: "safety_invariant".to_string(),
     name: "no_double_spending".to_string(),
@@ -69,100 +45,204 @@ let property = VerifiableProperty {
     description: "Ensures no double spending occurs".to_string(),
     source_location: "spec.qnt:42".to_string(),
     priority: PropertyPriority::Critical,
-    tags: vec!["safety".to_string(), "consensus".to_string()],
+    tags: vec!["safety".to_string()],
     continuous_monitoring: true,
 };
 
 evaluator.register_property(property)?;
+```
 
-// Update state and evaluate (streaming mode)
+This code registers a safety property for continuous monitoring. The evaluator tracks the property across all state transitions.
+
+### Evaluation Modes
+
+```rust
 evaluator.set_evaluation_mode(EvaluationMode::Streaming);
 let validation_result = evaluator.update_state(&world_state)?;
 
-// Or evaluate on-demand
 let result = evaluator.evaluate_all_properties(&world_state)?;
 ```
 
+Streaming mode evaluates properties continuously as state changes. On-demand mode evaluates properties only when explicitly requested.
+
+## ITF Trace Format Support
+
+The ITF (Informal Trace Format) converter enables bidirectional conversion between Aura simulation traces and ITF format. ITF is a JSON-based format used by formal verification tools like Quint.
+
+### ITF Format Structure
+
+```json
+{
+  "#meta": {
+    "format_version": "1.0",
+    "source": "aura-simulator"
+  },
+  "vars": ["state", "counter"],
+  "states": [
+    {
+      "#meta": {"index": 0},
+      "state": "init",
+      "counter": {"#bigint": "42"}
+    }
+  ]
+}
+```
+
+The format includes metadata, variable declarations, and state sequences. Each state maps variables to typed values using ITF expression types.
+
+### ITF Expression Types
+
+ITF supports primitive types including boolean, string, number, and bigint. Collection types include list, set, tuple, map, and record. Special types handle unserializable data.
+
+Primitive types represent basic values directly. Collection types use tagged JSON objects. The bigint type handles arbitrary precision integers.
+
+### Type Conversion
+
+```rust
+use aura_simulator::quint::{ItfTraceConverter};
+
+let mut converter = ItfTraceConverter::new();
+let itf_trace = converter.aura_to_itf(&execution_trace)?;
+let restored_trace = converter.itf_to_aura(&itf_trace)?;
+```
+
+The converter transforms Aura traces to ITF format and back. Type conversion preserves semantic meaning across formats.
+
+### State Mapping
+
+Aura simulation state maps to ITF variables according to fixed rules. The `tick` field maps to an ITF bigint variable. User-defined variables preserve their names and types. Protocol state becomes structured ITF records.
+
+Network state converts to ITF collections. Participant states map to ITF map structures. Message statistics become ITF records with numeric fields.
+
+### JSON Serialization
+
+```rust
+let itf_trace = converter.parse_itf_from_json(json_string)?;
+let json = converter.serialize_itf_to_json(&itf_trace, true)?;
+```
+
+The converter parses ITF from JSON strings and serializes traces back to JSON. Pretty printing is optional for human-readable output.
+
+### Validation Configuration
+
+```rust
+use aura_simulator::quint::{ItfValidationConfig};
+
+let validation_config = ItfValidationConfig {
+    validate_variable_consistency: true,
+    validate_loop_bounds: true,
+    validate_expression_types: true,
+    max_trace_length: 10000,
+    allow_unserializable: false,
+};
+
+let converter = ItfTraceConverter::with_config(
+    TraceConversionConfig::default(),
+    validation_config
+);
+```
+
+Validation ensures ITF format compliance. The configuration enables consistency checks, type validation, and bounds checking.
+
+### Error Handling
+
+```rust
+match converter.aura_to_itf(&execution_trace) {
+    Ok(itf_trace) => println!("Conversion successful"),
+    Err(ItfError::InvalidFormat(msg)) => eprintln!("Invalid format: {}", msg),
+    Err(ItfError::TypeConversion(msg)) => eprintln!("Type error: {}", msg),
+    Err(ItfError::Validation(msg)) => eprintln!("Validation error: {}", msg),
+    Err(e) => eprintln!("Other error: {}", e),
+}
+```
+
+The converter provides detailed error reporting for format violations, type mismatches, and validation failures. Each error type indicates a specific problem category.
+
 ## Configuration
+
+### Evaluator Configuration
 
 ```rust
 pub struct EvaluatorConfig {
-    /// Maximum evaluation time per property (milliseconds)
     pub max_evaluation_time_ms: u64,
-    /// Maximum state history to maintain
     pub max_history_length: usize,
-    /// Enable result caching for performance
     pub enable_caching: bool,
-    /// Cache eviction threshold
     pub cache_eviction_threshold: usize,
-    /// Enable parallel evaluation
     pub enable_parallel_evaluation: bool,
-    /// Maximum parallel threads
     pub max_parallel_threads: usize,
-    /// Enable detailed evaluation tracing
     pub enable_evaluation_tracing: bool,
-    /// Batch size for streaming evaluation
     pub stream_batch_size: usize,
-    /// Enable optimized short-circuit evaluation
     pub enable_short_circuit: bool,
 }
 ```
 
+Configuration controls evaluator behavior and performance. Timeouts prevent runaway evaluation. History limits bound memory usage. Caching and parallelization improve performance.
+
+### Conversion Configuration
+
+```rust
+TraceConversionConfig {
+    max_trace_length: 10000,
+    sampling_rate: 1.0,
+    compress_repeated_states: true,
+    include_metadata: true,
+    preserve_types: true,
+}
+```
+
+Conversion settings control trace size and fidelity. Sampling reduces trace length. Compression removes duplicate states. Type preservation maintains semantic accuracy.
+
 ## State History Management
 
-The evaluator maintains an efficient history of simulation states to support temporal property evaluation:
+The evaluator maintains chronologically ordered state snapshots for temporal property evaluation. Snapshots include timestamps, tick numbers, and variable values. Hash-based indices enable efficient lookup by timestamp or tick.
 
-```rust
-pub struct StateHistory {
-    /// Chronologically ordered state snapshots
-    snapshots: VecDeque<StateSnapshot>,
-    /// Index by timestamp for efficient lookup
-    timestamp_index: HashMap<u64, usize>,
-    /// Index by tick for range queries
-    tick_index: HashMap<u64, usize>,
-}
-```
-
-### State Snapshot Structure
-
-```rust
-pub struct StateSnapshot {
-    /// Timestamp when this snapshot was taken
-    pub timestamp: u64,
-    /// Simulation tick for this snapshot
-    pub tick: u64,
-    /// State variables at this point in time
-    pub variables: HashMap<String, QuintValue>,
-    /// Metadata about the state
-    pub metadata: HashMap<String, QuintValue>,
-    /// Hash of the state for integrity checking
-    pub state_hash: u64,
-}
-```
+History has configurable maximum length with automatic eviction of oldest entries. Each snapshot stores minimal state representation for memory efficiency. State hashes enable integrity checking and deduplication.
 
 ## Performance Optimizations
 
 ### Caching Strategy
 
-- **LRU Eviction**: Least recently used cache entries are evicted first
-- **State Hash Keys**: Cache keys based on state content hashes for precision
-- **Access Tracking**: Efficient tracking of cache access patterns
+The evaluator uses LRU eviction for result caching. Cache keys derive from state content hashes for precision. Access patterns determine eviction decisions.
 
 ### Parallel Evaluation
 
-- **Independent Properties**: Properties are evaluated concurrently when safe
-- **Thread Pool Management**: Configurable number of evaluation threads
-- **Load Balancing**: Work distribution across available threads
+Independent properties evaluate concurrently when safe. A thread pool manages evaluation threads with configurable size. Work distribution balances load across available threads.
 
 ### Memory Management
 
-- **Bounded History**: Configurable maximum history length with automatic eviction
-- **Efficient Indexing**: Hash-based indices for fast state lookup
-- **Snapshot Compression**: Minimal state representation for memory efficiency
+Bounded history prevents unbounded memory growth. Hash-based indices provide fast state lookup without full scans. Snapshot compression minimizes memory footprint per state.
+
+## Integration with Quint
+
+### Property Verification
+
+ITF traces enable property verification in Quint. Convert Aura simulation traces to ITF format. Load ITF traces in Quint verification environment. Verify temporal properties and invariants against execution traces.
+
+### Trace Analysis
+
+ITF format enables advanced trace analysis through specialized tools. Automated verification checks properties against specifications. Step-by-step debugging examines protocol execution. Regression testing compares traces across versions.
+
+## Best Practices
+
+### Variable Naming
+
+Use valid identifiers for ITF variable names. Avoid reserved keywords and special characters. Choose descriptive names that map to protocol concepts.
+
+### Type Selection
+
+Select appropriate ITF types for data representation. Prefer primitive types when possible for better tool support. Use structured types for complex data that requires organization.
+
+### Metadata Usage
+
+Include meaningful metadata for trace provenance. Add timestamps for temporal analysis. Provide source information to aid debugging.
+
+### Performance Tuning
+
+Configure sampling rate to control trace size. Enable state compression for repetitive traces. Monitor memory usage during long simulations. Adjust cache size based on evaluation patterns.
 
 ## Error Handling
 
-The evaluator provides comprehensive error handling for various failure modes:
+### Evaluation Errors
 
 ```rust
 pub enum EvaluationError {
@@ -176,18 +256,17 @@ pub enum EvaluationError {
 }
 ```
 
-## Integration with Quint Infrastructure
+Evaluation errors indicate various failure modes. Formula errors suggest invalid property syntax. Timeout errors mean evaluation exceeded time limits. State extraction errors indicate missing or malformed state data.
 
-The evaluator integrates seamlessly with the existing Quint infrastructure:
+### Common Issues
 
-- **QuintBridge**: Load properties from .qnt specification files
-- **PropertyExtractor**: Convert Quint properties to evaluatable form
-- **TraceConverter**: Convert evaluation results to Quint trace format
-- **ChaosGenerator**: Generate test scenarios targeting specific properties
+Variable inconsistency occurs when states have different variable sets. Type conversion errors arise from unsupported type combinations. Loop index errors indicate invalid ITF loop references. Large integers must use bigint to avoid overflow.
+
+### Debugging
+
+Enable detailed validation for comprehensive error reporting. Use pretty-printed JSON for manual trace inspection. Check trace completeness and variable consistency. Verify metadata integrity before processing.
 
 ## Statistics and Monitoring
-
-The evaluator provides detailed statistics for performance monitoring:
 
 ```rust
 pub struct EvaluationStatistics {
@@ -198,55 +277,17 @@ pub struct EvaluationStatistics {
     pub consistent_holds: u64,
     pub consistent_failures: u64,
     pub temporal_evaluations: u64,
-    pub invariant_evaluations: u64,
-    pub safety_evaluations: u64,
 }
 ```
 
-## Future Enhancements
-
-### Planned Features
-
-1. **True Quint Integration**: Direct integration with Quint evaluator backend
-2. **Advanced Temporal Logic**: Support for more complex temporal operators
-3. **Distributed Evaluation**: Multi-node property evaluation for large simulations
-4. **Property Dependencies**: Evaluation optimization based on property relationships
-5. **Machine Learning Integration**: Predictive property violation detection
-
-### Performance Improvements
-
-1. **SIMD Optimization**: Vectorized property evaluation where applicable
-2. **GPU Acceleration**: Parallel evaluation on GPU for massive property sets
-3. **Incremental Evaluation**: Only re-evaluate properties affected by state changes
-4. **Adaptive Caching**: Dynamic cache sizing based on evaluation patterns
-
-## Contributing
-
-When extending the evaluator:
-
-1. **Maintain Type Safety**: All property expressions should be statically validated
-2. **Preserve Performance**: New features must not degrade evaluation performance
-3. **Add Comprehensive Tests**: Include both unit and integration tests
-4. **Document Performance Characteristics**: Specify time/space complexity
-5. **Follow Error Handling Patterns**: Use consistent error types and messages
+Statistics track evaluator performance and behavior. Cache hit rate indicates caching effectiveness. Evaluation time shows performance characteristics. Failure counts identify problematic properties.
 
 ## Testing
 
-The evaluator includes comprehensive test coverage:
-
 ```bash
-# Run evaluator tests
 cargo test quint::evaluator
-
-# Run with performance profiling
 cargo test quint::evaluator --release -- --nocapture
-
-# Run specific test categories
-cargo test quint::evaluator::test_property_evaluation
-cargo test quint::evaluator::test_state_history
-cargo test quint::evaluator::test_evaluation_cache
+cargo test quint::trace_converter
 ```
 
-## License
-
-This code is part of the Aura project and follows the same licensing terms.
+The first command runs all evaluator tests with standard settings. The second runs with optimizations and full output. The third tests trace conversion functionality.
