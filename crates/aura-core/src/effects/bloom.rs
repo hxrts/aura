@@ -109,7 +109,7 @@ impl BloomFilter {
     pub fn new(config: BloomConfig) -> Result<Self, BloomError> {
         config.validate()?;
 
-        let byte_size = (config.bit_vector_size + 7) / 8; // Round up to byte boundary
+        let byte_size = config.bit_vector_size.div_ceil(8); // Round up to byte boundary
         Ok(Self {
             bits: vec![0u8; byte_size as usize],
             config,

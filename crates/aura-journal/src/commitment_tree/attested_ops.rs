@@ -39,8 +39,17 @@ impl From<TreeOp> for Fact {
             signature: op.aggregate_sig,
         };
 
+        // TODO: From trait should not generate random IDs. Consider refactoring to separate
+        // the conversion (deterministic) from ID generation (requires effect system).
+        // For now, use a deterministic placeholder based on the commitment hash.
+        let fact_id_bytes = {
+            let mut bytes = [0u8; 16];
+            bytes.copy_from_slice(&op.commitment.as_bytes()[..16]);
+            bytes
+        };
+
         Fact {
-            fact_id: FactId::new(),
+            fact_id: FactId::from_bytes(fact_id_bytes),
             // Note: authority_id removed - facts are scoped by Journal namespace
             content: FactContent::AttestedOp(attested),
         }

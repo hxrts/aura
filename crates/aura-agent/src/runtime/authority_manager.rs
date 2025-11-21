@@ -96,8 +96,16 @@ impl AuthorityManager {
             };
 
             // Create fact
+            // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
+            // For now, use deterministic ID based on authority ID and operation
+            let fact_id_bytes = {
+                let mut bytes = [0u8; 16];
+                bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
+                bytes[8] = 1; // Operation sequence marker
+                bytes
+            };
             let fact = Fact {
-                fact_id: aura_journal::fact_journal::FactId::new(),
+                fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
                 content: FactContent::AttestedOp(attested_op),
             };
 
@@ -122,8 +130,15 @@ impl AuthorityManager {
                     signature: vec![],
                 };
 
+                // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
+                let fact_id_bytes = {
+                    let mut bytes = [0u8; 16];
+                    bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
+                    bytes[8] = 2; // Operation sequence marker
+                    bytes
+                };
                 let fact = Fact {
-                    fact_id: aura_journal::fact_journal::FactId::new(),
+                    fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
                     content: FactContent::AttestedOp(attested_op),
                 };
 
@@ -202,8 +217,15 @@ impl AuthorityManager {
         };
 
         // Create fact
+        // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
+        let fact_id_bytes = {
+            let mut bytes = [0u8; 16];
+            bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
+            bytes[8] = 3; // add_device operation marker
+            bytes
+        };
         let fact = Fact {
-            fact_id: aura_journal::fact_journal::FactId::new(),
+            fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
             content: FactContent::AttestedOp(attested_op),
         };
 
@@ -253,8 +275,16 @@ impl AuthorityManager {
         };
 
         // Create fact
+        // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
+        let fact_id_bytes = {
+            let mut bytes = [0u8; 16];
+            bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
+            bytes[8] = 4; // remove_device operation marker
+            bytes[9..13].copy_from_slice(&leaf_index.to_le_bytes());
+            bytes
+        };
         let fact = Fact {
-            fact_id: aura_journal::fact_journal::FactId::new(),
+            fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
             content: FactContent::AttestedOp(attested_op),
         };
 
@@ -329,8 +359,16 @@ impl AuthorityManager {
         };
 
         // Create fact
+        // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
+        let fact_id_bytes = {
+            let mut bytes = [0u8; 16];
+            bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
+            bytes[8] = 5; // update_threshold operation marker
+            bytes[9..11].copy_from_slice(&new_threshold.to_le_bytes());
+            bytes
+        };
         let fact = Fact {
-            fact_id: aura_journal::fact_journal::FactId::new(),
+            fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
             content: FactContent::AttestedOp(attested_op),
         };
 
@@ -375,8 +413,15 @@ impl AuthorityManager {
         };
 
         // Create fact
+        // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
+        let fact_id_bytes = {
+            let mut bytes = [0u8; 16];
+            bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
+            bytes[8] = 6; // rotate_epoch operation marker
+            bytes
+        };
         let fact = Fact {
-            fact_id: aura_journal::fact_journal::FactId::new(),
+            fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
             content: FactContent::AttestedOp(attested_op),
         };
 

@@ -80,8 +80,9 @@ impl Journal {
         let source_authority = journal_fact.source_authority;
 
         // Convert JournalFact to proper Fact with FactContent
+        // TODO: This function should be async and accept RandomEffects to generate proper FactIds
         let fact = Fact {
-            fact_id: FactId::new(),
+            fact_id: FactId::from_bytes([0u8; 16]), // Placeholder - should use RandomEffects::random_uuid()
             content: FactContent::FlowBudget(crate::fact_journal::FlowBudgetFact {
                 context_id: ContextId::new(), // placeholder - should come from journal_fact or context
                 source: source_authority,

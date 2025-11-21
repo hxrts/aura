@@ -10,6 +10,12 @@
 //! - **Single-party**: Context for one operation/device at a time
 //! - **Context-free**: No assumptions about execution environment
 //!
+//! Note: This module may use `SystemTime::now()` in effect handler implementations
+//! for timestamp generation. This is legitimate as it's in the effect handler layer.
+
+// Allow disallowed methods in effect handler implementations
+#![allow(clippy::disallowed_methods)]
+
 //! # Usage
 //!
 //! ```rust,ignore

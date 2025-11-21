@@ -47,18 +47,18 @@ aura_effect_handlers! {
             get_flow_budget(context: &ContextId, peer: &AuthorityId) -> Result<FlowBudget, AuraError> => {
                 let budgets = self.flow_budgets.read().await;
                 Ok(budgets
-                    .get(&(context.clone(), *peer))
+                    .get(&(*context, *peer))
                     .copied()
                     .unwrap_or_default())
             },
             update_flow_budget(context: &ContextId, peer: &AuthorityId, budget: &FlowBudget) -> Result<FlowBudget, AuraError> => {
                 let mut budgets = self.flow_budgets.write().await;
-                budgets.insert((context.clone(), *peer), *budget);
+                budgets.insert((*context, *peer), *budget);
                 Ok(*budget)
             },
             charge_flow_budget(context: &ContextId, peer: &AuthorityId, cost: u32) -> Result<FlowBudget, AuraError> => {
                 let mut budgets = self.flow_budgets.write().await;
-                let budget_key = (context.clone(), *peer);
+                let budget_key = (*context, *peer);
                 let mut budget = budgets.get(&budget_key).copied().unwrap_or_default();
 
                 // Check headroom

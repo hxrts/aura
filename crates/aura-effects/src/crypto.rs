@@ -1,6 +1,14 @@
 //! Cryptographic Effect Handlers
 //!
 //! Provides context-free implementations of cryptographic operations.
+//!
+//! Note: This module legitimately uses cryptographic types like `sha2::Sha256`
+//! and `rand::rngs::OsRng` as it implements the CryptoEffects trait - this is
+//! the effect handler layer where actual cryptographic operations are provided.
+
+// Allow disallowed types/methods in cryptographic effect handler implementations
+#![allow(clippy::disallowed_types)]
+#![allow(clippy::disallowed_methods)]
 
 use async_trait::async_trait;
 use aura_core::crypto::{IdentityKeyContext, KeyDerivationSpec, PermissionKeyContext};
@@ -127,6 +135,12 @@ pub struct MockCryptoHandler {
     counter: Arc<Mutex<u64>>,
 }
 
+impl Default for MockCryptoHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockCryptoHandler {
     /// Create a new mock crypto handler with default seed (42)
     pub fn new() -> Self {
@@ -149,6 +163,12 @@ impl MockCryptoHandler {
 #[derive(Debug, Clone)]
 pub struct RealCryptoHandler {
     _phantom: std::marker::PhantomData<()>,
+}
+
+impl Default for RealCryptoHandler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RealCryptoHandler {
@@ -477,7 +497,7 @@ impl CryptoEffects for RealCryptoHandler {
         let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
         let mut okm = vec![0u8; output_len];
         hk.expand(info, &mut okm)
-            .map_err(|e| CryptoError::invalid(&format!("HKDF expand failed: {}", e)))?;
+            .map_err(|e| CryptoError::invalid(format!("HKDF expand failed: {}", e)))?;
 
         Ok(okm)
     }
@@ -541,7 +561,7 @@ impl CryptoEffects for RealCryptoHandler {
                 .try_into()
                 .map_err(|_| CryptoError::invalid("Invalid public key length"))?,
         )
-        .map_err(|e| CryptoError::invalid(&format!("Invalid verifying key: {}", e)))?;
+        .map_err(|e| CryptoError::invalid(format!("Invalid verifying key: {}", e)))?;
 
         let signature = Signature::from_bytes(
             signature
@@ -560,31 +580,29 @@ impl CryptoEffects for RealCryptoHandler {
         use frost_ed25519 as frost;
         use rand::rngs::OsRng;
 
-        let mut rng = OsRng;
+        let rng = OsRng;
 
         // Generate coefficients for secret sharing
         let (shares, public_key_package) = frost::keys::generate_with_dealer(
-            max_signers as u16,
-            threshold as u16,
+            max_signers,
+            threshold,
             frost::keys::IdentifierList::Default,
-            &mut rng,
+            rng,
         )
-        .map_err(|e| CryptoError::invalid(&format!("FROST key generation failed: {}", e)))?;
+        .map_err(|e| CryptoError::invalid(format!("FROST key generation failed: {}", e)))?;
 
         // Convert key shares to byte vectors
-        let key_packages: Vec<Vec<u8>> = shares
-            .iter()
-            .map(|(_, key_package)| {
+        let key_packages: Vec<Vec<u8>> = shares.values().map(|key_package| {
                 // Serialize the key package
                 bincode::serialize(key_package).map_err(|e| {
-                    CryptoError::invalid(&format!("Failed to serialize key package: {}", e))
+                    CryptoError::invalid(format!("Failed to serialize key package: {}", e))
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         // Serialize the public key package separately
         let public_key_package_bytes = bincode::serialize(&public_key_package).map_err(|e| {
-            CryptoError::invalid(&format!("Failed to serialize public key package: {}", e))
+            CryptoError::invalid(format!("Failed to serialize public key package: {}", e))
         })?;
 
         Ok(FrostKeyGenResult {
@@ -619,10 +637,10 @@ impl CryptoEffects for RealCryptoHandler {
             if let Some(&participant_id) = participants.get(i) {
                 let commitment: frost::round1::SigningCommitments =
                     bincode::deserialize(nonce_bytes).map_err(|e| {
-                        CryptoError::invalid(&format!("Invalid nonce format: {}", e))
+                        CryptoError::invalid(format!("Invalid nonce format: {}", e))
                     })?;
                 let identifier = frost::Identifier::try_from(participant_id)
-                    .map_err(|e| CryptoError::invalid(&format!("Invalid participant ID: {}", e)))?;
+                    .map_err(|e| CryptoError::invalid(format!("Invalid participant ID: {}", e)))?;
                 commitments.insert(identifier, commitment);
             }
         }
@@ -630,7 +648,7 @@ impl CryptoEffects for RealCryptoHandler {
         // Create signing package
         let package = frost::SigningPackage::new(commitments, message);
         let package_bytes = bincode::serialize(&package).map_err(|e| {
-            CryptoError::invalid(&format!("Failed to serialize signing package: {}", e))
+            CryptoError::invalid(format!("Failed to serialize signing package: {}", e))
         })?;
 
         Ok(FrostSigningPackage {
@@ -651,21 +669,21 @@ impl CryptoEffects for RealCryptoHandler {
 
         // Deserialize components
         let signing_package: frost::SigningPackage = bincode::deserialize(&package.package)
-            .map_err(|e| CryptoError::invalid(&format!("Invalid signing package: {}", e)))?;
+            .map_err(|e| CryptoError::invalid(format!("Invalid signing package: {}", e)))?;
 
         let key_package: frost::keys::KeyPackage = bincode::deserialize(key_share)
-            .map_err(|e| CryptoError::invalid(&format!("Invalid key share: {}", e)))?;
+            .map_err(|e| CryptoError::invalid(format!("Invalid key share: {}", e)))?;
 
         let signing_nonces: frost::round1::SigningNonces = bincode::deserialize(nonces)
-            .map_err(|e| CryptoError::invalid(&format!("Invalid signing nonces: {}", e)))?;
+            .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces: {}", e)))?;
 
         // Create signature share
         let signature_share = frost::round2::sign(&signing_package, &signing_nonces, &key_package)
-            .map_err(|e| CryptoError::invalid(&format!("FROST signing failed: {}", e)))?;
+            .map_err(|e| CryptoError::invalid(format!("FROST signing failed: {}", e)))?;
 
         // Serialize result
         bincode::serialize(&signature_share).map_err(|e| {
-            CryptoError::invalid(&format!("Failed to serialize signature share: {}", e))
+            CryptoError::invalid(format!("Failed to serialize signature share: {}", e))
         })
     }
 
@@ -679,12 +697,12 @@ impl CryptoEffects for RealCryptoHandler {
 
         // Deserialize signing package
         let signing_package: frost::SigningPackage = bincode::deserialize(&package.package)
-            .map_err(|e| CryptoError::invalid(&format!("Invalid signing package: {}", e)))?;
+            .map_err(|e| CryptoError::invalid(format!("Invalid signing package: {}", e)))?;
 
         // Deserialize public key package
         let pubkey_package: frost::keys::PublicKeyPackage =
             bincode::deserialize(&package.public_key_package)
-                .map_err(|e| CryptoError::invalid(&format!("Invalid public key package: {}", e)))?;
+                .map_err(|e| CryptoError::invalid(format!("Invalid public key package: {}", e)))?;
 
         // Deserialize signature shares
         let mut shares = BTreeMap::new();
@@ -692,17 +710,17 @@ impl CryptoEffects for RealCryptoHandler {
             if let Some(&participant_id) = package.participants.get(i) {
                 let signature_share: frost::round2::SignatureShare =
                     bincode::deserialize(share_bytes).map_err(|e| {
-                        CryptoError::invalid(&format!("Invalid signature share: {}", e))
+                        CryptoError::invalid(format!("Invalid signature share: {}", e))
                     })?;
                 let identifier = frost::Identifier::try_from(participant_id)
-                    .map_err(|e| CryptoError::invalid(&format!("Invalid participant ID: {}", e)))?;
+                    .map_err(|e| CryptoError::invalid(format!("Invalid participant ID: {}", e)))?;
                 shares.insert(identifier, signature_share);
             }
         }
 
         // Aggregate signatures using the proper FROST API with PublicKeyPackage
         let group_signature = frost::aggregate(&signing_package, &shares, &pubkey_package)
-            .map_err(|e| CryptoError::invalid(&format!("FROST aggregation failed: {}", e)))?;
+            .map_err(|e| CryptoError::invalid(format!("FROST aggregation failed: {}", e)))?;
 
         // Serialize the resulting signature
         Ok(group_signature.serialize().to_vec())
@@ -721,14 +739,14 @@ impl CryptoEffects for RealCryptoHandler {
             .try_into()
             .map_err(|_| CryptoError::invalid("Invalid signature length"))?;
         let frost_signature = frost::Signature::deserialize(signature_array)
-            .map_err(|e| CryptoError::invalid(&format!("Invalid FROST signature: {}", e)))?;
+            .map_err(|e| CryptoError::invalid(format!("Invalid FROST signature: {}", e)))?;
 
         // Parse group public key using deserialize
         let pubkey_array: [u8; 32] = group_public_key
             .try_into()
             .map_err(|_| CryptoError::invalid("Invalid group public key length"))?;
         let verifying_key = frost::VerifyingKey::deserialize(pubkey_array)
-            .map_err(|e| CryptoError::invalid(&format!("Invalid group public key: {}", e)))?;
+            .map_err(|e| CryptoError::invalid(format!("Invalid group public key: {}", e)))?;
 
         // Verify signature
         Ok(verifying_key.verify(message, &frost_signature).is_ok())
@@ -786,7 +804,7 @@ impl CryptoEffects for RealCryptoHandler {
 
         cipher
             .encrypt(nonce, plaintext)
-            .map_err(|e| CryptoError::invalid(&format!("AES-GCM encryption failed: {}", e)))
+            .map_err(|e| CryptoError::invalid(format!("AES-GCM encryption failed: {}", e)))
     }
 
     async fn aes_gcm_decrypt(
@@ -803,7 +821,7 @@ impl CryptoEffects for RealCryptoHandler {
 
         cipher
             .decrypt(nonce, ciphertext)
-            .map_err(|e| CryptoError::invalid(&format!("AES-GCM decryption failed: {}", e)))
+            .map_err(|e| CryptoError::invalid(format!("AES-GCM decryption failed: {}", e)))
     }
 
     async fn frost_rotate_keys(

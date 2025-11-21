@@ -100,7 +100,7 @@ impl TcpTransportHandler {
 
     /// Send data over TCP stream
     pub async fn send(&self, stream: &mut TcpStream, data: &[u8]) -> TransportResult<usize> {
-        let _ = timeout(self.config.write_timeout, stream.write_all(data))
+        timeout(self.config.write_timeout, stream.write_all(data))
             .await
             .map_err(|_| TransportError::Timeout("TCP write timeout".to_string()))?
             .map_err(TransportError::Io)?;

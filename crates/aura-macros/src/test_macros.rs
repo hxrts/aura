@@ -38,7 +38,7 @@ pub fn aura_test_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
     // Check if function is async
     if sig.asyncness.is_none() {
         return syn::Error::new_spanned(
-            &sig.fn_token,
+            sig.fn_token,
             "#[aura_test] can only be used on async functions",
         )
         .to_compile_error()

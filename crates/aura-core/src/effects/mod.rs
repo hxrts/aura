@@ -127,9 +127,12 @@ pub use crate::AuraError;
 ///
 /// This enum controls which implementations of effect handlers are used throughout
 /// the entire Aura system, from testing to production deployments.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
+)]
 pub enum ExecutionMode {
     /// Testing mode: Mock implementations, deterministic behavior
+    #[default]
     Testing,
     /// Production mode: Real implementations, actual system operations
     Production,
@@ -157,11 +160,5 @@ impl ExecutionMode {
             Self::Simulation { seed } => Some(*seed),
             _ => None,
         }
-    }
-}
-
-impl Default for ExecutionMode {
-    fn default() -> Self {
-        Self::Testing
     }
 }

@@ -6,11 +6,27 @@
 
 use crate::{identifiers::AuthorityId, Hash32, Result};
 use async_trait::async_trait;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 // Type aliases for authority operations
 type PublicKey = ed25519_dalek::VerifyingKey;
 type Signature = ed25519_dalek::Signature;
+
+/// Fallback public key for placeholder tree state
+///
+/// This is a known valid Ed25519 public key used as a fallback when
+/// key derivation from commitment bytes fails. This is temporary code
+/// until proper tree-based key derivation is implemented.
+static FALLBACK_PUBLIC_KEY: LazyLock<PublicKey> = LazyLock::new(|| {
+    // Using Ed25519 basepoint as a valid public key
+    const VALID_PUBKEY_BYTES: [u8; 32] = [
+        0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+        0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
+        0x66, 0x66,
+    ];
+    PublicKey::from_bytes(&VALID_PUBKEY_BYTES)
+        .expect("Hard-coded valid Ed25519 public key should parse successfully")
+});
 
 /// Authority trait representing an opaque cryptographic actor
 ///
@@ -97,8 +113,7 @@ impl TreeState {
         let mut key_bytes = [0u8; 32];
         key_bytes[..std::cmp::min(32, bytes.len())]
             .copy_from_slice(&bytes[..std::cmp::min(32, bytes.len())]);
-        PublicKey::from_bytes(&key_bytes)
-            .unwrap_or_else(|_| PublicKey::from_bytes(&[0; 32]).unwrap())
+        PublicKey::from_bytes(&key_bytes).unwrap_or(*FALLBACK_PUBLIC_KEY)
     }
 
     /// Get the root commitment hash for the current tree state

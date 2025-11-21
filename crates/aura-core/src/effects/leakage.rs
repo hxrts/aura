@@ -117,6 +117,10 @@ pub trait LeakageEffects: Send + Sync {
 #[async_trait]
 pub trait LeakageChoreographyExt: LeakageEffects {
     /// Record leakage for a send operation
+    ///
+    /// # Arguments
+    /// * `timestamp_ms` - Current timestamp in milliseconds since UNIX epoch.
+    ///   Should be obtained from `TimeEffects` to maintain effect system boundaries.
     async fn record_send_leakage(
         &self,
         source: AuthorityId,
@@ -124,6 +128,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
         context_id: ContextId,
         flow_cost: u64,
         observer_classes: &[ObserverClass],
+        timestamp_ms: u64,
     ) -> Result<()> {
         for observer in observer_classes {
             let event = LeakageEvent {
@@ -133,10 +138,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
                 leakage_amount: flow_cost,
                 observer_class: *observer,
                 operation: "send".to_string(),
-                timestamp_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64,
+                timestamp_ms,
             };
             self.record_leakage(event).await?;
         }
@@ -144,6 +146,10 @@ pub trait LeakageChoreographyExt: LeakageEffects {
     }
 
     /// Record leakage for a receive operation
+    ///
+    /// # Arguments
+    /// * `timestamp_ms` - Current timestamp in milliseconds since UNIX epoch.
+    ///   Should be obtained from `TimeEffects` to maintain effect system boundaries.
     async fn record_recv_leakage(
         &self,
         source: AuthorityId,
@@ -151,6 +157,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
         context_id: ContextId,
         flow_cost: u64,
         observer_classes: &[ObserverClass],
+        timestamp_ms: u64,
     ) -> Result<()> {
         for observer in observer_classes {
             let event = LeakageEvent {
@@ -160,10 +167,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
                 leakage_amount: flow_cost,
                 observer_class: *observer,
                 operation: "recv".to_string(),
-                timestamp_ms: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64,
+                timestamp_ms,
             };
             self.record_leakage(event).await?;
         }

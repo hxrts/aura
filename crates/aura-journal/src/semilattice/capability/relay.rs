@@ -28,8 +28,10 @@ pub struct RelayCapability {
 
 /// Policy for how flow budgets decay over time
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum BudgetDecayPolicy {
     /// No decay - budget remains constant until manually reset
+    #[default]
     NoDecay,
     /// Linear decay over time
     LinearDecay {
@@ -45,11 +47,6 @@ pub enum BudgetDecayPolicy {
     },
 }
 
-impl Default for BudgetDecayPolicy {
-    fn default() -> Self {
-        Self::NoDecay
-    }
-}
 
 impl RelayCapability {
     /// Create new relay capability
@@ -172,9 +169,9 @@ impl RelayCapability {
 
         // Take the more restrictive flow budget (lower limit)
         let flow_budget = if self.flow_budget.limit <= other.flow_budget.limit {
-            self.flow_budget.clone()
+            self.flow_budget
         } else {
-            other.flow_budget.clone()
+            other.flow_budget
         };
 
         // Take the more restrictive concurrent streams limit

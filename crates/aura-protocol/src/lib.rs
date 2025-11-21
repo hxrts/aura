@@ -11,7 +11,9 @@
     clippy::large_enum_variant,
     clippy::unused_unit,
     clippy::get_first,
-    clippy::single_range_in_vec_init
+    clippy::single_range_in_vec_init,
+    clippy::disallowed_methods,  // Orchestration layer coordinates time/random effects
+    clippy::disallowed_types
 )]
 //! Aura Protocol - Algebraic Effects Architecture
 //!

@@ -247,6 +247,12 @@ pub struct StorageAuthorizationHandler {
     auth_handler: StandardAuthorizationHandler,
 }
 
+impl Default for StorageAuthorizationHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StorageAuthorizationHandler {
     /// Create a new storage authorization handler
     pub fn new() -> Self {
@@ -308,6 +314,12 @@ impl AuthorizationEffects for StorageAuthorizationHandler {
 pub struct TreeAuthorizationHandler {
     /// Underlying authorization handler
     auth_handler: StandardAuthorizationHandler,
+}
+
+impl Default for TreeAuthorizationHandler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TreeAuthorizationHandler {
