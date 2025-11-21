@@ -12,16 +12,15 @@
 
 use aura_core::{ContextId, identifiers::DeviceId};
 use aura_macros::choreography;
-use aura_protocol::{
-    prelude::*,
-    transport_coordination::{
-        ChannelEstablishmentCoordinator, ChoreographicConfig, ChoreographicError,
-        ReceiptVerificationCoordinator, WebSocketHandshakeCoordinator,
-    },
+use aura_protocol::transport::{
+    ChannelEstablishmentCoordinator, ChoreographicConfig,
+    WebSocketHandshakeCoordinator,
 };
-use aura_transport::{
-    protocols::{HolePunchMessage, WebSocketMessage},
-    PrivacyLevel, TransportConfig,
+use aura_protocol::transport::channel_management::{
+    AllocatedResources, ChannelConfirmation, ChannelType, ConfirmationResult,
+};
+use aura_protocol::transport::websocket::{
+    WebSocketHandshakeInit, WebSocketHandshakeResponse, WebSocketHandshakeResult,
 };
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -36,10 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Example 2: Channel establishment choreography
     channel_establishment_example().await?;
 
-    // Example 3: Receipt verification choreography
-    receipt_verification_example().await?;
-
-    // Example 4: Custom choreographic transport protocol
+    // Example 3: Custom choreographic transport protocol
     custom_protocol_example().await?;
 
     Ok(())
@@ -50,19 +46,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>> {
     println!("🤝 Example 1: WebSocket Handshake Choreography\n");
 
-    let initiator_id = DeviceId::new();
-    let responder_id = DeviceId::new();
+    let initiator_id = DeviceId::from_bytes([1u8; 32]);
+    let responder_id = DeviceId::from_bytes([2u8; 32]);
     let context_id = ContextId::new();
 
     // Create choreographic configuration
     let choreo_config = ChoreographicConfig {
+        execution_timeout: std::time::Duration::from_secs(30),
         max_concurrent_protocols: 10,
-        protocol_timeout: std::time::Duration::from_secs(30),
+        default_flow_budget: 1000,
         required_capabilities: vec![
             "websocket_handshake".to_string(),
             "capability_negotiation".to_string(),
         ],
-        extension_registry: Default::default(),
     };
 
     // Create coordinators for both roles
@@ -72,8 +68,8 @@ async fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>>
     let mut responder_coordinator = WebSocketHandshakeCoordinator::new(responder_id, choreo_config);
 
     println!("Created choreographic coordinators:");
-    println!("  Initiator: {}", initiator_id.to_hex()[..8].to_string());
-    println!("  Responder: {}", responder_id.to_hex()[..8].to_string());
+    println!("  Initiator: {:?}", &initiator_id.to_bytes().unwrap()[..4]);
+    println!("  Responder: {:?}", &responder_id.to_bytes().unwrap()[..4]);
 
     // Initiate handshake (choreographic coordination)
     let session_id = initiator_coordinator.initiate_handshake(
@@ -85,7 +81,7 @@ async fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>>
     println!("\nHandshake initiated with session: {}", &session_id[..16]);
 
     // Simulate choreographic message exchange
-    let handshake_init = aura_transport::protocols::websocket::WebSocketHandshakeInit {
+    let handshake_init = WebSocketHandshakeInit {
         session_id: session_id.clone(),
         initiator_id,
         websocket_url: "wss://relay.example.com/handshake".to_string(),
@@ -100,12 +96,12 @@ async fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>>
     println!("  Capabilities: {:?}", handshake_init.capabilities);
 
     // Simulate successful handshake response
-    let handshake_response = aura_transport::protocols::websocket::WebSocketHandshakeResponse {
+    let handshake_response = WebSocketHandshakeResponse {
         session_id: session_id.clone(),
         responder_id,
         accepted_protocols: vec!["aura-v1".to_string()],
         granted_capabilities: vec!["secure_messaging".to_string()],
-        handshake_result: aura_transport::protocols::websocket::WebSocketHandshakeResult::Success,
+        handshake_result: WebSocketHandshakeResult::Success,
     };
 
     // Process response through choreographic coordinator
@@ -123,34 +119,31 @@ async fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>>
 async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔗 Example 2: Channel Establishment Choreography\n");
 
-    let coordinator_id = DeviceId::new();
-    let participant1_id = DeviceId::new();
-    let participant2_id = DeviceId::new();
+    let coordinator_id = DeviceId::from_bytes([10u8; 32]);
+    let participant1_id = DeviceId::from_bytes([11u8; 32]);
+    let participant2_id = DeviceId::from_bytes([12u8; 32]);
     let context_id = ContextId::new();
 
     let choreo_config = ChoreographicConfig {
+        execution_timeout: std::time::Duration::from_secs(60),
         max_concurrent_protocols: 5,
-        protocol_timeout: std::time::Duration::from_secs(60),
+        default_flow_budget: 2000,
         required_capabilities: vec![
             "channel_establishment".to_string(),
             "resource_allocation".to_string(),
         ],
-        extension_registry: Default::default(),
     };
 
     let mut coordinator = ChannelEstablishmentCoordinator::new(coordinator_id, choreo_config);
 
     println!("Channel establishment coordinator created");
-    println!(
-        "  Coordinator: {}",
-        coordinator_id.to_hex()[..8].to_string()
-    );
+    println!("  Coordinator: {:?}", &coordinator_id.to_bytes().unwrap()[..4]);
     println!("  Participants: {} peers", 2);
 
     // Initiate choreographic channel establishment
     let channel_id = coordinator.initiate_establishment(
         vec![participant1_id, participant2_id],
-        aura_transport::protocols::websocket::ChannelType::SecureMessaging,
+        ChannelType::SecureMessaging,
         context_id,
     )?;
 
@@ -158,11 +151,11 @@ async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error
     println!("  Channel ID: {}", &channel_id[..16]);
 
     // Simulate choreographic confirmations from participants
-    let confirmation1 = aura_transport::protocols::websocket::ChannelConfirmation {
+    let confirmation1 = ChannelConfirmation {
         channel_id: channel_id.clone(),
         participant_id: participant1_id,
-        confirmation_result: aura_transport::protocols::websocket::ConfirmationResult::Confirmed,
-        allocated_resources: aura_transport::protocols::websocket::AllocatedResources {
+        confirmation_result: ConfirmationResult::Confirmed,
+        allocated_resources: AllocatedResources {
             bandwidth_allocated: 100,
             storage_allocated: 1024,
             cpu_allocated: 2,
@@ -171,11 +164,11 @@ async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error
         timestamp: SystemTime::now(),
     };
 
-    let confirmation2 = aura_transport::protocols::websocket::ChannelConfirmation {
+    let confirmation2 = ChannelConfirmation {
         channel_id: channel_id.clone(),
         participant_id: participant2_id,
-        confirmation_result: aura_transport::protocols::websocket::ConfirmationResult::Confirmed,
-        allocated_resources: aura_transport::protocols::websocket::AllocatedResources {
+        confirmation_result: ConfirmationResult::Confirmed,
+        allocated_resources: AllocatedResources {
             bandwidth_allocated: 100,
             storage_allocated: 1024,
             cpu_allocated: 1,
@@ -200,98 +193,10 @@ async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
-/// Example 3: Receipt verification choreography
-/// Shows anti-replay protection and consensus building
-async fn receipt_verification_example() -> Result<(), Box<dyn std::error::Error>> {
-    println!("📋 Example 3: Receipt Verification Choreography\n");
-
-    let coordinator_id = DeviceId::new();
-    let verifier1_id = DeviceId::new();
-    let verifier2_id = DeviceId::new();
-    let context_id = ContextId::new();
-
-    let choreo_config = ChoreographicConfig {
-        max_concurrent_protocols: 15,
-        protocol_timeout: std::time::Duration::from_secs(45),
-        required_capabilities: vec![
-            "receipt_verification".to_string(),
-            "anti_replay_protection".to_string(),
-        ],
-        extension_registry: Default::default(),
-    };
-
-    let mut coordinator = ReceiptVerificationCoordinator::new(coordinator_id, choreo_config);
-
-    println!("Receipt verification coordinator created");
-    println!(
-        "  Coordinator: {}",
-        coordinator_id.to_hex()[..8].to_string()
-    );
-    println!("  Verifiers: 2 participants");
-
-    // Create receipt data for verification
-    let receipt_data = aura_transport::protocols::websocket::ReceiptData {
-        receipt_id: "receipt-001".to_string(),
-        sender_id: DeviceId::new(),
-        recipient_id: DeviceId::new(),
-        message_hash: vec![0x01, 0x02, 0x03, 0x04],
-        signature: vec![0xAA, 0xBB, 0xCC, 0xDD],
-        timestamp: SystemTime::now(),
-        context_id,
-    };
-
-    // Initiate choreographic receipt verification
-    let verification_id =
-        coordinator.initiate_verification(receipt_data, vec![verifier1_id, verifier2_id])?;
-
-    println!("\nMulti-party receipt verification initiated:");
-    println!("  Verification ID: {}", &verification_id[..16]);
-
-    // Simulate choreographic verification responses
-    let response1 = aura_transport::protocols::websocket::ReceiptVerificationResponse {
-        verification_id: verification_id.clone(),
-        verifier_id: verifier1_id,
-        verification_result: aura_transport::protocols::websocket::VerificationOutcome::Valid {
-            confidence: 95,
-        },
-        verification_proof: vec![0x11, 0x22, 0x33],
-        anti_replay_token: vec![0x44, 0x55, 0x66],
-        timestamp: SystemTime::now(),
-    };
-
-    let response2 = aura_transport::protocols::websocket::ReceiptVerificationResponse {
-        verification_id: verification_id.clone(),
-        verifier_id: verifier2_id,
-        verification_result: aura_transport::protocols::websocket::VerificationOutcome::Valid {
-            confidence: 88,
-        },
-        verification_proof: vec![0x77, 0x88, 0x99],
-        anti_replay_token: vec![0xAA, 0xBB, 0xCC],
-        timestamp: SystemTime::now(),
-    };
-
-    // Process responses through choreographic coordinator
-    let sufficient1 = coordinator.process_verification_response(response1)?;
-    let sufficient2 = coordinator.process_verification_response(response2)?;
-
-    // Build consensus through choreographic protocol
-    let consensus = coordinator.build_consensus(&verification_id)?;
-
-    println!("Choreographic verification completed:");
-    println!("  Sufficient responses: {}", sufficient1 && sufficient2);
-    println!("  Consensus result: {:?}", consensus);
-
-    println!("\nMulti-party receipt verification with anti-replay protection");
-    println!("Consensus building through choreographic coordination");
-    println!("Session types ensure correct verification workflow\n");
-
-    Ok(())
-}
-
-/// Example 4: Custom choreographic transport protocol
+/// Example 3: Custom choreographic transport protocol
 /// Shows how to define custom choreographic protocols using aura-macros
 async fn custom_protocol_example() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🎭 Example 4: Custom Choreographic Transport Protocol\n");
+    println!("🎭 Example 3: Custom Choreographic Transport Protocol\n");
 
     println!("Defining custom choreographic protocol with aura-macros:");
     println!("```rust");
