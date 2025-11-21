@@ -5,6 +5,7 @@
 //! CRDT using set union for convergence.
 
 use aura_core::{
+    effects::RandomEffects,
     identifiers::{AuthorityId, ContextId},
     semilattice::JoinSemilattice,
     Hash32, Result,
@@ -126,6 +127,26 @@ impl Journal {
 pub struct FactId(pub uuid::Uuid);
 
 impl FactId {
+    /// Generate a new random FactId using the effect system
+    ///
+    /// This is the preferred method for creating FactIds in production code.
+    /// It uses RandomEffects to ensure deterministic testing and proper effect boundaries.
+    ///
+    /// # Example
+    /// ```ignore
+    /// use aura_core::effects::RandomEffects;
+    /// use aura_journal::FactId;
+    ///
+    /// async fn create_fact(random: &dyn RandomEffects) {
+    ///     let fact_id = FactId::generate(random).await;
+    ///     // use fact_id...
+    /// }
+    /// ```
+    pub async fn generate(random: &dyn RandomEffects) -> Self {
+        let uuid = random.random_uuid().await;
+        Self(uuid)
+    }
+
     /// Create a FactId from a UUID
     ///
     /// The UUID should be obtained from `RandomEffects::random_uuid()` to maintain

@@ -4,10 +4,10 @@
 //! derived from fact-based journals. Persistence hooks are intentionally no-ops
 //! until the storage layer lands; callers can still exercise the API in tests.
 
-use aura_core::{AuraError, Authority, AuthorityId, ContextId, Result};
+use aura_core::{effects::RandomEffects, AuraError, Authority, AuthorityId, ContextId, Result};
 use aura_journal::{
     authority_state::DerivedAuthority,
-    fact_journal::{Journal, JournalNamespace},
+    fact_journal::{FactId, Journal, JournalNamespace},
 };
 use aura_relational::RelationalContext;
 use std::{collections::HashMap, sync::Arc};
@@ -61,8 +61,14 @@ impl AuthorityManager {
     ///
     /// If initial_device_key is empty, creates an authority with no devices.
     /// The threshold parameter is only applied if an initial device is provided.
+    ///
+    /// # Arguments
+    /// * `random` - RandomEffects for generating fact IDs
+    /// * `initial_device_key` - Optional initial device public key
+    /// * `threshold` - Signature threshold (only used if initial_device_key provided)
     pub async fn create_authority(
         &mut self,
+        random: &dyn RandomEffects,
         initial_device_key: Vec<u8>,
         threshold: u16,
     ) -> Result<AuthorityId> {
@@ -95,17 +101,9 @@ impl AuthorityManager {
                 signature: vec![],
             };
 
-            // Create fact
-            // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
-            // For now, use deterministic ID based on authority ID and operation
-            let fact_id_bytes = {
-                let mut bytes = [0u8; 16];
-                bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
-                bytes[8] = 1; // Operation sequence marker
-                bytes
-            };
+            // Create fact with proper random ID from effect system
             let fact = Fact {
-                fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
+                fact_id: FactId::generate(random).await,
                 content: FactContent::AttestedOp(attested_op),
             };
 
@@ -130,15 +128,9 @@ impl AuthorityManager {
                     signature: vec![],
                 };
 
-                // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
-                let fact_id_bytes = {
-                    let mut bytes = [0u8; 16];
-                    bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
-                    bytes[8] = 2; // Operation sequence marker
-                    bytes
-                };
+                // Create fact with proper random ID from effect system
                 let fact = Fact {
-                    fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
+                    fact_id: FactId::generate(random).await,
                     content: FactContent::AttestedOp(attested_op),
                 };
 
@@ -182,6 +174,7 @@ impl AuthorityManager {
     /// Add device to authority
     pub async fn add_device_to_authority(
         &mut self,
+        random: &dyn RandomEffects,
         authority_id: AuthorityId,
         device_public_key: Vec<u8>,
     ) -> Result<()> {
@@ -216,16 +209,9 @@ impl AuthorityManager {
             signature: vec![],    // Empty signature for now
         };
 
-        // Create fact
-        // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
-        let fact_id_bytes = {
-            let mut bytes = [0u8; 16];
-            bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
-            bytes[8] = 3; // add_device operation marker
-            bytes
-        };
+        // Create fact with proper random ID from effect system
         let fact = Fact {
-            fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
+            fact_id: FactId::generate(random).await,
             content: FactContent::AttestedOp(attested_op),
         };
 
@@ -241,6 +227,7 @@ impl AuthorityManager {
     /// Remove device from authority
     pub async fn remove_device_from_authority(
         &mut self,
+        random: &dyn RandomEffects,
         authority_id: AuthorityId,
         leaf_index: u32,
     ) -> Result<()> {
@@ -274,17 +261,9 @@ impl AuthorityManager {
             signature: vec![],    // Empty signature for now
         };
 
-        // Create fact
-        // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
-        let fact_id_bytes = {
-            let mut bytes = [0u8; 16];
-            bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
-            bytes[8] = 4; // remove_device operation marker
-            bytes[9..13].copy_from_slice(&leaf_index.to_le_bytes());
-            bytes
-        };
+        // Create fact with proper random ID from effect system
         let fact = Fact {
-            fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
+            fact_id: FactId::generate(random).await,
             content: FactContent::AttestedOp(attested_op),
         };
 
@@ -300,6 +279,7 @@ impl AuthorityManager {
     /// Update authority threshold policy
     pub async fn update_authority_threshold(
         &mut self,
+        random: &dyn RandomEffects,
         authority_id: AuthorityId,
         new_threshold: u16,
     ) -> Result<()> {
@@ -358,17 +338,9 @@ impl AuthorityManager {
             signature: vec![],    // Empty signature for now
         };
 
-        // Create fact
-        // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
-        let fact_id_bytes = {
-            let mut bytes = [0u8; 16];
-            bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
-            bytes[8] = 5; // update_threshold operation marker
-            bytes[9..11].copy_from_slice(&new_threshold.to_le_bytes());
-            bytes
-        };
+        // Create fact with proper random ID from effect system
         let fact = Fact {
-            fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
+            fact_id: FactId::generate(random).await,
             content: FactContent::AttestedOp(attested_op),
         };
 
@@ -382,7 +354,11 @@ impl AuthorityManager {
     }
 
     /// Rotate authority epoch (invalidates old shares)
-    pub async fn rotate_authority_epoch(&mut self, authority_id: AuthorityId) -> Result<()> {
+    pub async fn rotate_authority_epoch(
+        &mut self,
+        random: &dyn RandomEffects,
+        authority_id: AuthorityId,
+    ) -> Result<()> {
         // Get the authority journal for this authority
         let journal = self
             .authority_journals
@@ -412,16 +388,9 @@ impl AuthorityManager {
             signature: vec![],    // Empty signature for now
         };
 
-        // Create fact
-        // TODO: Should use RandomEffects::random_uuid() for proper random FactIds
-        let fact_id_bytes = {
-            let mut bytes = [0u8; 16];
-            bytes[..8].copy_from_slice(&authority_id.to_bytes()[..8]);
-            bytes[8] = 6; // rotate_epoch operation marker
-            bytes
-        };
+        // Create fact with proper random ID from effect system
         let fact = Fact {
-            fact_id: aura_journal::fact_journal::FactId::from_bytes(fact_id_bytes),
+            fact_id: FactId::generate(random).await,
             content: FactContent::AttestedOp(attested_op),
         };
 
@@ -478,13 +447,18 @@ impl SharedAuthorityManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_effects::random::MockRandomHandler;
 
     #[tokio::test]
     async fn test_authority_creation() {
         let mut manager = AuthorityManager::new("/tmp/test".to_string());
+        let random = MockRandomHandler::new_with_seed(42);
 
         let device_key = vec![1, 2, 3, 4]; // Mock public key
-        let authority_id = manager.create_authority(device_key, 2).await.unwrap();
+        let authority_id = manager
+            .create_authority(&random, device_key, 2)
+            .await
+            .unwrap();
 
         assert!(!authority_id.to_bytes().is_empty());
         assert_eq!(manager.list_authorities().len(), 1);
