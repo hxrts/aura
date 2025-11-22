@@ -1,5 +1,3 @@
-#![allow(clippy::disallowed_methods)] // TODO: Replace direct UUID calls with effect system
-
 use crate::effects::sync::{BloomDigest, SyncEffects, SyncError};
 use async_trait::async_trait;
 use aura_core::{tree::AttestedOp, Hash32};
@@ -287,7 +285,7 @@ mod tests {
         };
         let handler = BroadcasterHandler::new(config);
 
-        let peer1 = Uuid::new_v4();
+        let peer1 = Uuid::from_u128(1);
         handler.add_peer(peer1).await;
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -319,7 +317,7 @@ mod tests {
         };
         let handler = BroadcasterHandler::new(config);
 
-        let peer1 = Uuid::new_v4();
+        let peer1 = Uuid::from_u128(1);
         handler.add_peer(peer1).await;
 
         // Push 3 ops - third should be queued due to rate limit
@@ -368,7 +366,7 @@ mod tests {
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
 
-        let peer_id = Uuid::new_v4();
+        let peer_id = Uuid::from_u128(1);
         let retrieved = handler
             .lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32]))
             .await;
@@ -391,7 +389,7 @@ mod tests {
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op).await;
 
-        let peer_id = Uuid::new_v4();
+        let peer_id = Uuid::from_u128(1);
         let result = handler
             .lazy_pull_response(peer_id, aura_core::Hash32([1u8; 32]))
             .await;
@@ -403,7 +401,7 @@ mod tests {
     async fn test_announce_new_op() {
         let handler = BroadcasterHandler::new(BroadcastConfig::default());
 
-        let peer1 = Uuid::new_v4();
+        let peer1 = Uuid::from_u128(1);
         handler.add_peer(peer1).await;
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -438,7 +436,7 @@ mod tests {
         };
         let handler = BroadcasterHandler::new(config);
 
-        let peer1 = Uuid::new_v4();
+        let peer1 = Uuid::from_u128(1);
         handler.add_peer(peer1).await;
 
         // Hit rate limit
