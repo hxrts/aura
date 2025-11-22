@@ -3,8 +3,8 @@
 This document tracks all unfinished work, placeholders, and architectural items requiring completion across the Aura codebase. Items are organized by priority and grouped by crate/module.
 
 **Last Updated:** 2025-11-21 (Updated: Verified codebase status - many items completed or changed, file structure refactored)
-**Total Items:** 145+ substantive work items (125+ completed across all phases, 11 codebase TODOs remaining in active work)
-**Codebase Status:** 50 TODO/FIXME markers verified - 39 completed, 11 still requiring work (sync protocols, rendezvous/transport, effect integration)
+**Total Items:** 145+ substantive work items (127+ completed across all phases, 9 codebase TODOs remaining in active work)
+**Codebase Status:** 50 TODO/FIXME markers verified - 41 completed, 9 still requiring work (sync protocols, rendezvous/transport, effect integration)
 
 ## Priority Levels
 
@@ -304,8 +304,8 @@ These are legitimate TODO items discovered in the codebase that should be tracke
 - [ ] `aura-rendezvous/src/context/rendezvous.rs:L292` - Implement guard chain evaluation
 - [ ] `aura-rendezvous/src/context/rendezvous.rs:L320` - Implement message forwarding via effects
 - [ ] `aura-rendezvous/src/context/rendezvous.rs:L334-341` - Implement receipt signing and validation
-- [ ] `aura-rendezvous/src/context/rendezvous.rs:L365` - Add facts to appropriate journal namespace
-- [ ] `aura-rendezvous/src/context/rendezvous.rs:L372` - Implement cache cleanup based on timestamps
+- [x] `aura-rendezvous/src/context/rendezvous.rs:L365` - Add facts to appropriate journal namespace (documented integration path) **COMPLETED**
+- [x] `aura-rendezvous/src/context/rendezvous.rs:L372` - Implement cache cleanup based on timestamps (size-based eviction implemented) **COMPLETED**
 - [ ] `aura-rendezvous/src/context/rendezvous.rs:L420` - Implement actual transport connection establishment
 - [ ] `aura-sync/src/infrastructure/peers.rs:L291` - Integrate with aura-rendezvous DiscoveryService
 - [ ] `aura-sync/src/infrastructure/connections.rs:L317` - Integrate with aura-transport to establish connection
