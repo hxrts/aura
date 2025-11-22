@@ -4,8 +4,6 @@
 //! effect traits into a type-erased AuraHandler. This enables dynamic composition
 //! and runtime flexibility while maintaining type safety through the effect system.
 
-#![allow(clippy::disallowed_methods)] // TODO: Replace direct UUID calls with effect system
-
 use async_trait::async_trait;
 use std::fmt;
 use std::sync::Arc;
