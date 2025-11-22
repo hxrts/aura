@@ -3,8 +3,8 @@
 This document tracks all unfinished work, placeholders, and architectural items requiring completion across the Aura codebase. Items are organized by priority and grouped by crate/module.
 
 **Last Updated:** 2025-11-21 (Updated: Verified codebase status - many items completed or changed, file structure refactored)
-**Total Items:** 145+ substantive work items (120+ completed across all phases, 16 codebase TODOs remaining in active work)
-**Codebase Status:** 50 TODO/FIXME markers verified - 34 completed, 16 still requiring work (sync protocols, rendezvous/transport, effect integration)
+**Total Items:** 145+ substantive work items (125+ completed across all phases, 11 codebase TODOs remaining in active work)
+**Codebase Status:** 50 TODO/FIXME markers verified - 39 completed, 11 still requiring work (sync protocols, rendezvous/transport, effect integration)
 
 ## Priority Levels
 
