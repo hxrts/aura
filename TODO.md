@@ -16,10 +16,10 @@ This document tracks all unfinished work, placeholders, and architectural items 
 ---
 
 **Journal**
-- [ ] Stabilize consensus choreography surface: Simplify run_consensus_choreography until real FROST wiring lands. Keep signatures consistent but fence off experimental code behind a feature flag (e.g., consensus_frost_full). That avoids breaking downstream while you iterate on signing shares/nonce handling.
-- [ ] Normalize AEAD/key handling: Derive nonces from header (already started) and define a single KDF path for AMP message keys. Move the XOR/AES-GCM placeholder into a crypto::amp helper so routes can be swapped without touching transport code.
-- [ ] Guard chain ergonomics: Provide a helper to build the AMP send guard (cap, flow cost, leakage) to avoid repeating guard construction in every call. This reduces lifetime/capture issues and centralizes flow charging.
-- [ ] Reduce doc/format noise: Run cargo fmt and add #![allow(missing_docs)] only where intentional, or add short field docs to AMP facts/headers to stop warning flood. This will make real errors surface sooner.
+- [x] Stabilize consensus choreography surface: Simplify run_consensus_choreography until real FROST wiring lands. Keep signatures consistent but fence off experimental code behind a feature flag (e.g., consensus_frost_full). That avoids breaking downstream while you iterate on signing shares/nonce handling. **COMPLETED**
+- [x] Normalize AEAD/key handling: Derive nonces from header (already started) and define a single KDF path for AMP message keys. Move the XOR/AES-GCM placeholder into a crypto::amp helper so routes can be swapped without touching transport code. **COMPLETED**
+- [x] Guard chain ergonomics: Provide a helper to build the AMP send guard (cap, flow cost, leakage) to avoid repeating guard construction in every call. This reduces lifetime/capture issues and centralizes flow charging. **COMPLETED**
+- [x] Reduce doc/format noise: Run cargo fmt and add #![allow(missing_docs)] only where intentional, or add short field docs to AMP facts/headers to stop warning flood. This will make real errors surface sooner. **COMPLETED**
 - [ ] Agent/simulator wiring: Move AMP agent helpers into aura-testkit to keep core agent code stable. Simulator scenarios should import via a small facade to keep the surface area contained.
 - [ ] Maintenance/GC policy: Define a clear GC policy for AMP checkpoints/bumps and document it near the reducer; add a helper to compute safe pruning boundaries to avoid accidental state loss.
 
