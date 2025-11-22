@@ -147,7 +147,7 @@ aura-protocol becomes ~40% smaller and properly focused on Layer 4 orchestration
 ### Core Protocol Effect Injection (Layer 4-5) - CRITICAL
 
 **UUID Generation (RandomEffects needed):**
-- [ ] `aura-protocol/src/handlers/timeout_coordinator.rs:97` - Replace `Uuid::new_v4()` with RandomEffects for timeout handles
+- [x] `aura-protocol/src/handlers/timeout_coordinator.rs:97` - Replace `Uuid::new_v4()` with RandomEffects for timeout handles **COMPLETED**
 - [ ] `aura-protocol/src/handlers/context/context.rs:405` - Replace `uuid::Uuid::nil()` with RandomEffects for operation IDs
 - [ ] `aura-protocol/src/handlers/sync_anti_entropy.rs` - Replace direct UUID calls (file-level TODO)
 - [ ] `aura-protocol/src/handlers/sync_broadcaster.rs` - Replace direct UUID calls (file-level TODO)  
