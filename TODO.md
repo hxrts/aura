@@ -21,7 +21,7 @@ This document tracks all unfinished work, placeholders, and architectural items 
 - [x] Guard chain ergonomics: Provide a helper to build the AMP send guard (cap, flow cost, leakage) to avoid repeating guard construction in every call. This reduces lifetime/capture issues and centralizes flow charging. **COMPLETED**
 - [x] Reduce doc/format noise: Run cargo fmt and add #![allow(missing_docs)] only where intentional, or add short field docs to AMP facts/headers to stop warning flood. This will make real errors surface sooner. **COMPLETED**
 - [ ] Agent/simulator wiring: Move AMP agent helpers into aura-testkit to keep core agent code stable. Simulator scenarios should import via a small facade to keep the surface area contained.
-- [ ] Maintenance/GC policy: Define a clear GC policy for AMP checkpoints/bumps and document it near the reducer; add a helper to compute safe pruning boundaries to avoid accidental state loss.
+- [x] Maintenance/GC policy: Define a clear GC policy for AMP checkpoints/bumps and document it near the reducer; add a helper to compute safe pruning boundaries to avoid accidental state loss. **COMPLETED**
 
 ### Placeholder/Simplified Implementations (From Codebase Scan)
 
