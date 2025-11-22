@@ -3,7 +3,7 @@
 //! This module implements distributed session ticket creation and validation
 //! using choreographic programming principles with the rumpsteak-aura framework.
 
-use crate::{AccountId, AuraError, AuraResult, BiscuitGuardEvaluator, ResourceScope};
+use crate::{AccountId, AuraError, AuraResult, BiscuitGuardEvaluator};
 use aura_core::DeviceId;
 use aura_core::TimeEffects;
 use aura_macros::choreography;

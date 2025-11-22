@@ -3,10 +3,10 @@
 //! Main session coordination operations using choreographic programming patterns.
 
 use super::shared::*;
-use crate::core::{AgentResult, AgentError, AuthorityContext};
-use crate::runtime::{AuraEffectSystem};
+use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::runtime::AuraEffectSystem;
 use aura_core::identifiers::{AccountId, DeviceId};
-use aura_protocol::effects::{SessionType, ChoreographicRole};
+use aura_protocol::effects::{ChoreographicRole, SessionType};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -39,7 +39,7 @@ impl SessionOperations {
     pub(super) fn device_id(&self) -> DeviceId {
         self.authority_context.device_id()
     }
-    
+
     /// Access to effects system for submodules
     pub(super) fn effects(&self) -> &Arc<RwLock<AuraEffectSystem>> {
         &self.effects
@@ -51,7 +51,8 @@ impl SessionOperations {
         session_type: SessionType,
         participants: Vec<DeviceId>,
     ) -> AgentResult<SessionHandle> {
-        self.create_session_choreography(session_type, participants).await
+        self.create_session_choreography(session_type, participants)
+            .await
     }
 
     /// Create session using choreographic protocol
@@ -71,7 +72,8 @@ impl SessionOperations {
         let mut participant_roles = Vec::new();
         for (idx, participant) in participants.iter().enumerate() {
             if *participant != device_id {
-                participant_roles.push(SessionManagementRole::Participant(*participant, idx as u32));
+                participant_roles
+                    .push(SessionManagementRole::Participant(*participant, idx as u32));
             }
         }
 
@@ -85,7 +87,9 @@ impl SessionOperations {
         let my_role = ChoreographicRole::new(device_id.0, 0);
 
         // Create session through effects
-        let session_id = self.create_session_via_effects(&*effects, &session_type).await?;
+        let session_id = self
+            .create_session_via_effects(&*effects, &session_type)
+            .await?;
 
         let result = SessionHandle {
             session_id,
@@ -115,7 +119,10 @@ impl SessionOperations {
         };
 
         // Implement session status lookup via effects system
-        match self.get_session_status_via_effects(&*effects, &session_id_typed).await {
+        match self
+            .get_session_status_via_effects(&*effects, &session_id_typed)
+            .await
+        {
             Ok(Some(handle)) => Ok(Some(handle)),
             Ok(None) => Ok(None),
             Err(_) => Ok(None), // Session doesn't exist or is inactive
@@ -143,7 +150,8 @@ impl SessionOperations {
     /// Cleanup expired sessions
     pub async fn cleanup_expired_sessions(&self, max_age_seconds: u64) -> AgentResult<Vec<String>> {
         let effects = self.effects.read().await;
-        self.cleanup_sessions_via_effects(&*effects, max_age_seconds).await
+        self.cleanup_sessions_via_effects(&*effects, max_age_seconds)
+            .await
     }
 
     // Private implementation methods
@@ -199,22 +207,34 @@ impl SessionOperations {
             start_time: current_time,
             metadata: {
                 let mut metadata = HashMap::new();
-                metadata.insert("status".to_string(), serde_json::Value::String("ended".to_string()));
-                metadata.insert("ended_at".to_string(), serde_json::Value::Number(current_time.into()));
+                metadata.insert(
+                    "status".to_string(),
+                    serde_json::Value::String("ended".to_string()),
+                );
+                metadata.insert(
+                    "ended_at".to_string(),
+                    serde_json::Value::Number(current_time.into()),
+                );
                 metadata
             },
         })
     }
 
     /// List sessions via effects system
-    async fn list_sessions_via_effects(&self, effects: &AuraEffectSystem) -> AgentResult<Vec<String>> {
+    async fn list_sessions_via_effects(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> AgentResult<Vec<String>> {
         // List sessions (logging removed for simplicity)
         // Return empty list (no persistent storage yet)
         Ok(Vec::new())
     }
 
     /// Get session statistics via effects system
-    async fn get_session_stats_via_effects(&self, effects: &AuraEffectSystem) -> AgentResult<SessionStats> {
+    async fn get_session_stats_via_effects(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> AgentResult<SessionStats> {
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -250,24 +270,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_creation() {
-        use crate::runtime::effects::AuraEffectSystem;
         use crate::core::AgentConfig;
-        
+        use crate::runtime::effects::AuraEffectSystem;
+
         let authority_id = AuthorityId::new();
         let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new();
-        
+
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config);
         let effects = Arc::new(RwLock::new(effect_system));
-        
+
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 
         let device_id = sessions.device_id();
         let participants = vec![device_id];
-        
-        let handle = sessions.create_session(SessionType::Coordination, participants.clone())
-            .await.unwrap();
+
+        let handle = sessions
+            .create_session(SessionType::Coordination, participants.clone())
+            .await
+            .unwrap();
 
         assert!(!handle.session_id.is_empty());
         assert_eq!(handle.participants, participants);

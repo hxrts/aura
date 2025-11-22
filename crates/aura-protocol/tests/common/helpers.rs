@@ -13,15 +13,16 @@ use aura_core::{
     identifiers::{DeviceId, SessionId},
     AccountId,
 };
-use aura_protocol::{
-    handlers::CompositeHandler,
-};
+use aura_protocol::handlers::CompositeHandler;
 use uuid::Uuid;
 
 // === LEGACY FUNCTIONS - Use aura-testkit equivalents instead ===
 
 /// DEPRECATED: Use DeviceTestFixture::new(0).device_id() instead
-#[deprecated(since = "0.1.0", note = "Use aura-testkit DeviceTestFixture::new(0).device_id() instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use aura-testkit DeviceTestFixture::new(0).device_id() instead"
+)]
 #[allow(dead_code)]
 pub fn create_test_device_id() -> DeviceId {
     // Delegate to testkit for consistency
@@ -30,7 +31,10 @@ pub fn create_test_device_id() -> DeviceId {
 }
 
 /// DEPRECATED: Use DeviceTestFixture::new(1).device_id() instead  
-#[deprecated(since = "0.1.0", note = "Use aura-testkit DeviceTestFixture::new(1).device_id() instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use aura-testkit DeviceTestFixture::new(1).device_id() instead"
+)]
 #[allow(dead_code)]
 pub fn create_test_device_id_2() -> DeviceId {
     // Delegate to testkit for consistency
@@ -39,7 +43,10 @@ pub fn create_test_device_id_2() -> DeviceId {
 }
 
 /// DEPRECATED: Use create_test_fixture().session_id() instead
-#[deprecated(since = "0.1.0", note = "Use aura-testkit create_test_fixture().session_id() instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use aura-testkit create_test_fixture().session_id() instead"
+)]
 #[allow(dead_code)]
 pub fn create_test_session_id() -> SessionId {
     // Delegate to testkit for consistency
@@ -48,7 +55,10 @@ pub fn create_test_session_id() -> SessionId {
 }
 
 /// DEPRECATED: Use create_test_fixture().account_id() instead
-#[deprecated(since = "0.1.0", note = "Use aura-testkit create_test_fixture().account_id() instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use aura-testkit create_test_fixture().account_id() instead"
+)]
 #[allow(dead_code)]
 pub fn create_test_account_id() -> AccountId {
     // Delegate to testkit for consistency
@@ -57,7 +67,10 @@ pub fn create_test_account_id() -> AccountId {
 }
 
 /// DEPRECATED: Use DeviceTestFixture::new(i).device_id() in a loop instead
-#[deprecated(since = "0.1.0", note = "Use aura-testkit DeviceTestFixture::new(i).device_id() in a loop instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use aura-testkit DeviceTestFixture::new(i).device_id() in a loop instead"
+)]
 #[allow(dead_code)]
 pub fn create_test_participants(count: usize) -> Vec<DeviceId> {
     // Delegate to testkit for consistency
@@ -68,7 +81,10 @@ pub fn create_test_participants(count: usize) -> Vec<DeviceId> {
 }
 
 /// DEPRECATED: Use TestEffectsBuilder::for_unit_tests() instead
-#[deprecated(since = "0.1.0", note = "Use aura-testkit TestEffectsBuilder::for_unit_tests() instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use aura-testkit TestEffectsBuilder::for_unit_tests() instead"
+)]
 #[allow(dead_code)]
 pub fn create_test_handler() -> CompositeHandler {
     use aura_testkit::DeviceTestFixture;
@@ -76,7 +92,10 @@ pub fn create_test_handler() -> CompositeHandler {
 }
 
 /// DEPRECATED: Use TestEffectsBuilder with simulation mode instead
-#[deprecated(since = "0.1.0", note = "Use aura-testkit TestEffectsBuilder with simulation mode instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use aura-testkit TestEffectsBuilder with simulation mode instead"
+)]
 #[allow(dead_code)]
 pub fn create_simulation_handler() -> CompositeHandler {
     use aura_testkit::DeviceTestFixture;
@@ -84,7 +103,10 @@ pub fn create_simulation_handler() -> CompositeHandler {
 }
 
 /// DEPRECATED: Use testkit's deterministic builders instead
-#[deprecated(since = "0.1.0", note = "Use aura-testkit's deterministic builders instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use aura-testkit's deterministic builders instead"
+)]
 #[allow(dead_code)]
 pub fn create_deterministic_uuid(seed: u128) -> Uuid {
     Uuid::from_u128(seed + 0x1234567890abcdef)

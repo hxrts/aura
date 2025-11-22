@@ -13,6 +13,7 @@ use aura_protocol::effect_traits::ConsoleEffects;
 use std::path::Path;
 
 pub mod admin;
+pub mod amp;
 pub mod authority;
 pub mod context;
 pub mod init;
@@ -25,7 +26,6 @@ pub mod snapshot;
 pub mod status;
 pub mod threshold;
 pub mod version;
-pub mod amp;
 
 /// Main CLI handler that coordinates all operations through effects
 pub struct CliHandler {

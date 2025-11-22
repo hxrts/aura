@@ -6,8 +6,8 @@
 //!
 //! Designed for the stateless effect system architecture (work/021.md).
 
-use crate::types::{SimulatorConfig, SimulatorContext, SimulatorError, Result as SimResult};
-use aura_agent::{AuraEffectSystem, AgentBuilder};
+use crate::types::{Result as SimResult, SimulatorConfig, SimulatorContext, SimulatorError};
+use aura_agent::{AgentBuilder, AuraEffectSystem};
 use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
 use aura_testkit::{DeviceTestFixture, ProtocolTestFixture, TestExecutionMode};

@@ -26,6 +26,7 @@
 //! - Complete FROST ceremonies → `aura-frost` (Layer 5)
 
 // Domain modules - pure functions and types only
+pub mod amp;
 pub mod key_derivation_types;
 pub mod merkle;
 pub mod tree_signing;

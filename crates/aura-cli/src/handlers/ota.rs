@@ -89,10 +89,7 @@ async fn propose_upgrade(
 
     proposal.validate().context("Invalid upgrade proposal")?;
 
-    println!(
-        "Created upgrade proposal with ID: {}",
-        proposal.package_id
-    );
+    println!("Created upgrade proposal with ID: {}", proposal.package_id);
     println!("Upgrade proposal created successfully");
     println!("Package ID: {}", proposal.package_id);
     println!("Version: {}", proposal.version);

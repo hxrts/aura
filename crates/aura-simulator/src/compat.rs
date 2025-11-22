@@ -9,11 +9,7 @@ use serde_json::Value;
 /// Legacy handler trait for backward compatibility
 pub trait SimulatorHandler: Send + Sync {
     /// Handle a simulator operation
-    fn handle(
-        &self,
-        operation: SimulatorOperation,
-        context: &SimulatorContext,
-    ) -> Result<Value>;
+    fn handle(&self, operation: SimulatorOperation, context: &SimulatorContext) -> Result<Value>;
 
     /// Get the name of this handler
     fn name(&self) -> &str;

@@ -318,8 +318,8 @@ impl SbbFlooding for SbbFloodingCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_agent::AuraEffectSystem;
     use aura_agent::AgentConfig;
+    use aura_agent::AuraEffectSystem;
 
     fn create_test_effects(_device_id: DeviceId) -> SharedEffects {
         let config = AgentConfig::default();

@@ -6,9 +6,9 @@
 
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{AuraError, Receipt};
+use aura_transport::amp::{AmpError, AmpHeader};
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
-use aura_transport::amp::{AmpError, AmpHeader};
 
 /// Centralized AMP telemetry collector and structured logging interface
 #[derive(Debug, Clone)]
@@ -147,7 +147,7 @@ impl AmpTelemetry {
                 channel = %channel,
                 "AMP send metrics: payload={} -> encrypted={}, flow={}, total_time={}ms",
                 payload_size,
-                encrypted_size, 
+                encrypted_size,
                 flow_charge,
                 metrics.duration.as_millis()
             );
@@ -391,16 +391,33 @@ impl AmpTelemetry {
     /// Categorize AuraError for metrics and observability
     fn categorize_error(error: &AuraError) -> AmpErrorCategory {
         let error_str = error.to_string().to_lowercase();
-        
-        if error_str.contains("aead") || error_str.contains("crypto") || error_str.contains("seal") || error_str.contains("decrypt") {
+
+        if error_str.contains("aead")
+            || error_str.contains("crypto")
+            || error_str.contains("seal")
+            || error_str.contains("decrypt")
+        {
             AmpErrorCategory::Cryptographic
-        } else if error_str.contains("window") || error_str.contains("epoch") || error_str.contains("generation") || error_str.contains("amp") {
-            AmpErrorCategory::Protocol  
-        } else if error_str.contains("authorization") || error_str.contains("permission") || error_str.contains("guard") {
+        } else if error_str.contains("window")
+            || error_str.contains("epoch")
+            || error_str.contains("generation")
+            || error_str.contains("amp")
+        {
+            AmpErrorCategory::Protocol
+        } else if error_str.contains("authorization")
+            || error_str.contains("permission")
+            || error_str.contains("guard")
+        {
             AmpErrorCategory::Authorization
-        } else if error_str.contains("network") || error_str.contains("transport") || error_str.contains("broadcast") {
+        } else if error_str.contains("network")
+            || error_str.contains("transport")
+            || error_str.contains("broadcast")
+        {
             AmpErrorCategory::Network
-        } else if error_str.contains("serialization") || error_str.contains("json") || error_str.contains("deserialize") {
+        } else if error_str.contains("serialization")
+            || error_str.contains("json")
+            || error_str.contains("deserialize")
+        {
             AmpErrorCategory::Serialization
         } else {
             AmpErrorCategory::Unknown

@@ -18,10 +18,7 @@
 //! - **FileBasedSimulationHandler**: Persistent simulation state management
 
 use aura_core::{
-    effects::{
-        simulation::*,
-        StorageEffects, TimeEffects,
-    },
+    effects::{simulation::*, StorageEffects, TimeEffects},
     AuraError, Result,
 };
 use serde_json;
@@ -74,7 +71,7 @@ impl MockSimulationHandler {
     /// Create a new mock simulation handler
     pub fn new() -> Self {
         let storage = MockSimulationStorage::default();
-        
+
         Self {
             storage: Arc::new(RwLock::new(storage)),
         }
@@ -86,7 +83,7 @@ impl MockSimulationHandler {
             simulation_time: SimulationTime::new(start_time),
             ..Default::default()
         };
-        
+
         Self {
             storage: Arc::new(RwLock::new(storage)),
         }
@@ -94,10 +91,11 @@ impl MockSimulationHandler {
 
     /// Reset all simulation state
     pub fn reset(&self) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
-        
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
+
         storage.scenarios.clear();
         storage.checkpoints.clear();
         storage.active_faults.clear();
@@ -107,7 +105,7 @@ impl MockSimulationHandler {
         #[allow(clippy::disallowed_methods)]
         let now = SystemTime::now();
         storage.simulation_time = SimulationTime::new(now);
-        
+
         info!("Mock simulation handler state reset");
         Ok(())
     }
@@ -129,7 +127,7 @@ impl SimulationControlEffects for MockSimulationHandler {
     ) -> Result<ScenarioId> {
         #[allow(clippy::disallowed_methods)]
         let scenario_id = ScenarioId(format!("scenario_{}", uuid::Uuid::new_v4()));
-        
+
         let scenario = SimulationScenario {
             id: scenario_id.clone(),
             name,
@@ -139,24 +137,27 @@ impl SimulationControlEffects for MockSimulationHandler {
             state: ScenarioState::Initializing,
         };
 
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
-        
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
+
         storage.scenarios.insert(scenario_id.clone(), scenario);
-        
+
         debug!(scenario_id = %scenario_id, "Created simulation scenario");
         Ok(scenario_id)
     }
 
     async fn start_scenario(&self, scenario_id: &ScenarioId) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
-        let scenario = storage.scenarios.get_mut(scenario_id).ok_or_else(|| {
-            AuraError::invalid(format!("Scenario not found: {}", scenario_id))
-        })?;
+        let scenario = storage
+            .scenarios
+            .get_mut(scenario_id)
+            .ok_or_else(|| AuraError::invalid(format!("Scenario not found: {}", scenario_id)))?;
 
         match scenario.state {
             ScenarioState::Initializing | ScenarioState::Paused => {
@@ -172,13 +173,15 @@ impl SimulationControlEffects for MockSimulationHandler {
     }
 
     async fn pause_scenario(&self, scenario_id: &ScenarioId) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
-        let scenario = storage.scenarios.get_mut(scenario_id).ok_or_else(|| {
-            AuraError::invalid(format!("Scenario not found: {}", scenario_id))
-        })?;
+        let scenario = storage
+            .scenarios
+            .get_mut(scenario_id)
+            .ok_or_else(|| AuraError::invalid(format!("Scenario not found: {}", scenario_id)))?;
 
         if scenario.state == ScenarioState::Running {
             scenario.state = ScenarioState::Paused;
@@ -197,13 +200,15 @@ impl SimulationControlEffects for MockSimulationHandler {
     }
 
     async fn stop_scenario(&self, scenario_id: &ScenarioId) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
-        let scenario = storage.scenarios.get_mut(scenario_id).ok_or_else(|| {
-            AuraError::invalid(format!("Scenario not found: {}", scenario_id))
-        })?;
+        let scenario = storage
+            .scenarios
+            .get_mut(scenario_id)
+            .ok_or_else(|| AuraError::invalid(format!("Scenario not found: {}", scenario_id)))?;
 
         scenario.state = ScenarioState::Completed;
         info!(scenario_id = %scenario_id, "Stopped simulation scenario");
@@ -211,37 +216,44 @@ impl SimulationControlEffects for MockSimulationHandler {
     }
 
     async fn get_scenario(&self, scenario_id: &ScenarioId) -> Result<Option<SimulationScenario>> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         Ok(storage.scenarios.get(scenario_id).cloned())
     }
 
     async fn list_scenarios(&self) -> Result<Vec<SimulationScenario>> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         Ok(storage.scenarios.values().cloned().collect())
     }
 
     async fn advance_time(&self, duration: Duration) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
         let new_time = storage.simulation_time.current + duration;
         storage.simulation_time.current = new_time;
-        
-        debug!(duration_ms = duration.as_millis(), "Advanced simulation time");
+
+        debug!(
+            duration_ms = duration.as_millis(),
+            "Advanced simulation time"
+        );
         Ok(())
     }
 
     async fn set_time_rate(&self, rate: f64) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
         storage.simulation_time.rate = rate;
         debug!(rate = rate, "Set simulation time rate");
@@ -249,17 +261,19 @@ impl SimulationControlEffects for MockSimulationHandler {
     }
 
     async fn get_simulation_time(&self) -> Result<SimulationTime> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         Ok(storage.simulation_time.clone())
     }
 
     async fn set_manual_time_control(&self, enabled: bool) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
         storage.simulation_time.manual_control = enabled;
         debug!(enabled = enabled, "Set manual time control");
@@ -269,9 +283,10 @@ impl SimulationControlEffects for MockSimulationHandler {
     async fn create_checkpoint(&self, name: String) -> Result<CheckpointId> {
         #[allow(clippy::disallowed_methods)]
         let checkpoint_id = CheckpointId(format!("checkpoint_{}", uuid::Uuid::new_v4()));
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
         #[allow(clippy::disallowed_methods)]
         let timestamp = SystemTime::now();
@@ -288,17 +303,20 @@ impl SimulationControlEffects for MockSimulationHandler {
             size_bytes: 0, // Mock implementation doesn't track actual size
         };
 
-        storage.checkpoints.insert(checkpoint_id.clone(), checkpoint);
+        storage
+            .checkpoints
+            .insert(checkpoint_id.clone(), checkpoint);
         storage.metrics.checkpoints_created += 1;
-        
+
         info!(checkpoint_id = %checkpoint_id, "Created simulation checkpoint");
         Ok(checkpoint_id)
     }
 
     async fn restore_checkpoint(&self, checkpoint_id: &CheckpointId) -> Result<()> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         let _checkpoint = storage.checkpoints.get(checkpoint_id).ok_or_else(|| {
             AuraError::invalid(format!("Checkpoint not found: {}", checkpoint_id))
@@ -309,26 +327,32 @@ impl SimulationControlEffects for MockSimulationHandler {
         Ok(())
     }
 
-    async fn get_checkpoint(&self, checkpoint_id: &CheckpointId) -> Result<Option<SimulationCheckpoint>> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+    async fn get_checkpoint(
+        &self,
+        checkpoint_id: &CheckpointId,
+    ) -> Result<Option<SimulationCheckpoint>> {
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         Ok(storage.checkpoints.get(checkpoint_id).cloned())
     }
 
     async fn list_checkpoints(&self) -> Result<Vec<SimulationCheckpoint>> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         Ok(storage.checkpoints.values().cloned().collect())
     }
 
     async fn delete_checkpoint(&self, checkpoint_id: &CheckpointId) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
         storage.checkpoints.remove(checkpoint_id).ok_or_else(|| {
             AuraError::invalid(format!("Checkpoint not found: {}", checkpoint_id))
@@ -339,9 +363,10 @@ impl SimulationControlEffects for MockSimulationHandler {
     }
 
     async fn get_metrics(&self) -> Result<SimulationMetrics> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         let mut metrics = storage.metrics.clone();
         metrics.custom_metrics = storage.custom_metrics.clone();
@@ -349,14 +374,15 @@ impl SimulationControlEffects for MockSimulationHandler {
     }
 
     async fn reset_metrics(&self) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
         storage.metrics = SimulationMetrics::default();
         storage.custom_metrics.clear();
         storage.operation_stats.clear();
-        
+
         info!("Reset simulation metrics");
         Ok(())
     }
@@ -431,48 +457,55 @@ impl FaultInjectionEffects for MockSimulationHandler {
     }
 
     async fn inject_fault(&self, config: FaultInjectionConfig) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
         storage.active_faults.push(config.clone());
         storage.metrics.faults_injected += 1;
-        
+
         info!(fault_type = ?config.fault_type, "Injected simulation fault");
         Ok(())
     }
 
     async fn clear_faults(&self) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
         let fault_count = storage.active_faults.len();
         storage.active_faults.clear();
-        
-        info!(cleared_faults = fault_count, "Cleared all simulation faults");
+
+        info!(
+            cleared_faults = fault_count,
+            "Cleared all simulation faults"
+        );
         Ok(())
     }
 
     async fn clear_fault_type(&self, fault_type: FaultType) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
         let initial_count = storage.active_faults.len();
         storage.active_faults.retain(|config| {
             std::mem::discriminant(&config.fault_type) != std::mem::discriminant(&fault_type)
         });
         let cleared_count = initial_count - storage.active_faults.len();
-        
+
         info!(fault_type = ?fault_type, cleared_count = cleared_count, "Cleared specific fault type");
         Ok(())
     }
 
     async fn list_active_faults(&self) -> Result<Vec<FaultInjectionConfig>> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         Ok(storage.active_faults.clone())
     }
@@ -481,9 +514,10 @@ impl FaultInjectionEffects for MockSimulationHandler {
 #[async_trait::async_trait]
 impl SimulationObservationEffects for MockSimulationHandler {
     async fn record_metric(&self, name: String, value: f64) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
         storage.custom_metrics.insert(name.clone(), value);
         debug!(metric = %name, value = value, "Recorded simulation metric");
@@ -491,29 +525,33 @@ impl SimulationObservationEffects for MockSimulationHandler {
     }
 
     async fn get_metric(&self, name: &str) -> Result<Option<f64>> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         Ok(storage.custom_metrics.get(name).copied())
     }
 
     async fn get_all_metrics(&self) -> Result<HashMap<String, f64>> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         Ok(storage.custom_metrics.clone())
     }
 
     async fn record_operation(&self, operation_name: &str, duration: Duration) -> Result<()> {
-        let mut storage = self.storage.write().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire write lock: {}", e))
-        })?;
+        let mut storage = self
+            .storage
+            .write()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire write lock: {}", e)))?;
 
         storage.metrics.operations_count += 1;
-        
-        let stats = storage.operation_stats
+
+        let stats = storage
+            .operation_stats
             .entry(operation_name.to_string())
             .or_insert_with(|| OperationStats {
                 operation_name: operation_name.to_string(),
@@ -536,17 +574,19 @@ impl SimulationObservationEffects for MockSimulationHandler {
     }
 
     async fn get_operation_stats(&self, operation_name: &str) -> Result<Option<OperationStats>> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         Ok(storage.operation_stats.get(operation_name).cloned())
     }
 
     async fn export_simulation_data(&self, format: ExportFormat) -> Result<Vec<u8>> {
-        let storage = self.storage.read().map_err(|e| {
-            AuraError::internal(format!("Failed to acquire read lock: {}", e))
-        })?;
+        let storage = self
+            .storage
+            .read()
+            .map_err(|e| AuraError::internal(format!("Failed to acquire read lock: {}", e)))?;
 
         match format {
             ExportFormat::Json => {
@@ -558,14 +598,15 @@ impl SimulationObservationEffects for MockSimulationHandler {
                     "custom_metrics": storage.custom_metrics,
                     "active_faults": storage.active_faults
                 });
-                
+
                 serde_json::to_vec_pretty(&export_data).map_err(|e| {
                     AuraError::serialization(format!("Failed to serialize simulation data: {}", e))
                 })
             }
-            ExportFormat::Csv | ExportFormat::Binary => {
-                Err(AuraError::invalid(format!("Export format {:?} not yet implemented", format)))
-            }
+            ExportFormat::Csv | ExportFormat::Binary => Err(AuraError::invalid(format!(
+                "Export format {:?} not yet implemented",
+                format
+            ))),
         }
     }
 }
@@ -647,7 +688,7 @@ where
     ) -> Result<ScenarioId> {
         #[allow(clippy::disallowed_methods)]
         let scenario_id = ScenarioId(format!("scenario_{}", uuid::Uuid::new_v4()));
-        
+
         let scenario = SimulationScenario {
             id: scenario_id.clone(),
             name,
@@ -661,8 +702,10 @@ where
             AuraError::serialization(format!("Failed to serialize scenario: {}", e))
         })?;
 
-        self.storage.store(&self.scenario_key(&scenario_id), data).await?;
-        
+        self.storage
+            .store(&self.scenario_key(&scenario_id), data)
+            .await?;
+
         debug!(scenario_id = %scenario_id, "Created simulation scenario");
         Ok(scenario_id)
     }
@@ -672,11 +715,9 @@ where
 
     async fn get_simulation_time(&self) -> Result<SimulationTime> {
         match self.storage.retrieve(&self.time_key()).await? {
-            Some(data) => {
-                serde_json::from_slice(&data).map_err(|e| {
-                    AuraError::serialization(format!("Failed to deserialize simulation time: {}", e))
-                })
-            }
+            Some(data) => serde_json::from_slice(&data).map_err(|e| {
+                AuraError::serialization(format!("Failed to deserialize simulation time: {}", e))
+            }),
             None => {
                 // Initialize with current time if not set
                 #[allow(clippy::disallowed_methods)]
@@ -687,22 +728,57 @@ where
     }
 
     // For brevity, providing stub implementations for remaining methods
-    async fn start_scenario(&self, _scenario_id: &ScenarioId) -> Result<()> { todo!("Implement stateless scenario management") }
-    async fn pause_scenario(&self, _scenario_id: &ScenarioId) -> Result<()> { todo!("Implement stateless scenario management") }
-    async fn resume_scenario(&self, _scenario_id: &ScenarioId) -> Result<()> { todo!("Implement stateless scenario management") }
-    async fn stop_scenario(&self, _scenario_id: &ScenarioId) -> Result<()> { todo!("Implement stateless scenario management") }
-    async fn get_scenario(&self, _scenario_id: &ScenarioId) -> Result<Option<SimulationScenario>> { todo!("Implement stateless scenario management") }
-    async fn list_scenarios(&self) -> Result<Vec<SimulationScenario>> { todo!("Implement stateless scenario management") }
-    async fn advance_time(&self, _duration: Duration) -> Result<()> { todo!("Implement stateless time management") }
-    async fn set_time_rate(&self, _rate: f64) -> Result<()> { todo!("Implement stateless time management") }
-    async fn set_manual_time_control(&self, _enabled: bool) -> Result<()> { todo!("Implement stateless time management") }
-    async fn create_checkpoint(&self, _name: String) -> Result<CheckpointId> { todo!("Implement stateless checkpoint management") }
-    async fn restore_checkpoint(&self, _checkpoint_id: &CheckpointId) -> Result<()> { todo!("Implement stateless checkpoint management") }
-    async fn get_checkpoint(&self, _checkpoint_id: &CheckpointId) -> Result<Option<SimulationCheckpoint>> { todo!("Implement stateless checkpoint management") }
-    async fn list_checkpoints(&self) -> Result<Vec<SimulationCheckpoint>> { todo!("Implement stateless checkpoint management") }
-    async fn delete_checkpoint(&self, _checkpoint_id: &CheckpointId) -> Result<()> { todo!("Implement stateless checkpoint management") }
-    async fn get_metrics(&self) -> Result<SimulationMetrics> { todo!("Implement stateless metrics management") }
-    async fn reset_metrics(&self) -> Result<()> { todo!("Implement stateless metrics management") }
+    async fn start_scenario(&self, _scenario_id: &ScenarioId) -> Result<()> {
+        todo!("Implement stateless scenario management")
+    }
+    async fn pause_scenario(&self, _scenario_id: &ScenarioId) -> Result<()> {
+        todo!("Implement stateless scenario management")
+    }
+    async fn resume_scenario(&self, _scenario_id: &ScenarioId) -> Result<()> {
+        todo!("Implement stateless scenario management")
+    }
+    async fn stop_scenario(&self, _scenario_id: &ScenarioId) -> Result<()> {
+        todo!("Implement stateless scenario management")
+    }
+    async fn get_scenario(&self, _scenario_id: &ScenarioId) -> Result<Option<SimulationScenario>> {
+        todo!("Implement stateless scenario management")
+    }
+    async fn list_scenarios(&self) -> Result<Vec<SimulationScenario>> {
+        todo!("Implement stateless scenario management")
+    }
+    async fn advance_time(&self, _duration: Duration) -> Result<()> {
+        todo!("Implement stateless time management")
+    }
+    async fn set_time_rate(&self, _rate: f64) -> Result<()> {
+        todo!("Implement stateless time management")
+    }
+    async fn set_manual_time_control(&self, _enabled: bool) -> Result<()> {
+        todo!("Implement stateless time management")
+    }
+    async fn create_checkpoint(&self, _name: String) -> Result<CheckpointId> {
+        todo!("Implement stateless checkpoint management")
+    }
+    async fn restore_checkpoint(&self, _checkpoint_id: &CheckpointId) -> Result<()> {
+        todo!("Implement stateless checkpoint management")
+    }
+    async fn get_checkpoint(
+        &self,
+        _checkpoint_id: &CheckpointId,
+    ) -> Result<Option<SimulationCheckpoint>> {
+        todo!("Implement stateless checkpoint management")
+    }
+    async fn list_checkpoints(&self) -> Result<Vec<SimulationCheckpoint>> {
+        todo!("Implement stateless checkpoint management")
+    }
+    async fn delete_checkpoint(&self, _checkpoint_id: &CheckpointId) -> Result<()> {
+        todo!("Implement stateless checkpoint management")
+    }
+    async fn get_metrics(&self) -> Result<SimulationMetrics> {
+        todo!("Implement stateless metrics management")
+    }
+    async fn reset_metrics(&self) -> Result<()> {
+        todo!("Implement stateless metrics management")
+    }
 }
 
 // Stub implementations for other traits to keep the file compiling
@@ -712,16 +788,36 @@ where
     S: StorageEffects + Send + Sync,
     T: TimeEffects + Send + Sync,
 {
-    async fn inject_network_partition(&self, _groups: Vec<Vec<String>>) -> Result<()> { todo!("Implement fault injection") }
-    async fn inject_packet_loss(&self, _probability: f64) -> Result<()> { todo!("Implement fault injection") }
-    async fn inject_network_latency(&self, _delay: Duration) -> Result<()> { todo!("Implement fault injection") }
-    async fn inject_storage_failure(&self, _probability: f64) -> Result<()> { todo!("Implement fault injection") }
-    async fn inject_computation_slowness(&self, _factor: f64) -> Result<()> { todo!("Implement fault injection") }
-    async fn inject_byzantine_fault(&self, _fault: ByzantineFault) -> Result<()> { todo!("Implement fault injection") }
-    async fn inject_fault(&self, _config: FaultInjectionConfig) -> Result<()> { todo!("Implement fault injection") }
-    async fn clear_faults(&self) -> Result<()> { todo!("Implement fault injection") }
-    async fn clear_fault_type(&self, _fault_type: FaultType) -> Result<()> { todo!("Implement fault injection") }
-    async fn list_active_faults(&self) -> Result<Vec<FaultInjectionConfig>> { todo!("Implement fault injection") }
+    async fn inject_network_partition(&self, _groups: Vec<Vec<String>>) -> Result<()> {
+        todo!("Implement fault injection")
+    }
+    async fn inject_packet_loss(&self, _probability: f64) -> Result<()> {
+        todo!("Implement fault injection")
+    }
+    async fn inject_network_latency(&self, _delay: Duration) -> Result<()> {
+        todo!("Implement fault injection")
+    }
+    async fn inject_storage_failure(&self, _probability: f64) -> Result<()> {
+        todo!("Implement fault injection")
+    }
+    async fn inject_computation_slowness(&self, _factor: f64) -> Result<()> {
+        todo!("Implement fault injection")
+    }
+    async fn inject_byzantine_fault(&self, _fault: ByzantineFault) -> Result<()> {
+        todo!("Implement fault injection")
+    }
+    async fn inject_fault(&self, _config: FaultInjectionConfig) -> Result<()> {
+        todo!("Implement fault injection")
+    }
+    async fn clear_faults(&self) -> Result<()> {
+        todo!("Implement fault injection")
+    }
+    async fn clear_fault_type(&self, _fault_type: FaultType) -> Result<()> {
+        todo!("Implement fault injection")
+    }
+    async fn list_active_faults(&self) -> Result<Vec<FaultInjectionConfig>> {
+        todo!("Implement fault injection")
+    }
 }
 
 #[async_trait::async_trait]
@@ -730,12 +826,24 @@ where
     S: StorageEffects + Send + Sync,
     T: TimeEffects + Send + Sync,
 {
-    async fn record_metric(&self, _name: String, _value: f64) -> Result<()> { todo!("Implement observation") }
-    async fn get_metric(&self, _name: &str) -> Result<Option<f64>> { todo!("Implement observation") }
-    async fn get_all_metrics(&self) -> Result<HashMap<String, f64>> { todo!("Implement observation") }
-    async fn record_operation(&self, _operation_name: &str, _duration: Duration) -> Result<()> { todo!("Implement observation") }
-    async fn get_operation_stats(&self, _operation_name: &str) -> Result<Option<OperationStats>> { todo!("Implement observation") }
-    async fn export_simulation_data(&self, _format: ExportFormat) -> Result<Vec<u8>> { todo!("Implement observation") }
+    async fn record_metric(&self, _name: String, _value: f64) -> Result<()> {
+        todo!("Implement observation")
+    }
+    async fn get_metric(&self, _name: &str) -> Result<Option<f64>> {
+        todo!("Implement observation")
+    }
+    async fn get_all_metrics(&self) -> Result<HashMap<String, f64>> {
+        todo!("Implement observation")
+    }
+    async fn record_operation(&self, _operation_name: &str, _duration: Duration) -> Result<()> {
+        todo!("Implement observation")
+    }
+    async fn get_operation_stats(&self, _operation_name: &str) -> Result<Option<OperationStats>> {
+        todo!("Implement observation")
+    }
+    async fn export_simulation_data(&self, _format: ExportFormat) -> Result<Vec<u8>> {
+        todo!("Implement observation")
+    }
 }
 
 #[cfg(test)]
@@ -746,7 +854,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_simulation_handler_scenario_lifecycle() {
         let handler = MockSimulationHandler::new();
-        
+
         // Create scenario
         let scenario_id = handler
             .create_scenario(
@@ -781,16 +889,16 @@ mod tests {
     #[tokio::test]
     async fn test_mock_simulation_handler_time_control() {
         let handler = MockSimulationHandler::new();
-        
+
         let initial_time = handler.get_simulation_time().await.unwrap();
-        
+
         // Advance time
         let advance_duration = Duration::from_secs(30);
         handler.advance_time(advance_duration).await.unwrap();
-        
+
         let new_time = handler.get_simulation_time().await.unwrap();
         assert_eq!(new_time.current, initial_time.current + advance_duration);
-        
+
         // Set time rate
         handler.set_time_rate(2.0).await.unwrap();
         let time_with_rate = handler.get_simulation_time().await.unwrap();
@@ -800,7 +908,7 @@ mod tests {
     #[tokio::test]
     async fn test_mock_simulation_handler_checkpoints() {
         let handler = MockSimulationHandler::new();
-        
+
         // Create checkpoint
         let checkpoint_id = handler
             .create_checkpoint("test_checkpoint".to_string())
@@ -808,7 +916,11 @@ mod tests {
             .unwrap();
 
         // Verify checkpoint exists
-        let checkpoint = handler.get_checkpoint(&checkpoint_id).await.unwrap().unwrap();
+        let checkpoint = handler
+            .get_checkpoint(&checkpoint_id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(checkpoint.id, checkpoint_id);
 
         // List checkpoints
@@ -825,16 +937,21 @@ mod tests {
     #[tokio::test]
     async fn test_mock_simulation_handler_fault_injection() {
         let handler = MockSimulationHandler::new();
-        
+
         // Inject network partition
         let groups = vec![vec!["node1".to_string()], vec!["node2".to_string()]];
-        handler.inject_network_partition(groups.clone()).await.unwrap();
+        handler
+            .inject_network_partition(groups.clone())
+            .await
+            .unwrap();
 
         // Verify fault is active
         let active_faults = handler.list_active_faults().await.unwrap();
         assert_eq!(active_faults.len(), 1);
         match &active_faults[0].fault_type {
-            FaultType::Network(NetworkFault::Partition { groups: fault_groups }) => {
+            FaultType::Network(NetworkFault::Partition {
+                groups: fault_groups,
+            }) => {
                 assert_eq!(fault_groups, &groups);
             }
             _ => panic!("Unexpected fault type"),

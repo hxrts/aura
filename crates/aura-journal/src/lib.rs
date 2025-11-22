@@ -47,9 +47,7 @@ pub use error::{AuraError, Result};
 pub use aura_core::Hash32;
 
 // Domain re-exports
-pub use effect_api::{
-    CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus, Priority,
-};
+pub use effect_api::{CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus, Priority};
 
 // New fact-based journal exports
 pub use fact::{
@@ -62,14 +60,7 @@ pub use journal_api::{AccountSummary, Journal, JournalFact};
 
 // CRDT Implementation Details (INTERNAL - subject to change without notice)
 #[doc(hidden)]
-pub use semilattice::{
-    AccountState,
-    EpochLog,
-    GuardianRegistry,
-    IntentPool,
-    MaxCounter,
-    OpLog,
-};
+pub use semilattice::{AccountState, EpochLog, GuardianRegistry, IntentPool, MaxCounter, OpLog};
 
 // New commitment tree re-exports (tree types moved from aura-core)
 pub use commitment_tree::{

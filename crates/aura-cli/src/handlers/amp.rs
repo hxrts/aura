@@ -6,7 +6,10 @@ use aura_agent::AuraEffectSystem;
 /// Handle AMP commands with effect system integration.
 pub async fn handle_amp(_effect_system: &AuraEffectSystem, action: &AmpAction) -> Result<()> {
     match action {
-        AmpAction::Inspect { context: _, channel } => {
+        AmpAction::Inspect {
+            context: _,
+            channel,
+        } => {
             println!("AMP channel {:?} state inspection (placeholder)", channel);
         }
         AmpAction::Bump {

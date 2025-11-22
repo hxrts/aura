@@ -14,10 +14,7 @@ pub async fn handle_node(
     daemon: bool,
     config_path: &Path,
 ) -> Result<()> {
-    println!(
-        "Starting node on port {} (daemon: {})",
-        port, daemon
-    );
+    println!("Starting node on port {} (daemon: {})", port, daemon);
 
     println!("Config: {}", config_path.display());
 
@@ -77,10 +74,7 @@ async fn run_daemon_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
     // Simulate some startup delay
     simulate_startup_delay(effects).await;
 
-    println!(
-        "Node daemon started successfully on port {}",
-        port
-    );
+    println!("Node daemon started successfully on port {}", port);
 
     // TODO fix - In a real implementation, this would start the actual node service
     println!("Daemon is running. Use 'aura status' to check node status.");

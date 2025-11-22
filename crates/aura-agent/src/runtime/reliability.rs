@@ -20,20 +20,20 @@ impl ReliabilityManager {
             max_backoff,
         }
     }
-    
+
     /// Calculate backoff delay for attempt number
     pub fn backoff_delay(&self, attempt: usize) -> Duration {
         let exponential = self.base_backoff * (2_u32.pow(attempt.min(20) as u32));
         exponential.min(self.max_backoff)
     }
-    
+
     /// Execute operation with retry and backoff
     pub async fn with_retry<T, E, F>(&self, mut operation: F) -> Result<T, E>
     where
         F: FnMut() -> Result<T, E>,
     {
         let mut last_error = None;
-        
+
         for attempt in 0..=self.max_retries {
             match operation() {
                 Ok(result) => return Ok(result),
@@ -46,17 +46,13 @@ impl ReliabilityManager {
                 }
             }
         }
-        
+
         Err(last_error.unwrap())
     }
 }
 
 impl Default for ReliabilityManager {
     fn default() -> Self {
-        Self::new(
-            3,
-            Duration::from_millis(100),
-            Duration::from_secs(5),
-        )
+        Self::new(3, Duration::from_millis(100), Duration::from_secs(5))
     }
 }

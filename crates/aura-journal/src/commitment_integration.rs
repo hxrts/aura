@@ -6,7 +6,7 @@
 use crate::commitment_tree::authority_state::AuthorityTreeState;
 use crate::fact::AttestedOp;
 use aura_core::authority::TreeState;
-use aura_core::{Hash32, session_epochs::Epoch};
+use aura_core::{session_epochs::Epoch, Hash32};
 
 /// Convert AuthorityTreeState to the canonical TreeState
 impl From<&AuthorityTreeState> for TreeState {
@@ -38,7 +38,7 @@ impl AttestedOp {
     pub fn validate_against_parent(&self, parent_state: &TreeState) -> bool {
         self.parent_commitment == parent_state.root_commitment()
     }
-    
+
     /// Get the resulting epoch after this operation
     pub fn resulting_epoch(&self, parent_epoch: Epoch) -> Epoch {
         // Tree operations increment the epoch
@@ -57,11 +57,11 @@ mod tests {
         let mut auth_state = AuthorityTreeState::new();
         auth_state.epoch = 5;
         auth_state.root_commitment = [1; 32];
-        
+
         let tree_state = auth_state.to_tree_state();
-        
+
         assert_eq!(tree_state.epoch(), Epoch(5));
-        
+
         // Debug the commitment issue
         let expected = [1; 32];
         let actual = tree_state.root_commitment().0;
@@ -70,21 +70,16 @@ mod tests {
             println!("Actual: {:?}", actual);
         }
         assert_eq!(actual, expected);
-        
+
         assert_eq!(tree_state.threshold(), 1);
         assert_eq!(tree_state.device_count(), 0);
     }
-    
+
     #[test]
     fn test_attested_op_validation() {
         let parent_commitment = Hash32::new([2; 32]);
-        let tree_state = TreeState::with_values(
-            Epoch(10),
-            parent_commitment,
-            2,
-            3,
-        );
-        
+        let tree_state = TreeState::with_values(Epoch(10), parent_commitment, 2, 3);
+
         let valid_op = AttestedOp {
             tree_op: TreeOpKind::AddLeaf {
                 public_key: vec![0; 32],
@@ -94,14 +89,14 @@ mod tests {
             witness_threshold: 2,
             signature: vec![],
         };
-        
+
         assert!(valid_op.validate_against_parent(&tree_state));
-        
+
         let invalid_op = AttestedOp {
             parent_commitment: Hash32::from_bytes(&[99; 32]), // Wrong parent
             ..valid_op.clone()
         };
-        
+
         assert!(!invalid_op.validate_against_parent(&tree_state));
     }
 }

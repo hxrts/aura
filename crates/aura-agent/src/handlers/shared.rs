@@ -2,8 +2,8 @@
 //!
 //! Common utilities used by domain-specific handlers.
 
-use crate::core::{AuthorityContext, AgentResult};
-use crate::runtime::{ReliabilityManager, PersistenceUtils, EffectContext};
+use crate::core::{AgentResult, AuthorityContext};
+use crate::runtime::{EffectContext, PersistenceUtils, ReliabilityManager};
 use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
 use std::collections::HashMap;
 
@@ -11,10 +11,10 @@ use std::collections::HashMap;
 pub struct HandlerContext {
     /// Authority context
     pub authority: AuthorityContext,
-    
+
     /// Reliability manager for retries and backoff
     pub reliability: ReliabilityManager,
-    
+
     /// Effect context for operations
     pub effect_context: EffectContext,
 }
@@ -27,24 +27,24 @@ impl HandlerContext {
             session_id: authority.session_id,
             metadata: HashMap::new(),
         };
-        
+
         Self {
             authority,
             reliability: ReliabilityManager::default(),
             effect_context,
         }
     }
-    
+
     /// Get storage key for this authority
     pub fn authority_storage_key(&self) -> String {
         PersistenceUtils::authority_key(&self.authority.authority_id)
     }
-    
+
     /// Get storage key for a context
     pub fn context_storage_key(&self, context_id: &ContextId) -> String {
         PersistenceUtils::context_key(context_id)
     }
-    
+
     /// Execute operation with reliability (retry + backoff)
     pub async fn with_retry<T, E, F>(&self, operation: F) -> Result<T, E>
     where
@@ -69,7 +69,7 @@ impl HandlerUtilities {
             metadata: HashMap::new(),
         }
     }
-    
+
     /// Validate authority context
     pub fn validate_authority_context(context: &AuthorityContext) -> AgentResult<()> {
         // Basic validation - can be extended
@@ -78,12 +78,12 @@ impl HandlerUtilities {
         }
         Ok(())
     }
-    
+
     /// Create storage key for authority data
     pub fn authority_storage_key(authority_id: &AuthorityId) -> String {
         PersistenceUtils::authority_key(authority_id)
     }
-    
+
     /// Create storage key for context data
     pub fn context_storage_key(context_id: &ContextId) -> String {
         PersistenceUtils::context_key(context_id)

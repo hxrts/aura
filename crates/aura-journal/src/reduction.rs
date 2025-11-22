@@ -11,8 +11,9 @@ use aura_core::{
     authority::{AuthorityState, TreeState},
     hash,
     identifiers::{AuthorityId, ChannelId, ContextId},
+    session_epochs::Epoch,
     tree::{commit_leaf, policy_hash, LeafId, Policy},
-    Hash32, session_epochs::Epoch,
+    Hash32,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -49,10 +50,10 @@ fn apply_add_leaf(tree_state: &TreeState, public_key: &[u8]) -> TreeState {
     // 3. Recompute commitments up the tree
     // Since we don't have the full tree structure in TreeState, we'll compute
     // a leaf commitment and use it to update the root
-    
+
     let new_leaf_id = LeafId(tree_state.device_count());
     let leaf_commitment = commit_leaf(new_leaf_id, tree_state.epoch().0, public_key);
-    
+
     // In a full implementation, we'd update the tree structure and recompute
     // branch commitments. For now, we'll create a new root commitment that
     // incorporates the leaf commitment
@@ -62,7 +63,7 @@ fn apply_add_leaf(tree_state: &TreeState, public_key: &[u8]) -> TreeState {
     hasher.update(tree_state.root_commitment().as_bytes());
     hasher.update(&tree_state.device_count().to_le_bytes());
     let new_commitment = hasher.finalize();
-    
+
     TreeState::with_values(
         tree_state.epoch(),
         Hash32::new(new_commitment),
@@ -78,9 +79,9 @@ fn apply_remove_leaf(tree_state: &TreeState, leaf_index: u32) -> TreeState {
     // 2. Recompute commitments up the tree
     // Since we don't maintain full tree structure, we create a deterministic
     // commitment that reflects the removal
-    
+
     let removed_leaf_id = LeafId(leaf_index);
-    
+
     // Create a deterministic commitment for the removal operation
     let mut hasher = hash::hasher();
     hasher.update(b"ROOT_REMOVE_LEAF");
@@ -88,7 +89,7 @@ fn apply_remove_leaf(tree_state: &TreeState, leaf_index: u32) -> TreeState {
     hasher.update(tree_state.root_commitment().as_bytes());
     hasher.update(&tree_state.epoch().0.to_le_bytes());
     let new_commitment = hasher.finalize();
-    
+
     TreeState::with_values(
         tree_state.epoch(),
         Hash32::new(new_commitment),
@@ -101,15 +102,15 @@ fn apply_remove_leaf(tree_state: &TreeState, leaf_index: u32) -> TreeState {
 fn apply_update_policy(tree_state: &TreeState, threshold: u16) -> TreeState {
     // Policy updates affect branch nodes. We compute a new commitment
     // that incorporates the policy change
-    
+
     let new_policy = Policy::Threshold {
         m: threshold,
         n: tree_state.device_count() as u16,
     };
-    
+
     // Compute policy hash for the new threshold
     let new_policy_hash = policy_hash(&new_policy);
-    
+
     // Create a deterministic root commitment incorporating the policy
     let mut hasher = hash::hasher();
     hasher.update(b"ROOT_WITH_POLICY");
@@ -117,7 +118,7 @@ fn apply_update_policy(tree_state: &TreeState, threshold: u16) -> TreeState {
     hasher.update(tree_state.root_commitment().as_bytes());
     hasher.update(&tree_state.epoch().0.to_le_bytes());
     let new_commitment = hasher.finalize();
-    
+
     TreeState::with_values(
         tree_state.epoch(),
         Hash32::new(new_commitment),
@@ -130,30 +131,30 @@ fn apply_update_policy(tree_state: &TreeState, threshold: u16) -> TreeState {
 fn apply_rotate_epoch(tree_state: &TreeState) -> TreeState {
     // Epoch rotation requires recomputing all commitments in the tree
     // with the new epoch value
-    
+
     let new_epoch = Epoch(tree_state.epoch().0 + 1);
-    
+
     // In a full implementation, we would:
     // 1. Iterate through all leaves and recompute their commitments with new epoch
     // 2. Recompute all branch commitments bottom-up with new epoch
     // 3. Compute new root commitment
-    
+
     // For now, create a deterministic commitment that reflects the epoch change
     let current_policy = Policy::Threshold {
         m: tree_state.threshold(),
         n: tree_state.device_count() as u16,
     };
-    
+
     // Use the merkle tree utilities to compute a proper epoch-rotated commitment
     let policy_commitment = policy_hash(&current_policy);
-    
+
     let mut hasher = hash::hasher();
     hasher.update(b"ROOT_EPOCH_ROTATE");
     hasher.update(&new_epoch.0.to_le_bytes());
     hasher.update(&policy_commitment);
     hasher.update(tree_state.root_commitment().as_bytes());
     let new_commitment = hasher.finalize();
-    
+
     TreeState::with_values(
         new_epoch,
         Hash32::new(new_commitment),
@@ -656,6 +657,101 @@ pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<crate:
     (state_hash, superseded_facts)
 }
 
+// ==== AMP Garbage Collection Helpers ====
+//
+// These functions implement safe pruning boundaries for AMP facts according to the
+// GC policy documented in docs/112_amp.md section 9.2.
+
+/// Compute the safe pruning boundary for AMP checkpoints.
+///
+/// Returns the maximum `base_gen` value that can be safely pruned given the current
+/// maximum checkpoint generation. Checkpoints with `base_gen < safe_boundary` can
+/// be removed without affecting protocol safety.
+///
+/// # Arguments
+///
+/// * `max_checkpoint_gen` - The highest generation with an active checkpoint
+/// * `window_size` - Skip window size (defaults to 1024 if None)
+///
+/// # Returns
+///
+/// The safe pruning boundary generation, or 0 if no pruning is safe yet.
+///
+/// # Safety
+///
+/// This implements the policy: `safe_prune_gen = max_checkpoint_gen - (2 * W) - SAFETY_MARGIN`
+/// where W is the skip window size. This ensures:
+/// - The newest checkpoint's dual-window coverage `[G … G + 2W]` is fully preserved
+/// - An additional safety margin prevents premature pruning during active transitions
+/// - No messages within valid windows are made unrecoverable
+///
+/// # Example
+///
+/// ```ignore
+/// let window = 1024;
+/// let max_gen = 5000;
+/// let boundary = compute_checkpoint_pruning_boundary(max_gen, Some(window));
+/// // boundary = 5000 - (2 * 1024) - 512 = 2440
+/// // Checkpoints at base_gen < 2440 can be pruned
+/// ```
+pub fn compute_checkpoint_pruning_boundary(
+    max_checkpoint_gen: u64,
+    window_size: Option<u32>,
+) -> u64 {
+    let w = window_size.unwrap_or(DEFAULT_SKIP_WINDOW) as u64;
+    // Safety margin is always based on DEFAULT_SKIP_WINDOW to ensure consistent safety buffer
+    let safety_margin = (DEFAULT_SKIP_WINDOW / 2) as u64;
+    let required_coverage = 2 * w + safety_margin;
+
+    max_checkpoint_gen.saturating_sub(required_coverage)
+}
+
+/// Determine if a checkpoint can be safely pruned.
+///
+/// A checkpoint is pruneable if its generation is below the safe pruning boundary
+/// and there exists a newer checkpoint that provides complete window coverage.
+///
+/// # Arguments
+///
+/// * `checkpoint_gen` - The `base_gen` of the checkpoint to check
+/// * `max_checkpoint_gen` - The highest generation with an active checkpoint
+/// * `window_size` - Skip window size for the channel
+///
+/// # Returns
+///
+/// `true` if the checkpoint can be safely removed, `false` otherwise
+pub fn can_prune_checkpoint(
+    checkpoint_gen: u64,
+    max_checkpoint_gen: u64,
+    window_size: Option<u32>,
+) -> bool {
+    let boundary = compute_checkpoint_pruning_boundary(max_checkpoint_gen, window_size);
+    checkpoint_gen < boundary
+}
+
+/// Determine if a proposed channel epoch bump can be pruned.
+///
+/// A proposed bump can be pruned if:
+/// - A committed bump for the same transition exists (proposal was finalized)
+/// - OR a committed bump for a later epoch exists (proposal became stale)
+///
+/// # Arguments
+///
+/// * `proposed_parent_epoch` - The parent epoch of the proposed bump
+/// * `committed_epochs` - Set of all committed epoch transitions `(parent, new)`
+///
+/// # Returns
+///
+/// `true` if the proposed bump can be safely removed
+pub fn can_prune_proposed_bump(
+    proposed_parent_epoch: u64,
+    committed_epochs: &[(u64, u64)],
+) -> bool {
+    committed_epochs
+        .iter()
+        .any(|(parent, _new)| *parent >= proposed_parent_epoch)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -892,5 +988,59 @@ mod tests {
             state_a.channel_epochs.get(&channel),
             state_b.channel_epochs.get(&channel)
         );
+    }
+
+    #[test]
+    fn test_checkpoint_pruning_boundary() {
+        // With default window (1024) and max_gen = 5000
+        let boundary = compute_checkpoint_pruning_boundary(5000, None);
+        // Expected: 5000 - (2 * 1024) - 512 = 2440
+        assert_eq!(boundary, 2440);
+
+        // With custom window (512)
+        let boundary = compute_checkpoint_pruning_boundary(5000, Some(512));
+        // Expected: 5000 - (2 * 512) - 512 = 3464
+        assert_eq!(boundary, 3464);
+
+        // Edge case: max_gen too small
+        let boundary = compute_checkpoint_pruning_boundary(1000, None);
+        // Should saturate to 0 (1000 < 2560)
+        assert_eq!(boundary, 0);
+    }
+
+    #[test]
+    fn test_can_prune_checkpoint() {
+        // Checkpoint at gen 1000, max at 5000, default window
+        assert!(can_prune_checkpoint(1000, 5000, None));
+
+        // Checkpoint at gen 3000, max at 5000, default window
+        // Boundary is 2440, so 3000 > 2440 means NOT pruneable
+        assert!(!can_prune_checkpoint(3000, 5000, None));
+
+        // Checkpoint at gen 2440 is exactly at boundary, NOT pruneable
+        assert!(!can_prune_checkpoint(2440, 5000, None));
+
+        // Checkpoint at gen 2439 is below boundary, pruneable
+        assert!(can_prune_checkpoint(2439, 5000, None));
+    }
+
+    #[test]
+    fn test_can_prune_proposed_bump() {
+        let committed = vec![(0, 1), (1, 2), (3, 4)];
+
+        // Proposed bump 0→1 superseded by committed 0→1
+        assert!(can_prune_proposed_bump(0, &committed));
+
+        // Proposed bump 1→2 superseded by committed 1→2
+        assert!(can_prune_proposed_bump(1, &committed));
+
+        // Proposed bump 2→3 becomes stale (committed 3→4 exists)
+        assert!(can_prune_proposed_bump(2, &committed));
+
+        // Proposed bump 4→5 is still valid (no committed >= 4)
+        assert!(!can_prune_proposed_bump(4, &committed));
+
+        // Proposed bump 5→6 is still valid
+        assert!(!can_prune_proposed_bump(5, &committed));
     }
 }

@@ -3,12 +3,9 @@
 //! This module provides the implementation for deriving authority state
 //! from the fact-based journal, implementing the Authority trait.
 
-use crate::{
-    fact::Journal,
-    reduction::reduce_account_facts,
-};
+use crate::{fact::Journal, reduction::reduce_account_facts};
 use async_trait::async_trait;
-use aura_core::{Authority, AuthorityId, Hash32, Result, authority::TreeState};
+use aura_core::{authority::TreeState, Authority, AuthorityId, Hash32, Result};
 use ed25519_dalek::{Signature, VerifyingKey as PublicKey};
 
 /// Authority state derived from facts

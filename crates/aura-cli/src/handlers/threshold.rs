@@ -45,7 +45,11 @@ pub async fn handle_threshold(
             },
             Err(e) => {
                 eprintln!("Config file not found: {}: {}", config_path, e);
-                return Err(anyhow::anyhow!("Config file not found: {}: {}", config_path, e));
+                return Err(anyhow::anyhow!(
+                    "Config file not found: {}: {}",
+                    config_path,
+                    e
+                ));
             }
         }
     }
@@ -109,13 +113,12 @@ async fn validate_threshold_params(
     // Verify all configs have compatible threshold settings
     for (path, config) in configs {
         if config.threshold != configs[0].1.threshold {
-                    eprintln!(
-                    "Threshold mismatch in {}: expected {}, got {}",
-                    path.display(),
-                    configs[0].1.threshold,
-                    config.threshold
-                )
-                ;
+            eprintln!(
+                "Threshold mismatch in {}: expected {}, got {}",
+                path.display(),
+                configs[0].1.threshold,
+                config.threshold
+            );
             return Err(anyhow::anyhow!("Threshold mismatch in {}", path.display()));
         }
     }
@@ -130,18 +133,16 @@ async fn execute_threshold_signing(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
-    println!("Executing threshold signing operation")
-        ;
+    println!("Executing threshold signing operation");
 
     // Simulate threshold signing process
     for (i, (path, config)) in configs.iter().enumerate() {
-            println!(
-                "Signing with device {} ({}): {}",
-                i + 1,
-                config.device_id,
-                path.display()
-            )
-            ;
+        println!(
+            "Signing with device {} ({}): {}",
+            i + 1,
+            config.device_id,
+            path.display()
+        );
     }
 
     println!(
@@ -159,18 +160,16 @@ async fn execute_threshold_verification(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
-    println!("Executing threshold verification operation")
-        ;
+    println!("Executing threshold verification operation");
 
     // Simulate threshold verification process
     for (i, (path, config)) in configs.iter().enumerate() {
-            println!(
-                "Verifying with device {} ({}): {}",
-                i + 1,
-                config.device_id,
-                path.display()
-            )
-            ;
+        println!(
+            "Verifying with device {} ({}): {}",
+            i + 1,
+            config.device_id,
+            path.display()
+        );
     }
 
     println!(
@@ -188,18 +187,16 @@ async fn execute_threshold_keygen(
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
-    println!("Executing threshold key generation operation")
-        ;
+    println!("Executing threshold key generation operation");
 
     // Simulate threshold key generation process
     for (i, (path, config)) in configs.iter().enumerate() {
-            println!(
-                "Generating keys with device {} ({}): {}",
-                i + 1,
-                config.device_id,
-                path.display()
-            )
-            ;
+        println!(
+            "Generating keys with device {} ({}): {}",
+            i + 1,
+            config.device_id,
+            path.display()
+        );
     }
 
     println!(
@@ -250,15 +247,15 @@ async fn execute_dkd_protocol(
     // For now, return a placeholder result to get CLI compiling
     match Result::<DkdResult, String>::Err("DKD integration pending".to_string()) {
         Ok(_result) => {
-                    println!("DKD protocol completed successfully!");
+            println!("DKD protocol completed successfully!");
 
             // TODO: Extract result fields when DKD integration is complete
-                    println!("Session, participants, and key data available");
+            println!("Session, participants, and key data available");
 
             Ok(())
         }
         Err(e) => {
-                    eprintln!("DKD protocol failed: {}", e);
+            eprintln!("DKD protocol failed: {}", e);
             Err(anyhow::anyhow!("DKD protocol failed: {}", e))
         }
     }
@@ -296,13 +293,12 @@ pub async fn handle_dkd_test(
         Ok(result) => {
             println!("DKD test completed successfully!");
 
-                    println!(
-                    "Results: session={}, participants={}, key_len={}",
-                    result.session_id.0,
-                    result.participant_count,
-                    result.derived_key.len()
-                )
-                ;
+            println!(
+                "Results: session={}, participants={}, key_len={}",
+                result.session_id.0,
+                result.participant_count,
+                result.derived_key.len()
+            );
 
             Ok(())
         }

@@ -8,7 +8,7 @@ use crate::semilattice::{AccountState, OpLog};
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::semilattice::JoinSemilattice;
-use aura_core::{AccountId, AuraError, effects::RandomEffects};
+use aura_core::{effects::RandomEffects, AccountId, AuraError};
 use serde::{Deserialize, Serialize};
 
 /// Simplified Journal interface using fact-based architecture
@@ -73,7 +73,11 @@ impl Journal {
     }
 
     /// Add a fact to the journal
-    pub async fn add_fact(&mut self, journal_fact: JournalFact, random: &dyn RandomEffects) -> Result<(), AuraError> {
+    pub async fn add_fact(
+        &mut self,
+        journal_fact: JournalFact,
+        random: &dyn RandomEffects,
+    ) -> Result<(), AuraError> {
         let source_authority = journal_fact.source_authority;
 
         // Convert JournalFact to proper Fact with FactContent

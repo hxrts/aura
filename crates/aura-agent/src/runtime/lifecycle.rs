@@ -12,7 +12,7 @@ impl LifecycleManager {
     pub fn new() -> Self {
         Self {}
     }
-    
+
     /// Shutdown all managed components
     pub async fn shutdown(self) -> Result<(), String> {
         // Coordinate clean shutdown of all components

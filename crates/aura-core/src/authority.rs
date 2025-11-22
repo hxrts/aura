@@ -118,7 +118,12 @@ impl TreeState {
     }
 
     /// Create with specific values
-    pub fn with_values(epoch: Epoch, commitment: Hash32, threshold: u16, device_count: u32) -> Self {
+    pub fn with_values(
+        epoch: Epoch,
+        commitment: Hash32,
+        threshold: u16,
+        device_count: u32,
+    ) -> Self {
         Self {
             epoch,
             commitment,

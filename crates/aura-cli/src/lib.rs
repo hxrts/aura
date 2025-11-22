@@ -26,7 +26,10 @@ pub use handlers::CliHandler;
 // Action types are defined in this module and automatically available
 
 use aura_agent::AgentBuilder;
-use aura_core::{identifiers::{DeviceId, AuthorityId}, AuraError};
+use aura_core::{
+    identifiers::{AuthorityId, DeviceId},
+    AuraError,
+};
 
 /// Create a CLI handler for the given device ID
 pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
@@ -35,7 +38,10 @@ pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> 
         .with_authority(authority_id)
         .build_testing()
         .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
-    Ok(CliHandler::new(agent.runtime().effects().clone(), device_id))
+    Ok(CliHandler::new(
+        agent.runtime().effects().clone(),
+        device_id,
+    ))
 }
 
 /// Create a test CLI handler for the given device ID
@@ -45,7 +51,10 @@ pub fn create_test_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraEr
         .with_authority(authority_id)
         .build_testing()
         .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
-    Ok(CliHandler::new(agent.runtime().effects().clone(), device_id))
+    Ok(CliHandler::new(
+        agent.runtime().effects().clone(),
+        device_id,
+    ))
 }
 
 /// Create a CLI handler with a generated device ID

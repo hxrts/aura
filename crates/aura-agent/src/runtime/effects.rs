@@ -3,21 +3,28 @@
 //! Core effect system components per Layer-6 spec.
 
 use crate::core::{AgentConfig, AgentResult};
-use aura_core::effects::*;
-use aura_core::effects::storage::{StorageError, StorageStats};
-use aura_core::effects::network::PeerEventStream;
-use aura_core::effects::time::{TimeError, TimeoutHandle, WakeCondition};
-use aura_core::effects::crypto::{FrostSigningPackage, FrostKeyGenResult};
-use aura_core::{AuthorityId, ContextId, FlowBudget, AuraError, DeviceId, Hash32, LeafId, AttestedOp, TreeOpKind, LeafNode, NodeIndex, Policy};
-use aura_core::Journal;
-use aura_protocol::effects::{AuraEffects, ChoreographicEffects, EffectApiEffects, TreeEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent, ChoreographyMetrics, EffectApiError, EffectApiEvent, EffectApiEventStream};
-use aura_journal::commitment_tree::state::TreeState;
-use aura_protocol::effects::tree::{Cut, ProposalId, Partial, Snapshot};
-use aura_invitation::relationship_formation::RelationshipFormationEffects;
 use async_trait::async_trait;
+use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage};
+use aura_core::effects::network::PeerEventStream;
+use aura_core::effects::storage::{StorageError, StorageStats};
+use aura_core::effects::time::{TimeError, TimeoutHandle, WakeCondition};
+use aura_core::effects::*;
+use aura_core::Journal;
+use aura_core::{
+    AttestedOp, AuraError, AuthorityId, ContextId, DeviceId, FlowBudget, Hash32, LeafId, LeafNode,
+    NodeIndex, Policy, TreeOpKind,
+};
+use aura_invitation::relationship_formation::RelationshipFormationEffects;
+use aura_journal::commitment_tree::state::TreeState;
+use aura_protocol::effects::tree::{Cut, Partial, ProposalId, Snapshot};
+use aura_protocol::effects::{
+    AuraEffects, ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
+    ChoreographyMetrics, EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream,
+    TreeEffects,
+};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 /// Effect executor for dispatching effect calls
 pub struct EffectExecutor {
@@ -138,12 +145,22 @@ impl RandomEffects for AuraEffectSystem {
 // Implementation of CryptoEffects
 #[async_trait]
 impl CryptoEffects for AuraEffectSystem {
-    async fn hkdf_derive(&self, _ikm: &[u8], _salt: &[u8], _info: &[u8], output_len: usize) -> Result<Vec<u8>, CryptoError> {
+    async fn hkdf_derive(
+        &self,
+        _ikm: &[u8],
+        _salt: &[u8],
+        _info: &[u8],
+        output_len: usize,
+    ) -> Result<Vec<u8>, CryptoError> {
         // Mock implementation - in production this would use HKDF
         Ok(vec![0u8; output_len])
     }
 
-    async fn derive_key(&self, _master_key: &[u8], _context: &crypto::KeyDerivationContext) -> Result<Vec<u8>, CryptoError> {
+    async fn derive_key(
+        &self,
+        _master_key: &[u8],
+        _context: &crypto::KeyDerivationContext,
+    ) -> Result<Vec<u8>, CryptoError> {
         // Mock implementation
         Ok(vec![0u8; 32])
     }
@@ -153,32 +170,61 @@ impl CryptoEffects for AuraEffectSystem {
         Ok((vec![1u8; 32], vec![2u8; 32]))
     }
 
-    async fn ed25519_sign(&self, _message: &[u8], _private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    async fn ed25519_sign(
+        &self,
+        _message: &[u8],
+        _private_key: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
         // Mock implementation
         Ok(vec![3u8; 64])
     }
 
-    async fn ed25519_verify(&self, _message: &[u8], _signature: &[u8], _public_key: &[u8]) -> Result<bool, CryptoError> {
+    async fn ed25519_verify(
+        &self,
+        _message: &[u8],
+        _signature: &[u8],
+        _public_key: &[u8],
+    ) -> Result<bool, CryptoError> {
         // Mock implementation
         Ok(true)
     }
 
-    async fn frost_generate_keys(&self, _threshold: u16, _max_signers: u16) -> Result<crypto::FrostKeyGenResult, CryptoError> {
+    async fn frost_generate_keys(
+        &self,
+        _threshold: u16,
+        _max_signers: u16,
+    ) -> Result<crypto::FrostKeyGenResult, CryptoError> {
         // Mock implementation
-        Err(AuraError::crypto("frost_generate_keys not implemented in mock"))
+        Err(AuraError::crypto(
+            "frost_generate_keys not implemented in mock",
+        ))
     }
 
-    async fn frost_sign_share(&self, _signing_package: &crypto::FrostSigningPackage, _key_share: &[u8], _nonces: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    async fn frost_sign_share(
+        &self,
+        _signing_package: &crypto::FrostSigningPackage,
+        _key_share: &[u8],
+        _nonces: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
         // Mock implementation
         Ok(vec![4u8; 32])
     }
 
-    async fn frost_aggregate_signatures(&self, _signing_package: &crypto::FrostSigningPackage, _signature_shares: &[Vec<u8>]) -> Result<Vec<u8>, CryptoError> {
+    async fn frost_aggregate_signatures(
+        &self,
+        _signing_package: &crypto::FrostSigningPackage,
+        _signature_shares: &[Vec<u8>],
+    ) -> Result<Vec<u8>, CryptoError> {
         // Mock implementation
         Ok(vec![5u8; 64])
     }
 
-    async fn frost_verify(&self, _message: &[u8], _signature: &[u8], _public_key: &[u8]) -> Result<bool, CryptoError> {
+    async fn frost_verify(
+        &self,
+        _message: &[u8],
+        _signature: &[u8],
+        _public_key: &[u8],
+    ) -> Result<bool, CryptoError> {
         // Mock implementation
         Ok(true)
     }
@@ -206,7 +252,6 @@ impl CryptoEffects for AuraEffectSystem {
         data.zeroize();
     }
 
-
     async fn frost_create_signing_package(
         &self,
         _message: &[u8],
@@ -217,7 +262,7 @@ impl CryptoEffects for AuraEffectSystem {
         // Mock implementation
         Ok(FrostSigningPackage {
             message: vec![0u8; 32],
-            package: vec![0u8; 32], 
+            package: vec![0u8; 32],
             participants: vec![1, 2],
             public_key_package: vec![0u8; 32],
         })
@@ -276,14 +321,20 @@ impl CryptoEffects for AuraEffectSystem {
         _new_max_signers: u16,
     ) -> Result<crypto::FrostKeyGenResult, CryptoError> {
         // Mock implementation
-        Err(AuraError::crypto("frost_rotate_keys not implemented in mock"))
+        Err(AuraError::crypto(
+            "frost_rotate_keys not implemented in mock",
+        ))
     }
 }
 
 // Implementation of NetworkEffects
 #[async_trait]
 impl NetworkEffects for AuraEffectSystem {
-    async fn send_to_peer(&self, _peer_id: uuid::Uuid, _message: Vec<u8>) -> Result<(), NetworkError> {
+    async fn send_to_peer(
+        &self,
+        _peer_id: uuid::Uuid,
+        _message: Vec<u8>,
+    ) -> Result<(), NetworkError> {
         // Mock implementation
         Ok(())
     }
@@ -352,7 +403,10 @@ impl StorageEffects for AuraEffectSystem {
         Ok(())
     }
 
-    async fn retrieve_batch(&self, _keys: &[String]) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+    async fn retrieve_batch(
+        &self,
+        _keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
         // Mock implementation
         Ok(HashMap::new())
     }
@@ -487,7 +541,11 @@ impl JournalEffects for AuraEffectSystem {
         Ok(target.clone())
     }
 
-    async fn refine_caps(&self, target: &Journal, _refinement: &Journal) -> Result<Journal, AuraError> {
+    async fn refine_caps(
+        &self,
+        target: &Journal,
+        _refinement: &Journal,
+    ) -> Result<Journal, AuraError> {
         // Mock implementation - return target unchanged
         Ok(target.clone())
     }
@@ -502,17 +560,31 @@ impl JournalEffects for AuraEffectSystem {
         Ok(())
     }
 
-    async fn get_flow_budget(&self, _context: &ContextId, _peer: &AuthorityId) -> Result<FlowBudget, AuraError> {
+    async fn get_flow_budget(
+        &self,
+        _context: &ContextId,
+        _peer: &AuthorityId,
+    ) -> Result<FlowBudget, AuraError> {
         // Mock implementation
         Ok(FlowBudget::default())
     }
 
-    async fn update_flow_budget(&self, _context: &ContextId, _peer: &AuthorityId, budget: &FlowBudget) -> Result<FlowBudget, AuraError> {
+    async fn update_flow_budget(
+        &self,
+        _context: &ContextId,
+        _peer: &AuthorityId,
+        budget: &FlowBudget,
+    ) -> Result<FlowBudget, AuraError> {
         // Mock implementation - return unchanged
         Ok(budget.clone())
     }
 
-    async fn charge_flow_budget(&self, _context: &ContextId, _peer: &AuthorityId, _cost: u32) -> Result<FlowBudget, AuraError> {
+    async fn charge_flow_budget(
+        &self,
+        _context: &ContextId,
+        _peer: &AuthorityId,
+        _cost: u32,
+    ) -> Result<FlowBudget, AuraError> {
         // Mock implementation
         Ok(FlowBudget::default())
     }
@@ -862,7 +934,7 @@ impl AuraEffects for AuraEffectSystem {
 }
 
 // Note: RelationshipFormationEffects is a composite trait that is automatically implemented
-// when all required component traits are implemented: ConsoleEffects, CryptoEffects, 
+// when all required component traits are implemented: ConsoleEffects, CryptoEffects,
 // NetworkEffects, RandomEffects, TimeEffects, and JournalEffects
 
 /// Execution mode for the effect system

@@ -5,7 +5,7 @@
 
 use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
-use aura_relational::{GuardianBinding, RelationalContext, RelationalFact};
+use aura_relational::{GuardianBinding, RelationalContext};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 

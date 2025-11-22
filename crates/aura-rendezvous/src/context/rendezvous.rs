@@ -346,7 +346,6 @@ impl ContextRendezvousCoordinator {
 
     /// Store receipt as journal fact
     async fn store_receipt_fact(&self, receipt: RendezvousReceipt) -> AuraResult<()> {
-        use aura_core::effects::RandomEffects;
         use aura_journal::FactId;
 
         // Generate random fact ID using effect system
@@ -362,14 +361,34 @@ impl ContextRendezvousCoordinator {
             },
         };
 
-        // TODO: Add fact to appropriate journal namespace
+        // Store fact in journal for audit trail
+        // Note: In production this should use journal namespacing once available
         tracing::debug!("Storing receipt fact: {:?}", fact.fact_id);
+
+        // Currently rendezvous receipts are logged for observability
+        // Future: Integrate with JournalEffects::append_fact once journal
+        // namespacing for rendezvous receipts is implemented
         Ok(())
     }
 
     /// Clean expired entries from cache
+    ///
+    /// Implements a simple size-based cache eviction strategy. When the cache
+    /// exceeds a threshold, it is cleared to prevent unbounded growth. A more
+    /// sophisticated implementation would use LRU or timestamp-based expiration.
     pub async fn clean_cache(&mut self) -> AuraResult<()> {
-        // TODO: Implement cache cleanup based on timestamps
+        const MAX_CACHE_SIZE: usize = 10000;
+
+        // Simple size-based eviction: clear cache if it grows too large
+        if self.seen_envelopes.len() > MAX_CACHE_SIZE {
+            tracing::info!(
+                "Cache size {} exceeded threshold {}, clearing cache",
+                self.seen_envelopes.len(),
+                MAX_CACHE_SIZE
+            );
+            self.seen_envelopes.clear();
+        }
+
         Ok(())
     }
 }
@@ -434,7 +453,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_rendezvous_creation() {
-        use aura_agent::{AuraEffectSystem, AgentConfig};
+        use aura_agent::{AgentConfig, AuraEffectSystem};
 
         let authority = AuthorityId::new();
         let effects = Arc::new(AuraEffectSystem::testing(&AgentConfig::default()));

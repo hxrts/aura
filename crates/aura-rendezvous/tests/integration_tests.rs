@@ -15,7 +15,6 @@ use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
 use aura_protocol::effects::AuraEffects;
 use aura_rendezvous::messaging::{NetworkConfig, NetworkTransport};
 // Use testkit for proper test infrastructure
-use aura_testkit::DeviceTestFixture;
 use aura_rendezvous::{
     crypto::encryption::PaddingStrategy,
     integration::capability_aware::SbbForwardingPolicy,
@@ -24,6 +23,7 @@ use aura_rendezvous::{
     },
     messaging::{TransportMethod, TransportOfferPayload},
 };
+use aura_testkit::DeviceTestFixture;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

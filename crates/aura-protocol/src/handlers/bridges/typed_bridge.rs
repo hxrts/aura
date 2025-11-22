@@ -617,7 +617,6 @@ impl aura_core::effects::ConsoleEffects for TypedHandlerBridge {
 }
 
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use crate::handlers::core::erased::AuraHandlerFactory as ErasedAuraHandlerFactory;
@@ -625,7 +624,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_crypto_effects_bridge() {
-        let device_id = DeviceId::from(Uuid::new_v4());
+        let device_id = DeviceId::from(Uuid::from_u128(1));
         let handler = ErasedAuraHandlerFactory::for_testing(device_id);
         let ctx = crate::handlers::context_immutable::AuraContext::for_testing(device_id);
 
@@ -653,7 +652,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_time_effects_bridge() {
-        let device_id = DeviceId::from(Uuid::new_v4());
+        let device_id = DeviceId::from(Uuid::from_u128(2));
         let handler = ErasedAuraHandlerFactory::for_testing(device_id);
         let _handler = Arc::new(RwLock::new(handler));
 
@@ -664,7 +663,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_console_effects_bridge() {
-        let device_id = DeviceId::from(Uuid::new_v4());
+        let device_id = DeviceId::from(Uuid::from_u128(3));
         let handler = ErasedAuraHandlerFactory::for_testing(device_id);
         let _handler = Arc::new(RwLock::new(handler));
 

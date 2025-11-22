@@ -1323,7 +1323,7 @@ impl<N: NetworkEffects> ConnectionManager<N> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_agent::{AuraEffectSystem, AgentConfig};
+    use aura_agent::{AgentConfig, AuraEffectSystem};
 
     #[tokio::test]
     async fn test_connection_manager_creation() {

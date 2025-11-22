@@ -34,29 +34,24 @@ pub mod core;
 // Runtime modules (internal)
 mod runtime;
 
-// Handler modules (internal) 
+// Handler modules (internal)
 mod handlers;
 
-
 // Public API - authority-first design
-pub use core::{
-    AuraAgent, AgentBuilder, AgentConfig, AuthorityContext, AgentError, AgentResult,
-};
+pub use core::{AgentBuilder, AgentConfig, AgentError, AgentResult, AuraAgent, AuthorityContext};
 
 // Runtime types for advanced usage
 pub use runtime::{
-    EffectExecutor, EffectSystemBuilder, LifecycleManager,
-    ContextManager, FlowBudgetManager, ReceiptManager, ChoreographyAdapter,
-    RuntimeSystem, EffectRegistry, EffectRegistryError, EffectRegistryExt,
-    RuntimeBuilder, ExecutionMode,
+    ChoreographyAdapter, ContextManager, EffectExecutor, EffectRegistry, EffectRegistryError,
+    EffectRegistryExt, EffectSystemBuilder, ExecutionMode, FlowBudgetManager, LifecycleManager,
+    ReceiptManager, RuntimeBuilder, RuntimeSystem,
 };
 
-// Effect system types 
+// Effect system types
 pub use runtime::effects::AuraEffectSystem;
 
 // Re-export core types for convenience (authority-first)
 pub use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
-
 
 /// Create a production agent (convenience function)
 pub async fn create_production_agent(authority_id: AuthorityId) -> AgentResult<AuraAgent> {

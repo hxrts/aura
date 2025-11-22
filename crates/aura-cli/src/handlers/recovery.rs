@@ -54,10 +54,7 @@ async fn start_recovery(
     dispute_hours: u64,
     justification: Option<&str>,
 ) -> Result<()> {
-    println!(
-        "Starting {} recovery for account: {}",
-        priority, account
-    );
+    println!("Starting {} recovery for account: {}", priority, account);
     println!("Guardians: {}", guardians);
     println!("Threshold: {}", threshold);
     println!("Dispute window: {} hours", dispute_hours);
@@ -170,10 +167,7 @@ async fn start_recovery(
 
                 // Display key material if recovered
                 if let Some(key_material) = response.key_material {
-                    println!(
-                        "Recovered key material: {} bytes",
-                        key_material.len()
-                    );
+                    println!("Recovered key material: {} bytes", key_material.len());
                 }
             } else {
                 let error_msg = response
@@ -191,10 +185,7 @@ async fn start_recovery(
 }
 
 async fn approve_recovery(effects: &AuraEffectSystem, request_file: &Path) -> Result<()> {
-    println!(
-        "Approving recovery from: {}",
-        request_file.display()
-    );
+    println!("Approving recovery from: {}", request_file.display());
 
     // Read and parse recovery request file
     let request_content = std::fs::read_to_string(request_file)
@@ -207,14 +198,8 @@ async fn approve_recovery(effects: &AuraEffectSystem, request_file: &Path) -> Re
         "Loaded recovery request for account: {}",
         recovery_request.account_id
     );
-    println!(
-        "Requesting device: {}",
-        recovery_request.requesting_device
-    );
-    println!(
-        "Required threshold: {}",
-        recovery_request.threshold
-    );
+    println!("Requesting device: {}", recovery_request.requesting_device);
+    println!("Required threshold: {}", recovery_request.threshold);
 
     // Check if justification exists
     let justification_text = &recovery_request.context.justification;
@@ -264,10 +249,7 @@ async fn approve_recovery(effects: &AuraEffectSystem, request_file: &Path) -> Re
         Ok(approval_data) => {
             println!("Guardian approval completed successfully!");
             println!("Approval timestamp: {}", approval_data.timestamp);
-            println!(
-                "Key share size: {} bytes",
-                approval_data.key_share.len()
-            );
+            println!("Key share size: {} bytes", approval_data.key_share.len());
         }
         Err(e) => {
             return Err(anyhow::anyhow!("Guardian approval failed: {}", e));
@@ -291,10 +273,7 @@ async fn approve_recovery(effects: &AuraEffectSystem, request_file: &Path) -> Re
                     .find(|share| share.guardian.guardian_id == guardian_profile.guardian_id);
 
                 if let Some(share) = our_share {
-                    println!(
-                        "Contributed key share at timestamp: {}",
-                        share.issued_at
-                    );
+                    println!("Contributed key share at timestamp: {}", share.issued_at);
                 }
 
                 println!(
@@ -505,10 +484,7 @@ async fn dispute_recovery(effects: &AuraEffectSystem, evidence: &str, reason: &s
     std::fs::write("journal.json", journal_str)
         .map_err(|e| anyhow::anyhow!("Failed to persist journal: {}", e))?;
 
-    println!(
-        "Dispute recorded in Journal with key: {}",
-        dispute_key
-    );
+    println!("Dispute recorded in Journal with key: {}", dispute_key);
 
     println!("  Evidence ID: {}", evidence);
     println!("  Guardian ID: {}", guardian_id);

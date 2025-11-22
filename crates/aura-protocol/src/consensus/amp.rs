@@ -7,9 +7,9 @@
 use crate::amp::AmpJournalEffects;
 use crate::consensus::{run_consensus, CommitFact};
 use aura_core::{AuthorityId, Prestate, Result};
+use aura_journal::fact::{CommittedChannelEpochBump, ProposedChannelEpochBump};
 use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
 use std::collections::HashMap;
-use aura_journal::fact::{CommittedChannelEpochBump, ProposedChannelEpochBump};
 
 /// Derive a witness set and threshold from a prestate.
 ///
@@ -92,16 +92,15 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects>(
     key_packages: HashMap<AuthorityId, KeyPackage>,
     group_public_key: PublicKeyPackage,
 ) -> Result<CommittedChannelEpochBump> {
-    let (committed, commit) =
-        run_amp_channel_epoch_bump(
-            prestate,
-            proposal,
-            witnesses,
-            threshold,
-            key_packages,
-            group_public_key,
-        )
-        .await?;
+    let (committed, commit) = run_amp_channel_epoch_bump(
+        prestate,
+        proposal,
+        witnesses,
+        threshold,
+        key_packages,
+        group_public_key,
+    )
+    .await?;
 
     // Insert AMP committed bump fact
     journal
@@ -160,11 +159,11 @@ mod tests {
 
         let witnesses = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
         let key_packages: HashMap<AuthorityId, KeyPackage> = HashMap::new();
-        
+
         // Create test FROST keys using testkit (minimum valid parameters)
         let (_, group_public_key) = aura_testkit::builders::keys::helpers::test_frost_key_shares(
-            2, // threshold
-            3, // total
+            2,     // threshold
+            3,     // total
             12345, // deterministic seed
         );
 
