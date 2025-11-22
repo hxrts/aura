@@ -318,9 +318,8 @@ impl CounterexampleGenerator {
         let result = evaluator.simulate_via_evaluator(&json_ir).await?;
 
         // Parse result to extract counterexample
-        let parsed_result: Value = serde_json::from_str(&result).map_err(|e| {
-            AuraError::invalid(format!("Failed to parse simulation result: {}", e))
-        })?;
+        let parsed_result: Value = serde_json::from_str(&result)
+            .map_err(|e| AuraError::invalid(format!("Failed to parse simulation result: {}", e)))?;
 
         if let Some(counterexample) = parsed_result.get("counterexample") {
             Ok(Some(counterexample.clone()))
@@ -530,9 +529,8 @@ impl QuintRunner {
             .await?;
 
         // Parse the simulation result
-        let simulation_result: Value = serde_json::from_str(&result_json).map_err(|e| {
-            AuraError::invalid(format!("Failed to parse simulation result: {}", e))
-        })?;
+        let simulation_result: Value = serde_json::from_str(&result_json)
+            .map_err(|e| AuraError::invalid(format!("Failed to parse simulation result: {}", e)))?;
 
         debug!("Simulation completed successfully");
         Ok(simulation_result)
@@ -545,9 +543,8 @@ impl QuintRunner {
         _spec: &PropertySpec,
     ) -> AuraResult<String> {
         // Parse the JSON IR to add enhanced simulation parameters
-        let mut ir_value: Value = serde_json::from_str(json_ir).map_err(|e| {
-            AuraError::invalid(format!("Failed to parse JSON IR: {}", e))
-        })?;
+        let mut ir_value: Value = serde_json::from_str(json_ir)
+            .map_err(|e| AuraError::invalid(format!("Failed to parse JSON IR: {}", e)))?;
 
         // Add enhanced simulation configuration
         if let Some(config) = ir_value.get_mut("simulationConfig") {
@@ -574,9 +571,8 @@ impl QuintRunner {
             }
         }
 
-        serde_json::to_string(&ir_value).map_err(|e| {
-            AuraError::invalid(format!("Failed to serialize enhanced JSON IR: {}", e))
-        })
+        serde_json::to_string(&ir_value)
+            .map_err(|e| AuraError::invalid(format!("Failed to serialize enhanced JSON IR: {}", e)))
     }
 
     /// Analyze simulation result and generate verification report
@@ -780,9 +776,8 @@ impl QuintRunner {
         .map_err(|_| AuraError::invalid("Parse timeout".to_string()))??;
 
         // Parse the JSON IR to extract specification info
-        let parsed_ir: Value = serde_json::from_str(&json_ir).map_err(|e| {
-            AuraError::invalid(format!("Failed to parse JSON IR: {}", e))
-        })?;
+        let parsed_ir: Value = serde_json::from_str(&json_ir)
+            .map_err(|e| AuraError::invalid(format!("Failed to parse JSON IR: {}", e)))?;
 
         // Extract module information
         let module_info = self.extract_module_info(&parsed_ir)?;
@@ -856,9 +851,8 @@ impl QuintRunner {
         let duration = Duration::from_millis(0); // Fixed duration for deterministic testing
 
         // Parse and enhance simulation results
-        let mut result: Value = serde_json::from_str(&simulation_result).map_err(|e| {
-            AuraError::invalid(format!("Failed to parse simulation result: {}", e))
-        })?;
+        let mut result: Value = serde_json::from_str(&simulation_result)
+            .map_err(|e| AuraError::invalid(format!("Failed to parse simulation result: {}", e)))?;
 
         // Add metadata about the simulation run
         if let Some(result_obj) = result.as_object_mut() {
@@ -899,9 +893,8 @@ impl QuintRunner {
         max_samples: usize,
         n_traces: usize,
     ) -> AuraResult<String> {
-        let mut ir_value: Value = serde_json::from_str(json_ir).map_err(|e| {
-            AuraError::invalid(format!("Failed to parse JSON IR: {}", e))
-        })?;
+        let mut ir_value: Value = serde_json::from_str(json_ir)
+            .map_err(|e| AuraError::invalid(format!("Failed to parse JSON IR: {}", e)))?;
 
         // Add simulation configuration
         let simulation_config = serde_json::json!({
@@ -918,9 +911,8 @@ impl QuintRunner {
             ir_obj.insert("simulationConfig".to_string(), simulation_config);
         }
 
-        serde_json::to_string(&ir_value).map_err(|e| {
-            AuraError::invalid(format!("Failed to serialize enhanced JSON IR: {}", e))
-        })
+        serde_json::to_string(&ir_value)
+            .map_err(|e| AuraError::invalid(format!("Failed to serialize enhanced JSON IR: {}", e)))
     }
 
     /// Verify property with Aura infrastructure integration
@@ -1034,9 +1026,8 @@ impl QuintRunner {
     /// Check if specification involves capability operations
     fn involves_capability_operations(&self, spec: &PropertySpec) -> AuraResult<bool> {
         // Read the spec file and check for capability-related patterns
-        let spec_content = std::fs::read_to_string(&spec.spec_file).map_err(|e| {
-            AuraError::invalid(format!("Failed to read spec file: {}", e))
-        })?;
+        let spec_content = std::fs::read_to_string(&spec.spec_file)
+            .map_err(|e| AuraError::invalid(format!("Failed to read spec file: {}", e)))?;
 
         let capability_patterns = [
             "Cap",
@@ -1059,9 +1050,8 @@ impl QuintRunner {
     /// Check if specification involves privacy operations
     fn involves_privacy_operations(&self, spec: &PropertySpec) -> AuraResult<bool> {
         // Read the spec file and check for privacy-related patterns
-        let spec_content = std::fs::read_to_string(&spec.spec_file).map_err(|e| {
-            AuraError::invalid(format!("Failed to read spec file: {}", e))
-        })?;
+        let spec_content = std::fs::read_to_string(&spec.spec_file)
+            .map_err(|e| AuraError::invalid(format!("Failed to read spec file: {}", e)))?;
 
         let privacy_patterns = [
             "privacy",

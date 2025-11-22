@@ -24,9 +24,9 @@
 use crate::types::{SimulatorContext, SimulatorError};
 use aura_core::{
     effects::{
-        SimulationEffects, ScenarioId, CheckpointId, FaultType, NetworkFault, 
-        StorageFault, ComputationFault, ByzantineFault, FaultInjectionConfig,
-        SimulationMetrics, ScenarioState,
+        ByzantineFault, CheckpointId, ComputationFault, FaultInjectionConfig, FaultType,
+        NetworkFault, ScenarioId, ScenarioState, SimulationEffects, SimulationMetrics,
+        StorageFault,
     },
     AuraError, Result as AuraResult,
 };
@@ -114,13 +114,10 @@ where
         let scenario_id = self
             .effects
             .create_scenario(scenario_name.clone(), description, parameters)
-            .await
-?;
+            .await?;
 
         // Start the scenario immediately (following the original behavior)
-        self.effects
-            .start_scenario(&scenario_id)
-            .await?;
+        self.effects.start_scenario(&scenario_id).await?;
 
         info!(scenario_name = %scenario_name, scenario_id = %scenario_id, "Simulation scenario initialized");
         Ok(scenario_id)
@@ -136,15 +133,17 @@ where
         delta_time: Duration,
     ) -> AuraResult<SimulationTickResult> {
         if self.config.verbose_logging {
-            debug!(tick_number = tick_number, delta_ms = delta_time.as_millis(), "Executing simulation tick");
+            debug!(
+                tick_number = tick_number,
+                delta_ms = delta_time.as_millis(),
+                "Executing simulation tick"
+            );
         }
 
         let start_time = Instant::now();
 
         // Advance simulation time instead of maintaining tick counters
-        self.effects
-            .advance_time(delta_time)
-            .await?;
+        self.effects.advance_time(delta_time).await?;
 
         // Record the operation for metrics
         let execution_time = start_time.elapsed();
@@ -153,10 +152,7 @@ where
             .await?;
 
         // Get current simulation state from effects instead of internal state
-        let simulation_time = self
-            .effects
-            .get_simulation_time()
-            .await?;
+        let simulation_time = self.effects.get_simulation_time().await?;
 
         Ok(SimulationTickResult {
             tick_number,
@@ -183,9 +179,7 @@ where
         let fault_config = self.convert_legacy_fault_type(fault_type, target, duration)?;
 
         // Delegate to effect system instead of storing in scenario metadata
-        self.effects
-            .inject_fault(fault_config.clone())
-            .await?;
+        self.effects.inject_fault(fault_config.clone()).await?;
 
         info!(fault_type = ?fault_config.fault_type, "Simulation fault injected");
         Ok(())
@@ -232,10 +226,7 @@ where
         }
 
         // Verify checkpoint exists using effect system
-        let checkpoint = self
-            .effects
-            .get_checkpoint(&checkpoint_id)
-            .await?;
+        let checkpoint = self.effects.get_checkpoint(&checkpoint_id).await?;
 
         if checkpoint.is_none() {
             return Err(AuraError::invalid(format!(
@@ -245,9 +236,7 @@ where
         }
 
         // Delegate to effect system instead of manual state restoration
-        self.effects
-            .restore_checkpoint(&checkpoint_id)
-            .await?;
+        self.effects.restore_checkpoint(&checkpoint_id).await?;
 
         info!(checkpoint_id = %checkpoint_id, "Simulation checkpoint restored");
         Ok(())
@@ -257,19 +246,14 @@ where
     ///
     /// Replaces internal metrics counting with delegation to SimulationObservationEffects.
     pub async fn get_simulation_metrics(&self) -> AuraResult<SimulationMetrics> {
-        self.effects
-            .get_metrics()
-            .await
+        self.effects.get_metrics().await
     }
 
     /// List active scenarios
     ///
     /// Replaces internal scenario HashMap with delegation to SimulationControlEffects.
     pub async fn list_scenarios(&self) -> AuraResult<Vec<ScenarioSummary>> {
-        let scenarios = self
-            .effects
-            .list_scenarios()
-            .await?;
+        let scenarios = self.effects.list_scenarios().await?;
 
         Ok(scenarios
             .into_iter()
@@ -284,19 +268,16 @@ where
 
     /// Check if a scenario is currently running
     pub async fn is_scenario_running(&self, scenario_id: &ScenarioId) -> AuraResult<bool> {
-        let scenario = self
-            .effects
-            .get_scenario(scenario_id)
-            .await?;
+        let scenario = self.effects.get_scenario(scenario_id).await?;
 
-        Ok(scenario.map(|s| s.state == ScenarioState::Running).unwrap_or(false))
+        Ok(scenario
+            .map(|s| s.state == ScenarioState::Running)
+            .unwrap_or(false))
     }
 
     /// Pause a running scenario
     pub async fn pause_scenario(&self, scenario_id: &ScenarioId) -> AuraResult<()> {
-        self.effects
-            .pause_scenario(scenario_id)
-            .await?;
+        self.effects.pause_scenario(scenario_id).await?;
 
         info!(scenario_id = %scenario_id, "Scenario paused");
         Ok(())
@@ -304,9 +285,7 @@ where
 
     /// Resume a paused scenario
     pub async fn resume_scenario(&self, scenario_id: &ScenarioId) -> AuraResult<()> {
-        self.effects
-            .resume_scenario(scenario_id)
-            .await?;
+        self.effects.resume_scenario(scenario_id).await?;
 
         info!(scenario_id = %scenario_id, "Scenario resumed");
         Ok(())
@@ -314,9 +293,7 @@ where
 
     /// Stop a scenario
     pub async fn stop_scenario(&self, scenario_id: &ScenarioId) -> AuraResult<()> {
-        self.effects
-            .stop_scenario(scenario_id)
-            .await?;
+        self.effects.stop_scenario(scenario_id).await?;
 
         info!(scenario_id = %scenario_id, "Scenario stopped");
         Ok(())
@@ -324,9 +301,7 @@ where
 
     /// Clear all active faults
     pub async fn clear_faults(&self) -> AuraResult<()> {
-        self.effects
-            .clear_faults()
-            .await?;
+        self.effects.clear_faults().await?;
 
         info!("All simulation faults cleared");
         Ok(())
@@ -340,11 +315,9 @@ where
         duration: Option<Duration>,
     ) -> AuraResult<FaultInjectionConfig> {
         let fault_type = match legacy_fault {
-            LegacyFaultType::NetworkPartition => {
-                FaultType::Network(NetworkFault::Partition {
-                    groups: vec![vec![target]],
-                })
-            }
+            LegacyFaultType::NetworkPartition => FaultType::Network(NetworkFault::Partition {
+                groups: vec![vec![target]],
+            }),
             LegacyFaultType::PacketLoss { probability } => {
                 FaultType::Network(NetworkFault::PacketLoss { probability })
             }

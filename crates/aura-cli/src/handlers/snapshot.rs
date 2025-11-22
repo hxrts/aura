@@ -15,7 +15,7 @@ pub async fn handle_snapshot(device_id: DeviceId, action: &SnapshotAction) -> Re
 }
 
 async fn propose_snapshot(device_id: DeviceId) -> Result<()> {
-    // Create agent for this operation  
+    // Create agent for this operation
     let agent = AgentBuilder::new()
         .with_authority(AuthorityId::new())
         .build_testing()?;

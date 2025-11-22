@@ -9,14 +9,10 @@ use std::path::Path;
 
 /// Handle status display through effects
 pub async fn handle_status(effects: &AuraEffectSystem, config_path: &Path) -> Result<()> {
-    println!(
-        "Account status for config: {}",
-        config_path.display()
-    );
+    println!("Account status for config: {}", config_path.display());
 
     // Check if config exists through storage effects
-    let config_exists = std::path::Path::new(&config_path.display().to_string())
-        .exists();
+    let config_exists = std::path::Path::new(&config_path.display().to_string()).exists();
 
     if !config_exists {
         eprintln!("Config file not found: {}", config_path.display());

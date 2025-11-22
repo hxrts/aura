@@ -93,7 +93,11 @@ pub trait QuintEvaluationEffects: Send + Sync {
     async fn load_property_spec(&self, spec_source: &str) -> Result<PropertySpec>;
 
     /// Evaluate a single property against a state
-    async fn evaluate_property(&self, property: &Property, state: &Value) -> Result<EvaluationResult>;
+    async fn evaluate_property(
+        &self,
+        property: &Property,
+        state: &Value,
+    ) -> Result<EvaluationResult>;
 
     /// Run full verification of a specification
     async fn run_verification(&self, spec: &PropertySpec) -> Result<VerificationResult>;
@@ -115,7 +119,11 @@ pub trait QuintEvaluationEffects: Send + Sync {
 #[async_trait::async_trait]
 pub trait QuintVerificationEffects: Send + Sync {
     /// Verify a property with comprehensive checking
-    async fn verify_property(&self, property: &Property, state: &Value) -> Result<VerificationResult>;
+    async fn verify_property(
+        &self,
+        property: &Property,
+        state: &Value,
+    ) -> Result<VerificationResult>;
 
     /// Generate counterexample for a failing property
     async fn generate_counterexample(&self, property: &Property) -> Result<Option<Counterexample>>;
@@ -177,7 +185,12 @@ impl VerificationId {
 }
 
 impl Property {
-    pub fn new(id: impl Into<String>, name: impl Into<String>, kind: PropertyKind, expression: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        kind: PropertyKind,
+        expression: impl Into<String>,
+    ) -> Self {
         Self {
             id: PropertyId::new(id),
             name: name.into(),

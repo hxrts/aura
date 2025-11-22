@@ -9,7 +9,7 @@ pub mod config;
 pub mod context;
 pub mod error;
 
-pub use api::{AuraAgent, AgentBuilder};
+pub use api::{AgentBuilder, AuraAgent};
 pub use config::AgentConfig;
 pub use context::AuthorityContext;
 pub use error::{AgentError, AgentResult};

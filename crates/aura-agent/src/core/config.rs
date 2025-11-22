@@ -10,13 +10,13 @@ use std::path::PathBuf;
 pub struct AgentConfig {
     /// Storage configuration
     pub storage: StorageConfig,
-    
+
     /// Network configuration
     pub network: NetworkConfig,
-    
+
     /// Reliability configuration
     pub reliability: ReliabilityConfig,
-    
+
     /// Choreography configuration
     pub choreography: ChoreographyConfig,
 }
@@ -26,10 +26,10 @@ pub struct AgentConfig {
 pub struct StorageConfig {
     /// Base storage directory
     pub base_path: PathBuf,
-    
+
     /// Maximum cache size in bytes
     pub cache_size: usize,
-    
+
     /// Enable storage compression
     pub enable_compression: bool,
 }
@@ -39,10 +39,10 @@ pub struct StorageConfig {
 pub struct NetworkConfig {
     /// Bind address
     pub bind_address: String,
-    
+
     /// Maximum connections
     pub max_connections: usize,
-    
+
     /// Connection timeout in seconds
     pub connection_timeout: u64,
 }
@@ -52,10 +52,10 @@ pub struct NetworkConfig {
 pub struct ReliabilityConfig {
     /// Maximum retry attempts
     pub max_retries: usize,
-    
+
     /// Base backoff delay in milliseconds
     pub base_backoff_ms: u64,
-    
+
     /// Maximum backoff delay in milliseconds
     pub max_backoff_ms: u64,
 }
@@ -65,10 +65,10 @@ pub struct ReliabilityConfig {
 pub struct ChoreographyConfig {
     /// Enable choreography debugging
     pub enable_debug: bool,
-    
+
     /// Choreography timeout in seconds
     pub timeout_secs: u64,
-    
+
     /// Maximum concurrent choreographies
     pub max_concurrent: usize,
 }

@@ -82,4 +82,3 @@ pub enum OutputFormat {
     /// JSON output for scripting
     Json,
 }
-

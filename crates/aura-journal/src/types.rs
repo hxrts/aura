@@ -10,10 +10,7 @@ use aura_core::GuardianId;
 // Import authentication types (ThresholdSig is imported where needed)
 
 // Re-export consolidated types from aura-core
-pub use aura_core::{
-    ParticipantId, ProtocolType, SessionId, SessionOutcome,
-    SessionStatus,
-};
+pub use aura_core::{ParticipantId, ProtocolType, SessionId, SessionOutcome, SessionStatus};
 
 // Use ContentId from aura-core
 
@@ -70,7 +67,6 @@ impl Default for GuardianPolicy {
 // ProtocolType is now imported from aura-core
 
 // EventNonce is now imported from aura-core
-
 
 /// Session information
 ///
@@ -181,6 +177,3 @@ impl Session {
 // SessionStatus is now imported from aura-core
 
 // SessionOutcome is now imported from aura-core
-
-
-

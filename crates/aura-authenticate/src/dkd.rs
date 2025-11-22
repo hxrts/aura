@@ -809,7 +809,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_agent::{AuraEffectSystem, AgentConfig};
+    use aura_agent::{AgentConfig, AuraEffectSystem};
     use aura_core::DeviceId;
 
     #[test]

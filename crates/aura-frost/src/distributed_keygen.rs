@@ -231,7 +231,7 @@ mod tests {
     async fn test_dkg_choreography_basic() -> aura_core::AuraResult<()> {
         // Create multi-device test harness for distributed key generation
         let mut harness = ChoreographyTestHarness::with_devices(3);
-        
+
         // Assign choreographic roles
         harness.assign_role("Coordinator", 0);
         harness.assign_role("Participants", &[0, 1, 2]);
@@ -252,13 +252,15 @@ mod tests {
         };
 
         // Test that DKG init message can be created and serialized
-        let dkg_init = DkgInit { request: dkg_request };
-        
+        let dkg_init = DkgInit {
+            request: dkg_request,
+        };
+
         // Verify choreography message structure
         let serialized = serde_json::to_vec(&dkg_init)?;
         let deserialized: DkgInit = serde_json::from_slice(&serialized)
             .map_err(|e| aura_core::AuraError::parse(e.to_string()))?;
-        
+
         assert_eq!(dkg_init.request.session_id, deserialized.request.session_id);
         assert_eq!(dkg_init.request.threshold, deserialized.request.threshold);
 
@@ -270,16 +272,16 @@ mod tests {
     async fn test_dkg_multi_device_workflow() -> aura_core::AuraResult<()> {
         // Create comprehensive multi-device test environment
         let mut harness = ChoreographyTestHarness::with_devices(5);
-        
+
         // Set up threshold scheme: 3-of-5
         harness.assign_role("Coordinator", 0);
         harness.assign_role("Participants", &[0, 1, 2, 3, 4]);
 
         let fixture = create_test_fixture();
-        
+
         // Test complete DKG workflow with all message types
         let session_id = "integration_test_session".to_string();
-        
+
         // Phase 1: DKG Initialization
         let dkg_request = DkgRequest {
             session_id: session_id.clone(),
@@ -289,7 +291,7 @@ mod tests {
             participants: (0..5).map(|i| fixture.authority_id(i)).collect(),
             timeout_seconds: 300,
         };
-        
+
         // Phase 2: Simulate share commitments from participants
         let mut share_commitments = Vec::new();
         for i in 0..3 {
@@ -300,7 +302,7 @@ mod tests {
             };
             share_commitments.push(commitment);
         }
-        
+
         // Phase 3: Simulate share revelations
         let mut share_revelations = Vec::new();
         for i in 0..3 {
@@ -311,7 +313,7 @@ mod tests {
             };
             share_revelations.push(revelation);
         }
-        
+
         // Phase 4: Simulate verification results
         let mut verification_results = Vec::new();
         for i in 0..3 {
@@ -322,7 +324,7 @@ mod tests {
             };
             verification_results.push(result);
         }
-        
+
         // Phase 5: Test successful completion
         let dkg_success = DkgSuccess {
             session_id: session_id.clone(),

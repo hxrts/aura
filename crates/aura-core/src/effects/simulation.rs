@@ -333,7 +333,10 @@ pub trait SimulationControlEffects {
     async fn restore_checkpoint(&self, checkpoint_id: &CheckpointId) -> Result<()>;
 
     /// Get checkpoint information
-    async fn get_checkpoint(&self, checkpoint_id: &CheckpointId) -> Result<Option<SimulationCheckpoint>>;
+    async fn get_checkpoint(
+        &self,
+        checkpoint_id: &CheckpointId,
+    ) -> Result<Option<SimulationCheckpoint>>;
 
     /// List all available checkpoints
     async fn list_checkpoints(&self) -> Result<Vec<SimulationCheckpoint>>;

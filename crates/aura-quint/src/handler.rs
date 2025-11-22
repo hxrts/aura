@@ -3,12 +3,12 @@
 //! This module provides stateless handlers that implement the QuintEvaluationEffects
 //! and QuintVerificationEffects traits defined in aura-core.
 
+use async_trait::async_trait;
 use aura_core::effects::{
     Counterexample, EvaluationResult, EvaluationStatistics, Property, PropertySpec,
     QuintEvaluationEffects, QuintVerificationEffects, VerificationId, VerificationResult,
 };
 use aura_core::Result;
-use async_trait::async_trait;
 use serde_json::Value;
 use std::time::Instant;
 
@@ -74,8 +74,8 @@ impl QuintEvaluationEffects for QuintEvaluator {
         // Parse the Quint specification
         // TODO: Use actual quint_evaluator to parse spec_source
         // For now, create a minimal spec for the refactor
-        let spec = PropertySpec::new("parsed_spec")
-            .with_context(Value::Object(serde_json::Map::new()));
+        let spec =
+            PropertySpec::new("parsed_spec").with_context(Value::Object(serde_json::Map::new()));
 
         if self.config.verbose {
             let duration = start.elapsed();
@@ -85,7 +85,11 @@ impl QuintEvaluationEffects for QuintEvaluator {
         Ok(spec)
     }
 
-    async fn evaluate_property(&self, property: &Property, _state: &Value) -> Result<EvaluationResult> {
+    async fn evaluate_property(
+        &self,
+        property: &Property,
+        _state: &Value,
+    ) -> Result<EvaluationResult> {
         #[allow(clippy::disallowed_methods)]
         let start = Instant::now();
 
@@ -111,10 +115,7 @@ impl QuintEvaluationEffects for QuintEvaluator {
         };
 
         if self.config.verbose {
-            tracing::debug!(
-                "Property evaluation completed in {}ms",
-                execution_time
-            );
+            tracing::debug!("Property evaluation completed in {}ms", execution_time);
         }
 
         Ok(result)
@@ -194,7 +195,11 @@ impl QuintEvaluationEffects for QuintEvaluator {
 
 #[async_trait]
 impl QuintVerificationEffects for QuintEvaluator {
-    async fn verify_property(&self, property: &Property, state: &Value) -> Result<VerificationResult> {
+    async fn verify_property(
+        &self,
+        property: &Property,
+        state: &Value,
+    ) -> Result<VerificationResult> {
         if self.config.verbose {
             tracing::debug!("Verifying property: {}", property.name);
         }
@@ -255,7 +260,11 @@ impl QuintVerificationEffects for QuintEvaluator {
         }
 
         // Use the configured max steps or the parameter
-        let effective_max_steps = self.config.max_steps.map(|s| s as usize).unwrap_or(max_steps);
+        let effective_max_steps = self
+            .config
+            .max_steps
+            .map(|s| s as usize)
+            .unwrap_or(max_steps);
 
         if self.config.verbose {
             tracing::debug!("Using effective max steps: {}", effective_max_steps);
@@ -279,7 +288,7 @@ impl QuintVerificationEffects for QuintEvaluator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::effects::{PropertyKind, Property};
+    use aura_core::effects::{Property, PropertyKind};
 
     #[tokio::test]
     async fn test_quint_evaluator_creation() {
@@ -295,7 +304,7 @@ mod tests {
             "test_prop",
             "Test Property",
             PropertyKind::Invariant,
-            "x > 0"
+            "x > 0",
         );
         let state = Value::Object(serde_json::Map::new());
 
@@ -314,10 +323,9 @@ mod tests {
             "test_prop",
             "Test Property",
             PropertyKind::Invariant,
-            "x > 0"
+            "x > 0",
         );
-        let spec = PropertySpec::new("test_spec")
-            .with_property(property);
+        let spec = PropertySpec::new("test_spec").with_property(property);
 
         let result = evaluator.run_verification(&spec).await;
         assert!(result.is_ok());

@@ -2122,7 +2122,7 @@ mod tests {
                 let json_output = fuzzer
                     .export_itf_to_json(&itf_trace, true)
                     .expect("Failed to export ITF trace");
-                
+
                 assert!(json_output.contains("vars"));
                 assert!(json_output.contains("states"));
             }
@@ -2130,8 +2130,10 @@ mod tests {
                 // Conversion failure is acceptable as this indicates a known limitation
                 // in the current ITF format compatibility between fuzzer and trace converter
                 println!("ITF conversion failed as expected: {}", e);
-                assert!(e.to_string().contains("JSON parsing failed") || 
-                        e.to_string().contains("TraceConversionError"));
+                assert!(
+                    e.to_string().contains("JSON parsing failed")
+                        || e.to_string().contains("TraceConversionError")
+                );
             }
         }
     }

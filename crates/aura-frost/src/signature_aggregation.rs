@@ -228,7 +228,10 @@ mod tests {
             session_id: "test_session".to_string(),
             message: b"test message".to_vec(),
             threshold: 0, // Invalid threshold
-            signers: vec![aura_core::test_utils::test_authority_id(3), aura_core::test_utils::test_authority_id(4)],
+            signers: vec![
+                aura_core::test_utils::test_authority_id(3),
+                aura_core::test_utils::test_authority_id(4),
+            ],
             timeout_seconds: 60,
         };
         assert!(validate_aggregation_config(&invalid_request).is_err());
@@ -267,7 +270,7 @@ mod tests {
         let message = b"test message for threshold signing";
         let threshold = 3;
         let total_signers = 4;
-        
+
         // Create aggregation request using testkit authorities
         let request = AggregationRequest {
             session_id: "choreography_test_session".to_string(),
@@ -300,11 +303,12 @@ mod tests {
             threshold,
             total_signers,
             effects.as_ref(),
-        ).await;
+        )
+        .await;
 
         // Should succeed with sufficient signatures
         assert!(result.is_ok());
-        
+
         let threshold_sig = result?;
         assert_eq!(threshold_sig.signers.len(), threshold);
 
@@ -326,7 +330,9 @@ mod tests {
                 session_id: format!("multi_round_session_{}", round),
                 message: message.as_bytes().to_vec(),
                 threshold,
-                signers: (1..=6).map(|i| aura_core::test_utils::test_authority_id(i)).collect(),
+                signers: (1..=6)
+                    .map(|i| aura_core::test_utils::test_authority_id(i))
+                    .collect(),
                 timeout_seconds: 120,
             };
 
@@ -346,15 +352,16 @@ mod tests {
                 threshold,
                 6, // total signers
                 effects.as_ref(),
-            ).await;
+            )
+            .await;
 
             assert!(result.is_ok(), "Round {} aggregation should succeed", round);
-            
+
             let threshold_sig = result?;
             assert_eq!(
-                threshold_sig.signers.len(), 
+                threshold_sig.signers.len(),
                 threshold,
-                "Round {} should have correct number of signers", 
+                "Round {} should have correct number of signers",
                 round
             );
         }

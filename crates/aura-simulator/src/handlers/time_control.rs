@@ -230,10 +230,10 @@ mod tests {
     async fn test_time_acceleration() {
         let mut handler = SimulationTimeHandler::new();
         let timestamp1 = handler.current_timestamp_millis().await;
-        
+
         // Sleep a bit to ensure some real time passes
         tokio::time::sleep(Duration::from_millis(50)).await;
-        
+
         // Test acceleration after some time has passed
         handler.set_acceleration(2.0);
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -242,9 +242,13 @@ mod tests {
         // With 2x acceleration, 100ms real time should advance simulation time by ~200ms
         // Time should advance faster with acceleration
         let time_diff = timestamp2 - timestamp1;
-        
+
         // Should be at least some time advancement (more than 100ms due to acceleration)
-        assert!(time_diff > 100, "Expected time advancement > 100ms, got {}", time_diff);
+        assert!(
+            time_diff > 100,
+            "Expected time advancement > 100ms, got {}",
+            time_diff
+        );
     }
 
     #[tokio::test]

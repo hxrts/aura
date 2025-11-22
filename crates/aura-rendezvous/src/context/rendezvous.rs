@@ -434,7 +434,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_rendezvous_creation() {
-        use aura_agent::{AuraEffectSystem, AgentConfig};
+        use aura_agent::{AgentConfig, AuraEffectSystem};
 
         let authority = AuthorityId::new();
         let effects = Arc::new(AuraEffectSystem::testing(&AgentConfig::default()));

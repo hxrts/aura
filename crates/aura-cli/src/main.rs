@@ -6,7 +6,7 @@
 use anyhow::Result;
 use aura_agent::AgentBuilder;
 use aura_core::effects::ConsoleEffects;
-use aura_core::identifiers::{DeviceId, AuthorityId};
+use aura_core::identifiers::{AuthorityId, DeviceId};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 

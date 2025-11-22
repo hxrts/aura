@@ -80,8 +80,13 @@ async fn create_directory_through_effects(effects: &AuraEffectSystem, path: &Pat
     // Storage effect not available - using placeholder
     std::fs::create_dir_all(path)
         .map_err(|e| anyhow::anyhow!("Failed to create directory {}: {}", path.display(), e))?;
-    std::fs::write(&dir_marker_path, timestamp.to_le_bytes())
-        .map_err(|e| anyhow::anyhow!("Failed to create directory marker {}: {}", dir_marker_path.display(), e))
+    std::fs::write(&dir_marker_path, timestamp.to_le_bytes()).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to create directory marker {}: {}",
+            dir_marker_path.display(),
+            e
+        )
+    })
 }
 
 /// Create placeholder effect API data

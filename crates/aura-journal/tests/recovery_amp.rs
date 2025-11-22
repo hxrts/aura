@@ -1,9 +1,9 @@
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::Hash32;
-use aura_journal::fact::{
-    ChannelCheckpoint, CommittedChannelEpochBump, RelationalFact,
+use aura_journal::fact::{ChannelCheckpoint, CommittedChannelEpochBump, RelationalFact};
+use aura_journal::{
+    reduce_context, Fact, FactContent, FactId, FactJournal as Journal, JournalNamespace,
 };
-use aura_journal::{reduce_context, Fact, FactContent, FactId, FactJournal as Journal, JournalNamespace};
 
 #[test]
 fn recovery_from_journal_reconstructs_channel_state() {
@@ -12,17 +12,15 @@ fn recovery_from_journal_reconstructs_channel_state() {
 
     let checkpoint = Fact {
         fact_id: FactId::from_bytes([1u8; 16]),
-        content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(
-            ChannelCheckpoint {
-                context: ctx,
-                channel,
-                chan_epoch: 0,
-                base_gen: 42,
-                window: 32,
-                ck_commitment: Hash32::new([7u8; 32]),
-                skip_window_override: Some(32),
-            },
-        )),
+        content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(ChannelCheckpoint {
+            context: ctx,
+            channel,
+            chan_epoch: 0,
+            base_gen: 42,
+            window: 32,
+            ck_commitment: Hash32::new([7u8; 32]),
+            skip_window_override: Some(32),
+        })),
     };
 
     let committed = Fact {
@@ -49,4 +47,3 @@ fn recovery_from_journal_reconstructs_channel_state() {
     assert_eq!(ch_state.last_checkpoint_gen, 42);
     assert_eq!(ch_state.skip_window, 32);
 }
-

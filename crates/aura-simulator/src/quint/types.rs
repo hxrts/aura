@@ -2,7 +2,7 @@
 //!
 //! Data structures for simulation-specific aspects of Quint integration,
 //! including chaos generation, Byzantine mapping, and ITF trace conversion.
-//! 
+//!
 //! Core Quint types (Property, PropertySpec, EvaluationResult) have been moved
 //! to aura-core and aura-quint for proper architectural separation.
 

@@ -355,10 +355,7 @@ async fn save_scenario_results(
     }
     .map_err(|e| anyhow::anyhow!("Failed to serialize results: {}", e))?;
 
-    std::fs::write(
-            &output_path.display().to_string(),
-            results_json.as_bytes(),
-        )
+    std::fs::write(&output_path.display().to_string(), results_json.as_bytes())
         .map_err(|e| anyhow::anyhow!("Failed to save results: {}", e))?;
 
     println!("Results saved to: {}", output_path.display());

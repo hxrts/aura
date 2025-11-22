@@ -11,8 +11,9 @@ use aura_core::{
     authority::{AuthorityState, TreeState},
     hash,
     identifiers::{AuthorityId, ChannelId, ContextId},
+    session_epochs::Epoch,
     tree::{commit_leaf, policy_hash, LeafId, Policy},
-    Hash32, session_epochs::Epoch,
+    Hash32,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -49,10 +50,10 @@ fn apply_add_leaf(tree_state: &TreeState, public_key: &[u8]) -> TreeState {
     // 3. Recompute commitments up the tree
     // Since we don't have the full tree structure in TreeState, we'll compute
     // a leaf commitment and use it to update the root
-    
+
     let new_leaf_id = LeafId(tree_state.device_count());
     let leaf_commitment = commit_leaf(new_leaf_id, tree_state.epoch().0, public_key);
-    
+
     // In a full implementation, we'd update the tree structure and recompute
     // branch commitments. For now, we'll create a new root commitment that
     // incorporates the leaf commitment
@@ -62,7 +63,7 @@ fn apply_add_leaf(tree_state: &TreeState, public_key: &[u8]) -> TreeState {
     hasher.update(tree_state.root_commitment().as_bytes());
     hasher.update(&tree_state.device_count().to_le_bytes());
     let new_commitment = hasher.finalize();
-    
+
     TreeState::with_values(
         tree_state.epoch(),
         Hash32::new(new_commitment),
@@ -78,9 +79,9 @@ fn apply_remove_leaf(tree_state: &TreeState, leaf_index: u32) -> TreeState {
     // 2. Recompute commitments up the tree
     // Since we don't maintain full tree structure, we create a deterministic
     // commitment that reflects the removal
-    
+
     let removed_leaf_id = LeafId(leaf_index);
-    
+
     // Create a deterministic commitment for the removal operation
     let mut hasher = hash::hasher();
     hasher.update(b"ROOT_REMOVE_LEAF");
@@ -88,7 +89,7 @@ fn apply_remove_leaf(tree_state: &TreeState, leaf_index: u32) -> TreeState {
     hasher.update(tree_state.root_commitment().as_bytes());
     hasher.update(&tree_state.epoch().0.to_le_bytes());
     let new_commitment = hasher.finalize();
-    
+
     TreeState::with_values(
         tree_state.epoch(),
         Hash32::new(new_commitment),
@@ -101,15 +102,15 @@ fn apply_remove_leaf(tree_state: &TreeState, leaf_index: u32) -> TreeState {
 fn apply_update_policy(tree_state: &TreeState, threshold: u16) -> TreeState {
     // Policy updates affect branch nodes. We compute a new commitment
     // that incorporates the policy change
-    
+
     let new_policy = Policy::Threshold {
         m: threshold,
         n: tree_state.device_count() as u16,
     };
-    
+
     // Compute policy hash for the new threshold
     let new_policy_hash = policy_hash(&new_policy);
-    
+
     // Create a deterministic root commitment incorporating the policy
     let mut hasher = hash::hasher();
     hasher.update(b"ROOT_WITH_POLICY");
@@ -117,7 +118,7 @@ fn apply_update_policy(tree_state: &TreeState, threshold: u16) -> TreeState {
     hasher.update(tree_state.root_commitment().as_bytes());
     hasher.update(&tree_state.epoch().0.to_le_bytes());
     let new_commitment = hasher.finalize();
-    
+
     TreeState::with_values(
         tree_state.epoch(),
         Hash32::new(new_commitment),
@@ -130,30 +131,30 @@ fn apply_update_policy(tree_state: &TreeState, threshold: u16) -> TreeState {
 fn apply_rotate_epoch(tree_state: &TreeState) -> TreeState {
     // Epoch rotation requires recomputing all commitments in the tree
     // with the new epoch value
-    
+
     let new_epoch = Epoch(tree_state.epoch().0 + 1);
-    
+
     // In a full implementation, we would:
     // 1. Iterate through all leaves and recompute their commitments with new epoch
     // 2. Recompute all branch commitments bottom-up with new epoch
     // 3. Compute new root commitment
-    
+
     // For now, create a deterministic commitment that reflects the epoch change
     let current_policy = Policy::Threshold {
         m: tree_state.threshold(),
         n: tree_state.device_count() as u16,
     };
-    
+
     // Use the merkle tree utilities to compute a proper epoch-rotated commitment
     let policy_commitment = policy_hash(&current_policy);
-    
+
     let mut hasher = hash::hasher();
     hasher.update(b"ROOT_EPOCH_ROTATE");
     hasher.update(&new_epoch.0.to_le_bytes());
     hasher.update(&policy_commitment);
     hasher.update(tree_state.root_commitment().as_bytes());
     let new_commitment = hasher.finalize();
-    
+
     TreeState::with_values(
         new_epoch,
         Hash32::new(new_commitment),

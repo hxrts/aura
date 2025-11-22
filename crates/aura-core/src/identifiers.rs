@@ -536,7 +536,9 @@ impl From<AuthorityId> for Uuid {
 ///
 /// Channels are scoped under a RelationalContext. The identifier is opaque and
 /// does not reveal membership or topology.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Default,
+)]
 pub struct ChannelId(pub Hash32);
 
 impl ChannelId {
@@ -555,7 +557,6 @@ impl ChannelId {
         self.0.as_bytes()
     }
 }
-
 
 impl fmt::Display for ChannelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

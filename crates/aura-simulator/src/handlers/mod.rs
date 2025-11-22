@@ -14,8 +14,8 @@ pub use scenario::{
     InjectionAction, ScenarioDefinition, SimulationScenarioHandler, TriggerCondition,
 };
 pub use stateless_simulator::{
-    StatelessSimulatorHandler, StatelessSimulatorConfig, SimulationTickResult,
-    ScenarioSummary, LegacyFaultType,
+    LegacyFaultType, ScenarioSummary, SimulationTickResult, StatelessSimulatorConfig,
+    StatelessSimulatorHandler,
 };
 pub use time_control::SimulationTimeHandler;
 

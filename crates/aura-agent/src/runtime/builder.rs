@@ -29,10 +29,10 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use thiserror::Error;
 
-use super::{
-    EffectExecutor, AuraEffectSystem, LifecycleManager, ChoreographyAdapter, RuntimeSystem
-};
 use super::services::{ContextManager, FlowBudgetManager, ReceiptManager};
+use super::{
+    AuraEffectSystem, ChoreographyAdapter, EffectExecutor, LifecycleManager, RuntimeSystem,
+};
 use crate::core::{AgentConfig, AgentError, AgentResult, AuthorityContext};
 use aura_core::identifiers::AuthorityId;
 
@@ -42,7 +42,7 @@ pub enum EffectRegistryError {
     /// Required configuration missing
     #[error("Required configuration missing: {field}")]
     MissingConfiguration { field: String },
-    
+
     /// Handler creation failed
     #[error("Failed to create {handler_type} handler")]
     HandlerCreationFailed {
@@ -50,11 +50,11 @@ pub enum EffectRegistryError {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
-    
+
     /// Invalid configuration
     #[error("Invalid configuration: {message}")]
     InvalidConfiguration { message: String },
-    
+
     /// Effect system build failed
     #[error("Failed to build effect system")]
     BuildFailed {
@@ -65,9 +65,11 @@ pub enum EffectRegistryError {
 
 impl EffectRegistryError {
     pub fn missing_field(field: impl Into<String>) -> Self {
-        Self::MissingConfiguration { field: field.into() }
+        Self::MissingConfiguration {
+            field: field.into(),
+        }
     }
-    
+
     pub fn handler_creation_failed(
         handler_type: impl Into<String>,
         source: impl std::error::Error + Send + Sync + 'static,
@@ -77,13 +79,17 @@ impl EffectRegistryError {
             source: Box::new(source),
         }
     }
-    
+
     pub fn invalid_config(message: impl Into<String>) -> Self {
-        Self::InvalidConfiguration { message: message.into() }
+        Self::InvalidConfiguration {
+            message: message.into(),
+        }
     }
-    
+
     pub fn build_failed(source: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self::BuildFailed { source: Box::new(source) }
+        Self::BuildFailed {
+            source: Box::new(source),
+        }
     }
 }
 
@@ -114,7 +120,7 @@ impl EffectSystemBuilder {
             execution_mode: ExecutionMode::Production,
         }
     }
-    
+
     /// Create a testing builder
     pub fn testing() -> Self {
         Self {
@@ -123,7 +129,7 @@ impl EffectSystemBuilder {
             execution_mode: ExecutionMode::Testing,
         }
     }
-    
+
     /// Create a simulation builder
     pub fn simulation(seed: u64) -> Self {
         Self {
@@ -132,54 +138,54 @@ impl EffectSystemBuilder {
             execution_mode: ExecutionMode::Simulation { seed },
         }
     }
-    
+
     /// Set configuration
     pub fn with_config(mut self, config: AgentConfig) -> Self {
         self.config = Some(config);
         self
     }
-    
+
     /// Set authority ID
     pub fn with_authority(mut self, authority_id: AuthorityId) -> Self {
         self.authority_id = Some(authority_id);
         self
     }
-    
+
     /// Build the runtime system (async)
     pub async fn build(self) -> Result<RuntimeSystem, String> {
         let config = self.config.unwrap_or_default();
         let authority_id = self.authority_id.ok_or("Authority ID required")?;
-        
+
         // Create lifecycle manager
         let lifecycle_manager = LifecycleManager::new();
-        
+
         // Create effect system components based on execution mode
         let (effect_executor, effect_system) = match self.execution_mode {
             ExecutionMode::Production => {
                 let executor = EffectExecutor::production(config.clone());
                 let system = AuraEffectSystem::production(config.clone());
                 (executor, system)
-            },
+            }
             ExecutionMode::Testing => {
                 let executor = EffectExecutor::testing(config.clone());
                 let system = AuraEffectSystem::testing(&config);
                 (executor, system)
-            },
+            }
             ExecutionMode::Simulation { seed } => {
                 let executor = EffectExecutor::simulation(config.clone(), seed);
                 let system = AuraEffectSystem::simulation(&config, seed);
                 (executor, system)
-            },
+            }
         };
-        
+
         // Create service managers
         let context_manager = ContextManager::new(&config);
         let flow_budget_manager = FlowBudgetManager::new(&config);
         let receipt_manager = ReceiptManager::new(&config);
-        
+
         // Create choreography adapter
         let choreography_adapter = ChoreographyAdapter::new(&config);
-        
+
         Ok(RuntimeSystem::new(
             effect_executor,
             effect_system,
@@ -192,7 +198,7 @@ impl EffectSystemBuilder {
             authority_id,
         ))
     }
-    
+
     /// Build the runtime system (sync)
     pub fn build_sync(self) -> Result<RuntimeSystem, String> {
         // For testing/simulation, we can build synchronously
@@ -234,7 +240,7 @@ impl EffectRegistry {
             enable_tracing: false,
         }
     }
-    
+
     /// Create a testing effect registry
     ///
     /// Testing configurations use mock handlers for fast, deterministic tests:
@@ -251,7 +257,7 @@ impl EffectRegistry {
             enable_tracing: false,
         }
     }
-    
+
     /// Create a simulation effect registry
     ///
     /// Simulation configurations provide deterministic, controllable execution:
@@ -271,7 +277,7 @@ impl EffectRegistry {
             enable_tracing: false,
         }
     }
-    
+
     /// Create a custom effect registry for advanced configuration
     pub fn custom() -> Self {
         Self {
@@ -282,38 +288,37 @@ impl EffectRegistry {
             enable_tracing: false,
         }
     }
-    
+
     /// Set the authority context (authority-first approach)
     pub fn with_authority_context(mut self, context: AuthorityContext) -> Self {
         self.authority_context = Some(context);
         self
     }
-    
-    
+
     /// Enable logging for all effect operations
     pub fn with_logging(mut self) -> Self {
         self.enable_logging = true;
         self
     }
-    
+
     /// Enable metrics collection for performance monitoring
     pub fn with_metrics(mut self) -> Self {
         self.enable_metrics = true;
         self
     }
-    
+
     /// Enable distributed tracing for protocol debugging
     pub fn with_tracing(mut self) -> Self {
         self.enable_tracing = true;
         self
     }
-    
+
     /// Set custom execution mode
     pub fn with_execution_mode(mut self, mode: ExecutionMode) -> Self {
         self.execution_mode = mode;
         self
     }
-    
+
     /// Build the configured effect system
     ///
     /// This creates a complete `AuraEffectSystem` with all configured handlers
@@ -331,7 +336,7 @@ impl EffectRegistry {
         if self.authority_context.is_none() {
             return Err(EffectRegistryError::missing_field("authority_context"));
         }
-        
+
         // Create effect system based on execution mode
         let config = AgentConfig::default();
         let effect_system = match self.execution_mode {
@@ -340,12 +345,10 @@ impl EffectRegistry {
                 // In a real implementation, this would create production effects
                 // For now, use testing as a placeholder
                 AuraEffectSystem::testing(&config)
-            },
-            ExecutionMode::Simulation { seed } => {
-                AuraEffectSystem::simulation(&config, seed)
-            },
+            }
+            ExecutionMode::Simulation { seed } => AuraEffectSystem::simulation(&config, seed),
         };
-        
+
         Ok(Arc::new(effect_system))
     }
 }
@@ -353,19 +356,25 @@ impl EffectRegistry {
 /// Extension trait providing standard configurations
 pub trait EffectRegistryExt {
     /// Quick testing setup with authority context
-    fn quick_testing(context: AuthorityContext) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
-        EffectRegistry::testing().with_authority_context(context).build()
+    fn quick_testing(
+        context: AuthorityContext,
+    ) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
+        EffectRegistry::testing()
+            .with_authority_context(context)
+            .build()
     }
-    
+
     /// Quick production setup with authority context and basic middleware
-    fn quick_production(context: AuthorityContext) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
+    fn quick_production(
+        context: AuthorityContext,
+    ) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
         EffectRegistry::production()
             .with_authority_context(context)
             .with_logging()
             .with_metrics()
             .build()
     }
-    
+
     /// Quick simulation setup with authority context and seed
     fn quick_simulation(
         context: AuthorityContext,
@@ -391,14 +400,14 @@ impl RuntimeBuilder {
             .build()
             .await
     }
-    
+
     /// Create a testing runtime with authority-first design
     pub fn testing(authority_id: AuthorityId) -> Result<RuntimeSystem, String> {
         EffectSystemBuilder::testing()
             .with_authority(authority_id)
             .build_sync()
     }
-    
+
     /// Create a simulation runtime with authority-first design
     pub fn simulation(authority_id: AuthorityId, seed: u64) -> Result<RuntimeSystem, String> {
         EffectSystemBuilder::simulation(seed)
@@ -410,15 +419,18 @@ impl RuntimeBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_execution_modes() {
         assert_eq!(ExecutionMode::Production, ExecutionMode::Production);
         assert_eq!(ExecutionMode::Testing, ExecutionMode::Testing);
-        assert_eq!(ExecutionMode::Simulation { seed: 42 }, ExecutionMode::Simulation { seed: 42 });
+        assert_eq!(
+            ExecutionMode::Simulation { seed: 42 },
+            ExecutionMode::Simulation { seed: 42 }
+        );
         assert_ne!(ExecutionMode::Production, ExecutionMode::Testing);
     }
-    
+
     #[test]
     fn test_effect_registry_configurations() {
         // Test production configuration
@@ -426,44 +438,47 @@ mod tests {
         assert!(matches!(prod.execution_mode, ExecutionMode::Production));
         assert!(prod.enable_logging);
         assert!(prod.enable_metrics);
-        
+
         // Test testing configuration
         let test = EffectRegistry::testing();
         assert!(matches!(test.execution_mode, ExecutionMode::Testing));
         assert!(!test.enable_logging);
         assert!(!test.enable_metrics);
-        
+
         // Test simulation configuration
         let sim = EffectRegistry::simulation(42);
-        assert!(matches!(sim.execution_mode, ExecutionMode::Simulation { seed: 42 }));
+        assert!(matches!(
+            sim.execution_mode,
+            ExecutionMode::Simulation { seed: 42 }
+        ));
         assert!(sim.enable_logging);
         assert!(!sim.enable_metrics);
     }
-    
+
     #[test]
     fn test_builder_pattern() {
         let authority_id = AuthorityId::new();
         let context = AuthorityContext::new(authority_id);
-        
+
         let registry = EffectRegistry::custom()
             .with_authority_context(context)
             .with_logging()
             .with_metrics()
             .with_tracing()
             .with_execution_mode(ExecutionMode::Production);
-        
+
         assert!(registry.authority_context.is_some());
         assert!(matches!(registry.execution_mode, ExecutionMode::Production));
         assert!(registry.enable_logging);
         assert!(registry.enable_metrics);
         assert!(registry.enable_tracing);
     }
-    
+
     #[test]
     fn test_build_missing_context() {
         let result = EffectRegistry::testing().build();
         assert!(result.is_err());
-        
+
         match result.unwrap_err() {
             EffectRegistryError::MissingConfiguration { field } => {
                 assert_eq!(field, "authority_context");

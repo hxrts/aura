@@ -2,8 +2,8 @@
 //!
 //! Specialized handlers for threshold operation sessions.
 
-use super::{shared::*, coordination::SessionOperations};
-use crate::core::{AgentResult, AgentError};
+use super::{coordination::SessionOperations, shared::*};
+use crate::core::{AgentError, AgentResult};
 use aura_core::identifiers::DeviceId;
 use aura_protocol::effects::SessionType;
 use std::collections::HashMap;
@@ -21,7 +21,8 @@ impl SessionOperations {
             return Err(AgentError::config("Not enough participants for threshold"));
         }
 
-        let mut handle = self.create_session(SessionType::ThresholdOperation, participants)
+        let mut handle = self
+            .create_session(SessionType::ThresholdOperation, participants)
             .await?;
 
         // Add threshold metadata
@@ -47,7 +48,8 @@ impl SessionOperations {
 
         let participants = vec![device_id]; // Single participant for self-rotation
 
-        let mut handle = self.create_session(SessionType::KeyRotation, participants)
+        let mut handle = self
+            .create_session(SessionType::KeyRotation, participants)
             .await?;
 
         // Add rotation metadata
@@ -82,27 +84,25 @@ mod tests {
 
     #[tokio::test]
     async fn test_threshold_session() {
-        use crate::runtime::effects::AuraEffectSystem;
         use crate::core::AgentConfig;
-        
+        use crate::runtime::effects::AuraEffectSystem;
+
         let authority_id = AuthorityId::new();
         let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new();
-        
+
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config);
         let effects = Arc::new(RwLock::new(effect_system));
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 
-        let participants = vec![
-            sessions.device_id(),
-            DeviceId::new(),
-            DeviceId::new(),
-        ];
-        
-        let handle = sessions.create_threshold_session(participants, 2)
-            .await.unwrap();
+        let participants = vec![sessions.device_id(), DeviceId::new(), DeviceId::new()];
+
+        let handle = sessions
+            .create_threshold_session(participants, 2)
+            .await
+            .unwrap();
 
         assert!(handle.metadata.contains_key("threshold"));
         assert_eq!(
@@ -113,21 +113,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_key_rotation_session() {
-        use crate::runtime::effects::AuraEffectSystem;
         use crate::core::AgentConfig;
-        
+        use crate::runtime::effects::AuraEffectSystem;
+
         let authority_id = AuthorityId::new();
         let authority_context = AuthorityContext::new(authority_id);
         let account_id = AccountId::new();
-        
+
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config);
         let effects = Arc::new(RwLock::new(effect_system));
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 
-        let handle = sessions.create_key_rotation_session()
-            .await.unwrap();
+        let handle = sessions.create_key_rotation_session().await.unwrap();
 
         assert!(handle.metadata.contains_key("rotation_type"));
         assert_eq!(

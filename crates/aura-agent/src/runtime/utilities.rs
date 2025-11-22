@@ -14,17 +14,17 @@ impl PersistenceUtils {
     pub fn authority_key(authority_id: &AuthorityId) -> String {
         format!("authority/{}", authority_id)
     }
-    
+
     /// Generate storage key for context data
     pub fn context_key(context_id: &ContextId) -> String {
         format!("context/{}", context_id)
     }
-    
+
     /// Generate storage key for session data
     pub fn session_key(session_id: &SessionId) -> String {
         format!("session/{}", session_id)
     }
-    
+
     /// Generate storage key for journal data
     pub fn journal_key(authority_id: &AuthorityId, journal_type: &str) -> String {
         format!("journal/{}/{}", authority_id, journal_type)
@@ -43,19 +43,19 @@ impl StorageKeyManager {
             base_path: base_path.as_ref().to_path_buf(),
         }
     }
-    
+
     /// Get full path for a storage key
     pub fn path_for_key(&self, key: &str) -> PathBuf {
         self.base_path.join(key)
     }
-    
+
     /// Get directory for a storage key
     pub fn dir_for_key(&self, key: &str) -> PathBuf {
         let mut path = self.path_for_key(key);
         path.pop();
         path
     }
-    
+
     /// Ensure directory exists for a storage key
     pub async fn ensure_dir(&self, key: &str) -> Result<(), std::io::Error> {
         let dir = self.dir_for_key(key);
@@ -79,12 +79,12 @@ impl EffectApiHelpers {
             metadata,
         }
     }
-    
+
     /// Extract authority from effect context
     pub fn extract_authority(context: &EffectContext) -> AuthorityId {
         context.authority_id
     }
-    
+
     /// Extract session from effect context
     pub fn extract_session(context: &EffectContext) -> Option<SessionId> {
         context.session_id
@@ -96,10 +96,10 @@ impl EffectApiHelpers {
 pub struct EffectContext {
     /// Authority performing the operation
     pub authority_id: AuthorityId,
-    
+
     /// Session context (if any)
     pub session_id: Option<SessionId>,
-    
+
     /// Additional metadata
     pub metadata: HashMap<String, String>,
 }

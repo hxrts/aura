@@ -65,10 +65,12 @@ impl<E: GuardEffectSystem> AmpJournalEffects for E {
     async fn insert_relational_fact(&self, fact: RelationalFact) -> Result<()> {
         let context = fact_context(&fact)?;
         let mut journal = self.fetch_context_journal(context).await?;
-        journal.add_fact(Fact {
-            fact_id: FactId::from_uuid(Uuid::new_v4()),
-            content: FactContent::Relational(fact),
-        }).map_err(|e| AuraError::invalid(format!("failed to add fact: {}", e)))?;
+        journal
+            .add_fact(Fact {
+                fact_id: FactId::from_uuid(Uuid::new_v4()),
+                content: FactContent::Relational(fact),
+            })
+            .map_err(|e| AuraError::invalid(format!("failed to add fact: {}", e)))?;
 
         let bytes =
             serde_json::to_vec(&journal).map_err(|e| AuraError::serialization(e.to_string()))?;

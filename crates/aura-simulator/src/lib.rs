@@ -83,19 +83,19 @@ pub mod testkit_bridge;
 
 // Re-export core types for external usage
 pub use types::{
-    ByzantineStrategy, ChaosStrategy, FaultType, LogLevel, NetworkConfig,
-    PropertyViolationType, Result, SimulationOutcome, SimulatorConfig, SimulatorContext,
-    SimulatorError, SimulatorOperation, StateQuery, TimeConfig, TimeControlAction,
+    ByzantineStrategy, ChaosStrategy, FaultType, LogLevel, NetworkConfig, PropertyViolationType,
+    Result, SimulationOutcome, SimulatorConfig, SimulatorContext, SimulatorError,
+    SimulatorOperation, StateQuery, TimeConfig, TimeControlAction,
 };
 
 // Re-export effect handlers (pure algebraic effects)
 pub use handlers::{
-    ComposedSimulationEnvironment, SimulationEffectComposer, SimulationFaultHandler,
-    SimulationScenarioHandler, SimulationTimeHandler, StatelessSimulatorHandler,
-    CoreSimulatorHandler,
+    ComposedSimulationEnvironment, CoreSimulatorHandler, SimulationEffectComposer,
+    SimulationFaultHandler, SimulationScenarioHandler, SimulationTimeHandler,
+    StatelessSimulatorHandler,
 };
 
-// Re-export testkit bridge 
+// Re-export testkit bridge
 pub use testkit_bridge::{MiddlewareConfig as HandlerConfig, TestkitSimulatorBridge};
 
 // Legacy compatibility re-exports (deprecated - use pure effect handlers instead)
