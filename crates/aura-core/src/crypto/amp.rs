@@ -83,6 +83,11 @@ pub fn derive_nonce_from_ratchet(ratchet_gen: u64, chan_epoch: u64) -> [u8; 12] 
 /// - Domain separation via info string prevents key reuse
 /// - Ratchet generation as salt ensures forward secrecy
 /// - HKDF provides cryptographic strength key derivation
+///
+/// **Note**: Uses `sha2::Sha256` directly for HKDF key derivation, which is a
+/// cryptographic primitive operation and exempted from the general hash centralization
+/// policy. Key derivation requires algorithm-specific properties.
+#[allow(clippy::disallowed_types)] // HKDF-SHA256 is a cryptographic primitive for key derivation
 pub fn derive_message_key(
     master_key: &Hash32,
     context: &[u8],
