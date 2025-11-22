@@ -99,12 +99,35 @@ impl Journal {
 
     /// Get account state summary
     pub fn account_summary(&self) -> AccountSummary {
+        // Derive device count from authority facts in TreeState
+        let device_count = self.get_device_count_from_tree_state();
+        
         AccountSummary {
             account_id: self.account_state.account_id,
-            device_count: 0, // TODO: Derive device count from authority facts in TreeState
+            device_count,
             guardian_count: self.account_state.guardian_registry.guardians.len(),
             last_epoch: self.account_state.epoch_counter.value,
         }
+    }
+    
+    /// Derive device count from authority facts in TreeState
+    fn get_device_count_from_tree_state(&self) -> usize {
+        // Use the reduction function to derive tree state from facts
+        use crate::reduction::reduce_authority;
+        
+        // Create a fake Journal that wraps our fact journal for the reduction
+        // This is needed because reduce_authority expects a Journal struct
+        let temp_journal = Journal {
+            account_state: self.account_state.clone(),
+            op_log: self.op_log.clone(),
+            fact_journal: self.fact_journal.clone(),
+        };
+        
+        // Reduce the authority facts to get current tree state
+        let authority_state = reduce_authority(&temp_journal);
+        
+        // Return device count from the tree state
+        authority_state.tree_state.device_count() as usize
     }
 
     /// Get account ID

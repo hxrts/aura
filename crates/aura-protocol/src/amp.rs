@@ -3,7 +3,8 @@
 //! These glue Layer 4 orchestration to Layer 2 facts without leaking domain types
 //! outward. Backed by core `JournalEffects` and `GuardEffectSystem`.
 
-use crate::consensus::ConsensusId;
+use crate::consensus::{ConsensusId, commit_fact::ConsensusId as CommitConsensusId};
+use aura_core::identifiers::AuthorityId;
 use crate::effects::JournalEffects;
 use crate::guards::effect_system_trait::GuardEffectSystem;
 use aura_core::effects::StorageEffects;
@@ -30,6 +31,14 @@ pub trait AmpJournalEffects: JournalEffects + StorageEffects + Sized {
 
     /// Retrieve accumulated evidence for a consensus id.
     async fn evidence_for(&self, cid: ConsensusId) -> Result<Option<EvidenceRecord>>;
+
+    /// Insert evidence delta tracking witness participation in consensus.
+    async fn insert_evidence_delta(
+        &self,
+        witness: AuthorityId,
+        consensus_id: CommitConsensusId,
+        context: ContextId,
+    ) -> Result<()>;
 
     /// Scoped context store wrapper to avoid leaking storage keys.
     fn context_store(&self) -> AmpContextStore<'_, Self>
@@ -86,6 +95,25 @@ impl<E: GuardEffectSystem> AmpJournalEffects for E {
     async fn evidence_for(&self, cid: ConsensusId) -> Result<Option<EvidenceRecord>> {
         self.evidence_store().current(cid).await
     }
+
+    async fn insert_evidence_delta(
+        &self,
+        witness: AuthorityId,
+        consensus_id: CommitConsensusId,
+        context: ContextId,
+    ) -> Result<()> {
+        // Create evidence delta recording witness participation
+        let evidence_entry = format!("witness:{}:context:{}", witness, context);
+        let mut delta = EvidenceDelta::default();
+        delta.entries.insert(
+            hex::encode(consensus_id.0.0),
+            evidence_entry.into_bytes(),
+        );
+        
+        // Convert CommitConsensusId to ConsensusId for storage
+        let storage_cid = ConsensusId(consensus_id.0);
+        self.merge_evidence_delta(storage_cid, delta).await
+    }
 }
 
 /// Reduce to AMP channel state for a (context, channel).
@@ -125,7 +153,7 @@ pub struct EvidenceDelta {
 }
 
 fn evidence_key(cid: ConsensusId) -> String {
-    format!("amp/evidence/{}", cid.0.to_hex())
+    format!("amp/evidence/{}", hex::encode(cid.0.0))
 }
 
 fn context_journal_key(context: ContextId) -> String {

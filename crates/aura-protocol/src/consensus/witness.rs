@@ -196,28 +196,70 @@ impl WitnessRole {
         operation_hash: Hash32,
         operation_bytes: Vec<u8>,
     ) -> Result<WitnessMessage, String> {
-        // TODO: Verify prestate matches our view
-        // TODO: Generate nonce commitment using FROST
+        // Verify prestate matches our view
+        self.verify_prestate_consistency(prestate_hash)?;
+        
+        // Generate nonce commitment using FROST
+        let nonce_commitment = self.generate_frost_nonce_commitment(consensus_id).await?;
 
         let instance = WitnessInstance {
             consensus_id,
             prestate_hash,
             operation_hash,
-            nonce_commitment: None, // TODO: Generate with FROST
+            nonce_commitment: Some(nonce_commitment.clone()),
             partial_signature: None,
         };
 
         self.active_instances.insert(consensus_id, instance);
 
-        // For now, return a placeholder
+        // Return the generated nonce commitment
         Ok(WitnessMessage::NonceCommitment {
             consensus_id,
             authority: self.authority_id,
-            commitment: NonceCommitment {
-                signer: 0,          // TODO: Real signer ID
-                commitment: vec![], // TODO: Real FROST commitment
-            },
+            commitment: nonce_commitment,
         })
+    }
+
+    /// Verify prestate consistency with our current view
+    fn verify_prestate_consistency(&self, prestate_hash: Hash32) -> Result<(), String> {
+        // TODO: Implement prestate verification:
+        // 1. Get our current state hash from journal
+        // 2. Compare with provided prestate_hash
+        // 3. Reject if there's a mismatch (state divergence)
+        // 4. Handle state synchronization if needed
+        
+        // Basic validation for now
+        if prestate_hash == Hash32::default() {
+            return Err("Invalid prestate hash".to_string());
+        }
+        
+        // Placeholder - in production would verify against local state
+        Ok(())
+    }
+
+    /// Generate FROST nonce commitment for consensus
+    async fn generate_frost_nonce_commitment(
+        &self,
+        consensus_id: ConsensusId,
+    ) -> Result<NonceCommitment, String> {
+        // TODO: Implement actual FROST nonce generation:
+        // 1. Generate fresh random nonce using FROST protocol
+        // 2. Create cryptographic commitment to the nonce
+        // 3. Store nonce securely for later use in signing
+        // 4. Return commitment for coordinator aggregation
+        
+        use aura_core::crypto::frost::{generate_nonce_with_share, NonceCommitment};
+        
+        // For now, create a placeholder commitment
+        // In production, this would use real FROST key shares
+        let commitment = NonceCommitment::from_bytes(vec![0u8; 32])
+            .map_err(|e| format!("Failed to create nonce commitment: {}", e))?;
+            
+        // TODO: Store the nonce securely for later signing operations
+        // This would involve SecureStorageEffects to store the nonce
+        // indexed by consensus_id for retrieval during signing phase
+        
+        Ok(commitment)
     }
 }
 

@@ -7,7 +7,7 @@ use std::sync::Once;
 use std::time::Duration;
 
 use crate::foundation::{create_mock_test_context, SimpleTestContext};
-use aura_agent::{AgentConfig, ArcEffectSystemWrapper, AuraEffectSystem};
+use aura_agent::{AgentConfig, AuraEffectSystem};
 use aura_core::{AuraError, AuraResult, DeviceId};
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -151,12 +151,12 @@ impl TestFixture {
 
     /// Get an effect system wrapped for AuraEffects compatibility
     ///
-    /// This creates a wrapped effect system that implements AuraEffects
+    /// This creates an effect system that implements AuraEffects
     /// and can be used with coordinators that require Arc<E: AuraEffects>.
-    pub fn effect_system_wrapped(&self) -> ArcEffectSystemWrapper {
+    pub fn effect_system_wrapped(&self) -> Arc<AuraEffectSystem> {
         let config = AgentConfig::default();
         let system = AuraEffectSystem::testing(&config);
-        ArcEffectSystemWrapper::new(Arc::new(system))
+        Arc::new(system)
     }
 
     /// Get a reference to the test context for effect access

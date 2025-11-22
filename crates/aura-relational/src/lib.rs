@@ -10,12 +10,18 @@ use aura_core::{
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-pub mod consensus;
+pub mod consensus_adapter;
 pub mod guardian;
-// prestate module removed - now in aura-core
+// Consensus implementation moved to aura-protocol
+// Domain types moved to aura-core/relational/
 
-pub use consensus::{run_consensus, run_consensus_with_config, ConsensusProof};
-pub use guardian::{GuardianBinding, GuardianParameters, RecoveryGrant, RecoveryOp};
+// Re-export types from aura-core for API compatibility
+pub use aura_core::relational::{
+    ConsensusProof, GuardianBinding, GuardianParameters, RecoveryGrant, RecoveryOp,
+    RelationalFact, GenericBinding,
+};
+// Re-export consensus functions from adapter
+pub use consensus_adapter::{run_consensus, run_consensus_with_config, ConsensusConfig};
 // Re-export Prestate from aura-core for compatibility
 pub use aura_core::Prestate;
 
@@ -72,7 +78,7 @@ impl RelationalContext {
         self.guardian_bindings().into_iter().find(|b| {
             // Compare authority IDs directly instead of converting to Hash32
             // since account_commitment should be derived from the authority ID
-            b.account_commitment == Hash32::from_bytes(&authority_id.to_bytes())
+            b.account_commitment() == &Hash32::from_bytes(&authority_id.to_bytes())
         })
     }
 
@@ -176,27 +182,8 @@ impl RelationalJournal {
     }
 }
 
-/// Facts that can be stored in relational contexts
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum RelationalFact {
-    /// Guardian binding between authorities
-    GuardianBinding(GuardianBinding),
-    /// Recovery grant approval
-    RecoveryGrant(RecoveryGrant),
-    /// Generic binding for extensibility
-    Generic(GenericBinding),
-}
-
-/// Generic binding for application-specific relationships
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct GenericBinding {
-    /// Type of binding
-    pub binding_type: String,
-    /// Serialized binding data
-    pub binding_data: Vec<u8>,
-    /// Optional consensus proof
-    pub consensus_proof: Option<ConsensusProof>,
-}
+// RelationalFact and GenericBinding moved to aura-core/src/relational/
+// They are re-exported at the top of this file for API compatibility
 
 #[cfg(test)]
 mod tests {
@@ -225,12 +212,11 @@ mod tests {
         let hash1 = aura_core::hash::hash(&auth1.to_bytes());
         let hash2 = aura_core::hash::hash(&auth2.to_bytes());
 
-        let binding = GuardianBinding {
-            account_commitment: Hash32::new(hash1),
-            guardian_commitment: Hash32::new(hash2),
-            parameters: GuardianParameters::default(),
-            consensus_proof: None,
-        };
+        let binding = GuardianBinding::new(
+            Hash32::new(hash1),
+            Hash32::new(hash2),
+            GuardianParameters::default(),
+        );
 
         context
             .add_fact(RelationalFact::GuardianBinding(binding))

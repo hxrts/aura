@@ -81,8 +81,8 @@ pub async fn run_amp_channel_epoch_bump_default(
 
 /// Run consensus for a bump and persist the committed fact into the journal.
 ///
-/// Evidence plumbing TODO: currently inserts committed bump + consensus commit fact;
-/// evidence deltas integration will follow to track provenance per message.
+/// Evidence plumbing: Inserts committed bump + consensus commit fact + evidence deltas.
+/// Tracks message provenance per AMP specification requirements.
 pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects>(
     journal: &J,
     prestate: &Prestate,
@@ -109,10 +109,18 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects>(
         )
         .await?;
 
-    // Optionally also insert consensus evidence for observability/audit
+    // Insert consensus evidence for observability/audit
     journal
         .insert_relational_fact(commit.to_relational_fact())
         .await?;
+
+    // Evidence deltas: Track message provenance for each witness participation
+    // This creates an audit trail of which authorities contributed to consensus
+    for witness in &witnesses {
+        journal
+            .insert_evidence_delta(*witness, commit.consensus_id, committed.context)
+            .await?;
+    }
 
     Ok(committed)
 }

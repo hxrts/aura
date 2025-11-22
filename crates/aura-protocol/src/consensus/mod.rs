@@ -15,6 +15,7 @@ pub mod amp;
 pub mod choreography;
 pub mod commit_fact;
 pub mod coordinator;
+pub mod relational_consensus;
 pub mod witness;
 
 // Re-export core types
@@ -22,6 +23,11 @@ pub use amp::{finalize_amp_bump_with_journal_default, run_amp_channel_epoch_bump
 pub use choreography::run_consensus_choreography;
 pub use commit_fact::{CommitFact, ConsensusId};
 pub use coordinator::{ConsensusCoordinator, ConsensusInstance};
+pub use relational_consensus::{
+    run_consensus as run_relational_consensus,
+    run_consensus_with_config as run_relational_consensus_with_config,
+    ConsensusConfig as RelationalConsensusConfig,
+};
 pub use witness::{WitnessMessage, WitnessSet, WitnessShare};
 
 use aura_core::{hash, AuthorityId, Hash32, Prestate, Result};

@@ -100,6 +100,9 @@ pub mod crypto;
 /// Maintenance operation types
 pub mod maintenance;
 
+/// Relational domain types for cross-authority coordination
+pub mod relational;
+
 /// Internal test utilities (Layer 1 - does not use aura-testkit to avoid circular dependencies)
 #[doc(hidden)]
 pub mod test_utils;
@@ -212,6 +215,8 @@ pub use time::{
 pub use flow::{FlowBudget, Receipt};
 #[doc = "internal: Protocol types are moving to higher layers"]
 pub use protocols::*;
+#[doc = "stable: Core relational types for cross-authority coordination with semver guarantees"]
+pub use relational::*;
 #[doc = "unstable: Relationship types are under active development"]
 pub use relationships::*;
 #[doc = "internal: Session epoch management is moving to aura-agent"]

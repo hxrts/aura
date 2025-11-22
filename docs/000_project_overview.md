@@ -76,7 +76,7 @@ The layers are as follows:
 
 4. Orchestration (`aura-protocol`): Multi-party coordination, guard chain, and Aura Consensus runtime.
 
-5. Feature implementation: End-to-end protocol crates for authentication, recovery, rendezvous, and storage.
+5. Feature implementation: End-to-end protocol crates for authentication, recovery, relational contexts, rendezvous, and storage.
 
 6. Runtime composition (`aura-agent`, `aura-simulator`): Effect system assembly and deterministic simulation.
 

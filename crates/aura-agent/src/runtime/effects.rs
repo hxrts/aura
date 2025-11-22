@@ -70,7 +70,7 @@ pub trait EffectCall: Send + Sync {
 }
 
 /// Concrete effect system combining all effects for runtime usage
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuraEffectSystem {
     config: AgentConfig,
 }
@@ -958,3 +958,4 @@ impl AuraEffectSystem {
         }
     }
 }
+

@@ -110,6 +110,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 | `aura-frost` | Threshold signatures | FROST ceremonies and key resharing |
 | `aura-invitation` | Invitations | Peer onboarding and relational facts |
 | `aura-recovery` | Guardian recovery | Recovery grants and dispute escalation |
+| `aura-relational` | Cross-authority relationships | Guardian relationship protocols and consensus |
 | `aura-rendezvous` | Peer discovery | Context-scoped rendezvous and routing |
 | `aura-sync` | Synchronization | Journal sync and anti-entropy protocols |
 | `aura-storage` | Storage | Capability-guarded encrypted storage |
@@ -167,6 +168,7 @@ crates/
 ├── aura-protocol        Orchestration and coordination
 ├── aura-quint-api       Quint formal verification
 ├── aura-recovery        Guardian recovery protocols
+├── aura-relational      Cross-authority relationships
 ├── aura-rendezvous      Peer discovery and routing
 ├── aura-simulator       Deterministic simulation engine
 ├── aura-store           Storage domain types
@@ -204,6 +206,7 @@ graph TD
     recovery[aura-recovery]
     invitation[aura-invitation]
     frost[aura-frost]
+    relational[aura-relational]
     rendezvous[aura-rendezvous]
     sync[aura-sync]
     storage[aura-storage]
@@ -244,6 +247,7 @@ graph TD
     recovery --> mpst
     recovery --> protocol
     recovery --> journal
+    recovery --> relational
     invitation --> auth
     invitation --> wot
     invitation --> mpst
@@ -251,6 +255,8 @@ graph TD
     frost --> types
     frost --> journal
     frost --> mpst
+    relational --> types
+    relational --> journal
     rendezvous --> transport
     rendezvous --> wot
     rendezvous --> mpst
@@ -300,7 +306,7 @@ graph TD
     class verify,journal,wot,store,transport,mpst,macros spec
     class effects effects
     class protocol protocol
-    class auth,recovery,invitation,frost,rendezvous,sync,storage feature
+    class auth,recovery,invitation,frost,relational,rendezvous,sync,storage feature
     class agent,simulator runtime
     class cli app
     class testkit,quint test
@@ -344,6 +350,9 @@ Signature verification and identity validation interfaces.
 
 ### aura-journal
 Fact-based CRDT domain with validation rules and deterministic reduction.
+
+### aura-relational
+Cross-authority relationships, including Guardian relationship protocols with cross-authority consensus coordination and relational state management.
 
 ### aura-wot
 Meet-semilattice capability system with policy evaluation and authorization.
