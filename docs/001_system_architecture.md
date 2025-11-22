@@ -625,9 +625,35 @@ New effect traits go into `aura-core`. Their implementations belong in:
 * `aura-effects` if stateless and single-party.
 * `aura-protocol` if multi-party or coordinating multiple handlers.
 
-### 8.2 Direct System Access
+### 8.2 Impure Function Control
 
-Production `aura-effects` handlers can perform OS operations like filesystem access, network I/O, or time queries. All such operations must be behind effect traits for testability.
+**Deterministic Simulation Requirement**: Aura enables fully deterministic simulation by controlling all impure operations (time, randomness, filesystem, network) through effect traits.
+
+**ONLY** the following locations may contain direct impure function usage:
+- **Effect implementations in `aura-effects`**: Production handlers that implement effect traits
+- **Runtime assembly in `runtime/effects.rs`**: Effect system bootstrapping code
+- **Pure functions in `aura-core`**: Deterministic operations like `aura_core::hash`
+
+**All other code MUST use effect traits**:
+```rust
+// ❌ FORBIDDEN: Direct impure function usage
+let now = SystemTime::now();
+let random = thread_rng().gen::<u64>();
+let file = File::open("data.txt")?;
+
+// ✅ REQUIRED: Effect trait usage
+async fn my_operation<T: TimeEffects + RandomEffects + StorageEffects>(
+    ctx: &EffectContext,
+    effects: &T,
+) -> Result<Data> {
+    let timestamp = effects.current_time().await;
+    let nonce = effects.random_bytes(32).await?;
+    let data = effects.read_chunk(&chunk_id).await?;
+    Ok(Data { timestamp, nonce, data })
+}
+```
+
+This ensures WASM compatibility, predictable testing, and simulation determinism. Use `just arch-check` to validate compliance.
 
 ### 8.3 Usage Patterns
 
@@ -659,162 +685,3 @@ CRDT integration always composes from `JoinSemilattice` traits upwards, never by
 * commitment tree Semilattice Specification
 * Revised Journal Specification
 * Authorities and RelationalContexts Specification
-
-
-
----
-
-## Summary of Major Architecture Changes
-
-### 1. Identity Model and Authority Model Updated
-
-Original approach:
-
-* Treated devices, accounts, guardians, groups, and identities as first-class roles.
-* Mixed device-level identity with system logic.
-* Guardians appeared as leaf roles in commitment trees.
-
-Revised approach:
-
-* Identity is relational and contextual, not global.
-* Authorities are opaque cryptographic actors.
-* Guardianship and recovery moved entirely to RelationalContexts, not commitment tree roles.
-* No device-level public identifiers surface outside authorities.
-
-### 2. commitment tree Reframed as a Pure Intra-Authority Semilattice
-
-Original approach:
-
-* commitment tree integrated guardian leaves.
-* Device IDs in tree ops.
-* Tree updates tied to device-level signers.
-
-Revised approach:
-
-* commitment tree contains only device leaves and threshold policies.
-* It is explicitly a semilattice of AttestedOps.
-* Guardians and cross-authority relationships removed from the tree.
-
-### 3. Journal System Completely Overhauled
-
-Original approach:
-
-* Journal stored device-signed facts, capabilities, trust relationships, timestamps.
-* Capabilities lived inside a CRDT meet-semilattice.
-* Intent pool and device-level threshold voting present.
-
-Revised approach:
-
-* Journal stores only facts: AttestedOps, SnapshotFacts, RelationalFacts, and FlowBudget spent counters (limits remain runtime-derived).
-* No device signatures, no device IDs, no timestamps for correctness.
-* Capabilities are Biscuit tokens, not CRDT meet semilattice elements.
-* Capability refinement still uses semilattice semantics but this refinement happens inside Biscuit logic, at verification time, not in the replicated journal state. The semilattice lives inside the Biscuit evaluation logic, not in CRDT semilattice storage.
-* RelationalContexts have their own journals and reductions.
-* Capabilities can embed audit caveats or issue relational facts when formal delegation must be visible.
-
-Note on capability recovery: If a device loses its capability tokens, they aren't recreated from Journal. They must be reissued.
-
-Mitigation strategies include:
-* Use RelationalContexts to attach consent-based identity metadata
-* Use renewable session capabilities
-* Issue static capabilities tied to DKD-derived context keys
-
-### 4. Aura Consensus Integrated as the Only Strong Consensus
-
-Original approach:
-
-* Consensus logic mixed across various handlers and intent pools.
-* Threshold support collection using device IDs.
-
-Revised approach:
-
-* Aura Consensus is the only strong-agreement mechanism.
-* Used in authority updates and relational contexts.
-* Intent pool removed entirely.
-* Threshold signatures structured around authority roles, not devices.
-
-### 5. RelationalContexts Added (Major Architectural Shift)
-
-Original approach:
-
-* No relational context abstraction.
-* Cross-authority relationships handled ad hoc or through tree structure.
-
-Revised approach:
-
-* RelationalContexts define shared state between authorities.
-* Guardian configuration and recovery built out of two relational contexts.
-* Cross-authority operations use Aura Consensus with combined prestate hashes.
-* Clean separation between physical and logical state machines.
-
-### 6. Authorization Logic Corrected
-
-Original approach:
-
-* Capabilities stored in journal meet-semilattice.
-* Sometimes conflated identity, permission, and device roles.
-
-Revised approach:
-
-* Authorization uses Biscuit capability tokens.
-* No capability storage in journal.
-* Authorization is entirely separate from authentication.
-* Guard chain enforces Biscuit + budget + journal coupling.
-
-### 7. Identifiers Overhauled
-
-Original approach:
-
-* DeviceId, GroupId, RelayId, DKDContextId, MemberId, etc.
-* Many identifiers tied to device structure.
-
-Revised approach:
-
-* Only `AuthorityId`, `ContextId`, `SessionId`, `ContentId`.
-* All user-facing names become local-only petnames.
-* IDs reveal no operator or membership structure.
-
-### 8. Crate Roles and Boundaries Updated
-
-Original approach:
-
-* Boundary between domain logic, protocol logic, and effects was ambiguous.
-* Some components mixed device-level concerns and global identity concepts.
-
-Revised approach has clear boundaries:
-
-* `aura-core` = traits and types
-* domain crates = commitment/journal/relational logic
-* `aura-effects` = stateless single-party handlers
-* `aura-protocol` = multi-party orchestration + consensus
-* feature crates = DKD, FROST, recovery
-* runtime crates = assembly
-* UI crates = entrypoints
-
-### 9. Guardian and Recovery Model Rewritten
-
-Original approach:
-
-* Guardians encoded directly in commitment tree.
-* Recovery tied to guardian leaves.
-
-Revised approach:
-
-* Guardians are separate authorities.
-* Guardian configuration = relational context.
-* Recovery operations = second relational context.
-* All cross-authority logic handled by relational facts.
-
-### 10. Much Stronger Privacy Guarantees
-
-Original approach:
-
-* Device identifiers, trust relations, and group membership might leak.
-* Identifiers embedded structural info.
-
-Revised approach:
-
-* Authorities are opaque.
-* Contexts are opaque.
-* No device or membership structure leaks.
-* Identity is contextual and never global.

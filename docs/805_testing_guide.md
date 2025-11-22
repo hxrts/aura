@@ -7,9 +7,11 @@ This guide covers Aura's testing infrastructure built on the stateless effect sy
 Aura's testing approach is built on four key principles:
 
 1. **Async-Native Testing** - The `#[aura_test]` macro provides automatic tracing setup and timeout handling
-2. **Stateless Effect Handlers** - Tests use the same effect handlers as production code
+2. **Effect System Compliance** - Tests MUST use effect traits, never direct impure function access
 3. **Protocol Fidelity** - Tests run actual protocol logic through real effect implementations
-4. **Deterministic Fixtures** - TestFixture provides consistent, reproducible test environments
+4. **Deterministic Execution** - Controlled effects enable reproducible test environments
+
+**Critical**: Tests must follow the same effect system guidelines as production code. Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or other impure functions is forbidden. All impure operations must flow through effect traits to ensure deterministic simulation and WASM compatibility.
 
 This approach eliminates boilerplate while providing testing capabilities through automatic tracing, timeout protection, and reusable test fixtures.
 
@@ -116,11 +118,14 @@ async fn test_with_custom_config() -> aura_core::AuraResult<()> {
 }
 ```
 
-### Using Effect Systems in Tests
+### Effect System Compliance in Tests
+
+**Tests must use effect traits for all impure operations**:
 
 ```rust
 use aura_agent::runtime::AuraEffectSystem;
 use aura_agent::AgentConfig;
+use aura_core::effects::{TimeEffects, RandomEffects, StorageEffects};
 
 #[aura_test]
 async fn test_with_effects() -> aura_core::AuraResult<()> {
@@ -128,13 +133,26 @@ async fn test_with_effects() -> aura_core::AuraResult<()> {
 
     // Create effect system - uses real handlers with in-memory storage
     let effects = AuraEffectSystem::testing(&AgentConfig::default());
+    let ctx = fixture.context();
 
-    // Use effect system through trait methods
-    // (specific effect traits like CryptoEffects, StorageEffects, etc.)
+    // ✅ CORRECT: Use effect traits
+    let timestamp = effects.current_time().await;
+    let nonce = effects.random_bytes(32).await?;
+    let data = effects.read_chunk(&chunk_id).await?;
+
+    // ❌ FORBIDDEN in tests (just like production code):
+    // let now = SystemTime::now();
+    // let random = thread_rng().gen::<u64>();
+    // let file = File::open("test_data.txt")?;
 
     Ok(())
 }
 ```
+
+**Why effect compliance matters in tests**:
+- **Deterministic execution**: Tests produce consistent results
+- **WASM compatibility**: Test code can run in browsers
+- **Simulation fidelity**: Same constraints as production code
 
 ## Integration Testing
 
@@ -413,20 +431,30 @@ use aura_testkit::verification::*;
 
 For features not in testkit, use these patterns:
 
-**Time-dependent tests** - Use actual async delays:
+**Time-dependent tests** - Use effect traits for time operations:
 ```rust
+use aura_core::effects::TimeEffects;
+
 #[aura_test]
 async fn test_with_delay() -> aura_core::AuraResult<()> {
-    let start = std::time::Instant::now();
-
+    let fixture = create_test_fixture().await?;
+    let effects = AuraEffectSystem::testing(&AgentConfig::default());
+    
+    // ✅ CORRECT: Use TimeEffects
+    let start = effects.current_time().await;
+    
+    // For delays in tests, use tokio::time::sleep (acceptable in tests)
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-
-    let elapsed = start.elapsed();
+    
+    let end = effects.current_time().await;
+    let elapsed = end.duration_since(start)?;
     assert!(elapsed >= std::time::Duration::from_millis(100));
 
     Ok(())
 }
 ```
+
+**Note**: `tokio::time::sleep` is acceptable in test code for coordination, but time measurement must use `TimeEffects` for consistency with production patterns.
 
 **Performance testing** - Use criterion for benchmarks:
 ```rust

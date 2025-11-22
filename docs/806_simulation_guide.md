@@ -7,11 +7,40 @@ This guide covers Aura's simulation engine built on the effect system architectu
 Aura's simulation approach is built on four key principles:
 
 1. **Production Code Testing** - Run actual protocol implementations through real effect handlers
-2. **Handler-Based Architecture** - Simulation capabilities provided through composable effect handlers
-3. **Middleware Pattern** - Fault injection and monitoring via middleware layer
-4. **Deterministic Execution** - Controlled time and seeded randomness for reproducible results
+2. **Effect System Control** - All impure operations (time, randomness, I/O) controlled via effect traits
+3. **Middleware Pattern** - Fault injection and monitoring via middleware layer  
+4. **Deterministic Execution** - Controlled effects enable fully reproducible simulations
+
+**Critical**: Simulation determinism depends on effect system compliance. Protocol code must use effect traits (`TimeEffects`, `RandomEffects`, etc.) instead of direct system calls (`SystemTime::now()`, `thread_rng()`, etc.). This enables controlled time, seeded randomness, and predictable I/O for reliable simulation results.
 
 The simulation system leverages Aura's stateless effect architecture, providing simulation capabilities through specialized handlers rather than a separate simulation runtime.
+
+## Effect System Foundation
+
+Simulation determinism requires that all simulated code uses effect traits instead of direct system calls:
+
+```rust
+// ✅ CORRECT: Protocol code using effects (simulatable)
+async fn protocol_step<T: TimeEffects + RandomEffects>(
+    ctx: &EffectContext,
+    effects: &T,
+) -> Result<ProtocolMessage> {
+    let timestamp = effects.current_time().await;     // Controllable time
+    let nonce = effects.random_bytes(32).await?;      // Seeded randomness
+    
+    ProtocolMessage { timestamp, nonce, /* ... */ }
+}
+
+// ❌ FORBIDDEN: Direct system calls (breaks simulation)
+async fn broken_protocol_step() -> Result<ProtocolMessage> {
+    let timestamp = SystemTime::now();                // ❌ Uncontrolled time
+    let nonce = thread_rng().gen::<[u8; 32]>();      // ❌ Uncontrolled randomness
+    
+    ProtocolMessage { timestamp, nonce, /* ... */ }
+}
+```
+
+When protocol code follows effect system guidelines, simulation handlers can control all impure operations for deterministic execution.
 
 ## Simulation Infrastructure
 
@@ -373,6 +402,22 @@ let config = SimulatorConfig {
     deterministic_time: true, // Critical for reproducibility
 };
 ```
+
+### Validate Effect System Compliance
+
+Before running simulations, ensure protocol code follows effect guidelines:
+
+```bash
+# Run architectural compliance checker
+just arch-check
+
+# Look for effect system violations
+# - Direct time usage: SystemTime::now, Instant::now
+# - Direct randomness: thread_rng(), rand::random()
+# - Direct I/O: File::open(), std::net::TcpStream
+```
+
+Non-compliant code will break simulation determinism and should be refactored to use effect traits.
 
 ### Monitor Simulation State
 
