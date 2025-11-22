@@ -3,24 +3,24 @@
 //! Glue between AMP ratchet helpers, guard chain, and journal operations.
 //! Uses centralized telemetry for structured logging and metrics collection.
 
-use crate::amp::{get_channel_state, AmpJournalEffects};
 use super::telemetry::{
-    AmpMetrics, AmpReceiveTelemetry, AmpSendTelemetry, AmpFlowTelemetry,
-    create_window_validation_result, AMP_TELEMETRY,
+    create_window_validation_result, AmpFlowTelemetry, AmpMetrics, AmpReceiveTelemetry,
+    AmpSendTelemetry, AMP_TELEMETRY,
 };
+use crate::amp::{get_channel_state, AmpJournalEffects};
 use crate::consensus::finalize_amp_bump_with_journal_default;
-use aura_core::identifiers::{ChannelId, ContextId};
-use aura_core::{AuraError, Hash32, Result};
-use aura_journal::fact::ProposedChannelEpochBump;
-use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
-use std::collections::HashMap;
-use std::time::Instant;
-use aura_core::effects::NetworkEffects;
 use crate::guards::effect_system_trait::GuardEffectSystem;
-use serde::{Deserialize, Serialize};
+use aura_core::effects::NetworkEffects;
+use aura_core::identifiers::{ChannelId, ContextId};
+use aura_core::{AuraError, Result};
+use aura_journal::fact::ProposedChannelEpochBump;
 use aura_transport::amp::{
     derive_for_recv, derive_for_send, AmpError, AmpHeader, RatchetDerivation,
 };
+use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::time::Instant;
 fn map_amp_error(err: AmpError) -> AuraError {
     AuraError::invalid(format!("AMP ratchet error: {}", err))
 }
@@ -63,20 +63,51 @@ pub struct AmpDelivery {
     pub payload: Vec<u8>,
 }
 
-fn xor_seal(key: &Hash32, data: &[u8]) -> Vec<u8> {
-    let key_bytes = key.as_bytes();
-    data.iter()
-        .enumerate()
-        .map(|(i, b)| b ^ key_bytes[i % key_bytes.len()])
-        .collect()
+/// Derive nonce from AMP header using centralized crypto utilities.
+///
+/// This function delegates to `aura_core::crypto::amp::derive_nonce_from_ratchet`
+/// to ensure consistent nonce derivation across the codebase.
+fn nonce_from_header(header: &AmpHeader) -> [u8; 12] {
+    aura_core::crypto::amp::derive_nonce_from_ratchet(header.ratchet_gen, header.chan_epoch)
 }
 
-fn nonce_from_header(header: &AmpHeader) -> [u8; 12] {
-    // Deterministic nonce derived from header to keep AEAD unique per ratchet_gen.
-    let mut buf = [0u8; 12];
-    buf[..8].copy_from_slice(&header.ratchet_gen.to_le_bytes());
-    buf[8..].copy_from_slice(&header.chan_epoch.to_le_bytes()[..4]);
-    buf
+/// Create a configured guard chain for AMP send operations.
+///
+/// This helper centralizes guard chain construction for AMP sends, avoiding
+/// repetition and lifetime/capture issues. It configures:
+/// - Capability requirement: "amp:send"
+/// - Flow cost: Configurable (default: 1 for minimal overhead)
+/// - Leakage budget: Standard AMP metadata leakage
+/// - Journal coupling: Atomic fact commit with send operation
+///
+/// # Arguments
+///
+/// * `context` - Context identifier for the channel
+/// * `peer` - Destination authority ID
+/// * `flow_cost` - Optional flow cost (defaults to 1 if None)
+///
+/// # Returns
+///
+/// A configured `SendGuardChain` ready for evaluation
+///
+/// # Example
+///
+/// ```ignore
+/// let guard = build_amp_send_guard(context, peer, None);
+/// let result = guard.evaluate_with_coupling(effects).await?;
+/// ```
+fn build_amp_send_guard(
+    context: aura_core::identifiers::ContextId,
+    peer: aura_core::AuthorityId,
+    flow_cost: Option<u32>,
+) -> crate::guards::send_guard::SendGuardChain {
+    use crate::guards::journal_coupler::JournalCoupler;
+    use crate::guards::send_guard::SendGuardChain;
+
+    let cost = flow_cost.unwrap_or(1);
+    SendGuardChain::new("amp:send".to_string(), context, peer, cost)
+        .with_operation_id("amp_send")
+        .with_journal_coupler(JournalCoupler::new())
 }
 
 /// Reduce-before-send, validate window/epoch, and derive header/key/next_gen.
@@ -143,13 +174,9 @@ pub async fn amp_send<E>(
 where
     E: AmpJournalEffects + NetworkEffects + GuardEffectSystem + crate::effects::CryptoEffects,
 {
-    use crate::guards::send_guard::SendGuardChain;
-    use crate::guards::journal_coupler::JournalCoupler;
-    use std::time::Instant;
-    
     let overall_start = Instant::now();
     let payload_size = payload.len();
-    
+
     // Phase 1: Prepare send (journal reduction and ratchet derivation)
     let deriv = match prepare_send(effects, context, channel).await {
         Ok(deriv) => deriv,
@@ -168,32 +195,42 @@ where
         Ok(sealed) => sealed,
         Err(e) => {
             let error = AuraError::crypto(format!("AMP seal failed: {}", e));
-            AMP_TELEMETRY.log_send_failure(context, channel, &error, Some(AmpMetrics {
-                duration: overall_start.elapsed(),
-                crypto_time: Some(crypto_start.elapsed()),
-                guard_time: None,
-                journal_time: None,
-                bytes_processed: payload_size,
-                flow_charged: 0,
-            }));
+            AMP_TELEMETRY.log_send_failure(
+                context,
+                channel,
+                &error,
+                Some(AmpMetrics {
+                    duration: overall_start.elapsed(),
+                    crypto_time: Some(crypto_start.elapsed()),
+                    guard_time: None,
+                    journal_time: None,
+                    bytes_processed: payload_size,
+                    flow_charged: 0,
+                }),
+            );
             return Err(error);
         }
     };
     let crypto_time = crypto_start.elapsed();
-    
+
     let msg = AmpMessage::new(header, sealed.clone());
     let bytes = match serde_json::to_vec(&msg) {
         Ok(bytes) => bytes,
         Err(e) => {
             let error = AuraError::serialization(e.to_string());
-            AMP_TELEMETRY.log_send_failure(context, channel, &error, Some(AmpMetrics {
-                duration: overall_start.elapsed(),
-                crypto_time: Some(crypto_time),
-                guard_time: None,
-                journal_time: None,
-                bytes_processed: payload_size,
-                flow_charged: 0,
-            }));
+            AMP_TELEMETRY.log_send_failure(
+                context,
+                channel,
+                &error,
+                Some(AmpMetrics {
+                    duration: overall_start.elapsed(),
+                    crypto_time: Some(crypto_time),
+                    guard_time: None,
+                    journal_time: None,
+                    bytes_processed: payload_size,
+                    flow_charged: 0,
+                }),
+            );
             return Err(error);
         }
     };
@@ -202,43 +239,49 @@ where
     let guard_start = Instant::now();
     let peer = effects.authority_id();
     let flow_cost = 1u32; // Minimal cost for AMP message
-    let guard_chain = SendGuardChain::new(
-        "amp:send".to_string(),
-        context,
-        peer,
-        flow_cost,
-    ).with_operation_id("amp_send")
-     .with_journal_coupler(JournalCoupler::new());
+    let guard_chain = build_amp_send_guard(context, peer, Some(flow_cost));
 
     let guard_result = match guard_chain.evaluate_with_coupling(effects).await {
         Ok(result) => result,
         Err(error) => {
             let guard_time = guard_start.elapsed();
-            AMP_TELEMETRY.log_send_failure(context, channel, &error, Some(AmpMetrics {
+            AMP_TELEMETRY.log_send_failure(
+                context,
+                channel,
+                &error,
+                Some(AmpMetrics {
+                    duration: overall_start.elapsed(),
+                    crypto_time: Some(crypto_time),
+                    guard_time: Some(guard_time),
+                    journal_time: None,
+                    bytes_processed: payload_size,
+                    flow_charged: 0,
+                }),
+            );
+            return Err(error);
+        }
+    };
+
+    if !guard_result.authorized {
+        let guard_time = guard_start.elapsed();
+        let error = AuraError::permission_denied(
+            guard_result
+                .denial_reason
+                .unwrap_or_else(|| "AMP send unauthorized".to_string()),
+        );
+        AMP_TELEMETRY.log_send_failure(
+            context,
+            channel,
+            &error,
+            Some(AmpMetrics {
                 duration: overall_start.elapsed(),
                 crypto_time: Some(crypto_time),
                 guard_time: Some(guard_time),
                 journal_time: None,
                 bytes_processed: payload_size,
-                flow_charged: 0,
-            }));
-            return Err(error);
-        }
-    };
-    
-    if !guard_result.authorized {
-        let guard_time = guard_start.elapsed();
-        let error = AuraError::permission_denied(
-            guard_result.denial_reason.unwrap_or_else(|| "AMP send unauthorized".to_string())
+                flow_charged: flow_cost,
+            }),
         );
-        AMP_TELEMETRY.log_send_failure(context, channel, &error, Some(AmpMetrics {
-            duration: overall_start.elapsed(),
-            crypto_time: Some(crypto_time),
-            guard_time: Some(guard_time),
-            journal_time: None,
-            bytes_processed: payload_size,
-            flow_charged: flow_cost,
-        }));
         return Err(error);
     }
     let guard_time = guard_start.elapsed();
@@ -259,14 +302,19 @@ where
     // Phase 4: Network broadcast
     if let Err(e) = effects.broadcast(bytes).await {
         let error = AuraError::network(e.to_string());
-        AMP_TELEMETRY.log_send_failure(context, channel, &error, Some(AmpMetrics {
-            duration: overall_start.elapsed(),
-            crypto_time: Some(crypto_time),
-            guard_time: Some(guard_time),
-            journal_time: None,
-            bytes_processed: payload_size,
-            flow_charged: flow_cost,
-        }));
+        AMP_TELEMETRY.log_send_failure(
+            context,
+            channel,
+            &error,
+            Some(AmpMetrics {
+                duration: overall_start.elapsed(),
+                crypto_time: Some(crypto_time),
+                guard_time: Some(guard_time),
+                journal_time: None,
+                bytes_processed: payload_size,
+                flow_charged: flow_cost,
+            }),
+        );
         return Err(error);
     }
 
@@ -299,23 +347,28 @@ pub async fn amp_recv<E>(effects: &E, context: ContextId, bytes: Vec<u8>) -> Res
 where
     E: AmpJournalEffects + crate::effects::CryptoEffects,
 {
-    
     let overall_start = Instant::now();
     let wire_size = bytes.len();
-    
+
     // Phase 1: Deserialize wire message
     let wire: AmpMessage = match serde_json::from_slice(&bytes) {
         Ok(wire) => wire,
         Err(e) => {
             let error = AuraError::serialization(e.to_string());
-            AMP_TELEMETRY.log_receive_failure(context, None, None, &error, Some(AmpMetrics {
-                duration: overall_start.elapsed(),
-                crypto_time: None,
-                guard_time: None,
-                journal_time: None,
-                bytes_processed: wire_size,
-                flow_charged: 0,
-            }));
+            AMP_TELEMETRY.log_receive_failure(
+                context,
+                None,
+                None,
+                &error,
+                Some(AmpMetrics {
+                    duration: overall_start.elapsed(),
+                    crypto_time: None,
+                    guard_time: None,
+                    journal_time: None,
+                    bytes_processed: wire_size,
+                    flow_charged: 0,
+                }),
+            );
             return Err(error);
         }
     };
@@ -324,10 +377,10 @@ where
     if wire.header.context != context {
         let error = AuraError::invalid("AMP context mismatch");
         AMP_TELEMETRY.log_receive_failure(
-            context, 
-            Some(wire.header), 
-            None, 
-            &error, 
+            context,
+            Some(wire.header),
+            None,
+            &error,
             Some(AmpMetrics {
                 duration: overall_start.elapsed(),
                 crypto_time: None,
@@ -335,7 +388,7 @@ where
                 journal_time: None,
                 bytes_processed: wire_size,
                 flow_charged: 0,
-            })
+            }),
         );
         return Err(error);
     }
@@ -345,14 +398,14 @@ where
         Ok(deriv) => {
             // Create successful window validation result
             let window_validation = create_window_validation_result(
-                true, // epoch_valid (if we got here, validation passed)
-                true, // generation_valid
+                true,   // epoch_valid (if we got here, validation passed)
+                true,   // generation_valid
                 (0, 0), // window_bounds (TODO: extract actual bounds from validation)
                 wire.header.ratchet_gen,
                 None, // no error
             );
             (deriv, window_validation)
-        },
+        }
         Err(error) => {
             // Create basic window validation result for failed validation
             let error_str = error.to_string().to_lowercase();
@@ -384,13 +437,13 @@ where
                     journal_time: None,
                     bytes_processed: wire_size,
                     flow_charged: 0,
-                })
+                }),
             );
             return Err(error);
         }
     };
 
-    // Phase 4: AEAD decryption  
+    // Phase 4: AEAD decryption
     let crypto_start = Instant::now();
     let key = deriv.message_key.0;
     let nonce = nonce_from_header(&wire.header);
@@ -411,13 +464,13 @@ where
                     journal_time: None,
                     bytes_processed: wire_size,
                     flow_charged: 0,
-                })
+                }),
             );
             return Err(error);
         }
     };
     let crypto_time = crypto_start.elapsed();
-    
+
     // Success: Log comprehensive telemetry
     let total_duration = overall_start.elapsed();
     AMP_TELEMETRY.log_receive_success(AmpReceiveTelemetry {
@@ -435,7 +488,7 @@ where
             flow_charged: 0,
         },
     });
-    
+
     Ok(AmpMessage::new(wire.header, opened))
 }
 

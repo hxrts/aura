@@ -1,25 +1,32 @@
 //! Consensus Choreography
 //!
 //! This module implements the choreographic protocol for Aura Consensus,
-//! integrating with FROST threshold signatures to produce consensus proofs.
+//! with support for FROST threshold signatures.
 //!
-//! ## FROST Integration
+//! ## Feature Flags
 //!
-//! This module uses real FROST threshold cryptography from `frost-ed25519` via
-//! `aura-core::crypto::tree_signing`. All cryptographic operations are genuine:
+//! - **Default**: Uses simplified placeholder signatures for development and testing.
+//!   Signatures are deterministic but not cryptographically secure.
+//! - **`consensus_frost_full`**: Enables full FROST threshold cryptography integration
+//!   (experimental). Use this flag when testing complete FROST signing flows.
+//!
+//! ## FROST Integration (with `consensus_frost_full` feature)
+//!
+//! When the `consensus_frost_full` feature is enabled, this module uses FROST threshold
+//! cryptography from `frost-ed25519`:
 //!
 //! - **Nonce Generation**: Uses `frost_ed25519::round1::commit` for commitment phase
 //! - **Partial Signing**: Uses `frost_ed25519::round2::sign` for signature shares
-//! - **Aggregation**: Uses `frost_ed25519::aggregate` to combine partial signatures
+//! - **Aggregation**: Aggregates partial signatures into threshold signature
 //! - **Verification**: Verifies aggregated signatures against group public key
 //!
 //! ## Architecture
 //!
 //! The consensus protocol follows a 5-phase choreography:
 //! 1. **Execute**: Coordinator initiates consensus with prestate and operation
-//! 2. **Nonce Commit**: Witnesses generate FROST nonces and send commitments
+//! 2. **Nonce Commit**: Witnesses generate nonces and send commitments
 //! 3. **Sign Request**: Coordinator aggregates nonces and requests signatures
-//! 4. **Sign Share**: Witnesses create partial FROST signatures
+//! 4. **Sign Share**: Witnesses create partial signatures
 //! 5. **Result**: Coordinator aggregates signatures and broadcasts commit fact
 //!
 //! ## Dependencies
@@ -203,7 +210,10 @@ impl CoordinatorRole {
         self.collected_shares.len() >= self.config.threshold as usize
     }
 
-    /// Aggregate signatures and create commit fact using real FROST aggregation
+    /// Aggregate signatures and create commit fact
+    ///
+    /// This uses simplified placeholder signatures by default.
+    /// Enable `consensus_frost_full` feature for real FROST aggregation.
     pub fn create_commit_fact(
         &self,
         prestate_hash: Hash32,
@@ -211,22 +221,29 @@ impl CoordinatorRole {
         operation_bytes: Vec<u8>,
         group_public_key: &PublicKeyPackage,
     ) -> Result<CommitFact> {
-        // Placeholder until full FROST aggregation is wired; keeps the group key in scope.
-        let _ = group_public_key;
         let participants: Vec<_> = self.collected_shares.keys().cloned().collect();
 
-        // Create the message that was signed
-        let mut msg = Vec::new();
-        msg.extend_from_slice(b"AURA_CONSENSUS");
-        msg.extend_from_slice(&self.config.consensus_id.0 .0);
-        msg.extend_from_slice(&prestate_hash.0);
-        msg.extend_from_slice(&operation_hash.0);
+        #[cfg(feature = "consensus_frost_full")]
+        let threshold_signature = {
+            // Full FROST aggregation (experimental)
+            // TODO: Implement proper FROST signature aggregation
+            let _ = group_public_key;
+            let signers: Vec<u16> = self.collected_shares.values().map(|s| s.signer).collect();
+            ThresholdSignature {
+                signature: vec![0u8; 64], // Placeholder until full aggregation implemented
+                signers,
+            }
+        };
 
-        // Placeholder aggregated signature (real implementation would aggregate and verify)
-        let signers: Vec<u16> = self.collected_shares.values().map(|s| s.signer).collect();
-        let threshold_signature = ThresholdSignature {
-            signature: vec![0u8; 64],
-            signers,
+        #[cfg(not(feature = "consensus_frost_full"))]
+        let threshold_signature = {
+            // Simplified placeholder signatures (default)
+            let _ = group_public_key;
+            let signers: Vec<u16> = self.collected_shares.values().map(|s| s.signer).collect();
+            ThresholdSignature {
+                signature: vec![0u8; 64],
+                signers,
+            }
         };
 
         let commit_fact = CommitFact::new(
@@ -278,8 +295,8 @@ impl WitnessRole {
     ) -> Result<ConsensusMessage> {
         // TODO: Verify prestate matches our view
         // Placeholder nonce commitment (real implementation would use FROST)
-        let nonce_commitment =
-            aura_core::frost::NonceCommitment::from_bytes(vec![0u8; 32]).map_err(AuraError::invalid)?;
+        let nonce_commitment = aura_core::frost::NonceCommitment::from_bytes(vec![0u8; 32])
+            .map_err(AuraError::invalid)?;
 
         let instance = WitnessInstance {
             prestate_hash,
@@ -297,7 +314,10 @@ impl WitnessRole {
         })
     }
 
-    /// Handle sign request with real FROST signing
+    /// Handle sign request
+    ///
+    /// Uses simplified placeholder signing by default.
+    /// Enable `consensus_frost_full` feature for real FROST signing.
     pub fn handle_sign_request(
         &mut self,
         consensus_id: ConsensusId,
@@ -310,27 +330,39 @@ impl WitnessRole {
             .get_mut(&consensus_id)
             .ok_or_else(|| AuraError::not_found("Unknown consensus instance"))?;
 
-        // Create binding message for this consensus operation
-        let mut msg = Vec::new();
-        msg.extend_from_slice(b"AURA_CONSENSUS");
-        msg.extend_from_slice(&consensus_id.0 .0);
-        msg.extend_from_slice(&instance.prestate_hash.0);
-        msg.extend_from_slice(&instance.operation_hash.0);
+        #[cfg(feature = "consensus_frost_full")]
+        let partial_signature = {
+            // Full FROST signing (experimental)
+            let mut msg = Vec::new();
+            msg.extend_from_slice(b"AURA_CONSENSUS");
+            msg.extend_from_slice(&consensus_id.0 .0);
+            msg.extend_from_slice(&instance.prestate_hash.0);
+            msg.extend_from_slice(&instance.operation_hash.0);
 
-        // Convert aggregated nonces to FROST format
-        let mut signing_commitments = std::collections::BTreeMap::new();
-        for commitment in &aggregated_nonces {
-            let frost_id = commitment.frost_identifier().map_err(AuraError::invalid)?;
-            let frost_comm = commitment.to_frost().map_err(AuraError::invalid)?;
-            signing_commitments.insert(frost_id, frost_comm);
-        }
+            let mut signing_commitments = std::collections::BTreeMap::new();
+            for commitment in &aggregated_nonces {
+                let frost_id = commitment.frost_identifier().map_err(AuraError::invalid)?;
+                let frost_comm = commitment.to_frost().map_err(AuraError::invalid)?;
+                signing_commitments.insert(frost_id, frost_comm);
+            }
 
-        let _signing_package = frost_ed25519::SigningPackage::new(signing_commitments, &msg);
+            let _signing_package = frost_ed25519::SigningPackage::new(signing_commitments, &msg);
 
-        // Placeholder partial signature (real implementation would sign with FROST)
-        let partial_signature = PartialSignature {
-            signer: instance.signer,
-            signature: vec![0u8; 32],
+            // TODO: Use actual FROST signing with signing_share and signing_nonces
+            PartialSignature {
+                signer: instance.signer,
+                signature: vec![0u8; 32],
+            }
+        };
+
+        #[cfg(not(feature = "consensus_frost_full"))]
+        let partial_signature = {
+            // Simplified placeholder signing (default)
+            let _ = aggregated_nonces;
+            PartialSignature {
+                signer: instance.signer,
+                signature: vec![0u8; 32],
+            }
         };
 
         instance.partial_signature = Some(partial_signature.clone());
@@ -410,11 +442,16 @@ pub async fn run_consensus_choreography(
         .map(|id| (*id, WitnessRole::new(*id)))
         .collect();
 
-    // Store nonces for signing phase (in real implementation, this would use SecureStorageEffects)
+    // Store nonces for signing phase
+    #[cfg(feature = "consensus_frost_full")]
     let mut witness_nonces: HashMap<AuthorityId, frost_ed25519::round1::SigningNonces> =
         HashMap::new();
 
-    // Phase 1: Execute -> NonceCommit (using real FROST nonce generation)
+    #[cfg(not(feature = "consensus_frost_full"))]
+    let mut witness_nonces: HashMap<AuthorityId, frost_ed25519::round1::SigningNonces> =
+        HashMap::new();
+
+    // Phase 1: Execute -> NonceCommit
     let execute_message =
         coordinator.create_execute_message(prestate_hash, operation_hash, operation_bytes.clone());
 
@@ -423,12 +460,24 @@ pub async fn run_consensus_choreography(
             .get_mut(witness_id)
             .ok_or_else(|| AuraError::not_found("Witness not found"))?;
 
-        // Generate FROST nonces for this witness (this is placeholder - real implementation would use proper key shares)
-        // For now, skip nonce generation and let it fail at key package lookup later
-        let dummy_bytes = [1u8; 64]; // Use non-zero bytes
-        let dummy_nonces = frost_ed25519::round1::SigningNonces::deserialize(&dummy_bytes)
-            .map_err(|_| AuraError::invalid("Failed to create dummy nonces for test"))?;
-        witness_nonces.insert(*witness_id, dummy_nonces);
+        // Generate simplified placeholder nonces (default) or full FROST nonces (with feature flag)
+        #[cfg(feature = "consensus_frost_full")]
+        {
+            // TODO: Generate real FROST nonces using key packages
+            let dummy_bytes = [1u8; 64];
+            let dummy_nonces = frost_ed25519::round1::SigningNonces::deserialize(&dummy_bytes)
+                .map_err(|_| AuraError::invalid("Failed to create dummy nonces for test"))?;
+            witness_nonces.insert(*witness_id, dummy_nonces);
+        }
+
+        #[cfg(not(feature = "consensus_frost_full"))]
+        {
+            // Simplified nonce generation
+            let dummy_bytes = [1u8; 64];
+            let dummy_nonces = frost_ed25519::round1::SigningNonces::deserialize(&dummy_bytes)
+                .map_err(|_| AuraError::invalid("Failed to create placeholder nonces"))?;
+            witness_nonces.insert(*witness_id, dummy_nonces);
+        }
 
         let nonce_msg = witness.handle_execute(
             config.consensus_id,

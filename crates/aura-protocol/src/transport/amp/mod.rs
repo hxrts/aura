@@ -1,7 +1,7 @@
 //! AMP (Aura Messaging Protocol) Transport Integration
 //!
 //! This module provides the complete AMP implementation including:
-//! - Core transport functions (send/recv) 
+//! - Core transport functions (send/recv)
 //! - Centralized telemetry and observability
 //! - Guard chain integration for authorization and flow budgets
 //! - Journal operations for fact-based state management
