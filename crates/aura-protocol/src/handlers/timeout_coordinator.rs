@@ -15,7 +15,7 @@
 //! - Tracks timeout tasks globally for cancellation
 
 use async_trait::async_trait;
-use aura_core::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
+use aura_core::effects::{RandomEffects, TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 use aura_core::AuraError;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,25 +32,30 @@ struct ContextRegistry {
 
 /// Timeout coordinator that adds multi-context coordination to a base TimeEffects handler
 #[derive(Debug, Clone)]
-pub struct TimeoutCoordinator<T> {
+pub struct TimeoutCoordinator<T, R> {
     /// Base time handler for stateless operations
     inner: T,
+    /// Random effects for UUID generation
+    random: R,
     /// Shared registry for coordinating timeouts and contexts
     registry: Arc<RwLock<ContextRegistry>>,
 }
 
-impl<T: TimeEffects + Clone> TimeoutCoordinator<T> {
-    /// Create a new timeout coordinator wrapping a base time handler
-    pub fn new(inner: T) -> Self {
+impl<T: TimeEffects + Clone, R: RandomEffects + Clone> TimeoutCoordinator<T, R> {
+    /// Create a new timeout coordinator wrapping a base time handler and random effects
+    pub fn new(inner: T, random: R) -> Self {
         Self {
             inner,
+            random,
             registry: Arc::new(RwLock::new(ContextRegistry::default())),
         }
     }
 }
 
 #[async_trait]
-impl<T: TimeEffects + Clone + Send + Sync> TimeEffects for TimeoutCoordinator<T> {
+impl<T: TimeEffects + Clone + Send + Sync, R: RandomEffects + Clone + Send + Sync> TimeEffects
+    for TimeoutCoordinator<T, R>
+{
     // Delegate stateless operations to inner handler
 
     async fn current_epoch(&self) -> u64 {
@@ -92,9 +97,7 @@ impl<T: TimeEffects + Clone + Send + Sync> TimeEffects for TimeoutCoordinator<T>
     // Coordination methods (Layer 4)
 
     async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
-        #[allow(clippy::disallowed_methods)]
-        // TODO: Refactor to use RandomEffects for UUID generation
-        let handle = Uuid::new_v4();
+        let handle = self.random.random_uuid().await;
         let registry = Arc::clone(&self.registry);
         let handle_clone = handle;
         let timeout_task = tokio::spawn(async move {
