@@ -3,7 +3,7 @@
 //! This module implements the G_auth choreography for distributed device
 //! authentication using the rumpsteak-aura choreographic programming framework.
 
-use crate::{AccountId, AuraError, AuraResult, BiscuitGuardEvaluator, ResourceScope};
+use crate::{AccountId, AuraError, AuraResult, BiscuitGuardEvaluator};
 use aura_core::DeviceId;
 use aura_core::TimeEffects;
 use aura_macros::choreography;

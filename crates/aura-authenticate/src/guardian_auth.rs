@@ -6,13 +6,12 @@
 #![allow(clippy::disallowed_methods)]
 #![allow(clippy::unwrap_used)]
 
-use crate::{AuraError, AuraResult, BiscuitGuardEvaluator, RecoveryType, ResourceScope};
-use aura_core::effects::JournalEffects;
-use aura_core::{hash::hash, AccountId, DeviceId, Ed25519Signature, FlowBudget};
+use crate::{AuraError, AuraResult, BiscuitGuardEvaluator, ResourceScope};
+use aura_core::{hash::hash, AccountId, DeviceId, Ed25519Signature};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
-use aura_wot::{AccountAuthority, BiscuitTokenManager, JournalOp, StorageCategory};
+use aura_wot::BiscuitTokenManager;
 use biscuit_auth::Biscuit;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

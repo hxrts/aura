@@ -8,7 +8,7 @@ use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_verify::session::{SessionScope, SessionTicket};
-use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
+use aura_verify::{IdentityProof, VerifiedIdentity};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
