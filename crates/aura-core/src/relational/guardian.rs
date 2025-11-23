@@ -59,10 +59,10 @@ impl GuardianBinding {
         self.consensus_proof.is_some()
     }
 
-    /// Check if this binding has expired
-    pub fn is_expired(&self) -> bool {
+    /// Check if this binding has expired relative to the given time
+    pub fn is_expired(&self, current_time: chrono::DateTime<chrono::Utc>) -> bool {
         if let Some(expiration) = self.parameters.expiration {
-            chrono::Utc::now() > expiration
+            current_time > expiration
         } else {
             false
         }
@@ -127,18 +127,20 @@ impl GuardianParameters {
     }
 
     /// Create guardian parameters for emergency scenarios
-    pub fn emergency() -> Self {
+    ///
+    /// The expiration is set to 7 days from the provided current time.
+    pub fn emergency(current_time: chrono::DateTime<chrono::Utc>) -> Self {
         Self {
             recovery_delay: Duration::from_secs(60 * 60), // 1 hour for emergencies
             notification_required: false, // Skip notification in emergencies
-            expiration: Some(chrono::Utc::now() + chrono::Duration::days(7)), // Expires in 7 days
+            expiration: Some(current_time + chrono::Duration::days(7)), // Expires in 7 days
         }
     }
 
-    /// Check if these parameters are expired
-    pub fn is_expired(&self) -> bool {
+    /// Check if these parameters are expired relative to the given time
+    pub fn is_expired(&self, current_time: chrono::DateTime<chrono::Utc>) -> bool {
         if let Some(expiration) = self.expiration {
-            chrono::Utc::now() > expiration
+            current_time > expiration
         } else {
             false
         }
@@ -204,8 +206,10 @@ impl GuardianBindingBuilder {
     }
 
     /// Use emergency parameters (1 hour delay, no notification, 7 day expiration)
-    pub fn emergency_config(mut self) -> Self {
-        self.parameters = GuardianParameters::emergency();
+    ///
+    /// The expiration is set to 7 days from the provided current time.
+    pub fn emergency_config(mut self, current_time: chrono::DateTime<chrono::Utc>) -> Self {
+        self.parameters = GuardianParameters::emergency(current_time);
         self
     }
 
@@ -265,7 +269,8 @@ mod tests {
 
     #[test]
     fn test_guardian_parameters_emergency() {
-        let params = GuardianParameters::emergency();
+        let current_time = chrono::Utc::now();
+        let params = GuardianParameters::emergency(current_time);
         assert!(params.is_emergency_config());
         assert!(params.expiration.is_some());
     }
@@ -274,9 +279,10 @@ mod tests {
     fn test_guardian_binding_expiration() {
         let account = Hash32::default();
         let guardian = Hash32([1u8; 32]);
-        
+        let current_time = chrono::Utc::now();
+
         // Create binding that expires in the past
-        let past_time = chrono::Utc::now() - chrono::Duration::hours(1);
+        let past_time = current_time - chrono::Duration::hours(1);
         let expired_params = GuardianParameters::new(
             Duration::from_secs(3600),
             true,
@@ -284,10 +290,10 @@ mod tests {
         );
 
         let binding = GuardianBinding::new(account, guardian, expired_params);
-        assert!(binding.is_expired());
+        assert!(binding.is_expired(current_time));
 
         // Create binding that expires in the future
-        let future_time = chrono::Utc::now() + chrono::Duration::hours(1);
+        let future_time = current_time + chrono::Duration::hours(1);
         let valid_params = GuardianParameters::new(
             Duration::from_secs(3600),
             true,
@@ -295,6 +301,6 @@ mod tests {
         );
 
         let binding = GuardianBinding::new(account, guardian, valid_params);
-        assert!(!binding.is_expired());
+        assert!(!binding.is_expired(current_time));
     }
 }

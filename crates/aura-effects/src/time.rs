@@ -37,6 +37,8 @@ impl RealTimeHandler {
     }
 }
 
+// Effect handler implementation - allowed to use impure functions
+#[allow(clippy::disallowed_methods)]
 #[async_trait]
 impl TimeEffects for RealTimeHandler {
     async fn current_epoch(&self) -> u64 {

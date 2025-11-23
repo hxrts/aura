@@ -169,11 +169,11 @@ pub trait TransportEffects: Send + Sync {
 }
 
 /// Statistics about transport layer operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TransportStats {
     /// Number of envelopes sent successfully
     pub envelopes_sent: u64,
-    /// Number of envelopes received successfully  
+    /// Number of envelopes received successfully
     pub envelopes_received: u64,
     /// Number of send failures
     pub send_failures: u64,
@@ -183,17 +183,4 @@ pub struct TransportStats {
     pub active_channels: u32,
     /// Average envelope size in bytes
     pub avg_envelope_size: u32,
-}
-
-impl Default for TransportStats {
-    fn default() -> Self {
-        Self {
-            envelopes_sent: 0,
-            envelopes_received: 0,
-            send_failures: 0,
-            receive_failures: 0,
-            active_channels: 0,
-            avg_envelope_size: 0,
-        }
-    }
 }

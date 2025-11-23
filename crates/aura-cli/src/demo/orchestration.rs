@@ -521,6 +521,8 @@ impl DemoOrchestratorCli {
         println!("Aura Human-Agent Demo Orchestrator");
         println!("===================================");
 
+        // TODO: Implement full interactive menu - for now just runs once
+        #[allow(clippy::never_loop)]
         loop {
             println!("\nOptions:");
             println!("1. Start new demo session");

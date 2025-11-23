@@ -635,7 +635,7 @@ impl From<frost_ed25519::keys::PublicKeyPackage> for PublicKeyPackage {
         // Note: FROST PublicKeyPackage doesn't expose threshold/max_signers directly
         // We'll use reasonable defaults based on the number of signers
         let max_signers = signer_public_keys.len() as u16;
-        let threshold = (max_signers + 1) / 2; // Simple majority threshold
+        let threshold = max_signers.div_ceil(2); // Simple majority threshold
 
         Self {
             group_public_key,
@@ -693,8 +693,8 @@ impl From<frost_ed25519::keys::KeyPackage> for Share {
     fn from(frost_key_pkg: frost_ed25519::keys::KeyPackage) -> Self {
         let identifier = frost_key_pkg.identifier();
         let signing_share = frost_key_pkg.signing_share();
-        
-        Self::from_frost(*identifier, signing_share.clone())
+
+        Self::from_frost(*identifier, *signing_share)
     }
 }
 

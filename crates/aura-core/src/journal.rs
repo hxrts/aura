@@ -361,49 +361,7 @@ impl Bottom for Fact {
 
 impl PartialOrd for Fact {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        // CRDT partial order: A ≤ B if A's operations ⊆ B's operations
-        // and all LWW values in A are ≤ corresponding values in B
-
-        // Check if operations are subset
-        let ops_subset = self
-            .entries
-            .operation_set
-            .is_subset(&other.entries.operation_set);
-        let ops_superset = other
-            .entries
-            .operation_set
-            .is_subset(&self.entries.operation_set);
-
-        match (ops_subset, ops_superset) {
-            (true, true) => {
-                // Same operations, compare LWW values
-                if self.entries.lww_map == other.entries.lww_map {
-                    Some(std::cmp::Ordering::Equal)
-                } else {
-                    None // Same operations but different values = incomparable
-                }
-            }
-            (true, false) => {
-                // Self operations ⊆ Other operations, check value compatibility
-                for (key, self_val) in &self.entries.lww_map {
-                    if !self.is_key_removed(key) {
-                        if let Some(other_val) = other.entries.lww_map.get(key) {
-                            if self_val.version > other_val.version {
-                                return None; // Incomparable versions
-                            }
-                        } else if !other.is_key_removed(key) {
-                            return None; // Self has value, other doesn't
-                        }
-                    }
-                }
-                Some(std::cmp::Ordering::Less)
-            }
-            (false, true) => {
-                // Other operations ⊆ Self operations
-                Some(std::cmp::Ordering::Greater)
-            }
-            (false, false) => None, // Incomparable operation sets
-        }
+        Some(self.cmp(other))
     }
 }
 

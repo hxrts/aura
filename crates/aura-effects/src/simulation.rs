@@ -32,6 +32,8 @@ where
     }
 }
 
+// Effect handler implementation - allowed to use impure functions
+#[allow(clippy::disallowed_methods)]
 #[async_trait]
 impl<S, T> SimulationControlEffects for StatelessSimulationHandler<S, T>
 where
