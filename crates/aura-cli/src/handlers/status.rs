@@ -3,12 +3,16 @@
 //! Effect-based implementation of the status command.
 
 use anyhow::Result;
-use aura_agent::AuraEffectSystem;
-use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects};
+use aura_agent::{AuraEffectSystem, EffectContext};
+use aura_protocol::effect_traits::ConsoleEffects;
 use std::path::Path;
 
 /// Handle status display through effects
-pub async fn handle_status(effects: &AuraEffectSystem, config_path: &Path) -> Result<()> {
+pub async fn handle_status(
+    ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+    config_path: &Path,
+) -> Result<()> {
     println!("Account status for config: {}", config_path.display());
 
     // Check if config exists through storage effects
@@ -23,16 +27,16 @@ pub async fn handle_status(effects: &AuraEffectSystem, config_path: &Path) -> Re
     }
 
     // Read and parse config through storage effects
-    match read_config_through_effects(effects, config_path).await {
+    match read_config_through_effects(ctx, effects, config_path).await {
         Ok(config) => {
-            display_status_info(effects, &config).await;
+            display_status_info(ctx, effects, &config).await;
             Ok(())
         }
         Err(e) => {
             eprintln!("Failed to read config: {}", e);
 
             // Show basic status anyway
-            display_default_status(effects).await;
+            display_default_status(ctx, effects).await;
             Ok(())
         }
     }
@@ -40,6 +44,7 @@ pub async fn handle_status(effects: &AuraEffectSystem, config_path: &Path) -> Re
 
 /// Read configuration through storage effects
 async fn read_config_through_effects(
+    _ctx: &EffectContext,
     _effects: &AuraEffectSystem,
     config_path: &Path,
 ) -> Result<DeviceConfig> {
@@ -56,7 +61,11 @@ async fn read_config_through_effects(
 }
 
 /// Display status information through console effects
-async fn display_status_info(_effects: &AuraEffectSystem, config: &DeviceConfig) {
+async fn display_status_info(
+    _ctx: &EffectContext,
+    _effects: &AuraEffectSystem,
+    config: &DeviceConfig,
+) {
     println!("=== Account Status ===");
     println!("Device ID: {}", config.device_id);
     println!("Status: Active");
@@ -71,7 +80,7 @@ async fn display_status_info(_effects: &AuraEffectSystem, config: &DeviceConfig)
 }
 
 /// Display default status when config can't be read
-async fn display_default_status(_effects: &AuraEffectSystem) {
+async fn display_default_status(_ctx: &EffectContext, _effects: &AuraEffectSystem) {
     println!("=== Account Status (Default) ===");
     println!("Status: Unknown (config unreadable)");
     println!("Devices: Unknown");

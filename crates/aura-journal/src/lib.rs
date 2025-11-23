@@ -1,14 +1,30 @@
-//! Fact-based distributed journal for Aura
+//! # Aura Journal - Layer 2: Specification (Domain Crate)
+//!
+//! **Purpose**: Define fact-based journal semantics and deterministic reduction logic.
 //!
 //! This crate provides a fact-based CRDT journal using join semilattices,
 //! enabling automatic conflict resolution and convergence across authorities.
+//! Facts form a join-semilattice and merge via set union. Identical fact sets
+//! produce identical states across all replicas.
 //!
-//! # Architecture
+//! # Architecture Constraints
+//!
+//! **Layer 2 depends only on aura-core** (foundation).
+//! - ✅ Domain logic for journal semantics (no effects)
+//! - ✅ Fact model, validation rules, deterministic reduction
+//! - ✅ Semilattice operations and CRDT laws
+//! - ✅ Implement application effects (e.g., `JournalEffects`) by composing infrastructure effects
+//! - ❌ NO effect handler implementations (use aura-effects or domain crates)
+//! - ❌ NO multi-party coordination (that's aura-protocol)
+//! - ❌ NO runtime composition (that's aura-composition/aura-agent)
+//!
+//! # Key Concepts
 //!
 //! - **Facts**: Immutable, attested operations that form the journal
-//! - **Reduction**: Deterministic state computation from facts
-//! - **Namespaces**: Authority and context-scoped journals
-//! - **Integration**: Bridge with commitment tree for AttestedOp support
+//! - **Join-semilattice**: Facts merge via set union `∪` (monotonic growth)
+//! - **Reduction**: Deterministic state computation from fact set (identical inputs → identical outputs)
+//! - **Namespaces**: Authority-scoped and context-scoped journals
+//! - **AttestedOps**: Commitment tree updates expressed as facts
 
 // Core modules
 mod error;

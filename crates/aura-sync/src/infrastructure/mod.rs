@@ -1,16 +1,13 @@
-//! Infrastructure utilities for sync operations
+//! Layer 5: Sync Protocol Infrastructure - Peers, Connections, Caching, Rate Limiting
 //!
-//! This module provides supporting infrastructure for synchronization protocols:
-//! - Peer discovery and management
-//! - Connection pooling and lifecycle management
-//! - Retry logic with exponential backoff
-//! - Cache management with epoch tracking
-//! - Rate limiting for budget enforcement
+//! Supporting utilities for synchronization protocols:
+//! **PeerManager** (discovery & selection), **ConnectionPool** (pooling & reuse),
+//! **RetryPolicy** (resilient operations), **CacheManager** (epoch-aware invalidation),
+//! **RateLimiter** (flow budget enforcement).
 //!
-//! All infrastructure components follow Layer 5 patterns:
-//! - Effect-based with no direct handler dependencies
-//! - Stateless where possible, explicit state management where needed
-//! - Composable through trait-based interfaces
+//! **Integration** (per docs/003_information_flow_contract.md):
+//! RateLimiter enforces flow budgets; receipts propagate charges up the relay chain.
+//! CacheManager tracks epochs to invalidate stale data across authority boundaries.
 
 pub mod cache;
 pub mod connections;

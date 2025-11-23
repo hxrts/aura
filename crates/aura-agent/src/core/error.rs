@@ -60,4 +60,14 @@ impl AgentError {
     pub fn choreography(msg: impl Into<String>) -> Self {
         Self::Choreography(msg.into())
     }
+
+    /// Create an internal error (alias for runtime error)
+    pub fn internal(msg: impl Into<String>) -> Self {
+        Self::Runtime(msg.into())
+    }
+
+    /// Create an invalid argument error (alias for config error)
+    pub fn invalid(msg: impl Into<String>) -> Self {
+        Self::Config(msg.into())
+    }
 }

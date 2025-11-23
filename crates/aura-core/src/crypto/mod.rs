@@ -1,29 +1,19 @@
-//! Cryptographic Domain Types and Utilities
+//! Layer 1: Cryptographic Domain Types
 //!
-//! This module provides domain-specific cryptographic types and pure functions
-//! for use throughout the Aura system. Following the 8-layer architecture,
-//! these are **Layer 1 (Foundation)** components that contain only domain logic
-//! and semantic definitions - no effect handlers or implementations.
+//! Pure domain types and functions for threshold cryptography. Contains only
+//! domain specification; implementations are effect-based and layered.
 //!
-//! ## Core Domain Components
+//! **Core Components**:
+//! - **Key Derivation (amp)**: Deterministic KDF (HKDF-SHA256) per docs/001_system_architecture.md
+//! - **FROST Integration**: Domain types (Share, PartialSignature, ThresholdSignature)
+//! - **Merkle Utilities**: Content-addressed tree operations for commitment verification
+//! - **Ed25519**: Re-exports of ed25519-dalek for signature verification
 //!
-//! - **Key Derivation**: Pure functions for deterministic key derivation (DKD)
-//! - **FROST Integration**: Domain types for threshold cryptography
-//! - **Merkle Utilities**: Tree operations for commitment verification
-//! - **Standard Crypto Types**: Re-exports of ed25519-dalek types
-//!
-//! ## Architecture
-//!
-//! This module contains **domain specification only**:
-//! - Pure functions with no side effects
-//! - Domain types and data structures
-//! - Mathematical operations and algorithms
-//! - No effect handlers, middleware, or runtime implementations
-//!
-//! Effect implementations live in appropriate layers:
-//! - Basic crypto operations → `aura-effects` (Layer 3)
-//! - Multi-party coordination → `aura-protocol` (Layer 4)
-//! - Complete FROST ceremonies → `aura-frost` (Layer 5)
+//! **Layered Implementation** (per docs/001_system_architecture.md):
+//! - Basic crypto effects (sign, verify, key derive) → aura-effects/crypto (Layer 3)
+//! - Multi-party FROST coordination → aura-protocol/guards (Layer 4)
+//! - End-to-end FROST ceremonies → aura-frost (Layer 5)
+//! - No effect handlers in this layer (pure functions/types only)
 
 // Domain modules - pure functions and types only
 pub mod amp;

@@ -7,8 +7,8 @@ use std::sync::Once;
 use std::time::Duration;
 
 use crate::foundation::{create_mock_test_context, SimpleTestContext};
-use aura_agent::{AgentConfig, AuraEffectSystem};
-use aura_core::{AuraError, AuraResult, DeviceId};
+use aura_agent::{AuraEffectSystem, core::AgentConfig};
+use aura_core::{AuraError, AuraResult, DeviceId, AuthorityId};
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
@@ -126,7 +126,7 @@ impl TestFixture {
     /// Returns an Arc<AuraEffectSystem> that implements all effect traits.
     pub fn effect_system(&self) -> Arc<AuraEffectSystem> {
         let config = AgentConfig::default();
-        let system = AuraEffectSystem::testing(&config);
+        let system = AuraEffectSystem::testing(&config).expect("build test effect system");
         Arc::new(system)
     }
 
@@ -136,7 +136,7 @@ impl TestFixture {
     /// Returns an Arc<AuraEffectSystem> for compatibility with old interfaces.
     pub fn effect_system_arc(&self) -> Arc<AuraEffectSystem> {
         let config = AgentConfig::default();
-        let system = AuraEffectSystem::testing(&config);
+        let system = AuraEffectSystem::testing(&config).expect("build test effect system");
         Arc::new(system)
     }
 
@@ -146,7 +146,7 @@ impl TestFixture {
     /// Use this when you need the concrete type, not wrapped.
     pub fn effect_system_direct(&self) -> AuraEffectSystem {
         let config = AgentConfig::default();
-        AuraEffectSystem::testing(&config)
+        AuraEffectSystem::testing(&config).expect("build test effect system")
     }
 
     /// Get an effect system wrapped for AuraEffects compatibility
@@ -155,7 +155,7 @@ impl TestFixture {
     /// and can be used with coordinators that require Arc<E: AuraEffects>.
     pub fn effect_system_wrapped(&self) -> Arc<AuraEffectSystem> {
         let config = AgentConfig::default();
-        let system = AuraEffectSystem::testing(&config);
+        let system = AuraEffectSystem::testing(&config).expect("build test effect system");
         Arc::new(system)
     }
 

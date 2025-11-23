@@ -248,7 +248,8 @@ impl WitnessRole {
         // 3. Store nonce securely for later use in signing
         // 4. Return commitment for coordinator aggregation
         
-        use aura_core::crypto::frost::{generate_nonce_with_share, NonceCommitment};
+        use aura_core::crypto::tree_signing::{generate_nonce_with_share};
+        use aura_core::frost::NonceCommitment;
         
         // For now, create a placeholder commitment
         // In production, this would use real FROST key shares

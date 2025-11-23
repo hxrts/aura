@@ -1,17 +1,66 @@
 #![allow(missing_docs)]
 
-//! Aura Simulator Library
+//! # Aura Simulator - Layer 6: Runtime Composition
 //!
-//! This crate implements simulation functionality through effect system composition:
-//! - Scenario injection and dynamic test modifications
-//! - Fault simulation and error injection
-//! - Time control and temporal operations
-//! - Deterministic simulation environments
+//! This crate implements deterministic simulation runtime composition through effect system
+//! architecture for testing and protocol verification in the Aura platform.
 //!
-//! All simulation functionality is implemented as effect handlers
-//! following Aura's unified effect system architecture.
+//! ## Purpose
 //!
-//! # Effect System Architecture
+//! Layer 6 runtime composition crate providing:
+//! - Deterministic simulation environment for protocol testing
+//! - Effect handlers for simulation-specific capabilities (time, faults, scenarios)
+//! - Time control and temporal operations without real delays
+//! - Fault injection and Byzantine strategy simulation
+//! - Scenario composition and dynamic test modifications
+//!
+//! ## Architecture Constraints
+//!
+//! This crate depends on:
+//! - **Layer 1-5**: All lower layers (core, domain crates, effects, protocols, features)
+//! - **MUST NOT**: Create new persistent effect handlers (use aura-effects)
+//! - **MUST NOT**: Implement multi-party coordination (use aura-protocol)
+//! - **MUST NOT**: Be imported by Layer 1-5 crates (no circular dependencies)
+//!
+//! ## What Belongs Here
+//!
+//! - Simulation effect handlers (time, fault injection, scenario injection)
+//! - Deterministic execution environment composition
+//! - Effect composer for combining simulation capabilities
+//! - Time control and temporal simulation utilities
+//! - Fault injection strategies (Byzantine, chaos, network faults)
+//! - Scenario definition and injection infrastructure
+//! - Privacy analysis and observer model implementations
+//! - Testkit integration bridge
+//!
+//! ## What Does NOT Belong Here
+//!
+//! - Production effect implementations (belong in aura-effects)
+//! - Effect composition infrastructure (belong in aura-composition)
+//! - Multi-party protocol logic (belong in aura-protocol)
+//! - Feature protocol implementations (belong in Layer 5 crates)
+//! - Agent runtime composition (belong in aura-agent)
+//! - Concrete test cases and fixtures (belong in aura-testkit)
+//!
+//! ## Design Principles
+//!
+//! - Simulation is deterministic: same seed produces identical execution
+//! - Time is controlled: simulated time advances without real delays
+//! - Faults are injected: Byzantine, chaos, and network strategies composable
+//! - Effect-based: all simulation capabilities via effect system, no globals
+//! - Scenario injection: tests can modify behavior without code changes
+//! - Privacy analysis: formal verification of information flow properties
+//! - Composable: simulation handlers combine like production effects
+//!
+//! ## Key Components
+//!
+//! - **SimulationEffectComposer**: Assembly of simulation effect environment
+//! - **SimulationTimeHandler**: Time control without real delays
+//! - **SimulationFaultHandler**: Fault injection and Byzantine strategies
+//! - **SimulationScenarioHandler**: Dynamic scenario injection
+//! - **SimulatorConfig**: Configuration for simulation parameters
+//!
+//! ## Effect System Architecture
 //!
 //! The simulator uses composable effect handlers where each handler provides specific
 //! simulation capabilities through the unified effect system:
@@ -27,14 +76,14 @@
 //! let timestamp = time_handler.current_timestamp().await?;
 //! ```
 //!
-//! # Example Usage
+//! ## Example Usage
 //!
 //! ```rust,ignore
 //! use aura_simulator::handlers::SimulationEffectComposer;
-//! use aura_protocol::standard_patterns::EffectRegistry;
+//! use aura_agent::EffectRegistry;
 //! use std::time::Duration;
 //!
-//! // NEW: Create simulation environment using EffectRegistry + composer pattern
+//! // Create simulation environment using EffectRegistry + composer pattern
 //! let environment = SimulationEffectComposer::for_testing(device_id)?;
 //!
 //! // Or customize simulation effects
@@ -78,6 +127,9 @@ pub mod context;
 // Scenario definitions
 pub mod scenario;
 
+// Scenario executor for CLI recovery demo
+pub mod scenario_executor;
+
 // Testkit integration bridge
 pub mod testkit_bridge;
 
@@ -103,6 +155,9 @@ pub use compat::{PerformanceMetrics, SimulatorHandler};
 
 // Re-export scenario types for convenience
 pub use handlers::{InjectionAction, ScenarioDefinition, TriggerCondition};
+
+// Re-export scenario executor
+pub use scenario_executor::{ScenarioExecutor, ExecutionResult, ExecutionStep};
 
 // Re-export Duration for convenience
 pub use std::time::Duration;

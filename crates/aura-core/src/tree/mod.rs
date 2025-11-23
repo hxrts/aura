@@ -1,28 +1,22 @@
-//! Commitment Tree Core Types
+//! Layer 1: Commitment Tree Core Types
 //!
-//! This module defines the foundational data types for Aura's commitment tree with
-//! threshold signing, following the specification in `docs/123_commitment_tree.md`.
+//! Foundational data types for threshold tree with FROST signing. All types are
+//! pure structures with no business logic.
 //!
-//! # Design Principles
+//! **Key Types**:
+//! - **Epoch**: Monotonically increasing epoch counter for key rotation (per docs/110_rendezvous.md)
+//! - **Policy**: Meet-semilattice (⊓) threshold policy (Any, Threshold, All);
+//!   more restrictive is smaller per docs/002_theoretical_model.md
+//! - **LeafNode**: Device or guardian leaf in tree
+//! - **BranchNode**: Internal node with policy and content-addressed commitment
+//! - **TreeOp**: Parent-bound tree modification operation
+//! - **AttestedOp**: TreeOp with threshold signature proof (fact-based journal)
 //!
-//! - **Pure Foundation Types**: No business logic, only data structures
-//! - **Meet-Semilattice Policy**: Policies form a partial order where "more restrictive is smaller"
-//! - **Content-Addressed Operations**: All operations are identified by their hash (CID)
-//! - **Deterministic Commitments**: Tree commitments are reproducible from structure
-//!
-//! # Key Types
-//!
-//! - [`Epoch`]: Monotonically increasing epoch counter for key rotation
-//! - [`TreeHash32`]: 32-byte cryptographic hash for commitments
-//! - [`Policy`]: Meet-semilattice threshold policy (Any, Threshold, All)
-//! - [`LeafNode`]: Device or guardian leaf in the tree
-//! - [`BranchNode`]: Internal tree node with policy and commitment
-//! - [`TreeOp`]: Parent-bound tree modification operation
-//! - [`AttestedOp`]: Tree operation with threshold signature attestation
-//!
-//! # Reference
-//!
-//! See [`docs/123_commitment_tree.md`](../../../docs/123_commitment_tree.md) for complete specification.
+//! **Design Principles**:
+//! - Content-addressed: Operations identified by content hash (CID)
+//! - Deterministic: Reproducible commitments from structure
+//! - Policy semilattice: Refinement forms partial order (per docs/104_consensus.md)
+//! - Fact-based: AttestedOps are immutable atomic facts (per docs/102_journal.md)
 
 pub mod commitment;
 pub mod policy;

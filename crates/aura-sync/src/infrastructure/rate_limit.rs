@@ -64,8 +64,8 @@ pub fn check_rate_limit_sync(
 ) -> SyncResult<()> {
     use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
     // Convert u64 timestamp to Instant for aura-core compatibility
-    let now = UNIX_EPOCH + StdDuration::from_secs(now_timestamp);
-    let now_instant = SystemTime::now(); // TODO: Should use actual conversion
+    let _now = UNIX_EPOCH + StdDuration::from_secs(now_timestamp);
+    let _now_instant = SystemTime::now(); // TODO: Should use actual conversion
     #[allow(clippy::disallowed_methods)]
     let now_instant = std::time::Instant::now(); // Temporary - need proper time abstraction
     limiter

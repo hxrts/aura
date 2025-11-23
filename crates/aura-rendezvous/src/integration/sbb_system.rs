@@ -16,7 +16,7 @@ use crate::{
         CapabilityAwareSbbCoordinator, SbbForwardingPolicy, TrustStatistics,
     },
     messaging::{SbbMessageType, SbbTransportBridge, TransportOfferPayload},
-    sbb::{FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding},
+    sbb::{FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding, SBB_MESSAGE_SIZE},
 };
 use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId, TrustLevel};
 use aura_protocol::effects::AuraEffects;
@@ -199,22 +199,72 @@ impl IntegratedSbbSystem {
             AuraError::serialization(format!("Failed to serialize transport offer: {}", e))
         })?;
 
-        let envelope = if request.use_encryption {
-            // For encrypted flooding, we need to encrypt for each potential recipient
-            // For simplicity, we'll create an unencrypted envelope first and let the transport bridge handle encryption
-            // In a full implementation, we'd encrypt with a broadcast key or multiple recipient keys
-            tracing::info!(
-                "Encrypted SBB flooding not yet fully implemented, falling back to plaintext"
-            );
-            RendezvousEnvelope::new(payload_bytes, request.ttl)
-        } else {
-            // Create plaintext envelope
-            RendezvousEnvelope::new(payload_bytes, request.ttl)
-        };
+        if request.use_encryption {
+            // Encrypt envelope per eligible peer and forward individually
+            let now = crate::sbb::current_timestamp();
+            let base_envelope = RendezvousEnvelope::new(payload_bytes.clone(), request.ttl);
+            let config = SbbConfig::default();
 
+            let peers = self
+                .flooding_coordinator
+                .get_capability_aware_forwarding_peers(
+                    None,
+                    SBB_MESSAGE_SIZE,
+                    &self.forwarding_policy,
+                    now,
+                )
+                .await
+                .unwrap_or_default();
+
+            let mut forwarded = 0usize;
+            let mut message_size = 0usize;
+            for peer in peers {
+                let encrypted_envelope = self.encryption.encrypt_envelope_with_padding(
+                    &base_envelope,
+                    peer,
+                    &config.app_context,
+                    config.padding_strategy.clone(),
+                )?;
+
+                let sbb_envelope = SbbEnvelope::new_encrypted(encrypted_envelope, request.ttl);
+                let serialized =
+                    bincode::serialize(&sbb_envelope).map_err(|e| {
+                        AuraError::serialization(format!(
+                            "Failed to serialize encrypted SBB envelope: {}",
+                            e
+                        ))
+                    })?;
+
+                if let Some(next_hop) = RendezvousEnvelope::new(serialized, request.ttl).decrement_ttl() {
+                    message_size = sbb_envelope.size();
+                    if self
+                        .flooding_coordinator
+                        .forward_to_peer(next_hop, peer, now)
+                        .await
+                        .is_ok()
+                    {
+                        forwarded += 1;
+                    }
+                }
+            }
+
+            let flood_result = if forwarded > 0 {
+                FloodResult::Forwarded { peer_count: forwarded }
+            } else {
+                FloodResult::Dropped
+            };
+
+            return Ok(SbbDiscoveryResult {
+                flood_result,
+                peers_reached: forwarded,
+                encrypted: true,
+                message_size,
+            });
+        }
+
+        // Plaintext flooding path
+        let envelope = RendezvousEnvelope::new(payload_bytes, request.ttl);
         let message_size = envelope.payload.len();
-
-        // Flood through capability-aware coordinator
         let now = crate::sbb::current_timestamp();
         let flood_result = self
             .flooding_coordinator
@@ -229,7 +279,7 @@ impl IntegratedSbbSystem {
         Ok(SbbDiscoveryResult {
             flood_result,
             peers_reached,
-            encrypted: request.use_encryption,
+            encrypted: false,
             message_size,
         })
     }

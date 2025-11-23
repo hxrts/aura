@@ -6,41 +6,11 @@
 //! into the journal-backed FlowBudget CRDT described in
 //! `docs/103_information_flow_budget.md`.
 
-use async_trait::async_trait;
 use aura_core::{
+    effects::{FlowBudgetEffects, FlowHint},
     identifiers::{AuthorityId, ContextId},
     AuraResult, Receipt,
 };
-use serde::{Deserialize, Serialize};
-
-/// Hint describing which flow bucket should be charged before a send.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FlowHint {
-    pub context: ContextId,
-    pub peer: AuthorityId,
-    pub cost: u32,
-}
-
-impl FlowHint {
-    pub fn new(context: ContextId, peer: AuthorityId, cost: u32) -> Self {
-        Self {
-            context,
-            peer,
-            cost,
-        }
-    }
-}
-
-/// Trait implemented by effect systems that can charge flow budgets.
-#[async_trait]
-pub trait FlowBudgetEffects: Send + Sync {
-    async fn charge_flow(
-        &self,
-        context: &ContextId,
-        peer: &AuthorityId,
-        cost: u32,
-    ) -> AuraResult<Receipt>;
-}
 
 /// Guard that must run before every transport send.
 #[derive(Debug)]

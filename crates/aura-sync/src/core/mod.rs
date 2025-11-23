@@ -1,7 +1,12 @@
-//! Core abstractions for aura-sync
+//! Layer 5: Sync Protocol Foundation - Config, Errors, Metrics, Sessions
 //!
-//! This module provides the foundation types and patterns used throughout
-//! the sync protocols. It follows Aura's Layer 5 (Feature/Protocol) guidelines.
+//! Foundation types supporting synchronization protocol implementations:
+//! **SyncConfig** (protocol configuration), **SyncError** (unified error handling),
+//! **SyncMetrics** (performance instrumentation), **SessionManager** (session lifecycle).
+//!
+//! **Integration** (per docs/110_rendezvous.md):
+//! All sync protocols (anti-entropy, journal sync, OTA, snapshots) are built atop
+//! these foundation types. SessionManager coordinates multi-peer synchronization sessions.
 
 pub mod config;
 pub mod errors;

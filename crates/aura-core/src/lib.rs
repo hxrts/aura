@@ -1,22 +1,47 @@
-//! Aura Core - Whole System Model Foundation
+//! # Aura Core - Layer 1: Foundation
 //!
-//! This crate provides the foundational algebraic types and effect interfaces
-//! that define the whole system model for Aura. It contains only pure mathematical
-//! abstractions with no implementation details or application logic.
+//! **Purpose**: Single source of truth for all domain concepts and interfaces.
 //!
-//! # Architecture Layers
+//! This crate provides the foundational algebraic types, effect trait interfaces,
+//! and domain types that define the whole system model for Aura. It contains only
+//! pure mathematical abstractions with no implementation details or application logic.
 //!
-//! ## Core Algebraic Types
+//! # Architecture Constraints
+//!
+//! **Layer 1 has ZERO dependencies on other Aura crates** (foundation).
+//! - ✅ Effect trait definitions (interfaces, no implementations)
+//! - ✅ Domain types: `AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`
+//! - ✅ Semantic traits: `JoinSemilattice`, `MeetSemilattice`, `CvState`, `MvState`
+//! - ✅ Cryptographic utilities: key derivation, FROST types, merkle trees
+//! - ✅ Error types: `AuraError`, error codes, and guard metadata
+//! - ✅ Configuration system with validation
+//! - ✅ Extension traits providing convenience methods (e.g., `LeakageChoreographyExt`)
+//! - ❌ NO implementations (those go in aura-effects or domain crates)
+//! - ❌ NO application logic (that goes in feature crates)
+//! - ❌ NO handler composition (that's aura-composition)
+//!
+//! # Core Abstractions
+//!
+//! ## Algebraic Types
 //! - `Cap`: Meet-semilattice (⊓) for capabilities/authority
 //! - `Fact`: Join-semilattice (⊔) for knowledge accumulation
 //! - `Journal { facts: Fact, caps: Cap }`: CRDT pullback structure
-//! - Contexts (`RID`, `GID`, `DKD`): Privacy partitions
+//! - Contexts (`ContextId`): Privacy partitions
 //!
-//! ## Effect Interfaces (Pure Signatures)
-//! - `JournalEffects`: `merge_facts`, `refine_caps`
-//! - `CryptoEffects`: `sign_threshold`, `aead_seal`, `commitment_step`
-//! - `TransportEffects`: `send`, `recv`, `connect`
-//! - `TimeEffects`, `RandEffects`: Simulation/testing support
+//! ## Effect Trait Categories
+//!
+//! **Infrastructure Effects** (require handlers in aura-effects):
+//! - `CryptoEffects`: Signing, hashing, key derivation
+//! - `NetworkEffects`: TCP, message sending/receiving
+//! - `StorageEffects`: File I/O, chunk operations
+//! - `TimeEffects`: Current time, delays
+//! - `RandomEffects`: Cryptographic randomness
+//!
+//! **Application Effects** (implemented in domain crates with infrastructure effects):
+//! - `JournalEffects`: Fact-based journal operations
+//! - `AuthorizationEffects`: Biscuit token evaluation
+//! - `FlowBudgetEffects`: Privacy budget management
+//! - `LeakageEffects`: Metadata leakage tracking
 //!
 //! ## Semilattice CRDT Laws
 //! - Monotonic growth: `Fₜ₊₁ = Fₜ ⊔ δ` → `Fₜ ≤ Fₜ₊₁`
@@ -24,8 +49,8 @@
 //! - Compositional confluence: `merge(δ₁) ; merge(δ₂) ≡ merge(δ₁ ⊔ δ₂)`
 //!
 //! ## Privacy & Security Contracts
-//! - Context isolation: `κ₁ ≠ κ₂` prevents cross-context flow
-//! - Unlinkability: `τ[c1↔c2] ≈_ext τ` (computational indistinguishability)
+//! - Context isolation: Different `ContextId` prevents cross-context flow
+//! - Unlinkability: Computational indistinguishability across contexts
 //! - Leakage bounds: `L(τ, observer) ≤ Budget(observer)`
 
 #![allow(missing_docs)]
@@ -145,6 +170,11 @@ pub use consensus::{Prestate, PrestateBuilder};
 #[doc = "stable: Core message types with semver guarantees"]
 pub use messages::{
     AuthStrength, AuthTag, MessageValidation, MessageValidator, Msg, SemanticVersion, TypedMessage,
+    WireEnvelope, MessageError, MessageResult, WIRE_FORMAT_VERSION,
+    // Message error helper functions
+    cid_mismatch_error, invalid_envelope_size_error, invalid_message_format_error,
+    message_deserialization_error, message_serialization_error, message_too_large_error,
+    unsupported_version_error,
 };
 #[doc = "stable: Canonical serialization with semver guarantees"]
 pub use serialization::{
@@ -168,6 +198,11 @@ pub use effects::{
     ConsoleEffects,
     CrdtEffects,
     CryptoEffects,
+    // Core effect system types
+    EffectType,
+    ExecutionMode,
+    FlowBudgetEffects,
+    FlowHint,
     JournalEffects,
     MinimalEffects,
     RandomEffects,
@@ -214,6 +249,9 @@ pub use time::{
 #[doc = "unstable: FlowBudget API is experimental and may change"]
 pub use flow::{FlowBudget, Receipt};
 #[doc = "internal: Protocol types are moving to higher layers"]
+#[deprecated(
+    note = "Protocol/session types now live in higher layers; prefer importing from the owning crate instead of aura_core::protocols"
+)]
 pub use protocols::*;
 #[doc = "stable: Core relational types for cross-authority coordination with semver guarantees"]
 pub use relational::*;

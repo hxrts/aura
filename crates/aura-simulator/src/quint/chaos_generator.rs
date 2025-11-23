@@ -661,6 +661,9 @@ impl ChaosGenerator {
             setup: ScenarioSetup {
                 participants: 3,
                 threshold: 2,
+                chat_config: None,
+                data_loss_config: None,
+                demo_config: None,
             },
             network_conditions: None,
             byzantine_conditions: None,
@@ -677,6 +680,9 @@ impl ChaosGenerator {
             setup: ScenarioSetup {
                 participants: 5,
                 threshold: 3,
+                chat_config: None,
+                data_loss_config: None,
+                demo_config: None,
             },
             network_conditions: Some(NetworkConditions {
                 latency_ms: Some(500),

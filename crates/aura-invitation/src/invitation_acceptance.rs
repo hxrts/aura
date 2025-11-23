@@ -1,7 +1,7 @@
 //! Invitation acceptance helpers that interact with the shared registry.
 
 use crate::{
-    device_invitation::{shared_invitation_registry, InvitationEnvelope},
+    device_invitation::{create_invitation_registry, InvitationEnvelope},
     relationship_formation::{RelationshipFormationRequest, RelationshipType},
     transport::deliver_via_rendezvous,
     InvitationError, InvitationResult,
@@ -79,11 +79,12 @@ impl<E> InvitationAcceptanceCoordinator<E>
 where
     E: AuraEffects + ?Sized,
 {
-    /// Create a new acceptance coordinator with default configuration.
+    /// Create a new acceptance coordinator with default configuration and a new registry.
+    /// For production use, prefer `with_registry()` to share state across components.
     pub fn new(effect_system: Arc<E>) -> Self {
         Self {
             effects: effect_system,
-            registry: shared_invitation_registry(),
+            registry: create_invitation_registry(),
             config: AcceptanceProtocolConfig::default(),
         }
     }
@@ -100,11 +101,12 @@ where
         }
     }
 
-    /// Create with custom configuration.
+    /// Create with custom configuration and a new registry.
+    /// For production use, prefer `with_config_and_registry()` to share state across components.
     pub fn with_config(effect_system: Arc<E>, config: AcceptanceProtocolConfig) -> Self {
         Self {
             effects: effect_system,
-            registry: shared_invitation_registry(),
+            registry: create_invitation_registry(),
             config,
         }
     }

@@ -1,17 +1,30 @@
 #![allow(clippy::type_complexity)]
 
-//! Aura MPST - Full Rumpsteak-Aura Integration
+//! # Aura MPST - Layer 2: Specification (Choreography Runtime)
 //!
-//! This crate demonstrates the PROPER way for Aura to integrate
-//! with rumpsteak-aura and inherit ALL features automatically.
+//! **Purpose**: Runtime library for choreographic protocol specifications and multi-party session types.
 //!
-//! # Key Design Principle
+//! This crate provides semantic abstractions for choreographic features, integrating with
+//! rumpsteak-aura to enable full multi-party session type support with Aura-specific extensions.
+//!
+//! # Architecture Constraints
+//!
+//! **Layer 2 depends only on aura-core** (foundation).
+//! - ✅ Session type runtime and choreographic abstractions
+//! - ✅ Guard chain integration traits (`CapabilityGuard`, `JournalCoupling`, etc.)
+//! - ✅ Protocol specification support
+//! - ✅ Extensions for leakage tracking and context isolation
+//! - ❌ NO effect handler implementations
+//! - ❌ NO multi-party coordination logic (that's aura-protocol)
+//! - ❌ NO handler composition (that's aura-composition)
+//!
+//! # Design Philosophy
 //!
 //! This crate is a **regular crate** (not proc-macro) which allows it to:
-//! 1. Re-export ALL rumpsteak-aura functionality
+//! 1. Re-export all rumpsteak-aura functionality
 //! 2. Provide the exact same `choreography!` macro interface
 //! 3. Add Aura-specific extensions via the extension system
-//! 4. Import additional proc macros from the aura-macros crate
+//! 4. Integrate with the guard chain for protocol-level guards
 //!
 //! # Usage
 //!

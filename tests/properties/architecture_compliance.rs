@@ -18,7 +18,7 @@ enum Layer {
     Feature = 5,        // aura-frost, aura-invitation, etc.
     Runtime = 6,        // aura-agent, aura-simulator
     UI = 7,             // aura-cli
-    Testing = 8,        // aura-testkit, aura-quint-api
+    Testing = 8,        // aura-testkit, aura-quint
 }
 
 impl Layer {
@@ -52,7 +52,7 @@ impl Layer {
             "aura-cli" => Some(Layer::UI),
 
             // Layer 8: Testing/Tools
-            "aura-testkit" | "aura-quint-api" => Some(Layer::Testing),
+            "aura-testkit" | "aura-quint" => Some(Layer::Testing),
 
             // Benchmarks and meta-crates (not part of main architecture)
             "handler_performance" | "simple_benchmarks" | "aura" => None,
@@ -261,7 +261,7 @@ fn test_layer_boundaries() {
         eprintln!("  Layer 5: Feature/Protocol (aura-frost, etc.)");
         eprintln!("  Layer 6: Runtime Composition (aura-agent, aura-simulator)");
         eprintln!("  Layer 7: User Interface (aura-cli)");
-        eprintln!("  Layer 8: Testing/Tools (aura-testkit, aura-quint-api)\n");
+        eprintln!("  Layer 8: Testing/Tools (aura-testkit, aura-quint)\n");
 
         panic!(
             "{} architecture boundary violations found",

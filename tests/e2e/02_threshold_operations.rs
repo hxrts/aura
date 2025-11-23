@@ -10,7 +10,7 @@
 
 use aura_agent::runtime::AuthorityManager;
 use aura_core::{AuthorityId, Result};
-use aura_effects::random::MockRandomHandler;
+use aura_testkit::stateful_effects::random::MockRandomHandler;
 
 /// Test basic threshold policy setup
 #[tokio::test]

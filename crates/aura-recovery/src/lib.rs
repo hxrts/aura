@@ -1,19 +1,57 @@
-//! Aura Guardian Recovery Choreographies
+//! # Aura Recovery - Layer 5: Feature/Protocol Implementation
 //!
-//! This crate provides three essential choreographic protocols for guardian-based
-//! threshold identity management in Aura.
+//! This crate implements guardian-based recovery protocols for threshold identity
+//! management in the Aura platform.
 //!
-//! # Core Choreographies
+//! ## Purpose
 //!
-//! 1. **Guardian Setup** - Initial establishment of guardian relationships
-//! 2. **Guardian Membership** - Adding/removing guardians from the set
-//! 3. **Guardian Key Recovery** - Emergency key recovery with guardian approval
+//! Layer 5 feature crate providing end-to-end protocol implementations for:
+//! - Guardian setup and initial relationship establishment
+//! - Guardian membership changes (adding/removing guardians)
+//! - Emergency key recovery with guardian approval
+//! - Recovery initiation and multi-party recovery coordination
 //!
-//! # Design Principles
+//! ## Architecture Constraints
 //!
-//! - Simple, focused choreographies for specific use cases
-//! - Emergency-only recovery (no priority levels)
-//! - Clean integration with threshold signatures and authentication
+//! This crate depends on:
+//! - **Layer 1** (aura-core): Core types, effects, errors
+//! - **Layer 2** (aura-journal, aura-verify, aura-transport): Domain semantics
+//! - **Layer 3** (aura-effects): Effect handler implementations
+//! - **Layer 4** (aura-protocol): Orchestration and guard chain
+//! - **Layer 5** (aura-authenticate): Authentication coordination
+//! - **Layer 5** (aura-relational): Relational context management for recovery
+//!
+//! ## What Belongs Here
+//!
+//! - Complete guardian recovery protocol implementations
+//! - Guardian setup choreographies for threshold establishment
+//! - Guardian membership change coordination (add/remove)
+//! - Emergency key recovery protocols with multi-party approval
+//! - Recovery context management and state coordination
+//! - MPST protocol definitions for recovery ceremonies
+//!
+//! ## What Does NOT Belong Here
+//!
+//! - Effect handler implementations (belong in aura-effects)
+//! - Handler composition or registry (belong in aura-composition)
+//! - Low-level multi-party coordination (belong in aura-protocol)
+//! - Guardian relationship definitions (belong in aura-relational)
+//! - Cryptographic threshold signing (belong in aura-frost)
+//!
+//! ## Design Principles
+//!
+//! - Recovery ceremonies are structured, multi-step protocols
+//! - All protocols respect threshold requirements (k-of-n approval)
+//! - Integration with guard chain ensures authorization before recovery
+//! - Recovery state lives in relational contexts, not local authority state
+//! - Transactional semantics: recovery either completes or cleanly aborts
+//!
+//! ## Key Protocols
+//!
+//! - **Guardian Setup**: Initial k-of-n guardian threshold establishment
+//! - **Membership Change**: Adding or removing guardians from recovery set
+//! - **Key Recovery**: Emergency key recovery initiated by device owner
+//! - **Recovery Coordination**: Multi-party agreement on recovery terms
 
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]

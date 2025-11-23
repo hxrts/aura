@@ -4,15 +4,17 @@
 //! Uses the unified effect system for all operations.
 
 use anyhow::Result;
-use aura_agent::AgentBuilder;
-use aura_core::effects::ConsoleEffects;
-use aura_core::identifiers::{AuthorityId, DeviceId};
+use aura_agent::{AgentBuilder, EffectContext};
+use aura_core::{
+    effects::ExecutionMode,
+    identifiers::{AuthorityId, ContextId, DeviceId},
+};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use aura_cli::{
-    AdminAction, AmpAction, AuthorityCommands, CliHandler, ContextAction, InvitationAction,
-    RecoveryAction, ScenarioAction, SnapshotAction,
+    AdminAction, AmpAction, AuthorityCommands, ChatCommands, CliHandler, ContextAction,
+    InvitationAction, RecoveryAction, ScenarioAction, SnapshotAction,
 };
 
 #[derive(Parser)]
@@ -135,6 +137,12 @@ enum Commands {
         #[command(subcommand)]
         action: AmpAction,
     },
+
+    /// Secure chat messaging
+    Chat {
+        #[command(subcommand)]
+        command: ChatCommands,
+    },
 }
 
 #[tokio::main]
@@ -143,11 +151,15 @@ async fn main() -> Result<()> {
 
     // Create CLI device ID
     let device_id = DeviceId::new();
+    let authority_id = AuthorityId::new();
+    let context_id = ContextId::new();
+    let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
 
     // Initialize agent based on environment
     let agent = AgentBuilder::new()
-        .with_authority(AuthorityId::new())
-        .build_testing()?;
+        .with_authority(authority_id)
+        .build_testing_async(&effect_context)
+        .await?;
     let effect_system = agent.runtime().effects().clone();
 
     // Initialize logging through effects
@@ -155,7 +167,7 @@ async fn main() -> Result<()> {
     println!("Initializing Aura CLI with log level: {}", log_level);
 
     // Create CLI handler
-    let cli_handler = CliHandler::new(effect_system, device_id);
+    let cli_handler = CliHandler::new(effect_system, device_id, effect_context);
 
     // Execute command through effect system
     match &cli.command {
@@ -199,6 +211,7 @@ async fn main() -> Result<()> {
         Commands::Authority { command } => cli_handler.handle_authority(command).await,
         Commands::Context { action } => cli_handler.handle_context(action).await,
         Commands::Amp { action } => cli_handler.handle_amp(action).await,
+        Commands::Chat { command } => cli_handler.handle_chat(command).await,
         Commands::Version => cli_handler.handle_version().await,
     }
 }

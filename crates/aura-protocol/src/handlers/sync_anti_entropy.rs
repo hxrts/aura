@@ -1,5 +1,8 @@
 use crate::effects::sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
+use crate::guards::send_guard::{create_send_guard, SendGuardChain};
+use crate::guards::effect_system_trait::GuardEffectSystem;
 use async_trait::async_trait;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{tree::AttestedOp, Hash32};
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -11,6 +14,7 @@ use uuid::Uuid;
 /// Uses digest-based comparison to efficiently detect and reconcile
 /// OpLog differences between peers. Provides eventual consistency
 /// through periodic background synchronization.
+/// All network operations go through guard chain to enforce security.
 #[derive(Clone)]
 pub struct AntiEntropyHandler {
     #[allow(dead_code)]
@@ -18,14 +22,17 @@ pub struct AntiEntropyHandler {
     // In real implementation, these would be trait objects for Journal and Transport
     oplog: Arc<RwLock<Vec<AttestedOp>>>,
     peers: Arc<RwLock<BTreeSet<Uuid>>>,
+    /// Context ID for guard chain operations
+    context_id: ContextId,
 }
 
 impl AntiEntropyHandler {
-    pub fn new(config: AntiEntropyConfig) -> Self {
+    pub fn new(config: AntiEntropyConfig, context_id: ContextId) -> Self {
         Self {
             config,
             oplog: Arc::new(RwLock::new(Vec::new())),
             peers: Arc::new(RwLock::new(BTreeSet::new())),
+            context_id,
         }
     }
 
@@ -44,6 +51,7 @@ impl AntiEntropyHandler {
         let local_digest = self.get_oplog_digest().await?;
 
         // Step 2: Request remote digest
+        tracing::warn!("sync_with_peer_impl: Cannot use guard chain without effect system parameter");
         let remote_digest = self.request_digest_from_peer(peer_id).await?;
 
         // Step 3: Compute differences
@@ -54,12 +62,16 @@ impl AntiEntropyHandler {
 
         // Step 4: Push our ops to peer
         if !ops_to_push.is_empty() {
+            // Note: This now requires an effect system parameter to use guard chain
+            tracing::warn!("sync_with_peer_impl: Cannot use guard chain without effect system parameter");
             self.push_op_to_peers(ops_to_push[0].clone(), vec![peer_id])
                 .await?;
         }
 
         // Step 5: Pull missing ops from peer
         if !cids_to_pull.is_empty() {
+            // Note: This now requires an effect system parameter to use guard chain
+            tracing::warn!("sync_with_peer_impl: Cannot use guard chain without effect system parameter");
             let missing_ops = self.request_ops_from_peer(peer_id, cids_to_pull).await?;
 
             // Step 6: Verify and merge
@@ -69,9 +81,61 @@ impl AntiEntropyHandler {
         Ok(())
     }
 
-    /// Request digest from peer (stub - would use transport layer)
-    async fn request_digest_from_peer(&self, _peer_id: Uuid) -> Result<BloomDigest, SyncError> {
-        // In real implementation: transport.request(peer_id, DigestRequest).await
+    /// Request digest from peer using guard chain
+    async fn request_digest_from_peer_with_guard_chain<E: GuardEffectSystem>(
+        &self,
+        peer_id: Uuid,
+        effect_system: &E,
+    ) -> Result<BloomDigest, SyncError> {
+        // Convert UUID to AuthorityId for guard chain
+        let peer_authority = AuthorityId::from(peer_id);
+        
+        // Create guard chain for digest request
+        let guard_chain = create_send_guard(
+            "sync:request_digest".to_string(),
+            self.context_id,
+            peer_authority,
+            10, // low cost for digest request
+        )
+        .with_operation_id(format!("digest_request_{}", peer_id));
+        
+        // Evaluate guard chain before requesting
+        match guard_chain.evaluate(effect_system).await {
+            Ok(result) if result.authorized => {
+                tracing::debug!(
+                    "Guard chain authorized digest request from peer: {:?}",
+                    peer_id
+                );
+                
+                // TODO: Implement actual transport.request() with receipt
+                // let digest = transport.request_with_receipt(peer_id, DigestRequest, result.receipt).await?;
+                
+                // For now, return empty digest as placeholder
+                Ok(BloomDigest {
+                    cids: BTreeSet::new(),
+                })
+            }
+            Ok(result) => {
+                tracing::warn!(
+                    "Guard chain denied digest request from peer {:?}: {:?}",
+                    peer_id, result.denial_reason
+                );
+                Err(SyncError::AuthorizationFailed)
+            }
+            Err(err) => {
+                tracing::error!(
+                    "Guard chain evaluation failed for digest request from peer {:?}: {}",
+                    peer_id, err
+                );
+                Err(SyncError::AuthorizationFailed)
+            }
+        }
+    }
+    
+    /// Legacy digest request (deprecated)
+    async fn request_digest_from_peer(&self, peer_id: Uuid) -> Result<BloomDigest, SyncError> {
+        tracing::warn!("request_digest_from_peer called without guard chain - this bypasses security");
+        // TODO: Remove this legacy method once all callers are updated
         Ok(BloomDigest {
             cids: BTreeSet::new(),
         })
@@ -165,10 +229,11 @@ impl SyncEffects for AntiEntropyHandler {
 
     async fn request_ops_from_peer(
         &self,
-        _peer_id: Uuid,
+        peer_id: Uuid,
         cids: Vec<Hash32>,
     ) -> Result<Vec<AttestedOp>, SyncError> {
-        // In real implementation: transport.request(peer_id, OpsRequest { cids }).await
+        tracing::warn!("request_ops_from_peer called without guard chain - this bypasses security");
+        // Legacy fallback - just look in local oplog
         let oplog = self.oplog.read().await;
         let mut result = Vec::new();
 
@@ -196,12 +261,158 @@ impl SyncEffects for AntiEntropyHandler {
     }
 
     async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
-        // In real implementation: broadcast announcement to all peers
-        let _peers = self.peers.read().await;
-        // transport.broadcast(OpAnnouncement { cid }).await?;
+        // Legacy placeholder - in practice this should use the guard chain version
+        tracing::debug!("Announcing new op: {:?} (INSECURE)", cid);
+        Ok(())
+    }
 
-        // TODO fix - For now, just log
-        tracing::debug!("Announcing new op: {:?}", cid);
+    async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
+        // Placeholder - look in local oplog for the operation
+        let oplog = self.oplog.read().await;
+        oplog
+            .iter()
+            .find(|op| Hash32::from(op.op.parent_commitment) == cid)
+            .cloned()
+            .ok_or(SyncError::OperationNotFound)
+    }
+
+    async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
+        // Legacy placeholder - in practice this should use the guard chain version
+        tracing::warn!("push_op_to_peers called without guard chain - this bypasses security");
+        for peer in peers {
+            tracing::debug!("Pushing op to peer: {:?} (INSECURE)", peer);
+        }
+        Ok(())
+    }
+
+    async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError> {
+        let peers = self.peers.read().await;
+        Ok(peers.iter().copied().collect())
+    }
+}
+
+impl AntiEntropyHandler {
+    /// Get operations that are missing between local and remote digests
+    pub async fn get_missing_ops_public(
+        &self,
+        remote_digest: &BloomDigest,
+    ) -> Result<Vec<AttestedOp>, SyncError> {
+        self.get_missing_ops(remote_digest).await
+    }
+
+    async fn request_ops_from_peer_with_guard_chain_impl<E: GuardEffectSystem>(
+        &self,
+        peer_id: Uuid,
+        cids: Vec<Hash32>,
+        effect_system: &E,
+    ) -> Result<Vec<AttestedOp>, SyncError> {
+        // Convert UUID to AuthorityId for guard chain
+        let peer_authority = AuthorityId::from(peer_id);
+        
+        // Create guard chain for ops request
+        let guard_chain = create_send_guard(
+            "sync:request_ops".to_string(),
+            self.context_id,
+            peer_authority,
+            cids.len() as u32 * 5, // cost based on number of operations requested
+        )
+        .with_operation_id(format!("ops_request_{}_{}", peer_id, cids.len()));
+        
+        // Evaluate guard chain before requesting
+        match guard_chain.evaluate(effect_system).await {
+            Ok(result) if result.authorized => {
+                tracing::debug!(
+                    "Guard chain authorized ops request from peer: {:?} for {} ops",
+                    peer_id, cids.len()
+                );
+                
+                // TODO: Implement actual transport.request() with receipt
+                // let ops = transport.request_with_receipt(peer_id, OpsRequest { cids }, result.receipt).await?;
+                
+                // For now, simulate by looking in local oplog
+                let oplog = self.oplog.read().await;
+                let mut ops_result = Vec::new();
+                
+                for op in oplog.iter() {
+                    let op_cid = Hash32::from(op.op.parent_commitment);
+                    if cids.contains(&op_cid) {
+                        ops_result.push(op.clone());
+                    }
+                }
+                
+                Ok(ops_result)
+            }
+            Ok(result) => {
+                tracing::warn!(
+                    "Guard chain denied ops request from peer {:?}: {:?}",
+                    peer_id, result.denial_reason
+                );
+                Err(SyncError::AuthorizationFailed)
+            }
+            Err(err) => {
+                tracing::error!(
+                    "Guard chain evaluation failed for ops request from peer {:?}: {}",
+                    peer_id, err
+                );
+                Err(SyncError::AuthorizationFailed)
+            }
+        }
+    }
+
+    async fn announce_new_op_with_guard_chain_impl<E: GuardEffectSystem>(
+        &self,
+        cid: Hash32,
+        effect_system: &E,
+    ) -> Result<(), SyncError> {
+        let peers = self.peers.read().await;
+        
+        for &peer_uuid in peers.iter() {
+            let peer_authority = AuthorityId::from(peer_uuid);
+            
+            // Create guard chain for announcement
+            let guard_chain = create_send_guard(
+                "sync:announce_op".to_string(),
+                self.context_id,
+                peer_authority,
+                5, // low cost for announcement
+            )
+            .with_operation_id(format!("announce_{}_{}", cid, peer_uuid));
+            
+            // Evaluate guard chain before announcing
+            match guard_chain.evaluate(effect_system).await {
+                Ok(result) if result.authorized => {
+                    tracing::debug!(
+                        "Guard chain authorized announcement of op {:?} to peer: {:?}",
+                        cid, peer_uuid
+                    );
+                    
+                    // TODO: Implement actual transport.send() with receipt
+                    // transport.send_with_receipt(peer_uuid, OpAnnouncement { cid }, result.receipt).await?;
+                }
+                Ok(result) => {
+                    tracing::warn!(
+                        "Guard chain denied announcement of op {:?} to peer {:?}: {:?}",
+                        cid, peer_uuid, result.denial_reason
+                    );
+                    // Continue with other peers rather than fail entirely
+                }
+                Err(err) => {
+                    tracing::error!(
+                        "Guard chain evaluation failed for announcement of op {:?} to peer {:?}: {}",
+                        cid, peer_uuid, err
+                    );
+                    // Continue with other peers rather than fail entirely
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
+        tracing::warn!("announce_new_op called without guard chain - this bypasses security");
+        // Legacy fallback - just log
+        tracing::debug!("Announcing new op: {:?} (INSECURE)", cid);
         Ok(())
     }
 
@@ -216,19 +427,64 @@ impl SyncEffects for AntiEntropyHandler {
             .ok_or(SyncError::OperationNotFound)
     }
 
-    async fn push_op_to_peers(&self, _op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
-        // In real implementation: for each peer, transport.send(peer, op).await
-        for peer in peers {
-            tracing::debug!("Pushing op to peer: {:?}", peer);
-            // transport.send(peer, OpPush { op: op.clone() }).await?;
+    async fn push_op_to_peers_with_guard_chain_impl<E: GuardEffectSystem>(
+        &self,
+        op: AttestedOp,
+        peers: Vec<Uuid>,
+        effect_system: &E,
+    ) -> Result<(), SyncError> {
+        let cid = Hash32::from(op.op.parent_commitment);
+        
+        for peer_uuid in peers {
+            let peer_authority = AuthorityId::from(peer_uuid);
+            
+            // Create guard chain for op push
+            let guard_chain = create_send_guard(
+                "sync:push_op".to_string(),
+                self.context_id,
+                peer_authority,
+                50, // higher cost for full operation push
+            )
+            .with_operation_id(format!("push_op_{}_{}", cid, peer_uuid));
+            
+            // Evaluate guard chain before pushing
+            match guard_chain.evaluate(effect_system).await {
+                Ok(result) if result.authorized => {
+                    tracing::debug!(
+                        "Guard chain authorized push of op {:?} to peer: {:?}",
+                        cid, peer_uuid
+                    );
+                    
+                    // TODO: Implement actual transport.send() with receipt
+                    // transport.send_with_receipt(peer_uuid, OpPush { op: op.clone() }, result.receipt).await?;
+                }
+                Ok(result) => {
+                    tracing::warn!(
+                        "Guard chain denied push of op {:?} to peer {:?}: {:?}",
+                        cid, peer_uuid, result.denial_reason
+                    );
+                    return Err(SyncError::AuthorizationFailed);
+                }
+                Err(err) => {
+                    tracing::error!(
+                        "Guard chain evaluation failed for push of op {:?} to peer {:?}: {}",
+                        cid, peer_uuid, err
+                    );
+                    return Err(SyncError::AuthorizationFailed);
+                }
+            }
         }
-
+        
         Ok(())
     }
-
-    async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError> {
-        let peers = self.peers.read().await;
-        Ok(peers.iter().copied().collect())
+    
+    async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
+        tracing::warn!("push_op_to_peers called without guard chain - this bypasses security");
+        // Legacy fallback - just log
+        for peer in peers {
+            tracing::debug!("Pushing op to peer: {:?} (INSECURE)", peer);
+        }
+        Ok(())
     }
 }
 
@@ -261,14 +517,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_digest() {
-        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
+        let context_id = ContextId::new();
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
         let digest = handler.get_oplog_digest().await.unwrap();
         assert!(digest.cids.is_empty());
     }
 
     #[tokio::test]
     async fn test_digest_with_ops() {
-        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
+        let context_id = ContextId::new();
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
         let op2 = create_test_op(aura_core::Hash32([2u8; 32]));
@@ -284,7 +542,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_compute_ops_to_push() {
-        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
+        let context_id = ContextId::new();
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op1.clone()).await;
@@ -308,7 +567,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_compute_cids_to_pull() {
-        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
+        let context_id = ContextId::new();
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let local_digest = BloomDigest {
             cids: BTreeSet::new(), // We have no ops
@@ -329,7 +589,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_remote_ops() {
-        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
+        let context_id = ContextId::new();
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
         let op2 = create_test_op(aura_core::Hash32([2u8; 32]));
@@ -342,7 +603,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_peer_management() {
-        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
+        let context_id = ContextId::new();
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let peer1 = Uuid::from_u128(1);
         let peer2 = Uuid::from_u128(2);
@@ -358,7 +620,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_op() {
-        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
+        let context_id = ContextId::new();
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
@@ -377,7 +640,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_missing_op() {
-        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default());
+        let context_id = ContextId::new();
+        let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let peer_id = Uuid::from_u128(1);
         let result = handler

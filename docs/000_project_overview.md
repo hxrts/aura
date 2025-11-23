@@ -60,7 +60,7 @@ Aura's architecture rests on three pillars that work together to meet all constr
 
 **Second pillar: Protocol specification and safety.** Multi-party session types (MPST) specify distributed protocols from a global viewpoint. Automatic projection to local roles provides deadlock freedom and compile-time safety. Choreographic programming ensures that complex multi-party coordination is verifiable before deployment. Session types prevent entire classes of distributed protocol errors.
 
-**Third pillar: Stateless effect system composition.** Effects are capabilities code can request without shared mutable state. Effect traits live in `aura-core`. Stateless handlers are in `aura-effects`. Orchestrators are in `aura-protocol` and `aura-agent`. The guard chain is explicit and ordered: `AuthorizationEffects` (Biscuit/policy evaluation) flows to `FlowBudgetEffects` (charge-before-send) to `LeakageEffects` (observer-class budgets) to `JournalEffects` (fact commit) to `TransportEffects`. This sequencing eliminates deadlocks, enables deterministic testing, and keeps architectural boundaries clean.
+**Third pillar: Stateless effect system composition.** Effects are capabilities code can request without shared mutable state. Effect traits live in `aura-core`. Stateless production handlers are in `aura-effects`. Handler composition infrastructure is in `aura-composition`. Multi-party orchestrators are in `aura-protocol`. Mock and stateful test handlers are in `aura-testkit`. The guard chain is explicit and ordered: `AuthorizationEffects` (Biscuit/policy evaluation) flows to `FlowBudgetEffects` (charge-before-send) to `LeakageEffects` (observer-class budgets) to `JournalEffects` (fact commit) to `TransportEffects`. This sequencing eliminates deadlocks, enables deterministic testing, and keeps architectural boundaries clean.
 
 ## Implementation Architecture
 
@@ -72,17 +72,17 @@ The layers are as follows:
 
 2. Specification (Domain crates and `aura-mpst`): CRDT domains, capability systems, transport semantics, and session type definitions.
 
-3. Implementation (`aura-effects`): Stateless handlers for effect traits.
+3. Implementation (`aura-effects` and `aura-composition`): Stateless production handlers and handler composition infrastructure.
 
 4. Orchestration (`aura-protocol`): Multi-party coordination, guard chain, and Aura Consensus runtime.
 
-5. Feature implementation: End-to-end protocol crates for authentication, recovery, relational contexts, rendezvous, and storage.
+5. Feature implementation: End-to-end protocol crates for authentication, secure messaging, recovery, relational contexts, rendezvous, and storage.
 
-6. Runtime composition (`aura-agent`, `aura-simulator`): Effect system assembly and deterministic simulation.
+6. Runtime composition (`aura-agent`, `aura-simulator`): Complete system assembly and deterministic simulation.
 
 7. User interface (`aura-cli`): CLI entry points.
 
-8. Testing and tools (`aura-testkit`, `aura-quint-api`): Fixtures and simulation harnesses.
+8. Testing and tools (`aura-testkit`, `aura-quint`): Test fixtures, mock effect handlers, and simulation harnesses.
 
 ## Key Design Principles
 
@@ -98,7 +98,7 @@ These three pillars enable several key properties that solve the constraints.
 
 **No circular dependencies:** Each architectural layer builds on lower layers without reaching back down. This enables independent testing, reusability, and clear responsibility boundaries. Layer 1 depends on nothing. Layer 2 depends only on Layer 1. This pattern continues through all 8 layers.
 
-**Architecture answers one question per layer:** Foundation layer asks "what operations exist?" Specification layer asks "what does this mean?" Implementation layer asks "how do I do one thing?" Orchestration layer asks "how do I coordinate?" Each answer is independent and composable.
+**Architecture answers one question per layer:** Foundation layer asks "what operations exist?" Specification layer asks "what does this mean?" Implementation layer asks "how do I implement and assemble effects?" Orchestration layer asks "how do I coordinate distributed protocols?" Each answer is independent and composable.
 
 For mathematical foundations see [Theoretical Model](002_theoretical_model.md). For safety and liveness guarantees see [Distributed Systems Contract](004_distributed_systems_contract.md). For crate details see [Project Structure](999_project_structure.md).
 

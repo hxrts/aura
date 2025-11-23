@@ -11,7 +11,7 @@ use aura_core::{
     flow::FlowBudget, identifiers::DeviceId, relationships::ContextId, session_epochs::Epoch,
 };
 use aura_macros::aura_test;
-use aura_protocol::guards::flow::FlowBudgetEffects;
+use aura_core::effects::FlowBudgetEffects;
 use aura_testkit::{create_test_fixture, TestFixture};
 use proptest::prelude::*;
 

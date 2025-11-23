@@ -1,10 +1,17 @@
-//! System Effect Handlers
+//! Layer 3: System Effect Handlers - Logging, Metrics, Monitoring
 //!
-//! **Layer 3 (aura-effects)**: Basic system operation handlers.
+//! Stateless single-party implementations of system infrastructure effects.
+//! Moved from aura-protocol (Layer 4) because they implement basic single-operation
+//! handlers with no multi-party coordination.
 //!
-//! This module contains handlers for system-level effects like logging, metrics,
-//! and monitoring. These handlers were moved from aura-protocol (Layer 4) as they
-//! implement basic single-operation handlers with no coordination logic.
+//! **Handler Types**:
+//! - **LoggingSystemHandler**: Console output formatting and log level filtering
+//! - **MetricsSystemHandler**: Instrumentation counters and timing aggregation
+//! - **MonitoringSystemHandler**: Health checks and anomaly detection
+//!
+//! **Layer Constraint** (per docs/001_system_architecture.md):
+//! Layer 3 implements single-party handlers; multi-party coordination belongs in Layer 4.
+//! These handlers have no cross-party dependencies or choreography logic.
 
 pub mod logging;
 pub mod metrics;

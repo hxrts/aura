@@ -1,7 +1,15 @@
-//! Service layer for sync operations
+//! Layer 5: Synchronization Service Layer - Orchestration & Lifecycle
 //!
-//! This module provides high-level services that orchestrate multiple protocols
-//! and infrastructure components to provide complete synchronization functionality.
+//! High-level services orchestrating multiple protocols and infrastructure for complete
+//! synchronization functionality. Implements **Service** trait for unified lifecycle management.
+//!
+//! **Key Services**:
+//! - **SyncService**: Main service orchestrating anti-entropy, journal sync, OTA, snapshots
+//! - **MaintenanceService**: Garbage collection, cache invalidation, snapshot proposals
+//!
+//! **Service Trait** (per docs/106_effect_system_and_runtime.md):
+//! All services implement `Service` trait with: `start()`, `stop()`, `health_check()`, `is_running()`
+//! enabling uniform lifecycle management and health monitoring across aura-agent services.
 //!
 //! # Architecture
 //!

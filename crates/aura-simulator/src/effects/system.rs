@@ -12,7 +12,7 @@ use aura_core::{
     identifiers::DeviceId,
     AuraError,
 };
-use aura_effects::{
+use aura_testkit::stateful_effects::{
     console::MockConsoleHandler,
     crypto::MockCryptoHandler,
     random::MockRandomHandler,

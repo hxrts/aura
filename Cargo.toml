@@ -9,6 +9,7 @@ members = [
     "crates/aura-verify",
     "crates/aura-protocol",
     "crates/aura-effects",
+    "crates/aura-composition",
     "crates/aura-journal",
     "crates/aura-store",
     "crates/aura-transport",
@@ -26,6 +27,7 @@ members = [
     "crates/aura-recovery",
     "crates/aura-rendezvous",
     "crates/aura-relational",
+    "crates/aura-chat",
     "examples/hello-crdt",
     "examples/hello-choreo",
 ]

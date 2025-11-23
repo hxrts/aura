@@ -4,6 +4,7 @@
 //! while keeping device-local details derived internally.
 
 use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
+use aura_core::effects::TimeEffects;
 use std::collections::HashMap;
 
 /// Authority-first context for agent operations
@@ -90,29 +91,25 @@ impl AuthorityContext {
 
 impl RelationalContext {
     /// Create a new relational context
-    pub fn new(context_id: ContextId, participants: Vec<AuthorityId>) -> Self {
+    pub async fn new<T: TimeEffects>(
+        context_id: ContextId, 
+        participants: Vec<AuthorityId>,
+        time_effects: &T,
+    ) -> Self {
+        let timestamp = time_effects.current_timestamp().await;
         Self {
             context_id,
             participants,
             metadata: ContextMetadata {
-                created_at: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-                last_activity: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
+                created_at: timestamp,
+                last_activity: timestamp,
                 ..Default::default()
             },
         }
     }
 
     /// Update last activity timestamp
-    pub fn touch(&mut self) {
-        self.metadata.last_activity = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+    pub async fn touch<T: TimeEffects>(&mut self, time_effects: &T) {
+        self.metadata.last_activity = time_effects.current_timestamp().await;
     }
 }

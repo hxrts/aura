@@ -1,0 +1,20 @@
+[package]
+name = "aura-composition"
+version = "0.1.0"
+edition = "2021"
+description = "Aura Layer 3: Handler composition and effect system assembly"
+
+[dependencies]
+aura-core = { path = "../aura-core" }
+aura-effects = { path = "../aura-effects" }
+async-trait = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+thiserror = { workspace = true }
+uuid = { workspace = true, features = ["serde", "v4"] }
+tokio = { workspace = true, features = ["sync"] }
+bincode = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+aura-testkit = { path = "../aura-testkit" }

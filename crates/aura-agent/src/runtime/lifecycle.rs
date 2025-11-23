@@ -2,6 +2,8 @@
 //!
 //! Manages component lifecycle and system shutdown.
 
+use super::EffectContext;
+
 /// Lifecycle manager for coordinating system startup and shutdown
 pub struct LifecycleManager {
     // Internal state for lifecycle management
@@ -14,7 +16,7 @@ impl LifecycleManager {
     }
 
     /// Shutdown all managed components
-    pub async fn shutdown(self) -> Result<(), String> {
+    pub async fn shutdown(self, _ctx: &EffectContext) -> Result<(), String> {
         // Coordinate clean shutdown of all components
         Ok(())
     }

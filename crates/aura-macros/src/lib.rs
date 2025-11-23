@@ -1,10 +1,21 @@
-//! Aura Macros - Proc Macro Crate
+//! # Aura Macros - Layer 2: Specification (DSL Compiler)
 //!
-//! This crate provides choreography and effect handler macros for the Aura project.
+//! **Purpose**: Compile-time DSL parser for choreographies with Aura-specific annotations.
 //!
-//! Following the external-demo pattern, our choreography! macro inherits ALL
-//! rumpsteak-aura features automatically while providing a foundation for
-//! future Aura-specific enhancements.
+//! This crate provides choreography and effect handler macros for the Aura project,
+//! implementing a compile-time DSL that parses `guard_capability`, `flow_cost`, `journal_facts`
+//! and generates type-safe Rust code for distributed protocols.
+//!
+//! # Architecture Constraints
+//!
+//! **Layer 2 depends only on aura-core** (foundation).
+//! - ✅ Choreography DSL parsing and code generation
+//! - ✅ Aura-specific annotation extraction
+//! - ✅ Type-safe macro generation for distributed protocols
+//! - ✅ Integration with rumpsteak-aura projection
+//! - ❌ NO effect handler implementations (that's aura-effects)
+//! - ❌ NO runtime coordination logic (that's aura-protocol)
+//! - ❌ NO handler composition (that's aura-composition)
 
 use proc_macro::TokenStream;
 

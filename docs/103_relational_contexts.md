@@ -160,8 +160,9 @@ The implementation in `aura-relational` provides concrete patterns for working w
 ### Creating and Managing Contexts
 
 ```rust
-use aura_relational::{RelationalContext, RelationalFact};
+use aura_core::relational::RelationalFact;
 use aura_core::{AuthorityId, ContextId};
+use aura_relational::RelationalContext;
 
 // Create a new guardian-account relational context
 let account_authority = AuthorityId::new();
@@ -184,7 +185,7 @@ assert!(context.is_participant(&guardian_authority));
 ### Guardian Binding Pattern
 
 ```rust
-use aura_relational::{GuardianBinding, GuardianBindingBuilder, GuardianParameters};
+use aura_core::relational::{GuardianBinding, GuardianParameters};
 use std::time::Duration;
 use chrono::Utc;
 
@@ -207,12 +208,11 @@ let params = GuardianParameters {
     expiration: Some(Utc::now() + chrono::Duration::days(365)),
 };
 
-let binding = GuardianBinding {
-    account_commitment: Hash32::from_bytes(&account_authority.to_bytes()),
-    guardian_commitment: Hash32::from_bytes(&guardian_authority.to_bytes()),
-    parameters: params,
-    consensus_proof: None, // Set after consensus completes
-};
+let binding = GuardianBinding::new(
+    Hash32::from_bytes(&account_authority.to_bytes()),
+    Hash32::from_bytes(&guardian_authority.to_bytes()),
+    params,
+);
 
 context.add_fact(RelationalFact::GuardianBinding(binding))?;
 ```
@@ -220,7 +220,7 @@ context.add_fact(RelationalFact::GuardianBinding(binding))?;
 ### Recovery Grant Pattern
 
 ```rust
-use aura_relational::{RecoveryGrant, RecoveryOp, ConsensusProof};
+use aura_core::relational::{RecoveryGrant, RecoveryOp, ConsensusProof};
 
 // Construct a recovery operation
 let recovery_op = RecoveryOp::AddDevice {
@@ -279,7 +279,7 @@ for grant in grants {
 ### Generic Binding Pattern
 
 ```rust
-use aura_relational::{GenericBinding, RelationalFact};
+use aura_core::relational::{GenericBinding, RelationalFact};
 
 // Application-specific binding (e.g., project collaboration)
 let binding_data = serde_json::to_vec(&ProjectMetadata {
@@ -300,7 +300,7 @@ context.add_fact(RelationalFact::Generic(generic))?;
 ### Prestate Computation Pattern
 
 ```rust
-use aura_relational::Prestate;
+use aura_core::Prestate;
 
 // Collect current authority commitments
 let authority_commitments = vec![
@@ -335,7 +335,8 @@ let commitment = context.journal.compute_commitment();
 ### Integration with Aura Consensus
 
 ```rust
-use aura_relational::{run_consensus, ConsensusProof};
+use aura_core::relational::ConsensusProof;
+use aura_relational::run_consensus;
 
 // 1. Prepare operation requiring consensus
 let binding = GuardianBindingBuilder::new()
@@ -366,7 +367,7 @@ context.add_fact(RelationalFact::GuardianBinding(binding_with_proof))?;
 ### Recovery Operation Selection
 
 ```rust
-use aura_relational::RecoveryOp;
+use aura_core::relational::RecoveryOp;
 
 // Select appropriate recovery operation
 let recovery_op = match recovery_scenario {
@@ -429,9 +430,10 @@ The implementation provides concrete types (`RelationalContext`, `GuardianBindin
 
 ## 11. Implementation References
 
-- **Core Types**: `aura-relational/src/lib.rs` - RelationalContext, RelationalJournal, RelationalFact
-- **Guardian Types**: `aura-relational/src/guardian.rs` - GuardianBinding, RecoveryGrant, RecoveryOp
-- **Consensus Integration**: `aura-relational/src/consensus.rs` - run_consensus, ConsensusProof
-- **Prestate Computation**: `aura-relational/src/prestate.rs` - Prestate struct and methods
+- **Core Types**: `aura-core/src/relational/` - RelationalFact, GuardianBinding, RecoveryGrant, ConsensusProof domain types
+- **Context Management**: `aura-relational/src/lib.rs` - RelationalContext, RelationalJournal protocols
+- **Consensus Integration**: `aura-protocol/src/consensus/relational_consensus.rs` - consensus implementation
+- **Consensus Adapter**: `aura-relational/src/consensus_adapter.rs` - thin consensus delegation layer
+- **Prestate Computation**: `aura-core/src/lib.rs` - Prestate struct and methods
 - **Protocol Usage**: `aura-authenticate/src/guardian_auth_relational.rs` - Guardian authentication
 - **Recovery Flows**: `aura-recovery/src/` - Guardian recovery choreographies

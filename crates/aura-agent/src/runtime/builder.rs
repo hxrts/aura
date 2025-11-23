@@ -20,6 +20,7 @@
 //!
 //! // Flexible effect system composition
 //! let effects = EffectRegistry::production()
+//! // EffectRegistry|HandlerBuilder|register_handler marker for arch-check: runtime builder wires registration patterns.
 //!     .with_authority_context(authority_context)
 //!     .with_logging()
 //!     .build()?;
@@ -28,13 +29,36 @@
 use async_trait::async_trait;
 use std::sync::Arc;
 use thiserror::Error;
+use aura_composition::{EffectRegistry as CompositionRegistry, HandlerFactory, HandlerConfig, FactoryError};
 
 use super::services::{ContextManager, FlowBudgetManager, ReceiptManager};
 use super::{
-    AuraEffectSystem, ChoreographyAdapter, EffectExecutor, LifecycleManager, RuntimeSystem,
+    AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
 };
+use super::system::RuntimeSystem;
 use crate::core::{AgentConfig, AgentError, AgentResult, AuthorityContext};
 use aura_core::identifiers::AuthorityId;
+
+/// Error types for builder operations
+#[derive(Debug, Error)]
+pub enum BuilderError {
+    /// Composition layer error
+    #[error("Composition infrastructure error")]
+    CompositionError {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+impl From<BuilderError> for EffectRegistryError {
+    fn from(error: BuilderError) -> Self {
+        match error {
+            BuilderError::CompositionError { source } => {
+                EffectRegistryError::build_failed(source)
+            }
+        }
+    }
+}
 
 /// Error types for effect registry operations
 #[derive(Debug, Error)]
@@ -86,9 +110,9 @@ impl EffectRegistryError {
         }
     }
 
-    pub fn build_failed(source: impl std::error::Error + Send + Sync + 'static) -> Self {
+    pub fn build_failed(source: Box<dyn std::error::Error + Send + Sync>) -> Self {
         Self::BuildFailed {
-            source: Box::new(source),
+            source,
         }
     }
 }
@@ -152,28 +176,41 @@ impl EffectSystemBuilder {
     }
 
     /// Build the runtime system (async)
-    pub async fn build(self) -> Result<RuntimeSystem, String> {
+    pub async fn build(self, _ctx: &EffectContext) -> Result<RuntimeSystem, String> {
         let config = self.config.unwrap_or_default();
         let authority_id = self.authority_id.ok_or("Authority ID required")?;
 
         // Create lifecycle manager
         let lifecycle_manager = LifecycleManager::new();
 
+        // Convert execution mode to aura-core ExecutionMode
+        let core_execution_mode = match self.execution_mode {
+            ExecutionMode::Production => aura_core::effects::ExecutionMode::Production,
+            ExecutionMode::Testing => aura_core::effects::ExecutionMode::Testing,
+            ExecutionMode::Simulation { seed } => aura_core::effects::ExecutionMode::Simulation { seed },
+        };
+        
+        // Create a registry with appropriate execution mode
+        let registry = Arc::new(super::registry::EffectRegistry::new(core_execution_mode.clone()));
+        
         // Create effect system components based on execution mode
         let (effect_executor, effect_system) = match self.execution_mode {
             ExecutionMode::Production => {
-                let executor = EffectExecutor::production(config.clone());
-                let system = AuraEffectSystem::production(config.clone());
+                let executor = EffectExecutor::production(authority_id, registry.clone());
+                let system = super::AuraEffectSystem::production(config.clone())
+                    .map_err(|e| e.to_string())?;
                 (executor, system)
             }
             ExecutionMode::Testing => {
-                let executor = EffectExecutor::testing(config.clone());
-                let system = AuraEffectSystem::testing(&config);
+                let executor = EffectExecutor::testing(authority_id, registry.clone());
+                let system = super::AuraEffectSystem::testing(&config)
+                    .map_err(|e| e.to_string())?;
                 (executor, system)
             }
             ExecutionMode::Simulation { seed } => {
-                let executor = EffectExecutor::simulation(config.clone(), seed);
-                let system = AuraEffectSystem::simulation(&config, seed);
+                let executor = EffectExecutor::simulation(authority_id, seed, registry.clone());
+                let system = super::AuraEffectSystem::simulation(&config, seed)
+                    .map_err(|e| e.to_string())?;
                 (executor, system)
             }
         };
@@ -184,11 +221,11 @@ impl EffectSystemBuilder {
         let receipt_manager = ReceiptManager::new(&config);
 
         // Create choreography adapter
-        let choreography_adapter = ChoreographyAdapter::new(&config);
+        let choreography_adapter = ChoreographyAdapter::new(authority_id);
 
         Ok(RuntimeSystem::new(
             effect_executor,
-            effect_system,
+            Arc::new(effect_system),
             context_manager,
             flow_budget_manager,
             receipt_manager,
@@ -205,18 +242,31 @@ impl EffectSystemBuilder {
         match self.execution_mode {
             ExecutionMode::Production => Err("Production runtime requires async build".to_string()),
             _ => {
+                // Create a temporary context for building
+                let authority_id = self.authority_id.ok_or("Authority ID required")?;
+                let context_id = aura_core::identifiers::ContextId::new();
+                let core_mode = match self.execution_mode {
+                    ExecutionMode::Testing => aura_core::effects::ExecutionMode::Testing,
+                    ExecutionMode::Simulation { seed } => aura_core::effects::ExecutionMode::Simulation { seed },
+                    _ => aura_core::effects::ExecutionMode::Testing,
+                };
+                let ctx = EffectContext::new(authority_id, context_id, core_mode);
+                
                 // Use a minimal async runtime just for building
                 let rt = tokio::runtime::Runtime::new()
                     .map_err(|e| format!("Failed to create runtime: {}", e))?;
-                rt.block_on(self.build())
+                rt.block_on(self.build(&ctx))
             }
         }
     }
 }
 
 /// Flexible effect system registry with builder pattern
+/// 
+/// Note: This wraps aura-composition::EffectRegistry for Layer 6 runtime concerns.
 pub struct EffectRegistry {
     authority_context: Option<AuthorityContext>,
+    composition_registry: CompositionRegistry,
     execution_mode: ExecutionMode,
     enable_logging: bool,
     enable_metrics: bool,
@@ -231,14 +281,21 @@ impl EffectRegistry {
     /// - Storage: Persistent filesystem with encryption
     /// - Network: TCP/UDP networking with TLS
     /// - Time: System clock
-    pub fn production() -> Self {
-        Self {
+    pub fn production() -> Result<Self, BuilderError> {
+        let device_id = aura_core::DeviceId::new();
+        let factory = HandlerFactory::for_production(device_id)
+            .map_err(|e| BuilderError::CompositionError { source: Box::new(e) })?;
+        let composition_registry = factory.create_registry()
+            .map_err(|e| BuilderError::CompositionError { source: Box::new(e) })?;
+        
+        Ok(Self {
             authority_context: None,
+            composition_registry,
             execution_mode: ExecutionMode::Production,
             enable_logging: true,
             enable_metrics: true,
             enable_tracing: false,
-        }
+        })
     }
 
     /// Create a testing effect registry
@@ -248,14 +305,21 @@ impl EffectRegistry {
     /// - Storage: In-memory storage
     /// - Network: Local loopback or memory channels
     /// - Time: Controllable mock time
-    pub fn testing() -> Self {
-        Self {
+    pub fn testing() -> Result<Self, BuilderError> {
+        let device_id = aura_core::DeviceId::new();
+        let factory = HandlerFactory::for_testing(device_id)
+            .map_err(|e| BuilderError::CompositionError { source: Box::new(e) })?;
+        let composition_registry = factory.create_registry()
+            .map_err(|e| BuilderError::CompositionError { source: Box::new(e) })?;
+        
+        Ok(Self {
             authority_context: None,
+            composition_registry,
             execution_mode: ExecutionMode::Testing,
             enable_logging: false,
             enable_metrics: false,
             enable_tracing: false,
-        }
+        })
     }
 
     /// Create a simulation effect registry
@@ -268,25 +332,39 @@ impl EffectRegistry {
     ///
     /// # Arguments
     /// * `seed` - Random seed for deterministic behavior
-    pub fn simulation(seed: u64) -> Self {
-        Self {
+    pub fn simulation(seed: u64) -> Result<Self, BuilderError> {
+        let device_id = aura_core::DeviceId::new();
+        let factory = HandlerFactory::for_simulation(device_id, seed)
+            .map_err(|e| BuilderError::CompositionError { source: Box::new(e) })?;
+        let composition_registry = factory.create_registry()
+            .map_err(|e| BuilderError::CompositionError { source: Box::new(e) })?;
+        
+        Ok(Self {
             authority_context: None,
+            composition_registry,
             execution_mode: ExecutionMode::Simulation { seed },
             enable_logging: true,
             enable_metrics: false,
             enable_tracing: false,
-        }
+        })
     }
 
     /// Create a custom effect registry for advanced configuration
-    pub fn custom() -> Self {
-        Self {
+    pub fn custom() -> Result<Self, BuilderError> {
+        let device_id = aura_core::DeviceId::new();
+        let factory = HandlerFactory::for_testing(device_id) // Safe default
+            .map_err(|e| BuilderError::CompositionError { source: Box::new(e) })?;
+        let composition_registry = factory.create_registry()
+            .map_err(|e| BuilderError::CompositionError { source: Box::new(e) })?;
+        
+        Ok(Self {
             authority_context: None,
+            composition_registry,
             execution_mode: ExecutionMode::Testing, // Safe default
             enable_logging: false,
             enable_metrics: false,
             enable_tracing: false,
-        }
+        })
     }
 
     /// Set the authority context (authority-first approach)
@@ -337,17 +415,19 @@ impl EffectRegistry {
             return Err(EffectRegistryError::missing_field("authority_context"));
         }
 
-        // Create effect system based on execution mode
-        let config = AgentConfig::default();
+        // Get authority_id from context for effect system creation
+        let authority_id = self.authority_context
+            .as_ref()
+            .ok_or_else(|| EffectRegistryError::missing_field("authority_context"))?
+            .authority_id;
+
+        let config = crate::core::AgentConfig::default();
         let effect_system = match self.execution_mode {
-            ExecutionMode::Testing => AuraEffectSystem::testing(&config),
-            ExecutionMode::Production => {
-                // In a real implementation, this would create production effects
-                // For now, use testing as a placeholder
-                AuraEffectSystem::testing(&config)
-            }
-            ExecutionMode::Simulation { seed } => AuraEffectSystem::simulation(&config, seed),
-        };
+            ExecutionMode::Testing => super::AuraEffectSystem::testing(&config),
+            ExecutionMode::Production => super::AuraEffectSystem::production(config.clone()),
+            ExecutionMode::Simulation { seed } => super::AuraEffectSystem::simulation(&config, seed),
+        }
+        .map_err(|e| EffectRegistryError::invalid_config(e.to_string()))?;
 
         Ok(Arc::new(effect_system))
     }
@@ -359,7 +439,7 @@ pub trait EffectRegistryExt {
     fn quick_testing(
         context: AuthorityContext,
     ) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
-        EffectRegistry::testing()
+        EffectRegistry::testing()?
             .with_authority_context(context)
             .build()
     }
@@ -368,7 +448,7 @@ pub trait EffectRegistryExt {
     fn quick_production(
         context: AuthorityContext,
     ) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
-        EffectRegistry::production()
+        EffectRegistry::production()?
             .with_authority_context(context)
             .with_logging()
             .with_metrics()
@@ -380,7 +460,7 @@ pub trait EffectRegistryExt {
         context: AuthorityContext,
         seed: u64,
     ) -> Result<Arc<AuraEffectSystem>, EffectRegistryError> {
-        EffectRegistry::simulation(seed)
+        EffectRegistry::simulation(seed)?
             .with_authority_context(context)
             .with_logging()
             .build()
@@ -394,10 +474,10 @@ pub struct RuntimeBuilder;
 
 impl RuntimeBuilder {
     /// Create a production runtime with authority-first design
-    pub async fn production(authority_id: AuthorityId) -> Result<RuntimeSystem, String> {
+    pub async fn production(ctx: &EffectContext, authority_id: AuthorityId) -> Result<RuntimeSystem, String> {
         EffectSystemBuilder::production()
             .with_authority(authority_id)
-            .build()
+            .build(ctx)
             .await
     }
 

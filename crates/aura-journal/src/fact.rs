@@ -15,6 +15,32 @@ use aura_core::{
     semilattice::JoinSemilattice,
     Hash32, Result,
 };
+
+// Import EffectContext for proper context propagation
+// Note: In practice, this would import from wherever EffectContext is defined in aura-core
+use std::collections::HashMap;
+
+/// Effect context for API operations (placeholder - should import from aura-core)
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct EffectContext {
+    /// Authority performing the operation
+    authority_id: AuthorityId,
+    /// Session context (if any)
+    session_id: Option<u32>, // Simplified for this context
+    /// Additional metadata
+    metadata: HashMap<String, String>,
+}
+
+impl Default for EffectContext {
+    fn default() -> Self {
+        Self {
+            authority_id: AuthorityId::new(),
+            session_id: None,
+            metadata: HashMap::new(),
+        }
+    }
+}
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -142,12 +168,12 @@ impl FactId {
     /// use aura_core::effects::RandomEffects;
     /// use aura_journal::FactId;
     ///
-    /// async fn create_fact(random: &dyn RandomEffects) {
-    ///     let fact_id = FactId::generate(random).await;
+    /// async fn create_fact(ctx: &EffectContext, random: &dyn RandomEffects) {
+    ///     let fact_id = FactId::generate(ctx, random).await;
     ///     // use fact_id...
     /// }
     /// ```
-    pub async fn generate(random: &dyn RandomEffects) -> Self {
+    pub async fn generate(_ctx: &EffectContext, random: &dyn RandomEffects) -> Self {
         let uuid = random.random_uuid().await;
         Self(uuid)
     }
@@ -172,7 +198,7 @@ impl FactId {
 ///
 /// Facts are immutable entries in the journal that represent
 /// state changes or events in the system.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fact {
     /// Unique identifier for this fact
     pub fact_id: FactId,
@@ -180,8 +206,20 @@ pub struct Fact {
     pub content: FactContent,
 }
 
+impl PartialOrd for Fact {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Fact {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.fact_id.cmp(&other.fact_id)
+    }
+}
+
 /// Types of facts that can be stored in the journal
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FactContent {
     /// Attested operation on the commitment tree
     AttestedOp(AttestedOp),
@@ -236,7 +274,7 @@ pub enum FactType {
 ///
 /// Represents a threshold-signed operation on the commitment tree.
 /// These facts drive the authority's internal state transitions.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestedOp {
     /// The tree operation being attested
     pub tree_op: TreeOpKind,
@@ -251,12 +289,14 @@ pub struct AttestedOp {
 }
 
 /// Tree operation types that can be attested
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TreeOpKind {
     /// Add a new device/leaf to the tree
     AddLeaf {
         /// Public key of the new device (opaque bytes)
         public_key: Vec<u8>,
+        /// Role of the leaf (device or guardian)
+        role: aura_core::tree::LeafRole,
     },
     /// Remove a device/leaf from the tree
     RemoveLeaf {

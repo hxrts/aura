@@ -484,21 +484,59 @@ impl DkdProtocol {
     {
         tracing::debug!(session_id = ?session_id, "Exchanging reveals");
 
-        // In this simplified implementation, reveals are the same as commitments
-        // In a full implementation, this would involve revealing the randomness
-        // and verifying it matches the previous commitments
+        // Broadcast our commitment+randomness and receive the same from peers
+        let context =
+            self.active_sessions
+                .get(session_id)
+                .ok_or_else(|| DkdError::SessionNotFound {
+                    session_id: session_id.clone(),
+                })?;
 
-        let mut verified_contributions = Vec::new();
+        let local = commitments
+            .first()
+            .ok_or_else(|| DkdError::SessionNotFound {
+                session_id: session_id.clone(),
+            })?
+            .clone();
 
-        for commitment in commitments {
-            // Verify commitment matches revealed randomness
-            let expected_commitment = hash::hash(&commitment.randomness);
-            if Hash32::new(expected_commitment) != commitment.commitment {
+        let reveal_bytes =
+            serde_json::to_vec(&local).map_err(|e| DkdError::NetworkFailure {
+                reason: e.to_string(),
+            })?;
+
+        for participant in &context.participants {
+            if *participant != local.device_id {
+                effects
+                    .send_to_peer(participant.0, reveal_bytes.clone())
+                    .await
+                    .map_err(|e| DkdError::NetworkFailure {
+                        reason: e.to_string(),
+                    })?;
+            }
+        }
+
+        let mut verified_contributions = vec![local];
+
+        // Receive reveals from peers and validate commitments
+        for _ in 0..(context.participants.len().saturating_sub(1)) {
+            let (_peer, bytes) = effects
+                .receive()
+                .await
+                .map_err(|e| DkdError::NetworkFailure {
+                    reason: e.to_string(),
+                })?;
+            let contribution: ParticipantContribution =
+                serde_json::from_slice(&bytes).map_err(|e| DkdError::NetworkFailure {
+                    reason: e.to_string(),
+                })?;
+
+            let expected_commitment = hash::hash(&contribution.randomness);
+            if Hash32::new(expected_commitment) != contribution.commitment {
                 return Err(DkdError::CommitmentVerificationFailed {
-                    device_id: commitment.device_id,
+                    device_id: contribution.device_id,
                 });
             }
-            verified_contributions.push(commitment.clone());
+            verified_contributions.push(contribution);
         }
 
         tracing::debug!(
@@ -809,11 +847,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_agent::{AgentConfig, AuraEffectSystem};
     use aura_core::DeviceId;
+    use aura_testkit::TestEffectsBuilder;
 
     #[test]
-    #[ignore = "Requires JournalEffects which is not implemented in stub coordinator"]
     fn test_dkd_session_creation() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         runtime.block_on(async {
@@ -822,7 +859,8 @@ mod tests {
 
             let participants = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
 
-            let effects = AuraEffectSystem::testing(&AgentConfig::default());
+            let effects =
+                TestEffectsBuilder::for_unit_tests(DeviceId::new()).build().expect("effects");
             let session_id = protocol
                 .initiate_session(&effects, participants, None)
                 .await

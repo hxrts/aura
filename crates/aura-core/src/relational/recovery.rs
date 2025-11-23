@@ -294,7 +294,6 @@ mod tests {
     #[test]
     fn test_recovery_grant_properties() {
         use super::super::consensus::ConsensusProof;
-        use crate::crypto::frost::ThresholdSignature;
         use crate::AuthorityId;
 
         let proof = ConsensusProof {

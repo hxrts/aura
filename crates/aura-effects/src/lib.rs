@@ -5,44 +5,40 @@
     clippy::while_let_loop
 )]
 
-//! Aura Effects - Standard Effect Handler Implementations
+//! # Aura Effects - Layer 3: Implementation (Stateless Effect Handlers)
 //!
-//! This crate provides the **Implementation Layer** of the Aura architecture,
+//! **Purpose**: Production-grade stateless effect handlers that delegate to OS services.
+//!
+//! This crate provides the Implementation Layer of the Aura architecture,
 //! containing context-free, single-operation effect handlers that work in ANY
 //! execution context (production, testing, simulation, choreographic).
 //!
-//! # Architecture Position
+//! # Architecture Constraints
 //!
-//! ```text
-//! User Interface Layer (aura-cli, app-*)
-//!     ↓
-//! Runtime Composition (aura-agent, simulator)
-//!     ↓
-//! Feature/Protocol (frost, invitation, etc.)
-//!     ↓
-//! Orchestration Layer (aura-protocol)
-//!     ↓
-//! Implementation Layer (aura-effects) ← YOU ARE HERE
-//!     ↓
-//! Specification Layer (aura-mpst + domains)
-//!     ↓
-//! Interface Layer (aura-core)
-//! ```
+//! **Layer 3 depends only on aura-core and external libraries** (foundation + libraries).
+//! - MUST implement infrastructure effect traits defined in aura-core
+//! - MUST be stateless (no shared mutable state between calls)
+//! - MUST be single-party (each handler works independently)
+//! - MUST be context-free (no assumptions about caller's context)
+//! - MUST NOT depend on other Aura crates (domain crates, aura-protocol, etc.)
+//! - MUST NOT do multi-handler coordination
+//! - MUST NOT do multi-party protocol logic
 //!
-//! # Key Characteristics
+//! # Required Infrastructure Effects
 //!
-//! All handlers in this crate are:
-//! - **Stateless**: No coordination state between operations
-//! - **Single-party**: Work for one device in isolation
-//! - **Context-free**: No assumptions about execution context
-//! - **Single-operation**: Implement individual effect trait methods
+//! This crate MUST provide handlers for:
+//! - CryptoEffects: Ed25519 signing, hashing, key derivation
+//! - NetworkEffects: TCP connections, message sending
+//! - StorageEffects: File I/O, chunk operations
+//! - TimeEffects: Current time, delays
+//! - RandomEffects: Cryptographically secure randomness
 //!
 //! # What Belongs Here
 //!
-//! Basic effect implementations (RealCryptoHandler, MockCryptoHandler)
-//! Storage backends (FilesystemStorageHandler, InMemoryStorageHandler)
-//! Network transports (TcpNetworkHandler, MockNetworkHandler)
-//! Time providers (RealTimeHandler, SimulatedTimeHandler)
+//! Basic effect implementations (RealCryptoHandler, ProductionLeakageHandler)
+//! Storage backends (FilesystemStorageHandler, EncryptedStorageHandler)
+//! Network transports (TcpTransportHandler, WebSocketTransportHandler)
+//! Time providers (RealTimeHandler), System handlers (LoggingSystemHandler)
 //!
 //! # What Does NOT Belong Here
 //!
@@ -55,7 +51,7 @@
 //!
 //! ```rust,ignore
 //! use aura_effects::crypto::RealCryptoHandler;
-//! use aura_effects::storage::InMemoryStorageHandler;
+//! use aura_effects::storage::FilesystemStorageHandler;
 //! use aura_core::effects::{CryptoEffects, StorageEffects};
 //!
 //! // Use handlers directly for single operations
@@ -86,20 +82,20 @@ pub mod system;
 pub mod time;
 pub mod transport;
 
-// Re-export commonly used handlers
-pub use authorization::{MockAuthorizationHandler, StandardAuthorizationHandler};
-pub use biometric::{MockBiometricHandler, RealBiometricHandler};
-pub use bloom::{MockBloomHandler, RealBloomHandler};
-pub use console::{MockConsoleHandler, RealConsoleHandler};
-pub use context::{ExecutionContext, MockContextHandler, StandardContextHandler};
-pub use crypto::{EffectSystemRng, MockCryptoHandler, RealCryptoHandler};
-pub use journal::{MockJournalHandler, StandardJournalHandler};
-pub use leakage_handler::{NoOpLeakageHandler, ProductionLeakageHandler, TestLeakageHandler};
-pub use random::{MockRandomHandler, RealRandomHandler};
-pub use secure::{MockSecureStorageHandler, RealSecureStorageHandler};
-pub use simulation::{MockSimulationHandler, StatelessSimulationHandler};
-pub use storage::{EncryptedStorageHandler, FilesystemStorageHandler, MemoryStorageHandler};
-pub use time::{RealTimeHandler, SimulatedTimeHandler};
+// Re-export production handlers only - mock handlers moved to aura-testkit
+pub use authorization::StandardAuthorizationHandler;
+pub use biometric::RealBiometricHandler;
+pub use bloom::BloomHandler;
+pub use console::RealConsoleHandler;
+pub use context::{ExecutionContext, StandardContextHandler};
+pub use crypto::{EffectSystemRng, RealCryptoHandler};
+pub use journal::StandardJournalHandler;
+pub use leakage_handler::ProductionLeakageHandler;
+pub use random::RealRandomHandler;
+pub use secure::RealSecureStorageHandler;
+pub use simulation::StatelessSimulationHandler;
+pub use storage::{EncryptedStorageHandler, FilesystemStorageHandler};
+pub use time::RealTimeHandler;
 // Transport effect handlers - organized by functionality
 pub mod transport_effects {
     //! Transport effect implementations - Layer 3 stateless handlers
@@ -112,13 +108,14 @@ pub mod transport_effects {
         // Message processing
         FramingHandler,
 
-        InMemoryTransportHandler,
+        // InMemoryTransportHandler moved to aura-testkit
 
         // Facade patterns removed - migrate to aura-protocol
         // RetryingTransportManager,
         // TransportManager,
 
         // Core transport handlers
+        RealTransportHandler,
         TcpTransportHandler,
         TimeoutHelper,
         // Integration helpers
@@ -130,9 +127,13 @@ pub mod transport_effects {
 }
 
 // Convenience re-exports for most common handlers
+// Re-export system handlers
+pub use system::{LoggingSystemHandler, MetricsSystemHandler, MonitoringSystemHandler};
+
+// Convenience re-exports for most common transport handlers
 pub use transport_effects::{
-    FramingHandler, InMemoryTransportHandler, TcpTransportHandler, TransportError,
-    WebSocketTransportHandler,
+    FramingHandler, RealTransportHandler, TcpTransportHandler, 
+    TransportError, WebSocketTransportHandler,
 };
 
 // Re-export core effect traits for convenience

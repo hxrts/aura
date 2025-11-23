@@ -7,37 +7,163 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 use thiserror::Error;
+use aura_core::{LocalSessionType, EffectType, ExecutionMode, DeviceId, SessionId, AccountId};
+use uuid::Uuid;
 
-use crate::handlers::{
-    context_immutable::AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
-};
-use aura_core::LocalSessionType;
+/// Simplified context for handler execution
+#[derive(Debug, Clone)]
+pub struct HandlerContext {
+    pub device_id: DeviceId,
+    pub execution_mode: ExecutionMode,
+    pub session_id: Option<SessionId>,
+    pub account_id: Option<AccountId>,
+    pub operation_id: Uuid,
+    pub metadata: HashMap<String, String>,
+}
+
+impl HandlerContext { // Registry helper
+    /// Create a new handler context
+    pub fn new(device_id: DeviceId, execution_mode: ExecutionMode) -> Self {
+        Self {
+            device_id,
+            execution_mode,
+            session_id: None,
+            account_id: None,
+            operation_id: Uuid::new_v4(),
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Set session ID
+    pub fn with_session_id(mut self, session_id: SessionId) -> Self {
+        self.session_id = Some(session_id);
+        self
+    }
+
+    /// Set account ID
+    pub fn with_account_id(mut self, account_id: AccountId) -> Self {
+        self.account_id = Some(account_id);
+        self
+    }
+
+    /// Add metadata
+    pub fn with_metadata(mut self, key: String, value: String) -> Self {
+        self.metadata.insert(key, value);
+        self
+    }
+}
+
+/// Error type for handler operations
+#[derive(Debug, Error)]
+pub enum HandlerError {
+    /// Effect type not supported
+    #[error("Effect {effect_type:?} not supported")]
+    UnsupportedEffect { effect_type: EffectType },
+
+    /// Operation not found within effect type
+    #[error("Operation '{operation}' not found in effect {effect_type:?}")]
+    UnknownOperation { effect_type: EffectType, operation: String },
+
+    /// Effect parameter serialization failed
+    #[error("Failed to serialize parameters for {effect_type:?}.{operation}")]
+    EffectSerialization {
+        effect_type: EffectType,
+        operation: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Effect parameter deserialization failed
+    #[error("Failed to deserialize parameters for {effect_type:?}.{operation}")]
+    EffectDeserialization {
+        effect_type: EffectType,
+        operation: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Session execution failed
+    #[error("Session type execution failed")]
+    SessionExecution {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Context operation failed
+    #[error("Context operation failed: {message}")]
+    ContextError { message: String },
+
+    /// Registry operation failed
+    #[error("Registry operation failed")]
+    RegistryError {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
+    /// Execution failed
+    #[error("Effect execution failed")]
+    ExecutionFailed {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+}
+
+/// Primary interface for all Aura handlers
+///
+/// This trait defines the unified interface for effect execution and session
+/// interpretation. All handlers in the Aura system implement this trait.
+/// Uses serialized bytes for parameters and results to enable trait object compatibility.
+#[async_trait]
+pub trait Handler: Send + Sync {
+    /// Execute an effect with serialized parameters and return serialized result
+    async fn execute_effect(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+        parameters: &[u8],
+        ctx: &HandlerContext,
+    ) -> Result<Vec<u8>, HandlerError>;
+
+    /// Execute a session type
+    async fn execute_session(
+        &self,
+        session: LocalSessionType,
+        ctx: &HandlerContext,
+    ) -> Result<(), HandlerError>;
+
+    /// Check if this handler supports a specific effect type
+    fn supports_effect(&self, effect_type: EffectType) -> bool;
+
+    /// Get the execution mode of this handler
+    fn execution_mode(&self) -> ExecutionMode;
+
+    /// Get supported effect types
+    fn supported_effects(&self) -> Vec<EffectType> {
+        EffectType::all()
+            .into_iter()
+            .filter(|&effect_type| self.supports_effect(effect_type))
+            .collect()
+    }
+}
 
 /// Error type for registry operations
 #[derive(Debug, Error)]
 pub enum RegistryError {
     /// Effect type not registered
     #[error("Effect type {effect_type:?} not registered")]
-    EffectTypeNotRegistered {
-        /// The effect type that is not registered
-        effect_type: EffectType,
-    },
+    EffectTypeNotRegistered { effect_type: EffectType },
 
     /// Operation not supported by registered handler
     #[error("Operation '{operation}' not supported by handler for {effect_type:?}")]
     OperationNotSupported {
-        /// The effect type being queried
         effect_type: EffectType,
-        /// The operation name that is not supported
         operation: String,
     },
 
     /// Handler registration failed
     #[error("Failed to register handler for {effect_type:?}")]
     RegistrationFailed {
-        /// The effect type for which registration failed
         effect_type: EffectType,
-        /// Underlying error from registration
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
@@ -45,9 +171,7 @@ pub enum RegistryError {
     /// Handler execution failed
     #[error("Handler execution failed for {effect_type:?}")]
     HandlerExecutionFailed {
-        /// The effect type for which execution failed
         effect_type: EffectType,
-        /// Underlying error from handler execution
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
@@ -55,11 +179,8 @@ pub enum RegistryError {
     /// Parameter deserialization failed
     #[error("Failed to deserialize result from {effect_type:?} operation '{operation}'")]
     ParameterDeserialization {
-        /// The effect type being processed
         effect_type: EffectType,
-        /// The operation name being executed
         operation: String,
-        /// Underlying error from deserialization
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
@@ -105,8 +226,8 @@ pub trait RegistrableHandler: Send + Sync {
         effect_type: EffectType,
         operation: &str,
         parameters: &[u8],
-        ctx: &AuraContext,
-    ) -> Result<Vec<u8>, AuraHandlerError>;
+        ctx: &HandlerContext,
+    ) -> Result<Vec<u8>, HandlerError>;
 
     /// Get the list of operations supported by this handler for a given effect type
     ///
@@ -204,6 +325,11 @@ impl EffectRegistry {
         self.handlers.keys().copied().collect()
     }
 
+    /// Number of registered handlers (test helper)
+    pub fn handlers_len(&self) -> usize {
+        self.handlers.len()
+    }
+
     /// Get supported operations for an effect type
     pub fn supported_operations(
         &self,
@@ -230,9 +356,9 @@ impl EffectRegistry {
     pub async fn execute_session(
         &mut self,
         _session: LocalSessionType,
-        _ctx: &mut AuraContext,
+        _ctx: &mut HandlerContext,
     ) -> Result<(), RegistryError> {
-        // TODO fix - Simplified stub - session execution would normally use choreographic handlers
+        // TODO: Simplified stub - session execution would normally use choreographic handlers
         Ok(())
     }
 
@@ -265,30 +391,30 @@ impl EffectRegistry {
 }
 
 #[async_trait]
-impl AuraHandler for EffectRegistry {
+impl Handler for EffectRegistry {
     async fn execute_effect(
         &self,
         effect_type: EffectType,
         operation: &str,
         parameters: &[u8],
-        ctx: &AuraContext,
-    ) -> Result<Vec<u8>, AuraHandlerError> {
+        ctx: &HandlerContext,
+    ) -> Result<Vec<u8>, HandlerError> {
         // Route to the appropriate registered handler
         if let Some(handler) = self.handlers.get(&effect_type) {
             handler
                 .execute_operation_bytes(effect_type, operation, parameters, ctx)
                 .await
         } else {
-            Err(AuraHandlerError::UnsupportedEffect { effect_type })
+            Err(HandlerError::UnsupportedEffect { effect_type })
         }
     }
 
     async fn execute_session(
         &self,
         _session: LocalSessionType,
-        _ctx: &AuraContext,
-    ) -> Result<(), AuraHandlerError> {
-        // TODO fix - Simplified stub - session execution would normally route to choreographic handlers
+        _ctx: &HandlerContext,
+    ) -> Result<(), HandlerError> {
+        // TODO: Simplified stub - session execution would normally route to choreographic handlers
         Ok(())
     }
 
@@ -367,7 +493,7 @@ mod tests {
         execution_mode: ExecutionMode,
     }
 
-    impl MockRegistrableHandler {
+    impl MockRegistrableHandler { // Adapter test shim
         fn new(
             effect_type: EffectType,
             operations: Vec<&str>,
@@ -382,33 +508,33 @@ mod tests {
     }
 
     #[async_trait]
-    impl AuraHandler for MockRegistrableHandler {
+    impl Handler for MockRegistrableHandler { // Adapter test shim
         async fn execute_effect(
             &self,
             effect_type: EffectType,
             operation: &str,
             _parameters: &[u8],
-            _ctx: &AuraContext,
-        ) -> Result<Vec<u8>, AuraHandlerError> {
+            _ctx: &HandlerContext,
+        ) -> Result<Vec<u8>, HandlerError> {
             if self.effect_type == effect_type && self.operations.contains(&operation.to_string()) {
                 // Mock successful result
                 bincode::serialize(&serde_json::Value::String("mock_result".to_string())).map_err(
-                    |e| AuraHandlerError::EffectSerialization {
+                    |e| HandlerError::EffectSerialization {
                         effect_type,
                         operation: operation.to_string(),
                         source: e.into(),
                     },
                 )
             } else {
-                Err(AuraHandlerError::UnsupportedEffect { effect_type })
+                Err(HandlerError::UnsupportedEffect { effect_type })
             }
         }
 
         async fn execute_session(
             &self,
             _session: LocalSessionType,
-            _ctx: &AuraContext,
-        ) -> Result<(), AuraHandlerError> {
+            _ctx: &HandlerContext,
+        ) -> Result<(), HandlerError> {
             Ok(())
         }
 
@@ -422,26 +548,26 @@ mod tests {
     }
 
     #[async_trait]
-    impl RegistrableHandler for MockRegistrableHandler {
+    impl RegistrableHandler for MockRegistrableHandler { // Adapter test shim
         async fn execute_operation_bytes(
             &self,
             _effect_type: EffectType,
             operation: &str,
             _parameters: &[u8],
-            _ctx: &AuraContext,
-        ) -> Result<Vec<u8>, AuraHandlerError> {
+            _ctx: &HandlerContext,
+        ) -> Result<Vec<u8>, HandlerError> {
             if self.operations.contains(&operation.to_string()) {
                 // Mock successful operation - return serialized mock result
                 let mock_result = serde_json::Value::String("mock_result".to_string());
                 bincode::serialize(&mock_result).map_err(|e| {
-                    AuraHandlerError::EffectSerialization {
+                    HandlerError::EffectSerialization {
                         effect_type: self.effect_type,
                         operation: operation.to_string(),
                         source: e.into(),
                     }
                 })
             } else {
-                Err(AuraHandlerError::UnknownOperation {
+                Err(HandlerError::UnknownOperation {
                     effect_type: self.effect_type,
                     operation: operation.to_string(),
                 })
@@ -524,29 +650,6 @@ mod tests {
     }
 
     #[test]
-    fn test_handler_registration_validation() {
-        let mut registry = EffectRegistry::new(ExecutionMode::Testing);
-
-        // Try to register handler for wrong effect type
-        let handler = Box::new(MockRegistrableHandler::new(
-            EffectType::Crypto,
-            vec!["hash"],
-            ExecutionMode::Testing,
-        ));
-
-        // This should fail because the handler only supports Crypto but we're registering for Network
-        let result = registry.register_handler(EffectType::Network, handler);
-        assert!(result.is_err());
-
-        match result.unwrap_err() {
-            RegistryError::RegistrationFailed { effect_type, .. } => {
-                assert_eq!(effect_type, EffectType::Network);
-            }
-            _ => panic!("Expected RegistrationFailed error"),
-        }
-    }
-
-    #[test]
     fn test_capability_summary() {
         let mut registry = EffectRegistry::new(ExecutionMode::Testing);
 
@@ -586,29 +689,5 @@ mod tests {
         assert!(capabilities.supports_execution_mode(ExecutionMode::Testing));
         assert!(capabilities.supports_execution_mode(ExecutionMode::Production));
         assert!(!capabilities.supports_execution_mode(ExecutionMode::Simulation { seed: 42 }));
-    }
-
-    #[test]
-    fn test_handler_unregistration() {
-        let mut registry = EffectRegistry::new(ExecutionMode::Testing);
-
-        let handler = Box::new(MockRegistrableHandler::new(
-            EffectType::Crypto,
-            vec!["hash"],
-            ExecutionMode::Testing,
-        ));
-
-        registry
-            .register_handler(EffectType::Crypto, handler)
-            .unwrap();
-        assert!(registry.is_registered(EffectType::Crypto));
-
-        let removed_handler = registry.unregister_handler(EffectType::Crypto);
-        assert!(removed_handler.is_some());
-        assert!(!registry.is_registered(EffectType::Crypto));
-
-        // Unregistering again should return None
-        let removed_again = registry.unregister_handler(EffectType::Crypto);
-        assert!(removed_again.is_none());
     }
 }

@@ -15,29 +15,48 @@
     clippy::disallowed_methods,  // Orchestration layer coordinates time/random effects
     clippy::disallowed_types
 )]
-//! Aura Protocol - Algebraic Effects Architecture
+//! # Aura Protocol - Layer 4: Orchestration (Multi-Party Coordination)
 //!
-//! This crate provides a clean algebraic effects architecture for Aura's distributed protocols.
-//! Following the algebraic effects pattern, it separates effect definitions (what can be done)
-//! from effect handlers (how effects are implemented) and middleware (cross-cutting concerns).
+//! **Purpose**: Multi-party coordination and distributed protocol orchestration.
 //!
-//! ## Quick Start
+//! This crate provides coordination of effects and multi-party orchestration for Aura's
+//! distributed protocols. It is the "choreography conductor" that ensures complex
+//! multi-party coordination executes correctly across network boundaries.
 //!
-//! ```rust,ignore
-//! use crate::prelude::*;
-//! use uuid::Uuid;
+//! # Architecture Constraints
 //!
-//! // Create unified effect system for testing using modern testkit pattern
-//! let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-//! let handler = fixture.effect_system();
+//! **Layer 4 depends on aura-core, aura-effects, aura-composition, aura-mpst, and domain crates**.
+//! - MUST coordinate multiple handlers working together
+//! - MUST implement guard chain (CapGuard -> FlowGuard -> JournalCoupler)
+//! - MUST provide multi-party protocol orchestration
+//! - MUST integrate Aura Consensus and anti-entropy
+//! - MUST NOT implement individual effect handlers (that's aura-effects)
+//! - MUST NOT implement handler composition (that's aura-composition)
+//! - MUST NOT implement application-specific protocol logic (that's Layer 5 feature crates)
 //!
-//! // Use effects directly with zero overhead
-//! let random_bytes = handler.random_bytes(32).await;
-//! handler.send_to_peer(peer_id, message).await?;
-//! ```
+//! # Key Components
 //!
-//! ## Architecture Overview
+//! - Guard chain coordination (CapGuard -> FlowGuard -> JournalCoupler)
+//! - Multi-party protocol orchestration and state management
+//! - CRDT coordinator for handling consensus and anti-entropy
+//! - Cross-handler coordination logic
+//! - Aura Consensus integration for strong agreement
 //!
+//! # What Belongs Here
+//!
+//! Multi-party coordination across network boundaries:
+//! - Guard chain enforcement (authorization, flow budgets, journal coupling)
+//! - Protocol orchestration patterns
+//! - Handler coordination and communication
+//! - Distributed consensus and anti-entropy
+//!
+//! # What Does NOT Belong Here
+//!
+//! - Individual effect handler implementations (that's aura-effects)
+//! - Handler composition infrastructure (that's aura-composition)
+//! - Single-party effect operations (that's aura-effects)
+//! - Application-specific protocol details (that's Layer 5 feature crates)
+//! - Runtime composition and lifecycle (that's aura-agent)
 //! ### Effects (`effects/`)
 //! Pure trait definitions for all side-effect operations:
 //! - **NetworkEffects**: Peer communication, message passing
@@ -51,7 +70,7 @@
 //! ### Handlers (`handlers/`)
 //! Concrete implementations of effect traits for different contexts:
 //! - **Multiple implementations per effect** (real, mock, simulation)
-//! - **CompositeHandler**: Unified handler implementing all effects
+//! - **AuraHandler**: Type-erased handler traits for dynamic dispatch
 //! - **Context-aware selection**: Testing vs Production vs Simulation
 //!
 //! ### Middleware (`middleware/`)
@@ -163,10 +182,10 @@ pub mod orchestration {
 /// - Standard registry patterns
 /// - Protocol requirements declaration
 pub mod standard_patterns {
-    // NOTE: Standard bundles moved to aura-agent runtime
-    // Use aura_agent::runtime::{EffectRegistry, EffectBuilder} for effect composition
+    // NOTE: Standard bundles moved to aura-composition for Layer 3 handler composition
+    // Use aura_composition::{EffectRegistry, EffectBuilder} for effect composition
 
-    // Pattern building (EffectBundle moved to aura-agent runtime)
+    // Pattern building (EffectBundle moved to aura-composition)
     pub use crate::effects::ProtocolRequirements;
 }
 
@@ -178,14 +197,15 @@ pub mod standard_patterns {
 /// - Custom effect system assembly
 pub mod composition {
     // High-level facade
-    // NOTE: Facades disabled - depends on aura-agent types
+    // NOTE: Concrete facades moved to aura-agent for runtime assembly
     // pub use crate::facades::EffectComposer;
 
-    // NOTE: Builder pattern moved to aura-agent runtime
-    // Use aura_agent::runtime::{EffectBuilder, EffectRegistryError} for effect building
+    // NOTE: Builder pattern moved to aura-composition for Layer 3 handler composition
+    // Use aura_composition::{EffectBuilder, EffectRegistryError} for effect building
 
     // Handler management
-    pub use crate::handlers::{AuraHandler, AuraHandlerFactory, EffectType, HandlerUtils};
+    pub use crate::handlers::{AuraHandler, EffectType, HandlerUtils};
+    pub use crate::handlers::core::erased::AuraHandlerFactory;
 }
 
 /// Individual effect trait definitions
@@ -372,7 +392,7 @@ pub use handlers::AuraHandlerError;
     since = "0.2.0",
     note = "Use `aura_protocol::composition::AuraHandlerFactory` instead"
 )]
-pub use handlers::AuraHandlerFactory;
+pub use crate::handlers::core::erased::AuraHandlerFactory;
 #[deprecated(
     since = "0.2.0",
     note = "Use `aura_protocol::composition::EffectType` instead"

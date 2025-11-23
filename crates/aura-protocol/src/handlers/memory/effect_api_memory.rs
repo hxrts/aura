@@ -34,10 +34,10 @@ impl MemoryLedgerHandler {
 impl Default for MemoryLedgerHandler {
     fn default() -> Self {
         // Default uses mock handlers for testing
-        use aura_effects::{MockRandomHandler, SimulatedTimeHandler};
+        use aura_effects::{random::RealRandomHandler, time::RealTimeHandler};
         Self::new(
-            Arc::new(MockRandomHandler::new()),
-            Arc::new(SimulatedTimeHandler::new()),
+            Arc::new(RealRandomHandler::default()),
+            Arc::new(RealTimeHandler::default()),
         )
     }
 }

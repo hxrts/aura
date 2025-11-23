@@ -1,22 +1,33 @@
-//! Aura FROST Choreographies
+//! # Aura FROST - Layer 5: Feature/Protocol Implementation
 //!
-//! This crate provides choreographic protocols for FROST threshold signature
-//! operations in the Aura threshold identity platform.
+//! **Purpose**: FROST threshold signatures and key resharing operations.
 //!
-//! # Architecture
+//! Choreographic protocols for FROST threshold signature operations in the Aura
+//! threshold identity platform.
 //!
-//! This crate implements FROST protocols using the stateless effect system:
-//! - `threshold_signing` - FROST threshold signing service
-//! - `distributed_keygen` - Distributed key generation service
-//! - `key_resharing` - Key redistribution services
-//! - `signature_aggregation` - Multi-round signature coordination
+//! # Architecture Constraints
+//!
+//! **Layer 5 depends on aura-core, aura-effects, aura-mpst, and domain crates**.
+//! - MUST compose effects from aura-effects
+//! - MUST implement end-to-end FROST ceremony logic
+//! - MUST NOT implement cryptographic primitives directly (use CryptoEffects)
+//! - MUST NOT implement orchestration primitives (that's Layer 4 aura-protocol)
+//! - MUST NOT depend on runtime or UI layers (Layer 6+)
+//! - MUST NOT do UI or CLI concerns (that's Layer 7)
+//!
+//! # Core Protocols
+//!
+//! - Threshold Signing: FROST threshold signature ceremonies
+//! - Distributed Keygen: Distributed key generation service
+//! - Key Resharing: Key redistribution with threshold changes
+//! - Signature Aggregation: Multi-round signature coordination
 //!
 //! # Design Principles
 //!
-//! - Uses stateless effect composition for distributed FROST coordination
-//! - Integrates with aura-core for real cryptographic operations
+//! - Stateless effect composition for distributed coordination
+//! - Byzantine fault tolerance for M-of-N configurations
 //! - Effect-based architecture for predictable execution
-//! - Supports M-of-N threshold configurations with Byzantine fault tolerance
+//! - Composable threshold operations
 
 #![allow(missing_docs)]
 #![allow(

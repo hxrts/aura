@@ -24,6 +24,11 @@ aura-invitation = { path = "../aura-invitation" }
 aura-authenticate = { path = "../aura-authenticate" }
 aura-sync = { path = "../aura-sync" }
 aura-wot = { path = "../aura-wot" }
+aura-chat = { path = "../aura-chat" }
+aura-simulator = { path = "../aura-simulator" }
+aura-frost = { path = "../aura-frost" }
+aura-journal = { path = "../aura-journal" }
+aura-relational = { path = "../aura-relational" }
 
 # Effect system
 async-trait = { workspace = true }
@@ -49,6 +54,8 @@ tracing = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 once_cell = { workspace = true }
+chrono = { workspace = true }
+biscuit-auth = { workspace = true }
 
 [dev-dependencies]
 # Testing infrastructure (Layer 7 can use testkit)

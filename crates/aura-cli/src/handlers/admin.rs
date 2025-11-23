@@ -1,24 +1,29 @@
 //! Admin maintenance commands (replacement, fork controls).
 
 use anyhow::{anyhow, Result};
-use aura_agent::{AgentBuilder, AuraEffectSystem};
+use aura_agent::{AgentBuilder, AuraEffectSystem, EffectContext};
 use aura_core::identifiers::{AccountId, AuthorityId, DeviceId};
 use aura_protocol::effect_traits::ConsoleEffects;
 
 use crate::AdminAction;
 
 /// Handle admin-related maintenance commands.
-pub async fn handle_admin(device_id: DeviceId, action: &AdminAction) -> Result<()> {
+pub async fn handle_admin(
+    ctx: &EffectContext,
+    device_id: DeviceId,
+    action: &AdminAction,
+) -> Result<()> {
     match action {
         AdminAction::Replace {
             account,
             new_admin,
             activation_epoch,
-        } => replace_admin(device_id, account, new_admin, *activation_epoch).await,
+        } => replace_admin(ctx, device_id, account, new_admin, *activation_epoch).await,
     }
 }
 
 async fn replace_admin(
+    _ctx: &EffectContext,
     device_id: DeviceId,
     account: &str,
     new_admin: &str,

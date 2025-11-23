@@ -14,8 +14,10 @@ use aura_core::{
     identifiers::DeviceId,
 };
 use aura_effects::{
-    FilesystemStorageHandler, MemoryStorageHandler, MockCryptoHandler, MockRandomHandler,
-    RealCryptoHandler, RealRandomHandler,
+    FilesystemStorageHandler, RealCryptoHandler, RealRandomHandler,
+};
+use aura_testkit::stateful_effects::{
+    crypto::MockCryptoHandler, random::MockRandomHandler, storage::MemoryStorageHandler,
 };
 
 /// Benchmark random handler performance

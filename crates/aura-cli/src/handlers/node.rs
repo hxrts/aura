@@ -3,12 +3,13 @@
 //! Effect-based implementation of the node command.
 
 use anyhow::Result;
-use aura_agent::AuraEffectSystem;
+use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects, TimeEffects};
 use std::path::Path;
 
 /// Handle node operations through effects
 pub async fn handle_node(
+    ctx: &EffectContext,
     effects: &AuraEffectSystem,
     port: u16,
     daemon: bool,
@@ -32,19 +33,23 @@ pub async fn handle_node(
     }
 
     // Load and validate configuration
-    let _config = load_node_config(effects, config_path).await?;
+    let _config = load_node_config(ctx, effects, config_path).await?;
 
     if daemon {
         // Simulate daemon mode through effects
-        run_daemon_mode(effects, port).await
+        run_daemon_mode(ctx, effects, port).await
     } else {
         // Run interactive mode through effects
-        run_interactive_mode(effects, port).await
+        run_interactive_mode(ctx, effects, port).await
     }
 }
 
 /// Load node configuration through storage effects
-async fn load_node_config(effects: &AuraEffectSystem, config_path: &Path) -> Result<NodeConfig> {
+async fn load_node_config(
+    _ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+    config_path: &Path,
+) -> Result<NodeConfig> {
     let config_data = effects
         .retrieve(&config_path.display().to_string())
         .await
@@ -63,7 +68,11 @@ async fn load_node_config(effects: &AuraEffectSystem, config_path: &Path) -> Res
 }
 
 /// Run node in daemon mode through effects
-async fn run_daemon_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
+async fn run_daemon_mode(
+    _ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+    port: u16,
+) -> Result<()> {
     println!("Initializing daemon mode...");
 
     // Simulate daemon initialization
@@ -72,7 +81,7 @@ async fn run_daemon_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
     println!("Node started at epoch: {}", start_time);
 
     // Simulate some startup delay
-    simulate_startup_delay(effects).await;
+    simulate_startup_delay(_ctx, effects).await;
 
     println!("Node daemon started successfully on port {}", port);
 
@@ -83,7 +92,11 @@ async fn run_daemon_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
 }
 
 /// Run node in interactive mode through effects
-async fn run_interactive_mode(effects: &AuraEffectSystem, port: u16) -> Result<()> {
+async fn run_interactive_mode(
+    _ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+    port: u16,
+) -> Result<()> {
     println!(
         "Node started in interactive mode on port {}. Press Ctrl+C to stop.",
         port
@@ -93,7 +106,7 @@ async fn run_interactive_mode(effects: &AuraEffectSystem, port: u16) -> Result<(
     println!("Started at epoch: {}", start_time);
 
     // Simulate interactive mode - in real implementation would handle signals
-    simulate_interactive_session(effects).await;
+    simulate_interactive_session(_ctx, effects).await;
 
     println!("Node stopped");
 
@@ -101,7 +114,7 @@ async fn run_interactive_mode(effects: &AuraEffectSystem, port: u16) -> Result<(
 }
 
 /// Simulate startup delay using time effects
-async fn simulate_startup_delay(effects: &AuraEffectSystem) {
+async fn simulate_startup_delay(_ctx: &EffectContext, effects: &AuraEffectSystem) {
     let delay_start = effects.current_epoch().await;
 
     // Simulate 1 second startup time
@@ -118,7 +131,7 @@ async fn simulate_startup_delay(effects: &AuraEffectSystem) {
 }
 
 /// Simulate interactive session
-async fn simulate_interactive_session(effects: &AuraEffectSystem) {
+async fn simulate_interactive_session(_ctx: &EffectContext, effects: &AuraEffectSystem) {
     // TODO fix - In a real implementation, this would listen for signals
     // TODO fix - For now, simulate a short interactive session
 

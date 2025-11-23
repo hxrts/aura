@@ -6,13 +6,71 @@
 //! capabilities without directly depending on a concrete effect system implementation.
 
 use super::effect_system_trait::{GuardEffectSystem, SecurityContext};
+use crate::authorization::BiscuitAuthorizationBridge;
+use aura_wot::ResourceScope;
+use biscuit_auth::Biscuit;
 // use crate::wot::EffectSystemInterface; // Legacy interface removed
 
 /// Wrapper type to avoid coherence issues
 pub struct GuardEffectSystemWrapper<E>(pub E);
 
-// Legacy EffectSystemInterface implementations removed - use BiscuitAuthorizationBridge instead
-// TODO: Implement Biscuit-based authorization integration when available
+/// Biscuit-based authorization integration for GuardEffectSystem
+pub struct BiscuitGuardIntegration<E: GuardEffectSystem> {
+    /// The underlying effect system
+    pub effect_system: E,
+    /// Biscuit authorization bridge for token verification
+    pub auth_bridge: BiscuitAuthorizationBridge,
+}
+
+impl<E: GuardEffectSystem> BiscuitGuardIntegration<E> {
+    /// Create a new Biscuit guard integration
+    pub fn new(effect_system: E, auth_bridge: BiscuitAuthorizationBridge) -> Self {
+        Self {
+            effect_system,
+            auth_bridge,
+        }
+    }
+
+    /// Authorize an operation with a Biscuit token
+    pub fn authorize_with_token(
+        &self,
+        token: &Biscuit,
+        operation: &str,
+        resource_scope: &ResourceScope,
+    ) -> Result<bool, aura_wot::BiscuitError> {
+        // Use the authorization bridge to verify the token
+        let auth_result = self.auth_bridge.authorize(token, operation, resource_scope)?;
+        
+        // Check if the effect system can perform this operation
+        if !self.effect_system.can_perform_operation(operation) {
+            tracing::debug!(
+                operation = %operation,
+                "Effect system cannot perform operation despite valid token"
+            );
+            return Ok(false);
+        }
+
+        tracing::debug!(
+            operation = %operation,
+            authorized = auth_result.authorized,
+            delegation_depth = ?auth_result.delegation_depth,
+            "Biscuit authorization completed"
+        );
+
+        Ok(auth_result.authorized)
+    }
+
+    /// Get the security context for authorization decisions
+    pub fn get_authorization_context(&self) -> SecurityContext {
+        self.effect_system.get_security_context()
+    }
+
+    /// Check if an operation is allowed without a specific token
+    /// (for operations that don't require Biscuit authorization)
+    pub fn check_operation_allowed(&self, operation: &str) -> bool {
+        self.effect_system.can_perform_operation(operation)
+    }
+}
 
 /// Extension methods for GuardEffectSystem to support guard operations
 pub trait GuardExtensions {

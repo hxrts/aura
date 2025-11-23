@@ -275,14 +275,14 @@ mod tests {
 
     #[test]
     fn test_meet_handler_creation() {
-        let handler: MvHandler<TestSet> = MvHandler::new();
+        let handler: MvHandler<TestSet> = MvHandler::default();
         assert_eq!(handler.get_state(), &TestSet(BTreeSet::new()));
         assert_eq!(handler.constraint_count(), 0);
     }
 
     #[test]
     fn test_constraint_application() {
-        let mut handler: MvHandler<TestSet> = MvHandler::new();
+        let mut handler: MvHandler<TestSet> = MvHandler::default();
 
         // Start with top (empty set for this implementation)
         let initial_state = handler.get_state().clone();
@@ -302,7 +302,7 @@ mod tests {
     #[test]
     fn test_constraint_satisfaction() {
         // Start with an empty set (Top = most permissive)
-        let handler: MvHandler<TestSet> = MvHandler::new();
+        let handler: MvHandler<TestSet> = MvHandler::default();
 
         let mut read_set = BTreeSet::new();
         read_set.insert("read".to_string());
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_state_message_creation() {
-        let mut handler: MvHandler<TestSet> = MvHandler::new();
+        let mut handler: MvHandler<TestSet> = MvHandler::default();
 
         let msg1 = handler.create_state_msg();
         assert_eq!(msg1.monotonic_counter, 1);
@@ -355,7 +355,7 @@ mod tests {
 
     #[test]
     fn test_consistency_proof() {
-        let handler: MvHandler<TestSet> = MvHandler::new();
+        let handler: MvHandler<TestSet> = MvHandler::default();
         let device_id = DeviceId::new();
 
         let proof = handler.generate_consistency_proof(device_id);
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_multi_constraint_handler() {
-        let mut multi_handler: MultiConstraintHandler<TestSet> = MultiConstraintHandler::new();
+        let mut multi_handler: MultiConstraintHandler<TestSet> = MultiConstraintHandler::default();
 
         let mut read_constraint_set = BTreeSet::new();
         read_constraint_set.insert("read".to_string());

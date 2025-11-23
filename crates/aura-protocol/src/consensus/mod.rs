@@ -1,15 +1,31 @@
-//! Aura Consensus Implementation
+//! Layer 4: Aura Consensus Implementation - Strong Agreement
 //!
-//! This module provides the real Aura Consensus protocol implementation,
-//! replacing the stub in aura-relational. It integrates with FROST threshold
-//! signatures and produces CommitFact entries for journals.
+//! Strong-agreement consensus protocol for distributed multi-authority coordination.
+//! Sole mechanism for distributed agreement in Aura (per docs/104_consensus.md).
 //!
-//! ## Design Principles (from docs/402_consensus.md):
+//! **Protocol Design** (per docs/104_consensus.md):
+//! - **Single-shot consensus**: Agrees on one operation bound to a prestate (immutable reference point)
+//! - **Authority-based witnesses**: Uses AuthorityId (not device IDs) for agreement
+//! - **Two-path protocol**: Fast path (threshold signatures) with fallback (epidemic gossip)
+//! - **Monotonic progress**: Prestate commitment prevents rollback; proposals strictly ordered
+//! - **Cryptographic authentication**: FROST threshold signatures prove witness agreement
 //!
-//! - **Single-shot consensus**: Agrees on one operation bound to a prestate
-//! - **Authority-based witnesses**: Uses AuthorityId, not device IDs
-//! - **Two-path protocol**: Fast path and fallback epidemic gossip
-//! - **Journal integration**: Emits CommitFact for fact journals
+//! **Integration** (per docs/104_consensus.md, docs/003_information_flow_contract.md):
+//! - **Journal integration**: Emits CommitFact for immutable fact journals
+//! - **FROST integration**: Multi-party threshold signatures for authentication
+//! - **Guard chain**: Consensus messages flow through guard chain (CapGuard → FlowGuard → Journal)
+//! - **Relational contexts**: Multi-authority consensus facts enable cross-authority accountability
+//!
+//! **Formal Guarantees** (per docs/004_distributed_systems_contract.md):
+//! - **Agreement**: All honest authorities reach identical decision
+//! - **Commitment**: Decision is irreversible once formed (immutable in journal)
+//! - **Liveness**: All proposals eventually committed (no stalling under partial synchrony)
+//!
+//! **Module Organization**:
+//! - **amp**: AMP (Attestation Multi-Party) protocol for threshold agreement
+//! - **witness**: Witness management and quorum verification
+//! - **commit_fact**: Journal-backed consensus fact types
+//! - **choreography**: MPST choreographic specification of consensus protocol
 
 pub mod amp;
 pub mod choreography;
@@ -30,8 +46,8 @@ pub use relational_consensus::{
 };
 pub use witness::{WitnessMessage, WitnessSet, WitnessShare};
 
+use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::{hash, AuthorityId, Hash32, Prestate, Result};
-use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
 use serde::Serialize;
 use serde_json;
 
@@ -44,7 +60,7 @@ pub async fn run_consensus<T: Serialize>(
     operation: &T,
     witnesses: Vec<AuthorityId>,
     threshold: u16,
-    key_packages: std::collections::HashMap<AuthorityId, KeyPackage>,
+    key_packages: std::collections::HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
 ) -> Result<CommitFact> {
     let prestate_hash = prestate.compute_hash();

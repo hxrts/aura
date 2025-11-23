@@ -1,7 +1,16 @@
-//! Relay Coordination and Capability-Based Routing
+//! Layer 5: Relay Coordination - Capability-Based Routing & Selection
 //!
-//! This module implements relay coordination for message routing with
-//! capability-based access control and privacy-preserving relay selection.
+//! Relay coordination for message routing with capability-based access control
+//! and privacy-preserving relay selection (per docs/110_rendezvous.md).
+//!
+//! **Key Components**:
+//! - **RelayNode**: Relay peer with capabilities, metrics, performance, trust info
+//! - **RelaySelector**: Privacy-aware relay selection with QoS preferences
+//! - **RelayCapabilities**: Bandwidth, storage, connectivity constraints
+//!
+//! **Design** (per docs/108_transport_and_information_flow.md):
+//! Relays are selected based on capability tokens (Biscuit), performance metrics, and
+//! privacy preferences. Enables privacy-respecting relay chains for off-path message delivery.
 
 mod capabilities;
 mod coordinator;

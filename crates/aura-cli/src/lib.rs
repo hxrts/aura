@@ -1,59 +1,129 @@
-//! Aura CLI Library
+//! # Aura CLI - Layer 7: User Interface
 //!
-//! This library provides the command-line interface for the Aura threshold identity platform.
-//! It uses the unified effect system architecture for all operations following the guidance
-//! from docs/002_system_architecture.md.
+//! This crate provides the command-line interface for the Aura threshold identity platform.
 //!
-//! The aura-cli crate adheres to the unified effect system by:
-//! - Using AuraEffectSystem for all system interactions
-//! - Implementing CLI-specific effects as composition of core effects
-//! - Following proper dependency injection patterns
-//! - Avoiding direct system access except in effect handlers
+//! ## Purpose
+//!
+//! Layer 7 user interface crate providing:
+//! - CLI command implementations for scenario management, authority operations, and recovery
+//! - Integration with the agent runtime for command execution
+//! - User-facing commands for account management, authentication, and recovery
+//! - Visualization and reporting tools for status and diagnostics
+//!
+//! ## Architecture Constraints
+//!
+//! This crate depends on:
+//! - **Layer 1-6**: All lower layers (core, domain crates, effects, protocols, features, runtime)
+//! - **Layer 8** (optional): Test fixtures from aura-testkit for testing
+//! - **MUST NOT**: Create effect implementations or handlers (use aura-effects)
+//! - **MUST NOT**: Be imported by Layer 1-6 crates (no circular dependencies)
+//!
+//! ## What Belongs Here
+//!
+//! - CLI command definitions and argument parsing
+//! - CLI handler for command execution and coordination
+//! - Human-friendly command implementations for:
+//!   - Authority and context inspection (list, get, create)
+//!   - Scenario management (discover, list, validate, run)
+//!   - Account administration (replace admin, maintenance)
+//!   - Recovery operations (start, approve, dispute, status)
+//!   - Invitations (create, accept)
+//!   - OTA upgrades (propose, policy, status, opt-in)
+//! - Visualization and output formatting
+//! - Error handling and user-friendly error messages
+//! - Documentation and help text
+//!
+//! ## What Does NOT Belong Here
+//!
+//! - Effect implementations (belong in aura-effects)
+//! - Protocol logic (belong in Layer 5 feature crates)
+//! - Runtime composition (belong in aura-agent)
+//! - Test harnesses and fixtures (belong in aura-testkit)
+//! - Authorization logic (belong in aura-protocol/aura-wot)
+//! - Cryptographic operations (belong in aura-effects/aura-core)
+//!
+//! ## Design Principles
+//!
+//! - User-centric: CLI design prioritizes ease of use and clarity
+//! - Thin wrapper: CLI delegates actual logic to agent runtime and feature crates
+//! - Effect-agnostic: CLI works with any effect implementation via agent
+//! - Stateless: CLI is a pure coordinator, no persistent state
+//! - Error-friendly: Clear, actionable error messages for users
+//! - Documentation-rich: Help text and examples for all commands
+//! - Modular commands: Each command is independently usable
+//!
+//! ## Key Components
+//!
+//! - **CliHandler**: Main CLI handler coordinating command execution
+//! - **AmpAction, AuthorityCommands, ContextAction**: Scenario and authority commands
+//! - **RecoveryAction, InvitationAction, OtaAction**: Feature-specific commands
+//! - **ScenarioAction, AdminAction, SnapshotAction**: System administration commands
+//! - **Visualization module**: Output formatting and display utilities
+//!
+//! ## Usage
+//!
+//! CLI is driven by the binary crate `aura-cli-bin` which uses this library.
+//! Users interact through command-line invocations:
+//! ```sh
+//! aura authority list
+//! aura context create --participants ...
+//! aura recovery start --account ... --guardians ...
+//! aura scenario run --directory ... --pattern ...
+//! ```
 
 #![allow(clippy::disallowed_methods)] // CLI handlers need system calls in some TODO/placeholder code
 #![allow(clippy::disallowed_types)] // CLI uses blake3::Hasher directly in some places
 
 pub mod commands;
+pub mod demo;
 pub mod handlers;
+pub mod tui;
 pub mod visualization;
 
 // Re-export CLI handler and command enums
-pub use commands::{AmpAction, AuthorityCommands, ContextAction};
+pub use commands::{AmpAction, AuthorityCommands, ChatCommands, ContextAction, DemoCommands};
 pub use handlers::CliHandler;
 
 // Action types defined in this module (no re-export needed)
 
 // Action types are defined in this module and automatically available
 
-use aura_agent::AgentBuilder;
+use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::{
-    identifiers::{AuthorityId, DeviceId},
+    effects::ExecutionMode,
+    identifiers::{AuthorityId, ContextId, DeviceId},
     AuraError,
 };
 
 /// Create a CLI handler for the given device ID
 pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
     let authority_id = AuthorityId::new();
+    let context_id = ContextId::new();
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing()
         .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
+    let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
     Ok(CliHandler::new(
-        agent.runtime().effects().clone(),
+        agent.runtime().effects(),
         device_id,
+        effect_context,
     ))
 }
 
 /// Create a test CLI handler for the given device ID
 pub fn create_test_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
     let authority_id = AuthorityId::new();
+    let context_id = ContextId::new();
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing()
         .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
+    let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
     Ok(CliHandler::new(
-        agent.runtime().effects().clone(),
+        agent.runtime().effects(),
         device_id,
+        effect_context,
     ))
 }
 

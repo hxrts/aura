@@ -468,7 +468,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_enhanced_time_handler_creation() {
-        let handler = EnhancedTimeHandler::new();
+        let handler = EnhancedTimeHandler::default();
         let stats = handler.get_statistics().await;
 
         assert_eq!(stats.total_sleeps, 0);
@@ -478,7 +478,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_time_operations() {
-        let handler = EnhancedTimeHandler::new();
+        let handler = EnhancedTimeHandler::default();
 
         let current_epoch = handler.current_epoch().await;
         let current_timestamp = handler.current_timestamp().await;
@@ -492,7 +492,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sleep_operations() {
-        let handler = EnhancedTimeHandler::new();
+        let handler = EnhancedTimeHandler::default();
 
         let start = Instant::now();
         handler.sleep_ms(50).await;
@@ -507,7 +507,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_timeout_operations() {
-        let handler = EnhancedTimeHandler::new();
+        let handler = EnhancedTimeHandler::default();
 
         // Set timeout
         let timeout_handle = handler.set_timeout(100).await;
@@ -525,7 +525,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_context_management() {
-        let handler = EnhancedTimeHandler::new();
+        let handler = EnhancedTimeHandler::default();
 
         let context_id = Uuid::new_v4();
 
@@ -550,7 +550,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_yield_until_immediate() {
-        let handler = EnhancedTimeHandler::new();
+        let handler = EnhancedTimeHandler::default();
 
         let result = handler.yield_until(WakeCondition::Immediate).await;
         assert!(result.is_ok());
@@ -561,7 +561,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_yield_until_timeout() {
-        let handler = EnhancedTimeHandler::new();
+        let handler = EnhancedTimeHandler::default();
 
         let current_time = handler.current_timestamp().await;
         let future_time = current_time + 100; // 100 seconds in future
@@ -578,7 +578,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_yield_until_threshold_events() {
-        let handler = Arc::new(EnhancedTimeHandler::new());
+        let handler = Arc::new(EnhancedTimeHandler::default());
 
         // Start waiting for 3 events with 1 second timeout
         let wait_future = handler.yield_until(WakeCondition::ThresholdEvents {
@@ -603,7 +603,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_notification() {
-        let handler = EnhancedTimeHandler::new();
+        let handler = EnhancedTimeHandler::default();
 
         // Start event count
         let initial_count = handler.get_event_count().await;
@@ -617,7 +617,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_cleanup_expired_timeouts() {
-        let handler = EnhancedTimeHandler::new();
+        let handler = EnhancedTimeHandler::default();
 
         // Set a very short timeout
         let timeout_handle = handler.set_timeout(1).await;

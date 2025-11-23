@@ -81,8 +81,10 @@ impl Journal {
         let source_authority = journal_fact.source_authority;
 
         // Convert JournalFact to proper Fact with FactContent
+        // TODO: Use proper EffectContext when available
+        let dummy_ctx = crate::fact::EffectContext::default();
         let fact = Fact {
-            fact_id: FactId::generate(random).await,
+            fact_id: FactId::generate(&dummy_ctx, random).await,
             content: FactContent::FlowBudget(crate::fact::FlowBudgetFact {
                 context_id: ContextId::new(), // placeholder - should come from journal_fact or context
                 source: source_authority,
@@ -115,16 +117,8 @@ impl Journal {
         // Use the reduction function to derive tree state from facts
         use crate::reduction::reduce_authority;
         
-        // Create a fake Journal that wraps our fact journal for the reduction
-        // This is needed because reduce_authority expects a Journal struct
-        let temp_journal = Journal {
-            account_state: self.account_state.clone(),
-            op_log: self.op_log.clone(),
-            fact_journal: self.fact_journal.clone(),
-        };
-        
         // Reduce the authority facts to get current tree state
-        let authority_state = reduce_authority(&temp_journal);
+        let authority_state = reduce_authority(&self.fact_journal);
         
         // Return device count from the tree state
         authority_state.tree_state.device_count() as usize

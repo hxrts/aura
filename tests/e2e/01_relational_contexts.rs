@@ -1,8 +1,6 @@
 use aura_core::{hash, AuthorityId, Hash32};
-use aura_relational::{
-    guardian::{GuardianBinding, GuardianParameters},
-    RelationalContext, RelationalFact,
-};
+use aura_core::relational::{GuardianBinding, GuardianParameters, RelationalFact};
+use aura_relational::RelationalContext;
 
 #[test]
 fn relational_context_records_guardian_bindings() {
@@ -11,12 +9,11 @@ fn relational_context_records_guardian_bindings() {
 
     let mut context = RelationalContext::with_id(Default::default(), vec![account, guardian]);
 
-    let binding = GuardianBinding {
-        account_commitment: commitment_for(&account),
-        guardian_commitment: commitment_for(&guardian),
-        parameters: GuardianParameters::default(),
-        consensus_proof: None,
-    };
+    let binding = GuardianBinding::new(
+        commitment_for(&account),
+        commitment_for(&guardian),
+        GuardianParameters::default(),
+    );
 
     context
         .add_fact(RelationalFact::GuardianBinding(binding))

@@ -1,6 +1,6 @@
 use aura_agent::runtime::AuthorityManager;
 use aura_core::AuthorityId;
-use aura_effects::random::MockRandomHandler;
+use aura_testkit::stateful_effects::random::MockRandomHandler;
 
 #[tokio::test]
 async fn creates_and_lists_authorities() {

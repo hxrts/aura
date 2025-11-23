@@ -10,7 +10,7 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use crate::handlers::{AuraHandlerError, ExecutionMode};
-use crate::{effects::choreographic::ChoreographicRole, guards::flow::FlowHint};
+use crate::{effects::choreographic::ChoreographicRole, guards::FlowHint};
 use aura_core::identifiers::DeviceId;
 use aura_core::{AccountId, SessionId};
 
@@ -266,12 +266,18 @@ impl AgentContext {
     }
 
     /// Create a new session
-    /// NOTE: In production, should use TimeEffects for timestamp
-    pub fn create_session(&mut self, session_type: &str) -> SessionId {
+    /// NOTE: Requires TimeEffects parameter for proper time handling
+    pub async fn create_session<T: aura_core::TimeEffects>(
+        &mut self,
+        session_type: &str,
+        time_effects: &T,
+    ) -> SessionId {
         let session_id = SessionId::new();
-        // TODO: Replace with TimeEffects::current_timestamp()
+        // Use TimeEffects for proper timestamp
+        let timestamp = time_effects.current_timestamp().await;
+        let created_at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(timestamp);
         let metadata = SessionMetadata {
-            created_at: std::time::SystemTime::UNIX_EPOCH, // Deterministic timestamp
+            created_at,
             session_type: session_type.to_string(),
             data: HashMap::new(),
         };
@@ -390,11 +396,14 @@ impl AuraContext {
     }
 
     /// Create a new context for production mode
-    /// NOTE: In production, this should use TimeEffects for current timestamp
-    /// and RandomEffects for operation_id generation
-    pub fn for_production(device_id: DeviceId) -> Self {
-        // TODO: Replace with TimeEffects::current_timestamp_millis()
-        let created_at = 0u64; // Placeholder - should use TimeEffects
+    /// NOTE: Requires TimeEffects and RandomEffects parameters for proper initialization
+    pub async fn for_production<T: aura_core::TimeEffects, R: aura_core::RandomEffects>(
+        device_id: DeviceId,
+        time_effects: &T,
+        random_effects: &R,
+    ) -> Self {
+        // Use TimeEffects for current timestamp
+        let created_at = time_effects.current_timestamp().await;
         Self {
             device_id,
             execution_mode: ExecutionMode::Production,
@@ -402,7 +411,7 @@ impl AuraContext {
             created_at,
             account_id: None,
             metadata: HashMap::new(),
-            operation_id: uuid::Uuid::nil(), // TODO: Replace with RandomEffects
+            operation_id: random_effects.random_uuid().await, // Use RandomEffects
             epoch: created_at,
             flow_hint: None,
             choreographic: None,
@@ -487,11 +496,11 @@ impl AuraContext {
     }
 
     /// Create a derived context for a new operation.
-    /// NOTE: In production, should use RandomEffects for operation_id generation
-    pub fn child_operation(&self) -> Self {
+    /// NOTE: Requires RandomEffects parameter for proper operation_id generation
+    pub async fn child_operation<R: aura_core::RandomEffects>(&self, random_effects: &R) -> Self {
         let mut child = self.clone();
-        // TODO: Replace with RandomEffects::random_uuid()
-        child.operation_id = uuid::Uuid::nil(); // Placeholder - should use RandomEffects
+        // Use RandomEffects for operation_id generation
+        child.operation_id = random_effects.random_uuid().await;
         child.flow_hint = None;
         child
     }
@@ -518,11 +527,12 @@ impl AuraContext {
     }
 
     /// Get elapsed time since context creation
-    /// NOTE: In production, should use TimeEffects for current timestamp
-    pub fn elapsed(&self) -> Duration {
-        // TODO: Replace with TimeEffects::current_timestamp_millis()
-        // For now return zero duration to avoid disallowed method
-        Duration::ZERO
+    /// NOTE: Requires TimeEffects parameter for proper time calculation
+    pub async fn elapsed<T: aura_core::TimeEffects>(&self, time_effects: &T) -> Duration {
+        // Use TimeEffects for current timestamp
+        let current_timestamp = time_effects.current_timestamp().await;
+        let elapsed_seconds = current_timestamp.saturating_sub(self.created_at);
+        Duration::from_secs(elapsed_seconds)
     }
 }
 

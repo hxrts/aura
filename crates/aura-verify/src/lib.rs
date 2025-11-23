@@ -1,15 +1,20 @@
-//! Aura Identity Verification
+//! # Aura Verify - Layer 2: Specification (Domain Crate)
 //!
-//! **Layer 2: Specification - WHO (Authentication)**
+//! **Purpose**: Define identity semantics and signature verification logic.
 //!
 //! Complete identity verification system combining cryptographic signature verification
-//! with organizational device lifecycle management.
+//! with device lifecycle management.
 //!
-//! # Architecture
+//! # Architecture Constraints
 //!
-//! Core Layer 2 domain crate. Implements `aura-core` traits for identity concepts.
-//! Used by `aura-authenticate` (Layer 5) and other layers needing signature verification.
-//! No effect handlers - pure domain logic and cryptographic verification.
+//! **Layer 2 depends only on aura-core** (foundation).
+//! - ✅ Identity semantics and signature verification logic
+//! - ✅ Device lifecycle management (active, suspended, revoked)
+//! - ✅ Session management and validation
+//! - ✅ Pure domain logic for authentication checks
+//! - ❌ NO cryptographic signing/verification operations (use CryptoEffects from aura-effects)
+//! - ❌ NO handler composition (that's aura-composition)
+//! - ❌ NO multi-party protocol logic (that's aura-protocol)
 //!
 //! # Core Modules
 //!
@@ -31,6 +36,7 @@
 pub mod device;
 pub mod event_validation;
 pub mod guardian;
+pub mod messages;
 pub mod registry;
 pub mod session;
 pub mod threshold;
@@ -69,6 +75,14 @@ pub use aura_core::relationships::*;
 
 // Re-export registry types (from merged aura-identity)
 pub use registry::{DeviceInfo, DeviceStatus, IdentityVerifier, VerificationResult};
+
+// Re-export crypto message types
+pub use messages::crypto::{
+    AbortResharingMessage, AcknowledgeSubShareMessage, CryptoMessage, CryptoPayload,
+    DistributeSubShareMessage, EncryptedShare, FinalizeResharingMessage, InitiateResharingMessage,
+    ParticipantResharingVerification, ResharingAbortReason, ResharingMessage,
+    ResharingProtocolResult, ResharingVerification, RollbackResharingMessage,
+};
 
 // Convenience functions
 pub use device::verify_signature;

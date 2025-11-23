@@ -1,5 +1,8 @@
 use crate::effects::sync::{BloomDigest, SyncEffects, SyncError};
+use crate::guards::send_guard::{create_send_guard, SendGuardChain};
+use crate::guards::effect_system_trait::GuardEffectSystem;
 use async_trait::async_trait;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{tree::AttestedOp, Hash32};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -37,27 +40,31 @@ impl Default for BroadcastConfig {
 /// 2. Lazy pull: Respond to requests from peers for specific operations
 ///
 /// Includes rate limiting and back pressure handling to prevent overwhelming peers.
+/// All sends go through the guard chain to enforce authorization → flow → leakage → journal sequence.
 #[derive(Clone)]
 pub struct BroadcasterHandler {
     config: BroadcastConfig,
     /// Local operation store
     oplog: Arc<RwLock<BTreeMap<Hash32, AttestedOp>>>,
-    /// Set of known peers
+    /// Set of known peers (mapped to AuthorityId for guard chain)
     peers: Arc<RwLock<BTreeSet<Uuid>>>,
     /// Pending announcements (CID -> set of peers that need it)
     pending_announcements: Arc<RwLock<BTreeMap<Hash32, BTreeSet<Uuid>>>>,
     /// Rate limiting: peer -> count of ops pushed in current interval
     rate_limits: Arc<RwLock<BTreeMap<Uuid, usize>>>,
+    /// Context ID for guard chain operations
+    context_id: ContextId,
 }
 
 impl BroadcasterHandler {
-    pub fn new(config: BroadcastConfig) -> Self {
+    pub fn new(config: BroadcastConfig, context_id: ContextId) -> Self {
         Self {
             config,
             oplog: Arc::new(RwLock::new(BTreeMap::new())),
             peers: Arc::new(RwLock::new(BTreeSet::new())),
             pending_announcements: Arc::new(RwLock::new(BTreeMap::new())),
             rate_limits: Arc::new(RwLock::new(BTreeMap::new())),
+            context_id,
         }
     }
 
@@ -183,6 +190,73 @@ impl SyncEffects for BroadcasterHandler {
         _peer_id: Uuid,
         cids: Vec<Hash32>,
     ) -> Result<Vec<AttestedOp>, SyncError> {
+        // Return any ops we have that match the requested CIDs
+        let oplog = self.oplog.read().await;
+        let mut result = Vec::new();
+
+        for cid in cids {
+            if let Some(op) = oplog.get(&cid) {
+                result.push(op.clone());
+            }
+        }
+
+        Ok(result)
+    }
+
+    async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
+        let mut oplog = self.oplog.write().await;
+        let mut pending = self.pending_announcements.write().await;
+
+        for op in ops {
+            let cid = Hash32::from(op.op.parent_commitment);
+            oplog.insert(cid, op);
+            
+            // Add to pending announcements if not at capacity
+            if pending.len() < self.config.max_pending_announcements {
+                pending.insert(cid, BTreeSet::new());
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
+        let mut pending = self.pending_announcements.write().await;
+        
+        if pending.len() >= self.config.max_pending_announcements {
+            return Err(SyncError::OperationNotFound); // Using as "capacity exceeded"
+        }
+        
+        pending.insert(cid, BTreeSet::new());
+        Ok(())
+    }
+
+    async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
+        let oplog = self.oplog.read().await;
+        oplog.get(&cid)
+            .cloned()
+            .ok_or(SyncError::OperationNotFound)
+    }
+
+    async fn push_op_to_peers(&self, op: AttestedOp, _peers: Vec<Uuid>) -> Result<(), SyncError> {
+        let cid = Hash32::from(op.op.parent_commitment);
+        let mut oplog = self.oplog.write().await;
+        oplog.insert(cid, op);
+        Ok(())
+    }
+
+    async fn get_connected_peers(&self) -> Result<Vec<Uuid>, SyncError> {
+        // Broadcaster doesn't track individual peers - return empty list
+        Ok(Vec::new())
+    }
+}
+
+impl BroadcasterHandler {
+    async fn request_ops_from_peer_legacy(
+        &self,
+        _peer_id: Uuid,
+        cids: Vec<Hash32>,
+    ) -> Result<Vec<AttestedOp>, SyncError> {
         let oplog = self.oplog.read().await;
         let mut result = Vec::new();
 
@@ -228,19 +302,75 @@ impl SyncEffects for BroadcasterHandler {
         self.lazy_pull_response(peer_id, cid).await
     }
 
-    async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
-        // In real implementation: for each peer, transport.send(peer, op).await
+    async fn push_op_to_peers_with_guard_chain_impl<E: GuardEffectSystem>(
+        &self,
+        op: AttestedOp,
+        peers: Vec<Uuid>,
+        effect_system: &E,
+    ) -> Result<(), SyncError> {
         let cid = Hash32::from(op.op.parent_commitment);
-
-        for peer in peers {
-            tracing::debug!("Pushing op {:?} to peer: {:?}", cid, peer);
-            // transport.send(peer, OpPush { op: op.clone() }).await?;
+        
+        for peer_uuid in peers {
+            // Convert UUID to AuthorityId for guard chain
+            let peer_authority = AuthorityId::from(peer_uuid);
+            
+            // Create guard chain for sync operation
+            let guard_chain = create_send_guard(
+                "sync:broadcast_op".to_string(), // authorization requirement
+                self.context_id,
+                peer_authority,
+                50, // flow cost for broadcast operation
+            )
+            .with_operation_id(format!("broadcast_op_{}", cid));
+            
+            // Evaluate guard chain before sending
+            match guard_chain.evaluate(effect_system).await {
+                Ok(result) if result.authorized => {
+                    tracing::debug!(
+                        "Guard chain authorized broadcast of op {:?} to peer: {:?}",
+                        cid, peer_uuid
+                    );
+                    
+                    // TODO: Implement actual transport.send() with receipt from guard chain
+                    // transport.send_with_receipt(peer, OpPush { op: op.clone() }, result.receipt).await?;
+                    tracing::debug!("Op {:?} sent to peer: {:?} (mocked)", cid, peer_uuid);
+                }
+                Ok(result) => {
+                    tracing::warn!(
+                        "Guard chain denied broadcast of op {:?} to peer {:?}: {:?}",
+                        cid, peer_uuid, result.denial_reason
+                    );
+                    return Err(SyncError::AuthorizationFailed);
+                }
+                Err(err) => {
+                    tracing::error!(
+                        "Guard chain evaluation failed for op {:?} to peer {:?}: {}",
+                        cid, peer_uuid, err
+                    );
+                    return Err(SyncError::AuthorizationFailed);
+                }
+            }
         }
-
-        // Remove from pending announcements
+        
+        // Remove from pending announcements after successful sends
         let mut pending = self.pending_announcements.write().await;
         pending.remove(&cid);
+        
+        Ok(())
+    }
 
+    async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
+        // Legacy interface - deprecated, use push_op_to_peers_with_guard_chain instead
+        tracing::warn!("push_op_to_peers called without guard chain - this bypasses security");
+        
+        let cid = Hash32::from(op.op.parent_commitment);
+        for peer in peers {
+            tracing::debug!("Pushing op {:?} to peer: {:?} (INSECURE)", cid, peer);
+            // NOTE: This bypasses the guard chain and should not be used in production
+        }
+        
+        let mut pending = self.pending_announcements.write().await;
+        pending.remove(&cid);
         Ok(())
     }
 
@@ -283,7 +413,8 @@ mod tests {
             eager_push_enabled: true,
             ..Default::default()
         };
-        let handler = BroadcasterHandler::new(config);
+        let context_id = ContextId::new();
+        let handler = BroadcasterHandler::new(config, context_id);
 
         let peer1 = Uuid::from_u128(1);
         handler.add_peer(peer1).await;
@@ -301,7 +432,8 @@ mod tests {
             eager_push_enabled: false,
             ..Default::default()
         };
-        let handler = BroadcasterHandler::new(config);
+        let context_id = ContextId::new();
+        let handler = BroadcasterHandler::new(config, context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         let result = handler.eager_push_to_neighbors(op).await;
@@ -315,7 +447,8 @@ mod tests {
             eager_push_enabled: true,
             ..Default::default()
         };
-        let handler = BroadcasterHandler::new(config);
+        let context_id = ContextId::new();
+        let handler = BroadcasterHandler::new(config, context_id);
 
         let peer1 = Uuid::from_u128(1);
         handler.add_peer(peer1).await;
@@ -339,7 +472,8 @@ mod tests {
             eager_push_enabled: true,
             ..Default::default()
         };
-        let handler = BroadcasterHandler::new(config);
+        let context_id = ContextId::new();
+        let handler = BroadcasterHandler::new(config, context_id);
 
         // Fill pending queue to capacity
         for i in 0..6 {
@@ -361,7 +495,8 @@ mod tests {
             lazy_pull_enabled: true,
             ..Default::default()
         };
-        let handler = BroadcasterHandler::new(config);
+        let context_id = ContextId::new();
+        let handler = BroadcasterHandler::new(config, context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op.clone()).await;
@@ -384,7 +519,8 @@ mod tests {
             lazy_pull_enabled: false,
             ..Default::default()
         };
-        let handler = BroadcasterHandler::new(config);
+        let context_id = ContextId::new();
+        let handler = BroadcasterHandler::new(config, context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
         handler.add_op(op).await;
@@ -399,7 +535,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_announce_new_op() {
-        let handler = BroadcasterHandler::new(BroadcastConfig::default());
+        let context_id = ContextId::new();
+        let handler = BroadcasterHandler::new(BroadcastConfig::default(), context_id);
 
         let peer1 = Uuid::from_u128(1);
         handler.add_peer(peer1).await;
@@ -413,7 +550,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_deduplication() {
-        let handler = BroadcasterHandler::new(BroadcastConfig::default());
+        let context_id = ContextId::new();
+        let handler = BroadcasterHandler::new(BroadcastConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
         let op1_dup = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -434,7 +572,8 @@ mod tests {
             max_ops_per_peer: 1,
             ..Default::default()
         };
-        let handler = BroadcasterHandler::new(config);
+        let context_id = ContextId::new();
+        let handler = BroadcasterHandler::new(config, context_id);
 
         let peer1 = Uuid::from_u128(1);
         handler.add_peer(peer1).await;

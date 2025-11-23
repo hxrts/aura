@@ -4,7 +4,7 @@
 //! authority-centric architecture. Authorities are opaque cryptographic actors
 //! that can sign operations and hold state without exposing internal device structure.
 
-use crate::{identifiers::AuthorityId, session_epochs::Epoch, Hash32, Result};
+use crate::{identifiers::AuthorityId, journal::Fact, session_epochs::Epoch, Hash32, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, LazyLock};
@@ -80,8 +80,8 @@ pub type AuthorityRef = Arc<dyn Authority>;
 pub struct AuthorityState {
     /// Current commitment tree state (internal structure)
     pub tree_state: TreeState,
-    /// Placeholder for journal facts - will be replaced with actual fact types
-    pub facts: std::collections::BTreeSet<String>, // TODO: Replace with Fact type
+    /// Journal facts that define this authority's state
+    pub facts: std::collections::BTreeSet<Fact>,
 }
 
 /// Commitment tree state for authority management

@@ -1,26 +1,24 @@
-//! Bridge Adapters for Handler Integration
+//! Layer 4: Bridge Adapters - Type-Safe & Dynamic Handler Integration
 //!
-//! This module contains bridge adapters that connect different handler systems
-//! and provide integration points between various effect handling approaches.
+//! Bridge adapters connecting different handler systems with type-safe or dynamic bridging.
+//! Enables seamless integration between handler implementations without core interface changes.
 //!
-//! ## Bridge Types
-//!
-//! - **Typed Bridge**: Type-safe bridging between specific handler interfaces
+//! **Bridge Types** (per docs/001_system_architecture.md):
+//! - **TypedHandlerBridge**: Type-safe bridging between specific handler interfaces
 //!   - Preserves type information during handler composition
 //!   - Enables compile-time verification of handler compatibility
-//!   - Used for strongly-typed effect system integration
+//!   - Used for strongly-typed effect system integration (static dispatch)
 //!
-//! - **Unified Bridge**: Dynamic bridging for heterogeneous handler systems
-//!   - Type-erased bridging for maximum flexibility
-//!   - Runtime handler discovery and adaptation
+//! - **UnifiedAuraHandlerBridge**: Dynamic bridging for heterogeneous handler systems
+//!   - Type-erased bridging for maximum flexibility (runtime dispatch)
+//!   - Enables handler discovery and adaptation at runtime
 //!   - Used for plugin systems and dynamic handler loading
 //!
-//! ## Design Principles
-//!
-//! Bridge adapters follow the adapter pattern to connect incompatible interfaces
-//! while preserving the algebraic properties of the effect system. They enable
-//! seamless integration between different handler implementations without
-//! requiring changes to the core handler interfaces.
+//! **Design Principle** (per docs/106_effect_system_and_runtime.md):
+//! Bridge adapters follow adapter pattern to connect incompatible interfaces while
+//! preserving algebraic properties of effect system. Enable seamless integration
+//! between production handlers, mocks, and simulation handlers without changes to
+//! core handler interfaces or effect trait definitions.
 
 pub mod typed_bridge;
 pub mod unified_bridge;

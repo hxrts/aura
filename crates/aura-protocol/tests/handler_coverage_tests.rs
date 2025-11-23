@@ -11,9 +11,10 @@
 use aura_core::identifiers::DeviceId;
 use aura_protocol::handlers::context_immutable::AuraContext;
 use aura_protocol::handlers::{
-    erased::AuraHandlerFactory, AuraHandler, AuraHandlerError, CompositeHandler, EffectRegistry,
+    erased::AuraHandlerFactory, AuraHandler, AuraHandlerError, EffectRegistry,
     EffectType, ExecutionMode, RegistrableHandler,
 };
+use aura_composition::CompositeHandler;
 use aura_testkit::strategies::arb_device_id;
 use std::collections::HashSet;
 

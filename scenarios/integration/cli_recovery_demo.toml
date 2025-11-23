@@ -1,0 +1,303 @@
+# CLI Recovery Demo - Bob's Journey
+#
+# Complete scenario mirroring Bob's recovery demo workflow:
+# 1. Alice & Charlie pre-setup with existing accounts
+# 2. Bob onboarding with guardian setup 
+# 3. Group chat establishment and messaging
+# 4. Bob's account data loss simulation
+# 5. Guardian-assisted recovery with message history restoration
+#
+# This scenario validates the end-to-end UX demo flow from TODO.md Phase 1A
+
+[metadata]
+name = "cli_recovery_demo"
+description = "Complete CLI recovery demo scenario - Bob's journey with Alice & Charlie"
+version = "1.0.0"
+author = "Aura UX Demo Team"
+tags = ["demo", "recovery", "cli", "e2e", "multi-actor", "chat"]
+
+[setup]
+participants = 3  # Alice, Bob, Charlie
+threshold = 2     # 2-of-3 guardian setup
+seed = 2024       # Deterministic demo
+chat_enabled = true
+multi_actor_chat = true
+
+[network]
+latency_range = [50, 150]    # Realistic network latency
+drop_rate = 0.01             # Minimal packet loss for demo
+partition_simulation = true   # Enable account data loss simulation
+
+[demo_config]
+# Demo-specific configuration
+bob_as_protagonist = true
+alice_as_primary_guardian = true
+charlie_as_secondary_guardian = true
+message_history_validation = true
+account_loss_simulation = true
+
+# Phase 1: Pre-Demo Setup (Alice & Charlie preparation)
+[[phases]]
+name = "alice_charlie_setup"
+description = "Alice and Charlie set up their accounts before Bob joins"
+timeout_seconds = 10
+actions = [
+    { type = "run_choreography", choreography = "account_creation", participants = ["alice"], threshold = 1 },
+    { type = "run_choreography", choreography = "account_creation", participants = ["charlie"], threshold = 1 },
+    { type = "verify_property", property = "alice_account_ready", expected = true },
+    { type = "verify_property", property = "charlie_account_ready", expected = true }
+]
+
+# Phase 2: Bob's Onboarding Journey
+[[phases]]
+name = "bob_onboarding"
+description = "Bob creates account and receives guardian invitations from Alice & Charlie"
+timeout_seconds = 15
+actions = [
+    { type = "run_choreography", choreography = "account_creation", participants = ["bob"], threshold = 1 },
+    { type = "run_choreography", choreography = "guardian_invitation", participants = ["alice", "bob"], guardian = "alice", protege = "bob" },
+    { type = "run_choreography", choreography = "guardian_invitation", participants = ["charlie", "bob"], guardian = "charlie", protege = "bob" },
+    { type = "run_choreography", choreography = "guardian_configuration", participants = ["alice", "bob", "charlie"], threshold = 2 },
+    { type = "verify_property", property = "bob_guardians_configured", expected = true },
+    { type = "verify_property", property = "guardian_relationships_established", expected = true }
+]
+
+# Phase 3: Group Chat Establishment
+[[phases]]
+name = "group_chat_setup"
+description = "Alice creates group chat and invites Bob & Charlie"
+timeout_seconds = 10
+actions = [
+    { type = "run_choreography", choreography = "chat_group_creation", participants = ["alice"], creator = "alice", group_name = "Alice, Bob & Charlie" },
+    { type = "run_choreography", choreography = "chat_group_invitation", participants = ["alice", "bob"], group_admin = "alice", invitee = "bob" },
+    { type = "run_choreography", choreography = "chat_group_invitation", participants = ["alice", "charlie"], group_admin = "alice", invitee = "charlie" },
+    { type = "verify_property", property = "group_chat_created", expected = true },
+    { type = "verify_property", property = "all_members_joined", expected = true }
+]
+
+# Phase 4: Active Chat Messaging
+[[phases]]
+name = "group_messaging"
+description = "Multi-actor group chat with message history"
+timeout_seconds = 20
+actions = [
+    { type = "run_choreography", choreography = "chat_message", participants = ["alice"], sender = "alice", message = "Welcome to our group, Bob!" },
+    { type = "run_choreography", choreography = "chat_message", participants = ["bob"], sender = "bob", message = "Thanks Alice! Great to be here." },
+    { type = "run_choreography", choreography = "chat_message", participants = ["charlie"], sender = "charlie", message = "Hey everyone! This chat system is awesome." },
+    { type = "run_choreography", choreography = "chat_message", participants = ["alice"], sender = "alice", message = "Bob, you should backup your account soon" },
+    { type = "run_choreography", choreography = "chat_message", participants = ["bob"], sender = "bob", message = "I'll do that right after this demo!" },
+    { type = "verify_property", property = "message_history_available", expected = true },
+    { type = "verify_property", property = "all_messages_delivered", expected = true }
+]
+
+# Phase 5: Catastrophic Failure Simulation
+[[phases]]
+name = "bob_account_loss"
+description = "Simulate Bob losing all his account data"
+timeout_seconds = 5
+actions = [
+    { type = "simulate_data_loss", target = "bob", loss_type = "complete_device_loss" },
+    { type = "apply_network_condition", condition = "partition", participants = ["bob"], duration_ticks = 100 },
+    { type = "verify_property", property = "bob_account_inaccessible", expected = true },
+    { type = "verify_property", property = "bob_data_lost", expected = true }
+]
+
+# Phase 6: Recovery Initiation
+[[phases]]
+name = "recovery_initiation"
+description = "Bob initiates guardian recovery with Alice & Charlie's help"
+timeout_seconds = 15
+actions = [
+    { type = "run_choreography", choreography = "guardian_recovery_request", participants = ["bob"], requester = "bob" },
+    { type = "run_choreography", choreography = "guardian_recovery_validation", participants = ["alice", "bob"], guardian = "alice", protege = "bob" },
+    { type = "run_choreography", choreography = "guardian_recovery_validation", participants = ["charlie", "bob"], guardian = "charlie", protege = "bob" },
+    { type = "run_choreography", choreography = "guardian_recovery_coordination", participants = ["alice", "bob", "charlie"], threshold = 2 },
+    { type = "verify_property", property = "recovery_request_validated", expected = true },
+    { type = "verify_property", property = "guardian_approval_threshold_met", expected = true }
+]
+
+# Phase 7: Account and History Restoration
+[[phases]]
+name = "account_restoration"
+description = "Bob's account and chat history are restored"
+timeout_seconds = 20
+actions = [
+    { type = "run_choreography", choreography = "threshold_key_recovery", participants = ["alice", "bob", "charlie"], threshold = 2, target = "bob" },
+    { type = "run_choreography", choreography = "chat_history_sync", participants = ["bob"], target = "bob" },
+    { type = "verify_property", property = "bob_account_restored", expected = true },
+    { type = "verify_property", property = "bob_chat_history_restored", expected = true },
+    { type = "verify_property", property = "message_continuity_maintained", expected = true }
+]
+
+# Phase 8: Post-Recovery Verification
+[[phases]]
+name = "post_recovery_messaging"
+description = "Verify Bob can resume normal chat operations"
+timeout_seconds = 10
+actions = [
+    { type = "run_choreography", choreography = "chat_message", participants = ["bob"], sender = "bob", message = "I'm back! Thanks Alice and Charlie for helping me recover." },
+    { type = "run_choreography", choreography = "chat_message", participants = ["alice"], sender = "alice", message = "Welcome back Bob! Guardian recovery really works!" },
+    { type = "run_choreography", choreography = "chat_message", participants = ["charlie"], sender = "charlie", message = "Amazing! You can see all our previous messages too." },
+    { type = "verify_property", property = "bob_can_send_messages", expected = true },
+    { type = "verify_property", property = "bob_can_see_full_history", expected = true },
+    { type = "verify_property", property = "group_functionality_restored", expected = true }
+]
+
+# Demo Success Properties
+[[properties]]
+name = "alice_account_ready"
+property_type = "safety"
+description = "Alice's account is properly initialized"
+
+[[properties]]
+name = "charlie_account_ready"
+property_type = "safety"
+description = "Charlie's account is properly initialized"
+
+[[properties]]
+name = "bob_guardians_configured"
+property_type = "safety"
+description = "Bob has Alice and Charlie configured as guardians"
+
+[[properties]]
+name = "guardian_relationships_established"
+property_type = "liveness"
+description = "Guardian relationships are active and functional"
+
+[[properties]]
+name = "group_chat_created"
+property_type = "safety"
+description = "Group chat is created with all participants"
+
+[[properties]]
+name = "all_members_joined"
+property_type = "liveness"
+description = "Alice, Bob, and Charlie are all in the group chat"
+
+[[properties]]
+name = "message_history_available"
+property_type = "safety"
+description = "Chat message history is properly maintained"
+
+[[properties]]
+name = "all_messages_delivered"
+property_type = "liveness"
+description = "All chat messages are delivered to all participants"
+
+[[properties]]
+name = "bob_account_inaccessible"
+property_type = "safety"
+description = "Bob cannot access his account after data loss"
+
+[[properties]]
+name = "bob_data_lost"
+property_type = "safety"
+description = "Bob's account data is completely lost"
+
+[[properties]]
+name = "recovery_request_validated"
+property_type = "safety"
+description = "Guardian recovery request is properly validated"
+
+[[properties]]
+name = "guardian_approval_threshold_met"
+property_type = "safety"
+description = "Sufficient guardian approvals for recovery"
+
+[[properties]]
+name = "bob_account_restored"
+property_type = "liveness"
+description = "Bob's account is fully restored after guardian recovery"
+
+[[properties]]
+name = "bob_chat_history_restored"
+property_type = "safety"
+description = "Bob can see all previous chat messages after recovery"
+
+[[properties]]
+name = "message_continuity_maintained"
+property_type = "safety"
+description = "No messages were lost during the recovery process"
+
+[[properties]]
+name = "bob_can_send_messages"
+property_type = "liveness"
+description = "Bob can send new messages after recovery"
+
+[[properties]]
+name = "bob_can_see_full_history"
+property_type = "safety"
+description = "Bob can see complete chat history including pre-recovery messages"
+
+[[properties]]
+name = "group_functionality_restored"
+property_type = "liveness"
+description = "Full group chat functionality is restored after Bob's recovery"
+
+# Demo Choreographies
+[[choreographies]]
+name = "chat_group_creation"
+description = "Create a new group chat"
+participants_min = 1
+effects = ["StorageEffects", "RandomEffects", "TimeEffects"]
+
+[[choreographies]]
+name = "chat_group_invitation"
+description = "Invite a user to join an existing group chat"
+participants_min = 2
+effects = ["StorageEffects", "TransportEffects"]
+
+[[choreographies]]
+name = "chat_message"
+description = "Send a message to a group chat"
+participants_min = 1
+effects = ["StorageEffects", "TransportEffects", "TimeEffects"]
+
+[[choreographies]]
+name = "chat_history_sync"
+description = "Synchronize chat history for a user"
+participants_min = 1
+effects = ["StorageEffects", "TransportEffects"]
+
+[[choreographies]]
+name = "guardian_invitation"
+description = "Invite someone to be a guardian"
+participants_min = 2
+effects = ["StorageEffects", "TransportEffects", "CryptoEffects"]
+
+[[choreographies]]
+name = "guardian_recovery_request"
+description = "Request guardian-assisted account recovery"
+participants_min = 1
+effects = ["StorageEffects", "TransportEffects"]
+
+[[choreographies]]
+name = "guardian_recovery_validation"
+description = "Guardian validates recovery request"
+participants_min = 2
+effects = ["StorageEffects", "CryptoEffects", "TransportEffects"]
+
+[[choreographies]]
+name = "guardian_recovery_coordination"
+description = "Coordinate multi-guardian recovery process"
+participants_min = 2
+effects = ["StorageEffects", "CryptoEffects", "TransportEffects"]
+
+[[choreographies]]
+name = "threshold_key_recovery"
+description = "Recover threshold keys using guardian shares"
+participants_min = 2
+effects = ["CryptoEffects", "StorageEffects"]
+
+# Failure Simulation
+[[failure_modes]]
+name = "complete_device_loss"
+description = "Simulate complete loss of Bob's device and all local data"
+target_type = "participant"
+effects = ["data_loss", "network_partition"]
+
+[[failure_modes]]
+name = "partial_network_partition"
+description = "Simulate temporary network connectivity issues"
+target_type = "network"
+effects = ["packet_loss", "high_latency"]

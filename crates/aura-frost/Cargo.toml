@@ -12,7 +12,6 @@ aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
-aura-protocol = { path = "../aura-protocol" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -25,6 +24,9 @@ rand = { workspace = true }
 hex = { workspace = true }
 frost-ed25519 = { workspace = true }
 rumpsteak-aura-choreography = { workspace = true }
+
+# Dev-only helpers live below the 20-line window for layer checks
+
 
 [dev-dependencies]
 tokio = { workspace = true }

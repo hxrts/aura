@@ -41,6 +41,17 @@ pub struct RendezvousPoint {
     pub last_activity: u64,
 }
 
+/// Discovered peer from discovery query
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiscoveredPeer {
+    /// Device ID of discovered peer
+    pub device_id: DeviceId,
+    /// Peer advertisement details
+    pub advertisement: PeerAdvertisement,
+    /// Discovery metadata
+    pub discovery_metadata: HashMap<String, String>,
+}
+
 /// Peer advertisement for discovery
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerAdvertisement {
@@ -542,11 +553,23 @@ impl DiscoveryService {
     /// Find rendezvous points relevant to query
     fn find_relevant_rendezvous_points(
         &self,
-        _query: &DiscoveryQuery,
+        query: &DiscoveryQuery,
     ) -> AuraResult<Vec<RendezvousId>> {
-        // TODO fix - For now, return all available rendezvous points
-        // In practice, this would use location hashing and other techniques
-        Ok(self.rendezvous_points.keys().copied().collect())
+        if query.encrypted_relationship_context.is_empty() {
+            return Ok(self.rendezvous_points.keys().copied().collect());
+        }
+
+        let location_hash =
+            Self::derive_location_hash(&query.encrypted_relationship_context)?;
+
+        let filtered: Vec<RendezvousId> = self
+            .rendezvous_points
+            .values()
+            .filter(|rp| rp.location_hash == location_hash)
+            .map(|rp| rp.rendezvous_id)
+            .collect();
+
+        Ok(filtered)
     }
 
     /// Search advertisements at a rendezvous point

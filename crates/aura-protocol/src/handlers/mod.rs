@@ -1,53 +1,40 @@
-//! Unified Aura Handler Architecture
+//! Layer 4: Unified Handler Architecture - Effects-Handler Bridge
 //!
-//! This module defines the core traits and types for Aura's unified handler system.
-//! All effect execution, session type interpretation, and middleware composition
-//! flows through these interfaces.
+//! Bridges effect trait definitions (Layer 1 abstract interfaces) with concrete handler
+//! implementations (Layer 3/4 semantics). Handlers implement effect traits and compose
+//! via guard chains to enforce authorization, privacy, and budget invariants.
 //!
-//! # Architecture Overview
+//! **Core Design Pattern** (per docs/001_system_architecture.md, docs/106_effect_system_and_runtime.md):
+//! - **Effects** (Layer 1): Abstract trait interfaces; specify **what** operations are available
+//! - **Handlers** (Layer 3/4): Concrete implementations; define **how** operations execute
+//! - **Composition** (Layer 4): Guards and middleware wrap handlers for enforcement
+//! - **Execution**: Effect-using code parameterized by effect traits; handlers injected at runtime
 //!
-//! The unified handler architecture replaces the previous fragmented approach
-//! with a single, elegant composition system:
+//! **Benefits**:
+//! - Multiple implementations (production, mock, simulation) without changing effect declarations
+//! - Handler composition and middleware stacking (guard chain: CapGuard → FlowGuard → JournalCoupler)
+//! - Testing with deterministic implementations (aura-simulator)
+//! - Runtime mode switching (ExecutionMode::Testing/Production/Simulation)
 //!
-//! - **AuraHandler**: Core trait for all effect execution and session interpretation
-//! - **AuraContext**: Unified context flowing through all operations
-//! - **Effect**: Type-safe wrapper for all effect operations
-//! - **EffectType**: Classification system for effect dispatch
-//! - **ExecutionMode**: Environment control (Testing, Production, Simulation)
+//! **Handler Categories** (organized by concern):
+//! - **core**: Base effect handler traits, registry infrastructure, error types
+//! - **tree**: Commitment tree reduction and application handlers
+//! - **memory**: In-memory handlers for testing and simulation
+//! - **bridges**: Integration adapters connecting effect systems
+//! - **storage**: Storage coordination handlers
+//! - **context**: Context/lifecycle management for handler operations
 //!
-//! # Design Principles
+//! **Handler Categories**:
+//! - **core**: Base effect handler traits and registry
+//! - **tree**: Commitment tree operations
+//! - **memory**: In-memory implementations for testing
+//! - **agent**: Device auth, session management
+//! - **bridges**: Adapters for integration
+//! - **storage**: Storage coordination
+//! - **context**: Context management for handler operations
 //!
-//! - **Algebraic Composition**: Preserve free algebra properties
-//! - **Middleware-First**: All handlers are middleware in a composable stack
-//! - **Unified Context**: Single context object flows through all layers
-//! - **Zero Legacy**: Clean replacement with no backwards compatibility
-//!
-//! # Naming Conventions
-//!
-//! This module follows algebraic effects theory naming conventions:
-//!
-//! ## Effects vs Handlers
-//!
-//! - **Effect**: A declaration of capabilities or operations that a computation may perform,
-//!   without specifying how those operations are implemented. Effects are abstract interfaces
-//!   that represent what can be done.
-//!   - Examples: `CryptoEffects`, `NetworkEffects`, `StorageEffects`
-//!   - Naming: `{Domain}Effects` trait
-//!
-//! - **Handler**: A concrete implementation that interprets effects by providing the actual
-//!   behavior for each effect operation. Handlers define how effects are executed in a
-//!   specific context.
-//!   - Examples: `MockCryptoHandler`, `RealCryptoHandler`, `TcpNetworkHandler`
-//!   - Naming: `{Adjective}{Domain}Handler` struct
-//!
-//! ## Coordination Patterns
-//!
-//! - **Coordinator**: Orchestrates multiple handlers or manages multi-party operations
-//!   - Examples: `CrdtCoordinator`, `StorageCoordinator`
-//!   - Naming: `{Domain}Coordinator`
-//!
-//! - **Adapter**: Bridges between different interfaces or protocols
-//!   - Examples: `AuraHandlerAdapter`, `ChoreographicAdapter`
+//! **Guard Chain Integration** (docs/003_information_flow_contract.md):
+//! Every message flows: CapGuard → FlowGuard → JournalCoupler → LeakageTracker → Transport
 //!   - Naming: `{Source}{Target}Adapter`
 //!
 //! - **Bridge**: Connects different subsystems or layers
@@ -64,90 +51,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
 
-// Re-export ExecutionMode from aura_core to avoid duplication
-pub use aura_core::effects::ExecutionMode;
-
-// Legacy module declarations removed - now organized under new structure
-
-/// Effect type classification for dispatch and middleware routing
-///
-/// Categorizes all effects in the Aura system for efficient dispatch
-/// and middleware composition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum EffectType {
-    /// Cryptographic operations (FROST, DKD, hashing, key derivation)
-    Crypto,
-    /// Network communication (send, receive, broadcast)
-    Network,
-    /// Persistent storage operations
-    Storage,
-    /// Time-related operations (current time, sleep)
-    Time,
-    /// Console and logging operations
-    Console,
-    /// Random number generation
-    Random,
-    /// Effect API operations (transaction log, state)
-    EffectApi,
-    /// Journal operations (event log, snapshots)
-    Journal,
-
-    /// Tree operations (commitment tree, MLS)
-    Tree,
-
-    /// Choreographic protocol coordination
-    Choreographic,
-
-    /// System monitoring, logging, and configuration
-    System,
-
-    /// Device-local storage
-    DeviceStorage,
-    /// Device authentication and sessions
-    Authentication,
-    /// Configuration management
-    Configuration,
-    /// Session lifecycle management
-    SessionManagement,
-
-    /// Fault injection for testing
-    FaultInjection,
-    /// Time control for simulation
-    TimeControl,
-    /// State inspection for debugging
-    StateInspection,
-    /// Property checking for verification
-    PropertyChecking,
-    /// Chaos coordination for resilience testing
-    ChaosCoordination,
-}
-
-impl fmt::Display for EffectType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Crypto => write!(f, "crypto"),
-            Self::Network => write!(f, "network"),
-            Self::Storage => write!(f, "storage"),
-            Self::Time => write!(f, "time"),
-            Self::Console => write!(f, "console"),
-            Self::Random => write!(f, "random"),
-            Self::EffectApi => write!(f, "effect_api"),
-            Self::Journal => write!(f, "journal"),
-            Self::Tree => write!(f, "tree"),
-            Self::Choreographic => write!(f, "choreographic"),
-            Self::System => write!(f, "system"),
-            Self::DeviceStorage => write!(f, "device_storage"),
-            Self::Authentication => write!(f, "authentication"),
-            Self::Configuration => write!(f, "configuration"),
-            Self::SessionManagement => write!(f, "session_management"),
-            Self::FaultInjection => write!(f, "fault_injection"),
-            Self::TimeControl => write!(f, "time_control"),
-            Self::StateInspection => write!(f, "state_inspection"),
-            Self::PropertyChecking => write!(f, "property_checking"),
-            Self::ChaosCoordination => write!(f, "chaos_coordination"),
-        }
-    }
-}
+// Re-export types from aura_core to avoid duplication
+pub use aura_core::effects::{ExecutionMode, EffectType};
 
 /// Error type for Aura handler operations
 #[derive(Debug, Error)]
@@ -298,82 +203,17 @@ impl AuraHandlerError {
 // The primary AuraHandler trait is now defined in the erased module
 // to avoid duplication and ensure all handlers use the unified interface.
 
-impl EffectType {
-    /// Get all effect types
-    pub fn all() -> Vec<Self> {
-        vec![
-            Self::Crypto,
-            Self::Network,
-            Self::Storage,
-            Self::Time,
-            Self::Console,
-            Self::Random,
-            Self::EffectApi,
-            Self::Journal,
-            Self::Tree,
-            Self::Choreographic,
-            Self::System,
-            Self::DeviceStorage,
-            Self::Authentication,
-            Self::Configuration,
-            Self::SessionManagement,
-            Self::FaultInjection,
-            Self::TimeControl,
-            Self::StateInspection,
-            Self::PropertyChecking,
-            Self::ChaosCoordination,
-        ]
-    }
-
-    /// Check if this is a core protocol effect
-    pub fn is_protocol_effect(&self) -> bool {
-        matches!(
-            self,
-            Self::Crypto
-                | Self::Network
-                | Self::Storage
-                | Self::Time
-                | Self::Console
-                | Self::Random
-                | Self::EffectApi
-                | Self::Journal
-                | Self::Choreographic
-                | Self::System
-        )
-    }
-
-    /// Check if this is an agent effect
-    pub fn is_agent_effect(&self) -> bool {
-        matches!(
-            self,
-            Self::DeviceStorage
-                | Self::Authentication
-                | Self::Configuration
-                | Self::SessionManagement
-        )
-    }
-
-    /// Check if this is a simulation effect
-    pub fn is_simulation_effect(&self) -> bool {
-        matches!(
-            self,
-            Self::FaultInjection
-                | Self::TimeControl
-                | Self::StateInspection
-                | Self::PropertyChecking
-                | Self::ChaosCoordination
-        )
-    }
-}
+// EffectType impl block is defined in aura-core to avoid orphan rule violations
 
 // Re-export types from submodules (selective to avoid ambiguous re-exports)
 
-// Core handler infrastructure
+// Core handler infrastructure (type erasure only - composition moved to aura-composition)
 pub mod core;
-pub use core::{
-    AuraHandler, AuraHandlerBuilder, AuraHandlerConfig, AuraHandlerFactory, BoxedHandler,
-    CompositeHandler, EffectRegistry, FactoryError, HandlerUtils, RegistrableHandler,
-    RegistryError,
+pub use core::{AuraHandler, BoxedHandler, HandlerUtils};
+
+// Re-export composition infrastructure from aura-composition
+pub use aura_composition::{
+    CompositeHandler, EffectRegistry, HandlerFactory, FactoryError, RegistrableHandler,
 };
 
 // Context management

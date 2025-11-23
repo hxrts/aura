@@ -1,15 +1,20 @@
-//! # Aura Transport - Layer 2 Transport Types and Protocol Definitions
+//! # Aura Transport - Layer 2: Specification (Domain Crate)
+//!
+//! **Purpose**: Define P2P communication abstractions and transport semantics.
 //!
 //! This crate provides privacy-aware transport data types, protocol message definitions,
-//! and relationship-scoped connection abstractions. It implements Layer 2 of Aura's
-//! 8-layer architecture - Specification layer with types only, no implementations.
+//! and relationship-scoped connection abstractions.
 //!
-//! ## Architecture Compliance
+//! # Architecture Constraints
 //!
-//! - **Layer 2 (Specification)**: Types and protocol definitions only
-//! - **NO Effect Handlers**: Effect implementations belong in Layer 3 (aura-effects)
-//! - **NO Choreographic Coordination**: Multi-party coordination belongs in Layer 4 (aura-protocol)
-//! - **Privacy-by-Design**: Privacy preservation integrated into core types
+//! **Layer 2 depends only on aura-core** (foundation).
+//! - ✅ Transport semantics and message types
+//! - ✅ P2P communication abstractions
+//! - ✅ Privacy-by-design transport types
+//! - ✅ Protocol message specifications
+//! - ❌ NO effect handler implementations (use NetworkEffects from aura-effects)
+//! - ❌ NO multi-party coordination (that's aura-protocol)
+//! - ❌ NO runtime composition (that's aura-composition/aura-agent)
 //!
 //! ## Key Design Principles
 //!
@@ -82,6 +87,14 @@ pub mod protocols {
 /// Context-aware transport for authority-centric model
 pub mod context_transport;
 
+/// Transport layer message types and protocol definitions
+///
+/// This module contains message types for transport layer protocols including
+/// social coordination messages, rendezvous protocol messages, and other transport
+/// domain concerns that have been moved from higher layers following the architectural
+/// refactoring plan.
+pub mod messages;
+
 // Re-export types from sub-modules
 pub use types::config::TransportConfig;
 pub use types::connection::{ConnectionId, ConnectionInfo, ConnectionState, ScopedConnectionId};
@@ -101,4 +114,11 @@ pub use context_transport::{
     ContextTransportConfig, ContextTransportEndpoint, ContextTransportMessage,
     ContextTransportMetrics, ContextTransportSession, SessionControl, SessionState,
     TransportProtocol,
+};
+
+// Re-export message types
+pub use messages::{
+    AuthenticationPayload, HandshakeResult, HandshakeTranscript, PayloadKind, PskHandshakeConfig,
+    RendezvousMessage, SocialMessage, SocialPayload, StorageCapabilityAnnouncement,
+    TransportDescriptor, TransportKind, TransportOfferPayload,
 };

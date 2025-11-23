@@ -42,7 +42,9 @@ impl TestkitSimulatorBridge {
                         device_id, e
                     ))
                 })?;
-            let effect_system = agent.runtime().effects().clone();
+            let config = aura_agent::core::AgentConfig::default();
+            let effect_system = AuraEffectSystem::testing(&config)
+                .map_err(|e| SimulatorError::OperationFailed(e.to_string()))?;
 
             effect_systems.push((device_id, Arc::new(effect_system)));
         }
@@ -108,7 +110,10 @@ impl TestkitSimulatorBridge {
             .map_err(|e| {
                 SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
             })?;
-        Ok(Arc::new(agent.runtime().effects().clone()))
+        let config = aura_agent::core::AgentConfig::default();
+        let effect_system =
+            AuraEffectSystem::testing(&config).map_err(|e| SimulatorError::OperationFailed(e.to_string()))?;
+        Ok(Arc::new(effect_system))
     }
 }
 

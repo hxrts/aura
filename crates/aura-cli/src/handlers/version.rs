@@ -3,11 +3,11 @@
 //! Effect-based implementation of the version command.
 
 use anyhow::Result;
-use aura_agent::AuraEffectSystem;
+use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_protocol::effect_traits::ConsoleEffects;
 
 /// Handle version display through effects
-pub async fn handle_version(_effects: &AuraEffectSystem) -> Result<()> {
+pub async fn handle_version(_ctx: &EffectContext, _effects: &AuraEffectSystem) -> Result<()> {
     // Display version information through console effects
     println!("aura {}", env!("CARGO_PKG_VERSION"));
 

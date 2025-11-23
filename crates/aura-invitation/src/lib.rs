@@ -1,22 +1,55 @@
-//! Aura Invitation Choreographies
+//! # Aura Invitation - Layer 5: Feature/Protocol Implementation
 //!
-//! This crate provides choreographic protocols for invitation and acceptance
-//! operations in the Aura threshold identity platform.
+//! This crate implements choreographic protocols for invitation and acceptance
+//! of new devices, guardians, and relationships in the Aura threshold identity platform.
 //!
-//! # Architecture
+//! ## Purpose
 //!
-//! This crate implements invitation choreographies:
-//! - `G_invitation` - Main invitation and acceptance choreography
-//! - `guardian_invitation` - Guardian relationship establishment
-//! - `device_invitation` - Device onboarding and acceptance
-//! - `relationship_formation` - Trust relationship creation
+//! Layer 5 feature crate providing end-to-end protocol implementations for:
+//! - Device invitation and acceptance workflows
+//! - Guardian relationship establishment
+//! - Relationship formation between authorities
+//! - Capability-based invitation validation
 //!
-//! # Design Principles
+//! ## Architecture Constraints
 //!
-//! - Uses choreographic programming for distributed invitation coordination
-//! - Integrates with Web of Trust (WoT) for relationship management
-//! - Provides clean separation to avoid namespace conflicts (E0428 errors)
-//! - Supports capability-based invitation validation and acceptance
+//! This crate depends on:
+//! - **Layer 1** (aura-core): Core types, effects, errors
+//! - **Layer 2** (aura-journal, aura-wot, aura-verify): Domain semantics
+//! - **Layer 3** (aura-effects): Effect handler implementations
+//! - **Layer 4** (aura-protocol): Orchestration and guard chain
+//! - **Layer 4** (aura-mpst): Session type coordination
+//!
+//! ## What Belongs Here
+//!
+//! - Complete invitation protocol implementations (device, guardian, relationship)
+//! - Choreographic coordination for multi-party invitation ceremonies
+//! - Integration with Web of Trust for trust relationship validation
+//! - Capability-based authorization checks during invitation acceptance
+//! - MPST protocol definitions and rumpsteak projections for invitations
+//!
+//! ## What Does NOT Belong Here
+//!
+//! - Effect handler implementations (belong in aura-effects)
+//! - Handler composition or registry (belong in aura-composition)
+//! - Low-level multi-party coordination (belong in aura-protocol)
+//! - Runtime assembly or effect system management
+//! - Domain type definitions (belong in aura-journal/aura-wot/aura-verify)
+//!
+//! ## Design Principles
+//!
+//! - Choreographic programming with MPST for distributed coordination
+//! - All protocols are stateless; state lives in journals and relational contexts
+//! - Invitation ceremonies are transactional: either fully succeed or cleanly fail
+//! - Integration with guard chain ensures authorization checks before acceptance
+//! - Metadata privacy through capability-scoped relationship visibility
+//!
+//! ## Key Protocols
+//!
+//! - **Device Invitation**: Onboarding new devices into an authority
+//! - **Guardian Invitation**: Establishing guardian relationships
+//! - **Relationship Formation**: Creating peer relationships between authorities
+//! - **Acceptance Choreography**: Multi-party agreement on invitation terms
 
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]

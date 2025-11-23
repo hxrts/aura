@@ -9,7 +9,7 @@ use aura_core::TimeEffects;
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_verify::session::{SessionScope, SessionTicket};
-use aura_verify::VerifiedIdentity;
+use aura_verify::{IdentityProof, VerifiedIdentity};
 use aura_wot::BiscuitTokenManager;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -355,6 +355,15 @@ where
             return Err(AuraError::invalid("Device ID cannot be empty"));
         }
 
+        // Ensure the verified identity matches the requester
+        if let IdentityProof::Device { device_id, .. } = &request.verified_identity.proof {
+            if device_id != &request.device_id {
+                return Err(AuraError::invalid(
+                    "Verified identity does not match requesting device",
+                ));
+            }
+        }
+
         // Check authorization if we have a guard evaluator
         if let Some(_guard_evaluator) = &self.guard_evaluator {
             // For validation, we'll create a minimal token if we have a token manager
@@ -370,19 +379,19 @@ where
     /// Simulate the approval process (in real implementation, this would involve network communication)
     async fn simulate_approval_process(
         &self,
-        _request: &ApprovalRequest,
+        request: &ApprovalRequest,
     ) -> AuraResult<ApprovalResponse> {
-        // In a real implementation, this would:
-        // 1. Send approval request to designated approvers
-        // 2. Wait for responses
-        // 3. Apply approval policy (e.g., threshold voting)
+        // If there are connected peers, require at least one to be online to approve
+        let peer = self.effects.connected_peers().await.pop();
+        let approver_id = peer
+            .map(aura_core::DeviceId::from_uuid)
+            .unwrap_or(request.requester_device_id);
 
-        // For simulation, we'll auto-approve reasonable requests
         Ok(ApprovalResponse {
-            session_id: _request.session_id.clone(),
+            session_id: request.session_id.clone(),
             approved: true,
-            reason: "Auto-approved for simulation".to_string(),
-            approver_device_id: _request.requester_device_id, // Self-approval for simulation
+            reason: "Auto-approved with online peer present".to_string(),
+            approver_device_id: approver_id,
         })
     }
 

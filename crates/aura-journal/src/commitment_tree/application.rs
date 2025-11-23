@@ -482,7 +482,7 @@ fn apply_operation_to_state(
 }
 
 /// Find parent node for a given leaf in the tree structure
-fn find_parent_node(leaf: &LeafId, state: &TreeState) -> Option<NodeIndex> {
+fn find_parent_node(_leaf: &LeafId, state: &TreeState) -> Option<NodeIndex> {
     // TODO: Implement proper parent tracking:
     // 1. Traverse tree structure to find leaf's parent branch
     // 2. Return the immediate parent node for commitment recomputation
@@ -636,7 +636,9 @@ fn recompute_commitments(
         
         // Update the node's commitment
         let new_commitment = h.finalize();
-        state.set_branch_commitment(node, new_commitment);
+        if let Some(branch) = state.branches.get_mut(&node) {
+            branch.commitment = new_commitment;
+        }
         
         Ok(())
     }

@@ -3,7 +3,7 @@
 use aura_core::AuthorityId;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_protocol::consensus::run_amp_channel_epoch_bump;
-use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
+use aura_core::frost::{Share, PublicKeyPackage};
 use std::collections::HashMap;
 
 #[tokio::test]
@@ -22,7 +22,7 @@ async fn amp_consensus_smoke() {
 
     let prestate = aura_core::Prestate::new(vec![], aura_core::Hash32::default());
     let witnesses = vec![AuthorityId::new()];
-    let key_packages: HashMap<AuthorityId, KeyPackage> = HashMap::new();
+    let key_packages: HashMap<AuthorityId, Share> = HashMap::new();
 
     // Create test FROST keys using testkit
     let (_, group_public_key) = aura_testkit::builders::keys::helpers::test_frost_key_shares(
@@ -60,7 +60,7 @@ async fn amp_consensus_success_path() {
 
     let prestate = aura_core::Prestate::new(vec![], aura_core::Hash32::default());
     let witnesses = vec![AuthorityId::new()];
-    let mut key_packages: HashMap<AuthorityId, KeyPackage> = HashMap::new();
+    let mut key_packages: HashMap<AuthorityId, Share> = HashMap::new();
 
     // Create test FROST keys using testkit
     let (frost_key_packages, gp) = aura_testkit::builders::keys::helpers::test_frost_key_shares(

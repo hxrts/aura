@@ -1,9 +1,22 @@
-//! Transport Coordination Layer
+//! Layer 4: Transport Coordination - Multi-Party Protocol Orchestration
 //!
-//! Layer 4: Multi-party transport coordination using choreographic protocols.
-//! YES choreography - for complex distributed coordination patterns.
-//! NO choreography - for local effect composition and simple orchestration.
-//! Target: Each choreographic protocol <250 lines.
+//! Multi-party transport coordination orchestrating choreographic protocols at transport layer.
+//! Coordinates AMP (Attestation Multi-Party), channel establishment/teardown, WebSocket handshakes,
+//! with flow budgets and guard chain integration.
+//!
+//! **Integration** (per docs/108_transport_and_information_flow.md):
+//! - Messages from all protocol layers flow through this transport coordination layer
+//! - Guard chain evaluation (CapGuard → FlowGuard → JournalCoupler) happens at layer entry
+//! - Choreographic protocols project to per-role local types (aura-mpst Layer 2)
+//! - Receipt propagation for flow budget accounting (per docs/003_information_flow_contract.md)
+//!
+//! **Key Coordinators**:
+//! - **AMP Transport**: Threshold cryptography message coordination
+//! - **Channel Management**: Connection establishment/teardown choreography
+//! - **WebSocket**: Browser-compatible real-time bidirectional communication
+//!
+//! **Flow Budget Enforcement**: Each message send atomically increments spent counter;
+//! receipts prove charges for relayed messages
 
 pub mod amp;
 pub mod amp_choreo;

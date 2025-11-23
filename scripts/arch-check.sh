@@ -4,6 +4,125 @@
 
 set -euo pipefail
 
+
+show_usage() {
+    echo "Aura Architectural Compliance Checker"
+    echo ""
+    echo "Usage: $0 [OPTIONS]"
+    echo ""
+    echo "OPTIONS:"
+    echo "  -h, --help           Show this help message"
+    echo "  --layers             Check layer boundary compliance only"
+    echo "  --effects            Check effect system compliance only"
+    echo "  --deps               Check dependency direction only"
+    echo "  --completeness       Check implementation completeness only"
+    echo "  --todos              Check TODO/FIXME markers only"
+    echo "  --guards             Check guard chain compliance only"
+    echo "  --choreography       Check choreographic protocol compliance only"
+    echo "  --macros             Check macro usage compliance only"
+    echo "  --testkit            Check testkit usage compliance only"
+    echo "  --crdt               Check CRDT implementation compliance only"
+    echo "  --reimpl             Check reimplementation detection only"
+    echo "  --registration       Check handler registration system compliance only"
+    echo ""
+    echo "If no specific check is specified, all checks are run."
+    echo ""
+    echo "Examples:"
+    echo "  $0                   # Run all checks"
+    echo "  $0 --layers          # Only check layer boundaries"
+    echo "  $0 --effects --deps  # Check effects and dependencies only"
+}
+
+# Initialize all flags to false by default
+RUN_ALL=true
+RUN_LAYERS=false
+RUN_EFFECTS=false
+RUN_DEPS=false
+RUN_COMPLETENESS=false
+RUN_TODOS=false
+RUN_GUARDS=false
+RUN_CHOREOGRAPHY=false
+RUN_MACROS=false
+RUN_TESTKIT=false
+RUN_CRDT=false
+RUN_REIMPL=false
+RUN_REGISTRATION=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -h|--help)
+            show_usage
+            exit 0
+            ;;
+        --layers)
+            RUN_ALL=false
+            RUN_LAYERS=true
+            shift
+            ;;
+        --effects)
+            RUN_ALL=false
+            RUN_EFFECTS=true
+            shift
+            ;;
+        --deps)
+            RUN_ALL=false
+            RUN_DEPS=true
+            shift
+            ;;
+        --completeness)
+            RUN_ALL=false
+            RUN_COMPLETENESS=true
+            shift
+            ;;
+        --todos)
+            RUN_ALL=false
+            RUN_TODOS=true
+            shift
+            ;;
+        --guards)
+            RUN_ALL=false
+            RUN_GUARDS=true
+            shift
+            ;;
+        --choreography)
+            RUN_ALL=false
+            RUN_CHOREOGRAPHY=true
+            shift
+            ;;
+        --macros)
+            RUN_ALL=false
+            RUN_MACROS=true
+            shift
+            ;;
+        --testkit)
+            RUN_ALL=false
+            RUN_TESTKIT=true
+            shift
+            ;;
+        --crdt)
+            RUN_ALL=false
+            RUN_CRDT=true
+            shift
+            ;;
+        --reimpl)
+            RUN_ALL=false
+            RUN_REIMPL=true
+            shift
+            ;;
+        --registration)
+            RUN_ALL=false
+            RUN_REGISTRATION=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Use --help for usage information."
+            exit 1
+            ;;
+    esac
+done
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -22,6 +141,9 @@ declare -a WARNING_DETAILS
 
 echo -e "${BOLD}${CYAN}🔍 Aura Architectural Compliance Checker${NC}"
 echo -e "${CYAN}==========================================${NC}"
+if [ "$RUN_ALL" = false ]; then
+    echo -e "${BLUE}Running selected checks only${NC}"
+fi
 echo ""
 
 # Helper functions
@@ -92,6 +214,8 @@ check_cargo() {
     return 0
 }
 
+# Conditional execution based on flags
+if [ "$RUN_ALL" = true ] || [ "$RUN_LAYERS" = true ]; then
 section_header "Layer 1: Interface Purity (aura-core)"
 
 # More precise implementation detection - distinguish blanket impls from business logic
@@ -121,8 +245,11 @@ if grep -A 20 "^\[dependencies\]" crates/aura-core/Cargo.toml | grep -E "aura-[a
     violation "aura-core depends on other Aura crates (violates interface layer isolation)"
 fi
 
-section_divider
-section_header "Layer-Specific Boundary Validation"
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_LAYERS" = true ]; then
+    section_header "Layer-Specific Boundary Validation"
 
 # Check Layer 2: Domain crates don't implement effect handlers
 for crate in aura-journal aura-wot aura-verify aura-store aura-transport; do
@@ -251,8 +378,11 @@ for crate in aura-authenticate aura-frost aura-invitation aura-recovery aura-ren
     fi
 done
 
-section_divider
-section_header "Legacy Violation Checks"
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_DEPS" = true ]; then
+    section_header "Legacy Violation Checks"
 
 # Check for old effect-based ID generation patterns (excluding journal domain extensions)
 # Look for usage patterns but exclude the journal's SessionIdExt trait which is domain-specific
@@ -326,8 +456,8 @@ else
     fi
 fi
 
-section_divider
-section_header "Effect Trait Organization"
+    section_divider
+    section_header "Dependency Direction Analysis"
 
 # Effect trait location validation
 effect_traits_outside=$(find crates/ -name "*.rs" -not -path "*/aura-core/*" -exec grep -l "trait.*Effects" {} \; 2>/dev/null)
@@ -353,8 +483,8 @@ if [ -n "$effect_traits_outside" ]; then
     fi
 fi
 
-section_divider
-section_header "Test Pattern Compliance"
+    section_divider
+    section_header "Effect Trait Organization"
 
 # Tests should use clean patterns, not architectural violations
 effects_test_usage=$(grep -r "Effects::test()" crates/*/src/ 2>/dev/null | grep -v "aura-effects" | grep -v "aura-testkit" | head -3)
@@ -363,8 +493,8 @@ if [ -n "$effects_test_usage" ]; then
     echo "$effects_test_usage"
 fi
 
-section_divider
-section_header "Positive Architecture Validation"
+    section_divider
+    section_header "Test Pattern Compliance"
 
 # Effect trait classification - distinguish infrastructure vs application effects
 core_traits=$(grep -r "trait.*Effects" crates/aura-core/src/effects/ 2>/dev/null | \
@@ -547,8 +677,8 @@ if [ -n "$missing_semantic" ]; then
     echo "   🔧 HOW: Define trait with required join/meet operations for domain types"
 fi
 
-section_divider
-section_header "Domain Crate Content Validation"
+    section_divider
+    section_header "Positive Architecture Validation"
 
 # Check aura-journal for fact-based patterns
 if [ -d "crates/aura-journal" ]; then
@@ -620,8 +750,8 @@ if [ -d "crates/aura-macros" ]; then
     fi
 fi
 
-section_divider
-section_header "Layer Content Pattern Validation"
+    section_divider
+    section_header "Domain Crate Content Validation"
 
 # Layer 4: Check aura-protocol for orchestration patterns
 if [ -d "crates/aura-protocol" ]; then
@@ -685,8 +815,8 @@ if [ -d "crates/aura-simulator" ]; then
     fi
 fi
 
-section_divider
-section_header "Feature Crate Protocol Completeness"
+    section_divider
+    section_header "Layer Content Pattern Validation"
 
 # Check each feature crate for expected patterns
 if [ -d "crates/aura-authenticate" ]; then
@@ -774,8 +904,8 @@ if [ -d "crates/aura-sync" ]; then
     fi
 fi
 
-section_divider
-section_header "Architectural Anti-Pattern Detection"
+    section_divider
+    section_header "Feature Crate Protocol Completeness"
 
 subsection "Layer violation patterns"
 
@@ -821,8 +951,8 @@ for crate in aura-journal aura-wot aura-authenticate aura-recovery aura-relation
     fi
 done
 
-section_divider
-section_header "Documentation Pattern Compliance"
+    section_divider
+    section_header "Architectural Anti-Pattern Detection"
 
 subsection "Guard chain sequence validation"
 
@@ -868,8 +998,8 @@ if [ -d "crates/aura-journal" ]; then
     fi
 fi
 
-section_divider
-section_header "Enhanced Dependency Validation"
+    section_divider
+    section_header "Documentation Pattern Compliance"
 
 # Enhanced dependency validation with specific expected dependencies
 if check_cargo && [ -n "$deps_json" ]; then
@@ -922,16 +1052,125 @@ if check_cargo && [ -n "$deps_json" ]; then
     fi
 fi
 
-section_divider
-section_header "Implementation Completeness"
+    section_divider
+    section_header "Enhanced Dependency Validation"
+
+subsection "Testkit layer boundary enforcement"
+
+info "aura-testkit designed for Layer 4+ only (to avoid circular dependencies)"
+echo "   ✅ ALLOWED: aura-protocol, feature crates (Layer 5), runtime crates (Layer 6+)"
+echo "   🚫 FORBIDDEN: aura-core, domain crates, aura-effects, aura-composition (Layer 1-3)"
+echo ""
+
+# Check Layer 1-3 crates for forbidden aura-testkit usage
+forbidden_testkit_usage=""
+
+# Layer 1: Foundation (aura-core)
+if [ -d "crates/aura-core" ]; then
+    if grep -r "aura.testkit\|aura_testkit" crates/aura-core/Cargo.toml crates/aura-core/src/ 2>/dev/null | head -3; then
+        violation "aura-core uses aura-testkit (violates Layer 1 foundation isolation)"
+        forbidden_testkit_usage="$forbidden_testkit_usage aura-core"
+    fi
+fi
+
+# Layer 2: Domain crates 
+for crate in aura-journal aura-wot aura-verify aura-store aura-transport aura-mpst aura-macros; do
+    if [ -d "crates/$crate" ]; then
+        # Check both dependencies and dev-dependencies sections for testkit usage
+        if grep -A 20 -E "^\[dependencies\]|\[dev-dependencies\]" crates/$crate/Cargo.toml 2>/dev/null | \
+           grep "aura.testkit\|aura_testkit" | head -1 2>/dev/null; then
+            violation "$crate uses aura-testkit (Layer 2 should create internal test utilities instead)"
+            forbidden_testkit_usage="$forbidden_testkit_usage $crate"
+            echo "   ⚡ SOLUTION: Create $crate/src/test_utils.rs for internal testing"
+            echo "   📖 WHY: Domain crates must avoid circular deps; testkit depends on higher layers"
+            echo "   🔧 HOW: Use stateless patterns and aura-core types for domain-specific test helpers"
+        fi
+    fi
+done
+
+# Layer 3: Implementation crates
+for crate in aura-effects aura-composition; do
+    if [ -d "crates/$crate" ]; then
+        if grep -A 20 -E "^\[dependencies\]|\[dev-dependencies\]" crates/$crate/Cargo.toml 2>/dev/null | \
+           grep "aura.testkit\|aura_testkit" | head -1 2>/dev/null; then
+            violation "$crate uses aura-testkit (Layer 3 should use direct effect testing)"
+            forbidden_testkit_usage="$forbidden_testkit_usage $crate"
+            echo "   ⚡ SOLUTION: Test effect handlers directly or create internal test utilities"
+            echo "   📖 WHY: Implementation layer must stay below testkit to avoid circular dependencies"
+            echo "   🔧 HOW: Create stateless test patterns using only aura-core types"
+        fi
+    fi
+done
+
+# Check allowed usage in higher layers (positive check)
+allowed_testkit_usage=""
+
+# Layer 4: Orchestration (aura-protocol)
+if [ -d "crates/aura-protocol" ]; then
+    if grep -A 20 -E "^\[dev-dependencies\]" crates/aura-protocol/Cargo.toml 2>/dev/null | \
+       grep "aura.testkit\|aura_testkit" | head -1 2>/dev/null; then
+        allowed_testkit_usage="$allowed_testkit_usage aura-protocol"
+    fi
+fi
+
+# Layer 5: Feature crates
+for crate in aura-authenticate aura-frost aura-invitation aura-recovery aura-rendezvous aura-sync aura-storage aura-relational; do
+    if [ -d "crates/$crate" ]; then
+        if grep -A 20 -E "^\[dev-dependencies\]" crates/$crate/Cargo.toml 2>/dev/null | \
+           grep "aura.testkit\|aura_testkit" | head -1 2>/dev/null; then
+            allowed_testkit_usage="$allowed_testkit_usage $crate"
+        fi
+    fi
+done
+
+# Layer 6+: Runtime and UI crates  
+for crate in aura-agent aura-simulator aura-cli; do
+    if [ -d "crates/$crate" ]; then
+        if grep -A 20 -E "^\[dev-dependencies\]" crates/$crate/Cargo.toml 2>/dev/null | \
+           grep "aura.testkit\|aura_testkit" | head -1 2>/dev/null; then
+            allowed_testkit_usage="$allowed_testkit_usage $crate"
+        fi
+    fi
+done
+
+if [ -n "$allowed_testkit_usage" ]; then
+    success "aura-testkit correctly used by higher layers:$allowed_testkit_usage"
+fi
+
+if [ -z "$forbidden_testkit_usage" ] && [ -z "$allowed_testkit_usage" ]; then
+    info "No aura-testkit usage detected (may not be implemented yet)"
+fi
+
+subsection "Internal test utilities validation"
+
+# Check that lower layers create their own test utilities instead of using testkit
+for crate in aura-core aura-journal aura-wot aura-verify aura-store aura-transport aura-effects; do
+    if [ -d "crates/$crate" ]; then
+        # Look for internal test utilities (good pattern)
+        if [ -f "crates/$crate/src/test_utils.rs" ] || [ -d "crates/$crate/src/test_utils" ]; then
+            success "$crate has internal test utilities (correct pattern for Layer 1-3)"
+        elif grep -r "mod test" crates/$crate/src/ 2>/dev/null | head -1 >/dev/null; then
+            info "$crate has test modules (check if test_utils.rs would help avoid duplication)"
+        fi
+    fi
+done
+
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_TESTKIT" = true ]; then
+    section_header "Testkit Usage Compliance"
 
 # Verify the compatibility bridge was removed
 if [ -f "crates/aura-effects/src/id_generation.rs" ]; then
     violation "Compatibility bridge still exists (should have been removed)"
 fi
 
-section_divider
-section_header "Effect System Usage Compliance"
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_COMPLETENESS" = true ]; then
+    section_header "Implementation Completeness Detection"
 
 info "Effect system enforces deterministic simulation and consistent interfaces"
 echo "   ✅ ALLOWED: aura-effects implementations, runtime/effects.rs, pure functions"
@@ -1045,8 +1284,11 @@ if [ -n "$global_state" ]; then
     echo "   💡 NOTE: Static loggers and constants are acceptable"
 fi
 
-section_divider
-section_header "Guard Chain Compliance"
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
+    section_header "Effect System Usage Compliance"
 
 subsection "Guard chain sequence enforcement"
 
@@ -1079,8 +1321,11 @@ else
     echo "   💡 TIP: Authorization should use Biscuit tokens, not stored capabilities"
 fi
 
-section_divider 
-section_header "Choreographic Protocol Compliance"
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_GUARDS" = true ]; then
+    section_header "Guard Chain Compliance"
 
 subsection "Session type usage validation"
 
@@ -1116,8 +1361,481 @@ else
     echo "   💡 TIP: Use annotations for guard capabilities and flow costs"
 fi
 
-section_divider
-section_header "CRDT Implementation Compliance"
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_CHOREOGRAPHY" = true ]; then
+    section_header "Choreographic Protocol Compliance"
+
+subsection "Available macros from aura-macros"
+
+info "aura-macros provides macros for common patterns:"
+echo "   🎯 choreography! - Define distributed protocols with session types"
+echo "   🧪 #[aura_test] - Async test wrapper with tracing and timeout"
+echo "   ⚙️  #[aura_effect_handlers] - Generate effect handler patterns"
+echo "   🔧 #[aura_handler_adapters] - Generate handler adaptation code"
+echo "   🌍 #[aura_effect_implementations] - Generate effect system implementations"
+echo "   💥 #[aura_error_types] - Generate structured error types"
+echo ""
+
+# Check for tests that should be using #[aura_test] macro
+standard_test_macros=$(grep -r "#\[test\]\|#\[tokio::test\]" crates/*/src/ 2>/dev/null | \
+    grep -v "aura-macros\|test_utils\|simple.*test" | \
+    grep -v "mock\|Mock" | \
+    head -10 || true)
+
+if [ -n "$standard_test_macros" ]; then
+    warning "Standard test macros found (consider using #[aura_test] for async tests)"
+    echo "$standard_test_macros"
+    echo ""
+    echo "   💡 SUGGESTION: Use #[aura_test] for async tests that need tracing/timeout"
+    echo "   📖 WHY: #[aura_test] provides automatic tracing setup and 30s timeout protection"
+    echo "   🔧 HOW: Replace #[tokio::test] with #[aura_test] for protocol tests"
+    echo "   ✅ ACCEPTABLE: Simple unit tests and mock tests can use standard macros"
+    item_divider
+fi
+
+# Check for manual async test patterns that could use choreography!
+manual_async_tests=$(grep -r "async fn.*test\|fn.*test.*async" crates/*/src/ 2>/dev/null | \
+    grep -v "trait\|Effects\|// " | \
+    grep -v "aura-macros" | \
+    head -10 || true)
+
+if [ -n "$manual_async_tests" ]; then
+    warning "Manual async test functions found (consider macro patterns)"
+    echo "$manual_async_tests"
+    echo ""
+    echo "   💡 SUGGESTION: Use #[aura_test] for async tests or choreography! for protocol tests"
+    echo "   📖 WHY: Macros provide consistent patterns and reduce boilerplate"
+    echo "   🔧 HOW: #[aura_test] async fn my_test() -> aura_core::AuraResult<()>"
+    echo "   ✅ ACCEPTABLE: Effect trait implementations and test utilities"
+    item_divider
+fi
+
+# Check for manual error type definitions that could use aura_error_types!
+manual_error_types=$(grep -r "pub enum.*Error\|pub struct.*Error" crates/*/src/ 2>/dev/null | \
+    grep -v "aura-core\|test\|Test" | \
+    head -10 || true)
+
+if [ -n "$manual_error_types" ]; then
+    warning "Manual error types found (consider using #[aura_error_types] macro)"
+    echo "$manual_error_types"
+    echo ""
+    echo "   💡 SUGGESTION: Use #[aura_error_types] for structured error hierarchies"
+    echo "   📖 WHY: Macro generates consistent error patterns with categories and codes"
+    echo "   🔧 HOW: #[aura_error_types] struct MyErrors { NetworkError, AuthError }"
+    echo "   ✅ ACCEPTABLE: Simple error types and core foundation errors"
+    item_divider
+fi
+
+# Check for manual effect handler patterns that could use macros
+manual_effect_handlers=$(grep -r "struct.*Handler.*Effects\|impl.*Effects.*Handler" crates/*/src/ 2>/dev/null | \
+    grep -v "aura-effects\|aura-testkit\|Mock" | \
+    head -10 || true)
+
+if [ -n "$manual_effect_handlers" ]; then
+    warning "Manual effect handler patterns found (consider using effect macros)"
+    echo "$manual_effect_handlers"
+    echo ""
+    echo "   💡 SUGGESTION: Consider #[aura_effect_handlers] or #[aura_handler_adapters] for complex patterns"
+    echo "   📖 WHY: Macros reduce boilerplate and ensure consistent handler patterns"
+    echo "   🔧 HOW: #[aura_effect_handlers] for generation, #[aura_handler_adapters] for adaptation"
+    echo "   ✅ ACCEPTABLE: Domain-specific handlers with business logic may need manual implementation"
+    item_divider
+fi
+
+# Positive check: Look for good macro usage
+aura_test_usage=$(grep -r "#\[aura_test\]" crates/*/src/ 2>/dev/null | wc -l | tr -d ' ')
+choreography_usage=$(grep -r "choreography!" crates/*/src/ 2>/dev/null | wc -l | tr -d ' ')
+error_types_usage=$(grep -r "#\[aura_error_types\]" crates/*/src/ 2>/dev/null | wc -l | tr -d ' ')
+
+# Handle empty results
+aura_test_usage=${aura_test_usage:-0}
+choreography_usage=${choreography_usage:-0}
+error_types_usage=${error_types_usage:-0}
+
+total_macro_usage=$((aura_test_usage + choreography_usage + error_types_usage))
+
+if [ "$total_macro_usage" -gt 0 ]; then
+    success "Found proper macro usage: #[aura_test]($aura_test_usage), choreography!($choreography_usage), #[aura_error_types]($error_types_usage)"
+else
+    info "Limited macro usage detected (may be early in development)"
+    echo "   💡 TIP: Consider leveraging macros as codebase grows for consistency"
+fi
+
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_MACROS" = true ]; then
+    section_header "Macro Usage Compliance"
+
+subsection "Domain type duplication detection"
+
+# Check for domain types redefined outside aura-core
+canonical_types="AuthorityId ContextId SessionId FlowBudget ObserverClass Capability EffectContext"
+duplicate_domain_types=""
+
+for type in $canonical_types; do
+    redefinitions=$(find crates/ -not -path "*/aura-core/*" -name "*.rs" \
+        -exec grep -l "pub struct $type\|pub type $type\|pub enum $type" {} \; 2>/dev/null || true)
+    if [ -n "$redefinitions" ]; then
+        duplicate_domain_types="$duplicate_domain_types $type"
+        violation "Domain type $type redefined outside aura-core"
+        echo "$redefinitions"
+        echo "   ⚡ SOLUTION: Remove duplicate definition and import from aura-core"
+        echo "   📖 WHY: Foundation types must be canonical to avoid type confusion"
+        echo "   🔧 HOW: use aura_core::$type instead of defining locally"
+    fi
+done
+
+if [ -z "$duplicate_domain_types" ]; then
+    success "No domain type redefinitions found (canonical types respected)"
+fi
+
+subsection "Custom context type detection"
+
+# Check for alternative context types that should use EffectContext
+alternative_contexts=$(find crates/ -not -path "*/aura-core/*" -name "*.rs" \
+    -exec grep -l "struct.*Context\|enum.*Context" {} \; 2>/dev/null | \
+    xargs grep -l "struct.*Context\|enum.*Context" | \
+    grep -v "test\|Test" || true)
+
+if [ -n "$alternative_contexts" ]; then
+    # Filter out legitimate context types
+    suspicious_contexts=$(echo "$alternative_contexts" | \
+        xargs grep "struct.*Context\|enum.*Context" | \
+        grep -v "EffectContext\|TraceContext\|ErrorContext\|ConfigContext" || true)
+    
+    if [ -n "$suspicious_contexts" ]; then
+        warning "Custom context types found (consider using EffectContext)"
+        echo "$suspicious_contexts"
+        echo "   💡 SUGGESTION: Use EffectContext for async operation context propagation"
+        echo "   📖 WHY: EffectContext provides standardized context with tracing/correlation"
+        echo "   🔧 HOW: Pass EffectContext through async call chains"
+        echo "   ✅ ACCEPTABLE: Domain-specific contexts that don't replace EffectContext"
+    fi
+fi
+
+subsection "Builder pattern duplication detection"
+
+# Check for builder patterns that could be centralized in aura-composition
+custom_builders=$(find crates/ -not -path "*/aura-composition/*" -not -path "*/aura-core/*" \
+    -name "*.rs" -exec grep -l ".*Builder.*build.*async\|.*Builder.*with_" {} \; 2>/dev/null | \
+    head -5 || true)
+
+if [ -n "$custom_builders" ]; then
+    warning "Custom builder patterns found (consider aura-composition patterns)"
+    echo "$custom_builders"
+    echo "   💡 SUGGESTION: Use or extend builder patterns from aura-composition"
+    echo "   📖 WHY: Standardized builders reduce duplication and ensure consistency"
+    echo "   🔧 HOW: Import builder utilities from aura-composition"
+    echo "   ✅ ACCEPTABLE: Domain-specific builders with unique business logic"
+fi
+
+subsection "Guard component reimplementation detection"
+
+# Check for guard components implemented outside aura-protocol
+custom_guards=$(find crates/ -not -path "*/aura-protocol/*" -name "*.rs" \
+    -exec grep -l "Guard.*struct\|impl.*Guard" {} \; 2>/dev/null | \
+    head -3 || true)
+
+if [ -n "$custom_guards" ]; then
+    warning "Custom guard implementations found (consider aura-protocol guards)"
+    echo "$custom_guards"
+    echo "   💡 SUGGESTION: Use guard chain components from aura-protocol"
+    echo "   📖 WHY: Guard chain provides standardized authorization → flow → journal sequence"
+    echo "   🔧 HOW: Import CapGuard, FlowGuard, JournalCoupler from aura-protocol"
+    echo "   ✅ ACCEPTABLE: Domain-specific guards that extend the standard chain"
+fi
+
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_TODOS" = true ]; then
+    section_header "TODO and Incomplete Implementation Detection"
+
+subsection "TODO and incomplete implementation markers"
+
+# Check for various markers that indicate incomplete implementation
+todo_markers="TODO FIXME XXX HACK BUG"
+incomplete_words="simplified placeholder stub temporary workaround"
+# incomplete_phrases defined inline below
+
+all_incomplete_indicators=""
+
+for marker in $todo_markers; do
+    marker_violations=$(grep -r "$marker" crates/*/src/ 2>/dev/null | \
+        grep -v "test" | \
+        grep -v "// Example" | \
+        grep -v "docs/" | \
+        head -20 || true)
+    
+    if [ -n "$marker_violations" ]; then
+        all_incomplete_indicators="$all_incomplete_indicators\n$marker_violations"
+    fi
+done
+
+# Check for incomplete implementation words (case-insensitive)
+for word in $incomplete_words; do
+    word_violations=$(grep -ri "\b$word\b" crates/*/src/ 2>/dev/null | \
+        grep -v "test" | \
+        grep -v "// Example" | \
+        grep -v "docs/" | \
+        head -10 || true)
+    
+    if [ -n "$word_violations" ]; then
+        all_incomplete_indicators="$all_incomplete_indicators\n$word_violations"
+    fi
+done
+
+# Check for incomplete implementation phrases (case-insensitive)
+while IFS= read -r phrase; do
+    [ -z "$phrase" ] && continue
+    phrase_violations=$(grep -ri "$phrase" crates/*/src/ 2>/dev/null | \
+        grep -v "test" | \
+        grep -v "// Example" | \
+        grep -v "docs/" | \
+        head -10 || true)
+    
+    if [ -n "$phrase_violations" ]; then
+        all_incomplete_indicators="$all_incomplete_indicators\n$phrase_violations"
+    fi
+done << 'EOF'
+in a real implementation
+not yet implemented
+for now
+quick fix
+as a workaround
+needs to be fixed
+should be implemented
+this is temporary
+EOF
+
+# Check for common stub patterns
+stub_patterns="unimplemented!\|todo!\|panic!(\"not\|unreachable!(\"TODO"
+stub_violations=$(grep -rE "$stub_patterns" crates/*/src/ 2>/dev/null | \
+    grep -v "test" | \
+    grep -v "// Example" | \
+    head -15 || true)
+
+if [ -n "$stub_violations" ]; then
+    all_incomplete_indicators="$all_incomplete_indicators\n$stub_violations"
+fi
+
+# Display all incomplete implementation indicators
+if [ -n "$all_incomplete_indicators" ]; then
+    warning "Incomplete implementation indicators found"
+    echo -e "$all_incomplete_indicators"
+    echo ""
+    echo "   📋 GUIDANCE: Review these items and convert to tracked tasks in TODO.md"
+    echo "   🔧 HOW: Replace temporary implementations with proper solutions"
+    echo "   💡 TIP: Use 'grep -r "TODO\|FIXME" crates/' to see all remaining items"
+    echo "   ✅ ACCEPTABLE: Test code and examples may contain temporary implementations"
+else
+    success "No incomplete implementation markers found (clean codebase)"
+fi
+
+subsection "Configuration and environment dependencies"
+
+# Check for hardcoded values that should be configurable
+hardcoded_patterns="localhost:.*[0-9]\|127\.0\.0\.1\|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\|:80[0-9][0-9]"
+hardcoded_violations=$(grep -rE "$hardcoded_patterns" crates/*/src/ 2>/dev/null | \
+    grep -v "test" | \
+    grep -v "example" | \
+    grep -v "0.0.0.0:0" | \
+    grep -v "127.0.0.1" | \
+    head -10 || true)
+
+if [ -n "$hardcoded_violations" ]; then
+    warning "Hardcoded network addresses/ports found (should be configurable)"
+    echo "$hardcoded_violations"
+    echo "   💡 SUGGESTION: Move network configuration to config files or environment variables"
+    echo "   📖 WHY: Hardcoded addresses prevent deployment flexibility"
+    echo "   🔧 HOW: Use ConfigurationEffects to load network settings"
+    echo "   ✅ ACCEPTABLE: Test fixtures and examples may use hardcoded values"
+fi
+
+# Check for magic numbers that should be constants
+magic_numbers=$(grep -rE "[^a-zA-Z0-9_][0-9]{3,}[^a-zA-Z0-9_]" crates/*/src/ 2>/dev/null | \
+    grep -v "test" | \
+    grep -v "0x" | \
+    grep -v "Duration" | \
+    grep -v "timeout" | \
+    grep -v "size" | \
+    head -5 || true)
+
+if [ -n "$magic_numbers" ]; then
+    info "Large numeric literals found (consider using named constants)"
+    echo "$magic_numbers"
+    echo "   💡 TIP: Replace magic numbers with const DESCRIPTIVE_NAME: Type = value;"
+fi
+
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_REGISTRATION" = true ]; then
+    section_header "Handler Registration System Compliance"
+
+subsection "Direct handler instantiation detection"
+
+info "The handler registration system enables clean composition without circular dependencies"
+echo "   ✅ CORRECT: Use EffectRegistry and builders from aura-composition"
+echo "   🚫 FORBIDDEN: Direct handler instantiation in feature crates and protocols"
+echo "   💡 PATTERN: Feature crates compose handlers via registration system"
+echo ""
+
+# Check for direct handler instantiation patterns that bypass the registration system
+direct_instantiation_patterns="Handler::new\(\)|.*Handler::create\(\)|.*Handler::build\(\)"
+handler_violations=""
+
+# Layer 4: aura-protocol should use composition, not direct instantiation
+if [ -d "crates/aura-protocol" ]; then
+    protocol_violations=$(grep -rE "$direct_instantiation_patterns" crates/aura-protocol/src/ 2>/dev/null | \
+        grep -v "test" | \
+        grep -v "// Example" | \
+        grep -v "aura-composition" | \
+        head -5 || true)
+    
+    if [ -n "$protocol_violations" ]; then
+        violation "aura-protocol directly instantiates handlers (should use registration system)"
+        echo "$protocol_violations"
+        echo "   ⚡ SOLUTION: Use EffectRegistry.get_handler() or composition builders"
+        echo "   📖 WHY: Protocol coordination should use composed handlers, not create them directly"
+        echo "   🔧 HOW: Replace Handler::new() with registry.get_handler() from aura-composition"
+        handler_violations="$handler_violations aura-protocol"
+    fi
+fi
+
+# Layer 5: Feature crates should compose handlers, not instantiate them
+for crate in aura-authenticate aura-frost aura-invitation aura-recovery aura-relational aura-rendezvous aura-sync; do
+    if [ -d "crates/$crate" ]; then
+        feature_violations=$(grep -rE "$direct_instantiation_patterns" crates/$crate/src/ 2>/dev/null | \
+            grep -v "test" | \
+            grep -v "// Example" | \
+            grep -v "testkit" | \
+            head -3 || true)
+        
+        if [ -n "$feature_violations" ]; then
+            violation "$crate directly instantiates handlers (should use composition)"
+            echo "$feature_violations"
+            echo "   ⚡ SOLUTION: Use handler composition from aura-composition"
+            echo "   📖 WHY: Feature crates should be reusable building blocks"
+            echo "   🔧 HOW: Accept pre-composed handlers or use EffectRegistry"
+            handler_violations="$handler_violations $crate"
+        fi
+    fi
+done
+
+# Check for proper usage of aura-composition patterns
+if [ -d "crates/aura-composition" ]; then
+    composition_patterns="EffectRegistry|HandlerBuilder|register_handler"
+    composition_usage=$(grep -r "$composition_patterns" crates/*/src/ 2>/dev/null | \
+        grep -v "aura-composition" | \
+        grep -v "test" | \
+        wc -l | tr -d ' \n' || echo 0)
+    composition_usage=${composition_usage:-0}
+    
+    if [ "$composition_usage" -gt 0 ]; then
+        success "Found handler composition patterns in use ($composition_usage references)"
+    else
+        warning "Limited usage of aura-composition handler registration system"
+        echo "   💡 SUGGESTION: Consider using EffectRegistry for handler composition"
+        echo "   📖 WHY: Registration system enables clean composition without circular dependencies"
+        echo "   🔧 HOW: Import EffectRegistry from aura-composition and register handlers"
+    fi
+fi
+
+subsection "Handler registration pattern validation"
+
+# Check that aura-composition contains expected registration infrastructure
+if [ -d "crates/aura-composition" ]; then
+    registry_components="Registry Builder Adapter"
+    missing_components=""
+    
+    for component in $registry_components; do
+        if ! grep -r "$component" crates/aura-composition/src/ 2>/dev/null >/dev/null; then
+            missing_components="$missing_components $component"
+        fi
+    done
+    
+    if [ -n "$missing_components" ]; then
+        warning "aura-composition missing expected components:$missing_components"
+        echo "   💡 SUGGESTION: Implement missing registry infrastructure"
+        echo "   📖 WHY: Handler registration requires Registry, Builder, and Adapter patterns"
+        echo "   🔧 HOW: Add missing components to enable clean handler composition"
+    else
+        success "aura-composition contains expected registration infrastructure"
+    fi
+    
+    # Check for proper separation between aura-effects and aura-composition
+    effects_in_composition=$(grep -r "aura-effects" crates/aura-composition/src/ 2>/dev/null | \
+        grep -v "test" | \
+        grep -v "// " | \
+        wc -l || echo 0)
+    
+    if [ "$effects_in_composition" -gt 2 ]; then
+        warning "aura-composition heavily coupled to aura-effects implementations"
+        echo "   💡 SUGGESTION: Use trait abstractions instead of concrete handler types"
+        echo "   📖 WHY: Composition should work with any handler implementations"
+        echo "   🔧 HOW: Depend on aura-core traits, not aura-effects implementations"
+    fi
+fi
+
+# Positive patterns: Check for blanket implementations that enable automatic composition
+blanket_impls=$(grep -r "impl<.*>.*Effects.*for.*Effects" crates/*/src/ 2>/dev/null | \
+    wc -l || echo 0)
+
+if [ "$blanket_impls" -gt 0 ]; then
+    success "Found blanket implementations enabling automatic composition ($blanket_impls)"
+    echo "   💡 EXAMPLE: impl<T: GuardEffectSystem> AmpJournalEffects for T"
+    echo "   📖 WHY: Blanket implementations enable composition without explicit registration"
+    echo "   🔧 HOW: Trait bounds compose effects automatically when conditions are met"
+fi
+
+if [ -z "$handler_violations" ]; then
+    success "No direct handler instantiation violations found"
+    echo "   🎯 RESULT: Codebase properly uses handler registration/composition patterns"
+else
+    echo "   📋 AFFECTED CRATES:$handler_violations"
+    echo "   🔧 SOLUTION SUMMARY: Replace direct instantiation with composition patterns"
+fi
+
+subsection "Registration system architecture validation"
+
+# Check that the registration system follows the documented split Layer 3 architecture
+if [ -d "crates/aura-effects" ] && [ -d "crates/aura-composition" ]; then
+    # aura-effects should contain stateless handlers
+    stateless_handlers=$(find crates/aura-effects/src/ -name "*.rs" -exec grep -l "Handler.*Effects" {} \; 2>/dev/null | wc -l)
+    
+    # aura-composition should contain composition infrastructure  
+    composition_infra=$(find crates/aura-composition/src/ -name "*.rs" -exec grep -l "Registry\|Builder\|Compose" {} \; 2>/dev/null | wc -l)
+    
+    if [ "$stateless_handlers" -gt 0 ] && [ "$composition_infra" -gt 0 ]; then
+        success "Split Layer 3 architecture properly implemented"
+        echo "   📊 METRICS: $stateless_handlers handler files, $composition_infra composition files"
+        echo "   🏗️  PATTERN: aura-effects (handlers) + aura-composition (assembly)"
+    else
+        warning "Split Layer 3 architecture may not be fully implemented"
+        echo "   📊 METRICS: $stateless_handlers handler files, $composition_infra composition files"
+        echo "   💡 SUGGESTION: Ensure clear separation between handlers and composition"
+    fi
+fi
+
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_REIMPL" = true ]; then
+    section_header "Reimplementation Detection"
+
+# Reimplementation detection content should be here - currently empty
+info "Checking for reimplementations of core patterns..."
+# TODO: Add reimplementation detection logic
+
+    section_divider
+fi
+
+if [ "$RUN_ALL" = true ] || [ "$RUN_CRDT" = true ]; then
+    section_header "CRDT Implementation Compliance"
 
 subsection "Semilattice operation validation"
 
@@ -1180,6 +1898,9 @@ else
     echo "   💡 TIP: Implement LifecycleAware for initialization and shutdown hooks"
 fi
 
+    section_divider
+fi
+
 # Summary
 echo ""
 echo ""
@@ -1228,6 +1949,27 @@ echo -e "  ${BLUE}•${NC} Guard chain sequence enforcement"
 echo -e "  ${BLUE}•${NC} Choreographic protocol compliance"
 echo -e "  ${BLUE}•${NC} CRDT and semilattice operation validation"
 echo -e "  ${BLUE}•${NC} WASM compatibility and lifecycle management"
+echo -e "  ${BLUE}•${NC} Macro usage patterns and consistency checking"
+echo -e "  ${BLUE}•${NC} Reimplementation detection (domain types, contexts, builders, guards)"
+echo -e "  ${BLUE}•${NC} Implementation completeness checking (TODO/FIXME markers, stubs, hardcoded values)"
+echo ""
+echo -e "${BOLD}Flags used:${NC}"
+if [ "$RUN_ALL" = true ]; then
+    echo -e "  ${CYAN}•${NC} --all (complete compliance check)"
+else
+    [ "$RUN_LAYERS" = true ] && echo -e "  ${CYAN}•${NC} --layers"
+    [ "$RUN_EFFECTS" = true ] && echo -e "  ${CYAN}•${NC} --effects"
+    [ "$RUN_DEPS" = true ] && echo -e "  ${CYAN}•${NC} --deps"
+    [ "$RUN_COMPLETENESS" = true ] && echo -e "  ${CYAN}•${NC} --completeness"
+    [ "$RUN_TODOS" = true ] && echo -e "  ${CYAN}•${NC} --todos"
+    [ "$RUN_GUARDS" = true ] && echo -e "  ${CYAN}•${NC} --guards"
+    [ "$RUN_CHOREOGRAPHY" = true ] && echo -e "  ${CYAN}•${NC} --choreography"
+    [ "$RUN_MACROS" = true ] && echo -e "  ${CYAN}•${NC} --macros"
+    [ "$RUN_TESTKIT" = true ] && echo -e "  ${CYAN}•${NC} --testkit"
+    [ "$RUN_CRDT" = true ] && echo -e "  ${CYAN}•${NC} --crdt"
+    [ "$RUN_REIMPL" = true ] && echo -e "  ${CYAN}•${NC} --reimpl"
+    [ "$RUN_REGISTRATION" = true ] && echo -e "  ${CYAN}•${NC} --registration"
+fi
 
 if [ $VIOLATIONS -eq 0 ] && [ $WARNINGS -eq 0 ]; then
     echo ""

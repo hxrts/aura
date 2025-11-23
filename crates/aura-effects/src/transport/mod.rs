@@ -1,16 +1,24 @@
-//! Transport Effect Handlers
+//! Layer 3: Transport Effect Handlers - Production Only
 //!
-//! Layer 3: Single-party, stateless transport effect implementations.
-//! NO choreography - these are context-free effect handlers only.
-//! Target: Each file <200 lines, use mature libraries.
+//! Stateless single-party implementations of NetworkEffects from aura-core (Layer 1).
+//! Each handler implements a pure effect: accept input, perform transport operation, produce output.
 //!
-//! **Note**: TransportCoordinator and RetryingTransportManager were moved to aura-protocol
-//! (Layer 4) as they implement multi-party coordination logic. Import from
-//! `aura_protocol::handlers::transport_coordinator` instead.
+//! **Handler Types**:
+//! - **TcpTransportHandler**: Real TCP sockets with configurable timeouts
+//! - **WebSocketTransportHandler**: Browser-compatible WebSocket protocol
+//! - **RealTransportHandler**: Production transport with TransportEffects implementation
+//! - **FramingHandler**: Message delimiting (length-prefix framing for streams)
+//! - **Utils**: Address validation, connection metrics, timeout management
+//!
+//! **Layer Constraint** (per docs/106_effect_system_and_runtime.md):
+//! NO choreography or multi-party coordination here. Multi-party transport logic
+//! (routing, retry, connection management) belongs in aura-protocol/transport (Layer 4).
+//! These implement pure infrastructure effects only.
 
 // REMOVED: pub mod coordination; // Moved to aura-protocol (Layer 4)
+// REMOVED: pub mod memory; // Moved to aura-testkit (Layer 8)
 pub mod framing;
-pub mod memory;
+pub mod real;
 pub mod tcp;
 pub mod utils;
 pub mod websocket;
@@ -19,7 +27,8 @@ pub mod websocket;
 // pub use coordination::{RetryingTransportManager, TransportCoordinationConfig,
 //                        TransportCoordinationError, CoordinationResult};
 pub use framing::FramingHandler;
-pub use memory::InMemoryTransportHandler;
+// REMOVED: pub use memory::InMemoryTransportHandler; // Moved to aura-testkit
+pub use real::RealTransportHandler;
 pub use tcp::TcpTransportHandler;
 pub use utils::{AddressResolver, BufferUtils, ConnectionMetrics, TimeoutHelper, UrlValidator};
 pub use websocket::WebSocketTransportHandler;
@@ -94,7 +103,7 @@ type TransportResult<T> = Result<T, TransportError>;
 // instead of implementing single-party, stateless effects. The coordination logic
 // belongs in Layer 4 (aura-protocol).
 // Individual transport handlers remain in this crate as they follow Layer 3 principles:
-// - TcpTransportHandler, WebSocketTransportHandler, InMemoryTransportHandler
+// - TcpTransportHandler, WebSocketTransportHandler, RealTransportHandler
 //
 // TODO: Implement proper Layer 4 coordination patterns in aura-protocol where:
 // - TransportManager coordinates multiple transport handlers

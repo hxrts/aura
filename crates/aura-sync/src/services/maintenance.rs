@@ -401,21 +401,139 @@ impl MaintenanceService {
         // Convert to maintenance event type
         Ok(UpgradeProposal {
             package_id: proposal.package_id,
-            version,
+            version: version.clone(),
             kind,
             artifact_hash: proposal.package_hash,
-            artifact_uri: None,     // TODO: Add URI support
-            activation_fence: None, // TODO: Map activation_epoch to IdentityEpochFence
+            artifact_uri: Self::generate_artifact_uri(&proposal, &version), // Add URI support for artifacts
+            activation_fence: Self::map_activation_epoch(&proposal, proposer), // Map activation_epoch to IdentityEpochFence
         })
     }
 
+    /// Verify threshold signature for maintenance operation
+    async fn verify_threshold_signature<C: aura_core::effects::CryptoEffects>(
+        &self,
+        proposal: &UpgradeProposal,
+        crypto_effects: &C,
+        threshold_signature: &[u8],
+        group_public_key: &[u8],
+    ) -> SyncResult<()> {
+        // Construct message for signature verification
+        // This should match the format used when creating the signature
+        let message = self.construct_upgrade_message(proposal);
+        
+        // Verify FROST threshold signature
+        match crypto_effects.frost_verify(&message, threshold_signature, group_public_key).await {
+            Ok(true) => {
+                tracing::info!(
+                    "Threshold signature verification successful for upgrade proposal {}",
+                    proposal.package_id
+                );
+                Ok(())
+            }
+            Ok(false) => {
+                let error_msg = format!(
+                    "Threshold signature verification failed for upgrade proposal {}",
+                    proposal.package_id
+                );
+                tracing::error!("{}", error_msg);
+                Err(crate::core::errors::sync_validation_error(error_msg))
+            }
+            Err(e) => {
+                let error_msg = format!(
+                    "Threshold signature verification error for upgrade proposal {}: {}",
+                    proposal.package_id, e
+                );
+                tracing::error!("{}", error_msg);
+                Err(crate::core::errors::sync_validation_error(error_msg))
+            }
+        }
+    }
+
+    /// Construct message for upgrade proposal signature verification
+    fn construct_upgrade_message(&self, proposal: &UpgradeProposal) -> Vec<u8> {
+        use std::io::Write;
+        
+        let mut message = Vec::new();
+        
+        // Domain separator
+        message.write_all(b"AURA_UPGRADE_PROPOSAL").unwrap();
+        
+        // Package ID
+        message.write_all(proposal.package_id.as_bytes()).unwrap();
+        
+        // Version
+        message.write_all(proposal.version.to_string().as_bytes()).unwrap();
+        
+        // Artifact hash
+        message.write_all(&proposal.artifact_hash.0).unwrap();
+        
+        // Upgrade kind (serialized)
+        match proposal.kind {
+            UpgradeKind::SoftFork => message.write_all(b"SOFT_FORK").unwrap(),
+            UpgradeKind::HardFork => message.write_all(b"HARD_FORK").unwrap(),
+        }
+        
+        // Activation fence if present
+        if let Some(ref fence) = proposal.activation_fence {
+            message.write_all(fence.account_id.0.as_bytes()).unwrap();
+            message.write_all(&fence.epoch.to_le_bytes()).unwrap();
+        }
+        
+        message
+    }
+
+    /// Map activation_epoch to IdentityEpochFence
+    fn map_activation_epoch(
+        proposal: &crate::protocols::ota::UpgradeProposal,
+        proposer: DeviceId,
+    ) -> Option<IdentityEpochFence> {
+        // Map activation epoch from OTA proposal to identity epoch fence
+        if let Some(activation_epoch) = proposal.activation_epoch {
+            // For hard forks, we need an epoch fence to coordinate the upgrade
+            // The account ID is derived from the proposer device ID
+            let account_id = AccountId(proposer.0); // Device belongs to account
+            
+            Some(IdentityEpochFence::new(account_id, activation_epoch))
+        } else {
+            // Soft upgrades don't require epoch fencing
+            None
+        }
+    }
+
+    /// Generate artifact URI for package downloads
+    fn generate_artifact_uri(
+        proposal: &crate::protocols::ota::UpgradeProposal,
+        version: &SemanticVersion,
+    ) -> Option<String> {
+        // Generate standardized URI for artifact downloads
+        // This follows the Aura artifact naming convention:
+        // aura://{package_id}/{version}/{hash}
+        // This URI can be resolved by the artifact resolver to actual download locations
+        
+        let uri = format!(
+            "aura://{}/{}/{:02x}{:02x}{:02x}{:02x}",
+            proposal.package_id.hyphenated(),
+            version,
+            proposal.package_hash.0[0], // Use first 4 bytes of hash for brevity
+            proposal.package_hash.0[1],
+            proposal.package_hash.0[2],
+            proposal.package_hash.0[3]
+        );
+        
+        Some(uri)
+    }
+
     /// Activate upgrade after approval
-    pub async fn activate_upgrade(
+    pub async fn activate_upgrade<C: aura_core::effects::CryptoEffects>(
         &self,
         proposal: UpgradeProposal,
         account_id: AccountId,
+        crypto_effects: &C,
+        threshold_signature: &[u8],
+        group_public_key: &[u8],
     ) -> SyncResult<UpgradeActivated> {
-        // TODO: Verify threshold signature
+        // Verify threshold signature during maintenance
+        self.verify_threshold_signature(&proposal, crypto_effects, threshold_signature, group_public_key).await?;
 
         let activation_fence = proposal
             .activation_fence

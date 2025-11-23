@@ -4,6 +4,7 @@
 //! various entities and concepts within the Aura system.
 
 use crate::{hash, Hash32};
+use hex;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::str::FromStr;
@@ -561,6 +562,22 @@ impl ChannelId {
 impl fmt::Display for ChannelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "channel:{}", hex::encode(self.0.as_bytes()))
+    }
+}
+
+impl FromStr for ChannelId {
+    type Err = hex::FromHexError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Handle both raw hex and prefixed format
+        let hex_str = s.strip_prefix("channel:").unwrap_or(s);
+        let bytes = hex::decode(hex_str)?;
+        if bytes.len() != 32 {
+            return Err(hex::FromHexError::InvalidStringLength);
+        }
+        let mut array = [0u8; 32];
+        array.copy_from_slice(&bytes);
+        Ok(ChannelId::from_bytes(array))
     }
 }
 

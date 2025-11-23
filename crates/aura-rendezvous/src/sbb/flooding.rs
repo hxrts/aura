@@ -117,6 +117,21 @@ impl SbbFloodingCoordinator {
         }
     }
 
+    /// Get device ID
+    pub fn device_id(&self) -> DeviceId {
+        self.device_id
+    }
+
+    /// Get friends list
+    pub fn friends(&self) -> &[DeviceId] {
+        &self.friends
+    }
+
+    /// Get guardians list
+    pub fn guardians(&self) -> &[DeviceId] {
+        &self.guardians
+    }
+
     /// Remove friend relationship
     pub fn remove_friend(&mut self, friend_id: &DeviceId) {
         self.friends.retain(|id| id != friend_id);
@@ -306,11 +321,36 @@ impl SbbFlooding for SbbFloodingCoordinator {
 
     async fn forward_to_peer(
         &mut self,
-        _envelope: RendezvousEnvelope,
-        _peer: DeviceId,
+        envelope: RendezvousEnvelope,
+        peer: DeviceId,
         _now: u64,
     ) -> AuraResult<()> {
-        // TODO: Integrate with transport layer
+        // Serialize the envelope for transport
+        let envelope_data = serde_json::to_vec(&envelope).map_err(|e| {
+            AuraError::internal(format!("Failed to serialize envelope for peer {}: {}", peer, e))
+        })?;
+
+        // Convert DeviceId to UUID for NetworkEffects
+        let peer_uuid: uuid::Uuid = peer.into();
+
+        // Send envelope to peer via network effects
+        self.effects
+            .send_to_peer(peer_uuid, envelope_data)
+            .await
+            .map_err(|e| {
+                AuraError::network(format!(
+                    "Failed to send rendezvous envelope to peer {}: {}",
+                    peer, e
+                ))
+            })?;
+
+        tracing::debug!(
+            peer = ?peer,
+            envelope_id = ?envelope.id,
+            ttl = envelope.ttl,
+            "Successfully forwarded rendezvous envelope to peer"
+        );
+
         Ok(())
     }
 }

@@ -32,7 +32,7 @@ Messages scoped to `ContextId` never leak into other contexts. Contexts may be e
 
 Commitment tree operations resolve conflicts using the stable ordering described in [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md). This ordering is derived from the cryptographic identifiers and facts stored in the journal. Conflicts are always resolved in the same way across all replicas.
 
-### Receipts chain
+### Receipt chain
 
 Multi-hop forwarding requires signed receipts. Downstream peers reject messages lacking a chain rooted in their relational context. See [Transport and Information Flow](108_transport_and_information_flow.md). This prevents unauthorized message propagation.
 
@@ -76,8 +76,6 @@ Epoch rotation relies on loosely synchronized clocks. The journal serves as the 
 | Rendezvous offer propagation      | O(log N) gossip hops          |
 | FlowGuard charge                  | Single local transaction (<10 ms) |
 | Anti-entropy reconciliation       | k × gossip period (k depends on fanout) |
-
-These are guidelines; actual deployments should benchmark and set alarms when latency significantly exceeds expectations.
 
 ## 6. Adversarial Model
 

@@ -1,0 +1,30 @@
+[package]
+name = "session-choreography"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aura-core = { path = "../../crates/aura-core" }
+aura-macros = { path = "../../crates/aura-macros" }
+aura-agent = { path = "../../crates/aura-agent" }
+aura-protocol = { path = "../../crates/aura-protocol" }
+aura-effects = { path = "../../crates/aura-effects" }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+anyhow = "1.0"
+
+[[bin]]
+name = "session_patterns"
+path = "src/session_patterns.rs"
+
+[[bin]]
+name = "multi_party_session"
+path = "src/multi_party_session.rs"
+
+[[bin]]
+name = "session_lifecycle"
+path = "src/session_lifecycle.rs"

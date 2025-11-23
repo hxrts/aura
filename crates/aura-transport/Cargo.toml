@@ -35,6 +35,7 @@ bincode = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+async-trait = { workspace = true }
 
 [dev-dependencies]
 # Testing only - no runtime dependencies

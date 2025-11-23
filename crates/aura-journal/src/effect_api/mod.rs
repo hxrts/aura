@@ -1,17 +1,17 @@
-//! Effect API Module
+//! Layer 2: Journal Effect API - Intent & Capability Management
 //!
-//! Implements the journal effect_api CRDT that stores the authoritative history of tree operations.
-//! This module provides:
+//! Implements journal CRDT components for intent staging and capability-based authorization.
+//! Separates authentication (tree membership via AttestedOp) from authorization (fine-grained capabilities).
 //!
-//! - **AttestedOp**: Signed operations that mutate the commitment tree
-//! - **CapabilityRef**: Authorization tokens with expiry and scope
-//! - **Intent**: Proposed tree mutations staged in the intent pool
+//! **Key Types**:
+//! - **Intent**: Proposed tree mutations staged for batch processing
+//! - **CapabilityRef**: Fine-grained, revocable authorization tokens with expiry/scope
+//! - **IntentBatch**: Atomic group of intents for transactional tree updates
 //!
-//! ## Architecture
-//!
-//! The effect_api separates authentication (tree membership) from authorization (capabilities).
-//! All security-critical tree mutations are recorded as signed TreeOp entries with threshold
-//! attestation, while capabilities provide fine-grained, revocable authorization tokens.
+//! **Design Principle** (per docs/109_authorization.md):
+//! All security-critical mutations recorded as AttestedOp (threshold signatures) in fact journal.
+//! Capabilities provide layered authorization via Biscuit tokens (aura-wot/biscuit) evaluated at
+//! message entry point (aura-protocol/guards/CapGuard).
 
 pub mod capability;
 pub mod intent;

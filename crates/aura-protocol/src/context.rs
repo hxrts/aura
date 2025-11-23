@@ -3,7 +3,7 @@
 //! This module provides the unified context that flows through all effect operations,
 //! maintaining state, device identity, execution mode, and operation tracking.
 
-use crate::guards::flow::FlowHint;
+use crate::guards::FlowHint;
 use aura_core::{
     effects::{RandomEffects, TimeEffects},
     identifiers::{DeviceId, SessionId},

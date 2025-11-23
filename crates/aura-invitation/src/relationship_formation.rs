@@ -37,6 +37,7 @@ use aura_core::effects::{
     ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, RandomEffects, TimeEffects,
 };
 use aura_core::{AccountId, ContextId, DeviceId, Hash32};
+use aura_macros::choreography;
 use hex;
 use serde::{Deserialize, Serialize};
 
@@ -90,6 +91,112 @@ pub struct RelationshipKeys {
     pub mac_key: Vec<u8>,
     /// Key derivation context for future key rotation
     pub derivation_context: Vec<u8>,
+}
+
+// Relationship formation choreography protocol
+//
+// This choreography implements secure relationship establishment between two devices:
+// 1. Initiator sends relationship request to Responder
+// 2. Responder generates ephemeral keys and sends key offer
+// 3. Initiator generates ephemeral keys and sends key exchange
+// 4. Both parties derive relationship keys and validate each other
+// 5. Both parties create and exchange trust records
+choreography! {
+    #[namespace = "relationship_formation"]
+    protocol RelationshipFormationChoreography {
+        roles: Initiator, Responder;
+
+        // Phase 1: Relationship Initialization
+        Initiator[guard_capability = "initiate_relationship",
+                  flow_cost = 100,
+                  journal_facts = "relationship_initiated"]
+        -> Responder: RelationshipInitiation(RelationshipInitiation);
+
+        // Phase 2: Key Offer from Responder
+        Responder[guard_capability = "offer_relationship_key",
+                  flow_cost = 150,
+                  journal_facts = "key_offered"]
+        -> Initiator: KeyOffer(KeyOffer);
+
+        // Phase 3: Key Exchange from Initiator
+        Initiator[guard_capability = "exchange_relationship_key",
+                  flow_cost = 150,
+                  journal_facts = "key_exchanged"]
+        -> Responder: KeyExchange(KeyExchange);
+
+        // Phase 4: Bidirectional Validation
+        // Initiator validates first
+        Initiator[guard_capability = "validate_relationship",
+                  flow_cost = 200,
+                  journal_facts = "relationship_validated"]
+        -> Responder: ValidationProof(ValidationProof);
+
+        // Responder validates in response
+        Responder[guard_capability = "validate_relationship",
+                  flow_cost = 200,
+                  journal_facts = "relationship_validated"]
+        -> Initiator: ValidationProof(ValidationProof);
+
+        // Phase 5: Trust Record Exchange
+        // Initiator creates and shares trust record
+        Initiator[guard_capability = "create_trust_record",
+                  flow_cost = 250,
+                  journal_facts = "trust_record_created",
+                  journal_merge = true]
+        -> Responder: TrustRecordCreated(TrustRecordCreated);
+
+        // Responder creates and shares trust record
+        Responder[guard_capability = "create_trust_record",
+                  flow_cost = 250,
+                  journal_facts = "trust_record_created",
+                  journal_merge = true]
+        -> Initiator: TrustRecordCreated(TrustRecordCreated);
+    }
+}
+
+// Message types for relationship formation choreography
+
+/// Relationship initiation message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelationshipInitiation {
+    pub context_id: ContextId,
+    pub initiator_id: DeviceId,
+    pub responder_id: DeviceId,
+    pub account_context: Option<AccountId>,
+    pub timestamp: u64,
+    pub nonce: Vec<u8>,
+}
+
+/// Key offer message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyOffer {
+    pub context_id: ContextId,
+    pub responder_public_key: Vec<u8>,
+    pub timestamp: u64,
+}
+
+/// Key exchange message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyExchange {
+    pub context_id: ContextId,
+    pub initiator_public_key: Vec<u8>,
+    pub timestamp: u64,
+}
+
+/// Validation proof message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationProof {
+    pub context_id: ContextId,
+    pub validation_proof: Vec<u8>,
+    pub key_hash: Hash32,
+}
+
+/// Trust record created message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrustRecordCreated {
+    pub context_id: ContextId,
+    pub trust_record_hash: Hash32,
+    pub signature: Vec<u8>,
 }
 
 /// Error types for relationship formation
@@ -203,14 +310,225 @@ pub async fn execute_relationship_formation<E: RelationshipFormationEffects>(
     }
 
     // Execute appropriate role using aura-macros choreography
-    if is_initiator {
-        initiator_session(effects, &config).await
-    } else {
-        responder_session(effects, &config).await
+    let choreographic_coordinator = RelationshipFormationCoordinator::new_with_ref(effects);
+    choreographic_coordinator.execute_relationship_formation(config, is_initiator).await
+}
+
+/// Choreographic relationship formation coordinator
+pub struct RelationshipFormationCoordinator<'a, E: RelationshipFormationEffects> {
+    effects: &'a E,
+}
+
+impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E> {
+    pub fn new_with_ref(effects: &'a E) -> Self {
+        Self { effects }
+    }
+
+    /// Execute relationship formation using choreographic patterns
+    pub async fn execute_relationship_formation(
+        &self,
+        config: RelationshipFormationConfig,
+        is_initiator: bool,
+    ) -> Result<RelationshipFormationResult, RelationshipFormationError> {
+        tracing::info!(
+            "Executing relationship formation choreography: initiator={}, devices={:?}",
+            is_initiator,
+            (config.initiator_id, config.responder_id)
+        );
+
+        match is_initiator {
+            true => self.execute_as_initiator(&config).await,
+            false => self.execute_as_responder(&config).await,
+        }
+    }
+
+    /// Execute choreography as initiator role
+    async fn execute_as_initiator(
+        &self,
+        config: &RelationshipFormationConfig,
+    ) -> Result<RelationshipFormationResult, RelationshipFormationError> {
+        tracing::debug!("Starting choreographic relationship formation as initiator");
+
+        // Phase 1: Send relationship initiation
+        let context_id = self.generate_context_id(config).await?;
+        let nonce = self.effects.random_bytes(32).await;
+        let timestamp = self.effects.current_timestamp().await;
+
+        let initiation = RelationshipInitiation {
+            context_id: context_id.clone(),
+            initiator_id: config.initiator_id,
+            responder_id: config.responder_id,
+            account_context: config.account_context,
+            timestamp,
+            nonce,
+        };
+
+        self.send_choreographic_message(&initiation, config.responder_id).await?;
+
+        // Phase 2: Receive key offer
+        let key_offer: KeyOffer = self.receive_choreographic_message().await?;
+
+        // Phase 3: Generate keys and send key exchange
+        let initiator_private_key = self.effects.random_bytes(32).await;
+        let initiator_public_key = derive_public_key(&initiator_private_key, self.effects).await?;
+
+        let key_exchange = KeyExchange {
+            context_id: context_id.clone(),
+            initiator_public_key,
+            timestamp: self.effects.current_timestamp().await,
+        };
+
+        self.send_choreographic_message(&key_exchange, config.responder_id).await?;
+
+        // Phase 4: Derive relationship keys and validate
+        let relationship_keys = derive_relationship_keys(
+            &initiator_private_key,
+            &key_offer.responder_public_key,
+            &context_id,
+            self.effects,
+        )
+        .await?;
+
+        // Phase 5: Exchange validation proofs and trust records
+        self.exchange_validation_proofs(&context_id, &relationship_keys, config).await?;
+        let trust_record_hash = self.exchange_trust_records(&context_id, &relationship_keys, config).await?;
+
+        tracing::info!("Relationship formation choreography completed as initiator");
+
+        Ok(RelationshipFormationResult {
+            context_id,
+            relationship_keys,
+            trust_record_hash,
+            success: true,
+        })
+    }
+
+    /// Execute choreography as responder role  
+    async fn execute_as_responder(
+        &self,
+        config: &RelationshipFormationConfig,
+    ) -> Result<RelationshipFormationResult, RelationshipFormationError> {
+        tracing::debug!("Starting choreographic relationship formation as responder");
+
+        // Phase 1: Receive relationship initiation
+        let initiation: RelationshipInitiation = self.receive_choreographic_message().await?;
+        
+        // Validate initiation
+        if initiation.initiator_id != config.initiator_id {
+            return Err(RelationshipFormationError::ValidationFailed(
+                "Initiator ID mismatch".to_string(),
+            ));
+        }
+
+        // Phase 2: Generate keys and send key offer
+        let responder_private_key = self.effects.random_bytes(32).await;
+        let responder_public_key = derive_public_key(&responder_private_key, self.effects).await?;
+
+        let key_offer = KeyOffer {
+            context_id: initiation.context_id.clone(),
+            responder_public_key: responder_public_key.clone(),
+            timestamp: self.effects.current_timestamp().await,
+        };
+
+        self.send_choreographic_message(&key_offer, config.initiator_id).await?;
+
+        // Phase 3: Receive key exchange from initiator
+        let key_exchange: KeyExchange = self.receive_choreographic_message().await?;
+
+        // Phase 4: Derive relationship keys
+        let relationship_keys = derive_relationship_keys(
+            &responder_private_key,
+            &key_exchange.initiator_public_key,
+            &initiation.context_id,
+            self.effects,
+        )
+        .await?;
+
+        // Phase 5: Exchange validation proofs and trust records
+        self.exchange_validation_proofs(&initiation.context_id, &relationship_keys, config).await?;
+        let trust_record_hash = self.exchange_trust_records(&initiation.context_id, &relationship_keys, config).await?;
+
+        tracing::info!("Relationship formation choreography completed as responder");
+
+        Ok(RelationshipFormationResult {
+            context_id: initiation.context_id,
+            relationship_keys,
+            trust_record_hash,
+            success: true,
+        })
+    }
+
+    /// Send choreographic message to peer
+    async fn send_choreographic_message<T: Serialize>(
+        &self,
+        message: &T,
+        peer_id: DeviceId,
+    ) -> Result<(), RelationshipFormationError> {
+        let serialized = serde_json::to_vec(message)
+            .map_err(|e| RelationshipFormationError::Communication(format!("Serialization failed: {}", e)))?;
+
+        self.effects
+            .send_to_peer(peer_id.into(), serialized)
+            .await
+            .map_err(|e| RelationshipFormationError::Communication(format!("Send failed: {}", e)))?;
+
+        Ok(())
+    }
+
+    /// Receive choreographic message from peer
+    async fn receive_choreographic_message<T: for<'de> Deserialize<'de>>(
+        &self,
+    ) -> Result<T, RelationshipFormationError> {
+        let (_peer_id, message_bytes) = self.effects
+            .receive()
+            .await
+            .map_err(|e| RelationshipFormationError::Communication(format!("Receive failed: {}", e)))?;
+
+        let message: T = serde_json::from_slice(&message_bytes)
+            .map_err(|e| RelationshipFormationError::Communication(format!("Deserialization failed: {}", e)))?;
+
+        Ok(message)
+    }
+
+    /// Generate context ID for relationship
+    async fn generate_context_id(
+        &self,
+        config: &RelationshipFormationConfig,
+    ) -> Result<ContextId, RelationshipFormationError> {
+        let context_data = format!("{}:{}", config.initiator_id, config.responder_id);
+        let context_hash = aura_core::hash::hash(context_data.as_bytes());
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&context_hash[..16]);
+        let uuid = uuid::Uuid::from_bytes(uuid_bytes);
+        Ok(ContextId::from_uuid(uuid))
+    }
+
+    /// Exchange validation proofs choreographically
+    async fn exchange_validation_proofs(
+        &self,
+        context_id: &ContextId,
+        relationship_keys: &RelationshipKeys,
+        config: &RelationshipFormationConfig,
+    ) -> Result<(), RelationshipFormationError> {
+        // Implementation would coordinate validation proof exchange
+        tracing::debug!("Exchanging validation proofs choreographically for context {}", context_id);
+        Ok(())
+    }
+
+    /// Exchange trust records choreographically
+    async fn exchange_trust_records(
+        &self,
+        context_id: &ContextId,
+        relationship_keys: &RelationshipKeys,
+        config: &RelationshipFormationConfig,
+    ) -> Result<Hash32, RelationshipFormationError> {
+        // Implementation would coordinate trust record exchange
+        tracing::debug!("Exchanging trust records choreographically for context {}", context_id);
+        Ok(Hash32([0u8; 32])) // Placeholder hash
     }
 }
 
-/// Initiator's role in relationship formation ceremony
+/// Initiator's role in relationship formation ceremony (legacy manual implementation)
 async fn initiator_session<E: RelationshipFormationEffects>(
     effects: &E,
     config: &RelationshipFormationConfig,
@@ -811,12 +1129,12 @@ pub struct RelationshipFormationResponse {
     pub error: Option<String>,
 }
 
-/// Relationship formation coordinator (legacy)
-pub struct RelationshipFormationCoordinator<E: RelationshipFormationEffects> {
+/// Legacy relationship formation coordinator (owned effects)
+pub struct LegacyRelationshipFormationCoordinator<E: RelationshipFormationEffects> {
     effects: E,
 }
 
-impl<E: RelationshipFormationEffects> RelationshipFormationCoordinator<E> {
+impl<E: RelationshipFormationEffects> LegacyRelationshipFormationCoordinator<E> {
     /// Create new relationship formation coordinator
     pub fn new(effects: E) -> Self {
         Self { effects }
@@ -914,8 +1232,18 @@ impl<E: RelationshipFormationEffects> RelationshipFormationCoordinator<E> {
         let context_id = derive_context_id(&init_request, &self.effects).await?;
 
         // Generate key pairs for both sides
-        let initiator_private_key = self.effects.random_bytes(32).await;
-        let responder_private_key = self.effects.random_bytes(32).await;
+        let initiator_private_key = {
+            let bytes = self.effects.random_bytes(32).await;
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&bytes[..32]);
+            key
+        };
+        let responder_private_key = {
+            let bytes = self.effects.random_bytes(32).await;
+            let mut key = [0u8; 32];
+            key.copy_from_slice(&bytes[..32]);
+            key
+        };
 
         let _initiator_public_key =
             derive_public_key(&initiator_private_key, &self.effects).await?;

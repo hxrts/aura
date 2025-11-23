@@ -3,12 +3,14 @@
 //! Effect-based implementation of the init command.
 
 use anyhow::Result;
-use aura_agent::AuraEffectSystem;
-use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects, TimeEffects};
+use aura_agent::{AuraEffectSystem, EffectContext};
+use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects};
+use aura_core::effects::TimeEffects;
 use std::path::Path;
 
 /// Handle initialization through effects
 pub async fn handle_init(
+    ctx: &EffectContext,
     effects: &AuraEffectSystem,
     num_devices: u32,
     threshold: u32,
@@ -39,12 +41,13 @@ pub async fn handle_init(
 
     // Create directory structure through storage effects
     let configs_dir = output.join("configs");
-    create_directory_through_effects(effects, output).await?;
-    create_directory_through_effects(effects, &configs_dir).await?;
+    create_directory_through_effects(ctx, effects, output).await?;
+    create_directory_through_effects(ctx, effects, &configs_dir).await?;
 
     // Create placeholder effect API through storage effects
     let effect_api_path = output.join("effect_api.cbor");
-    let effect_api_data = create_placeholder_effect_api(effects, threshold, num_devices).await?;
+    let effect_api_data =
+        create_placeholder_effect_api(ctx, effects, threshold, num_devices).await?;
 
     effects
         .store(&effect_api_path.display().to_string(), effect_api_data)
@@ -56,9 +59,18 @@ pub async fn handle_init(
         let config_content = create_device_config(i, threshold, num_devices);
         let config_path = configs_dir.join(format!("device_{}.toml", i));
 
-        // Storage effect not available - using placeholder
-        std::fs::write(&config_path, config_content)
-            .map_err(|e| anyhow::anyhow!("Failed to create device config {}: {}", i, e))?;
+        // Create device config via StorageEffects
+        let config_key = format!("device_config:{}", config_path.display());
+        effects
+            .store(&config_key, config_content.into_bytes())
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to create device config {} via storage effects: {}",
+                    i,
+                    e
+                )
+            })?;
 
         println!("Created device_{}.toml", i);
     }
@@ -70,27 +82,31 @@ pub async fn handle_init(
 }
 
 /// Create directory marker through storage effects
-async fn create_directory_through_effects(effects: &AuraEffectSystem, path: &Path) -> Result<()> {
-    let dir_marker_path = path.join(".aura_directory");
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+async fn create_directory_through_effects(
+    _ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+    path: &Path,
+) -> Result<()> {
+    let timestamp = <AuraEffectSystem as aura_core::effects::TimeEffects>::current_timestamp(effects).await;
 
-    // Storage effect not available - using placeholder
-    std::fs::create_dir_all(path)
-        .map_err(|e| anyhow::anyhow!("Failed to create directory {}: {}", path.display(), e))?;
-    std::fs::write(&dir_marker_path, timestamp.to_le_bytes()).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to create directory marker {}: {}",
-            dir_marker_path.display(),
-            e
-        )
-    })
+    // Create directory marker via StorageEffects (since StorageEffects is key-value based)
+    let dir_marker_key = format!("directory_marker:{}", path.display());
+    effects
+        .store(&dir_marker_key, timestamp.to_le_bytes().to_vec())
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to create directory marker via storage effects: {}",
+                e
+            )
+        })?;
+
+    Ok(())
 }
 
 /// Create placeholder effect API data
 async fn create_placeholder_effect_api(
+    _ctx: &EffectContext,
     effects: &AuraEffectSystem,
     threshold: u32,
     num_devices: u32,

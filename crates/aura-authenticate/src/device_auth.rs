@@ -11,6 +11,7 @@ use aura_protocol::effects::AuraEffects;
 use aura_verify::session::{SessionScope, SessionTicket};
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 use aura_wot::BiscuitTokenManager;
+use ed25519_dalek::Verifier;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -286,13 +287,15 @@ where
         let challenge_response = self.generate_challenge(&challenge_request).await?;
 
         // Phase 3: Proof Submission - Create identity proof
-        let identity_proof = self
+        let (identity_proof, verifying_key) = self
             .create_identity_proof(request, &challenge_response)
             .await?;
         let proof_submission = ProofSubmission {
             session_id: challenge_response.session_id.clone(),
             identity_proof: identity_proof.clone(),
-            key_material: self.create_key_material(&request.device_id).await?,
+            key_material: self
+                .create_key_material(&request.device_id, verifying_key)
+                .await?,
         };
 
         // Phase 4: Authentication Result - Verify proof
@@ -341,38 +344,47 @@ where
         &self,
         request: &DeviceAuthRequest,
         challenge_response: &ChallengeResponse,
-    ) -> AuraResult<IdentityProof> {
+    ) -> AuraResult<(IdentityProof, aura_core::crypto::Ed25519VerifyingKey)> {
         // Create message to sign (combine challenge with device info)
         let mut message = Vec::new();
         message.extend_from_slice(&challenge_response.challenge);
         message.extend_from_slice(request.device_id.to_string().as_bytes());
 
-        // Generate signature using effect system
-        // In a real implementation, this would use the device's private key
-        // For simulation, we'll generate a deterministic signature
-        let signature_bytes = self.effects.random_bytes(64).await;
+        // Generate keypair and signature using the effect system crypto API
+        let (verifying_key_bytes, signing_key_bytes) = self
+            .effects
+            .ed25519_generate_keypair()
+            .await
+            .map_err(|e| AuraError::crypto(format!("Keypair generation failed: {}", e)))?;
+        let signature_bytes = self
+            .effects
+            .ed25519_sign(&message, &signing_key_bytes)
+            .await
+            .map_err(|e| AuraError::crypto(format!("Failed to sign challenge: {}", e)))?;
+
+        let mut pk_array = [0u8; 32];
+        pk_array.copy_from_slice(&verifying_key_bytes[..32]);
+        let verifying_key = aura_core::crypto::Ed25519VerifyingKey::from_bytes(&pk_array)
+            .map_err(|e| AuraError::crypto(format!("Invalid verifying key: {}", e)))?;
+
         let mut signature = [0u8; 64];
         signature.copy_from_slice(&signature_bytes[..64]);
 
-        Ok(IdentityProof::Device {
-            device_id: request.device_id,
-            signature: signature.into(),
-        })
+        Ok((
+            IdentityProof::Device {
+                device_id: request.device_id,
+                signature: signature.into(),
+            },
+            verifying_key,
+        ))
     }
 
     /// Create key material for verification
-    async fn create_key_material(&self, device_id: &DeviceId) -> AuraResult<KeyMaterial> {
-        // Generate public key for verification
-        // In a real implementation, this would retrieve the actual device public key
-        let public_key_bytes = self.effects.random_bytes(32).await;
-        let mut public_key_array = [0u8; 32];
-        public_key_array.copy_from_slice(&public_key_bytes[..32]);
-
-        // Create Ed25519VerifyingKey from bytes
-        use aura_core::crypto::Ed25519VerifyingKey;
-        let public_key = Ed25519VerifyingKey::from_bytes(&public_key_array)
-            .map_err(|e| AuraError::crypto(format!("Invalid public key: {}", e)))?;
-
+    async fn create_key_material(
+        &self,
+        device_id: &DeviceId,
+        public_key: aura_core::crypto::Ed25519VerifyingKey,
+    ) -> AuraResult<KeyMaterial> {
         let mut key_material = KeyMaterial::new();
         key_material.add_device_key(*device_id, public_key);
 
@@ -397,14 +409,20 @@ where
             });
         }
 
-        // For simulation, we'll assume successful verification
-        // In production, this would verify the signature against the challenge
+        // Verify signature against provided key material
         let verified_identity = match &proof_submission.identity_proof {
-            IdentityProof::Device {
-                device_id,
-                signature: _,
-            } => {
-                // Create verified identity
+            IdentityProof::Device { device_id, signature } => {
+                let verifying_key = proof_submission
+                    .key_material
+                    .get_device_public_key(device_id)
+                    .map_err(|e| AuraError::crypto(format!("Missing device key: {}", e)))?;
+
+                let sig_bytes: [u8; 64] = signature.to_bytes();
+                let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
+                verifying_key
+                    .verify(&challenge_response.challenge, &sig)
+                    .map_err(|e| AuraError::crypto(format!("Signature verification failed: {}", e)))?;
+
                 VerifiedIdentity {
                     proof: proof_submission.identity_proof.clone(),
                     message_hash: aura_core::hash::hash(&challenge_response.challenge),

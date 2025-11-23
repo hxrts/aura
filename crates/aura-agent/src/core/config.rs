@@ -4,10 +4,15 @@
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use aura_core::DeviceId;
 
 /// Agent configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
+    /// Device ID for this agent
+    #[serde(with = "device_id_serde")]
+    pub device_id: DeviceId,
+
     /// Storage configuration
     pub storage: StorageConfig,
 
@@ -76,6 +81,7 @@ pub struct ChoreographyConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
+            device_id: DeviceId::new(),
             storage: StorageConfig::default(),
             network: NetworkConfig::default(),
             reliability: ReliabilityConfig::default(),
@@ -125,6 +131,11 @@ impl Default for ChoreographyConfig {
 }
 
 impl AgentConfig {
+    /// Get the device ID for this agent
+    pub fn device_id(&self) -> DeviceId {
+        self.device_id
+    }
+
     /// Check if this is a testing configuration
     pub fn is_testing(&self) -> bool {
         // For now, consider it testing if the base path contains "test"
@@ -135,5 +146,26 @@ impl AgentConfig {
     pub fn is_simulation(&self) -> bool {
         // For now, consider it simulation if the base path contains "sim"
         self.storage.base_path.to_string_lossy().contains("sim")
+    }
+}
+
+/// Serde support for DeviceId
+mod device_id_serde {
+    use super::*;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(device_id: &DeviceId, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        device_id.0.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<DeviceId, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let uuid = uuid::Uuid::deserialize(deserializer)?;
+        Ok(DeviceId(uuid))
     }
 }

@@ -529,6 +529,108 @@ impl MetricsCollector {
         }
     }
 
+    /// Increment sync attempts for a peer
+    pub fn increment_sync_attempts(&self, _peer: DeviceId) {
+        if let Ok(operational) = self.registry.operational.lock() {
+            operational.sync_sessions_total.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Increment sync successes for a peer
+    pub fn increment_sync_successes(&self, _peer: DeviceId) {
+        if let Ok(operational) = self.registry.operational.lock() {
+            operational.sync_sessions_completed_total.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Add synced operations count for a peer
+    pub fn add_synced_operations(&self, _peer: DeviceId, ops_count: usize) {
+        if let Ok(operational) = self.registry.operational.lock() {
+            operational.sync_operations_transferred_total.fetch_add(ops_count as u64, Ordering::Relaxed);
+        }
+    }
+
+    /// Update last sync timestamp for a peer
+    pub fn update_last_sync(&self, _peer: DeviceId) {
+        // For now, this is a no-op since we track global sync time
+        // In a real implementation, this would update per-peer sync times
+    }
+
+    /// Increment auto sync rounds counter
+    pub fn increment_auto_sync_rounds(&self) {
+        if let Ok(operational) = self.registry.operational.lock() {
+            operational.sync_sessions_total.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Add auto sync results
+    pub fn add_auto_sync_results(&self, _results: &[(DeviceId, usize)]) {
+        // For now, this is a no-op
+        // In a real implementation, this would aggregate the results
+    }
+
+    /// Update auto sync timing
+    pub fn update_auto_sync_timing(&self, _duration: Duration) {
+        // For now, this is a no-op
+        // In a real implementation, this would track auto-sync duration
+    }
+
+    /// Get last sync timestamp in milliseconds since Unix epoch
+    pub fn get_last_sync_timestamp(&self) -> Option<u64> {
+        // For now, use the system time as a placeholder
+        // In a real implementation, this would track the actual last sync time
+        Some(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_millis() as u64
+        )
+    }
+
+    /// Get total number of requests processed
+    pub fn get_total_requests_processed(&self) -> u64 {
+        if let Ok(operational) = self.registry.operational.lock() {
+            operational.sync_sessions_completed_total.load(Ordering::Relaxed)
+        } else {
+            0
+        }
+    }
+
+    /// Get total number of errors encountered
+    pub fn get_total_errors_encountered(&self) -> u64 {
+        if let Ok(errors) = self.registry.errors.lock() {
+            errors.network_errors_total.load(Ordering::Relaxed) +
+            errors.protocol_errors_total.load(Ordering::Relaxed) +
+            errors.timeout_errors_total.load(Ordering::Relaxed) +
+            errors.resource_errors_total.load(Ordering::Relaxed) +
+            errors.authorization_errors_total.load(Ordering::Relaxed)
+        } else {
+            0
+        }
+    }
+
+    /// Get average sync latency in milliseconds
+    pub fn get_average_sync_latency_ms(&self) -> f64 {
+        if let Ok(performance) = self.registry.performance.lock() {
+            // Simple average calculation - in a real implementation this would use proper statistics
+            performance.network_latency_histogram.stats().average()
+        } else {
+            0.0
+        }
+    }
+
+    /// Get last operation timestamp in milliseconds since Unix epoch
+    pub fn get_last_operation_timestamp(&self) -> Option<u64> {
+        // For now, use the system time as a placeholder
+        // In a real implementation, this would track the actual last operation time
+        Some(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or(Duration::ZERO)
+                .as_millis() as u64
+        )
+    }
+
     /// Export comprehensive metrics snapshot
     pub fn export_snapshot(&self) -> SyncMetricsSnapshot {
         let operational_snapshot = if let Ok(operational) = self.registry.operational.lock() {

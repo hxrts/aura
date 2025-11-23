@@ -4,7 +4,7 @@
 //! as specified in the formal model. It provides observer models for external,
 //! neighbor, and in-group adversaries with appropriate privacy guarantees.
 
-#![allow(clippy::disallowed_methods)] // TODO: Replace direct time calls with effect system
+// Time calls replaced with TimeEffects integration
 
 use super::effect_system_trait::GuardEffectSystem;
 use super::LeakageBudget;
@@ -75,11 +75,12 @@ impl PrivacyBudgetTracker {
     }
 
     /// Consume budget for an operation
-    pub fn consume_budget(
+    pub async fn consume_budget<T: aura_core::TimeEffects>(
         &mut self,
         operation_id: String,
         consumed: LeakageBudget,
         observable_by: Vec<AdversaryClass>,
+        time_effects: &T,
     ) -> AuraResult<()> {
         // Check if we can afford this operation
         if !self.can_afford_operation(&consumed) {
@@ -107,10 +108,7 @@ impl PrivacyBudgetTracker {
         let consumption = BudgetConsumption {
             operation_id: operation_id.clone(),
             consumed: consumed.clone(),
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            timestamp: time_effects.current_timestamp().await,
             observable_by,
         };
 
@@ -131,11 +129,8 @@ impl PrivacyBudgetTracker {
     }
 
     /// Clean up old budget consumption records outside the tracking window
-    pub fn cleanup_old_records(&mut self) {
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+    pub async fn cleanup_old_records<T: aura_core::TimeEffects>(&mut self, time_effects: &T) {
+        let current_time = time_effects.current_timestamp().await;
 
         let window_start = current_time.saturating_sub(self.state.tracking_window_hours * 3600);
 
@@ -224,10 +219,11 @@ pub async fn track_leakage_consumption<E: GuardEffectSystem>(
         operation_id.to_string(),
         leakage_budget.clone(),
         observable_by,
-    )?;
+        effect_system,
+    ).await?;
 
     // Clean up old records outside the tracking window
-    tracker.cleanup_old_records();
+    tracker.cleanup_old_records(effect_system).await;
 
     // Save updated state back to storage
     save_privacy_tracker(&tracker, effect_system).await?;
@@ -367,10 +363,7 @@ pub async fn get_privacy_budget_status<E: GuardEffectSystem>(
         Ok(tracker) => {
             let mut state = tracker.state.clone();
             // Clean up old records before returning status
-            let current_time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+            let current_time = effect_system.current_timestamp().await;
             let window_start = current_time.saturating_sub(state.tracking_window_hours * 3600);
 
             state

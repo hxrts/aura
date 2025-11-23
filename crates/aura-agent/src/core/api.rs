@@ -3,7 +3,8 @@
 //! Minimal public API surface for the agent runtime.
 
 use super::{AgentConfig, AgentError, AgentResult, AuthorityContext};
-use crate::runtime::{EffectSystemBuilder, RuntimeSystem};
+use crate::runtime::{EffectContext, EffectSystemBuilder};
+use crate::runtime::system::RuntimeSystem;
 use aura_core::identifiers::AuthorityId;
 
 /// Main agent interface - thin facade delegating to runtime
@@ -40,8 +41,8 @@ impl AuraAgent {
     }
 
     /// Shutdown the agent
-    pub async fn shutdown(self) -> AgentResult<()> {
-        self.runtime.shutdown().await.map_err(AgentError::runtime)
+    pub async fn shutdown(self, ctx: &EffectContext) -> AgentResult<()> {
+        self.runtime.shutdown(ctx).await.map_err(|e| AgentError::runtime(e))
     }
 }
 
@@ -73,15 +74,22 @@ impl AgentBuilder {
     }
 
     /// Build a production agent
-    pub async fn build_production(self) -> AgentResult<AuraAgent> {
+    pub async fn build_production(self, ctx: &EffectContext) -> AgentResult<AuraAgent> {
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
+        // Create a temporary context for building
+        let temp_context = EffectContext::new(
+            authority_id,
+            aura_core::identifiers::ContextId::new(),
+            aura_core::effects::ExecutionMode::Production,
+        );
+        
         let runtime = EffectSystemBuilder::production()
             .with_config(self.config)
             .with_authority(authority_id)
-            .build()
+            .build(&temp_context)
             .await
             .map_err(AgentError::runtime)?;
 
@@ -98,6 +106,22 @@ impl AgentBuilder {
             .with_config(self.config)
             .with_authority(authority_id)
             .build_sync()
+            .map_err(AgentError::runtime)?;
+
+        Ok(AuraAgent::new(runtime, authority_id))
+    }
+
+    /// Build a testing agent using an existing async runtime
+    pub async fn build_testing_async(self, ctx: &EffectContext) -> AgentResult<AuraAgent> {
+        let authority_id = self
+            .authority_id
+            .ok_or_else(|| AgentError::config("Authority ID required"))?;
+
+        let runtime = EffectSystemBuilder::testing()
+            .with_config(self.config)
+            .with_authority(authority_id)
+            .build(ctx)
+            .await
             .map_err(AgentError::runtime)?;
 
         Ok(AuraAgent::new(runtime, authority_id))

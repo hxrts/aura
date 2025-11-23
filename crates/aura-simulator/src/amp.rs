@@ -12,6 +12,9 @@ pub fn amp_out_of_order_scenario() -> Scenario {
         setup: ScenarioSetup {
             participants: 3,
             threshold: 2,
+            chat_config: None,
+            data_loss_config: None,
+            demo_config: None,
         },
         network_conditions: Some(NetworkConditions {
             latency_ms: Some(50),

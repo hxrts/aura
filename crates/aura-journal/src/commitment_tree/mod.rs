@@ -1,36 +1,18 @@
-//! Commitment Tree - New Implementation
+//! Layer 2: Commitment Tree - CRDT Tree State Machine
 //!
-//! This module implements the commitment tree specification from:
-//! - docs/123_commitment_tree.md
-//! - docs/123_tree_sync.md
+//! CRDT-based implementation: **OpLog** (fact-based operation log) → **deterministic reduction** → **TreeState**.
+//! Enables threshold key management, device membership, and authority state coordination.
 //!
-//! ## Architecture (from spec)
+//! **Key Invariants** (per docs/102_journal.md):
+//! - **OpLog is authoritative**: Only persisted data; immutable facts (AttestedOp)
+//! - **Deterministic reduction**: Same OpLog always produces identical TreeState across all replicas
+//! - **Monotonic growth**: OpLog append-only; facts never retracted
+//! - **Content-addressed**: Each fact identified by CID (content hash)
 //!
-//! ```text
-//! OpLog (CRDT OR-set of AttestedOp) ─────┐
-//!                                         │
-//!                                         ↓ reduce()
-//!                                    TreeState
-//!                                    (derived, materialized on-demand)
-//!                                    - epoch: u64
-//!                                    - root_commitment: Hash32
-//!                                    - nodes: BTreeMap<NodeIndex, Node>
-//!                                    - leaves: BTreeMap<LeafId, LeafNode>
-//! ```
-//!
-//! ## Key Principles:
-//!
-//! 1. **Journal stores only AttestedOp** - no shares, no transcripts
-//! 2. **TreeState is derived** - computed on-demand via reduction, never stored
-//! 3. **OpLog is OR-set CRDT** - join-based append-only log
-//! 4. **Deterministic reduction** - DAG with topological sort and H(op) tie-breaker
-//!
-//! ## CRITICAL INVARIANTS:
-//!
-//! - TreeState is **NEVER** stored in the journal
-//! - OpLog is the **ONLY** persisted tree data
-//! - Reduction is **DETERMINISTIC** across all replicas
-//! - Same OpLog always produces same TreeState
+//! **Architecture**: Separation of concerns:
+//! - `application`: Validate & apply operations to tree state
+//! - `reduction`: Deterministic state derivation from OpLog
+//! - `compaction`: Garbage collection and snapshotting
 
 /// Commitment tree application and verification
 pub mod application;

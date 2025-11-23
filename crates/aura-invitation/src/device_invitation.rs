@@ -11,14 +11,10 @@ use aura_journal::semilattice::{InvitationRecord, InvitationRecordRegistry};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_wot::SerializableBiscuit;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
-
-static GLOBAL_INVITATION_REGISTRY: Lazy<Arc<Mutex<InvitationRecordRegistry>>> =
-    Lazy::new(|| Arc::new(Mutex::new(InvitationRecordRegistry::new())));
 
 /// Device invitation request
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,11 +252,12 @@ impl<E> DeviceInvitationCoordinator<E>
 where
     E: AuraEffects + ?Sized,
 {
-    /// Create new device invitation coordinator.
+    /// Create new device invitation coordinator with a new registry.
+    /// For production use, prefer `with_registry()` to share state across components.
     pub fn new(effect_system: Arc<E>) -> Self {
         Self {
             effects: effect_system,
-            registry: Arc::clone(&GLOBAL_INVITATION_REGISTRY),
+            registry: Arc::new(Mutex::new(InvitationRecordRegistry::new())),
             default_ttl_secs: 3600,
         }
     }
@@ -373,7 +370,8 @@ where
     }
 }
 
-/// Access the shared invitation registry used by other modules.
-pub fn shared_invitation_registry() -> Arc<Mutex<InvitationRecordRegistry>> {
-    Arc::clone(&GLOBAL_INVITATION_REGISTRY)
+/// Create a new invitation registry for use across components.
+/// This replaces the previous global state pattern with explicit dependency injection.
+pub fn create_invitation_registry() -> Arc<Mutex<InvitationRecordRegistry>> {
+    Arc::new(Mutex::new(InvitationRecordRegistry::new()))
 }

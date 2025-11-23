@@ -1,10 +1,23 @@
-//! Aura Testkit
+//! # Aura Testkit - Layer 8: Testing & Tools
 //!
-//! This module provides common test setup functions to eliminate duplication
-//! across test modules. It includes factories for creating test accounts,
-//! devices, keys, and common test fixtures.
+//! This crate provides shared testing infrastructure, fixtures, and utilities for the Aura platform.
 //!
-//! # Architecture Constraints
+//! ## Purpose
+//!
+//! Layer 8 testing tools crate providing:
+//! - Test fixtures for common account, device, and authority scenarios
+//! - Effect system test harnesses and effect capture utilities
+//! - Mock implementations of effects for deterministic testing
+//! - Time control facilities for temporal testing
+//! - Privacy analysis and information flow verification tools
+//! - Simulation infrastructure for protocol testing
+//!
+//! ## Architecture Constraints
+//!
+//! This crate depends on:
+//! - **Layer 1-7**: All lower layers (core, domain crates, effects, protocols, features, runtime, UI)
+//! - **MUST NOT**: Be imported by Layer 1-3 crates (would create circular dependencies)
+//! - **MAY be imported by**: Layer 4-7 crates in dev-dependencies only
 //!
 //! **IMPORTANT**: This testkit is designed for testing **Layer 4 and higher** crates only:
 //! - Layer 4: aura-protocol (orchestration)
@@ -12,13 +25,49 @@
 //! - Layer 6: aura-agent, aura-simulator (runtime)
 //! - Layer 7: aura-cli (UI)
 //!
-//! **DO NOT use aura-testkit in foundation/specification layers** (would create circular dependencies):
-//! - ❌ Layer 1: aura-core (foundation)
-//! - ❌ Layer 2: aura-journal, aura-wot, aura-verify, aura-store, aura-transport (specification)
-//! - ❌ Layer 3: aura-effects (implementation)
-//!
 //! Foundation layers should create their own internal test utilities (e.g., `aura-core/src/test_utils.rs`)
-//! to avoid circular dependencies.
+//! to avoid circular dependencies. These tests should use stateless effect patterns where possible.
+//!
+//! ## What Belongs Here
+//!
+//! - Test fixtures and builders for common scenarios
+//! - Effect system test harnesses and mocking infrastructure
+//! - Mock effect implementations for testing
+//! - Time control and deterministic scheduling for tests
+//! - Privacy analysis tools and information flow verification
+//! - Simulation support infrastructure
+//! - Configuration management for test environments
+//! - Verification utilities for protocol testing
+//!
+//! ## What Does NOT Belong Here
+//!
+//! - Production effect implementations (belong in aura-effects)
+//! - Protocol logic (belong in Layer 5 feature crates)
+//! - Runtime composition logic (belong in aura-agent)
+//! - UI implementations (belong in aura-cli)
+//! - Test cases for specific crates (belong in those crates' test modules)
+//! - Formal verification logic (Quint belongs in aura-quint-api)
+//!
+//! ## Design Principles
+//!
+//! - Reusability: Test fixtures are designed for common testing scenarios
+//! - Determinism: All test infrastructure produces deterministic results
+//! - Isolation: Tests can run independently without interference
+//! - Effect-based: Uses the same effect system as production
+//! - Mock transparency: Mock effects behave consistently with real ones
+//! - Cleanup: Test fixtures clean up resources on drop
+//! - Dependency-aware: Respects architectural layer constraints
+//!
+//! ## Key Components
+//!
+//! - **builders**: Builder patterns for constructing test accounts, devices, authorities
+//! - **fixtures**: Pre-configured test scenarios and environments
+//! - **mocks**: Mock effect implementations for testing
+//! - **effect_api**: Effect system test harnesses and capture utilities
+//! - **time**: Deterministic time control for temporal testing
+//! - **verification**: Protocol verification and assertion utilities
+//! - **privacy**: Privacy analysis and leakage tracking
+//! - **simulation**: Simulation support for protocol testing
 
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
@@ -58,6 +107,7 @@ pub mod foundation;
 pub mod infrastructure;
 pub mod mocks;
 pub mod simulation;
+pub mod stateful_effects;
 pub mod time;
 pub mod verification;
 
@@ -75,6 +125,7 @@ pub use foundation::*;
 pub use infrastructure::*;
 pub use mocks::*;
 pub use simulation::*;
+pub use stateful_effects::*;
 pub use time::*;
 pub use verification::*;
 

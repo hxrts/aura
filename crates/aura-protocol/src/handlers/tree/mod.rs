@@ -1,8 +1,10 @@
-//! Tree handler implementations
+//! Layer 4: Tree Handler Implementations
 //!
-//! The production tree handlers were removed during the refactor, but a dummy
-//! handler remains useful for tests and composite handler wiring. This module
-//! provides that placeholder implementation.
+//! Handlers for commitment tree operations. Production handlers removed during refactor;
+//! dummy handler remains for tests and composite handler composition.
+//!
+//! **Note**: Tree reduction and application logic now lives in aura-journal (Layer 2),
+//! enabling separation between domain CRDT operations and protocol-layer orchestration.
 
 pub mod dummy;
 

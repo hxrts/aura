@@ -5,17 +5,24 @@
 #![allow(clippy::disallowed_methods)]
 
 use anyhow::{Context, Result};
-use aura_agent::AuraEffectSystem;
-use aura_core::{Hash32, SemanticVersion};
-use aura_protocol::effect_traits::ConsoleEffects;
-use aura_sync::maintenance::UpgradeProposal;
+use aura_agent::{AuraEffectSystem, EffectContext};
+use aura_core::effects::{ConsoleEffects, StorageEffects};
+use aura_core::{AccountId, Hash32, SemanticVersion};
+use aura_sync::maintenance::{IdentityEpochFence, UpgradeProposal};
 use aura_sync::protocols::ota::UpgradeKind;
+use blake3::Hasher;
+use std::fs;
+use std::path::Path;
 use uuid::Uuid;
 
 use crate::OtaAction;
 
 /// Handle OTA commands through effects
-pub async fn handle_ota(effects: &AuraEffectSystem, action: &OtaAction) -> Result<()> {
+pub async fn handle_ota(
+    _ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+    action: &OtaAction,
+) -> Result<()> {
     match action {
         OtaAction::Propose {
             from_version,
@@ -25,6 +32,7 @@ pub async fn handle_ota(effects: &AuraEffectSystem, action: &OtaAction) -> Resul
             description,
         } => {
             propose_upgrade(
+                _ctx,
                 effects,
                 from_version,
                 to_version,
@@ -34,15 +42,16 @@ pub async fn handle_ota(effects: &AuraEffectSystem, action: &OtaAction) -> Resul
             )
             .await
         }
-        OtaAction::Policy { policy } => set_policy(effects, policy).await,
-        OtaAction::Status => get_status(effects).await,
-        OtaAction::OptIn { proposal_id } => opt_in(effects, proposal_id).await,
-        OtaAction::List => list_proposals(effects).await,
-        OtaAction::Stats => get_stats(effects).await,
+        OtaAction::Policy { policy } => set_policy(_ctx, effects, policy).await,
+        OtaAction::Status => get_status(_ctx, effects).await,
+        OtaAction::OptIn { proposal_id } => opt_in(_ctx, effects, proposal_id).await,
+        OtaAction::List => list_proposals(_ctx, effects).await,
+        OtaAction::Stats => get_stats(_ctx, effects).await,
     }
 }
 
 async fn propose_upgrade(
+    _ctx: &EffectContext,
     effects: &AuraEffectSystem,
     _from_version: &str,
     to_version: &str,
@@ -78,60 +87,164 @@ async fn propose_upgrade(
     let patch: u16 = parts[2].parse().context("Invalid patch version")?;
     let version = SemanticVersion::new(major, minor, patch);
 
+    // Compute artifact hash from local file if available, otherwise hash the URL string
+    let artifact_hash = compute_artifact_hash(download_url)?;
+
     let proposal = UpgradeProposal {
         package_id: Uuid::new_v4(),
         version,
-        artifact_hash: Hash32([0u8; 32]), // TODO: Compute actual hash from artifact
+        artifact_hash,
         artifact_uri: Some(download_url.to_string()),
         kind,
-        activation_fence: None, // TODO: Set for hard forks
+        activation_fence: match kind {
+            UpgradeKind::HardFork => Some(IdentityEpochFence::new(
+                AccountId::from_uuid(_ctx.authority_id().uuid()),
+                0,
+            )),
+            _ => None,
+        },
     };
 
     proposal.validate().context("Invalid upgrade proposal")?;
 
-    println!("Created upgrade proposal with ID: {}", proposal.package_id);
-    println!("Upgrade proposal created successfully");
-    println!("Package ID: {}", proposal.package_id);
-    println!("Version: {}", proposal.version);
-    println!("Type: {:?}", proposal.kind);
+    let key = format!("ota:proposal:{}", proposal.package_id);
+    let _ = effects
+        .store(&key, serde_json::to_vec(&proposal)?)
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+
+    ConsoleEffects::log_info(
+        effects,
+        &format!(
+            "Created upgrade proposal {} (version {}, kind {:?})",
+            proposal.package_id, proposal.version, proposal.kind
+        ),
+    )
+    .await?;
 
     Ok(())
 }
 
-async fn set_policy(effects: &AuraEffectSystem, policy: &str) -> Result<()> {
-    println!("Setting OTA policy to: {}", policy);
-    println!("OTA policy set to: {}", policy);
-    // TODO: Store policy in agent configuration
+async fn set_policy(_ctx: &EffectContext, effects: &AuraEffectSystem, policy: &str) -> Result<()> {
+    let key = "ota:policy";
+    effects
+        .store(key, policy.as_bytes().to_vec())
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+    ConsoleEffects::log_info(effects, &format!("OTA policy set to: {}", policy)).await?;
     Ok(())
 }
 
-async fn get_status(effects: &AuraEffectSystem) -> Result<()> {
-    println!("Checking OTA status");
-    println!("OTA Status: No active upgrades");
-    // TODO: Query actual upgrade status from agent
+async fn get_status(_ctx: &EffectContext, effects: &AuraEffectSystem) -> Result<()> {
+    let proposals = list_saved_proposals(effects).await?;
+    if proposals.is_empty() {
+        ConsoleEffects::log_info(effects, "OTA Status: No active upgrades").await?;
+        return Ok(());
+    }
+
+    ConsoleEffects::log_info(
+        effects,
+        &format!("OTA Status: {} proposal(s) tracked", proposals.len()),
+    )
+    .await?;
+
+    for proposal in proposals {
+        let opt_in_key = format!("ota:optin:{}", proposal.package_id);
+        let opted_in = effects
+            .retrieve(&opt_in_key)
+            .await
+            .map(|v| v.is_some())
+            .unwrap_or(false);
+        ConsoleEffects::log_info(
+            effects,
+            &format!(
+                "  • {} ({}, kind {:?}) opted_in={}",
+                proposal.package_id, proposal.version, proposal.kind, opted_in
+            ),
+        )
+        .await?;
+    }
     Ok(())
 }
 
-async fn opt_in(effects: &AuraEffectSystem, proposal_id: &str) -> Result<()> {
-    println!("Opting into upgrade proposal: {}", proposal_id);
-    println!("Opted into proposal: {}", proposal_id);
-    // TODO: Send opt-in to coordinator
+async fn opt_in(_ctx: &EffectContext, effects: &AuraEffectSystem, proposal_id: &str) -> Result<()> {
+    let proposal_uuid = Uuid::parse_str(proposal_id).context("proposal_id must be a UUID")?;
+
+    let key = format!("ota:optin:{}", proposal_uuid);
+    effects
+        .store(&key, b"opted-in".to_vec())
+        .await
+        .map_err(|e| anyhow::Error::from(e))?;
+
+    ConsoleEffects::log_info(effects, &format!("Opted into proposal: {}", proposal_uuid)).await?;
     Ok(())
 }
 
-async fn list_proposals(effects: &AuraEffectSystem) -> Result<()> {
-    println!("Listing upgrade proposals");
-    println!("No upgrade proposals found");
-    // TODO: Query actual proposals from agent
+async fn list_proposals(_ctx: &EffectContext, effects: &AuraEffectSystem) -> Result<()> {
+    let proposals = list_saved_proposals(effects).await?;
+    if proposals.is_empty() {
+        ConsoleEffects::log_info(effects, "No upgrade proposals found").await?;
+        return Ok(());
+    }
+
+    ConsoleEffects::log_info(
+        effects,
+        &format!("Listing {} proposal(s):", proposals.len()),
+    )
+    .await?;
+
+    for proposal in proposals {
+        ConsoleEffects::log_info(
+            effects,
+            &format!(
+                "  • {} version {} kind {:?}",
+                proposal.package_id, proposal.version, proposal.kind
+            ),
+        )
+        .await?;
+    }
     Ok(())
 }
 
-async fn get_stats(effects: &AuraEffectSystem) -> Result<()> {
-    println!("Getting OTA statistics");
-    println!("OTA Statistics:");
-    println!("  Total upgrades: 0");
-    println!("  Successful: 0");
-    println!("  Failed: 0");
-    // TODO: Query actual statistics from agent
+async fn get_stats(_ctx: &EffectContext, effects: &AuraEffectSystem) -> Result<()> {
+    let proposals = list_saved_proposals(effects).await?;
+    let opt_ins = effects
+        .list_keys(Some("ota:optin:"))
+        .await
+        .map(|list| list.len())
+        .unwrap_or(0);
+
+    ConsoleEffects::log_info(effects, "OTA Statistics:").await?;
+    ConsoleEffects::log_info(effects, &format!("  Total proposals: {}", proposals.len())).await?;
+    ConsoleEffects::log_info(effects, &format!("  Opt-ins: {}", opt_ins)).await?;
     Ok(())
+}
+
+fn compute_artifact_hash(download_url: &str) -> Result<Hash32> {
+    let mut hasher = Hasher::new();
+    let path = Path::new(download_url);
+    if path.exists() {
+        let data = fs::read(path)?;
+        hasher.update(&data);
+    } else {
+        hasher.update(download_url.as_bytes());
+    }
+    let digest = hasher.finalize();
+    Ok(Hash32(*digest.as_bytes()))
+}
+
+async fn list_saved_proposals(effects: &AuraEffectSystem) -> Result<Vec<UpgradeProposal>> {
+    let mut proposals = Vec::new();
+    let keys = effects
+        .list_keys(Some("ota:proposal:"))
+        .await
+        .unwrap_or_default();
+    for key in keys {
+        if let Ok(Some(raw)) = effects.retrieve(&key).await {
+            if let Ok(proposal) = serde_json::from_slice::<UpgradeProposal>(&raw) {
+                proposals.push(proposal);
+            }
+        }
+    }
+    Ok(proposals)
 }

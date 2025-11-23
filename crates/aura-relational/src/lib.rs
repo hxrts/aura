@@ -1,3 +1,59 @@
+//! # Aura Relational - Layer 5: Feature/Protocol Implementation
+//!
+//! This crate implements relational contexts for cross-authority coordination
+//! and management of guardian bindings, recovery grants, and peer relationships
+//! in the Aura threshold identity platform.
+//!
+//! ## Purpose
+//!
+//! Layer 5 feature crate providing relational context management for:
+//! - Cross-authority relationship coordination without exposing internal structure
+//! - Guardian binding management and lifecycle
+//! - Recovery grant storage and consensus coordination
+//! - Relational fact journals for distributed state agreement
+//! - Consensus coordination through Aura Consensus protocol
+//!
+//! ## Architecture Constraints
+//!
+//! This crate depends on:
+//! - **Layer 1** (aura-core): Core types, effects, errors
+//! - **Layer 2** (aura-journal): CRDT semantics and fact storage
+//! - **Layer 3** (aura-effects): Effect handler implementations
+//! - **Layer 4** (aura-protocol): Orchestration and Aura Consensus
+//!
+//! ## What Belongs Here
+//!
+//! - RelationalContext abstraction and lifecycle management
+//! - RelationalJournal for fact-based state in relational contexts
+//! - Guardian binding management and query operations
+//! - Recovery grant management and retrieval
+//! - Consensus adapter for running Aura Consensus on relational state
+//! - Context-scoped metadata and participant tracking
+//!
+//! ## What Does NOT Belong Here
+//!
+//! - Effect handler implementations (belong in aura-effects)
+//! - Low-level consensus algorithms (belong in aura-protocol)
+//! - Guardian protocol coordination (belong in aura-recovery)
+//! - Recovery protocol coordination (belong in aura-recovery)
+//! - Invitation choreographies (belong in aura-invitation)
+//!
+//! ## Design Principles
+//!
+//! - Relational contexts are stateless coordinators for distributed agreement
+//! - All state is fact-based and stored in journals; no mutable local state
+//! - Participant list is explicit and immutable per context
+//! - Facts form a semilattice: adding facts is monotonic, idempotent
+//! - Consensus ensures multi-authority agreement on fact sets
+//! - Contexts provide metadata privacy: no exposure of internal device structure
+//!
+//! ## Key Components
+//!
+//! - **RelationalContext**: Multi-authority coordination unit
+//! - **RelationalJournal**: CRDT-based fact storage for relational state
+//! - **RelationalFact**: Guardian bindings, recovery grants, peer metadata
+//! - **ConsensusAdapter**: Aura Consensus coordination for agreement
+//!
 //! RelationalContext implementation for cross-authority coordination
 //!
 //! This crate implements the RelationalContext abstraction that manages
@@ -5,38 +61,31 @@
 
 use aura_core::{
     identifiers::{AuthorityId, ContextId},
+    relational::{GuardianBinding, GuardianParameters, RecoveryGrant, RelationalFact},
     Hash32, Result,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::sync::Mutex;
 
 pub mod consensus_adapter;
 pub mod guardian;
-// Consensus implementation moved to aura-protocol
-// Domain types moved to aura-core/relational/
 
-// Re-export types from aura-core for API compatibility
-pub use aura_core::relational::{
-    ConsensusProof, GuardianBinding, GuardianParameters, RecoveryGrant, RecoveryOp,
-    RelationalFact, GenericBinding,
-};
-// Re-export consensus functions from adapter
+// Export consensus functions from adapter
 pub use consensus_adapter::{run_consensus, run_consensus_with_config, ConsensusConfig};
-// Re-export Prestate from aura-core for compatibility
-pub use aura_core::Prestate;
 
 /// RelationalContext manages cross-authority relationships
 ///
 /// Contexts provide a way for multiple authorities to coordinate
 /// without revealing their internal device structure or identity.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct RelationalContext {
     /// Unique identifier for this context
     pub context_id: ContextId,
     /// Authorities participating in this context
     pub participants: Vec<AuthorityId>,
-    /// Journal storing relational facts
-    pub journal: RelationalJournal,
+    /// Journal storing relational facts (wrapped in Mutex for thread-safe mutation)
+    journal: Mutex<RelationalJournal>,
 }
 
 impl RelationalContext {
@@ -48,7 +97,7 @@ impl RelationalContext {
         Self {
             context_id,
             participants,
-            journal,
+            journal: Mutex::new(journal),
         }
     }
 
@@ -59,32 +108,58 @@ impl RelationalContext {
         Self {
             context_id,
             participants,
-            journal,
+            journal: Mutex::new(journal),
         }
     }
 
     /// Add a relational fact to the context
-    pub fn add_fact(&mut self, fact: RelationalFact) -> Result<()> {
-        self.journal.add_fact(fact)
+    pub fn add_fact(&self, fact: RelationalFact) -> Result<()> {
+        let mut journal = self.journal.lock().map_err(|_| {
+            aura_core::AuraError::internal("Failed to acquire journal lock")
+        })?;
+        journal.add_fact(fact)
     }
 
     /// Get all guardian bindings in this context
-    pub fn guardian_bindings(&self) -> Vec<&GuardianBinding> {
-        self.journal.guardian_bindings()
+    pub fn guardian_bindings(&self) -> Vec<GuardianBinding> {
+        if let Ok(journal) = self.journal.lock() {
+            journal.guardian_bindings().into_iter().cloned().collect()
+        } else {
+            vec![]
+        }
     }
 
     /// Get guardian binding for a specific authority
-    pub fn get_guardian_binding(&self, authority_id: AuthorityId) -> Option<&GuardianBinding> {
+    pub fn get_guardian_binding(&self, authority_id: AuthorityId) -> Option<GuardianBinding> {
         self.guardian_bindings().into_iter().find(|b| {
             // Compare authority IDs directly instead of converting to Hash32
             // since account_commitment should be derived from the authority ID
-            b.account_commitment() == &Hash32::from_bytes(&authority_id.to_bytes())
+            &b.account_commitment == &Hash32::from_bytes(&authority_id.to_bytes())
         })
     }
 
     /// Get all recovery grants in this context
-    pub fn recovery_grants(&self) -> Vec<&RecoveryGrant> {
-        self.journal.recovery_grants()
+    pub fn recovery_grants(&self) -> Vec<RecoveryGrant> {
+        if let Ok(journal) = self.journal.lock() {
+            journal.recovery_grants().into_iter().cloned().collect()
+        } else {
+            vec![]
+        }
+    }
+
+    /// Get shared secret for this context
+    /// Returns the cryptographic material used for context-specific operations
+    pub fn shared_secret(&self) -> Option<[u8; 32]> {
+        // For now, derive a deterministic shared secret from context ID
+        // In production, this would use proper key agreement protocol
+        let mut secret = [0u8; 32];
+        let context_bytes = self.context_id.to_bytes();
+        
+        // Use first 32 bytes of context ID as temporary shared secret
+        let len = std::cmp::min(context_bytes.len(), 32);
+        secret[..len].copy_from_slice(&context_bytes[..len]);
+        
+        Some(secret)
     }
 
     /// Check if an authority is a participant
@@ -107,7 +182,30 @@ impl RelationalContext {
         &self,
         authority_commitments: Vec<(AuthorityId, Hash32)>,
     ) -> aura_core::Prestate {
-        aura_core::Prestate::new(authority_commitments, self.journal.compute_commitment())
+        let journal_commitment = if let Ok(journal) = self.journal.lock() {
+            journal.compute_commitment()
+        } else {
+            Hash32([0u8; 32]) // fallback to zero hash if lock fails
+        };
+        aura_core::Prestate::new(authority_commitments, journal_commitment)
+    }
+
+    /// Get all facts in this context for iteration
+    pub fn get_facts(&self) -> BTreeSet<RelationalFact> {
+        if let Ok(journal) = self.journal.lock() {
+            journal.facts.clone()
+        } else {
+            BTreeSet::new()
+        }
+    }
+
+    /// Compute the journal commitment hash
+    pub fn journal_commitment(&self) -> Hash32 {
+        if let Ok(journal) = self.journal.lock() {
+            journal.compute_commitment()
+        } else {
+            Hash32([0u8; 32]) // fallback to zero hash if lock fails
+        }
     }
 }
 
@@ -206,7 +304,7 @@ mod tests {
         let auth1 = AuthorityId::new();
         let auth2 = AuthorityId::new();
 
-        let mut context = RelationalContext::new(vec![auth1, auth2]);
+        let context = RelationalContext::new(vec![auth1, auth2]);
 
         // Hash the authority IDs to create 32-byte commitments
         let hash1 = aura_core::hash::hash(&auth1.to_bytes());

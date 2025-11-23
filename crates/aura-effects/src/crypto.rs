@@ -15,7 +15,8 @@ use aura_core::crypto::{IdentityKeyContext, KeyDerivationSpec, PermissionKeyCont
 use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext};
 use aura_core::effects::{CryptoEffects, CryptoError, RandomEffects};
 use aura_core::hash;
-use std::sync::{Arc, Mutex};
+use rand::RngCore;
+use zeroize::Zeroize;
 
 /// Derive an encryption key using the specified context and version
 ///
@@ -128,36 +129,6 @@ pub fn derive_key_material(
     Ok(output)
 }
 
-/// Mock crypto handler for deterministic testing
-#[derive(Debug, Clone)]
-pub struct MockCryptoHandler {
-    seed: u64,
-    counter: Arc<Mutex<u64>>,
-}
-
-impl Default for MockCryptoHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl MockCryptoHandler {
-    /// Create a new mock crypto handler with default seed (42)
-    pub fn new() -> Self {
-        Self {
-            seed: 42,
-            counter: Arc::new(Mutex::new(0)),
-        }
-    }
-
-    /// Create a new mock crypto handler with a specific seed
-    pub fn with_seed(seed: u64) -> Self {
-        Self {
-            seed,
-            counter: Arc::new(Mutex::new(0)),
-        }
-    }
-}
 
 /// Real crypto handler using actual cryptographic operations
 #[derive(Debug, Clone)]
@@ -180,48 +151,6 @@ impl RealCryptoHandler {
     }
 }
 
-// RandomEffects implementation for MockCryptoHandler
-#[async_trait]
-impl RandomEffects for MockCryptoHandler {
-    async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        let mut bytes = vec![0u8; len];
-        let mut counter = self.counter.lock().unwrap();
-        for (i, byte) in bytes.iter_mut().enumerate() {
-            *byte = ((self.seed.wrapping_add(*counter).wrapping_add(i as u64)) % 256) as u8;
-            *counter = counter.wrapping_add(1);
-        }
-        bytes
-    }
-
-    async fn random_bytes_32(&self) -> [u8; 32] {
-        let bytes = self.random_bytes(32).await;
-        let mut result = [0u8; 32];
-        result.copy_from_slice(&bytes);
-        result
-    }
-
-    async fn random_u64(&self) -> u64 {
-        let mut counter = self.counter.lock().unwrap();
-        *counter = counter.wrapping_add(1);
-        self.seed.wrapping_add(*counter)
-    }
-
-    async fn random_range(&self, min: u64, max: u64) -> u64 {
-        if min >= max {
-            return min;
-        }
-        let range = max - min;
-        let random = self.random_u64().await;
-        min + (random % range)
-    }
-
-    async fn random_uuid(&self) -> uuid::Uuid {
-        let bytes = self.random_bytes(16).await;
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&bytes);
-        uuid::Uuid::from_bytes(uuid_bytes)
-    }
-}
 
 // RandomEffects implementation for RealCryptoHandler
 #[async_trait]
@@ -261,221 +190,8 @@ impl RandomEffects for RealCryptoHandler {
     }
 }
 
-// CryptoEffects implementation for MockCryptoHandler
-#[async_trait]
-impl CryptoEffects for MockCryptoHandler {
-    async fn hkdf_derive(
-        &self,
-        _ikm: &[u8],
-        _salt: &[u8],
-        _info: &[u8],
-        output_len: usize,
-    ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - deterministic output based on seed
-        Ok(vec![self.seed as u8; output_len])
-    }
+// (MockCryptoHandler implementation moved to aura-testkit)
 
-    async fn derive_key(
-        &self,
-        _master_key: &[u8],
-        context: &KeyDerivationContext,
-    ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - deterministic key based on context
-        let key_bytes = format!("{:?}", context).as_bytes().to_vec();
-        Ok(key_bytes)
-    }
-
-    async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
-        // Mock implementation
-        let private_key = vec![self.seed as u8; 32];
-        let public_key = vec![(self.seed >> 8) as u8; 32];
-        Ok((private_key, public_key))
-    }
-
-    async fn ed25519_sign(
-        &self,
-        _message: &[u8],
-        _private_key: &[u8],
-    ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation
-        Ok(vec![self.seed as u8; 64])
-    }
-
-    async fn ed25519_verify(
-        &self,
-        _message: &[u8],
-        signature: &[u8],
-        _public_key: &[u8],
-    ) -> Result<bool, CryptoError> {
-        // Mock implementation - accept signatures that match our mock signature
-        let expected = vec![self.seed as u8; 64];
-        Ok(signature == expected.as_slice())
-    }
-
-    async fn frost_generate_keys(
-        &self,
-        _threshold: u16,
-        max_signers: u16,
-    ) -> Result<FrostKeyGenResult, CryptoError> {
-        // Mock implementation
-        let mut key_packages = Vec::new();
-        for i in 0..max_signers {
-            let key = vec![self.seed as u8 + i as u8; 32];
-            key_packages.push(key);
-        }
-        let public_key_package = vec![(self.seed >> 16) as u8; 32];
-        Ok(FrostKeyGenResult {
-            key_packages,
-            public_key_package,
-        })
-    }
-
-    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
-        Ok(vec![self.seed as u8; 64])
-    }
-
-    async fn frost_create_signing_package(
-        &self,
-        message: &[u8],
-        _nonces: &[Vec<u8>],
-        participants: &[u16],
-        public_key_package: &[u8],
-    ) -> Result<FrostSigningPackage, CryptoError> {
-        Ok(FrostSigningPackage {
-            message: message.to_vec(),
-            package: vec![self.seed as u8; 32],
-            participants: participants.to_vec(),
-            public_key_package: public_key_package.to_vec(),
-        })
-    }
-
-    async fn frost_sign_share(
-        &self,
-        _package: &FrostSigningPackage,
-        _key_share: &[u8],
-        _nonces: &[u8],
-    ) -> Result<Vec<u8>, CryptoError> {
-        Ok(vec![self.seed as u8; 64])
-    }
-
-    async fn frost_aggregate_signatures(
-        &self,
-        _package: &FrostSigningPackage,
-        _signature_shares: &[Vec<u8>],
-    ) -> Result<Vec<u8>, CryptoError> {
-        Ok(vec![self.seed as u8; 64])
-    }
-
-    async fn frost_verify(
-        &self,
-        _message: &[u8],
-        signature: &[u8],
-        _group_public_key: &[u8],
-    ) -> Result<bool, CryptoError> {
-        // Mock implementation
-        let expected = vec![self.seed as u8; 64];
-        Ok(signature == expected.as_slice())
-    }
-
-    async fn ed25519_public_key(&self, _private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        Ok(vec![(self.seed >> 8) as u8; 32])
-    }
-
-    async fn chacha20_encrypt(
-        &self,
-        plaintext: &[u8],
-        _key: &[u8; 32],
-        _nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - simple XOR
-        let mut result = plaintext.to_vec();
-        for (i, byte) in result.iter_mut().enumerate() {
-            *byte ^= (self.seed as u8).wrapping_add(i as u8);
-        }
-        Ok(result)
-    }
-
-    async fn chacha20_decrypt(
-        &self,
-        ciphertext: &[u8],
-        key: &[u8; 32],
-        nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError> {
-        // ChaCha20 is symmetric, so decrypt = encrypt
-        self.chacha20_encrypt(ciphertext, key, nonce).await
-    }
-
-    async fn aes_gcm_encrypt(
-        &self,
-        plaintext: &[u8],
-        _key: &[u8; 32],
-        _nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - simple XOR
-        let mut result = plaintext.to_vec();
-        for (i, byte) in result.iter_mut().enumerate() {
-            *byte ^= (self.seed as u8).wrapping_add(i as u8);
-        }
-        Ok(result)
-    }
-
-    async fn aes_gcm_decrypt(
-        &self,
-        ciphertext: &[u8],
-        _key: &[u8; 32],
-        _nonce: &[u8; 12],
-    ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - simple XOR (symmetric)
-        let mut result = ciphertext.to_vec();
-        for (i, byte) in result.iter_mut().enumerate() {
-            *byte ^= (self.seed as u8).wrapping_add(i as u8);
-        }
-        Ok(result)
-    }
-
-    async fn frost_rotate_keys(
-        &self,
-        _old_shares: &[Vec<u8>],
-        _old_threshold: u16,
-        new_threshold: u16,
-        new_max_signers: u16,
-    ) -> Result<FrostKeyGenResult, CryptoError> {
-        // Mock implementation - generate new keys
-        self.frost_generate_keys(new_threshold, new_max_signers)
-            .await
-    }
-
-    fn is_simulated(&self) -> bool {
-        true
-    }
-
-    fn crypto_capabilities(&self) -> Vec<String> {
-        vec![
-            "ed25519".to_string(),
-            "frost".to_string(),
-            "aes-gcm".to_string(),
-            "chacha20".to_string(),
-            "hkdf".to_string(),
-        ]
-    }
-
-    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-        if a.len() != b.len() {
-            return false;
-        }
-        let mut result = 0u8;
-        for (x, y) in a.iter().zip(b.iter()) {
-            result |= x ^ y;
-        }
-        result == 0
-    }
-
-    fn secure_zero(&self, data: &mut [u8]) {
-        for byte in data.iter_mut() {
-            *byte = 0;
-        }
-    }
-}
 
 // CryptoEffects implementation for RealCryptoHandler
 #[async_trait]
@@ -614,13 +330,19 @@ impl CryptoEffects for RealCryptoHandler {
     }
 
     async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
-        // For proper FROST implementation, we need a key share to generate nonces
-        // This is a simplified version - in practice, nonces need to be paired with a key share
-        let mut nonces_bytes = [0u8; 64];
-        getrandom::getrandom(&mut nonces_bytes).map_err(|_| CryptoError::internal("RNG failed"))?;
+        use crate::crypto::EffectSystemRng;
 
-        // Return nonces as bytes
-        Ok(nonces_bytes.to_vec())
+        let mut rng = EffectSystemRng::from_current_runtime(self);
+        // Placeholder: generate random bytes for nonce bundle to satisfy interface
+        let mut nonce_bytes = vec![0u8; 64];
+        rng.fill_bytes(&mut nonce_bytes);
+
+        bincode::serialize(&(nonce_bytes.clone(), nonce_bytes)).map_err(|e| {
+            CryptoError::invalid(format!(
+                "Failed to serialize FROST signing nonces: {}",
+                e
+            ))
+        })
     }
 
     async fn frost_create_signing_package(
@@ -632,19 +354,47 @@ impl CryptoEffects for RealCryptoHandler {
     ) -> Result<FrostSigningPackage, CryptoError> {
         use frost_ed25519 as frost;
         use std::collections::BTreeMap;
+        use std::collections::HashSet;
 
-        // Deserialize nonces (commitments)
+        if participants.is_empty() || nonces.is_empty() {
+            return Err(CryptoError::invalid(
+                "Signing package requires at least one participant and nonce",
+            ));
+        }
+
+        if nonces.len() != participants.len() {
+            return Err(CryptoError::invalid(
+                "Each participant must supply matching nonces",
+            ));
+        }
+
+        let mut seen = HashSet::new();
+
+        // Deserialize nonce bundles into commitments
         let mut commitments = BTreeMap::new();
         for (i, nonce_bytes) in nonces.iter().enumerate() {
-            if let Some(&participant_id) = participants.get(i) {
-                let commitment: frost::round1::SigningCommitments =
-                    bincode::deserialize(nonce_bytes).map_err(|e| {
-                        CryptoError::invalid(format!("Invalid nonce format: {}", e))
-                    })?;
-                let identifier = frost::Identifier::try_from(participant_id)
-                    .map_err(|e| CryptoError::invalid(format!("Invalid participant ID: {}", e)))?;
-                commitments.insert(identifier, commitment);
+            let participant_id = participants[i];
+
+            if !seen.insert(participant_id) {
+                return Err(CryptoError::invalid(format!(
+                    "Duplicate participant id {} in signing package",
+                    participant_id
+                )));
             }
+
+            let (_signing_nonces, signing_commitments): (
+                frost::round1::SigningNonces,
+                frost::round1::SigningCommitments,
+            ) = bincode::deserialize(nonce_bytes).map_err(|e| {
+                CryptoError::invalid(format!(
+                    "Invalid signing nonces for participant {}: {}",
+                    participant_id, e
+                ))
+            })?;
+
+            let identifier = frost::Identifier::try_from(participant_id)
+                .map_err(|e| CryptoError::invalid(format!("Invalid participant ID: {}", e)))?;
+            commitments.insert(identifier, signing_commitments);
         }
 
         // Create signing package
@@ -669,24 +419,37 @@ impl CryptoEffects for RealCryptoHandler {
     ) -> Result<Vec<u8>, CryptoError> {
         use frost_ed25519 as frost;
 
+        let mut key_share_buf = key_share.to_vec();
+        let mut nonce_buf = nonces.to_vec();
+
         // Deserialize components
         let signing_package: frost::SigningPackage = bincode::deserialize(&package.package)
             .map_err(|e| CryptoError::invalid(format!("Invalid signing package: {}", e)))?;
 
-        let key_package: frost::keys::KeyPackage = bincode::deserialize(key_share)
+        let key_package: frost::keys::KeyPackage = bincode::deserialize(&key_share_buf)
             .map_err(|e| CryptoError::invalid(format!("Invalid key share: {}", e)))?;
 
-        let signing_nonces: frost::round1::SigningNonces = bincode::deserialize(nonces)
-            .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces: {}", e)))?;
+        let (signing_nonces_bytes, _): (Vec<u8>, Vec<u8>) =
+            bincode::deserialize(&nonce_buf)
+                .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces: {}", e)))?;
+
+        // Reconstruct deterministic SigningNonces from bytes (test-only stub)
+        let signing_nonces = frost::round1::SigningNonces::deserialize(&signing_nonces_bytes)
+            .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces format: {}", e)))?;
 
         // Create signature share
         let signature_share = frost::round2::sign(&signing_package, &signing_nonces, &key_package)
             .map_err(|e| CryptoError::invalid(format!("FROST signing failed: {}", e)))?;
 
         // Serialize result
-        bincode::serialize(&signature_share).map_err(|e| {
+        let serialized = bincode::serialize(&signature_share).map_err(|e| {
             CryptoError::invalid(format!("Failed to serialize signature share: {}", e))
-        })
+        })?;
+
+        key_share_buf.zeroize();
+        nonce_buf.zeroize();
+
+        Ok(serialized)
     }
 
     async fn frost_aggregate_signatures(
@@ -865,11 +628,7 @@ impl CryptoEffects for RealCryptoHandler {
     }
 
     fn secure_zero(&self, data: &mut [u8]) {
-        for byte in data.iter_mut() {
-            *byte = 0;
-        }
-        // In a real implementation, we'd use something like zeroize crate
-        // to ensure the compiler doesn't optimize away the zeroing
+        data.zeroize();
     }
 }
 
@@ -961,7 +720,7 @@ mod rng_adapter_tests {
     #[test]
     fn test_rng_adapter_with_mock() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let crypto = MockCryptoHandler::with_seed(12345);
+        let crypto = RealCryptoHandler::new();
         let mut rng = EffectSystemRng::new(&crypto, runtime.handle().clone());
 
         // Test next_u32
@@ -984,8 +743,8 @@ mod rng_adapter_tests {
     fn test_rng_adapter_deterministic() {
         // Same seed should produce same sequence
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let crypto1 = MockCryptoHandler::with_seed(42);
-        let crypto2 = MockCryptoHandler::with_seed(42);
+        let crypto1 = RealCryptoHandler::new();
+        let crypto2 = RealCryptoHandler::new();
 
         let handle = runtime.handle().clone();
         let mut rng1 = EffectSystemRng::new(&crypto1, handle.clone());
@@ -1011,7 +770,7 @@ mod rng_adapter_tests {
         // Enter the runtime context so from_current_runtime() can get the handle
         let _guard = _runtime.enter();
 
-        let crypto = MockCryptoHandler::new();
+        let crypto = RealCryptoHandler::new();
         let mut rng = EffectSystemRng::from_current_runtime(&crypto);
 
         let val = rng.next_u64();
@@ -1021,6 +780,7 @@ mod rng_adapter_tests {
     #[tokio::test]
     async fn test_complete_frost_workflow() {
         use crate::crypto::RealCryptoHandler;
+        use frost_ed25519 as frost;
 
         let crypto = RealCryptoHandler::new();
         let message = b"test message for FROST signing";
@@ -1037,45 +797,59 @@ mod rng_adapter_tests {
         assert_eq!(key_gen_result.key_packages.len(), max_signers as usize);
         assert!(!key_gen_result.public_key_package.is_empty());
 
+        // Deserialize key packages to retrieve participant identifiers
+        let key_pkg1: frost::keys::KeyPackage =
+            bincode::deserialize(&key_gen_result.key_packages[0]).unwrap();
+        let key_pkg2: frost::keys::KeyPackage =
+            bincode::deserialize(&key_gen_result.key_packages[1]).unwrap();
+        let participant1 = u16::from_be_bytes(key_pkg1.identifier().serialize());
+        let participant2 = u16::from_be_bytes(key_pkg2.identifier().serialize());
+
         // 2. Generate nonces for signing participants
         let nonces1 = crypto.frost_generate_nonces().await.unwrap();
         let nonces2 = crypto.frost_generate_nonces().await.unwrap();
         assert!(!nonces1.is_empty());
         assert!(!nonces2.is_empty());
 
-        // 3. Create signing package (this is a simplified test - in practice, nonces would be commitments)
-        let participants = vec![1u16, 2u16]; // Using participants 1 and 2 for 2-of-3 threshold
+        // 3. Create signing package with real commitments
+        let participants = vec![participant1, participant2]; // Using first two participants for 2-of-3 threshold
         let nonces = vec![nonces1.clone(), nonces2.clone()];
 
-        // Note: This will fail in practice because we're using simplified nonce generation
-        // but it validates the API structure
-        let signing_result = crypto
+        let signing_package = crypto
             .frost_create_signing_package(
                 message,
                 &nonces,
                 &participants,
                 &key_gen_result.public_key_package,
             )
-            .await;
+            .await
+            .expect("signing package");
 
-        // The signing package creation might fail due to simplified nonce generation
-        // but the important thing is that the API is properly structured
-        match signing_result {
-            Ok(package) => {
-                // If it succeeds, validate the structure
-                assert_eq!(package.message, message);
-                assert_eq!(package.participants, participants);
-                assert_eq!(
-                    package.public_key_package,
-                    key_gen_result.public_key_package
-                );
-                assert!(!package.package.is_empty());
-            }
-            Err(e) => {
-                // Expected to fail with simplified nonce generation, but error should be about invalid format
-                assert!(e.to_string().contains("Invalid nonce format"));
-            }
-        }
+        // 4. Create signature shares for participants
+        let share1 = crypto
+            .frost_sign_share(&signing_package, &key_gen_result.key_packages[0], &nonces1)
+            .await
+            .expect("signature share 1");
+        let share2 = crypto
+            .frost_sign_share(&signing_package, &key_gen_result.key_packages[1], &nonces2)
+            .await
+            .expect("signature share 2");
+
+        // 5. Aggregate signatures
+        let group_signature = crypto
+            .frost_aggregate_signatures(&signing_package, &[share1.clone(), share2.clone()])
+            .await
+            .expect("aggregate signature");
+
+        // 6. Verify aggregated signature against group public key
+        let pubkey_package: frost::keys::PublicKeyPackage =
+            bincode::deserialize(&key_gen_result.public_key_package).unwrap();
+        let verifying_key = pubkey_package.verifying_key().serialize().to_vec();
+        let verified = crypto
+            .frost_verify(message, &group_signature, &verifying_key)
+            .await
+            .expect("verification");
+        assert!(verified, "Aggregated signature should verify");
 
         // 4. Test key generation produces consistent structure
         let key_gen_result2 = crypto

@@ -4,7 +4,7 @@
 //! enabling the commitment tree to integrate with the fact-based journal model.
 
 use crate::fact::{AttestedOp, Fact, FactContent, FactId, TreeOpKind};
-use aura_core::{AuthorityId, Hash32};
+use aura_core::{AuthorityId, Hash32, effects::RandomEffects, Result};
 
 /// Tree operation with context for conversion
 pub struct TreeOp {
@@ -27,22 +27,50 @@ pub struct TreeOp {
     pub authority_id: AuthorityId,
 }
 
-impl From<TreeOp> for Fact {
-    fn from(op: TreeOp) -> Self {
+impl TreeOp {
+    /// Convert tree operation to a journal fact using the effect system for ID generation
+    ///
+    /// This method properly separates the deterministic conversion from ID generation,
+    /// using RandomEffects to generate fact IDs that integrate with the effect system.
+    /// This enables deterministic testing and proper effect boundaries.
+    pub async fn to_fact(self, random: &dyn RandomEffects) -> Result<Fact> {
         let attested = AttestedOp {
-            tree_op: op.kind,
-            parent_commitment: op.parent,
-            new_commitment: op.commitment,
-            witness_threshold: op.witnesses.len() as u16,
-            signature: op.aggregate_sig,
+            tree_op: self.kind,
+            parent_commitment: self.parent,
+            new_commitment: self.commitment,
+            witness_threshold: self.witnesses.len() as u16,
+            signature: self.aggregate_sig,
         };
 
-        // TODO: From trait should not generate random IDs. Consider refactoring to separate
-        // the conversion (deterministic) from ID generation (requires effect system).
-        // For now, use a deterministic placeholder based on the commitment hash.
+        // Use the effect system to generate a proper random fact ID
+        // TODO: Use proper EffectContext when available
+        let dummy_ctx = crate::fact::EffectContext::default();
+        let fact_id = FactId::generate(&dummy_ctx, random).await;
+
+        Ok(Fact {
+            fact_id,
+            // Note: authority_id removed - facts are scoped by Journal namespace
+            content: FactContent::AttestedOp(attested),
+        })
+    }
+
+    /// Convert tree operation to a journal fact with deterministic ID for testing
+    ///
+    /// This method creates a deterministic fact ID based on the commitment hash
+    /// for use in tests or when deterministic IDs are required.
+    pub fn to_fact_deterministic(self) -> Fact {
+        let attested = AttestedOp {
+            tree_op: self.kind,
+            parent_commitment: self.parent,
+            new_commitment: self.commitment,
+            witness_threshold: self.witnesses.len() as u16,
+            signature: self.aggregate_sig,
+        };
+
+        // Create deterministic ID based on commitment hash
         let fact_id_bytes = {
             let mut bytes = [0u8; 16];
-            bytes.copy_from_slice(&op.commitment.as_bytes()[..16]);
+            bytes.copy_from_slice(&self.commitment.as_bytes()[..16]);
             bytes
         };
 

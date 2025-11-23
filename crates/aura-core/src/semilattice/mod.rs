@@ -1,7 +1,24 @@
-//! CRDT foundation layer for Aura workspace
+//! Layer 1: CRDT Foundation Traits
 //!
-//! This module provides the foundational traits and message types for
-//! implementing CRDTs with session types and effect interpreters.
+//! Foundational traits and message types for implementing CRDTs with eventual consistency.
+//!
+//! **Core Traits** (per docs/002_theoretical_model.md):
+//! - **JoinSemilattice**: Merge operation with idempotent join (⊔)
+//! - **MeetSemiLattice**: Refinement operation with idempotent meet (⊓)
+//! - **Bottom/Top**: Least and greatest elements in the partial order
+//! - **CvState**: Convergent value type (satisfies semilattice laws)
+//!
+//! **Message Types**:
+//! - **StateMsg**: Full state transfer
+//! - **DeltaMsg**: Incremental delta (cheaper for large states)
+//! - **ConstraintMsg**: Policy constraints as meet-lattice refinement
+//!
+//! **Mathematical Invariants**:
+//! - Commutativity: Merge order doesn't matter
+//! - Associativity: Grouping merges doesn't matter
+//! - Idempotency: Merging twice = merging once
+//!
+//! These properties guarantee all replicas eventually converge (per docs/004_distributed_systems_contract.md).
 
 pub use message_types::*;
 pub use semantic_traits::*;

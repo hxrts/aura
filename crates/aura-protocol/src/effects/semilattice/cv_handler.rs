@@ -167,9 +167,9 @@
 //! }
 //!
 //! impl<S: CvState> InstrumentedCvHandler<S> {
-//!     pub fn new() -> Self {
+//!     pub fn new(handler: CvHandler<S>) -> Self {
 //!         Self {
-//!             inner: CvHandler::new(),
+//!             inner: handler,
 //!             metrics: HandlerMetrics::default(),
 //!         }
 //!     }
@@ -205,9 +205,9 @@
 //! }
 //!
 //! impl<S: CvState + PartialOrd + Clone> ValidatedCvHandler<S> {
-//!     pub fn new_with_validation() -> Self {
+//!     pub fn new_with_validation(handler: CvHandler<S>) -> Self {
 //!         Self {
-//!             handler: CvHandler::new(),
+//!             handler,
 //!             validation_enabled: true,
 //!         }
 //!     }
@@ -605,7 +605,8 @@ impl<S: CvState> CvHandler<S> {
     /// # impl Bottom for Counter { fn bottom() -> Self { Counter(0) } }
     /// # impl CvState for Counter {}
     ///
-    /// let mut handler = CvHandler::new();
+    /// // Obtain a handler from a composition/registry (in tests, construct directly)
+    /// let mut handler = CvHandler::with_state(Counter::bottom());
     ///
     /// // Local user operation: increment counter
     /// handler.update_state(Counter(1));

@@ -5,6 +5,7 @@
 use super::{coordination::SessionOperations, shared::*};
 use crate::core::{AgentError, AgentResult};
 use aura_core::identifiers::DeviceId;
+use aura_core::effects::TimeEffects;
 use aura_protocol::effects::SessionType;
 use std::collections::HashMap;
 
@@ -58,10 +59,7 @@ impl SessionOperations {
             serde_json::Value::String("self_rotation".to_string()),
         );
 
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let timestamp = effects.current_timestamp_millis().await;
 
         handle.metadata.insert(
             "requested_at".to_string(),

@@ -1,7 +1,15 @@
-//! Agent handlers
+//! Layer 4: Agent Effect Handlers - Authentication, Session, System
 //!
-//! This module contains effect handlers specific to agent operations.
-//! These handlers implement the agent effect traits defined in the effects module.
+//! Effect handlers for agent operations implementing agent effect traits (Layer 1).
+//! These handlers manage device authentication, session lifecycle, and system status.
+//!
+//! **Handler Types**:
+//! - **AuthenticationHandler**: Device authentication and credential verification
+//! - **MemorySessionHandler**: In-memory session lifecycle management
+//! - **AgentEffectSystemHandler**: Agent system status and configuration
+//!
+//! **Note**: Handlers here focus on effect implementations; orchestration logic
+//! (state machines, workflows) lives in aura-agent (Layer 6)
 
 pub mod auth;
 pub mod session;

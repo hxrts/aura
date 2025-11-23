@@ -176,13 +176,30 @@ pub enum BiometricType {
 }
 
 /// Session management effects for device-side session coordination
+/// 
+/// Enhanced to support choreographic patterns and consistent protocol implementation.
 #[async_trait]
 pub trait SessionManagementEffects: Send + Sync {
     /// Create new device session for distributed protocols
     async fn create_session(&self, session_type: SessionType) -> Result<SessionId>;
 
+    /// Create choreographic session with participants and roles
+    async fn create_choreographic_session(
+        &self,
+        session_type: SessionType,
+        participants: Vec<DeviceId>,
+        choreography_config: ChoreographyConfig,
+    ) -> Result<SessionId>;
+
     /// Join existing session as participant
     async fn join_session(&self, session_id: SessionId) -> Result<SessionHandle>;
+
+    /// Join choreographic session with specific role
+    async fn join_choreographic_session(
+        &self,
+        session_id: SessionId,
+        role: ChoreographicRole,
+    ) -> Result<SessionHandle>;
 
     /// Leave session gracefully
     async fn leave_session(&self, session_id: SessionId) -> Result<()>;
@@ -196,11 +213,45 @@ pub trait SessionManagementEffects: Send + Sync {
     /// Get session status and metadata
     async fn get_session_status(&self, session_id: SessionId) -> Result<SessionStatus>;
 
-    /// Send message within session context
+    /// Send choreographic message within session context
+    async fn send_choreographic_message(
+        &self,
+        session_id: SessionId,
+        message_type: &str,
+        payload: &[u8],
+        target_role: Option<ChoreographicRole>,
+    ) -> Result<()>;
+
+    /// Send message within session context (legacy compatibility)
     async fn send_session_message(&self, session_id: SessionId, message: &[u8]) -> Result<()>;
 
-    /// Receive messages for session
+    /// Receive choreographic messages for session with role filtering
+    async fn receive_choreographic_messages(
+        &self,
+        session_id: SessionId,
+        role_filter: Option<ChoreographicRole>,
+    ) -> Result<Vec<ChoreographicMessage>>;
+
+    /// Receive messages for session (legacy compatibility)
     async fn receive_session_messages(&self, session_id: SessionId) -> Result<Vec<SessionMessage>>;
+
+    /// Get choreography phase for session
+    async fn get_choreography_phase(&self, session_id: SessionId) -> Result<Option<String>>;
+
+    /// Update choreography state
+    async fn update_choreography_state(
+        &self,
+        session_id: SessionId,
+        phase: &str,
+        state_data: &[u8],
+    ) -> Result<()>;
+
+    /// Validate choreography message against current phase
+    async fn validate_choreographic_message(
+        &self,
+        session_id: SessionId,
+        message: &ChoreographicMessage,
+    ) -> Result<bool>;
 }
 
 /// Types of sessions the agent can participate in
@@ -270,6 +321,52 @@ pub struct SessionMessage {
     pub timestamp: u64,
     pub message_type: String,
     pub payload: Vec<u8>,
+}
+
+/// Choreographic role in a session
+#[derive(Debug, Clone, Serialize, Deserialize, Hash, PartialEq, Eq)]
+pub struct ChoreographicRole {
+    pub device_id: uuid::Uuid,
+    pub role_index: u32,
+}
+
+impl ChoreographicRole {
+    pub fn new(device_id: uuid::Uuid, role_index: u32) -> Self {
+        Self { device_id, role_index }
+    }
+}
+
+/// Configuration for choreographic sessions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChoreographyConfig {
+    /// Protocol namespace
+    pub namespace: String,
+    /// Guard capabilities required
+    pub guard_capabilities: Vec<String>,
+    /// Flow budget limits
+    pub flow_budget: Option<u64>,
+    /// Journal facts to record
+    pub journal_facts: Vec<String>,
+    /// Timeout for the choreography in seconds
+    pub timeout_seconds: u64,
+    /// Maximum number of retries
+    pub max_retries: u32,
+}
+
+/// Choreographic message with role and phase information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChoreographicMessage {
+    pub from: DeviceId,
+    pub to: Option<DeviceId>,
+    pub source_role: ChoreographicRole,
+    pub target_role: Option<ChoreographicRole>,
+    pub protocol_namespace: String,
+    pub phase: String,
+    pub message_type: String,
+    pub payload: Vec<u8>,
+    pub timestamp: u64,
+    pub sequence_number: u64,
+    pub guard_capabilities: Vec<String>,
 }
 
 /// Configuration management effects for device settings

@@ -6,174 +6,83 @@
 
 use aura_core::effects::{AuthorizationEffects, AuthorizationError};
 use aura_core::{AuthorityId, Cap};
-use aura_macros::aura_effect_handlers;
-use std::collections::HashMap;
 
-// Generate both mock and real authorization handlers using the macro
-aura_effect_handlers! {
-    trait_name: AuthorizationEffects,
-    mock: {
-        struct_name: MockAuthorizationHandler,
-        state: {
-            default_allow: bool,
-            capability_responses: HashMap<String, bool>,
-            delegation_responses: HashMap<String, bool>,
-        },
-        features: {
-            async_trait: true,
-            deterministic: true,
-        },
-        methods: {
-            verify_capability(_capabilities: &Cap, operation: &str, resource: &str) -> Result<bool, AuthorizationError> => {
-                // Check for specific responses first
-                let key = format!("{}:{}", operation, resource);
-                if let Some(&response) = self.capability_responses.get(&key) {
-                    return Ok(response);
-                }
-
-                // Check operation-only responses
-                if let Some(&response) = self.capability_responses.get(operation) {
-                    return Ok(response);
-                }
-
-                // Return default behavior
-                Ok(self.default_allow)
-            },
-            delegate_capabilities(_source_capabilities: &Cap, requested_capabilities: &Cap, target_device: &AuthorityId) -> Result<Cap, AuthorizationError> => {
-                // Check for specific delegation response
-                let key = format!("{}:{}", target_device, "delegate");
-                if let Some(&allowed) = self.delegation_responses.get(&key) {
-                    if !allowed {
-                        return Err(AuthorizationError::AccessDenied {
-                            operation: "delegate".to_string(),
-                            resource: target_device.to_string(),
-                        });
-                    }
-                }
-
-                // Mock implementation: simplified capability intersection
-                // In a real implementation, this would use proper meet-semilattice operations
-                Ok(requested_capabilities.clone())
-            },
-        },
-    },
-    real: {
-        struct_name: StandardAuthorizationHandler,
-        state: {
-            allow_all: bool,
-        },
-        features: {
-            async_trait: true,
-        },
-        methods: {
-            verify_capability(capabilities: &Cap, operation: &str, resource: &str) -> Result<bool, AuthorizationError> => {
-                // If allow_all is enabled, permit everything (development mode)
-                if self.allow_all {
-                    return Ok(true);
-                }
-
-                // Check temporal validity first
-                let current_time = aura_core::current_unix_timestamp();
-                if !capabilities.is_valid_at(current_time) {
-                    return Ok(false);
-                }
-
-                // Check if capability applies to the resource
-                if !capabilities.applies_to(resource) {
-                    return Ok(false);
-                }
-
-                // Map operation to required permission
-                let required_permission = Self::map_operation_to_permission(operation);
-
-                // Check if capabilities allow the required permission
-                let allowed = capabilities.allows(&required_permission);
-
-                tracing::debug!(
-                    "Authorization check: operation='{}', resource='{}', permission='{}', allowed={}",
-                    operation, resource, required_permission, allowed
-                );
-
-                Ok(allowed)
-            },
-            delegate_capabilities(source_capabilities: &Cap, requested_capabilities: &Cap, target_device: &AuthorityId) -> Result<Cap, AuthorizationError> => {
-                // Check temporal validity of source capabilities
-                let current_time = aura_core::current_unix_timestamp();
-                if !source_capabilities.is_valid_at(current_time) {
-                    return Err(AuthorizationError::AccessDenied {
-                        operation: "delegate".to_string(),
-                        resource: target_device.to_string(),
-                    });
-                }
-
-                // Perform meet-semilattice intersection: source ⊓ requested
-                // This ensures delegation can only restrict authority, never expand it
-                use aura_core::MeetSemiLattice;
-                let mut delegated_capabilities = source_capabilities.meet(requested_capabilities);
-
-                // Add delegation entry to track provenance
-                delegated_capabilities.add_delegation(
-                    "delegator".to_string(), // In real implementation, get from context
-                    target_device.to_string(),
-                    None, // No additional constraints for basic delegation
-                );
-
-                tracing::debug!(
-                    "Capability delegation: target_device={}, source_permissions={:?}, requested_permissions={:?}, delegated_permissions={:?}",
-                    target_device, source_capabilities.permissions(), requested_capabilities.permissions(), delegated_capabilities.permissions()
-                );
-
-                Ok(delegated_capabilities)
-            },
-        },
-    },
+/// Standard authorization handler that implements proper capability evaluation
+pub struct StandardAuthorizationHandler {
+    allow_all: bool,
 }
 
-impl MockAuthorizationHandler {
-    /// Create a mock handler that allows all operations
-    pub fn allow_all() -> Self {
-        let mut handler = Self::new_deterministic();
-        handler.default_allow = true;
-        handler
-    }
-
-    /// Create a mock handler that denies all operations
-    pub fn deny_all() -> Self {
-        let mut handler = Self::new_deterministic();
-        handler.default_allow = false;
-        handler
-    }
-
-    /// Set the default allow/deny behavior
-    pub fn with_default_allow(mut self, allow: bool) -> Self {
-        self.default_allow = allow;
-        self
-    }
-
-    /// Configure specific capability check response
-    pub fn with_capability_response(
-        mut self,
+#[async_trait::async_trait]
+impl AuthorizationEffects for StandardAuthorizationHandler {
+    async fn verify_capability(
+        &self,
+        capabilities: &Cap,
         operation: &str,
         resource: &str,
-        allowed: bool,
-    ) -> Self {
-        let key = format!("{}:{}", operation, resource);
-        self.capability_responses.insert(key, allowed);
-        self
+    ) -> Result<bool, AuthorizationError> {
+        // If allow_all is enabled, permit everything (development mode)
+        if self.allow_all {
+            return Ok(true);
+        }
+
+        // Check temporal validity first
+        let current_time = aura_core::current_unix_timestamp();
+        if !capabilities.is_valid_at(current_time) {
+            return Ok(false);
+        }
+
+        // Check if capability applies to the resource
+        if !capabilities.applies_to(resource) {
+            return Ok(false);
+        }
+
+        // Map operation to required permission
+        let required_permission = Self::map_operation_to_permission(operation);
+
+        // Check if capabilities allow the required permission
+        let allowed = capabilities.allows(&required_permission);
+
+        tracing::debug!(
+            "Authorization check: operation='{}', resource='{}', permission='{}', allowed={}",
+            operation, resource, required_permission, allowed
+        );
+
+        Ok(allowed)
     }
 
-    /// Configure capability response for operation only
-    pub fn with_operation_response(mut self, operation: &str, allowed: bool) -> Self {
-        self.capability_responses
-            .insert(operation.to_string(), allowed);
-        self
-    }
+    async fn delegate_capabilities(
+        &self,
+        source_capabilities: &Cap,
+        requested_capabilities: &Cap,
+        target_device: &AuthorityId,
+    ) -> Result<Cap, AuthorizationError> {
+        // Check temporal validity of source capabilities
+        let current_time = aura_core::current_unix_timestamp();
+        if !source_capabilities.is_valid_at(current_time) {
+            return Err(AuthorizationError::AccessDenied {
+                operation: "delegate".to_string(),
+                resource: target_device.to_string(),
+            });
+        }
 
-    /// Configure delegation response for a specific authority
-    pub fn with_delegation_response(mut self, target_device: &AuthorityId, allowed: bool) -> Self {
-        let key = format!("{}:{}", target_device, "delegate");
-        self.delegation_responses.insert(key, allowed);
-        self
+        // Perform meet-semilattice intersection: source ⊓ requested
+        // This ensures delegation can only restrict authority, never expand it
+        use aura_core::MeetSemiLattice;
+        let mut delegated_capabilities = source_capabilities.meet(requested_capabilities);
+
+        // Add delegation entry to track provenance
+        delegated_capabilities.add_delegation(
+            "delegator".to_string(), // In real implementation, get from context
+            target_device.to_string(),
+            None, // No additional constraints for basic delegation
+        );
+
+        tracing::debug!(
+            "Capability delegation: target_device={}, source_permissions={:?}, requested_permissions={:?}, delegated_permissions={:?}",
+            target_device, source_capabilities.permissions(), requested_capabilities.permissions(), delegated_capabilities.permissions()
+        );
+
+        Ok(delegated_capabilities)
     }
 }
 
@@ -220,10 +129,10 @@ impl StandardAuthorizationHandler {
             "admin:capability_delegation" => "admin:delegate".to_string(),
             "admin:system_config" => "admin:system".to_string(),
 
-            // Choreography operations
-            "choreo:initiate" => "choreo:initiate".to_string(),
-            "choreo:participate" => "choreo:participate".to_string(),
-            "choreo:coordinate" => "choreo:coordinate".to_string(),
+            // Session operations (basic permission mapping - no coordination)
+            "session:initiate" => "session:initiate".to_string(),
+            "session:participate" => "session:participate".to_string(),
+            "session:manage" => "session:manage".to_string(),
 
             // Recovery operations
             "recovery:initiate" => "recovery:initiate".to_string(),

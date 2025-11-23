@@ -2,27 +2,28 @@
 
 use crate::commands::context::ContextAction;
 use anyhow::{Context as AnyhowContext, Result};
+use aura_agent::EffectContext;
 use blake3::Hasher;
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
 
 /// Handle context debugging commands.
-pub async fn handle_context(action: &ContextAction) -> Result<()> {
+pub async fn handle_context(ctx: &EffectContext, action: &ContextAction) -> Result<()> {
     match action {
         ContextAction::Inspect {
             context,
             state_file,
-        } => inspect_context(context, state_file).await,
+        } => inspect_context(ctx, context, state_file).await,
         ContextAction::Receipts {
             context,
             state_file,
             detailed,
-        } => show_receipts(context, state_file, *detailed).await,
+        } => show_receipts(ctx, context, state_file, *detailed).await,
     }
 }
 
-async fn inspect_context(context: &str, state_file: &Path) -> Result<()> {
+async fn inspect_context(_ctx: &EffectContext, context: &str, state_file: &Path) -> Result<()> {
     let snapshot = load_context(state_file, context)?;
     let headroom = snapshot
         .flow_budget
@@ -66,7 +67,12 @@ async fn inspect_context(context: &str, state_file: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn show_receipts(context: &str, state_file: &Path, detailed: bool) -> Result<()> {
+async fn show_receipts(
+    _ctx: &EffectContext,
+    context: &str,
+    state_file: &Path,
+    detailed: bool,
+) -> Result<()> {
     let snapshot = load_context(state_file, context)?;
     if snapshot.receipts.is_empty() {
         println!("No receipts recorded for context {}", snapshot.context);

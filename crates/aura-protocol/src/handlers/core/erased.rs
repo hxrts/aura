@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use crate::handlers::{context_immutable::AuraContext, AuraHandlerError, EffectType};
 use aura_core::effects::ExecutionMode;
 use aura_core::LocalSessionType;
+use aura_composition::registry::Handler;
 
 /// Primary interface for all Aura handlers
 ///
@@ -47,6 +48,60 @@ pub trait AuraHandler: Send + Sync {
     }
 }
 
+/// Adapter to bridge CompositeHandler to AuraHandler interface
+struct CompositeHandlerAdapter {
+    composite: aura_composition::CompositeHandler,
+}
+
+impl CompositeHandlerAdapter {
+    fn new(composite: aura_composition::CompositeHandler) -> Self {
+        Self { composite }
+    }
+}
+
+#[async_trait]
+impl AuraHandler for CompositeHandlerAdapter {
+    async fn execute_effect(
+        &self,
+        effect_type: EffectType,
+        operation: &str,
+        parameters: &[u8],
+        ctx: &AuraContext,
+    ) -> Result<Vec<u8>, AuraHandlerError> {
+        // Convert AuraContext to HandlerContext
+        let handler_ctx = aura_composition::HandlerContext::new(ctx.device_id, ctx.execution_mode);
+        
+        // Execute through composite handler
+        self.composite
+            .execute_effect(effect_type, operation, parameters, &handler_ctx)
+            .await
+            .map_err(|e| AuraHandlerError::registry_error(e))
+    }
+
+    async fn execute_session(
+        &self,
+        session: LocalSessionType,
+        ctx: &AuraContext,
+    ) -> Result<(), AuraHandlerError> {
+        // Convert AuraContext to HandlerContext
+        let handler_ctx = aura_composition::HandlerContext::new(ctx.device_id, ctx.execution_mode);
+        
+        // Execute through composite handler
+        self.composite
+            .execute_session(session, &handler_ctx)
+            .await
+            .map_err(|e| AuraHandlerError::session_error(e))
+    }
+
+    fn supports_effect(&self, effect_type: EffectType) -> bool {
+        self.composite.supports_effect(effect_type)
+    }
+
+    fn execution_mode(&self) -> ExecutionMode {
+        self.composite.execution_mode()
+    }
+}
+
 /// Factory for creating Aura handlers
 ///
 /// Creates handlers that implement the unified AuraHandler trait.
@@ -55,16 +110,18 @@ pub struct AuraHandlerFactory;
 impl AuraHandlerFactory {
     /// Create a handler for testing
     pub fn for_testing(device_id: aura_core::identifiers::DeviceId) -> Box<dyn AuraHandler> {
-        let handler = crate::handlers::CompositeHandler::for_testing(device_id.into());
-        Box::new(handler)
+        let composite = aura_composition::CompositeHandler::for_testing(device_id.into());
+        let adapter = CompositeHandlerAdapter::new(composite);
+        Box::new(adapter)
     }
 
     /// Create a handler for production
     pub fn for_production(
         device_id: aura_core::identifiers::DeviceId,
     ) -> Result<Box<dyn AuraHandler>, AuraHandlerError> {
-        let handler = crate::handlers::CompositeHandler::for_production(device_id.into());
-        Ok(Box::new(handler))
+        let composite = aura_composition::CompositeHandler::for_production(device_id.into());
+        let adapter = CompositeHandlerAdapter::new(composite);
+        Ok(Box::new(adapter))
     }
 
     /// Create a handler for simulation
@@ -72,8 +129,9 @@ impl AuraHandlerFactory {
         device_id: aura_core::identifiers::DeviceId,
         _seed: u64,
     ) -> Box<dyn AuraHandler> {
-        let handler = crate::handlers::CompositeHandler::for_simulation(device_id.into());
-        Box::new(handler)
+        let composite = aura_composition::CompositeHandler::for_simulation(device_id.into(), _seed);
+        let adapter = CompositeHandlerAdapter::new(composite);
+        Box::new(adapter)
     }
 }
 
@@ -96,8 +154,8 @@ impl HandlerUtils {
         T: serde::de::DeserializeOwned + Send + Sync,
     {
         // Serialize parameters
-        let param_bytes =
-            bincode::serialize(&parameters).map_err(|e| AuraHandlerError::EffectSerialization {
+        let param_bytes = serde_json::to_vec(&parameters)
+            .map_err(|e| AuraHandlerError::EffectSerialization {
                 effect_type,
                 operation: operation.to_string(),
                 source: e.into(),
@@ -109,11 +167,12 @@ impl HandlerUtils {
             .await?;
 
         // Deserialize the result
-        bincode::deserialize(&result_bytes).map_err(|e| AuraHandlerError::EffectDeserialization {
-            effect_type,
-            operation: operation.to_string(),
-            source: e.into(),
-        })
+        serde_json::from_slice(&result_bytes)
+            .map_err(|e| AuraHandlerError::EffectDeserialization {
+                effect_type,
+                operation: operation.to_string(),
+                source: e.into(),
+            })
     }
 }
 
@@ -156,25 +215,16 @@ mod tests {
         let mut handler = AuraHandlerFactory::for_testing(device_id);
         let ctx = AuraContext::for_testing(device_id);
 
-        // Test typed effect execution
-        #[derive(serde::Serialize, serde::Deserialize)]
-        struct TestParams {
-            value: u32,
-        }
-
-        let params = TestParams { value: 42 };
-
-        // This would normally execute an effect, but our stub handler will return an error
-        let result: Result<String, _> = HandlerUtils::execute_typed_effect(
+        // Test typed effect execution for a supported operation
+        let result: Result<(), _> = HandlerUtils::execute_typed_effect(
             handler.as_mut(),
             EffectType::Console,
-            "print",
-            params,
+            "log_info",
+            "hello from handler",
             &ctx,
         )
         .await;
 
-        // Our stub returns UnsupportedEffect, which is expected
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 }

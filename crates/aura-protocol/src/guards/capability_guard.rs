@@ -4,7 +4,7 @@
 //! integrating with Biscuit tokens for authorization.
 
 use super::GuardResult;
-use crate::authorization::BiscuitAuthorizationBridge;
+use crate::authorization::{AuthorizationResult, BiscuitAuthorizationBridge};
 use aura_core::{AuraError, AuthorityId, ContextId, FlowBudget, Result};
 use aura_wot::{AuthorityOp, ContextOp, ResourceScope};
 use biscuit_auth::Biscuit;
@@ -89,6 +89,63 @@ impl CapabilityGuard {
         flow_budget.record_charge(flow_cost);
 
         Ok(true)
+    }
+
+    /// Evaluate an authority operation with full authorization result
+    async fn evaluate_authority_op_with_result(
+        &self,
+        authority_id: &AuthorityId,
+        operation: &AuthorityOp,
+        token: Option<&Biscuit>,
+        flow_budget: &mut FlowBudget,
+    ) -> Result<(bool, AuthorizationResult)> {
+        // Create resource scope
+        let scope = ResourceScope::Authority {
+            authority_id: *authority_id,
+            operation: operation.clone(),
+        };
+
+        // Determine flow cost based on operation
+        let flow_cost = match operation {
+            AuthorityOp::UpdateTree => 100,
+            AuthorityOp::AddDevice => 75,
+            AuthorityOp::RemoveDevice => 75,
+            AuthorityOp::Rotate => 150,
+            AuthorityOp::AddGuardian => 200,
+            AuthorityOp::RemoveGuardian => 200,
+            AuthorityOp::ModifyThreshold => 300,
+            AuthorityOp::RevokeDevice => 100,
+        };
+
+        // Check flow budget
+        if !flow_budget.can_charge(flow_cost) {
+            return Err(AuraError::invalid(format!(
+                "Insufficient budget for operation: {} (required: {}, available: {})",
+                operation.as_str(),
+                flow_cost,
+                flow_budget.headroom()
+            )));
+        }
+
+        // If no token provided, return default result
+        let token = token.ok_or_else(|| {
+            AuraError::permission_denied("No authorization token provided".to_string())
+        })?;
+
+        // Authorize with Biscuit
+        let auth_result = self
+            .biscuit_bridge
+            .authorize(token, operation.as_str(), &scope)
+            .map_err(|e| AuraError::permission_denied(format!("Biscuit error: {:?}", e)))?;
+
+        if !auth_result.authorized {
+            return Ok((false, auth_result));
+        }
+
+        // Charge flow budget
+        flow_budget.record_charge(flow_cost);
+
+        Ok((true, auth_result))
     }
 
     /// Evaluate a context operation
@@ -180,14 +237,14 @@ impl CapabilityGuardExt for CapabilityGuard {
             AuthorityOp::RevokeDevice => 100,
         };
 
-        let authorized = self
-            .evaluate_authority_op(authority_id, operation, token, flow_budget)
+        let (authorized, auth_result) = self
+            .evaluate_authority_op_with_result(authority_id, operation, token, flow_budget)
             .await?;
 
         Ok(GuardResult {
             authorized,
             flow_consumed: if authorized { flow_cost } else { 0 },
-            delegation_depth: None, // TODO: Extract from Biscuit evaluation
+            delegation_depth: auth_result.delegation_depth,
         })
     }
 }

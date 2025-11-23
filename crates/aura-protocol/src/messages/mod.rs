@@ -1,33 +1,21 @@
-//! Protocol Message Types
+//! Layer 4: Protocol Message Types - Domain-Separated, Versioned, Typed
 //!
-//! This module provides message type definitions for all Aura distributed protocols,
-//! organized by domain for clear separation of concerns.
+//! Message type definitions organized by domain with version compatibility.
+//! Enables choreographic message routing with type-safe domain separation.
 //!
-//! ## Message Domains
+//! **Message Domains**:
+//! - **crypto**: Threshold cryptography (FROST, resharing, key derivation)
+//! - **social_types**: Social coordination (peer discovery, rendezvous)
+//! - **common_envelope**: Message envelope infrastructure (versioning, wire format)
+//! - **common_error**: Protocol error types with error codes
 //!
-//! - **Crypto**: Threshold cryptography protocols (DKD, FROST, resharing)
-//!   - Key derivation coordination messages
-//!   - Threshold signature orchestration
-//!   - Key resharing protocol messages
-//!
-//! - **Social**: Peer coordination protocols (rendezvous, discovery)
-//!   - Transport offer/answer messages
-//!   - PSK handshake transcripts
-//!   - Capability announcements
-//!
-//! - **Common**: Shared message infrastructure
-//!   - Generic message envelopes
-//!   - Protocol error types
-//!   - Version compatibility headers
-//!
-//! ## Design Principles
-//!
-//! - **Domain Separation**: Each protocol domain has its own message namespace
-//! - **Consistent Serialization**: All messages use serde traits for wire format
-//! - **Version Compatibility**: Forward and backward compatibility through versioning
-//! - **Type Safety**: Strong typing prevents message type confusion
-//! - **Unified Envelope**: Single `AuraMessage` enum for transport layer
-//!
+//! **Design Principles** (per docs/001_system_architecture.md, docs/107_mpst_and_choreography.md):
+//! - **Domain separation**: Each protocol namespace isolated (prevents message confusion)
+//! - **Type safety**: Strong typing enables compile-time message validation
+//! - **Versioning**: WIRE_FORMAT_VERSION for forward/backward compatibility
+//! - **Unified envelope**: Single AuraMessage enum routes messages to correct handler
+//! - **Serialization**: serde bincode for deterministic wire format (enables commitment verification)
+//! - **Choreography integration**: Messages typed for session type matching (MPST)
 //! ## Usage Pattern
 //!
 //! ```rust,ignore

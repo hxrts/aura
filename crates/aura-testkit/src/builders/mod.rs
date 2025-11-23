@@ -1,8 +1,11 @@
-//! Test data construction & factories
+//! Layer 8: Test Data Builders - Entity Factories & Scenarios
 //!
-//! This module provides factories for creating individual test entities (accounts, devices, keys)
-//! with consistent configuration across the Aura test suite. These are the lowest-level building
-//! blocks for constructing test scenarios.
+//! Factories for creating test entities with consistent configuration:
+//! **AccountBuilder**, **DeviceSetBuilder**, **KeySetBuilder**, **TestScenarioFactory**.
+//!
+//! **Purpose** (per docs/106_effect_system_and_runtime.md):
+//! Enable rapid test setup without duplicating entity creation logic. Builders compose
+//! to create complete multi-device scenarios for integration testing.
 
 pub mod account;
 pub mod device;

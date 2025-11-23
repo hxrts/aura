@@ -14,6 +14,8 @@
 
 use crate::semilattice::{Bottom, JoinSemilattice, MeetSemiLattice, Top};
 use serde::{Deserialize, Serialize};
+use serde_json;
+use std::cmp::Ordering;
 use std::fmt;
 
 /// Fact type for the journal - represents "what we know" (⊔-monotone)
@@ -27,6 +29,7 @@ pub struct Fact {
     /// CRDT-based fact storage with operation timestamps
     entries: FactCrdt,
 }
+
 
 /// CRDT implementation for facts using Observed-Remove Set semantics
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -401,6 +404,14 @@ impl PartialOrd for Fact {
             }
             (false, false) => None, // Incomparable operation sets
         }
+    }
+}
+
+impl Ord for Fact {
+    fn cmp(&self, other: &Self) -> Ordering {
+        serde_json::to_string(self)
+            .unwrap_or_default()
+            .cmp(&serde_json::to_string(other).unwrap_or_default())
     }
 }
 

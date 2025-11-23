@@ -133,7 +133,7 @@ impl Bottom for PeerView {
 mod tests {
     use super::*;
     use aura_core::effects::RandomEffects;
-    use aura_effects::random::MockRandomHandler;
+    use aura_testkit::stateful_effects::random::MockRandomHandler;
 
     /// Create a deterministic random handler for tests
     fn test_random_handler() -> MockRandomHandler {

@@ -3,9 +3,10 @@
 //! Main runtime system that orchestrates all agent operations.
 
 use super::services::{ContextManager, FlowBudgetManager, ReceiptManager};
-use super::{AuraEffectSystem, ChoreographyAdapter, EffectExecutor, LifecycleManager};
+use super::{AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager};
 use crate::core::{AgentConfig, AgentError, AgentResult, AuthorityContext};
 use aura_core::identifiers::AuthorityId;
+use std::sync::Arc;
 
 /// Main runtime system for the agent
 pub struct RuntimeSystem {
@@ -13,7 +14,7 @@ pub struct RuntimeSystem {
     effect_executor: EffectExecutor,
 
     /// Effect system
-    effect_system: AuraEffectSystem,
+    effect_system: Arc<AuraEffectSystem>,
 
     /// Context manager
     context_manager: ContextManager,
@@ -41,7 +42,7 @@ impl RuntimeSystem {
     /// Create a new runtime system
     pub(crate) fn new(
         effect_executor: EffectExecutor,
-        effect_system: AuraEffectSystem,
+        effect_system: std::sync::Arc<AuraEffectSystem>,
         context_manager: ContextManager,
         flow_budget_manager: FlowBudgetManager,
         receipt_manager: ReceiptManager,
@@ -69,8 +70,8 @@ impl RuntimeSystem {
     }
 
     /// Get the effect system
-    pub fn effects(&self) -> &AuraEffectSystem {
-        &self.effect_system
+    pub fn effects(&self) -> std::sync::Arc<AuraEffectSystem> {
+        self.effect_system.clone()
     }
 
     /// Get the context manager
@@ -99,7 +100,7 @@ impl RuntimeSystem {
     }
 
     /// Shutdown the runtime system
-    pub async fn shutdown(self) -> Result<(), String> {
-        self.lifecycle_manager.shutdown().await
+    pub async fn shutdown(self, ctx: &EffectContext) -> Result<(), String> {
+        self.lifecycle_manager.shutdown(ctx).await
     }
 }

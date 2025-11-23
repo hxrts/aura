@@ -14,6 +14,7 @@ categories = ["cryptography", "authentication"]
 # Workspace crates
 aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
+aura-composition = { path = "../aura-composition" }
 aura-protocol = { path = "../aura-protocol" }
 aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }

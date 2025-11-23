@@ -131,16 +131,16 @@ impl TestEffectComposer {
 
 /// Composite test handler that implements all required effect traits
 ///
-/// This handler composes individual effect handlers from aura-effects into a single
+/// This handler composes individual effect handlers from stateful_effects into a single
 /// object that implements TestEffectHandler trait for convenient testing.
 pub struct CompositeTestHandler {
-    crypto: aura_effects::MockCryptoHandler,
-    storage: aura_effects::MemoryStorageHandler,
-    time: aura_effects::SimulatedTimeHandler,
-    random: aura_effects::MockRandomHandler,
-    console: aura_effects::MockConsoleHandler,
-    journal: aura_effects::MockJournalHandler,
-    network: aura_effects::InMemoryTransportHandler,
+    crypto: crate::stateful_effects::MockCryptoHandler,
+    storage: crate::stateful_effects::MemoryStorageHandler,
+    time: crate::stateful_effects::SimulatedTimeHandler,
+    random: crate::stateful_effects::MockRandomHandler,
+    console: crate::stateful_effects::MockConsoleHandler,
+    journal: crate::stateful_effects::MockJournalHandler,
+    network: crate::stateful_effects::InMemoryTransportHandler,
     execution_mode: ExecutionMode,
 }
 
@@ -153,13 +153,13 @@ impl CompositeTestHandler {
         };
 
         Ok(Self {
-            crypto: aura_effects::MockCryptoHandler::new(),
-            storage: aura_effects::MemoryStorageHandler::new(),
-            time: aura_effects::SimulatedTimeHandler::new(),
-            random: aura_effects::MockRandomHandler::new_with_seed(seed),
-            console: aura_effects::MockConsoleHandler::new(),
-            journal: aura_effects::MockJournalHandler::new(),
-            network: aura_effects::InMemoryTransportHandler::default(),
+            crypto: crate::stateful_effects::MockCryptoHandler::new(),
+            storage: crate::stateful_effects::MemoryStorageHandler::new(),
+            time: crate::stateful_effects::SimulatedTimeHandler::new(),
+            random: crate::stateful_effects::MockRandomHandler::new_with_seed(seed),
+            console: crate::stateful_effects::MockConsoleHandler::new(),
+            journal: crate::stateful_effects::MockJournalHandler::new(),
+            network: crate::stateful_effects::InMemoryTransportHandler::default(),
             execution_mode,
         })
     }
@@ -177,13 +177,13 @@ impl CompositeTestHandler {
         };
 
         Ok(Self {
-            crypto: aura_effects::MockCryptoHandler::new(),
-            storage: aura_effects::MemoryStorageHandler::new(),
-            time: aura_effects::SimulatedTimeHandler::new(),
-            random: aura_effects::MockRandomHandler::new_with_seed(seed),
-            console: aura_effects::MockConsoleHandler::new(),
-            journal: aura_effects::MockJournalHandler::new(),
-            network: aura_effects::InMemoryTransportHandler::default(),
+            crypto: crate::stateful_effects::MockCryptoHandler::new(),
+            storage: crate::stateful_effects::MemoryStorageHandler::new(),
+            time: crate::stateful_effects::SimulatedTimeHandler::new(),
+            random: crate::stateful_effects::MockRandomHandler::new_with_seed(seed),
+            console: crate::stateful_effects::MockConsoleHandler::new(),
+            journal: crate::stateful_effects::MockJournalHandler::new(),
+            network: crate::stateful_effects::InMemoryTransportHandler::default(),
             execution_mode,
         })
     }

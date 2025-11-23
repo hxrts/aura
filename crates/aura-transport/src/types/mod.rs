@@ -1,7 +1,19 @@
-//! Privacy-Aware Core Transport Types
+//! Layer 2: Privacy-Aware Transport Types
 //!
-//! This module provides essential transport data types with built-in privacy preservation.
-//! All types are designed with privacy-by-design principles and relationship scoping.
+//! Core transport data types with privacy-by-design principles.
+//!
+//! **Key Types**:
+//! - **Envelope**: Encrypted message wrapper with relationship scope
+//! - **FrameHeader**: Frame type and sequence info without metadata
+//! - **ScopedEnvelope**: Relationship-scoped encryption per (peer, context) pair
+//! - **ConnectionInfo**: Anonymized connection metadata (no peer identifiers exposed)
+//! - **PrivacyLevel**: Configuration for metadata leakage control
+//!
+//! **Design** (per docs/108_transport_and_information_flow.md):
+//! - All types designed with privacy-first approach
+//! - Relationship scoping: Content encrypted per (source, destination, context)
+//! - Metadata minimization: Frame headers contain only protocol essentials
+//! - Configuration: PrivacyLevel controls verbosity of metadata collection
 
 pub mod config;
 pub mod connection;

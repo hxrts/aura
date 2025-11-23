@@ -4,24 +4,30 @@
 
 use crate::ScenarioAction;
 use anyhow::Result;
-use aura_agent::AuraEffectSystem;
-use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects};
-use std::path::Path;
+use aura_agent::{AuraEffectSystem, EffectContext};
+use aura_core::effects::{ConsoleEffects, StorageEffects};
+use std::time::Instant;
+use std::path::{Path, PathBuf};
+use std::fs;
 
 /// Handle scenario operations through effects
-pub async fn handle_scenarios(effects: &AuraEffectSystem, action: &ScenarioAction) -> Result<()> {
+pub async fn handle_scenarios(
+    ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+    action: &ScenarioAction,
+) -> Result<()> {
     match action {
         ScenarioAction::Discover { root, validate } => {
-            handle_discover(effects, root, *validate).await
+            handle_discover(ctx, effects, root, *validate).await
         }
         ScenarioAction::List {
             directory,
             detailed,
-        } => handle_list(effects, directory, *detailed).await,
+        } => handle_list(ctx, effects, directory, *detailed).await,
         ScenarioAction::Validate {
             directory,
             strictness,
-        } => handle_validate(effects, directory, strictness.as_deref()).await,
+        } => handle_validate(ctx, effects, directory, strictness.as_deref()).await,
         ScenarioAction::Run {
             directory,
             pattern,
@@ -31,6 +37,7 @@ pub async fn handle_scenarios(effects: &AuraEffectSystem, action: &ScenarioActio
             detailed_report,
         } => {
             handle_run(
+                ctx,
                 effects,
                 directory.as_deref(),
                 pattern.as_deref(),
@@ -46,12 +53,17 @@ pub async fn handle_scenarios(effects: &AuraEffectSystem, action: &ScenarioActio
             output,
             format,
             detailed,
-        } => handle_report(effects, input, output, format.as_deref(), *detailed).await,
+        } => handle_report(ctx, effects, input, output, format.as_deref(), *detailed).await,
     }
 }
 
 /// Handle scenario discovery through effects
-async fn handle_discover(effects: &AuraEffectSystem, root: &Path, validate: bool) -> Result<()> {
+async fn handle_discover(
+    ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+    root: &Path,
+    validate: bool,
+) -> Result<()> {
     println!("Discovering scenarios in: {}", root.display());
 
     println!("Validation: {}", validate);
@@ -71,7 +83,7 @@ async fn handle_discover(effects: &AuraEffectSystem, root: &Path, validate: bool
     }
 
     // Simulate scenario discovery
-    let scenarios = discover_scenarios_through_effects(effects, root).await?;
+    let scenarios = discover_scenarios_through_effects(ctx, effects, root).await?;
 
     println!("Found {} scenarios", scenarios.len());
 
@@ -81,7 +93,7 @@ async fn handle_discover(effects: &AuraEffectSystem, root: &Path, validate: bool
 
     if validate {
         println!("Validating discovered scenarios...");
-        validate_scenarios_through_effects(effects, &scenarios).await?;
+        validate_scenarios_through_effects(ctx, effects, &scenarios).await?;
         println!("All scenarios validated successfully");
     }
 
@@ -89,19 +101,24 @@ async fn handle_discover(effects: &AuraEffectSystem, root: &Path, validate: bool
 }
 
 /// Handle scenario listing through effects
-async fn handle_list(effects: &AuraEffectSystem, directory: &Path, detailed: bool) -> Result<()> {
+async fn handle_list(
+    ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+    directory: &Path,
+    detailed: bool,
+) -> Result<()> {
     println!("Listing scenarios in: {}", directory.display());
 
     println!("Detailed: {}", detailed);
 
     // Get scenarios through storage effects
-    let scenarios = list_scenarios_through_effects(effects, directory).await?;
+    let scenarios = list_scenarios_through_effects(ctx, effects, directory).await?;
 
     println!("Available scenarios:");
 
     for scenario in scenarios {
         if detailed {
-            display_detailed_scenario_info(effects, &scenario).await;
+            display_detailed_scenario_info(ctx, effects, &scenario).await;
         } else {
             println!("  - {}", scenario.name);
         }
@@ -112,6 +129,7 @@ async fn handle_list(effects: &AuraEffectSystem, directory: &Path, detailed: boo
 
 /// Handle scenario validation through effects
 async fn handle_validate(
+    ctx: &EffectContext,
     effects: &AuraEffectSystem,
     directory: &Path,
     strictness: Option<&str>,
@@ -123,10 +141,10 @@ async fn handle_validate(
     }
 
     // Validate scenarios through storage effects
-    let scenarios = list_scenarios_through_effects(effects, directory).await?;
+    let scenarios = list_scenarios_through_effects(ctx, effects, directory).await?;
     let scenario_names: Vec<String> = scenarios.into_iter().map(|s| s.name).collect();
 
-    validate_scenarios_through_effects(effects, &scenario_names).await?;
+    validate_scenarios_through_effects(ctx, effects, &scenario_names).await?;
 
     println!("All scenarios valid");
 
@@ -135,6 +153,7 @@ async fn handle_validate(
 
 /// Handle scenario execution through effects
 async fn handle_run(
+    ctx: &EffectContext,
     effects: &AuraEffectSystem,
     directory: Option<&Path>,
     pattern: Option<&str>,
@@ -162,12 +181,12 @@ async fn handle_run(
 
     // Execute scenarios through effects
     let results =
-        execute_scenarios_through_effects(effects, directory, pattern, parallel, max_parallel)
+        execute_scenarios_through_effects(ctx, effects, directory, pattern, parallel, max_parallel)
             .await?;
 
     // Save results if output file specified
     if let Some(output_path) = output_file {
-        save_scenario_results(effects, output_path, &results, detailed_report).await?;
+        save_scenario_results(ctx, effects, output_path, &results, detailed_report).await?;
     }
 
     println!("All scenarios completed successfully");
@@ -177,7 +196,8 @@ async fn handle_run(
 
 /// Handle report generation through effects
 async fn handle_report(
-    _effects: &AuraEffectSystem,
+    ctx: &EffectContext,
+    effects: &AuraEffectSystem,
     input: &Path,
     output: &Path,
     format: Option<&str>,
@@ -193,15 +213,33 @@ async fn handle_report(
     println!("Detailed: {}", detailed);
 
     // Load results through storage effects
-    let results_data = std::fs::read_to_string(&input.display().to_string())
-        .map_err(|e| anyhow::anyhow!("Failed to read results file: {}", e))?;
+    let input_key = format!("scenario_results:{}", input.display());
+    let results_data = match effects.retrieve(&input_key).await {
+        Ok(Some(data)) => String::from_utf8(data)
+            .map_err(|e| anyhow::anyhow!("Invalid UTF-8 in results file: {}", e))?,
+        Ok(None) => {
+            return Err(anyhow::anyhow!(
+                "Results file not found: {}",
+                input.display()
+            ))
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!(
+                "Failed to read results file via storage effects: {}",
+                e
+            ))
+        }
+    };
 
     // Generate report
     let report = generate_report_from_results(results_data.as_bytes(), format, detailed)?;
 
     // Save report through storage effects
-    std::fs::write(&output.display().to_string(), report.as_bytes())
-        .map_err(|e| anyhow::anyhow!("Failed to save report: {}", e))?;
+    let output_key = format!("scenario_report:{}", output.display());
+    effects
+        .store(&output_key, report.as_bytes().to_vec())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to save report via storage effects: {}", e))?;
 
     println!("Report generated successfully");
 
@@ -210,6 +248,7 @@ async fn handle_report(
 
 /// Discover scenarios through storage effects
 async fn discover_scenarios_through_effects(
+    _ctx: &EffectContext,
     _effects: &AuraEffectSystem,
     root: &Path,
 ) -> Result<Vec<String>> {
@@ -230,6 +269,7 @@ async fn discover_scenarios_through_effects(
 
 /// Validate scenarios through effects
 async fn validate_scenarios_through_effects(
+    _ctx: &EffectContext,
     effects: &AuraEffectSystem,
     scenarios: &[String],
 ) -> Result<()> {
@@ -249,29 +289,20 @@ async fn validate_scenarios_through_effects(
 
 /// List scenarios through storage effects
 async fn list_scenarios_through_effects(
+    _ctx: &EffectContext,
     _effects: &AuraEffectSystem,
     directory: &Path,
 ) -> Result<Vec<ScenarioInfo>> {
-    let scenarios = vec![
-        ScenarioInfo {
-            name: "threshold_test.toml".to_string(),
-            description: "Tests threshold signature operations".to_string(),
-            devices: 3,
-            threshold: 2,
-        },
-        ScenarioInfo {
-            name: "recovery_test.toml".to_string(),
-            description: "Tests account recovery scenarios".to_string(),
-            devices: 5,
-            threshold: 3,
-        },
-        ScenarioInfo {
-            name: "performance_test.toml".to_string(),
-            description: "Performance benchmarks".to_string(),
-            devices: 10,
-            threshold: 7,
-        },
-    ];
+    let files = collect_scenario_files(directory)?;
+    let scenarios: Vec<ScenarioInfo> = files
+        .into_iter()
+        .map(|path| ScenarioInfo {
+            name: path.to_string_lossy().into_owned(),
+            description: "Scenario file".to_string(),
+            devices: 0,
+            threshold: 0,
+        })
+        .collect();
 
     println!(
         "Listed {} scenarios from {}",
@@ -283,7 +314,11 @@ async fn list_scenarios_through_effects(
 }
 
 /// Display detailed scenario information
-async fn display_detailed_scenario_info(effects: &AuraEffectSystem, scenario: &ScenarioInfo) {
+async fn display_detailed_scenario_info(
+    _ctx: &EffectContext,
+    _effects: &AuraEffectSystem,
+    scenario: &ScenarioInfo,
+) {
     println!(
         "  - {} ({} devices, threshold {})",
         scenario.name, scenario.devices, scenario.threshold
@@ -293,57 +328,171 @@ async fn display_detailed_scenario_info(effects: &AuraEffectSystem, scenario: &S
 
 /// Execute scenarios through effects
 async fn execute_scenarios_through_effects(
-    _effects: &AuraEffectSystem,
+    ctx: &EffectContext,
+    effects: &AuraEffectSystem,
     _directory: Option<&Path>,
     pattern: Option<&str>,
     parallel: bool,
     max_parallel: Option<usize>,
 ) -> Result<Vec<ScenarioResult>> {
-    let mut results = Vec::new();
+    let base_dir = _directory.unwrap_or_else(|| Path::new("scenarios"));
+    let mut scenario_files = collect_scenario_files(base_dir)?;
 
-    // Simulate scenario execution
-    let scenario_names = if let Some(pat) = pattern {
+    if let Some(pat) = pattern {
         println!("Filtering scenarios by pattern: {}", pat);
-        vec!["threshold_test.toml".to_string()]
-    } else {
-        vec![
-            "threshold_test.toml".to_string(),
-            "recovery_test.toml".to_string(),
-        ]
-    };
+        scenario_files.retain(|p| p.to_string_lossy().contains(pat));
+    }
+
+    if scenario_files.is_empty() {
+        println!("No scenarios matched the provided filters");
+        return Ok(Vec::new());
+    }
+
+    let mut results = Vec::new();
 
     if parallel {
         let max = max_parallel.unwrap_or(4);
         println!(
             "Running {} scenarios in parallel (max {})",
-            scenario_names.len(),
+            scenario_files.len(),
             max
         );
     } else {
         println!("Running scenarios sequentially");
     }
 
-    for scenario in scenario_names {
-        println!("Executing: {}", scenario);
+    for scenario in scenario_files {
+        println!("Executing: {}", scenario.display());
+        let start = Instant::now();
+        let run_result = run_scenario_file(ctx, effects, &scenario).await;
 
-        // Simulate execution
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let (success, error) = match run_result {
+            Ok(_) => (true, None),
+            Err(e) => (false, Some(e.to_string())),
+        };
+
         let result = ScenarioResult {
-            name: scenario.clone(),
-            success: true,
-            duration_ms: 1500,
-            error: None,
+            name: scenario.to_string_lossy().into_owned(),
+            success,
+            duration_ms,
+            error,
+            log_path: Some("effect_console".to_string()),
         };
 
         results.push(result);
-        println!("Completed: {}", scenario);
+        println!("Completed: {}", scenario.display());
     }
 
     Ok(results)
 }
 
+/// Collect scenario files (toml) under a directory tree
+fn collect_scenario_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut stack = vec![root.to_path_buf()];
+    let mut found = Vec::new();
+
+    while let Some(dir) = stack.pop() {
+        let entries = fs::read_dir(&dir).map_err(|e| {
+            anyhow::anyhow!("Failed to read scenario directory {}: {}", dir.display(), e)
+        })?;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| {
+                anyhow::anyhow!("Failed to read scenario entry {}: {}", dir.display(), e)
+            })?;
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path
+                .extension()
+                .map(|ext| ext == "toml")
+                .unwrap_or(false)
+            {
+                found.push(path);
+            }
+        }
+    }
+
+    Ok(found)
+}
+
+/// Simulate running a scenario file with detailed logging through effect system
+async fn run_scenario_file(
+    ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+    path: &Path,
+) -> Result<()> {
+    let contents = fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("Failed to read scenario {}: {}", path.display(), e))?;
+
+    let parsed: toml::Value = toml::from_str(&contents).map_err(|e| {
+        anyhow::anyhow!("Failed to parse scenario {} as TOML: {}", path.display(), e)
+    })?;
+
+    ConsoleEffects::log_info(
+        effects,
+        &format!("Scenario: {}", path.display()),
+    )
+    .await
+    .ok();
+
+    if let Some(meta) = parsed.get("metadata") {
+        if let Some(name) = meta.get("name").and_then(|v| v.as_str()) {
+            let _ = ConsoleEffects::log_info(effects, &format!("Name: {}", name)).await;
+        }
+        if let Some(desc) = meta.get("description").and_then(|v| v.as_str()) {
+            let _ = ConsoleEffects::log_info(effects, &format!("Description: {}", desc)).await;
+        }
+    }
+
+    if let Some(phases) = parsed.get("phases").and_then(|p| p.as_array()) {
+        let _ = ConsoleEffects::log_info(effects, &format!("Phases: {}", phases.len())).await;
+        for (idx, phase) in phases.iter().enumerate() {
+            let name = phase
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("<unnamed>");
+            let _ = ConsoleEffects::log_info(
+                effects,
+                &format!("Phase {}: {}", idx + 1, name),
+            )
+            .await;
+
+            if let Some(actions) = phase.get("actions").and_then(|a| a.as_array()) {
+                let _ = ConsoleEffects::log_info(
+                    effects,
+                    &format!("  Actions: {}", actions.len()),
+                )
+                .await;
+                for (a_idx, action) in actions.iter().enumerate() {
+                    if let Some(action_type) = action.get("type").and_then(|t| t.as_str()) {
+                        let _ = ConsoleEffects::log_info(
+                            effects,
+                            &format!("    {}. type={}", a_idx + 1, action_type),
+                        )
+                        .await;
+                    } else {
+                        let _ = ConsoleEffects::log_info(
+                            effects,
+                            &format!("    {}. <unknown action>", a_idx + 1),
+                        )
+                        .await;
+                    }
+                }
+            }
+        }
+    } else {
+        let _ = ConsoleEffects::log_warn(effects, "No phases defined").await;
+    }
+
+    Ok(())
+}
+
 /// Save scenario results through storage effects
 async fn save_scenario_results(
-    _effects: &AuraEffectSystem,
+    _ctx: &EffectContext,
+    effects: &AuraEffectSystem,
     output_path: &Path,
     results: &[ScenarioResult],
     detailed: bool,
@@ -355,8 +504,31 @@ async fn save_scenario_results(
     }
     .map_err(|e| anyhow::anyhow!("Failed to serialize results: {}", e))?;
 
-    std::fs::write(&output_path.display().to_string(), results_json.as_bytes())
-        .map_err(|e| anyhow::anyhow!("Failed to save results: {}", e))?;
+    // Persist to filesystem for user visibility
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to create output directory {}: {}",
+                    parent.display(),
+                    e
+                )
+            })?;
+        }
+    }
+    std::fs::write(output_path, results_json.as_bytes()).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to write scenario results to {}: {}",
+            output_path.display(),
+            e
+        )
+    })?;
+
+    let output_key = format!("scenario_output:{}", output_path.display());
+    effects
+        .store(&output_key, results_json.as_bytes().to_vec())
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to save results via storage effects: {}", e))?;
 
     println!("Results saved to: {}", output_path.display());
 
@@ -428,4 +600,5 @@ struct ScenarioResult {
     success: bool,
     duration_ms: u64,
     error: Option<String>,
+    log_path: Option<String>,
 }

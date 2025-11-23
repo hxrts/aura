@@ -9,7 +9,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 ```
 ┌─────────────────────────────────────────────┐
 │ Layer 8: Testing & Development Tools        │
-│         (aura-testkit, aura-quint-api)      │
+│         (aura-testkit, aura-quint)          │
 ├─────────────────────────────────────────────┤
 │ Layer 7: User Interface                     │
 │         (aura-cli)                          │
@@ -149,13 +149,13 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 | Crate | Protocol | Purpose |
 |-------|----------|---------|
 | `aura-authenticate` | Authentication | Device, threshold, and guardian auth flows |
+| `aura-chat` | Secure messaging | Group chat with AMP transport integration |
 | `aura-frost` | Threshold signatures | FROST ceremonies and key resharing |
 | `aura-invitation` | Invitations | Peer onboarding and relational facts |
 | `aura-recovery` | Guardian recovery | Recovery grants and dispute escalation |
 | `aura-relational` | Cross-authority relationships | RelationalContext protocols (domain types in aura-core) |
 | `aura-rendezvous` | Peer discovery | Context-scoped rendezvous and routing |
 | `aura-sync` | Synchronization | Journal sync and anti-entropy protocols |
-| `aura-storage` | Storage | Capability-guarded encrypted storage |
 
 **Key characteristics**: Reusable building blocks with no UI or binary entry points.
 
@@ -205,7 +205,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 - **Mock effect handlers**: `MockCryptoHandler`, `MockTimeHandler`, `InMemoryStorageHandler`, etc.
 - Stateful test handlers that maintain controllable state for deterministic testing
 
-**`aura-quint-api`**: Formal verification bridge to Quint model checker.
+**`aura-quint`**: Formal verification bridge to Quint model checker.
 
 **Key characteristics**: Mock handlers in `aura-testkit` are allowed to be stateful (using `Arc<Mutex<>>`, etc.) since they need controllable, deterministic state for testing. This maintains the stateless principle for production handlers in `aura-effects` while enabling comprehensive testing.
 
@@ -217,6 +217,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 crates/
 ├── aura-agent           Runtime composition and agent lifecycle
 ├── aura-authenticate    Authentication protocols
+├── aura-chat            Secure group messaging protocols
 ├── aura-cli             Command-line interface
 ├── aura-composition     Handler composition and effect system assembly
 ├── aura-core            Foundation types and effect traits
@@ -227,7 +228,7 @@ crates/
 ├── aura-macros          Choreography DSL compiler
 ├── aura-mpst            Session types and choreography specs
 ├── aura-protocol        Orchestration and coordination
-├── aura-quint-api       Quint formal verification
+├── aura-quint       Quint formal verification
 ├── aura-recovery        Guardian recovery protocols
 ├── aura-relational      Cross-authority relationships
 ├── aura-rendezvous      Peer discovery and routing
@@ -267,13 +268,14 @@ graph TD
 
     %% Feature Layer
     auth[aura-authenticate]
+    chat[aura-chat]
     recovery[aura-recovery]
     invitation[aura-invitation]
     frost[aura-frost]
     relational[aura-relational]
     rendezvous[aura-rendezvous]
     sync[aura-sync]
-    storage[aura-storage]
+    store[aura-store]
 
     %% Runtime Layer
     agent[aura-agent]
@@ -284,7 +286,7 @@ graph TD
 
     %% Testing Layer
     testkit[aura-testkit]
-    quint[aura-quint-api]
+    quint[aura-quint]
 
     %% Dependencies
     verify --> types
@@ -309,6 +311,10 @@ graph TD
     auth --> verify
     auth --> wot
     auth --> composition
+    chat --> types
+    chat --> transport
+    chat --> composition
+    chat --> mpst
     recovery --> auth
     recovery --> verify
     recovery --> wot
@@ -338,9 +344,9 @@ graph TD
     sync --> mpst
     sync --> journal
     sync --> composition
-    storage --> store
-    storage --> journal
-    storage --> composition
+    store --> types
+    store --> journal
+    store --> composition
     agent --> types
     agent --> protocol
     agent --> journal
@@ -387,7 +393,7 @@ graph TD
     class effects effects
     class composition composition
     class protocol protocol
-    class auth,recovery,invitation,frost,relational,rendezvous,sync,storage feature
+    class auth,chat,recovery,invitation,frost,relational,rendezvous,sync,store feature
     class agent,simulator runtime
     class cli app
     class testkit,quint test
@@ -822,6 +828,9 @@ Multi-party coordination and distributed protocol orchestration including guard 
 ### aura-authenticate
 Device, threshold, and guardian authentication protocols.
 
+### aura-chat
+Secure group messaging with authority-first design and AMP transport integration.
+
 ### aura-frost
 FROST threshold signatures and key resharing operations.
 
@@ -837,9 +846,6 @@ Social Bulletin Board peer discovery with relationship-based routing.
 ### aura-sync
 Journal synchronization and anti-entropy protocols.
 
-### aura-storage
-Capability-guarded encrypted storage protocols.
-
 ### aura-agent
 Production runtime assembling handlers and protocols into executable systems.
 
@@ -852,5 +858,5 @@ Command-line interface for account management and recovery visualization.
 ### aura-testkit
 Comprehensive testing infrastructure including test fixtures, scenario builders, property test helpers, and mock effect handlers with controllable stateful behavior for deterministic testing.
 
-### aura-quint-api
+### aura-quint
 Formal verification integration for protocol specifications.

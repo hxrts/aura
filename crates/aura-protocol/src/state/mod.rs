@@ -1,33 +1,24 @@
-//! CRDT State Types for Distributed Coordination
+//! Layer 4: CRDT State Types - Semilattice Coordination
 //!
-//! This module contains CRDT (Conflict-free Replicated Data Type) state implementations
-//! for distributed coordination protocols. All types implement semilattice operations
-//! to guarantee eventual consistency across replicas.
+//! Distributed state management using CRDT semilattices (⊔, ⊓) for conflict-free replication
+//! and eventual consistency (per docs/002_theoretical_model.md, docs/110_state_reduction.md).
 //!
-//! ## Architecture
+//! **Mathematical Foundation** (per docs/002_theoretical_model.md §3):
+//! All types satisfy required semilattice properties for convergence:
+//! - **Associativity**: `(A ⊔ B) ⊔ C = A ⊔ (B ⊔ C)`
+//! - **Commutativity**: `A ⊔ B = B ⊔ A`
+//! - **Idempotency**: `A ⊔ A = A`
 //!
-//! CRDT state types provide the foundation for distributed coordination:
+//! These properties ensure merge operations can be applied in any order;
+//! all replicas converge regardless of network delays or message reordering.
 //!
-//! ```text
-//! PeerView (G-Set) ─────┐
-//!                       ├── Anti-Entropy Protocol
-//! IntentState (LWW) ────┘
-//! ```
+//! **State Models**:
+//! - **PeerView (G-Set)**: Peer discovery (grow-only set, ⊔ = union)
+//! - **IntentState (LWW)**: Operation proposals (last-write-wins with timestamp resolution)
 //!
-//! ## CRDT Types
-//!
-//! - **PeerView**: Grow-only set (G-Set) of discovered peers
-//!   - Implements join-semilattice: `A ⊔ B` = union of peer sets
-//!   - Monotonic: peers can be added but never removed
-//!   - Used for peer discovery and membership tracking
-//!
-//! - **IntentState**: Last-Writer-Wins (LWW) register for operation proposals
-//!   - Implements join-semilattice with timestamp ordering
-//!   - Resolves conflicts by preferring most recent updates
-//!   - Used for coordinated operation scheduling
-//!
-//! ## Semilattice Properties
-//!
+//! **Critical Invariant: Idempotency** (per docs/110_state_reduction.md):
+//! Applying same state update twice must have identical effects. Idempotency violation
+//! introduces inconsistency across replicas and violates eventual consistency guarantee.
 //! All CRDT types satisfy the mathematical requirements for convergence:
 //!
 //! - **Associativity**: `(A ⊔ B) ⊔ C = A ⊔ (B ⊔ C)`

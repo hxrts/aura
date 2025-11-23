@@ -241,10 +241,9 @@ impl<N: NetworkEffects> StunClient<N> {
         let request = StunMessage::binding_request();
         let transaction_id = request.transaction_id;
 
-        // Serialize STUN message to JSON for transport
-        // TODO: In production, this should be binary STUN encoding per RFC 5389
-        let request_data = serde_json::to_vec(&request).map_err(|e| {
-            AuraError::serialization(format!("Failed to serialize STUN request: {}", e))
+        // Serialize STUN message to binary format per RFC 5389
+        let request_data = self.encode_stun_message(&request).map_err(|e| {
+            AuraError::serialization(format!("Failed to encode STUN request: {}", e))
         })?;
 
         // Send UDP packet to STUN server via network effects
@@ -262,9 +261,9 @@ impl<N: NetworkEffects> StunClient<N> {
                 AuraError::network(format!("Failed to receive STUN response: {}", e))
             })?;
 
-        // Parse STUN response
-        let response: StunMessage = serde_json::from_slice(&response_data).map_err(|e| {
-            AuraError::serialization(format!("Failed to parse STUN response: {}", e))
+        // Parse STUN response from binary format
+        let response = self.decode_stun_message(&response_data).map_err(|e| {
+            AuraError::serialization(format!("Failed to decode STUN response: {}", e))
         })?;
 
         // Verify transaction ID matches
@@ -292,6 +291,358 @@ impl<N: NetworkEffects> StunClient<N> {
         Err(AuraError::coordination_failed(
             "STUN response missing mapped address".to_string(),
         ))
+    }
+
+    /// Encode STUN message to binary format per RFC 5389
+    fn encode_stun_message(&self, message: &StunMessage) -> Result<Vec<u8>, AuraError> {
+        let mut data = Vec::new();
+        
+        // STUN header: message type (2 bytes) + message length (2 bytes) + magic cookie (4 bytes) + transaction ID (12 bytes)
+        // Message type (16 bits)
+        let msg_type = match (&message.message_type.method, &message.message_type.class) {
+            (aura_transport::protocols::stun::StunMethod::Binding, aura_transport::protocols::stun::StunClass::Request) => 0x0001,
+            (aura_transport::protocols::stun::StunMethod::Binding, aura_transport::protocols::stun::StunClass::SuccessResponse) => 0x0101,
+            (aura_transport::protocols::stun::StunMethod::Binding, aura_transport::protocols::stun::StunClass::ErrorResponse) => 0x0111,
+            _ => 0x0001, // Default to binding request
+        };
+        data.extend_from_slice(&(msg_type as u16).to_be_bytes());
+        
+        // Message length (16 bits) - placeholder, will be updated after attributes
+        let length_pos = data.len();
+        data.extend_from_slice(&[0, 0]);
+        
+        // Magic cookie (32 bits) - RFC 5389 defines this as 0x2112A442
+        data.extend_from_slice(&0x2112A442u32.to_be_bytes());
+        
+        // Transaction ID (96 bits / 12 bytes)
+        data.extend_from_slice(&message.transaction_id.as_bytes()[0..12]);
+        
+        let attributes_start = data.len();
+        
+        // Encode attributes
+        for attribute in &message.attributes {
+            let attr_start = data.len();
+            
+            match attribute {
+                StunAttribute::MappedAddress(addr) => {
+                    // Attribute type: 0x0001 (MAPPED-ADDRESS)
+                    data.extend_from_slice(&0x0001u16.to_be_bytes());
+                    
+                    // Attribute length
+                    let attr_length = if addr.is_ipv4() { 8 } else { 20 };
+                    data.extend_from_slice(&(attr_length as u16).to_be_bytes());
+                    
+                    // Reserved (8 bits)
+                    data.push(0);
+                    
+                    // Protocol family (8 bits): IPv4 = 0x01, IPv6 = 0x02
+                    if addr.is_ipv4() {
+                        data.push(0x01);
+                        // Port (16 bits)
+                        data.extend_from_slice(&addr.port().to_be_bytes());
+                        // IPv4 address (32 bits)
+                        if let std::net::IpAddr::V4(ipv4) = addr.ip() {
+                            data.extend_from_slice(&ipv4.octets());
+                        }
+                    } else {
+                        data.push(0x02);
+                        // Port (16 bits)
+                        data.extend_from_slice(&addr.port().to_be_bytes());
+                        // IPv6 address (128 bits)
+                        if let std::net::IpAddr::V6(ipv6) = addr.ip() {
+                            data.extend_from_slice(&ipv6.octets());
+                        }
+                    }
+                },
+                StunAttribute::XorMappedAddress(addr) => {
+                    // Attribute type: 0x0020 (XOR-MAPPED-ADDRESS)
+                    data.extend_from_slice(&0x0020u16.to_be_bytes());
+                    
+                    // Attribute length
+                    let attr_length = if addr.is_ipv4() { 8 } else { 20 };
+                    data.extend_from_slice(&(attr_length as u16).to_be_bytes());
+                    
+                    // Reserved (8 bits)
+                    data.push(0);
+                    
+                    // Protocol family (8 bits)
+                    if addr.is_ipv4() {
+                        data.push(0x01);
+                        // XOR port with magic cookie high 16 bits
+                        let xor_port = addr.port() ^ 0x2112;
+                        data.extend_from_slice(&xor_port.to_be_bytes());
+                        // XOR IPv4 address with magic cookie
+                        if let std::net::IpAddr::V4(ipv4) = addr.ip() {
+                            let addr_bytes = ipv4.octets();
+                            let magic_bytes = 0x2112A442u32.to_be_bytes();
+                            for i in 0..4 {
+                                data.push(addr_bytes[i] ^ magic_bytes[i]);
+                            }
+                        }
+                    } else {
+                        data.push(0x02);
+                        // XOR port with magic cookie high 16 bits
+                        let xor_port = addr.port() ^ 0x2112;
+                        data.extend_from_slice(&xor_port.to_be_bytes());
+                        // XOR IPv6 address with magic cookie + transaction ID
+                        if let std::net::IpAddr::V6(ipv6) = addr.ip() {
+                            let addr_bytes = ipv6.octets();
+                            let mut xor_key = Vec::new();
+                            xor_key.extend_from_slice(&0x2112A442u32.to_be_bytes());
+                            xor_key.extend_from_slice(message.transaction_id.as_bytes());
+                            for i in 0..16 {
+                                data.push(addr_bytes[i] ^ xor_key[i]);
+                            }
+                        }
+                    }
+                },
+                StunAttribute::ErrorCode { code, reason } => {
+                    // Attribute type: 0x0009 (ERROR-CODE)
+                    data.extend_from_slice(&0x0009u16.to_be_bytes());
+                    
+                    // Attribute length: 4 bytes + reason phrase length (padded to 4-byte boundary)
+                    let reason_bytes = reason.as_bytes();
+                    let padded_length = (reason_bytes.len() + 3) & !3; // Round up to multiple of 4
+                    let attr_length = 4 + padded_length;
+                    data.extend_from_slice(&(attr_length as u16).to_be_bytes());
+                    
+                    // Reserved (21 bits) + Class (3 bits) + Number (8 bits)
+                    let class = (code / 100) as u8;
+                    let number = (code % 100) as u8;
+                    data.extend_from_slice(&[0, 0]); // Reserved 16 bits
+                    data.push(class); // Class in bits 21-23
+                    data.push(number); // Number in bits 24-31
+                    
+                    // Reason phrase (variable length, padded to 4-byte boundary)
+                    data.extend_from_slice(reason_bytes);
+                    // Add padding if needed
+                    while data.len() - attr_start - 4 < padded_length {
+                        data.push(0);
+                    }
+                },
+                StunAttribute::Username(_) |
+                StunAttribute::MessageIntegrity(_) |
+                StunAttribute::UnknownAttributes(_) |
+                StunAttribute::Realm(_) |
+                StunAttribute::Nonce(_) |
+                StunAttribute::Software(_) |
+                StunAttribute::AlternateServer(_) => {
+                    // TODO: Implement encoding for these STUN attributes
+                    tracing::debug!("Skipping unsupported STUN attribute: {:?}", attribute);
+                },
+                StunAttribute::Unknown { attribute_type, data: attr_data } => {
+                    // Unknown attribute - encode as-is
+                    data.extend_from_slice(&attribute_type.to_be_bytes());
+                    data.extend_from_slice(&(attr_data.len() as u16).to_be_bytes());
+                    data.extend_from_slice(attr_data);
+                    
+                    // Add padding if needed (attributes must be 4-byte aligned)
+                    while (data.len() - attr_start - 4) % 4 != 0 {
+                        data.push(0);
+                    }
+                },
+            }
+        }
+        
+        // Update message length (length of all attributes)
+        let attributes_length = data.len() - attributes_start;
+        let length_bytes = (attributes_length as u16).to_be_bytes();
+        data[length_pos] = length_bytes[0];
+        data[length_pos + 1] = length_bytes[1];
+        
+        Ok(data)
+    }
+    
+    /// Decode STUN message from binary format per RFC 5389
+    fn decode_stun_message(&self, data: &[u8]) -> Result<StunMessage, AuraError> {
+        if data.len() < 20 {
+            return Err(AuraError::serialization("STUN message too short".to_string()));
+        }
+        
+        // Parse header
+        let msg_type_raw = u16::from_be_bytes([data[0], data[1]]);
+        let message_type = match msg_type_raw {
+            0x0001 => aura_transport::protocols::stun::StunMessageType {
+                method: aura_transport::protocols::stun::StunMethod::Binding,
+                class: aura_transport::protocols::stun::StunClass::Request,
+            },
+            0x0101 => aura_transport::protocols::stun::StunMessageType {
+                method: aura_transport::protocols::stun::StunMethod::Binding,
+                class: aura_transport::protocols::stun::StunClass::SuccessResponse,
+            },
+            0x0111 => aura_transport::protocols::stun::StunMessageType {
+                method: aura_transport::protocols::stun::StunMethod::Binding,
+                class: aura_transport::protocols::stun::StunClass::ErrorResponse,
+            },
+            _ => return Err(AuraError::serialization(format!("Unknown STUN message type: 0x{:04x}", msg_type_raw))),
+        };
+        
+        let message_length = u16::from_be_bytes([data[2], data[3]]) as usize;
+        let magic_cookie = u32::from_be_bytes([data[4], data[5], data[6], data[7]]);
+        
+        // Verify magic cookie
+        if magic_cookie != 0x2112A442 {
+            return Err(AuraError::serialization(format!("Invalid STUN magic cookie: 0x{:08x}", magic_cookie)));
+        }
+        
+        // Extract transaction ID - convert 12 bytes to Uuid
+        let mut transaction_id_bytes = [0u8; 12];
+        transaction_id_bytes.copy_from_slice(&data[8..20]);
+        // Convert 12 bytes to 16 bytes for Uuid by zero-padding
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes[0..12].copy_from_slice(&transaction_id_bytes);
+        let transaction_id = uuid::Uuid::from_bytes(uuid_bytes);
+        
+        // Verify message length matches actual data
+        if data.len() != 20 + message_length {
+            return Err(AuraError::serialization(format!(
+                "STUN message length mismatch: header says {}, actual is {}",
+                message_length, data.len() - 20
+            )));
+        }
+        
+        // Parse attributes
+        let mut attributes = Vec::new();
+        let mut offset = 20;
+        
+        while offset < data.len() {
+            if offset + 4 > data.len() {
+                return Err(AuraError::serialization("Incomplete STUN attribute header".to_string()));
+            }
+            
+            let attr_type = u16::from_be_bytes([data[offset], data[offset + 1]]);
+            let attr_length = u16::from_be_bytes([data[offset + 2], data[offset + 3]]) as usize;
+            
+            let attr_start = offset + 4;
+            let attr_end = attr_start + attr_length;
+            
+            if attr_end > data.len() {
+                return Err(AuraError::serialization("STUN attribute extends beyond message".to_string()));
+            }
+            
+            let attr_data = &data[attr_start..attr_end];
+            
+            let attribute = match attr_type {
+                0x0001 => {
+                    // MAPPED-ADDRESS
+                    if attr_data.len() < 4 {
+                        return Err(AuraError::serialization("MAPPED-ADDRESS attribute too short".to_string()));
+                    }
+                    
+                    let family = attr_data[1];
+                    let port = u16::from_be_bytes([attr_data[2], attr_data[3]]);
+                    
+                    let addr = match family {
+                        0x01 => {
+                            // IPv4
+                            if attr_data.len() != 8 {
+                                return Err(AuraError::serialization("Invalid IPv4 MAPPED-ADDRESS length".to_string()));
+                            }
+                            let ip = std::net::Ipv4Addr::from([attr_data[4], attr_data[5], attr_data[6], attr_data[7]]);
+                            std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port)
+                        },
+                        0x02 => {
+                            // IPv6
+                            if attr_data.len() != 20 {
+                                return Err(AuraError::serialization("Invalid IPv6 MAPPED-ADDRESS length".to_string()));
+                            }
+                            let mut ip_bytes = [0u8; 16];
+                            ip_bytes.copy_from_slice(&attr_data[4..20]);
+                            let ip = std::net::Ipv6Addr::from(ip_bytes);
+                            std::net::SocketAddr::new(std::net::IpAddr::V6(ip), port)
+                        },
+                        _ => return Err(AuraError::serialization(format!("Unknown address family: {}", family))),
+                    };
+                    
+                    StunAttribute::MappedAddress(addr)
+                },
+                0x0020 => {
+                    // XOR-MAPPED-ADDRESS
+                    if attr_data.len() < 4 {
+                        return Err(AuraError::serialization("XOR-MAPPED-ADDRESS attribute too short".to_string()));
+                    }
+                    
+                    let family = attr_data[1];
+                    let xor_port = u16::from_be_bytes([attr_data[2], attr_data[3]]);
+                    let port = xor_port ^ 0x2112;
+                    
+                    let addr = match family {
+                        0x01 => {
+                            // IPv4
+                            if attr_data.len() != 8 {
+                                return Err(AuraError::serialization("Invalid IPv4 XOR-MAPPED-ADDRESS length".to_string()));
+                            }
+                            let magic_bytes = 0x2112A442u32.to_be_bytes();
+                            let mut ip_bytes = [0u8; 4];
+                            for i in 0..4 {
+                                ip_bytes[i] = attr_data[4 + i] ^ magic_bytes[i];
+                            }
+                            let ip = std::net::Ipv4Addr::from(ip_bytes);
+                            std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port)
+                        },
+                        0x02 => {
+                            // IPv6
+                            if attr_data.len() != 20 {
+                                return Err(AuraError::serialization("Invalid IPv6 XOR-MAPPED-ADDRESS length".to_string()));
+                            }
+                            let mut xor_key = Vec::new();
+                            xor_key.extend_from_slice(&0x2112A442u32.to_be_bytes());
+                            xor_key.extend_from_slice(transaction_id.as_bytes());
+                            
+                            let mut ip_bytes = [0u8; 16];
+                            for i in 0..16 {
+                                ip_bytes[i] = attr_data[4 + i] ^ xor_key[i];
+                            }
+                            let ip = std::net::Ipv6Addr::from(ip_bytes);
+                            std::net::SocketAddr::new(std::net::IpAddr::V6(ip), port)
+                        },
+                        _ => return Err(AuraError::serialization(format!("Unknown address family: {}", family))),
+                    };
+                    
+                    StunAttribute::XorMappedAddress(addr)
+                },
+                0x0009 => {
+                    // ERROR-CODE
+                    if attr_data.len() < 4 {
+                        return Err(AuraError::serialization("ERROR-CODE attribute too short".to_string()));
+                    }
+                    
+                    let class = attr_data[2] as u16;
+                    let number = attr_data[3] as u16;
+                    let code = class * 100 + number;
+                    
+                    let reason = if attr_data.len() > 4 {
+                        String::from_utf8_lossy(&attr_data[4..]).trim_end_matches('\0').to_string()
+                    } else {
+                        String::new()
+                    };
+                    
+                    StunAttribute::ErrorCode { code, reason }
+                },
+                _ => {
+                    // Unknown attribute
+                    StunAttribute::Unknown {
+                        attribute_type: attr_type,
+                        data: attr_data.to_vec(),
+                    }
+                },
+            };
+            
+            attributes.push(attribute);
+            
+            // Move to next attribute (with padding)
+            offset = attr_end;
+            // Attributes are padded to 4-byte boundaries
+            while offset % 4 != 0 && offset < data.len() {
+                offset += 1;
+            }
+        }
+        
+        Ok(StunMessage {
+            message_type,
+            transaction_id,
+            attributes,
+        })
     }
 
     /// Discover reflexive address with retry logic
@@ -946,27 +1297,32 @@ impl<N: NetworkEffects> ConnectionManager<N> {
         // Create QUIC connection configuration
         let quic_config = self.create_quic_client_config()?;
 
-        // Attempt to establish UDP socket first
-        let local_socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| {
-            AuraError::coordination_failed(format!("Failed to bind UDP socket: {}", e))
-        })?;
+        // TODO: Replace with NetworkEffects call when UDP socket binding is supported
+        // For now, this would need to be refactored to use network effects
+        return Err(AuraError::coordination_failed(
+            "Direct UDP socket binding replaced with NetworkEffects - implementation needed".to_string()
+        ));
+        
+        // let local_socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| {
+        //     AuraError::coordination_failed(format!("Failed to bind UDP socket: {}", e))
+        // })?;
 
-        let local_addr = local_socket.local_addr().map_err(|e| {
-            AuraError::coordination_failed(format!("Failed to get local address: {}", e))
-        })?;
-
-        // Perform QUIC handshake simulation (real implementation would use quinn)
-        let connection_result = self
-            .perform_quic_handshake(local_socket, addr, quic_config)
-            .await?;
-
-        tracing::info!(
-            local_addr = %local_addr,
-            remote_addr = %addr,
-            "QUIC connection established"
-        );
-
-        Ok(connection_result)
+        // let local_addr = local_socket.local_addr().map_err(|e| {
+        //     AuraError::coordination_failed(format!("Failed to get local address: {}", e))
+        // })?;
+        //
+        // // Perform QUIC handshake simulation (real implementation would use quinn)
+        // let connection_result = self
+        //     .perform_quic_handshake(local_socket, addr, quic_config)
+        //     .await?;
+        //
+        // tracing::info!(
+        //     local_addr = %local_addr,
+        //     remote_addr = %addr,
+        //     "QUIC connection established"
+        // );
+        //
+        // Ok(connection_result)
     }
 
     /// Create QUIC client configuration
@@ -1031,25 +1387,27 @@ impl<N: NetworkEffects> ConnectionManager<N> {
     async fn try_websocket_connection(&self, addr: SocketAddr) -> Result<SocketAddr, AuraError> {
         tracing::debug!(addr = %addr, "Attempting WebSocket connection");
 
-        // Establish TCP connection first
-        let tcp_stream = tokio::net::TcpStream::connect(addr)
-            .await
-            .map_err(|e| AuraError::coordination_failed(format!("TCP connection failed: {}", e)))?;
+        // TODO: Replace with NetworkEffects call for TCP connections
+        return Err(AuraError::coordination_failed(
+            "Direct TCP connections replaced with NetworkEffects - implementation needed".to_string()
+        ));
+        
+        // let tcp_stream = tokio::net::TcpStream::connect(addr)
+        //     .await
+        //     .map_err(|e| AuraError::coordination_failed(format!("TCP connection failed: {}", e)))?;
 
-        // Convert to std::net::TcpStream for synchronous operations
-        let std_stream = tcp_stream.into_std().map_err(|e| {
-            AuraError::coordination_failed(format!("Failed to convert stream: {}", e))
-        })?;
+        // let std_stream = tcp_stream.into_std().map_err(|e| {
+        //     AuraError::coordination_failed(format!("Failed to convert stream: {}", e))
+        // })?;
 
-        // Perform WebSocket handshake
-        let ws_connection = self.perform_websocket_handshake(std_stream, addr).await?;
-
-        tracing::info!(
-            remote_addr = %addr,
-            "WebSocket connection established"
-        );
-
-        Ok(ws_connection)
+        // let ws_connection = self.perform_websocket_handshake(std_stream, addr).await?;
+        //
+        // tracing::info!(
+        //     remote_addr = %addr,
+        //     "WebSocket connection established"
+        // );
+        //
+        // Ok(ws_connection)
     }
 
     /// Perform WebSocket handshake.

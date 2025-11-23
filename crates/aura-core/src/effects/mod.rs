@@ -1,43 +1,23 @@
-//! Core Effect Trait Definitions
+//! Layer 1: Core Effect Trait Definitions
 //!
-//! This module contains pure trait definitions for all side-effect operations used by protocols.
-//! Following the algebraic effects pattern, this module defines what effects can be performed,
-//! while the protocol handlers define how those effects are implemented.
+//! Pure trait definitions for all side-effect operations in Aura.
+//! This module defines **what** effects can be performed; handlers define **how**.
+//! (per docs/106_effect_system_and_runtime.md)
 //!
-//! ## Architecture Principles
+//! **Effect Classification**:
+//! - **Infrastructure Effects**: Core runtime (Time, Crypto, Network, Storage, Random).
+//!   Must implement in aura-effects (Layer 3); domain crates may not.
+//! - **Application Effects**: Domain-specific (Journal, Authorization, Capability).
+//!   Implemented in domain crates (aura-journal, aura-wot, aura-verify, etc.).
+//! - **Composite Effects**: Convenience traits combining infrastructure/application effects.
 //!
-//! 1. **Pure Traits**: This module contains only trait definitions, no implementations
-//! 2. **Effect Isolation**: All side effects are abstracted through these interfaces
-//! 3. **Algebraic Effects**: Designed to work with handlers that interpret these effects
-//! 4. **Composability**: Effects can be combined and decorated with middleware
+//! **Execution Modes** (per ExecutionMode enum):
+//! - **Testing**: Mock implementations, deterministic behavior
+//! - **Production**: Real system operations
+//! - **Simulation**: Deterministic with controllable effects (seed-driven)
 //!
-//! ## Effect Categories
-//!
-//! - **Time Effects**: Scheduling, timeouts, temporal coordination
-//! - **Crypto Effects**: Basic cryptographic operations, random generation
-//! - **Storage Effects**: Basic data persistence, key-value operations
-//!
-//! ## Usage Pattern
-//!
-//! ```rust,ignore
-//! use aura_core::effects::{TimeEffects, CryptoEffects};
-//!
-//! // Pure protocol function that accepts effects
-//! async fn execute_protocol_phase<E>(
-//!     state: ProtocolState,
-//!     effects: &E,
-//! ) -> Result<ProtocolState, AuraError>
-//! where
-//!     E: TimeEffects + CryptoEffects,
-//! {
-//!     // Use effects for side-effect operations
-//!     let timestamp = effects.current_timestamp().await;
-//!     let random_data = effects.random_bytes_32().await;
-//!
-//!     // Pure logic using the effect results
-//!     Ok(state.with_timestamp(timestamp))
-//! }
-//! ```
+//! All effect-using code is parameterized by effect traits, enabling:
+//! Deterministic testing, flexible handler composition, runtime mode switching (per docs/106_effect_system_and_runtime.md)
 
 // Core effect trait definitions
 pub mod agent;
@@ -49,6 +29,7 @@ pub mod capability;
 pub mod chaos;
 pub mod console;
 pub mod crypto;
+pub mod flow; // Flow budget management
 pub mod journal;
 pub mod leakage; // Privacy leakage tracking
 pub mod migration; // Empty module - migration complete
@@ -63,6 +44,7 @@ pub mod supertraits;
 pub mod system;
 pub mod testing;
 pub mod time;
+pub mod transport;
 
 // Re-export core effect traits
 pub use agent::{
@@ -87,6 +69,7 @@ pub use capability::{
 pub use chaos::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
 pub use console::ConsoleEffects;
 pub use crypto::{CryptoEffects, CryptoError};
+pub use flow::{FlowBudgetEffects, FlowHint};
 pub use journal::JournalEffects;
 pub use leakage::{
     LeakageBudget, LeakageChoreographyExt, LeakageEffects, LeakageEvent, ObserverClass,
@@ -132,6 +115,9 @@ pub use supertraits::{
 pub use system::{SystemEffects, SystemError};
 pub use testing::{TestingEffects, TestingError};
 pub use time::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
+pub use transport::{
+    TransportEffects, TransportError, TransportEnvelope, TransportReceipt, TransportStats,
+};
 
 // Re-export unified error system
 pub use crate::AuraError;
@@ -173,5 +159,113 @@ impl ExecutionMode {
             Self::Simulation { seed } => Some(*seed),
             _ => None,
         }
+    }
+}
+
+/// Effect type enumeration for all effects in the Aura system
+///
+/// Categorizes all effects in the Aura system for efficient dispatch
+/// and middleware composition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+pub enum EffectType {
+    /// Cryptographic operations (FROST, DKD, hashing, key derivation)
+    Crypto,
+    /// Network communication (send, receive, broadcast)
+    Network,
+    /// Persistent storage operations
+    Storage,
+    /// Time-related operations (current time, sleep)
+    Time,
+    /// Console and logging operations
+    Console,
+    /// Random number generation
+    Random,
+    /// Effect API operations (transaction log, state)
+    EffectApi,
+    /// Journal operations (event log, snapshots)
+    Journal,
+
+    /// Tree operations (commitment tree, MLS)
+    Tree,
+
+    /// Choreographic protocol coordination
+    Choreographic,
+
+    /// System monitoring, logging, and configuration
+    System,
+
+    /// Device-local storage
+    DeviceStorage,
+    /// Device authentication and sessions
+    Authentication,
+    /// Configuration management
+    Configuration,
+    /// Session lifecycle management
+    SessionManagement,
+
+    /// Fault injection for testing
+    FaultInjection,
+    /// Time control for simulation
+    TimeControl,
+    /// State inspection for debugging
+    StateInspection,
+    /// Property checking for verification
+    PropertyChecking,
+    /// Chaos coordination for resilience testing
+    ChaosCoordination,
+}
+
+impl std::fmt::Display for EffectType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Crypto => write!(f, "crypto"),
+            Self::Network => write!(f, "network"),
+            Self::Storage => write!(f, "storage"),
+            Self::Time => write!(f, "time"),
+            Self::Console => write!(f, "console"),
+            Self::Random => write!(f, "random"),
+            Self::EffectApi => write!(f, "effect_api"),
+            Self::Journal => write!(f, "journal"),
+            Self::Tree => write!(f, "tree"),
+            Self::Choreographic => write!(f, "choreographic"),
+            Self::System => write!(f, "system"),
+            Self::DeviceStorage => write!(f, "device_storage"),
+            Self::Authentication => write!(f, "authentication"),
+            Self::Configuration => write!(f, "configuration"),
+            Self::SessionManagement => write!(f, "session_management"),
+            Self::FaultInjection => write!(f, "fault_injection"),
+            Self::TimeControl => write!(f, "time_control"),
+            Self::StateInspection => write!(f, "state_inspection"),
+            Self::PropertyChecking => write!(f, "property_checking"),
+            Self::ChaosCoordination => write!(f, "chaos_coordination"),
+        }
+    }
+}
+
+impl EffectType {
+    /// Get all effect types
+    pub fn all() -> Vec<Self> {
+        vec![
+            Self::Crypto,
+            Self::Network,
+            Self::Storage,
+            Self::Time,
+            Self::Console,
+            Self::Random,
+            Self::EffectApi,
+            Self::Journal,
+            Self::Tree,
+            Self::Choreographic,
+            Self::System,
+            Self::DeviceStorage,
+            Self::Authentication,
+            Self::Configuration,
+            Self::SessionManagement,
+            Self::FaultInjection,
+            Self::TimeControl,
+            Self::StateInspection,
+            Self::PropertyChecking,
+            Self::ChaosCoordination,
+        ]
     }
 }

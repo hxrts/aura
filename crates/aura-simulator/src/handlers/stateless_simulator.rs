@@ -389,7 +389,7 @@ pub enum LegacyFaultType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_effects::MockSimulationHandler;
+    use aura_testkit::MockSimulationHandler;
     use tokio;
 
     #[tokio::test]

@@ -1,33 +1,19 @@
-//! Protocol implementations for synchronization
+//! Layer 5: Synchronization Protocol Implementations - Anti-Entropy, Snapshots, OTA, Epochs
 //!
-//! This module provides complete end-to-end synchronization protocol implementations
-//! following Aura's Layer 5 (Feature/Protocol) architecture. Each protocol is:
-//! - Effect-based: Parameterized by effect traits
-//! - Choreographic: Uses session types where appropriate
-//! - Composable: Can be combined with other protocols
-//! - Reusable: Building blocks for higher-level services
+//! Complete end-to-end protocol implementations built atop Layer 4 orchestration:
+//! - **anti_entropy**: Digest-based CRDT reconciliation with state transfer (per docs/110_state_reduction.md)
+//! - **journal**: Journal operation synchronization with causal ordering guarantees
+//! - **snapshots**: Coordinated garbage collection with writer fencing and threshold approval
+//! - **ota**: OTA upgrade coordination with epoch fencing for consistency
+//! - **receipts**: Receipt verification for multi-hop message chains (per docs/003_information_flow_contract.md)
+//! - **epochs**: Epoch rotation and identity epoch management with AMP consensus
 //!
-//! # Protocol Modules
-//!
-//! - `anti_entropy`: Digest-based state reconciliation for CRDT synchronization
-//! - `journal`: Journal operation synchronization and coordination
-//! - `snapshots`: Coordinated garbage collection with threshold approval
-//! - `ota`: Over-the-air upgrade coordination with epoch fencing
-//! - `receipts`: Receipt verification for multi-hop message chains
-//! - `epochs`: Epoch rotation and identity epoch management
-//!
-//! # Architecture
-//!
-//! All protocols follow these patterns:
-//!
-//! ## Effect-Based Design
-//!
-//! ```rust,no_run
-//! use aura_sync::protocols::AntiEntropyProtocol;
-//! use aura_core::effects::{JournalEffects, NetworkEffects};
-//!
-//! async fn sync<E>(effects: &E, peer: DeviceId) -> SyncResult<()>
-//! where
+//! **Protocol Principles** (per docs/107_mpst_and_choreography.md):
+//! - **Effect-based**: Parameterized by effect traits (NetworkEffects, JournalEffects) for testing
+//! - **Choreographic**: Use session types (aura-mpst) for distributed coordination with deadlock freedom
+//! - **Composable**: Can be combined without tight coupling via effect composition
+//! - **Reusable**: Building blocks for services (aura-sync/services) and higher-level workflows
+//! - **Guard-integrated**: Messages flow through guard chain (CapGuard → FlowGuard → Journal)
 //!     E: JournalEffects + NetworkEffects,
 //! {
 //!     let protocol = AntiEntropyProtocol::new(config);

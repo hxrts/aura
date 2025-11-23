@@ -12,6 +12,10 @@ use aura_verify::{IdentityProof, VerifiedIdentity};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
+fn authority_to_device_id(auth_id: &AuthorityId) -> aura_core::DeviceId {
+    aura_core::DeviceId::from_uuid(auth_id.0)
+}
+
 /// Authority authentication request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthorityAuthRequest {
@@ -232,14 +236,18 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
         match verification_result {
             Ok(true) => {
                 // Create session ticket
+                let mut ticket_nonce = [0u8; 16];
+                let ticket_nonce_bytes = self.effects.random_bytes(16).await;
+                ticket_nonce.copy_from_slice(&ticket_nonce_bytes[..16]);
+
                 let session_ticket = SessionTicket {
                     session_id: uuid::Uuid::parse_str(&challenge.session_id)
                         .unwrap_or_else(|_| uuid::Uuid::new_v4()),
-                    issuer_device_id: aura_core::DeviceId::new(), // TODO: Map from AuthorityId
+                    issuer_device_id: aura_core::DeviceId::from_uuid(request.authority_id.uuid()),
                     scope: request.requested_scope,
                     issued_at: challenge.timestamp,
                     expires_at: challenge.timestamp + 3600, // 1 hour
-                    nonce: [0; 16],                         // TODO: Generate proper nonce
+                    nonce: ticket_nonce,
                 };
 
                 // Create identity proof - simulating a device signature for authority
@@ -252,7 +260,7 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
                 };
 
                 let identity_proof = IdentityProof::Device {
-                    device_id: aura_core::DeviceId::new(), // TODO: Map from authority
+                    device_id: aura_core::DeviceId::from_uuid(request.authority_id.uuid()),
                     signature,
                 };
 
@@ -321,13 +329,17 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
                     aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await;
 
                 // Create session ticket
+                let mut nonce = [0u8; 16];
+                let nonce_bytes = self.effects.random_bytes(16).await;
+                nonce.copy_from_slice(&nonce_bytes[..16]);
+
                 let session_ticket = SessionTicket {
                     session_id: uuid::Uuid::new_v4(),
-                    issuer_device_id: aura_core::DeviceId::new(), // TODO: Map from AuthorityId
+                    issuer_device_id: authority_to_device_id(&request.authority_id),
                     scope: request.requested_scope.clone(),
                     issued_at: timestamp,
                     expires_at: timestamp + 3600, // 1 hour
-                    nonce: [0; 16],               // TODO: Generate proper nonce
+                    nonce,
                 };
 
                 // Create identity proof - simulating a device signature for authority
@@ -340,7 +352,7 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
                 };
 
                 let identity_proof = IdentityProof::Device {
-                    device_id: aura_core::DeviceId::new(), // TODO: Map from authority
+                    device_id: authority_to_device_id(&request.authority_id),
                     signature,
                 };
 

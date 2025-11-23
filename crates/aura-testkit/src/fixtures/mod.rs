@@ -1,8 +1,12 @@
-//! Composed test scenarios & fixtures
+//! Layer 8: Reusable Test Fixtures - Semantic Patterns & Cleanup
 //!
-//! This module provides reusable, semantic test fixtures that combine the lower-level
-//! builders into complete test scenarios. These fixtures eliminate boilerplate and provide
-//! convenient setup for common testing patterns.
+//! Semantic test fixtures combining builders into complete test scenarios:
+//! **BiscuitFixture** (authorization tokens), **ProtocolFixture** (operation patterns),
+//! **CommonFixture** (reusable patterns), **CleanupFixture** (resource management).
+//!
+//! **Design** (per docs/106_effect_system_and_runtime.md):
+//! Fixtures provide domain-specific patterns (e.g., "create authorized peer" without
+//! manual token generation). Enable fluent test writing with minimal boilerplate.
 
 pub mod biscuit;
 pub mod cleanup;

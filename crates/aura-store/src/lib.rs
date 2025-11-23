@@ -1,13 +1,19 @@
-//! Aura Storage Domain Layer
+//! # Aura Store - Layer 2: Specification (Domain Crate)
+//!
+//! **Purpose**: Define storage domain types, semantics, and capability-based access control.
 //!
 //! This crate provides storage domain types, semantics, and pure logic for the Aura platform.
-//! It follows the 8-layer architecture as a Layer 2 (Specification/Domain) crate.
 //!
-//! ## Architecture Position
+//! # Architecture Constraints
 //!
-//! - **Layer 2 - Domain/Specification**: Pure storage types and logic
-//! - **Dependencies**: Only `aura-core` (foundation layer)
-//! - **Responsibilities**: Storage domain concepts, no effect handlers or coordination
+//! **Layer 2 depends only on aura-core** (foundation).
+//! - ✅ Storage domain types and semantics
+//! - ✅ Capability-based access control logic
+//! - ✅ Content-addressed storage abstraction
+//! - ✅ Pure functions for storage operations
+//! - ❌ NO effect handler implementations (use StorageEffects from aura-effects)
+//! - ❌ NO handler composition (that's aura-composition)
+//! - ❌ NO multi-party protocol logic (that's aura-protocol)
 //!
 //! ## Core Concepts
 //!

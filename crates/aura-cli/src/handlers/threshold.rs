@@ -3,8 +3,9 @@
 //! Effect-based implementation of threshold operations.
 
 use anyhow::Result;
-use aura_agent::AuraEffectSystem;
+use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_authenticate::DkdResult;
+use aura_core::effects::StorageEffects;
 use aura_core::DeviceId;
 // Removed unused effect traits
 use std::path::PathBuf;
@@ -12,6 +13,7 @@ use uuid::Uuid;
 
 /// Handle threshold operations through effects
 pub async fn handle_threshold(
+    ctx: &EffectContext,
     effects: &AuraEffectSystem,
     configs: &str,
     _threshold: u32,
@@ -31,22 +33,37 @@ pub async fn handle_threshold(
     for config_path in &config_paths {
         let path = PathBuf::from(config_path);
 
-        // Simplified config loading without storage effects
-        match std::fs::read_to_string(&path) {
-            Ok(data) => match parse_config_data(data.as_bytes()) {
-                Ok(config) => {
-                    println!("Loaded config: {}", config_path);
-                    valid_configs.push((path, config));
-                }
+        // Load config via StorageEffects
+        let config_key = format!("device_config:{}", path.display());
+        match effects.retrieve(&config_key).await {
+            Ok(Some(data)) => match String::from_utf8(data) {
+                Ok(config_string) => match parse_config_data(config_string.as_bytes()) {
+                    Ok(config) => {
+                        println!("Loaded config: {}", config_path);
+                        valid_configs.push((path, config));
+                    }
+                    Err(e) => {
+                        eprintln!("Invalid config {}: {}", config_path, e);
+                        return Err(anyhow::anyhow!("Invalid config {}: {}", config_path, e));
+                    }
+                },
                 Err(e) => {
-                    eprintln!("Invalid config {}: {}", config_path, e);
-                    return Err(anyhow::anyhow!("Invalid config {}: {}", config_path, e));
+                    eprintln!("Invalid UTF-8 in config file {}: {}", config_path, e);
+                    return Err(anyhow::anyhow!(
+                        "Invalid UTF-8 in config file {}: {}",
+                        config_path,
+                        e
+                    ));
                 }
             },
+            Ok(None) => {
+                eprintln!("Config file not found: {}", config_path);
+                return Err(anyhow::anyhow!("Config file not found: {}", config_path));
+            }
             Err(e) => {
-                eprintln!("Config file not found: {}: {}", config_path, e);
+                eprintln!("Failed to read config {}: {}", config_path, e);
                 return Err(anyhow::anyhow!(
-                    "Config file not found: {}: {}",
+                    "Failed to read config {}: {}",
                     config_path,
                     e
                 ));
@@ -55,14 +72,14 @@ pub async fn handle_threshold(
     }
 
     // Validate threshold parameters
-    validate_threshold_params(&valid_configs, _threshold).await?;
+    validate_threshold_params(ctx, &valid_configs, _threshold).await?;
 
     // Execute threshold operation based on mode
     match mode {
-        "sign" => execute_threshold_signing(effects, &valid_configs, _threshold).await,
-        "verify" => execute_threshold_verification(effects, &valid_configs, _threshold).await,
-        "keygen" => execute_threshold_keygen(effects, &valid_configs, _threshold).await,
-        "dkd" => execute_dkd_protocol(effects, &valid_configs, _threshold).await,
+        "sign" => execute_threshold_signing(ctx, effects, &valid_configs, _threshold).await,
+        "verify" => execute_threshold_verification(ctx, effects, &valid_configs, _threshold).await,
+        "keygen" => execute_threshold_keygen(ctx, effects, &valid_configs, _threshold).await,
+        "dkd" => execute_dkd_protocol(ctx, effects, &valid_configs, _threshold).await,
         _ => {
             eprintln!("Unknown threshold mode: {}", mode);
             Err(anyhow::anyhow!("Unknown threshold mode: {}", mode))
@@ -83,6 +100,7 @@ fn parse_config_data(data: &[u8]) -> Result<ThresholdConfig> {
 
 /// Validate threshold parameters
 async fn validate_threshold_params(
+    _ctx: &EffectContext,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
@@ -129,7 +147,8 @@ async fn validate_threshold_params(
 
 /// Execute threshold signing operation
 async fn execute_threshold_signing(
-    effects: &AuraEffectSystem,
+    _ctx: &EffectContext,
+    _effects: &AuraEffectSystem,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
@@ -156,7 +175,8 @@ async fn execute_threshold_signing(
 
 /// Execute threshold verification operation
 async fn execute_threshold_verification(
-    effects: &AuraEffectSystem,
+    _ctx: &EffectContext,
+    _effects: &AuraEffectSystem,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
@@ -183,7 +203,8 @@ async fn execute_threshold_verification(
 
 /// Execute threshold key generation operation
 async fn execute_threshold_keygen(
-    effects: &AuraEffectSystem,
+    _ctx: &EffectContext,
+    _effects: &AuraEffectSystem,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
@@ -210,7 +231,8 @@ async fn execute_threshold_keygen(
 
 /// Execute DKD (Distributed Key Derivation) protocol
 async fn execute_dkd_protocol(
-    effects: &AuraEffectSystem,
+    _ctx: &EffectContext,
+    _effects: &AuraEffectSystem,
     configs: &[(PathBuf, ThresholdConfig)],
     _threshold: u32,
 ) -> Result<()> {
@@ -263,6 +285,7 @@ async fn execute_dkd_protocol(
 
 /// Handle DKD testing with specific parameters
 pub async fn handle_dkd_test(
+    _ctx: &EffectContext,
     effects: &AuraEffectSystem,
     app_id: &str,
     context: &str,

@@ -2,11 +2,12 @@
 
 use crate::commands::authority::AuthorityCommands;
 use anyhow::Result;
-use aura_agent::AuraEffectSystem;
+use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_core::effects::ConsoleEffects;
 
 /// Execute authority management commands.
 pub async fn handle_authority(
+    _ctx: &EffectContext,
     effect_system: &AuraEffectSystem,
     command: &AuthorityCommands,
 ) -> Result<()> {

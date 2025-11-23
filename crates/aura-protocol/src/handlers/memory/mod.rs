@@ -1,30 +1,23 @@
-//! Memory-Based Handler Implementations
+//! Layer 4: Memory-Based Handler Implementations
 //!
-//! This module contains in-memory handler implementations primarily used for
-//! testing, development, and non-persistent coordination scenarios.
+//! In-memory handler implementations for testing, simulation, and non-persistent coordination.
+//! Implement same interfaces as persistent handlers with in-memory storage for fast access.
 //!
-//! ## Handler Types
+//! **Handler Types** (per docs/106_effect_system_and_runtime.md):
+//! - **MemoryChoreographicHandler**: In-memory choreographic protocol coordination
+//!   - Session state management without persistence (perfect for aura-simulator)
+//!   - Protocol coordination for test scenarios
+//!   - Fast, stateful choreography execution with deterministic behavior
 //!
-//! - **Choreographic Memory**: In-memory choreographic protocol coordination
-//!   - Session state management without persistence
-//!   - Protocol coordination for testing scenarios
-//!   - Fast, stateful choreography execution
-//!
-//! - **Effect API Memory**: In-memory effect_api operations
-//!   - Event storage without persistence
+//! - **MemoryLedgerHandler**: In-memory effect_api operations
+//!   - Event storage for testing without disk I/O
 //!   - Device authorization tracking
-//!   - Audit trail for testing scenarios
+//!   - Audit trail for test scenarios and replay
 //!
-//! - **Guardian Authorization**: In-memory guardian management
-//!   - Guardian registration and authorization
-//!   - Recovery coordination without persistence
-//!   - Testing support for guardian protocols
-//!
-//! ## Design Principles
-//!
-//! Memory handlers provide the same interfaces as persistent handlers but store
-//! all state in memory for fast access and easy testing. They implement the full
-//! handler contracts while avoiding external dependencies or persistence overhead.
+//! **Design Principle** (per docs/106_effect_system_and_runtime.md):
+//! Memory handlers provide same handler contracts as persistent implementations, enabling
+//! handler swapping for testing. Implement full effect trait semantics while avoiding
+//! external dependencies and I/O overhead. Enable deterministic simulation (ExecutionMode::Simulation)
 
 pub mod choreographic_memory;
 // pub mod guardian_authorization; // Removed - replaced by Biscuit-based authorization

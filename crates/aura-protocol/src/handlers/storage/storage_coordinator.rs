@@ -5,7 +5,8 @@
 
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::{identifiers::DeviceId, AuraResult};
-use aura_effects::{EncryptedStorageHandler, FilesystemStorageHandler, MemoryStorageHandler};
+use aura_effects::{EncryptedStorageHandler, FilesystemStorageHandler};
+// Note: MemoryStorageHandler would be from aura-testkit, using FilesystemStorageHandler for now
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -25,7 +26,7 @@ pub struct StorageCoordinator {
 #[derive(Clone)]
 pub enum StorageBackend {
     /// In-memory storage
-    Memory(Arc<MemoryStorageHandler>),
+    Memory(Arc<FilesystemStorageHandler>),
     /// Filesystem storage
     Filesystem(Arc<FilesystemStorageHandler>),
     /// Encrypted memory storage
@@ -113,7 +114,9 @@ impl StorageCoordinatorBuilder {
 impl StorageCoordinator {
     /// Create a simple coordinator with memory storage
     pub fn with_memory(device_id: DeviceId) -> Self {
-        let primary = StorageBackend::Memory(Arc::new(MemoryStorageHandler::new()));
+        let primary = StorageBackend::Memory(Arc::new(FilesystemStorageHandler::new(
+            std::env::temp_dir().join("aura_memory_storage")
+        )));
         Self {
             primary,
             replicas: Vec::new(),
@@ -125,7 +128,7 @@ impl StorageCoordinator {
     /// Create coordinator with encrypted storage
     pub fn with_encrypted(device_id: DeviceId, encryption_key: Option<Vec<u8>>) -> Self {
         let primary = StorageBackend::Encrypted(Arc::new(EncryptedStorageHandler::new(
-            "/tmp/storage".to_string(),
+            "/tmp/storage".to_string().into(),
             encryption_key,
         )));
         Self {
@@ -371,10 +374,12 @@ mod tests {
         let device_id = DeviceId::new();
         let coordinator = StorageCoordinatorBuilder::new(device_id)
             .with_primary(StorageBackend::Memory(
-                Arc::new(MemoryStorageHandler::new()),
+                Arc::new(FilesystemStorageHandler::new(
+                    std::env::temp_dir().join("aura_test_storage")
+                )),
             ))
             .add_replica(StorageBackend::Encrypted(Arc::new(
-                EncryptedStorageHandler::new("/tmp/test".to_string(), None),
+                EncryptedStorageHandler::new("/tmp/test".to_string().into(), None),
             )))
             .build()
             .unwrap();
@@ -398,10 +403,12 @@ mod tests {
         let device_id = DeviceId::new();
         let coordinator = StorageCoordinatorBuilder::new(device_id)
             .with_primary(StorageBackend::Memory(
-                Arc::new(MemoryStorageHandler::new()),
+                Arc::new(FilesystemStorageHandler::new(
+                    std::env::temp_dir().join("aura_test_storage")
+                )),
             ))
             .add_replica(StorageBackend::Encrypted(Arc::new(
-                EncryptedStorageHandler::new("/tmp/test".to_string(), None),
+                EncryptedStorageHandler::new("/tmp/test".to_string().into(), None),
             )))
             .with_routing_rule("secret_".to_string(), "encrypted".to_string())
             .build()

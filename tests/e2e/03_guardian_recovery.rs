@@ -5,8 +5,9 @@
 use aura_agent::runtime::AuthorityManager;
 use aura_core::{hash, Hash32};
 use aura_core::{AuthorityId, Result};
-use aura_effects::random::MockRandomHandler;
-use aura_relational::{GuardianBinding, GuardianParameters, RelationalContext, RelationalFact};
+use aura_testkit::stateful_effects::random::MockRandomHandler;
+use aura_core::relational::{GuardianBinding, GuardianParameters, RelationalFact};
+use aura_relational::RelationalContext;
 
 /// Test guardian binding creation
 #[tokio::test]
@@ -82,12 +83,11 @@ fn test_guardian_binding_facts() {
     let account_hash = hash::hash(&account_id.to_bytes());
     let guardian_hash = hash::hash(&guardian_id.to_bytes());
 
-    let binding = GuardianBinding {
-        account_commitment: Hash32::new(account_hash),
-        guardian_commitment: Hash32::new(guardian_hash),
-        parameters: GuardianParameters::default(),
-        consensus_proof: None,
-    };
+    let binding = GuardianBinding::new(
+        Hash32::new(account_hash),
+        Hash32::new(guardian_hash),
+        GuardianParameters::default(),
+    );
 
     // Add binding to context
     context

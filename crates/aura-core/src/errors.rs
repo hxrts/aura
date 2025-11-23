@@ -122,6 +122,13 @@ impl AuraError {
         }
     }
 
+    /// Create a chat error
+    pub fn chat(message: impl Into<String>) -> Self {
+        Self::Internal {
+            message: format!("Chat error: {}", message.into()),
+        }
+    }
+
     /// Create an internal error
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Internal {

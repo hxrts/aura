@@ -5,7 +5,7 @@
 
 use aura_agent::runtime::AuthorityManager;
 use aura_core::{AuthorityId, ContextId, Result};
-use aura_effects::random::MockRandomHandler;
+use aura_testkit::stateful_effects::random::MockRandomHandler;
 
 /// Test complete authority lifecycle from creation to usage
 #[tokio::test]

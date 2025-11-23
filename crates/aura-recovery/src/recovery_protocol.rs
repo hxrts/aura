@@ -7,7 +7,9 @@
 
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
-use aura_relational::{ConsensusProof, Prestate, RecoveryGrant, RecoveryOp, RelationalContext};
+use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
+use aura_core::Prestate;
+use aura_relational::RelationalContext;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -126,11 +128,11 @@ impl RecoveryProtocol {
         // Create prestate
         let prestate = Prestate {
             authority_commitments: vec![(self.account_authority, self.current_commitment())],
-            context_commitment: self.recovery_context.journal.compute_commitment(),
+            context_commitment: self.recovery_context.journal_commitment(),
         };
 
-        // Run consensus (currently stubbed)
-        aura_relational::consensus::run_consensus(&prestate, operation).await
+        // Run consensus using consensus adapter
+        aura_relational::run_consensus(&prestate, operation).await
     }
 
     /// Initiate recovery ceremony

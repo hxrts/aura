@@ -3,6 +3,7 @@
 //! Shared utilities for persistence, storage keys, and effect API helpers.
 
 use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
+use aura_core::effects::{StorageEffects, StorageError};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -56,10 +57,13 @@ impl StorageKeyManager {
         path
     }
 
-    /// Ensure directory exists for a storage key
-    pub async fn ensure_dir(&self, key: &str) -> Result<(), std::io::Error> {
-        let dir = self.dir_for_key(key);
-        tokio::fs::create_dir_all(dir).await
+    /// Ensure directory exists for a storage key via StorageEffects
+    pub async fn ensure_dir<S: StorageEffects>(&self, storage: &S, key: &str) -> Result<(), StorageError> {
+        // Use StorageEffects to ensure the directory structure exists
+        // Since StorageEffects is key-value based, we store a marker to ensure the "directory" exists
+        let dir_marker_key = format!("__dir_marker__/{}", key);
+        storage.store(&dir_marker_key, vec![]).await?;
+        Ok(())
     }
 }
 

@@ -428,6 +428,26 @@ test-macos-keychain:
     echo "  - Use 'just status' to verify keychain integration"
     echo "  - Deploy with confidence knowing keys are hardware-protected"
 
+# Check architectural layer compliance (all checks)
+arch-check *FLAGS:
+    scripts/arch-check.sh {{FLAGS}} || true
+
+# Quick architectural checks by category
+arch-layers:
+    scripts/arch-check.sh --layers || true
+
+arch-effects:
+    scripts/arch-check.sh --effects || true
+
+arch-deps:
+    scripts/arch-check.sh --deps || true
+
+arch-completeness:
+    scripts/arch-check.sh --completeness || true
+
+arch-todos:
+    scripts/arch-check.sh --todos || true
+
 # Run CI checks locally (dry-run of GitHub CI workflow)
 ci-dry-run:
     #!/usr/bin/env bash

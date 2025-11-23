@@ -4,10 +4,9 @@
 //! This avoids circular dependencies by not depending on the concrete AuraEffectSystem type.
 
 use crate::effects::JournalEffects;
-use crate::guards::flow::FlowBudgetEffects;
 use async_trait::async_trait;
-use aura_core::effects::StorageEffects;
-use aura_core::{effects::RandomEffects, identifiers::AuthorityId, TimeEffects};
+use aura_core::effects::{FlowBudgetEffects, RandomEffects, StorageEffects, TimeEffects};
+use aura_core::identifiers::AuthorityId;
 
 /// Minimal interface that guards need from an effect system
 ///
@@ -72,27 +71,52 @@ use aura_core::effects::ExecutionMode;
 
 impl GuardEffectSystem for Box<dyn AuraEffects> {
     fn authority_id(&self) -> AuthorityId {
-        // TODO: This should come from the actual effect system
-        // For now, return a dummy authority ID to make compilation work
-        AuthorityId::new()
+        // Get the authority ID from system configuration
+        // This should be configured when the effect system is initialized
+        match futures::executor::block_on(async { self.get_config("authority_id").await }) {
+            Ok(authority_id_str) => {
+                // Parse the authority ID from configuration
+                authority_id_str.parse().unwrap_or_else(|_| {
+                    tracing::warn!("Invalid authority_id in config, using new ID");
+                    AuthorityId::new()
+                })
+            }
+            Err(_) => {
+                // If no authority ID is configured, generate a new one
+                tracing::debug!("No authority_id configured, generating new ID");
+                AuthorityId::new()
+            }
+        }
     }
 
     fn execution_mode(&self) -> ExecutionMode {
-        // TODO: This should come from the actual effect system
-        // For now, return a default mode
-        ExecutionMode::Production
+        // Delegate to the actual effect system's execution mode
+        AuraEffects::execution_mode(self.as_ref())
     }
 
-    fn get_metadata(&self, _key: &str) -> Option<String> {
-        // TODO: This should delegate to the actual effect system
-        // For now, return None to indicate no metadata available
-        None
+    fn get_metadata(&self, key: &str) -> Option<String> {
+        // Delegate to the effect system's configuration system
+        match futures::executor::block_on(async { self.get_config(key).await }) {
+            Ok(value) => Some(value),
+            Err(_) => {
+                tracing::debug!(key = %key, "Metadata not found in configuration");
+                None
+            }
+        }
     }
 
-    fn can_perform_operation(&self, _operation: &str) -> bool {
-        // TODO: This should check the actual effect system capabilities
-        // For now, return true to allow all operations
-        true
+    fn can_perform_operation(&self, operation: &str) -> bool {
+        // Check if the operation is permitted based on system capabilities
+        // This could check against a list of allowed operations in configuration
+        let allowed_operations_key = "allowed_operations";
+        if let Some(allowed_ops) = self.get_metadata(allowed_operations_key) {
+            // Parse comma-separated list of allowed operations
+            allowed_ops.split(',').any(|op| op.trim() == operation)
+        } else {
+            // If no specific restrictions are configured, allow all operations
+            tracing::debug!(operation = %operation, "No operation restrictions configured, allowing operation");
+            true
+        }
     }
 }
 

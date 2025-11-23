@@ -1,33 +1,31 @@
-//! Protocol guards for capability-based authorization
+//! Layer 4: Protocol Guard Chain - Authorization, Budget, Privacy, Journal
 //!
-//! This module implements the guard infrastructure for choreographic protocols,
-//! providing capability-based preconditions, delta fact application, and privacy
-//! budget tracking as described in Phase 2.3 of the refactor plan.
+//! Choreographic enforcement of authorization, flow budgets, privacy, and journal consistency
+//! through a composable guard chain applied to **every send** (per docs/003_information_flow_contract.md).
 //!
-//! ## Architecture
+//! **Guard Chain Sequence**:
+//! `CapGuard` → `FlowGuard` → `JournalCoupler` → `LeakageTracker` → `Transport`
 //!
-//! Guards implement the formal model's operational semantics:
-//! - **Guard evaluation**: `need(σ) ≤ C` checking before protocol operations
-//! - **Delta application**: `merge_facts(Δfacts)` atomic with message send
-//! - **Leakage tracking**: Privacy budget enforcement with observer models
-//! - **Send guard chain**: Complete `need(m) ≤ Caps(ctx) ∧ headroom(ctx, cost)` predicate enforcement
+//! **Invariant: Charge-Before-Send**:
+//! No transport side effect occurs unless all preceding guards succeed. Ensures:
+//! - Authorization verified (Biscuit tokens evaluated)
+//! - Flow budgets charged (atomically incremented spent counter)
+//! - Delta facts committed to journal (atomic with send)
+//! - Leakage budget validated (per observer class)
 //!
-//! ## Usage
+//! **Receipt Semantics** (per docs/003_information_flow_contract.md §3.2):
+//! FlowGuard produces receipts proving budget charges, scoped to (ContextId, peer) pairs,
+//! bound to Epochs (budget rotation). Required for relayed messages (per-hop forwarding).
 //!
-//! ### Send Guard Chain (Primary Interface)
-//! ```rust,ignore
-//! use crate::guards::{create_send_guard, SendGuardChain};
-//! // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
+//! **Guard Implementations**:
+//! - **CapGuard**: Biscuit token evaluation with `need(σ) ≤ C` predicate
+//! - **FlowGuard**: Flow budget enforcement, atomically increments spent counter
+//! - **JournalCoupler**: Merges delta facts atomic with send
+//! - **LeakageTracker**: Privacy budget per observer class (external, neighbor, group)
 //!
-//! // Create send guard with complete predicate enforcement
-//! let send_guard = create_send_guard(
-//!     Capability::send_message(),
-//!     context_id,
-//!     peer_device,
-//!     100 // flow cost
-//! ).with_operation_id("ping_send");
-//!
-//! // Evaluate complete guard chain: need(m) ≤ Caps(ctx) ∧ headroom(ctx, cost)
+//! **Receipt Semantics**: FlowGuard produces receipts proving budget charges,
+//! scoped to ContextId/peer pairs, bound to Epochs (budget rotation). Required
+//! for relayed messages (per-hop forwarding).
 //! let result = send_guard.evaluate(&effect_system).await?;
 //! if result.authorized {
 //!     // Proceed with send using receipt for anti-replay protection
@@ -70,7 +68,9 @@ pub mod capability_guard; // Authority-based capability guards
 
 pub use effect_system_trait::GuardEffectSystem;
 // Legacy guard evaluation removed - use BiscuitAuthorizationBridge instead
-pub use flow::{FlowBudgetEffects, FlowGuard, FlowHint};
+pub use flow::FlowGuard;
+// FlowBudgetEffects and FlowHint moved to aura-core
+pub use aura_core::effects::{FlowBudgetEffects, FlowHint};
 pub use journal_coupler::{
     CouplingMetrics, JournalCoupler, JournalCouplerBuilder, JournalCouplingResult, JournalOperation,
 };
@@ -79,13 +79,14 @@ pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 // use crate::wot::EffectSystemInterface; // Legacy interface removed - use Biscuit authorization instead
 use aura_core::AuraResult;
 // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
+use biscuit_auth::Biscuit;
 use std::future::Future;
 
 /// Protocol execution guard combining authorization checking, delta application, and privacy tracking
 #[derive(Debug, Clone)]
 pub struct ProtocolGuard {
     /// Required Biscuit authorization tokens for this operation
-    pub required_tokens: Vec<String>, // TODO: Use proper Biscuit token type when available
+    pub required_tokens: Vec<Biscuit>,
     /// Facts to be merged into the journal after successful execution
     pub delta_facts: Vec<serde_json::Value>, // Placeholder for actual fact types
     /// Privacy leakage budget for this operation
@@ -147,13 +148,13 @@ impl ProtocolGuard {
     }
 
     /// Add a required authorization token to this guard
-    pub fn require_token(mut self, token: String) -> Self {
+    pub fn require_token(mut self, token: Biscuit) -> Self {
         self.required_tokens.push(token);
         self
     }
 
     /// Add multiple required authorization tokens to this guard
-    pub fn require_tokens(mut self, tokens: Vec<String>) -> Self {
+    pub fn require_tokens(mut self, tokens: Vec<Biscuit>) -> Self {
         self.required_tokens.extend(tokens);
         self
     }

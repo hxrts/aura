@@ -5,6 +5,24 @@
 use aura_recovery::types::RecoveryEvidence;
 use std::fmt::Write;
 
+/// Minimal session status for visualization
+#[derive(Debug, Clone)]
+pub enum RecoverySessionStatus {
+    Pending,
+    Approved,
+    Failed,
+}
+
+/// Minimal recovery session state for visualization
+#[derive(Debug, Clone)]
+pub struct RecoverySessionState {
+    pub session_id: String,
+    pub status: RecoverySessionStatus,
+    pub started_at: u64,
+    pub updated_at: u64,
+    pub evidence: Option<RecoveryEvidence>,
+}
+
 /// Format recovery evidence for CLI display
 pub fn format_recovery_evidence(evidence: &RecoveryEvidence) -> String {
     let mut output = String::new();
@@ -100,20 +118,42 @@ pub fn format_recovery_evidence(evidence: &RecoveryEvidence) -> String {
     output
 }
 
-/* TODO: Re-enable when RecoverySessionState and RecoverySessionStatus are available
 /// Format recovery session state for CLI display
 pub fn format_session_state(session: &RecoverySessionState) -> String {
-    // Implementation commented out until types are available
-    "Recovery session formatting not yet implemented".to_string()
-}
-*/
+    let mut output = String::new();
+    let _ = writeln!(
+        &mut output,
+        "Session {} - {:?}",
+        session.session_id, session.status
+    );
+    let _ = writeln!(
+        &mut output,
+        "Started: {} | Updated: {}",
+        format_timestamp(session.started_at),
+        format_timestamp(session.updated_at)
+    );
 
-/* TODO: Re-enable when RecoverySessionState is available
+    if let Some(evidence) = &session.evidence {
+        output.push_str(&format_recovery_evidence(evidence));
+    }
+
+    output
+}
+
 /// Format multiple recovery sessions as a list
 pub fn format_session_list(sessions: &[RecoverySessionState]) -> String {
-    "Session list formatting not yet implemented".to_string()
+    if sessions.is_empty() {
+        return "No recovery sessions found.".to_string();
+    }
+
+    let mut output = String::new();
+    for (idx, session) in sessions.iter().enumerate() {
+        let _ = writeln!(&mut output, "Session {}:", idx + 1);
+        output.push_str(&format_session_state(session));
+    }
+
+    output
 }
-*/
 
 /// Format evidence list with summary stats
 pub fn format_evidence_list(evidence_list: &[RecoveryEvidence]) -> String {

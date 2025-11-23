@@ -107,6 +107,10 @@ pub enum SyncError {
     /// Time-related error (e.g., system clock issues)
     #[error("Time error occurred")]
     TimeError,
+
+    /// Authorization failed during guard chain evaluation
+    #[error("Authorization failed: guard chain denied operation")]
+    AuthorizationFailed,
 }
 
 /// Sync effect traits for anti-entropy and broadcast operations

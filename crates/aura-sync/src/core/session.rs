@@ -662,6 +662,39 @@ where
             total_operations,
         }
     }
+
+    /// Close a session for a specific peer
+    pub fn close_session(&mut self, peer: DeviceId) -> SyncResult<()> {
+        // Find sessions involving this peer and close them
+        let session_ids_to_remove: Vec<SessionId> = self.sessions
+            .iter()
+            .filter_map(|(session_id, session_state)| {
+                match session_state {
+                    SessionState::Active { participants, .. } => {
+                        if participants.contains(&peer) {
+                            Some(*session_id)
+                        } else {
+                            None
+                        }
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
+        for session_id in session_ids_to_remove {
+            self.sessions.remove(&session_id);
+        }
+
+        Ok(())
+    }
+
+    /// Check if peer has an active session
+    pub fn has_active_session(&self, peer: DeviceId) -> bool {
+        self.sessions.values().any(|session_state| {
+            matches!(session_state, SessionState::Active { participants, .. } if participants.contains(&peer))
+        })
+    }
 }
 
 /// Session manager statistics

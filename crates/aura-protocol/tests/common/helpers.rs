@@ -13,7 +13,7 @@ use aura_core::{
     identifiers::{DeviceId, SessionId},
     AccountId,
 };
-use aura_protocol::handlers::CompositeHandler;
+use aura_composition::CompositeHandler;
 use uuid::Uuid;
 
 // === LEGACY FUNCTIONS - Use aura-testkit equivalents instead ===

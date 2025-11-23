@@ -1,28 +1,55 @@
-//! Aura-Sync: Threshold Identity Synchronization Protocols
+//! # Aura Sync - Layer 5: Feature/Protocol Implementation
 //!
 //! This crate provides complete end-to-end synchronization protocol implementations
-//! for the Aura threshold identity platform, following the 8-layer architecture
-//! as a **Layer 5 (Feature/Protocol)** component.
+//! for the Aura threshold identity platform.
 //!
-//! # Architecture Overview
+//! ## Purpose
 //!
-//! Aura-sync provides reusable protocol building blocks for:
-//! - Journal state synchronization using CRDT semantics
-//! - Anti-entropy protocols for state reconciliation
+//! Layer 5 feature crate providing reusable protocol building blocks for:
+//! - Journal state synchronization using CRDT semilattice semantics
+//! - Anti-entropy protocols for state reconciliation between peers
+//! - Snapshot creation and restoration for efficient sync initialization
 //! - OTA upgrade coordination with threshold approval
-//! - Session-based peer synchronization
-//! - Receipt verification for distributed protocols
+//! - Receipt verification for distributed protocol commitment
 //!
-//! # Design Principles
+//! ## Architecture Constraints
 //!
-//! - **Effect-Based Architecture**: All protocols parameterized by effect traits
-//! - **Choreographic Coordination**: Following Aura's session type patterns
-//! - **CRDT Semantics**: Built on journal semilattice operations
+//! This crate depends on:
+//! - **Layer 1** (aura-core): Core types, effects, errors, session management
+//! - **Layer 2** (aura-journal): CRDT semantics and fact storage
+//! - **Layer 3** (aura-effects): Effect handler implementations
+//! - **Layer 4** (aura-protocol): Orchestration and guard chain
+//!
+//! ## What Belongs Here
+//!
+//! - Complete protocol implementations (anti-entropy, journal sync, snapshots, OTA, receipts)
+//! - Protocol coordination for multi-party synchronization
+//! - Configuration and policy for sync strategies
+//! - Metrics collection and health monitoring
+//! - Session management for protocol coordination
+//! - Infrastructure utilities (peer management, retry logic, caching, rate limiting)
+//! - MPST protocol definitions for sync ceremonies
+//!
+//! ## What Does NOT Belong Here
+//!
+//! - Effect handler implementations (belong in aura-effects)
+//! - Handler composition or registry (belong in aura-composition)
+//! - Low-level multi-party coordination (belong in aura-protocol)
+//! - Journal implementations (belong in aura-journal)
+//! - Storage backend implementations
+//!
+//! ## Design Principles
+//!
+//! - All protocols parameterized by effect traits: generic over effect implementations
+//! - Protocols are effect-driven: composition, testing, and deployment flexibility
+//! - CRDT semantics ensure idempotent, convergent synchronization
+//! - Anti-entropy ensures eventual consistency without coordination overhead
+//! - Session-based coordination allows stateless protocol implementation
+//! - Integration with guard chain ensures authorization before synchronization
+//! - Metrics collection enables observability and performance tuning
 
 // Allow disallowed methods/types in protocol implementations that coordinate effects
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
-//! - **Zero Legacy Code**: Clean, modern APIs with no backwards compatibility
-//! - **Layer 5 Compliance**: Reusable protocol building blocks, not UI applications
 //!
 //! # Usage
 //!
@@ -54,11 +81,6 @@
 //!     protocol.sync_with_peer(effects, peer).await
 //! }
 //! ```
-//!
-//! # Integration
-//!
-//! See [`INTEGRATION.md`](crate::INTEGRATION) for detailed integration patterns
-//! with other Aura crates and the effect system architecture.
 
 // TODO: Re-enable once all documentation is complete
 #![warn(missing_docs)]

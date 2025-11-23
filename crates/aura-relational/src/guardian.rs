@@ -3,7 +3,7 @@
 //! This module defines the types used for guardian configuration
 //! and recovery operations in relational contexts.
 
-use crate::consensus::ConsensusProof;
+use aura_core::relational::ConsensusProof;
 use aura_core::Hash32;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

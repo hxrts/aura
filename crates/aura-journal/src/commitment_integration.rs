@@ -83,6 +83,7 @@ mod tests {
         let valid_op = AttestedOp {
             tree_op: TreeOpKind::AddLeaf {
                 public_key: vec![0; 32],
+                role: aura_core::tree::LeafRole::Device,
             },
             parent_commitment,
             new_commitment: Hash32::new([3; 32]),

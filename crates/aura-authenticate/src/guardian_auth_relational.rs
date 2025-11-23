@@ -3,9 +3,14 @@
 //! This module implements guardian authentication using the RelationalContext
 //! model, replacing the device-centric guardian authentication.
 
-use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
+use aura_core::{
+    relational::{GenericBinding, RelationalFact},
+    AuraError, Authority, AuthorityId, Hash32, Result, AccountId,
+};
 use aura_macros::choreography;
-use aura_relational::{GuardianBinding, RelationalContext};
+use aura_core::relational::GuardianBinding;
+use aura_relational::RelationalContext;
+use ed25519_dalek::{Signature, VerifyingKey, Verifier};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -50,9 +55,11 @@ pub struct GuardianAuthProof {
     /// Guardian authority ID
     pub guardian_id: AuthorityId,
     /// Guardian binding proof from context
-    pub binding_proof: Option<aura_relational::ConsensusProof>,
+    pub binding_proof: Option<aura_core::relational::ConsensusProof>,
     /// Signature over operation
     pub operation_signature: Vec<u8>,
+    /// Timestamp when the proof was created
+    pub issued_at: u64,
 }
 
 /// Guardian authentication response
@@ -96,6 +103,10 @@ pub async fn authenticate_guardian(
         guardian_id: guardian_authority.authority_id(),
         binding_proof: binding.consensus_proof.clone(),
         operation_signature: signature.to_bytes().to_vec(),
+        issued_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
     })
 }
 
@@ -128,6 +139,19 @@ pub async fn verify_guardian_proof(
         .get_guardian_binding(proof.guardian_id)
         .ok_or_else(|| AuraError::not_found("Guardian binding not found"))?;
 
+    // Basic freshness check (10 minutes)
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if now.saturating_sub(proof.issued_at) > 600 {
+        return Ok(GuardianAuthResponse {
+            success: false,
+            authorized: false,
+            error: Some("Guardian proof expired".to_string()),
+        });
+    }
+
     // Verify consensus proof if present
     if let Some(consensus_proof) = &binding.consensus_proof {
         if !verify_consensus_proof(consensus_proof, &binding) {
@@ -139,30 +163,34 @@ pub async fn verify_guardian_proof(
         }
     }
 
-    // Verify operation signature
-    // The proof.operation_signature contains the guardian's signature over the operation
-    // In production, this would verify the signature against the guardian's public key
-    // from the binding commitment
+    // Serialize the operation and verify the guardian's signature
+    let operation_bytes = bincode::serialize(&request.operation)
+        .map_err(|e| AuraError::serialization(format!("Failed to serialize operation: {}", e)))?;
 
-    // For now, we perform structural validation of the proof
-    // TODO: Add cryptographic signature verification once public key lookup is implemented
+    // Ensure signature length is valid
+    let sig_bytes: [u8; 64] = proof
+        .operation_signature
+        .as_slice()
+        .try_into()
+        .map_err(|_| AuraError::crypto("Invalid guardian signature length"))?;
 
-    if proof.operation_signature.is_empty() {
+    // Derive verifying key from guardian commitment (the binding commits to the guardian's root key)
+    let verifying_key_bytes: [u8; 32] = binding.guardian_commitment.0;
+    let verifying_key = VerifyingKey::from_bytes(&verifying_key_bytes).map_err(|e| {
+        AuraError::crypto(format!(
+            "Invalid guardian commitment (pubkey decode failed): {}",
+            e
+        ))
+    })?;
+
+    // Verify signature
+    if let Err(err) = verifying_key.verify(&operation_bytes, &Signature::from_bytes(&sig_bytes)) {
         return Ok(GuardianAuthResponse {
             success: false,
             authorized: false,
-            error: Some("Missing operation signature".to_string()),
+            error: Some(format!("Invalid guardian signature: {}", err)),
         });
     }
-
-    // Serialize the operation to verify it matches
-    let _operation_bytes = bincode::serialize(&request.operation)
-        .map_err(|e| AuraError::serialization(format!("Failed to serialize operation: {}", e)))?;
-
-    // TODO: Verify signature cryptographically:
-    // 1. Extract guardian's public key from binding commitment
-    // 2. Verify proof.operation_signature over operation_bytes
-    // For now, we accept if the proof structure is valid
 
     Ok(GuardianAuthResponse {
         success: true,
@@ -173,7 +201,7 @@ pub async fn verify_guardian_proof(
 
 /// Verify consensus proof for guardian binding
 fn verify_consensus_proof(
-    proof: &aura_relational::ConsensusProof,
+    proof: &aura_core::relational::ConsensusProof,
     binding: &GuardianBinding,
 ) -> bool {
     // Verify threshold signature
@@ -196,19 +224,11 @@ fn verify_consensus_proof(
         return false;
     }
 
-    // Check 4: Verify prestate hash matches binding
-    // The prestate should include the guardian binding commitment
-    // This ensures the consensus is about the correct binding operation
-
-    // TODO: Implement proper hash verification:
-    // 1. Compute binding commitment from binding fields
-    // 2. Reconstruct prestate from binding
-    // 3. Hash the prestate
-    // 4. Compare with proof.prestate_hash
-
-    // For now, we accept if the proof structure is valid and has a prestate_hash
-    if proof.prestate_hash.0 == [0u8; 32] {
-        return false; // Invalid/zero prestate hash
+    // Check 4: Verify prestate hash matches binding by hashing the binding payload
+    let binding_bytes = bincode::serialize(binding).unwrap_or_default();
+    let expected_hash = aura_core::hash::hash(&binding_bytes);
+    if proof.prestate_hash.0 != expected_hash {
+        return false;
     }
 
     // All checks passed
@@ -244,6 +264,14 @@ pub struct GuardianAuthHandler {
     context: Arc<RelationalContext>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RecoveryRequestRecord {
+    guardian_id: AuthorityId,
+    account_id: AuthorityId,
+    requested_at: u64,
+    operation: GuardianOperation,
+}
+
 impl GuardianAuthHandler {
     /// Create a new guardian authentication handler
     pub fn new(context: Arc<RelationalContext>) -> Self {
@@ -260,7 +288,27 @@ impl GuardianAuthHandler {
         let proof = authenticate_guardian(&self.context, guardian.as_ref(), &request).await?;
 
         // Verify proof
-        verify_guardian_proof(&self.context, &request, &proof).await
+        let verified = verify_guardian_proof(&self.context, &request, &proof).await?;
+
+        // Record request for delay enforcement
+        let record = RecoveryRequestRecord {
+            guardian_id: guardian.authority_id(),
+            account_id: request.account_id,
+            requested_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            operation: request.operation.clone(),
+        };
+
+        if let Ok(binding_bytes) = serde_json::to_vec(&record) {
+            let _ = self.context.add_fact(RelationalFact::Generic(GenericBinding::new(
+                "recovery_request".to_string(),
+                binding_bytes,
+            )));
+        }
+
+        Ok(verified)
     }
 
     /// Check if guardian can approve operation
@@ -279,12 +327,39 @@ impl GuardianAuthHandler {
         match operation {
             GuardianOperation::ApproveRecovery { new_commitment: _ } => {
                 // Check if recovery delay has passed
-                // Guardian parameters specify minimum delay before approval
                 let recovery_delay = binding.parameters.recovery_delay;
 
-                // TODO: Track recovery request time in relational context
-                // For now, we check that the delay period is configured
-                // In production, verify: current_time >= request_time + recovery_delay
+                // Determine the latest recovery request timestamp for this guardian
+                let latest_request_time = self
+                    .context
+                    .get_facts()
+                    .iter()
+                    .filter_map(|fact| match fact {
+                        RelationalFact::Generic(binding)
+                            if binding.binding_type == "recovery_request" =>
+                        {
+                            serde_json::from_slice::<RecoveryRequestRecord>(
+                                &binding.binding_data,
+                            )
+                            .ok()
+                        }
+                        _ => None,
+                    })
+                    .filter(|record| record.guardian_id == guardian_id)
+                    .map(|record| record.requested_at)
+                    .max()
+                    .unwrap_or(0);
+
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+
+                if latest_request_time > 0
+                    && now < latest_request_time + recovery_delay.as_secs()
+                {
+                    return Ok(false);
+                }
 
                 // Check if notification was required
                 if binding.parameters.notification_required {

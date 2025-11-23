@@ -6,9 +6,9 @@
 
 use crate::amp::AmpJournalEffects;
 use crate::consensus::{run_consensus, CommitFact};
+use aura_core::frost::{Share, PublicKeyPackage};
 use aura_core::{AuthorityId, Prestate, Result};
 use aura_journal::fact::{CommittedChannelEpochBump, ProposedChannelEpochBump};
-use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
 use std::collections::HashMap;
 
 /// Derive a witness set and threshold from a prestate.
@@ -34,7 +34,7 @@ pub async fn run_amp_channel_epoch_bump(
     proposal: &ProposedChannelEpochBump,
     witnesses: Vec<AuthorityId>,
     threshold: u16,
-    key_packages: HashMap<AuthorityId, KeyPackage>,
+    key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
 ) -> Result<(CommittedChannelEpochBump, CommitFact)> {
     // Consensus over the proposal itself; serialization is handled by `run_consensus`.
@@ -64,7 +64,7 @@ pub async fn run_amp_channel_epoch_bump(
 pub async fn run_amp_channel_epoch_bump_default(
     prestate: &Prestate,
     proposal: &ProposedChannelEpochBump,
-    key_packages: HashMap<AuthorityId, KeyPackage>,
+    key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
 ) -> Result<(CommittedChannelEpochBump, CommitFact)> {
     let (witnesses, threshold) = default_witness_policy(prestate);
@@ -89,13 +89,13 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects>(
     proposal: &ProposedChannelEpochBump,
     witnesses: Vec<AuthorityId>,
     threshold: u16,
-    key_packages: HashMap<AuthorityId, KeyPackage>,
+    key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
 ) -> Result<CommittedChannelEpochBump> {
     let (committed, commit) = run_amp_channel_epoch_bump(
         prestate,
         proposal,
-        witnesses,
+        witnesses.clone(),
         threshold,
         key_packages,
         group_public_key,
@@ -130,7 +130,7 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects>(
     journal: &J,
     prestate: &Prestate,
     proposal: &ProposedChannelEpochBump,
-    key_packages: HashMap<AuthorityId, KeyPackage>,
+    key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
 ) -> Result<CommittedChannelEpochBump> {
     let (witnesses, threshold) = default_witness_policy(prestate);
@@ -150,7 +150,7 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects>(
 mod tests {
     use super::*;
     use aura_core::AuthorityId;
-    use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
+    use aura_core::frost::{Share, PublicKeyPackage};
     use std::collections::HashMap;
 
     #[tokio::test]
@@ -166,7 +166,7 @@ mod tests {
         };
 
         let witnesses = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
-        let key_packages: HashMap<AuthorityId, KeyPackage> = HashMap::new();
+        let key_packages: HashMap<AuthorityId, Share> = HashMap::new();
 
         // Create test FROST keys using testkit (minimum valid parameters)
         let (_, group_public_key) = aura_testkit::builders::keys::helpers::test_frost_key_shares(

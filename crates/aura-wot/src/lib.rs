@@ -1,19 +1,29 @@
-//! # Aura Web of Trust
+//! # Aura Web of Trust - Layer 2: Specification (Domain Crate)
 //!
-//! Authority-based authorization system using Biscuit tokens for
-//! cryptographically verifiable capability delegation.
+//! **Purpose**: Define trust and authorization semantics with capability refinement.
 //!
-//! This crate implements the Web of Trust layer from Aura's architectural
-//! model, providing Biscuit-based authorization with authority-centric
-//! resource scopes described in docs/002_theoretical_model.md.
+//! Authority-based authorization system using Biscuit tokens for cryptographically
+//! verifiable capability delegation. This crate implements the Web of Trust layer
+//! from Aura's architectural model, providing Biscuit-based authorization with
+//! authority-centric resource scopes.
 //!
-//! ## Authorization System
+//! # Architecture Constraints
+//!
+//! **Layer 2 depends only on aura-core** (foundation).
+//! - ✅ Capability refinement logic (meet-semilattice `⊓`)
+//! - ✅ Biscuit token helpers and semantics (no cryptographic operations)
+//! - ✅ Authorization domain types and policies
+//! - ❌ NO cryptographic signing (that's aura-effects via CryptoEffects)
+//! - ❌ NO handler composition (that's aura-composition)
+//! - ❌ NO multi-party protocol logic (that's aura-protocol)
+//!
+//! # Authorization System
 //!
 //! The crate provides:
-//! - Biscuit token management with cryptographic verification
+//! - Biscuit token model and verification semantics
 //! - Authority-centric resource scopes (AuthorityOp, ContextOp)
-//! - Token delegation with built-in attenuation
-//! - Datalog-based policy enforcement
+//! - Capability refinement with attenuation rules
+//! - Policy evaluation patterns (datalog-based)
 //!
 //! ## Usage
 //!
@@ -21,7 +31,7 @@
 //! use aura_wot::{ResourceScope, AuthorityOp};
 //! use aura_core::{AuthorityId};
 //!
-//! // Authority-based resource authorization  
+//! // Authority-based resource authorization
 //! let resource = ResourceScope::Authority {
 //!     authority_id: AuthorityId::new(),
 //!     operation: AuthorityOp::UpdateTree,
@@ -35,6 +45,7 @@ pub mod errors;
 // Use Biscuit tokens via BiscuitTokenManager instead
 
 // Biscuit-based authorization (new implementation)
+pub mod biscuit;
 pub mod biscuit_resources;
 pub mod biscuit_token;
 pub mod resource_scope; // Authority-based resource scopes
@@ -56,6 +67,9 @@ pub use biscuit_token::{AccountAuthority, BiscuitError, BiscuitTokenManager, Ser
 
 // Re-export authority-based resource scopes
 pub use resource_scope::{AuthorityOp, ContextOp, ResourceScope};
+
+// Re-export Biscuit authorization types
+pub use biscuit::{AuthorizationResult, BiscuitAuthorizationBridge};
 
 /// Type alias for capability meet operation results
 pub type CapResult<T> = Result<T, WotError>;

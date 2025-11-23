@@ -24,10 +24,15 @@
 //! // Meet-semilattice CRDT
 //! let coordinator = CrdtCoordinator::with_mv(authority_id);
 //!
-//! // Multiple handlers can be chained
-//! let coordinator = CrdtCoordinator::new(authority_id)
-//!     .with_cv_handler(CvHandler::new())
-//!     .with_delta_handler(DeltaHandler::with_threshold(50));
+//! // RECOMMENDED: Use pre-composed handlers from aura-composition
+//! // let factory = HandlerFactory::for_testing(device_id)?;
+//! // let registry = factory.create_registry()?;
+//! // Extract handlers from registry for coordination
+//!
+//! // Compose handlers externally and inject them
+//! // let coordinator = CrdtCoordinator::new(authority_id)
+//! //     .with_cv_handler(precomposed_cv_handler)
+//! //     .with_delta_handler(precomposed_delta_handler);
 //! ```
 //!
 //! # Integration with Choreographies
@@ -437,19 +442,6 @@ where
 
     // === Convenience Builder Methods ===
 
-    /// Create a coordinator with a convergent CRDT handler initialized with default state
-    ///
-    /// # Example
-    /// ```ignore
-    /// let coordinator = CrdtCoordinator::with_cv(device_id);
-    /// ```
-    pub fn with_cv(authority_id: AuthorityId) -> Self
-    where
-        CvS: Bottom,
-    {
-        Self::new(authority_id).with_cv_handler(CvHandler::new())
-    }
-
     /// Create a coordinator with a convergent CRDT handler initialized with given state
     ///
     /// # Example
@@ -468,19 +460,6 @@ where
     /// ```
     pub fn with_cm(authority_id: AuthorityId, state: CmS) -> Self {
         Self::new(authority_id).with_cm_handler(CmHandler::new(state))
-    }
-
-    /// Create a coordinator with a delta CRDT handler
-    ///
-    /// # Example
-    /// ```ignore
-    /// let coordinator = CrdtCoordinator::with_delta(authority_id);
-    /// ```
-    pub fn with_delta(authority_id: AuthorityId) -> Self
-    where
-        DeltaS: Bottom,
-    {
-        Self::new(authority_id).with_delta_handler(DeltaHandler::new())
     }
 
     /// Create a coordinator with a delta CRDT handler with compaction threshold
@@ -506,7 +485,7 @@ where
     where
         MvS: Top,
     {
-        Self::new(authority_id).with_mv_handler(MvHandler::new())
+        Self::new(authority_id).with_mv_handler(MvHandler::default())
     }
 
     /// Create a coordinator with a meet-semilattice CRDT handler initialized with given state
@@ -703,7 +682,7 @@ mod tests {
             DummyOp,
             DummyId,
         >::new(authority_id)
-        .with_cv_handler(CvHandler::new());
+        .with_cv_handler(CvHandler::with_state(CvS::bottom()));
 
         assert_eq!(coordinator.authority_id(), authority_id);
         assert!(coordinator.has_handler(CrdtType::Convergent));

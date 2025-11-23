@@ -8,9 +8,10 @@
 //! handlers directly.
 
 use super::{
-    SimulationFaultHandler, SimulationScenarioHandler, SimulationTickResult, SimulationTimeHandler,
+    SimulationFaultHandler, SimulationScenarioHandler, SimulationTimeHandler,
+    stateless_simulator::SimulationTickResult,
 };
-use aura_agent::{AgentBuilder, AuraEffectSystem};
+use aura_agent::{AgentBuilder, AuraEffectSystem, core::AgentConfig};
 use aura_core::effects::{ChaosEffects, TestingEffects, TimeEffects};
 use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
@@ -57,8 +58,9 @@ impl SimulationEffectComposer {
             .with_authority(authority_id)
             .build_testing()
             .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
-        let effect_system = agent.runtime().effects().clone();
-
+        let config = aura_agent::core::AgentConfig::default();
+        let effect_system =
+            AuraEffectSystem::testing(&config).map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
         self.effect_system = Some(Arc::new(effect_system));
         Ok(self)
     }

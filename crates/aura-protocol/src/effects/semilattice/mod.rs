@@ -1,8 +1,23 @@
-//! CRDT effect interpreter layer
+//! Layer 4: CRDT Effect Interpreter - Semilattice Law Enforcement
 //!
-//! This module provides composable effect handlers that enforce CRDT semantic laws
-//! independently of session type communication. The handlers bridge between
-//! session-type messages and CRDT operations, ensuring convergence properties.
+//! Composable effect handlers enforcing CRDT semantic laws (⊔, ⊓) independent of
+//! session type communication. Handlers bridge session-type messages with CRDT operations,
+//! ensuring mathematical convergence properties (per docs/002_theoretical_model.md, docs/110_state_reduction.md).
+//!
+//! **Handler Types** (per docs/002_theoretical_model.md §4):
+//! - **CvHandler**: State-based CRDTs (join semilattice ⊔, idempotent merge)
+//! - **CmHandler**: Operation-based CRDTs (causal ordering, effect commutativity)
+//! - **DeltaHandler**: Delta-based CRDTs (incremental state transfer)
+//! - **MvHandler**: Value-based CRDTs (meet semilattice ⊓ for policy refinement)
+//! - **MultiConstraintHandler**: Manage multiple constraint scopes (per context)
+//!
+//! **Mathematical Invariants** (critical for convergence):
+//! - **Associativity**: `(A ⊔ B) ⊔ C = A ⊔ (B ⊔ C)` → allows any merge order
+//! - **Commutativity**: `A ⊔ B = B ⊔ A` → order-independent convergence
+//! - **Idempotency**: `A ⊔ A = A` → duplicate messages safe
+//!
+//! **Integration**: Works with choreography layer (aura-mpst) to coordinate multi-party
+//! synchronization protocols (anti-entropy, gossip, state reconciliation)
 //!
 //! ## Architecture
 //!
@@ -78,59 +93,12 @@ pub mod delta_handler;
 pub mod mv_handler;
 
 use aura_core::identifiers::{DeviceId, SessionId};
-use aura_core::semilattice::{CausalOp, CmApply, CvState, Dedup, Delta, MvState, Top};
+use aura_core::semilattice::{CausalOp, CmApply, CvState, Dedup, Delta};
 
-/// Handler factory for creating CRDT effect handlers
-pub struct HandlerFactory;
-
-impl HandlerFactory {
-    /// Create a state-based CRDT handler
-    pub fn cv_handler<S: CvState>() -> CvHandler<S> {
-        CvHandler::new()
-    }
-
-    /// Create a state-based CRDT handler with initial state
-    pub fn cv_handler_with_state<S: CvState>(state: S) -> CvHandler<S> {
-        CvHandler::with_state(state)
-    }
-
-    /// Create an operation-based CRDT handler
-    pub fn cm_handler<S, Op, Id>(state: S) -> CmHandler<S, Op, Id>
-    where
-        S: CmApply<Op> + Dedup<Id>,
-        Op: CausalOp<Id = Id, Ctx = aura_journal::CausalContext>,
-        Id: Clone + PartialEq,
-    {
-        CmHandler::new(state)
-    }
-
-    /// Create a delta-based CRDT handler
-    pub fn delta_handler<S: CvState, D: Delta>() -> DeltaHandler<S, D> {
-        DeltaHandler::new()
-    }
-
-    /// Create a delta-based CRDT handler with custom fold threshold
-    pub fn delta_handler_with_threshold<S: CvState, D: Delta>(
-        threshold: usize,
-    ) -> DeltaHandler<S, D> {
-        DeltaHandler::with_threshold(threshold)
-    }
-
-    /// Create a meet-based CRDT handler
-    pub fn mv_handler<S: MvState + Top>() -> MvHandler<S> {
-        MvHandler::new()
-    }
-
-    /// Create a meet-based CRDT handler with initial state
-    pub fn mv_handler_with_state<S: MvState + Top>(state: S) -> MvHandler<S> {
-        MvHandler::with_state(state)
-    }
-
-    /// Create a multi-constraint handler for managing multiple constraint scopes
-    pub fn multi_constraint_handler<S: MvState + Top>() -> MultiConstraintHandler<S> {
-        MultiConstraintHandler::new()
-    }
-}
+/// DEPRECATED: Handler factory for creating CRDT effect handlers
+/// 
+/// This factory has been deprecated due to architectural violations.
+// HandlerFactory has been removed to comply with aura-composition-based registration.
 
 /// Execution utilities for integrating handlers with choreographic protocols
 pub mod execution {
@@ -277,6 +245,7 @@ pub mod composition {
 mod tests {
     use super::*;
     use aura_core::semilattice::{Bottom, JoinSemilattice};
+    use aura_composition::{EffectRegistry, HandlerConfig, HandlerConfigBuilder, RegistrableHandler};
 
     // Test CRDT type
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -297,33 +266,37 @@ mod tests {
     impl CvState for TestCounter {}
 
     #[test]
-    fn test_handler_factory_cv_handler() {
-        let handler = HandlerFactory::cv_handler::<TestCounter>();
-        assert_eq!(handler.get_state(), &TestCounter(0));
-    }
-
-    #[test]
-    fn test_handler_factory_cv_handler_with_state() {
-        let handler = HandlerFactory::cv_handler_with_state(TestCounter(42));
-        assert_eq!(handler.get_state(), &TestCounter(42));
-    }
-
-    #[test]
-    fn test_composed_handler_creation() {
-        let composed = composition::ComposedHandler::new();
-        assert!(composed.list_handler_types().is_empty());
-    }
-
-    #[test]
     fn test_composed_handler_registration() {
-        let mut composed = composition::ComposedHandler::new();
-        let handler = HandlerFactory::cv_handler::<TestCounter>();
-        let config = DeliveryConfig::default();
+        let mut registry = EffectRegistry::new(aura_core::effects::ExecutionMode::Testing);
 
-        composed.register_cv_handler("test-counter".to_string(), handler, config);
+        // Simulate registration via composition layer by boxing the handler as a RegistrableHandler
+        let handler = CvHandler::with_state(TestCounter::bottom());
+        // Wrap in a shim that implements RegistrableHandler for tests
+        struct CvShim<S: CvState>(CvHandler<S>);
+        #[async_trait::async_trait]
+        impl<S: CvState + Send + Sync + 'static> RegistrableHandler for CvShim<S> {
+            async fn execute_operation_bytes(
+                &self,
+                _effect_type: aura_core::EffectType,
+                _operation: &str,
+                _parameters: &[u8],
+                _ctx: &aura_composition::HandlerContext,
+            ) -> Result<Vec<u8>, aura_composition::HandlerError> {
+                Err(aura_composition::HandlerError::UnsupportedEffect { effect_type: aura_core::EffectType::Choreographic })
+            }
+            fn supported_operations(&self, _effect_type: aura_core::EffectType) -> Vec<String> { vec![] }
+            fn supports_effect(&self, _effect_type: aura_core::EffectType) -> bool { false }
+            fn execution_mode(&self) -> aura_core::ExecutionMode { aura_core::ExecutionMode::Testing }
+        }
 
-        let types = composed.list_handler_types();
-        assert_eq!(types.len(), 1);
-        assert_eq!(types[0], "test-counter");
+        registry
+            .register_handler(
+                aura_core::EffectType::Choreographic,
+                Box::new(CvShim(handler)),
+            )
+            .expect("registry registration");
+
+        // Ensure registry holds exactly one handler
+        assert_eq!(registry.handlers_len(), 1);
     }
 }

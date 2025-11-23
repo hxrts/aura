@@ -1,11 +1,15 @@
-//! Protocol Message Definitions
+//! Layer 2: Transport Protocol Message Types
 //!
-//! This module provides essential protocol message types for transport coordination.
-//! These types are designed for compatibility with choreographic protocols and
-//! mature networking libraries.
+//! Protocol message types for network coordination: STUN (NAT traversal),
+//! hole punching (peer-to-peer connection), WebSocket framing.
+//!
+//! **Design** (per docs/108_transport_and_information_flow.md):
+//! - Protocol-agnostic message definitions for choreography composition
+//! - Enables future choreographic implementations with multiple transport backends
+//! - Messages flow through guard chain (aura-protocol/guards) for authorization/flow control
 
-pub mod stun;
 pub mod hole_punch;
+pub mod stun;
 pub mod websocket;
 
 // Internal API only - protocols are implementation details

@@ -1,8 +1,19 @@
-//! Journal CRDT implementations using harmonized architecture
+//! Layer 2: Journal CRDT Implementations
 //!
-//! This module provides journal-specific CRDTs built on the harmonized
-//! foundation from `aura-core`. All types implement the standard CRDT
-//! traits and can participate in choreographic synchronization.
+//! Domain-specific CRDT types built on aura-core semilattice foundation (Layer 1).
+//! All types implement JoinSemilattice (⊔) or MeetSemiLattice (⊓) for eventual consistency.
+//!
+//! **CRDT Types**:
+//! - **AccountState (G-Set)**: Device membership, monotonically growing
+//! - **EpochLog**: Monotonic epoch counter and key rotation history
+//! - **OpLog (OR-Set)**: Operation log as idempotent set of attested operations
+//! - **InvitationRegistry**: Pending invitations with TTL constraints
+//! - **GuardianRegistry**: Guardian set membership tracking
+//! - **Capability Constraints (Meet-Lattice)**: Meet-semilattice (⊓) policies for resource access
+//!
+//! **Convergence Invariant** (per docs/110_state_reduction.md):
+//! All synchronization operations are idempotent and commutative; applying same update twice
+//! produces identical state. Enables deterministic reduction across all replicas.
 
 pub use account_state::{AccountState, GuardianRegistry, MaxCounter};
 pub use concrete_types::{EpochLog, IntentPool};

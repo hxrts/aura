@@ -1,24 +1,25 @@
-//! Core Handler Infrastructure
+//! Layer 4: Core Handler Infrastructure - Type Erasure for Protocol Integration
 //!
-//! This module contains the foundational components for the Aura handler system,
-//! providing the building blocks for handler composition, registration, and orchestration.
+//! Provides type-erased handler traits for dynamic dispatch and integration with
+//! the protocol layer's guard chain and multi-party coordination systems.
 //!
-//! ## Components
+//! **Remaining Components**: 
+//! - **Erased**: Type-erased handler traits for dynamic dispatch; enables runtime polymorphism
 //!
-//! - **Composite**: Multi-handler composition and delegation patterns
-//! - **Erased**: Type-erased handler traits for dynamic dispatch
-//! - **Factory**: Handler construction and configuration patterns
+//! **Moved to aura-composition (Layer 3)**:
+//! - **Composite**: Multi-handler composition with delegation patterns
+//! - **Factory**: Handler construction with configuration and builder patterns
 //! - **Registry**: Handler registration and lookup mechanisms
 //!
-//! These components work together to provide the core infrastructure that enables
-//! the flexible, composable handler architecture used throughout the protocol layer.
+//! **Design Pattern** (per docs/106_effect_system_and_runtime.md):
+//! - Handlers implement effect traits (Layer 1 interfaces)
+//! - aura-composition provides registry and composition (Layer 3)
+//! - This module provides protocol integration (Layer 4)
+//! - Type-erasing enables plugin systems and dynamic handler loading
+//!
+//! **Integration**: Works with guard chain (aura-protocol/guards) to enforce authorization,
+//! flow budgets, and privacy at message entry points
 
-pub mod composite;
 pub mod erased;
-pub mod factory;
-pub mod registry;
 
-pub use composite::CompositeHandler;
 pub use erased::{AuraHandler, BoxedHandler, HandlerUtils};
-pub use factory::{AuraHandlerBuilder, AuraHandlerConfig, AuraHandlerFactory, FactoryError};
-pub use registry::{EffectRegistry, RegistrableHandler, RegistryError};

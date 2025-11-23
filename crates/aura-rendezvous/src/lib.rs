@@ -1,26 +1,61 @@
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
-//! Aura Rendezvous Layer
+//! # Aura Rendezvous - Layer 5: Feature/Protocol Implementation
 //!
-//! This crate provides Secret-Branded Broadcasting (SBB) and rendezvous protocols
+//! This crate implements Secret-Branded Broadcasting (SBB) and rendezvous protocols
 //! for privacy-preserving communication in the Aura threshold identity platform.
 //!
-//! # Architecture
+//! ## Purpose
 //!
-//! This crate implements rendezvous application layer:
-//! - `sbb/` - Secret-Branded Broadcasting protocols
-//! - `crypto/` - Encryption and key management
-//! - `relay/` - Relay coordination and capability-based routing
-//! - `messaging/` - Anonymous messaging with relationship isolation
-//! - `context/` - Context-aware rendezvous system
-//! - `channel/` - Secure channel establishment
-//! - `integration/` - Complete integrated SBB system
+//! Layer 5 feature crate providing privacy-preserving communication protocols for:
+//! - Secret-Branded Broadcasting (SBB) for metadata-private message delivery
+//! - Relationship-scoped secure channels between peers
+//! - Capability-based relay node selection and routing
+//! - Context-aware rendezvous coordination for peer discovery
+//! - Anonymous messaging with full relationship isolation
 //!
-//! # Design Principles
+//! ## Architecture Constraints
 //!
-//! - Uses Secret-Branded Broadcasting for metadata privacy
-//! - Implements relationship-scoped communication contexts
-//! - Provides capability-based relay authorization
-//! - Integrates with choreographic programming for coordination
+//! This crate depends on:
+//! - **Layer 1** (aura-core): Core types, effects, errors
+//! - **Layer 2** (aura-journal, aura-transport): Domain semantics and transport
+//! - **Layer 3** (aura-effects): Effect handler implementations
+//! - **Layer 4** (aura-protocol): Orchestration and guard chain
+//! - **Layer 4** (aura-mpst): Session types for SBB coordination
+//! - **Layer 5** (aura-relational): Relationship context management
+//!
+//! ## What Belongs Here
+//!
+//! - Complete SBB protocol implementations (flooding, coordination)
+//! - Secure channel establishment and key rotation protocols
+//! - Relay selection with capability-based filtering
+//! - Context-aware rendezvous for peer discovery
+//! - Encryption and key derivation for relationships
+//! - Anonymous messaging envelope handling
+//! - MPST protocol definitions for rendezvous ceremonies
+//!
+//! ## What Does NOT Belong Here
+//!
+//! - Effect handler implementations (belong in aura-effects)
+//! - Handler composition or registry (belong in aura-composition)
+//! - Low-level multi-party coordination (belong in aura-protocol)
+//! - Transport layer implementations (belong in aura-transport)
+//! - Relationship management (belong in aura-relational)
+//!
+//! ## Design Principles
+//!
+//! - Metadata privacy through SBB: routing information is cryptographically hidden
+//! - All channel state is ephemeral; relationships persist in relational contexts
+//! - Relay selection is capability-scoped: only authorized relays are visible
+//! - Rendezvous protocols are transient: contexts dissolve after peer exchange
+//! - Integration with guard chain ensures authorization before routing
+//! - Messages are padded to uniform size for traffic analysis resistance
+//!
+//! ## Key Protocols
+//!
+//! - **Secret-Branded Broadcasting**: Metadata-private message flooding
+//! - **Secure Channel**: End-to-end encryption with forward secrecy
+//! - **Relay Selection**: Capability-based relay filtering and routing
+//! - **Rendezvous**: Privacy-preserving peer discovery and contact exchange
 
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]

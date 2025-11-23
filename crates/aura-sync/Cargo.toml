@@ -12,6 +12,7 @@ aura-core = { path = "../aura-core" }
 aura-protocol = { path = "../aura-protocol" }
 aura-journal = { path = "../aura-journal" }
 aura-wot = { path = "../aura-wot" }
+aura-rendezvous = { path = "../aura-rendezvous" }
 
 # Note: aura-macros and aura-mpst intentionally omitted
 # This crate demonstrates semantic library independence by using
@@ -29,6 +30,8 @@ bincode = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
 biscuit-auth = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
 
 [dev-dependencies]
 # Testing infrastructure (Layer 5 can use testkit)

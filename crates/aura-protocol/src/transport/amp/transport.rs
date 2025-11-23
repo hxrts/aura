@@ -17,7 +17,7 @@ use aura_journal::fact::ProposedChannelEpochBump;
 use aura_transport::amp::{
     derive_for_recv, derive_for_send, AmpError, AmpHeader, RatchetDerivation,
 };
-use frost_ed25519::keys::{KeyPackage, PublicKeyPackage};
+use aura_core::frost::{Share, PublicKeyPackage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;
@@ -147,7 +147,7 @@ pub async fn commit_bump_with_consensus<E: AmpJournalEffects>(
     effects: &E,
     prestate: &aura_core::Prestate,
     proposal: &ProposedChannelEpochBump,
-    key_packages: HashMap<aura_core::AuthorityId, KeyPackage>,
+    key_packages: HashMap<aura_core::AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
 ) -> Result<()> {
     finalize_amp_bump_with_journal_default(

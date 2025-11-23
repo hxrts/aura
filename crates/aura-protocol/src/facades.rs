@@ -138,3 +138,7 @@ pub trait StandardPatterns {
 // let orchestrator = DefaultProtocolOrchestrator::new(device_id, effect_system);
 // orchestrator.execute_choreography(protocol).await?;
 // ```
+//
+// NOTE: Concrete implementations require Layer 6 runtime assembly, so they live
+// in aura-agent. This maintains proper layer boundaries while providing the
+// traits needed for protocol coordination at Layer 4.

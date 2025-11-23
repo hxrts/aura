@@ -4,6 +4,7 @@
 
 use crate::core::{AgentConfig, AgentResult};
 use async_trait::async_trait;
+use aura_composition::{HandlerFactory, CompositeHandler, CompositeHandlerAdapter};
 use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage};
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::storage::{StorageError, StorageStats};
@@ -22,34 +23,46 @@ use aura_protocol::effects::{
     ChoreographyMetrics, EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream,
     TreeEffects,
 };
+use aura_protocol::guards::effect_system_trait::GuardEffectSystem;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Effect executor for dispatching effect calls
+/// 
+/// Note: This wraps aura-composition infrastructure for Layer 6 runtime concerns.
 pub struct EffectExecutor {
     config: AgentConfig,
+    composite: CompositeHandlerAdapter,
 }
 
 impl EffectExecutor {
     /// Create new effect executor
-    pub fn new(config: AgentConfig) -> Self {
-        Self { config }
+    pub fn new(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
+        let device_id = aura_core::DeviceId::from(config.device_id());
+        let composite = CompositeHandlerAdapter::for_testing(device_id);
+        Ok(Self { config, composite })
     }
 
     /// Create production effect executor
-    pub fn production(config: AgentConfig) -> Self {
-        Self { config }
+    pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
+        let device_id = aura_core::DeviceId::from(config.device_id());
+        let composite = CompositeHandlerAdapter::for_production(device_id);
+        Ok(Self { config, composite })
     }
 
     /// Create testing effect executor
-    pub fn testing(config: AgentConfig) -> Self {
-        Self { config }
+    pub fn testing(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
+        let device_id = aura_core::DeviceId::from(config.device_id());
+        let composite = CompositeHandlerAdapter::for_testing(device_id);
+        Ok(Self { config, composite })
     }
 
     /// Create simulation effect executor
-    pub fn simulation(config: AgentConfig, _seed: u64) -> Self {
-        Self { config }
+    pub fn simulation(config: AgentConfig, seed: u64) -> Result<Self, crate::core::AgentError> {
+        let device_id = aura_core::DeviceId::from(config.device_id());
+        let composite = CompositeHandlerAdapter::for_simulation(device_id, seed);
+        Ok(Self { config, composite })
     }
 
     /// Dispatch effect call
@@ -70,39 +83,56 @@ pub trait EffectCall: Send + Sync {
 }
 
 /// Concrete effect system combining all effects for runtime usage
-#[derive(Debug, Clone)]
+/// 
+/// Note: This wraps aura-composition infrastructure for Layer 6 runtime concerns.
 pub struct AuraEffectSystem {
     config: AgentConfig,
+    composite: CompositeHandlerAdapter,
 }
 
 impl AuraEffectSystem {
     /// Create new effect system with configuration
-    pub fn new(config: AgentConfig) -> Self {
-        Self { config }
+    pub fn new(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
+        let device_id = aura_core::DeviceId::from(config.device_id());
+        let composite = CompositeHandlerAdapter::for_testing(device_id);
+        Ok(Self { config, composite })
     }
 
     /// Create effect system for production
-    pub fn production(config: AgentConfig) -> Self {
-        Self { config }
+    pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
+        let device_id = aura_core::DeviceId::from(config.device_id());
+        let composite = CompositeHandlerAdapter::for_production(device_id);
+        Ok(Self { config, composite })
     }
 
     /// Create effect system for testing with default configuration
-    pub fn testing(config: &AgentConfig) -> Self {
-        Self {
+    pub fn testing(config: &AgentConfig) -> Result<Self, crate::core::AgentError> {
+        let device_id = aura_core::DeviceId::from(config.device_id());
+        let composite = CompositeHandlerAdapter::for_testing(device_id);
+        Ok(Self {
             config: config.clone(),
-        }
+            composite,
+        })
     }
 
     /// Create effect system for simulation with controlled seed
-    pub fn simulation(config: &AgentConfig, _seed: u64) -> Self {
-        Self {
+    pub fn simulation(config: &AgentConfig, seed: u64) -> Result<Self, crate::core::AgentError> {
+        let device_id = aura_core::DeviceId::from(config.device_id());
+        let composite = CompositeHandlerAdapter::for_simulation(device_id, seed);
+        Ok(Self {
             config: config.clone(),
-        }
+            composite,
+        })
     }
 
     /// Get configuration
     pub fn config(&self) -> &AgentConfig {
         &self.config
+    }
+
+    /// Get composite handler
+    pub fn composite(&self) -> &CompositeHandlerAdapter {
+        &self.composite
     }
 }
 
@@ -920,6 +950,34 @@ impl EffectApiEffects for AuraEffectSystem {
     }
 }
 
+// Implementation of FlowBudgetEffects
+#[async_trait]
+impl FlowBudgetEffects for AuraEffectSystem {
+    async fn charge_flow(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+        cost: u32,
+    ) -> aura_core::AuraResult<aura_core::Receipt> {
+        // Use the journal-backed flow budget charge to honor charge-before-send
+        let updated_budget = JournalEffects::charge_flow_budget(self, context, peer, cost).await?;
+
+        // Build a receipt chained by spent value as a monotone nonce
+        let nonce = updated_budget.spent;
+        let epoch = updated_budget.epoch;
+        Ok(aura_core::Receipt::new(
+            *context,
+            AuthorityId::new(), // Mock source authority
+            *peer,
+            epoch,
+            cost,
+            nonce,
+            aura_core::Hash32::default(),
+            Vec::new(), // Empty signature in mock
+        ))
+    }
+}
+
 // Implementation of AuraEffects (composite trait)
 #[async_trait]
 impl AuraEffects for AuraEffectSystem {
@@ -930,6 +988,66 @@ impl AuraEffects for AuraEffectSystem {
         } else {
             aura_core::effects::ExecutionMode::Production
         }
+    }
+}
+
+// Implementation of GuardEffectSystem trait
+// This enables automatic AmpJournalEffects implementation
+impl GuardEffectSystem for AuraEffectSystem {
+    fn authority_id(&self) -> AuthorityId {
+        // Get the authority ID from the configuration
+        // For now, generate a new one - in production this should be persisted
+        AuthorityId::from_uuid(self.config.device_id().0)
+    }
+
+    fn execution_mode(&self) -> aura_core::effects::ExecutionMode {
+        // Delegate to AuraEffects implementation
+        AuraEffects::execution_mode(self)
+    }
+
+    fn get_metadata(&self, key: &str) -> Option<String> {
+        // Access configuration metadata
+        match key {
+            "authority_id" => Some(self.authority_id().to_string()),
+            "execution_mode" => Some(format!("{:?}", self.execution_mode())),
+            "device_id" => Some(self.config.device_id().to_string()),
+            _ => {
+                tracing::debug!(key = %key, "Metadata not found for key");
+                None
+            }
+        }
+    }
+
+    fn can_perform_operation(&self, operation: &str) -> bool {
+        // For now, allow all operations in the runtime
+        // In production, this could check against configuration or policy
+        tracing::debug!(operation = %operation, "Checking operation permissions");
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_protocol::amp::AmpJournalEffects;
+    use aura_core::identifiers::ContextId;
+
+    #[tokio::test]
+    async fn test_guard_effect_system_enables_amp_journal_effects() {
+        let config = AgentConfig::default();
+        let effect_system = AuraEffectSystem::testing(&config).unwrap();
+        
+        // Test that our GuardEffectSystem implementation enables AmpJournalEffects
+        let context = ContextId::new();
+        let _journal = effect_system.fetch_context_journal(context).await.unwrap();
+        
+        // Test that metadata works
+        assert!(effect_system.get_metadata("authority_id").is_some());
+        assert!(effect_system.get_metadata("execution_mode").is_some());
+        assert!(effect_system.get_metadata("device_id").is_some());
+        
+        // Test operation permissions
+        assert!(effect_system.can_perform_operation("test_operation"));
     }
 }
 
@@ -958,4 +1076,3 @@ impl AuraEffectSystem {
         }
     }
 }
-

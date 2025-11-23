@@ -1,8 +1,16 @@
-//! Relational domain types for cross-authority coordination
+//! Layer 1: Relational Domain Types
 //!
-//! This module contains the core domain types for managing relationships
-//! and coordination between authorities in the Aura system. These types
-//! are pure data structures without protocol logic.
+//! Core types for cross-authority coordination: **GuardianBinding** (threshold recovery),
+//! **RecoveryGrant** (recovery delegation), **RelationalFact** (multi-authority agreement),
+//! **ConsensusProof** (distributed agreement witness), **RecoveryOp** (recovery procedures).
+//!
+//! **Pure Data Layer**: No protocol logic. Protocol implementations live in:
+//! - aura-recovery (Layer 5): Guardian recovery coordination
+//! - aura-relational (Layer 5): Relational context state machines
+//! - aura-protocol/consensus (Layer 4): Multi-party agreement
+//!
+//! **Design Principle**: Relational facts enable facts to reference cross-authority context
+//! (per docs/103_relational_contexts.md), enabling distributed accountability.
 
 pub mod consensus;
 pub mod fact;

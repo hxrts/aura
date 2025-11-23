@@ -1,0 +1,18 @@
+//! Agent runtime stubs
+//!
+//! Placeholder for agent runtime functionality that will integrate
+//! with the new authority-centric architecture.
+
+use aura_core::identifiers::AuthorityId;
+
+/// Stub agent runtime
+#[derive(Debug)]
+pub struct AgentRuntime {
+    authority_id: AuthorityId,
+}
+
+impl AgentRuntime {
+    pub fn new(authority_id: AuthorityId) -> Self {
+        Self { authority_id }
+    }
+}

@@ -37,7 +37,7 @@ All commands below must be run within `nix develop`.
 ### Testing
 - `just test` - Run all tests (preferred)
 - `just test-crate <name>` - Test specific crate
-- `just ci` - Full CI checks (format, lint, test)
+- `just ci-dry-run` - Local CI checks (format, lint, test)
 - `just smoke-test` - Phase 0 integration tests
 - `cargo test --workspace -- --nocapture` - Tests with output
 
@@ -50,7 +50,6 @@ All commands below must be run within `nix develop`.
 ### Phase 0 Demo
 - `just init-account` - Initialize 2-of-3 threshold account
 - `just status` - Show account status
-- `just test-dkd <app_id> <context>` - Test key derivation
 
 ## Architecture Essentials
 
@@ -65,17 +64,17 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
    - `aura-mpst`: Session type runtime with guard extensions and leakage tracking (`LeakageTracker`).
    - `aura-macros`: Choreography DSL parser/annotation extractor (`guard_capability`, `flow_cost`, `journal_facts`, `leak`) that emits rumpsteak projections.
 
-3. **Implementation** (`aura-effects`): Stateless, single-party handlers (real & mock) implementing core effect traits (crypto, network, storage, randomness, console, leakage, etc.).
+3. **Implementation** (`aura-effects` + `aura-composition`): Stateless, single-party handlers (`aura-effects`) and handler composition infrastructure (`aura-composition`). Production handlers implement core effect traits (crypto, network, storage, randomness, console, etc.). Mock/test handlers are in `aura-testkit`.
 
 4. **Orchestration** (`aura-protocol`): Multi-party coordination and guard infrastructure: handler adapters, CrdtCoordinator, GuardChain (CapGuard → FlowGuard → JournalCoupler), Capability evaluator, Aura Consensus runtime, anti-entropy/snapshot helpers.
 
-5. **Feature/Protocol** (`aura-authenticate`, `aura-frost`, `aura-invitation`, `aura-recovery`, `aura-rendezvous`, `aura-storage`, `aura-sync`): End-to-end protocol crates (auth, guardian recovery, rendezvous, storage, etc.) built atop the orchestration layer.
+5. **Feature/Protocol** (`aura-authenticate`, `aura-chat`, `aura-frost`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-sync`): End-to-end protocol crates (auth, secure messaging, guardian recovery, rendezvous, storage, etc.) built atop the orchestration layer.
 
 6. **Runtime Composition** (`aura-agent`, `aura-simulator`): Runtime assembly of effect systems (agent) and deterministic simulation (simulator). `aura-agent` now owns the effect registry/builder infrastructure; `aura-protocol` no longer exports the legacy registry.
 
 7. **User Interface** (`aura-cli`): CLI entry points driving the agent runtime. Current CLI exposes scenario/admin/recovery/invitation flows plus the new authority/context inspection commands.
 
-8. **Testing & Tools** (`aura-testkit`, `aura-quint-api`): Shared fixtures, simulation harnesses, property tests, Quint interop.
+8. **Testing & Tools** (`aura-testkit`, `aura-quint`): Shared fixtures, simulation harnesses, property tests, Quint interop.
 
 **Where does my code go?** See the docs under `docs/001_system_architecture.md` and `docs/100_authority_and_identity.md` for the latest authority-centric guidance.
 
@@ -83,7 +82,7 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 
 Aura now models identity via opaque authorities (`AuthorityId`) and relational contexts (`ContextId`). Key points:
 
-- commitment tree updates and device membership are expressed as fact-based AttestedOps (`aura-journal/src/fact_journal.rs`). No graph-based `journal_ops` remain.
+- commitment tree updates and device membership are expressed as fact-based AttestedOps (`aura-journal/src/fact.rs`). No graph-based `journal_ops` remain.
 - Relational contexts (guardian bindings, recovery grants, rendezvous receipts) live in their own journals (`docs/103_relational_contexts.md`).
 - Aura Consensus is the sole strong-agreement mechanism (`docs/104_consensus.md`). Fast path + fallback gossip integrate with the guard chain.
 - Guard chain sequence: `AuthorizationEffects` (Biscuit/capabilities) → `FlowBudgetEffects` (charge-before-send) → `LeakageEffects` (`docs/003_information_flow_contract.md`) → `JournalEffects` (fact commit) → `TransportEffects`.
@@ -103,7 +102,7 @@ Reference `docs/003_information_flow_contract.md` for the unified flow-budget/me
 ## Authorization Systems
 
 1. **Traditional Capability Semantics** (`aura-wot`): Meet-semilattice capability evaluation for local checks.
-2. **Biscuit Tokens** (`aura-wot/src/biscuit_*`, `aura-protocol/src/authorization/*`): Cryptographically verifiable, attenuated tokens.
+2. **Biscuit Tokens** (`aura-wot/src/biscuit/`, `aura-protocol/src/authorization.rs`): Cryptographically verifiable, attenuated tokens.
 3. **Guard Integration**: `aura-protocol::guards::{CapGuard, FlowGuard, JournalCoupler, LeakageTracker}` enforce Biscuit/policy requirements, flow budgets, journal commits, and leakage budgets per message.
 
 ## Documentation Map
@@ -122,4 +121,4 @@ Reference `docs/003_information_flow_contract.md` for the unified flow-budget/me
 ## Legacy Cleanup Status
 
 - Graph-based `journal_ops` directory removed; guard/tests now track fact deltas.
-- `DeviceMetadata`/`DeviceType` removal in progress (see work plan in `refactor.md`). Until the new authority-derived device view lands, legacy structs remain in `aura-journal::types`, Effect APIs, and testkit builders.
+- `DeviceMetadata`/`DeviceType` removal in progress. Until the new authority-derived device view lands, legacy structs remain in `aura-journal::types`, Effect APIs, and testkit builders.

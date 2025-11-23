@@ -5,8 +5,11 @@
 
 #![allow(missing_docs)]
 
-use crate::FrostResult;
-use aura_core::frost::{PartialSignature, ThresholdSignature};
+use crate::{
+    threshold_signing::{FrostCrypto, ThresholdSigningConfig},
+    FrostResult,
+};
+use aura_core::frost::{NonceCommitment, PartialSignature, PublicKeyPackage, ThresholdSignature, TreeSigningContext};
 use aura_core::{identifiers::AuthorityId, AuraError};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
@@ -136,66 +139,78 @@ pub fn validate_aggregation_config(request: &AggregationRequest) -> FrostResult<
 pub async fn perform_frost_aggregation(
     partial_signatures: &[PartialSignature],
     message: &[u8],
-    threshold: usize,
-    total_signers: usize,
-    random_effects: &dyn aura_core::effects::RandomEffects,
+    context: &TreeSigningContext,
+    nonce_commitments: &std::collections::HashMap<AuthorityId, NonceCommitment>,
+    public_key_package: &PublicKeyPackage,
 ) -> FrostResult<ThresholdSignature> {
     use aura_core::frost::tree_signing::{binding_message, frost_aggregate, TreeSigningContext};
-    use aura_effects::EffectSystemRng;
     use frost_ed25519 as frost;
     use std::collections::BTreeMap;
 
-    if partial_signatures.len() < threshold {
+    if partial_signatures.len() < public_key_package.threshold as usize {
         return Err(AuraError::invalid(format!(
             "Insufficient partial signatures: {} < {}",
             partial_signatures.len(),
-            threshold
+            public_key_package.threshold
         )));
     }
 
-    // Create context and binding message for the aggregation
-    let context = TreeSigningContext::new(1, 0, [0u8; 32]);
-    let bound_message = binding_message(&context, message);
+    let bound_message = binding_message(context, message);
 
-    // Create mock commitments for aggregation (in production, these come from nonce phase)
-    let mut frost_commitments = BTreeMap::new();
-    for i in 0..partial_signatures.len() {
-        frost_commitments.insert(
-            (i + 1) as u16,
-            aura_core::frost::NonceCommitment {
-                signer: (i + 1) as u16,
-                commitment: vec![0u8; 32],
-            },
-        );
+    let mut frost_commitments_by_u16 = BTreeMap::new();
+    for (i, (authority, commitment)) in nonce_commitments.iter().enumerate() {
+        // Map authority to u16 signer ID (simple index-based mapping for now)
+        let signer_id = (i + 1) as u16;
+        frost_commitments_by_u16.insert(signer_id, commitment.clone());
     }
 
-    // Generate temporary public key package for aggregation
-    // In production, this would come from the DKG ceremony
-    let mut rng = EffectSystemRng::from_current_runtime(random_effects);
-    let (_, pubkey_package) = frost::keys::generate_with_dealer(
-        total_signers.try_into().unwrap(),
-        threshold.try_into().unwrap(),
-        frost::keys::IdentifierList::Default,
-        &mut rng,
-    )
-    .map_err(|e| AuraError::crypto(format!("Failed to generate key package: {}", e)))?;
+    // Convert to frost_ed25519::keys::PublicKeyPackage for aggregation
+    let frost_public_key_package: frost_ed25519::keys::PublicKeyPackage = public_key_package
+        .clone()
+        .try_into()
+        .map_err(|e| AuraError::invalid(format!("Failed to convert public key package: {}", e)))?;
 
     // Aggregate the signatures
     let signature_bytes = frost_aggregate(
         partial_signatures,
         &bound_message,
-        &frost_commitments,
-        &pubkey_package,
+        &frost_commitments_by_u16,
+        &frost_public_key_package,
     )
     .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {}", e)))?;
 
     // Create threshold signature result
-    let participating_signers: Vec<u16> = (0..partial_signatures.len() as u16).collect();
+    let participating_signers: Vec<u16> =
+        partial_signatures.iter().map(|p| p.signer).collect();
 
     Ok(ThresholdSignature::new(
         signature_bytes,
         participating_signers,
     ))
+}
+
+fn frost_commitments_from_nonce(
+    commitments: &std::collections::HashMap<AuthorityId, NonceCommitment>,
+) -> FrostResult<
+    std::collections::BTreeMap<
+        frost_ed25519::Identifier,
+        frost_ed25519::round1::SigningCommitments,
+    >,
+> {
+    use std::collections::BTreeMap;
+
+    let mut frost_commitments = BTreeMap::new();
+    for commitment in commitments.values() {
+        let identifier = commitment
+            .frost_identifier()
+            .map_err(|e| AuraError::invalid(e))?;
+        let signing_commitments = commitment
+            .to_frost()
+            .map_err(|e| AuraError::invalid(e))?;
+        frost_commitments.insert(identifier, signing_commitments);
+    }
+
+    Ok(frost_commitments)
 }
 
 // The choreography macro generates these types and functions automatically:
@@ -263,54 +278,73 @@ mod tests {
     #[aura_test]
     async fn test_frost_aggregation_choreography() -> aura_core::AuraResult<()> {
         let fixture = create_test_fixture().await?;
-
-        // Get the effect system from the fixture
         let effects = fixture.effect_system();
 
         let message = b"test message for threshold signing";
-        let threshold = 3;
-        let total_signers = 4;
+        let config = ThresholdSigningConfig::new(3, 4, 300);
+        let context = TreeSigningContext::new(1, 0, [1u8; 32]);
 
-        // Create aggregation request using testkit authorities
-        let request = AggregationRequest {
-            session_id: "choreography_test_session".to_string(),
-            message: message.to_vec(),
-            threshold,
-            signers: vec![
-                aura_core::test_utils::test_authority_id(1),
-                aura_core::test_utils::test_authority_id(2),
-                aura_core::test_utils::test_authority_id(3),
-                aura_core::test_utils::test_authority_id(4),
-            ],
-            timeout_seconds: 300,
-        };
+        let authorities: Vec<_> = (0..config.total_signers)
+            .map(|_| aura_core::AuthorityId::new())
+            .collect();
+        let key_material = FrostCrypto::generate_key_material(
+            &authorities,
+            &config,
+            &*effects.random_effects(),
+        )
+        .await?;
 
-        // Validate configuration using testkit-generated data
-        assert!(validate_aggregation_config(&request).is_ok());
+        let mut nonce_commitments = std::collections::HashMap::new();
+        let mut signer_nonces =
+            std::collections::HashMap::<AuthorityId, frost_ed25519::round1::SigningNonces>::new();
 
-        // Simulate partial signatures from threshold number of signers
+        for authority in &authorities {
+            let key_pkg = key_material
+                .key_packages
+                .get(authority)
+                .expect("missing key package");
+            let (nonces, commitment) =
+                FrostCrypto::generate_nonce_commitment(key_pkg, &*effects.random_effects()).await?;
+            signer_nonces.insert(*authority, nonces);
+            nonce_commitments.insert(*authority, commitment);
+        }
+
+        let frost_commitments = frost_commitments_from_nonce(&nonce_commitments)?;
+
         let mut partial_signatures = Vec::new();
-        for i in 0..threshold {
-            let partial_sig = PartialSignature::from_bytes(vec![42u8 + i as u8; 32])
-                .map_err(|e| aura_core::AuraError::invalid(e))?;
+        for authority in authorities.iter().take(config.threshold) {
+            let key_pkg = key_material
+                .key_packages
+                .get(authority)
+                .expect("missing key package");
+            let signing_nonces = signer_nonces
+                .get(authority)
+                .expect("missing nonces for signer");
+            let partial_sig = FrostCrypto::generate_partial_signature(
+                &context,
+                message,
+                key_pkg,
+                signing_nonces,
+                &frost_commitments,
+                &*effects.random_effects(),
+            )
+            .await?;
             partial_signatures.push(partial_sig);
         }
 
-        // Test aggregation with effect system
+        // Convert frost PublicKeyPackage to aura-core PublicKeyPackage
+        let aura_public_key_package = PublicKeyPackage::from(key_material.public_key_package.clone());
+        
         let result = perform_frost_aggregation(
             &partial_signatures,
             message,
-            threshold,
-            total_signers,
-            effects.as_ref(),
+            &context,
+            &nonce_commitments,
+            &aura_public_key_package,
         )
-        .await;
+        .await?;
 
-        // Should succeed with sufficient signatures
-        assert!(result.is_ok());
-
-        let threshold_sig = result?;
-        assert_eq!(threshold_sig.signers.len(), threshold);
+        assert_eq!(result.signers.len(), config.threshold);
 
         println!("✓ FROST aggregation choreography test completed");
         Ok(())
@@ -321,49 +355,76 @@ mod tests {
         let fixture = create_test_fixture().await?;
         let effects = fixture.effect_system();
 
-        // Test multiple rounds of aggregation with different thresholds
         for round in 1..=3 {
-            let threshold = 3 + round; // Varying thresholds: 4, 5, 6
-            let message = format!("round {} message", round);
+            let config = ThresholdSigningConfig::new(3 + round, 6, 120);
+            let context = TreeSigningContext::new(round as u32, round as u64, [round as u8; 32]);
 
-            let request = AggregationRequest {
-                session_id: format!("multi_round_session_{}", round),
-                message: message.as_bytes().to_vec(),
-                threshold,
-                signers: (1..=6)
-                    .map(|i| aura_core::test_utils::test_authority_id(i))
-                    .collect(),
-                timeout_seconds: 120,
-            };
+            let authorities: Vec<_> = (0..config.total_signers)
+                .map(|_| aura_core::AuthorityId::new())
+                .collect();
+            let key_material = FrostCrypto::generate_key_material(
+                &authorities,
+                &config,
+                &*effects.random_effects(),
+            )
+            .await?;
 
-            // Create sufficient partial signatures for this round
+            let mut nonce_commitments = std::collections::HashMap::new();
+            let mut signer_nonces = std::collections::HashMap::<
+                AuthorityId,
+                frost_ed25519::round1::SigningNonces,
+            >::new();
+
+            for authority in &authorities {
+                let key_pkg = key_material
+                    .key_packages
+                    .get(authority)
+                    .expect("missing key package");
+                let (nonces, commitment) = FrostCrypto::generate_nonce_commitment(
+                    key_pkg,
+                    &*effects.random_effects(),
+                )
+                .await?;
+                signer_nonces.insert(*authority, nonces);
+                nonce_commitments.insert(*authority, commitment);
+            }
+
+            let frost_commitments = frost_commitments_from_nonce(&nonce_commitments)?;
+
             let mut partial_signatures = Vec::new();
-            for i in 0..threshold {
-                let sig_data = vec![round as u8 * 10 + i as u8; 32];
-                let partial_sig = PartialSignature::from_bytes(sig_data)
-                    .map_err(|e| aura_core::AuraError::invalid(e))?;
+            for authority in authorities.iter().take(config.threshold) {
+                let key_pkg = key_material
+                    .key_packages
+                    .get(authority)
+                    .expect("missing key package");
+                let signing_nonces = signer_nonces
+                    .get(authority)
+                    .expect("missing nonces for signer");
+                let partial_sig = FrostCrypto::generate_partial_signature(
+                    &context,
+                    b"round message",
+                    key_pkg,
+                    signing_nonces,
+                    &frost_commitments,
+                    &*effects.random_effects(),
+                )
+                .await?;
                 partial_signatures.push(partial_sig);
             }
 
-            // Test aggregation for this round
+            // Convert frost PublicKeyPackage to aura-core PublicKeyPackage
+            let aura_public_key_package = PublicKeyPackage::from(key_material.public_key_package.clone());
+            
             let result = perform_frost_aggregation(
                 &partial_signatures,
-                message.as_bytes(),
-                threshold,
-                6, // total signers
-                effects.as_ref(),
+                b"round message",
+                &context,
+                &nonce_commitments,
+                &aura_public_key_package,
             )
-            .await;
+            .await?;
 
-            assert!(result.is_ok(), "Round {} aggregation should succeed", round);
-
-            let threshold_sig = result?;
-            assert_eq!(
-                threshold_sig.signers.len(),
-                threshold,
-                "Round {} should have correct number of signers",
-                round
-            );
+            assert_eq!(result.signers.len(), config.threshold);
         }
 
         println!("✓ Multi-round signature aggregation test completed");

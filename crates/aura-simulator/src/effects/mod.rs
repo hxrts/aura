@@ -1,8 +1,7 @@
-//! Simulation Effect System
+//! Layer 6: Simulation Effect System
 //!
-//! This module provides the simulation-specific effect system that extends the core
-//! Aura effect system with simulation capabilities. Middleware patterns have been
-//! removed in favor of direct effect handler composition.
+//! Simulation-specific effect system extending core Aura effects with
+//! deterministic time, fault injection, and scenario capabilities.
 
 pub mod system;
 

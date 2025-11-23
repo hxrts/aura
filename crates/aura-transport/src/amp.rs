@@ -3,10 +3,14 @@
 //! Implements the transport layer for AMP (Aura Messaging Protocol) including
 //! message envelope handling, AEAD encryption/decryption, and ratchet advancement.
 
+use async_trait::async_trait;
 use aura_core::identifiers::{ChannelId, ContextId, AuthorityId};
-use aura_core::{Hash32, Result, AuraError};
+use aura_core::{Hash32, AuraError};
 use aura_journal::ChannelEpochState;
 use serde::{Deserialize, Serialize};
+
+type AmpResult<T> = std::result::Result<T, AmpError>;
+type CoreResult<T> = std::result::Result<T, AuraError>;
 
 /// AMP message header used as AEAD associated data
 ///
@@ -86,7 +90,7 @@ pub fn derive_for_send(
     context: ContextId,
     channel: ChannelId,
     state: &ChannelEpochState,
-) -> Result<RatchetDerivation, AmpError> {
+) -> AmpResult<RatchetDerivation> {
     let (min_gen, max_gen) = window_bounds(state.last_checkpoint_gen, state.skip_window);
     let ratchet_gen = state.current_gen;
 
@@ -124,7 +128,7 @@ pub fn derive_for_send(
 pub fn derive_for_recv(
     state: &ChannelEpochState,
     header: AmpHeader,
-) -> Result<RatchetDerivation, AmpError> {
+) -> AmpResult<RatchetDerivation> {
     let pending_epoch = state.pending_bump.as_ref().map(|p| p.new_epoch);
     let valid_epoch = header.chan_epoch == state.chan_epoch
         || pending_epoch.is_some_and(|e| header.chan_epoch == e);
@@ -166,7 +170,7 @@ pub fn advance_send(
     context: ContextId,
     channel: ChannelId,
     state: &ChannelEpochState,
-) -> Result<RatchetDerivation, AmpError> {
+) -> AmpResult<RatchetDerivation> {
     derive_for_send(context, channel, state)
 }
 
@@ -175,7 +179,7 @@ pub fn advance_send(
 pub fn advance_recv(
     state: &ChannelEpochState,
     header: AmpHeader,
-) -> Result<RatchetDerivation, AmpError> {
+) -> AmpResult<RatchetDerivation> {
     derive_for_recv(state, header)
 }
 
@@ -200,7 +204,7 @@ pub struct AmpEnvelope {
 ///
 /// Provides the interface between AMP message handling and the underlying
 /// transport effects system.
-#[async_trait::async_trait]
+#[async_trait]
 pub trait AmpTransport {
     /// Encrypt and send an AMP message through the transport layer.
     async fn send_amp_message(
@@ -209,17 +213,17 @@ pub trait AmpTransport {
         channel: ChannelId,
         payload: Vec<u8>,
         recipient: AuthorityId,
-    ) -> Result<()>;
+    ) -> AmpResult<()>;
 
     /// Receive and decrypt an AMP message from the transport layer.
-    async fn receive_amp_message(&self, envelope: AmpEnvelope) -> Result<Vec<u8>>;
+    async fn receive_amp_message(&self, envelope: AmpEnvelope) -> AmpResult<Vec<u8>>;
 
     /// Get the current channel epoch state for ratchet operations.
     async fn get_channel_state(
         &self,
         context: ContextId,
         channel: ChannelId,
-    ) -> Result<ChannelEpochState>;
+    ) -> AmpResult<ChannelEpochState>;
 
     /// Update channel state with new generation after send/receive.
     async fn update_channel_state(
@@ -227,7 +231,7 @@ pub trait AmpTransport {
         context: ContextId,
         channel: ChannelId,
         new_state: ChannelEpochState,
-    ) -> Result<()>;
+    ) -> AmpResult<()>;
 }
 
 /// AEAD encryption/decryption implementation for AMP messages.
@@ -241,7 +245,7 @@ impl AmpAead {
         message_key: &Hash32,
         header: &AmpHeader,
         payload: &[u8],
-    ) -> Result<(Vec<u8>, Vec<u8>)> {
+    ) -> CoreResult<(Vec<u8>, Vec<u8>)> {
         // TODO: Implement ChaCha20-Poly1305 AEAD encryption
         // For now, return placeholder
         let encrypted = payload.to_vec(); // Placeholder: should be encrypted
@@ -255,7 +259,7 @@ impl AmpAead {
         header: &AmpHeader,
         encrypted_payload: &[u8],
         auth_tag: &[u8],
-    ) -> Result<Vec<u8>> {
+    ) -> CoreResult<Vec<u8>> {
         // TODO: Implement ChaCha20-Poly1305 AEAD decryption
         // For now, return placeholder
         if auth_tag.len() != 16 {
@@ -287,9 +291,13 @@ impl<T: AmpTransport> AmpProtocol<T> {
         channel: ChannelId,
         payload: Vec<u8>,
         recipient: AuthorityId,
-    ) -> Result<()> {
+    ) -> CoreResult<()> {
         // Get current channel state
-        let state = self.transport.get_channel_state(context, channel).await?;
+        let state = self
+            .transport
+            .get_channel_state(context, channel)
+            .await
+            .map_err(|e| AuraError::invalid(e.to_string()))?;
         
         // Derive ratchet and message key for send
         let derivation = advance_send(context, channel, &state)
@@ -312,16 +320,24 @@ impl<T: AmpTransport> AmpProtocol<T> {
         };
         
         // Send through transport
-        self.transport.send_amp_message(context, channel, 
-            serde_json::to_vec(&envelope)
-                .map_err(|e| AuraError::serialization(e.to_string()))?,
-            recipient,
-        ).await?;
+        self.transport
+            .send_amp_message(
+                context,
+                channel,
+                serde_json::to_vec(&envelope)
+                    .map_err(|e| AuraError::serialization(e.to_string()))?,
+                recipient,
+            )
+            .await
+            .map_err(|e| AuraError::invalid(e.to_string()))?;
         
         // Update state with new generation
         let mut new_state = state;
         new_state.current_gen = derivation.next_gen;
-        self.transport.update_channel_state(context, channel, new_state).await?;
+        self.transport
+            .update_channel_state(context, channel, new_state)
+            .await
+            .map_err(|e| AuraError::invalid(e.to_string()))?;
         
         Ok(())
     }
@@ -329,12 +345,16 @@ impl<T: AmpTransport> AmpProtocol<T> {
     /// Receive and process an AMP message.
     ///
     /// Handles envelope parsing, ratchet validation, decryption, and state updates.
-    pub async fn receive_message(&self, envelope: AmpEnvelope) -> Result<Vec<u8>> {
+    pub async fn receive_message(&self, envelope: AmpEnvelope) -> CoreResult<Vec<u8>> {
         let context = envelope.header.context;
         let channel = envelope.header.channel;
         
         // Get current channel state
-        let state = self.transport.get_channel_state(context, channel).await?;
+        let state = self
+            .transport
+            .get_channel_state(context, channel)
+            .await
+            .map_err(|e| AuraError::invalid(e.to_string()))?;
         
         // Validate header and derive message key
         let derivation = advance_recv(&state, envelope.header)
@@ -352,7 +372,10 @@ impl<T: AmpTransport> AmpProtocol<T> {
         let mut new_state = state;
         if envelope.header.ratchet_gen >= new_state.current_gen {
             new_state.current_gen = derivation.next_gen;
-            self.transport.update_channel_state(context, channel, new_state).await?;
+        self.transport
+            .update_channel_state(context, channel, new_state)
+            .await
+            .map_err(|e| AuraError::invalid(e.to_string()))?;
         }
         
         Ok(payload)

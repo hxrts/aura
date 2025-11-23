@@ -19,12 +19,12 @@
 //! # Usage
 //!
 //! ```rust,ignore
-//! use aura_effects::context::{StandardContextHandler, MockContextHandler};
+//! use aura_effects::context::StandardContextHandler;
 //! use aura_core::DeviceId;
 //!
 //! // Create context with explicit parameters
 //! let context = StandardContextHandler::new()
-//!     .create_execution_context(device_id, operation_type, metadata);
+//!     .create_execution_context(device_id, operation_type);
 //!
 //! // Use context explicitly in operations
 //! let result = handler.perform_operation(&context, &params).await?;
@@ -208,68 +208,6 @@ impl Default for StandardContextHandler {
     }
 }
 
-/// Mock context handler for testing
-///
-/// Provides controllable context creation for testing scenarios.
-#[derive(Debug, Clone)]
-pub struct MockContextHandler {
-    /// Fixed timestamp to use for all contexts
-    fixed_timestamp: Option<u64>,
-
-    /// Default metadata to include in all contexts
-    default_metadata: HashMap<String, String>,
-}
-
-impl MockContextHandler {
-    /// Create a new mock context handler
-    pub fn new() -> Self {
-        Self {
-            fixed_timestamp: None,
-            default_metadata: HashMap::new(),
-        }
-    }
-
-    /// Use a fixed timestamp for all contexts (deterministic testing)
-    pub fn with_fixed_timestamp(mut self, timestamp: u64) -> Self {
-        self.fixed_timestamp = Some(timestamp);
-        self
-    }
-
-    /// Add default metadata that will be included in all contexts
-    pub fn with_default_metadata(mut self, key: String, value: String) -> Self {
-        self.default_metadata.insert(key, value);
-        self
-    }
-
-    /// Create an execution context with mock behavior
-    pub fn create_execution_context(
-        &self,
-        device_id: DeviceId,
-        operation_type: String,
-    ) -> ExecutionContext {
-        let timestamp = self.fixed_timestamp.unwrap_or_else(|| {
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0)
-        });
-
-        ExecutionContext {
-            device_id,
-            account_id: None,
-            session_id: None,
-            operation_type,
-            timestamp,
-            metadata: self.default_metadata.clone(),
-        }
-    }
-}
-
-impl Default for MockContextHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -358,22 +296,6 @@ mod tests {
         assert!(!handler.validate_context(&context, &["missing_field"]));
     }
 
-    #[test]
-    fn test_mock_context_handler() {
-        let handler = MockContextHandler::new()
-            .with_fixed_timestamp(12345)
-            .with_default_metadata("test_mode".to_string(), "enabled".to_string());
-
-        let device_id = DeviceId::new();
-        let context = handler.create_execution_context(device_id, "test".to_string());
-
-        assert_eq!(context.device_id, device_id);
-        assert_eq!(context.timestamp, 12345);
-        assert_eq!(
-            context.get_metadata("test_mode"),
-            Some(&"enabled".to_string())
-        );
-    }
 
     #[test]
     fn test_metadata_merging() {

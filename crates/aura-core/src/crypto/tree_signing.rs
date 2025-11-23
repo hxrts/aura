@@ -616,6 +616,96 @@ impl PublicKeyPackage {
     }
 }
 
+// Type conversions between aura-core FROST types and frost_ed25519 types
+// These enable seamless interoperability across architectural layers
+
+impl From<frost_ed25519::keys::PublicKeyPackage> for PublicKeyPackage {
+    fn from(frost_pkg: frost_ed25519::keys::PublicKeyPackage) -> Self {
+        // Extract the group public key
+        let group_public_key = frost_pkg.verifying_key().serialize().to_vec();
+        
+        // Extract individual signer public keys
+        let mut signer_public_keys = std::collections::BTreeMap::new();
+        for (frost_id, verifying_share) in frost_pkg.verifying_shares() {
+            // Convert frost Identifier to u16
+            let signer_id = u16::from_be_bytes([0, frost_id.serialize()[0]]);
+            signer_public_keys.insert(signer_id, verifying_share.serialize().to_vec());
+        }
+
+        // Note: FROST PublicKeyPackage doesn't expose threshold/max_signers directly
+        // We'll use reasonable defaults based on the number of signers
+        let max_signers = signer_public_keys.len() as u16;
+        let threshold = (max_signers + 1) / 2; // Simple majority threshold
+
+        Self {
+            group_public_key,
+            signer_public_keys,
+            threshold,
+            max_signers,
+        }
+    }
+}
+
+impl TryFrom<PublicKeyPackage> for frost_ed25519::keys::PublicKeyPackage {
+    type Error = String;
+
+    fn try_from(aura_pkg: PublicKeyPackage) -> Result<Self, Self::Error> {
+        // Parse the group verifying key
+        if aura_pkg.group_public_key.len() != 32 {
+            return Err(format!(
+                "Invalid group public key length: {} (expected 32)",
+                aura_pkg.group_public_key.len()
+            ));
+        }
+        let mut group_key_bytes = [0u8; 32];
+        group_key_bytes.copy_from_slice(&aura_pkg.group_public_key);
+        let group_verifying_key = frost_ed25519::VerifyingKey::deserialize(group_key_bytes)
+            .map_err(|e| format!("Failed to deserialize group verifying key: {}", e))?;
+
+        // Parse individual signer verifying shares
+        let mut signer_verifying_keys = std::collections::BTreeMap::new();
+        for (signer_id, key_bytes) in &aura_pkg.signer_public_keys {
+            if key_bytes.len() != 32 {
+                return Err(format!(
+                    "Invalid signer key length for signer {}: {} (expected 32)",
+                    signer_id, key_bytes.len()
+                ));
+            }
+            
+            // Convert u16 signer ID to frost Identifier
+            let frost_id = frost::Identifier::try_from(*signer_id)
+                .map_err(|e| format!("Invalid signer ID {}: {}", signer_id, e))?;
+            
+            let mut key_array = [0u8; 32];
+            key_array.copy_from_slice(key_bytes);
+            let verifying_share = frost_ed25519::keys::VerifyingShare::deserialize(key_array)
+                .map_err(|e| format!("Failed to deserialize signer {} verifying share: {}", signer_id, e))?;
+            
+            signer_verifying_keys.insert(frost_id, verifying_share);
+        }
+
+        // Create FROST PublicKeyPackage
+        Ok(frost_ed25519::keys::PublicKeyPackage::new(signer_verifying_keys, group_verifying_key))
+    }
+}
+
+impl From<frost_ed25519::keys::KeyPackage> for Share {
+    fn from(frost_key_pkg: frost_ed25519::keys::KeyPackage) -> Self {
+        let identifier = frost_key_pkg.identifier();
+        let signing_share = frost_key_pkg.signing_share();
+        
+        Self::from_frost(*identifier, signing_share.clone())
+    }
+}
+
+impl TryFrom<Share> for frost_ed25519::keys::SigningShare {
+    type Error = String;
+
+    fn try_from(aura_share: Share) -> Result<Self, Self::Error> {
+        aura_share.to_frost()
+    }
+}
+
 /// Signing session state for coordinating signatures
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SigningSession {
