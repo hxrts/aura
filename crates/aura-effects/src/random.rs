@@ -11,8 +11,8 @@
 // Allow disallowed methods in effect handler implementations
 #![allow(clippy::disallowed_methods)]
 
-use aura_core::effects::RandomEffects;
 use async_trait::async_trait;
+use aura_core::effects::RandomEffects;
 use rand::RngCore;
 
 /// Real random handler using actual cryptographically secure randomness

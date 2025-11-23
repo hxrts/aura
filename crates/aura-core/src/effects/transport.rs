@@ -4,8 +4,8 @@
 //! step in the guard chain sequence. TransportEffects handles actual network packet emission
 //! after authorization, flow budget charging, leakage recording, and journal fact merging.
 
+use crate::{AuraError, AuthorityId, ContextId};
 use async_trait::async_trait;
-use crate::{AuthorityId, ContextId, AuraError};
 use serde::{Deserialize, Serialize};
 
 /// Receipt produced by successful guard chain execution
@@ -57,37 +57,25 @@ pub enum TransportError {
     },
     /// Failed to receive message
     #[error("Transport receive failed: {reason}")]
-    ReceiveFailed {
-        reason: String,
-    },
+    ReceiveFailed { reason: String },
     /// No message available for receive
     #[error("No message available")]
     NoMessage,
     /// Invalid envelope format
     #[error("Invalid envelope: {reason}")]
-    InvalidEnvelope {
-        reason: String,
-    },
+    InvalidEnvelope { reason: String },
     /// Receipt validation failed
     #[error("Receipt validation failed: {reason}")]
-    ReceiptValidationFailed {
-        reason: String,
-    },
+    ReceiptValidationFailed { reason: String },
     /// Destination unreachable
     #[error("Destination unreachable: {destination}")]
-    DestinationUnreachable {
-        destination: AuthorityId,
-    },
+    DestinationUnreachable { destination: AuthorityId },
     /// Transport protocol error
     #[error("Transport protocol error: {details}")]
-    ProtocolError {
-        details: String,
-    },
+    ProtocolError { details: String },
     /// Channel not established
     #[error("Secure channel not established for context {context}")]
-    ChannelNotEstablished {
-        context: ContextId,
-    },
+    ChannelNotEstablished { context: ContextId },
 }
 
 impl From<TransportError> for AuraError {
@@ -158,18 +146,14 @@ pub trait TransportEffects: Send + Sync {
     ) -> Result<TransportEnvelope, TransportError>;
 
     /// Check if a secure channel is established for the given context and peer
-    async fn is_channel_established(
-        &self,
-        context: ContextId,
-        peer: AuthorityId,
-    ) -> bool;
+    async fn is_channel_established(&self, context: ContextId, peer: AuthorityId) -> bool;
 
     /// Get statistics about transport operation
     async fn get_transport_stats(&self) -> TransportStats;
 }
 
 /// Statistics about transport layer operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TransportStats {
     /// Number of envelopes sent successfully
     pub envelopes_sent: u64,
@@ -183,17 +167,4 @@ pub struct TransportStats {
     pub active_channels: u32,
     /// Average envelope size in bytes
     pub avg_envelope_size: u32,
-}
-
-impl Default for TransportStats {
-    fn default() -> Self {
-        Self {
-            envelopes_sent: 0,
-            envelopes_received: 0,
-            send_failures: 0,
-            receive_failures: 0,
-            active_channels: 0,
-            avg_envelope_size: 0,
-        }
-    }
 }

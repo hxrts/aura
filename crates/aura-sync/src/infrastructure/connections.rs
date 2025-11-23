@@ -371,7 +371,7 @@ impl ConnectionPool {
             }
         } // Drop mutable borrow
 
-        // Create new connection via aura-transport  
+        // Create new connection via aura-transport
         let transport_connection = self.establish_transport_connection(peer_id).await?;
         let connection_id = transport_connection.connection_id.clone();
         let mut metadata = ConnectionMetadata::new_with_transport(
@@ -459,7 +459,7 @@ impl ConnectionPool {
 
         // Step 1: Collect all expired connections to close
         let mut all_connections_to_remove = Vec::new();
-        
+
         for (_peer_id, connections) in self.connections.iter_mut() {
             let before = connections.len();
 
@@ -530,7 +530,10 @@ impl ConnectionPool {
     }
 
     /// Establish transport connection to peer via aura-transport
-    async fn establish_transport_connection(&self, peer_id: DeviceId) -> SyncResult<TransportConnectionInfo> {
+    async fn establish_transport_connection(
+        &self,
+        peer_id: DeviceId,
+    ) -> SyncResult<TransportConnectionInfo> {
         tracing::debug!("Establishing transport connection to peer {}", peer_id);
 
         // In a full implementation, this would:
@@ -540,12 +543,15 @@ impl ConnectionPool {
 
         // For now, create a placeholder transport connection
         // This should be replaced with actual aura-transport integration
-        let connection_id = format!("transport_{}_{}", peer_id, 
+        let connection_id = format!(
+            "transport_{}_{}",
+            peer_id,
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_millis());
-        
+                .as_millis()
+        );
+
         // Simulate connection establishment
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
@@ -559,7 +565,7 @@ impl ConnectionPool {
             connection_id,
             protocol: "quic".to_string(), // Default to QUIC
             remote_address: format!("peer_{}.local:8080", peer_id), // Placeholder address
-            public_key: vec![0u8; 32], // Placeholder public key
+            public_key: vec![0u8; 32],    // Placeholder public key
             established_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
@@ -587,7 +593,7 @@ impl ConnectionPool {
 
             // In a full implementation, this would call:
             // effects.close_connection(&metadata.connection_id).await?;
-            
+
             // For now, just simulate the close operation
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
 

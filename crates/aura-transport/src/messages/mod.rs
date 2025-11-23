@@ -11,6 +11,5 @@
 pub mod social_rendezvous;
 pub mod social_types;
 
-// Re-export commonly used types
-pub use social_rendezvous::*;
+// Re-export commonly used types (social_types re-exports social_rendezvous)
 pub use social_types::*;

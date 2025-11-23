@@ -10,7 +10,7 @@ pub mod guardian;
 pub mod screens;
 pub mod state;
 
-pub use app::{TuiApp, DemoEvent};
+pub use app::{DemoEvent, TuiApp};
 pub use demo::DemoInterface;
 pub use guardian::GuardianInterface;
 pub use state::AppState;

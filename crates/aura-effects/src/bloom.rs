@@ -39,27 +39,27 @@ impl BloomEffects for BloomHandler {
         // TODO: Implement hardware-optimized bloom insertion
         // For now, use basic implementation
         use aura_core::hash;
-        
+
         for i in 0..filter.config.num_hash_functions {
             let mut hasher = hash::hasher();
             hasher.update(&i.to_le_bytes());
             hasher.update(element);
-            
+
             let hash_result = hasher.finalize();
             let hash_bytes = &hash_result;
             let mut hash_u64_bytes = [0u8; 8];
             hash_u64_bytes.copy_from_slice(&hash_bytes[..8]);
             let hash_value = u64::from_le_bytes(hash_u64_bytes);
-            
+
             let bit_index = hash_value % filter.config.bit_vector_size;
             let byte_index = (bit_index / 8) as usize;
             let bit_offset = (bit_index % 8) as u8;
-            
+
             if byte_index < filter.bits.len() {
                 filter.bits[byte_index] |= 1u8 << bit_offset;
             }
         }
-        
+
         filter.element_count += 1;
         Ok(())
     }
@@ -71,27 +71,29 @@ impl BloomEffects for BloomHandler {
     ) -> Result<bool, BloomError> {
         // TODO: Implement hardware-optimized bloom lookup
         use aura_core::hash;
-        
+
         for i in 0..filter.config.num_hash_functions {
             let mut hasher = hash::hasher();
             hasher.update(&i.to_le_bytes());
             hasher.update(element);
-            
+
             let hash_result = hasher.finalize();
             let hash_bytes = &hash_result;
             let mut hash_u64_bytes = [0u8; 8];
             hash_u64_bytes.copy_from_slice(&hash_bytes[..8]);
             let hash_value = u64::from_le_bytes(hash_u64_bytes);
-            
+
             let bit_index = hash_value % filter.config.bit_vector_size;
             let byte_index = (bit_index / 8) as usize;
             let bit_offset = (bit_index % 8) as u8;
-            
-            if byte_index >= filter.bits.len() || (filter.bits[byte_index] & (1u8 << bit_offset)) == 0 {
+
+            if byte_index >= filter.bits.len()
+                || (filter.bits[byte_index] & (1u8 << bit_offset)) == 0
+            {
                 return Ok(false);
             }
         }
-        
+
         Ok(true)
     }
 
@@ -125,7 +127,11 @@ impl BloomEffects for BloomHandler {
     }
 
     async fn bloom_estimate_count(&self, filter: &BloomFilter) -> Result<u64, BloomError> {
-        let set_bits: u64 = filter.bits.iter().map(|byte| byte.count_ones() as u64).sum();
+        let set_bits: u64 = filter
+            .bits
+            .iter()
+            .map(|byte| byte.count_ones() as u64)
+            .sum();
         let m = filter.config.bit_vector_size as f64;
         let k = filter.config.num_hash_functions as f64;
 

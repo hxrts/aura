@@ -5,8 +5,8 @@
 
 use crate::{fact::Journal, reduction::reduce_account_facts};
 use async_trait::async_trait;
-use aura_core::{authority::TreeState, Authority, AuthorityId, Hash32, Result, AuraError};
 use aura_core::effects::CryptoEffects;
+use aura_core::{authority::TreeState, AuraError, Authority, AuthorityId, Hash32, Result};
 use ed25519_dalek::{Signature, VerifyingKey as PublicKey};
 
 /// Authority state derived from facts
@@ -21,7 +21,11 @@ pub struct AuthorityState {
 
 impl AuthorityState {
     /// Sign with threshold - internal implementation
-    pub async fn sign_with_threshold<E: CryptoEffects>(&self, effects: &E, data: &[u8]) -> Result<Signature> {
+    pub async fn sign_with_threshold<E: CryptoEffects>(
+        &self,
+        effects: &E,
+        data: &[u8],
+    ) -> Result<Signature> {
         // Get the root public key for signing context
         let _public_key = self.tree_state.root_key();
 
@@ -33,11 +37,15 @@ impl AuthorityState {
     ///
     /// This properly delegates FROST operations to the effects system, following
     /// the architectural pattern: Layer 2 (journal) → Layer 3 (effects) → Layer 5 (frost).
-    async fn coordinate_frost_threshold_signing<E: CryptoEffects>(&self, _effects: &E, _data: &[u8]) -> Result<Signature> {
+    async fn coordinate_frost_threshold_signing<E: CryptoEffects>(
+        &self,
+        _effects: &E,
+        _data: &[u8],
+    ) -> Result<Signature> {
         // Get threshold requirements from tree state
         let threshold = self.tree_state.threshold();
         let device_count = self.tree_state.device_count();
-        
+
         // Validate we have sufficient devices for threshold
         if device_count < threshold as u32 {
             return Err(AuraError::invalid(format!(
@@ -50,9 +58,9 @@ impl AuthorityState {
         // This is a proper architectural boundary - Layer 2 should delegate but not implement
         Err(AuraError::internal(
             "FROST threshold signing requires full protocol implementation. \
-             This should be coordinated through aura-frost crate via the orchestration layer."
+             This should be coordinated through aura-frost crate via the orchestration layer.",
         ))
-        
+
         // TODO: When FROST architecture is fully implemented, this should:
         // 1. Extract device key shares from secure storage via effects
         // 2. Coordinate FROST signing session via transport effects
@@ -94,7 +102,11 @@ impl DerivedAuthority {
     ///
     /// This method provides the correct architectural pattern for threshold signing:
     /// Layer 2 (journal) → Layer 3 (effects) → Layer 5 (frost) → Layer 4 (orchestration)
-    pub async fn sign_operation_with_effects<E: CryptoEffects>(&self, effects: &E, operation: &[u8]) -> Result<Signature> {
+    pub async fn sign_operation_with_effects<E: CryptoEffects>(
+        &self,
+        effects: &E,
+        operation: &[u8],
+    ) -> Result<Signature> {
         // Delegate to internal threshold signing with effects
         self.state.sign_with_threshold(effects, operation).await
     }
@@ -120,7 +132,7 @@ impl Authority for DerivedAuthority {
         // For now, return an error that shows the proper delegation pattern
         Err(AuraError::internal(
             "Authority trait sign_operation requires effects parameter for FROST delegation. \
-             Use DerivedAuthority::sign_operation_with_effects() instead."
+             Use DerivedAuthority::sign_operation_with_effects() instead.",
         ))
     }
 

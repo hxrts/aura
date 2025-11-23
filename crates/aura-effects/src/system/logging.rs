@@ -18,33 +18,51 @@ use uuid::Uuid;
 /// Log entry with structured metadata
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct LogEntry {
+    /// Log level (debug, info, warn, error)
     pub level: String,
+    /// Log message content
     pub message: String,
+    /// Component that generated the log
     pub component: String,
+    /// Associated session identifier
     pub session_id: Option<SessionId>,
+    /// Associated device identifier
     pub device_id: Option<DeviceId>,
+    /// Structured metadata key-value pairs
     pub metadata: HashMap<String, Value>,
+    /// Unique trace identifier for request correlation
     pub trace_id: Option<Uuid>,
 }
 
 /// Audit log entry for security-critical events
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AuditEntry {
+    /// Type of event (e.g., "authentication", "authorization", "key_operation")
     pub event_type: String,
+    /// Actor performing the action
     pub actor: Option<DeviceId>,
+    /// Resource being acted upon
     pub resource: String,
+    /// Action performed (e.g., "create", "read", "update", "delete")
     pub action: String,
+    /// Outcome of the action (success, failure, denied)
     pub outcome: String,
+    /// Structured metadata for the audit entry
     pub metadata: HashMap<String, Value>,
+    /// Associated session identifier
     pub session_id: Option<SessionId>,
 }
 
 /// Configuration for logging system
 #[derive(Debug, Clone)]
 pub struct LoggingConfig {
+    /// Maximum number of log entries to retain in memory
     pub max_log_entries: usize,
+    /// Maximum number of audit entries to retain in memory
     pub max_audit_entries: usize,
+    /// Log level filter (debug, info, warn, error)
     pub log_level: String,
+    /// Whether audit logging is enabled
     pub audit_enabled: bool,
 }
 
@@ -62,11 +80,17 @@ impl Default for LoggingConfig {
 /// Statistics for the logging system
 #[derive(Debug, Clone, Default)]
 pub struct LoggingStats {
+    /// Total number of log entries written
     pub total_logs: u64,
+    /// Total number of audit entries written
     pub total_audit_logs: u64,
+    /// Number of error level logs
     pub error_logs: u64,
+    /// Number of warning level logs
     pub warn_logs: u64,
+    /// Number of info level logs
     pub info_logs: u64,
+    /// Number of debug level logs
     pub debug_logs: u64,
 }
 
@@ -75,7 +99,7 @@ pub struct LoggingStats {
 /// This handler provides system logging by delegating to external logging services.
 /// It is stateless and does not maintain in-memory buffers.
 ///
-/// **Note**: Complex log aggregation and multi-component coordination has been 
+/// **Note**: Complex log aggregation and multi-component coordination has been
 /// moved to `LoggingCoordinator` in aura-protocol (Layer 4). This handler provides
 /// only stateless logging operations. For coordination capabilities, wrap this handler
 /// with `aura_protocol::handlers::LoggingCoordinator`.
@@ -268,7 +292,7 @@ impl SystemEffects for LoggingSystemHandler {
             value = value,
             "Config update requested via logging handler (placeholder)"
         );
-        
+
         match key {
             "log_level" => {
                 // Validate the value but don't store it (stateless handler)
@@ -282,12 +306,12 @@ impl SystemEffects for LoggingSystemHandler {
             }
             "audit_enabled" => {
                 // Validate the value but don't store it (stateless handler)
-                value.parse::<bool>().map_err(|_| {
-                    SystemError::InvalidConfiguration {
+                value
+                    .parse::<bool>()
+                    .map_err(|_| SystemError::InvalidConfiguration {
                         key: key.to_string(),
                         value: value.to_string(),
-                    }
-                })?;
+                    })?;
                 Ok(())
             }
             _ => Err(SystemError::InvalidConfiguration {
@@ -318,8 +342,14 @@ impl SystemEffects for LoggingSystemHandler {
         // TODO: In production, this would query external metrics service
         let mut metrics = HashMap::new();
         metrics.insert("uptime".to_string(), 1.0);
-        metrics.insert("max_log_entries_configured".to_string(), self.config.max_log_entries as f64);
-        metrics.insert("max_audit_entries_configured".to_string(), self.config.max_audit_entries as f64);
+        metrics.insert(
+            "max_log_entries_configured".to_string(),
+            self.config.max_log_entries as f64,
+        );
+        metrics.insert(
+            "max_audit_entries_configured".to_string(),
+            self.config.max_audit_entries as f64,
+        );
         Ok(metrics)
     }
 

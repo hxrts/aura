@@ -1,7 +1,7 @@
 //! Example demonstrating various ways to use the EffectRegistry
 
-use aura_core::{effects::ExecutionMode, AuraResult, DeviceId};
 use aura_composition::EffectRegistry;
+use aura_core::{effects::ExecutionMode, AuraResult, DeviceId};
 
 #[tokio::main]
 async fn main() -> AuraResult<()> {

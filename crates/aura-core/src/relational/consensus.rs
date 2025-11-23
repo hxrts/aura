@@ -165,10 +165,7 @@ impl ConsensusStatus {
 
     /// Check if this status indicates failure
     pub fn is_failed(&self) -> bool {
-        matches!(
-            self,
-            ConsensusStatus::Failed | ConsensusStatus::TimedOut
-        )
+        matches!(self, ConsensusStatus::Failed | ConsensusStatus::TimedOut)
     }
 
     /// Check if this status indicates the operation is still in progress
@@ -213,13 +210,7 @@ mod tests {
         let operation_hash = Hash32([1u8; 32]);
         let attester = AuthorityId::new();
 
-        let proof = ConsensusProof::new(
-            prestate_hash,
-            operation_hash,
-            None,
-            vec![attester],
-            true,
-        );
+        let proof = ConsensusProof::new(prestate_hash, operation_hash, None, vec![attester], true);
 
         assert_eq!(proof.prestate_hash, prestate_hash);
         assert_eq!(proof.operation_hash, operation_hash);
@@ -232,7 +223,7 @@ mod tests {
     #[test]
     fn test_consensus_proof_validity() {
         let attester = AuthorityId::new();
-        
+
         // Valid proof with threshold met but no signature (incomplete)
         let proof_no_sig = ConsensusProof::new(
             Hash32::default(),
@@ -245,11 +236,8 @@ mod tests {
         assert!(proof_no_sig.is_complete()); // Has attesters and threshold met
 
         // Failed proof
-        let failed_proof = ConsensusProof::failed(
-            Hash32::default(),
-            Hash32::default(),
-            vec![attester],
-        );
+        let failed_proof =
+            ConsensusProof::failed(Hash32::default(), Hash32::default(), vec![attester]);
         assert!(!failed_proof.is_valid());
         assert!(!failed_proof.threshold_met());
     }
@@ -293,21 +281,9 @@ mod tests {
         let prestate1 = Hash32::default();
         let prestate2 = Hash32([1u8; 32]);
 
-        let proof1 = ConsensusProof::new(
-            prestate1,
-            Hash32::default(),
-            None,
-            vec![auth],
-            true,
-        );
+        let proof1 = ConsensusProof::new(prestate1, Hash32::default(), None, vec![auth], true);
 
-        let proof2 = ConsensusProof::new(
-            prestate2,
-            Hash32::default(),
-            None,
-            vec![auth],
-            true,
-        );
+        let proof2 = ConsensusProof::new(prestate2, Hash32::default(), None, vec![auth], true);
 
         assert!(proof1 < proof2); // prestate1 < prestate2
     }
@@ -315,22 +291,16 @@ mod tests {
     #[test]
     fn test_consensus_status() {
         let auth = AuthorityId::new();
-        
-        let success_proof = ConsensusProof::new(
-            Hash32::default(),
-            Hash32::default(),
-            None,
-            vec![auth],
-            true,
-        );
 
-        let fail_proof = ConsensusProof::failed(
-            Hash32::default(),
-            Hash32::default(),
-            vec![auth],
-        );
+        let success_proof =
+            ConsensusProof::new(Hash32::default(), Hash32::default(), None, vec![auth], true);
 
-        assert_eq!(ConsensusStatus::from(&success_proof), ConsensusStatus::Succeeded);
+        let fail_proof = ConsensusProof::failed(Hash32::default(), Hash32::default(), vec![auth]);
+
+        assert_eq!(
+            ConsensusStatus::from(&success_proof),
+            ConsensusStatus::Succeeded
+        );
         assert_eq!(ConsensusStatus::from(&fail_proof), ConsensusStatus::Failed);
 
         assert!(ConsensusStatus::Succeeded.is_successful());
@@ -342,12 +312,9 @@ mod tests {
     #[test]
     fn test_consensus_proof_test_helper() {
         let auth = AuthorityId::new();
-        
-        let test_proof = ConsensusProof::test_proof(
-            Hash32::default(),
-            Hash32::default(),
-            vec![auth],
-        );
+
+        let test_proof =
+            ConsensusProof::test_proof(Hash32::default(), Hash32::default(), vec![auth]);
 
         assert!(test_proof.threshold_met());
         assert!(!test_proof.has_signature());

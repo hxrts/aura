@@ -3,7 +3,7 @@
 //! Provides type-erased handler traits for dynamic dispatch and integration with
 //! the protocol layer's guard chain and multi-party coordination systems.
 //!
-//! **Remaining Components**: 
+//! **Remaining Components**:
 //! - **Erased**: Type-erased handler traits for dynamic dispatch; enables runtime polymorphism
 //!
 //! **Moved to aura-composition (Layer 3)**:

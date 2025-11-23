@@ -4,8 +4,8 @@
 
 use crate::core::{AgentConfig, AgentResult};
 use async_trait::async_trait;
-use aura_composition::{HandlerFactory, CompositeHandler, CompositeHandlerAdapter};
-use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage};
+use aura_composition::CompositeHandlerAdapter;
+use aura_core::effects::crypto::FrostSigningPackage;
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::storage::{StorageError, StorageStats};
 use aura_core::effects::time::{TimeError, TimeoutHandle, WakeCondition};
@@ -15,21 +15,18 @@ use aura_core::{
     AttestedOp, AuraError, AuthorityId, ContextId, DeviceId, FlowBudget, Hash32, LeafId, LeafNode,
     NodeIndex, Policy, TreeOpKind,
 };
-use aura_invitation::relationship_formation::RelationshipFormationEffects;
 use aura_journal::commitment_tree::state::TreeState;
 use aura_protocol::effects::tree::{Cut, Partial, ProposalId, Snapshot};
 use aura_protocol::effects::{
     AuraEffects, ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
-    ChoreographyMetrics, EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream,
-    TreeEffects,
+    ChoreographyMetrics, EffectApiEffects, EffectApiError, EffectApiEventStream, TreeEffects,
 };
 use aura_protocol::guards::effect_system_trait::GuardEffectSystem;
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Effect executor for dispatching effect calls
-/// 
+///
 /// Note: This wraps aura-composition infrastructure for Layer 6 runtime concerns.
 pub struct EffectExecutor {
     config: AgentConfig,
@@ -83,7 +80,7 @@ pub trait EffectCall: Send + Sync {
 }
 
 /// Concrete effect system combining all effects for runtime usage
-/// 
+///
 /// Note: This wraps aura-composition infrastructure for Layer 6 runtime concerns.
 pub struct AuraEffectSystem {
     config: AgentConfig,
@@ -1029,23 +1026,23 @@ impl GuardEffectSystem for AuraEffectSystem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_protocol::amp::AmpJournalEffects;
     use aura_core::identifiers::ContextId;
+    use aura_protocol::amp::AmpJournalEffects;
 
     #[tokio::test]
     async fn test_guard_effect_system_enables_amp_journal_effects() {
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config).unwrap();
-        
+
         // Test that our GuardEffectSystem implementation enables AmpJournalEffects
         let context = ContextId::new();
         let _journal = effect_system.fetch_context_journal(context).await.unwrap();
-        
+
         // Test that metadata works
         assert!(effect_system.get_metadata("authority_id").is_some());
         assert!(effect_system.get_metadata("execution_mode").is_some());
         assert!(effect_system.get_metadata("device_id").is_some());
-        
+
         // Test operation permissions
         assert!(effect_system.can_perform_operation("test_operation"));
     }

@@ -198,7 +198,7 @@ impl WitnessRole {
     ) -> Result<WitnessMessage, String> {
         // Verify prestate matches our view
         self.verify_prestate_consistency(prestate_hash)?;
-        
+
         // Generate nonce commitment using FROST
         let nonce_commitment = self.generate_frost_nonce_commitment(consensus_id).await?;
 
@@ -227,12 +227,12 @@ impl WitnessRole {
         // 2. Compare with provided prestate_hash
         // 3. Reject if there's a mismatch (state divergence)
         // 4. Handle state synchronization if needed
-        
+
         // Basic validation for now
         if prestate_hash == Hash32::default() {
             return Err("Invalid prestate hash".to_string());
         }
-        
+
         // Placeholder - in production would verify against local state
         Ok(())
     }
@@ -247,19 +247,18 @@ impl WitnessRole {
         // 2. Create cryptographic commitment to the nonce
         // 3. Store nonce securely for later use in signing
         // 4. Return commitment for coordinator aggregation
-        
-        use aura_core::crypto::tree_signing::{generate_nonce_with_share};
+
         use aura_core::frost::NonceCommitment;
-        
+
         // For now, create a placeholder commitment
         // In production, this would use real FROST key shares
         let commitment = NonceCommitment::from_bytes(vec![0u8; 32])
             .map_err(|e| format!("Failed to create nonce commitment: {}", e))?;
-            
+
         // TODO: Store the nonce securely for later signing operations
         // This would involve SecureStorageEffects to store the nonce
         // indexed by consensus_id for retrieval during signing phase
-        
+
         Ok(commitment)
     }
 }

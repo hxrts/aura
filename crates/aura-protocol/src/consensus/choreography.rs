@@ -9,7 +9,7 @@
 //! Layer 4 (orchestration) → Layer 5 (aura-frost) → Layer 3 (aura-effects) → Layer 1 (aura-core types)
 //!
 //! - **Nonce Generation**: Coordinated via aura-frost crate (not direct frost_ed25519)
-//! - **Partial Signing**: Coordinated via aura-frost crate (not direct frost_ed25519) 
+//! - **Partial Signing**: Coordinated via aura-frost crate (not direct frost_ed25519)
 //! - **Aggregation**: Coordinated via aura-frost crate (not direct frost_ed25519)
 //! - **Verification**: Verifies aggregated signatures against group public key
 //!
@@ -29,7 +29,9 @@
 //! - Requires properly generated FROST key shares from DKG/resharing ceremonies
 
 use super::{CommitFact, ConsensusId};
-use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature, Share, PublicKeyPackage};
+use aura_core::frost::{
+    NonceCommitment, PartialSignature, PublicKeyPackage, Share, ThresholdSignature,
+};
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
 use rand::RngCore;
@@ -345,12 +347,12 @@ impl WitnessRole {
         // 1. Getting our current state hash from the journal
         // 2. Comparing against the provided prestate_hash
         // 3. Ensuring state consistency across witnesses
-        
+
         // For now, perform basic validation
         if prestate_hash == Hash32::default() {
             return Err(AuraError::invalid("Invalid prestate hash"));
         }
-        
+
         // Placeholder - in production this would:
         // - Retrieve current authority state hash
         // - Compare with prestate_hash
@@ -365,16 +367,16 @@ impl WitnessRole {
         // 2. Ensure participant count meets threshold requirements
         // 3. Verify consensus_id matches expected values
         // 4. Check operation integrity
-        
+
         // Basic validation for now
         if commit_fact.participants.len() < commit_fact.threshold as usize {
             return Err(AuraError::invalid("Insufficient participants in result"));
         }
-        
+
         if commit_fact.threshold_signature.signature.is_empty() {
             return Err(AuraError::invalid("Empty threshold signature in result"));
         }
-        
+
         // TODO: Add full FROST signature verification once key packages are integrated
         Ok(())
     }
@@ -510,7 +512,7 @@ pub async fn run_consensus_choreography(
                 signer: (idx + 1) as u16,
                 commitment: vec![0u8; 32],
             });
-            
+
         let sign_msg = witness.handle_sign_request(
             config.consensus_id,
             aggregated_nonces.clone(),

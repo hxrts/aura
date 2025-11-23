@@ -3,14 +3,14 @@
 //! This module implements guardian authentication using the RelationalContext
 //! model, replacing the device-centric guardian authentication.
 
+use aura_core::relational::GuardianBinding;
 use aura_core::{
     relational::{GenericBinding, RelationalFact},
-    AuraError, Authority, AuthorityId, Hash32, Result, AccountId,
+    AuraError, Authority, AuthorityId, Hash32, Result,
 };
 use aura_macros::choreography;
-use aura_core::relational::GuardianBinding;
 use aura_relational::RelationalContext;
-use ed25519_dalek::{Signature, VerifyingKey, Verifier};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -302,10 +302,12 @@ impl GuardianAuthHandler {
         };
 
         if let Ok(binding_bytes) = serde_json::to_vec(&record) {
-            let _ = self.context.add_fact(RelationalFact::Generic(GenericBinding::new(
-                "recovery_request".to_string(),
-                binding_bytes,
-            )));
+            let _ = self
+                .context
+                .add_fact(RelationalFact::Generic(GenericBinding::new(
+                    "recovery_request".to_string(),
+                    binding_bytes,
+                )));
         }
 
         Ok(verified)
@@ -338,10 +340,8 @@ impl GuardianAuthHandler {
                         RelationalFact::Generic(binding)
                             if binding.binding_type == "recovery_request" =>
                         {
-                            serde_json::from_slice::<RecoveryRequestRecord>(
-                                &binding.binding_data,
-                            )
-                            .ok()
+                            serde_json::from_slice::<RecoveryRequestRecord>(&binding.binding_data)
+                                .ok()
                         }
                         _ => None,
                     })
@@ -355,9 +355,7 @@ impl GuardianAuthHandler {
                     .unwrap_or_default()
                     .as_secs();
 
-                if latest_request_time > 0
-                    && now < latest_request_time + recovery_delay.as_secs()
-                {
+                if latest_request_time > 0 && now < latest_request_time + recovery_delay.as_secs() {
                     return Ok(false);
                 }
 

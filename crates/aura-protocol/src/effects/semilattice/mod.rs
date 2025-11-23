@@ -96,10 +96,10 @@ use aura_core::identifiers::{DeviceId, SessionId};
 use aura_core::semilattice::{CausalOp, CmApply, CvState, Dedup, Delta};
 
 /// DEPRECATED: Handler factory for creating CRDT effect handlers
-/// 
+///
 /// This factory has been deprecated due to architectural violations.
-// HandlerFactory has been removed to comply with aura-composition-based registration.
-
+/// HandlerFactory has been removed to comply with aura-composition-based registration.
+///
 /// Execution utilities for integrating handlers with choreographic protocols
 pub mod execution {
     use super::*;
@@ -244,8 +244,10 @@ pub mod composition {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_composition::{
+        EffectRegistry, HandlerConfig, HandlerConfigBuilder, RegistrableHandler,
+    };
     use aura_core::semilattice::{Bottom, JoinSemilattice};
-    use aura_composition::{EffectRegistry, HandlerConfig, HandlerConfigBuilder, RegistrableHandler};
 
     // Test CRDT type
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -282,11 +284,19 @@ mod tests {
                 _parameters: &[u8],
                 _ctx: &aura_composition::HandlerContext,
             ) -> Result<Vec<u8>, aura_composition::HandlerError> {
-                Err(aura_composition::HandlerError::UnsupportedEffect { effect_type: aura_core::EffectType::Choreographic })
+                Err(aura_composition::HandlerError::UnsupportedEffect {
+                    effect_type: aura_core::EffectType::Choreographic,
+                })
             }
-            fn supported_operations(&self, _effect_type: aura_core::EffectType) -> Vec<String> { vec![] }
-            fn supports_effect(&self, _effect_type: aura_core::EffectType) -> bool { false }
-            fn execution_mode(&self) -> aura_core::ExecutionMode { aura_core::ExecutionMode::Testing }
+            fn supported_operations(&self, _effect_type: aura_core::EffectType) -> Vec<String> {
+                vec![]
+            }
+            fn supports_effect(&self, _effect_type: aura_core::EffectType) -> bool {
+                false
+            }
+            fn execution_mode(&self) -> aura_core::ExecutionMode {
+                aura_core::ExecutionMode::Testing
+            }
         }
 
         registry

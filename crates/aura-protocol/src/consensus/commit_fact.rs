@@ -170,25 +170,25 @@ fn verify_threshold_signature(
     // 1. Reconstruct the group public key from participant keys
     // 2. Verify the signature against the operation bytes using FROST
     // 3. Ensure the signature was created by at least `threshold` participants
-    
+
     // For now, perform basic validation
     if threshold_signature.signature.is_empty() {
         return Err("Empty signature".to_string());
     }
-    
+
     if participants.len() < threshold as usize {
         return Err("Insufficient participants for threshold".to_string());
     }
-    
+
     if operation_bytes.is_empty() {
         return Err("Empty operation bytes".to_string());
     }
-    
+
     // TODO: Replace with actual FROST signature verification once:
     // - PublicKeyPackage is available for the group
     // - FROST verification functions are properly integrated
     // - Participant key mapping is established
-    
+
     Ok(())
 }
 

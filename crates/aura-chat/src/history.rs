@@ -226,8 +226,6 @@ impl Default for HistoryQuery {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // TODO: Add tests with mock storage
     #[tokio::test]
     async fn test_chat_history_creation() {

@@ -215,12 +215,14 @@ pub async fn track_leakage_consumption<E: GuardEffectSystem>(
     }
 
     // Consume the budget and record the operation
-    tracker.consume_budget(
-        operation_id.to_string(),
-        leakage_budget.clone(),
-        observable_by,
-        effect_system,
-    ).await?;
+    tracker
+        .consume_budget(
+            operation_id.to_string(),
+            leakage_budget.clone(),
+            observable_by,
+            effect_system,
+        )
+        .await?;
 
     // Clean up old records outside the tracking window
     tracker.cleanup_old_records(effect_system).await;

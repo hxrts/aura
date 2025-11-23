@@ -47,12 +47,10 @@
 //! 3. The same effect can have multiple handlers (mock vs real, different backends)
 //! 4. Handlers can be composed, chained, or swapped without changing effect declarations
 
-use serde::{Deserialize, Serialize};
-use std::fmt;
 use thiserror::Error;
 
 // Re-export types from aura_core to avoid duplication
-pub use aura_core::effects::{ExecutionMode, EffectType};
+pub use aura_core::effects::{EffectType, ExecutionMode};
 
 /// Error type for Aura handler operations
 #[derive(Debug, Error)]
@@ -213,7 +211,7 @@ pub use core::{AuraHandler, BoxedHandler, HandlerUtils};
 
 // Re-export composition infrastructure from aura-composition
 pub use aura_composition::{
-    CompositeHandler, EffectRegistry, HandlerFactory, FactoryError, RegistrableHandler,
+    CompositeHandler, EffectRegistry, FactoryError, HandlerFactory, RegistrableHandler,
 };
 
 // Context management

@@ -227,15 +227,16 @@ impl IntegratedSbbSystem {
                 )?;
 
                 let sbb_envelope = SbbEnvelope::new_encrypted(encrypted_envelope, request.ttl);
-                let serialized =
-                    bincode::serialize(&sbb_envelope).map_err(|e| {
-                        AuraError::serialization(format!(
-                            "Failed to serialize encrypted SBB envelope: {}",
-                            e
-                        ))
-                    })?;
+                let serialized = bincode::serialize(&sbb_envelope).map_err(|e| {
+                    AuraError::serialization(format!(
+                        "Failed to serialize encrypted SBB envelope: {}",
+                        e
+                    ))
+                })?;
 
-                if let Some(next_hop) = RendezvousEnvelope::new(serialized, request.ttl).decrement_ttl() {
+                if let Some(next_hop) =
+                    RendezvousEnvelope::new(serialized, request.ttl).decrement_ttl()
+                {
                     message_size = sbb_envelope.size();
                     if self
                         .flooding_coordinator
@@ -249,7 +250,9 @@ impl IntegratedSbbSystem {
             }
 
             let flood_result = if forwarded > 0 {
-                FloodResult::Forwarded { peer_count: forwarded }
+                FloodResult::Forwarded {
+                    peer_count: forwarded,
+                }
             } else {
                 FloodResult::Dropped
             };

@@ -6,18 +6,12 @@ use aura_core::effects::{
     ConsoleEffects, CryptoEffects, RandomEffects, StorageEffects, TimeEffects,
 };
 use aura_effects::{
-    console::RealConsoleHandler,
-    crypto::RealCryptoHandler,
-    random::RealRandomHandler,
-    storage::EncryptedStorageHandler,
-    time::RealTimeHandler,
+    console::RealConsoleHandler, crypto::RealCryptoHandler, random::RealRandomHandler,
+    storage::EncryptedStorageHandler, time::RealTimeHandler,
 };
 use aura_testkit::stateful_effects::{
-    console::MockConsoleHandler,
-    crypto::MockCryptoHandler,
-    random::MockRandomHandler,
-    storage::MemoryStorageHandler,
-    time::SimulatedTimeHandler,
+    console::MockConsoleHandler, crypto::MockCryptoHandler, random::MockRandomHandler,
+    storage::MemoryStorageHandler, time::SimulatedTimeHandler,
 };
 
 #[tokio::test]

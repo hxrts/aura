@@ -103,7 +103,7 @@ impl Journal {
     pub fn account_summary(&self) -> AccountSummary {
         // Derive device count from authority facts in TreeState
         let device_count = self.get_device_count_from_tree_state();
-        
+
         AccountSummary {
             account_id: self.account_state.account_id,
             device_count,
@@ -111,15 +111,15 @@ impl Journal {
             last_epoch: self.account_state.epoch_counter.value,
         }
     }
-    
+
     /// Derive device count from authority facts in TreeState
     fn get_device_count_from_tree_state(&self) -> usize {
         // Use the reduction function to derive tree state from facts
         use crate::reduction::reduce_authority;
-        
+
         // Reduce the authority facts to get current tree state
         let authority_state = reduce_authority(&self.fact_journal);
-        
+
         // Return device count from the tree state
         authority_state.tree_state.device_count() as usize
     }

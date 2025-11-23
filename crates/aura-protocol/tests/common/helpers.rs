@@ -9,11 +9,11 @@
 //! - TestEffectsBuilder::for_unit_tests() instead of custom handlers
 //! - ChoreographyTestHarness for multi-device scenarios
 
+use aura_composition::CompositeHandler;
 use aura_core::{
     identifiers::{DeviceId, SessionId},
     AccountId,
 };
-use aura_composition::CompositeHandler;
 use uuid::Uuid;
 
 // === LEGACY FUNCTIONS - Use aura-testkit equivalents instead ===

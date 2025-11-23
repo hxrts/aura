@@ -5,8 +5,8 @@
 //! state in testing and monitoring scenarios.
 
 // Re-export the specific handlers that were moved
-pub use metrics::*;
 pub use logging::*;
+pub use metrics::*;
 pub use monitoring::*;
 
 /// Metrics system handlers for testing

@@ -7,7 +7,9 @@
 //! This module contains only production-grade stateless handlers.
 
 use async_trait::async_trait;
-use aura_core::effects::{SecureStorageEffects, SecureStorageError, SecureStorageLocation};
+use aura_core::effects::{
+    SecureStorageCapability, SecureStorageEffects, SecureStorageError, SecureStorageLocation,
+};
 
 /// Real secure storage handler for production use
 ///
@@ -134,14 +136,27 @@ mod tests {
     #[tokio::test]
     async fn test_real_secure_storage_not_implemented() {
         let handler = RealSecureStorageHandler::default();
-        let location = SecureStorageLocation::Local;
+        let location = SecureStorageLocation::new("test_namespace", "test_key");
+        let capabilities = vec![SecureStorageCapability::Read];
 
         // All methods should return not implemented errors
-        assert!(handler.secure_store(&location, "test", b"data").await.is_err());
-        assert!(handler.secure_retrieve(&location, "test").await.is_err());
-        assert!(handler.secure_delete(&location, "test").await.is_err());
-        assert!(handler.secure_exists(&location, "test").await.is_err());
-        assert!(handler.secure_list_keys(&location).await.is_err());
+        assert!(handler
+            .secure_store(&location, b"data", &capabilities)
+            .await
+            .is_err());
+        assert!(handler
+            .secure_retrieve(&location, &capabilities)
+            .await
+            .is_err());
+        assert!(handler
+            .secure_delete(&location, &capabilities)
+            .await
+            .is_err());
+        assert!(handler.secure_exists(&location).await.is_err());
+        assert!(handler
+            .secure_list_keys("test_namespace", &capabilities)
+            .await
+            .is_err());
     }
 
     #[tokio::test]

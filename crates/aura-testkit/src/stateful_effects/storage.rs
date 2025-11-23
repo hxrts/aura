@@ -4,9 +4,9 @@
 //! to fix architectural violations. These handlers use Arc<RwLock<>> for shared
 //! storage state in testing scenarios.
 
+use async_trait::async_trait;
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::ChunkId;
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -100,7 +100,10 @@ impl StorageEffects for MemoryStorageHandler {
         Ok(())
     }
 
-    async fn retrieve_batch(&self, keys: &[String]) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
         let data = self.data.read().await;
         let mut result = HashMap::new();
         for key in keys {

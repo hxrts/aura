@@ -8,8 +8,8 @@ use aura_core::effects::{NetworkEffects, NetworkError};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_protocol::effects::AuraEffects;
-use aura_protocol::guards::send_guard::{create_send_guard, SendGuardChain};
 use aura_protocol::guards::effect_system_trait::GuardEffectSystem;
+use aura_protocol::guards::send_guard::create_send_guard;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -64,7 +64,7 @@ impl NetworkTransport {
 
         // Convert DeviceId to AuthorityId for guard chain
         let recipient_authority = AuthorityId::from(recipient.0);
-        
+
         // Create guard chain for network send
         let guard_chain = create_send_guard(
             "network:send_data".to_string(),
@@ -73,7 +73,7 @@ impl NetworkTransport {
             (data.len() / 100) as u32 + 10, // cost based on data size + base cost
         )
         .with_operation_id(format!("network_send_{}_{}", self.device_id, recipient));
-        
+
         // Evaluate guard chain before sending
         match guard_chain.evaluate(effect_system).await {
             Ok(result) if result.authorized => {
@@ -81,15 +81,16 @@ impl NetworkTransport {
                     "Guard chain authorized send to {}, proceeding with network transmission",
                     recipient
                 );
-                
+
                 // Use the actual network effect handler for transmission
                 self.network_effects
                     .send_to_peer(recipient.0, data)
                     .await
                     .map_err(|e| match e {
-                        NetworkError::SendFailed { reason, .. } => {
-                            AuraError::network(format!("Failed to send to {}: {}", recipient, reason))
-                        }
+                        NetworkError::SendFailed { reason, .. } => AuraError::network(format!(
+                            "Failed to send to {}: {}",
+                            recipient, reason
+                        )),
                         NetworkError::PeerUnreachable { peer_id } => {
                             AuraError::network(format!("Peer unreachable: {}", peer_id))
                         }
@@ -107,33 +108,35 @@ impl NetworkTransport {
                     })
             }
             Ok(result) => {
-                let reason = result.denial_reason.unwrap_or_else(|| "unknown".to_string());
-                tracing::warn!(
-                    "Guard chain denied send to {}: {}",
-                    recipient, reason
-                );
+                let reason = result
+                    .denial_reason
+                    .unwrap_or_else(|| "unknown".to_string());
+                tracing::warn!("Guard chain denied send to {}: {}", recipient, reason);
                 Err(AuraError::permission_denied(format!(
-                    "Send to {} denied: {}", recipient, reason
+                    "Send to {} denied: {}",
+                    recipient, reason
                 )))
             }
             Err(err) => {
                 tracing::error!(
                     "Guard chain evaluation failed for send to {}: {}",
-                    recipient, err
+                    recipient,
+                    err
                 );
                 Err(AuraError::permission_denied(format!(
-                    "Send authorization failed: {}", err
+                    "Send authorization failed: {}",
+                    err
                 )))
             }
         }
     }
-    
+
     /// Legacy send method (deprecated - bypasses guard chain)
     pub async fn send(&self, recipient: &DeviceId, data: Vec<u8>) -> AuraResult<()> {
         tracing::warn!(
             "NetworkTransport::send called without guard chain - this bypasses security"
         );
-        
+
         // Use the actual network effect handler for transmission
         self.network_effects
             .send_to_peer(recipient.0, data)
@@ -188,27 +191,27 @@ impl NetworkTransport {
 
         // Get connected peers first
         let connected_peers = self.connected_peers().await;
-        
+
         // Send to each peer individually through guard chain
         for peer_device in connected_peers {
-            if let Err(err) = self.send_with_guard_chain(&peer_device, data.clone(), effect_system).await {
-                tracing::warn!(
-                    "Failed to broadcast to peer {}: {}",
-                    peer_device, err
-                );
+            if let Err(err) = self
+                .send_with_guard_chain(&peer_device, data.clone(), effect_system)
+                .await
+            {
+                tracing::warn!("Failed to broadcast to peer {}: {}", peer_device, err);
                 // Continue with other peers rather than failing the entire broadcast
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Legacy broadcast method (deprecated - bypasses guard chain)
     pub async fn broadcast(&self, data: Vec<u8>) -> AuraResult<()> {
         tracing::warn!(
             "NetworkTransport::broadcast called without guard chain - this bypasses security"
         );
-        
+
         self.network_effects
             .broadcast(data)
             .await
@@ -480,7 +483,8 @@ impl SbbTransportBridge {
         coordinator: &SbbFloodingCoordinator,
     ) -> bool {
         // Respond to offers from friends or guardians
-        coordinator.friends().contains(&offer.device_id) || coordinator.guardians().contains(&offer.device_id)
+        coordinator.friends().contains(&offer.device_id)
+            || coordinator.guardians().contains(&offer.device_id)
     }
 
     /// Create and send transport answer for an offer
@@ -490,8 +494,10 @@ impl SbbTransportBridge {
         coordinator: &SbbFloodingCoordinator,
     ) -> AuraResult<()> {
         // Select a transport method we support
-        let selected_method = self.select_transport_method(&offer.transport_methods).await?;
-        
+        let selected_method = self
+            .select_transport_method(&offer.transport_methods)
+            .await?;
+
         // Create answer payload
         let answer = TransportAnswerPayload {
             device_id: coordinator.device_id(),
@@ -512,7 +518,8 @@ impl SbbTransportBridge {
         coordinator: &SbbFloodingCoordinator,
     ) -> bool {
         // Accept offers from friends or guardians
-        coordinator.friends().contains(&offer.device_id) || coordinator.guardians().contains(&offer.device_id)
+        coordinator.friends().contains(&offer.device_id)
+            || coordinator.guardians().contains(&offer.device_id)
     }
 
     /// Select the best transport method from available options
@@ -522,25 +529,18 @@ impl SbbTransportBridge {
     ) -> AuraResult<TransportMethod> {
         // Prefer QUIC, then WebSocket, then TCP
         for method in methods {
-            match method {
-                TransportMethod::Quic { .. } => return Ok(method.clone()),
-                _ => {}
-            }
+            if let TransportMethod::Quic { .. } = method { return Ok(method.clone()) }
         }
         for method in methods {
-            match method {
-                TransportMethod::WebSocket { .. } => return Ok(method.clone()),
-                _ => {}
-            }
+            if let TransportMethod::WebSocket { .. } = method { return Ok(method.clone()) }
         }
         for method in methods {
-            match method {
-                TransportMethod::Tcp { .. } => return Ok(method.clone()),
-                _ => {}
-            }
+            if let TransportMethod::Tcp { .. } = method { return Ok(method.clone()) }
         }
-        
-        Err(AuraError::invalid("No supported transport methods available"))
+
+        Err(AuraError::invalid(
+            "No supported transport methods available",
+        ))
     }
 
     /// Create transport answer for an offer
@@ -550,7 +550,7 @@ impl SbbTransportBridge {
         selected_method: &TransportMethod,
     ) -> AuraResult<TransportAnswerPayload> {
         let coordinator = self.flooding_coordinator.read().await;
-        
+
         Ok(TransportAnswerPayload {
             device_id: coordinator.device_id(),
             selected_method: selected_method.clone(),
@@ -590,14 +590,20 @@ impl SbbTransportBridge {
     ) -> AuraResult<()> {
         match method {
             TransportMethod::WebSocket { url } => {
-                tracing::info!("Establishing WebSocket connection to {} at {}", target_device, url);
+                tracing::info!(
+                    "Establishing WebSocket connection to {} at {}",
+                    target_device,
+                    url
+                );
                 // TODO: Implement actual WebSocket connection
                 Ok(())
             }
             TransportMethod::Quic { addr, port } => {
                 tracing::info!(
                     "Establishing QUIC connection to {} at {}:{}",
-                    target_device, addr, port
+                    target_device,
+                    addr,
+                    port
                 );
                 // TODO: Implement actual QUIC connection
                 Ok(())
@@ -605,7 +611,9 @@ impl SbbTransportBridge {
             TransportMethod::Tcp { addr, port } => {
                 tracing::info!(
                     "Establishing TCP connection to {} at {}:{}",
-                    target_device, addr, port
+                    target_device,
+                    addr,
+                    port
                 );
                 // TODO: Implement actual TCP connection
                 Ok(())
@@ -629,9 +637,9 @@ impl SbbTransportBridge {
         selected: &TransportMethod,
         offered: &[TransportMethod],
     ) -> bool {
-        offered.iter().any(|method| {
-            std::mem::discriminant(method) == std::mem::discriminant(selected)
-        })
+        offered
+            .iter()
+            .any(|method| std::mem::discriminant(method) == std::mem::discriminant(selected))
     }
 
     /// Get connection parameters for transport method
@@ -698,7 +706,7 @@ impl NetworkTransportSender {
     pub fn new(transport: Arc<RwLock<NetworkTransport>>) -> Self {
         Self { transport }
     }
-    
+
     /// Send message with guard chain enforcement
     pub async fn send_to_peer_with_guard_chain<E: GuardEffectSystem>(
         &self,
@@ -713,7 +721,9 @@ impl NetworkTransportSender {
 
         // Send via network transport with guard chain
         let transport = self.transport.read().await;
-        transport.send_with_guard_chain(&peer, payload, effect_system).await
+        transport
+            .send_with_guard_chain(&peer, payload, effect_system)
+            .await
     }
 }
 
@@ -729,7 +739,7 @@ impl TransportSender for NetworkTransportSender {
         tracing::warn!(
             "NetworkTransportSender::send_to_peer called without guard chain - this bypasses security"
         );
-        
+
         // Serialize SBB message
         let payload = bincode::serialize(&message).map_err(|e| {
             AuraError::serialization(format!("Failed to serialize SBB message: {}", e))

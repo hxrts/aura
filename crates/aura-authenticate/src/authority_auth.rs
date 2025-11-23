@@ -180,7 +180,7 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
     pub async fn authenticate_as_requester(
         &self,
         authority: Arc<dyn Authority>,
-        verifier_authority: AuthorityId,
+        _verifier_authority: AuthorityId,
         scope: SessionScope,
     ) -> Result<AuthorityAuthResponse> {
         // Create authentication request
@@ -301,7 +301,7 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
     }
 
     /// Generate challenge data for authentication
-    async fn generate_challenge(&self, request: &AuthorityAuthRequest) -> Result<ChallengeData> {
+    async fn generate_challenge(&self, _request: &AuthorityAuthRequest) -> Result<ChallengeData> {
         // Generate challenge nonce
         let mut nonce = [0u8; 32];
         let nonce_bytes = self.effects.random_bytes(32).await;

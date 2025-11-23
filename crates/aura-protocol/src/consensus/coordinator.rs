@@ -3,8 +3,8 @@
 //! This module implements the coordinator role for Aura Consensus,
 //! managing consensus instances and orchestrating the protocol flow.
 
-use super::{CommitFact, ConsensusId, WitnessMessage, WitnessSet, WitnessShare};
 use super::choreography::ConsensusMessage;
+use super::{CommitFact, ConsensusId, WitnessMessage, WitnessSet, WitnessShare};
 use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature};
 use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
@@ -105,7 +105,15 @@ impl ConsensusCoordinator {
     /// Run fast path protocol
     async fn run_fast_path(&mut self, instance_id: Hash32) -> Result<CommitFact> {
         // Extract all needed data from instance to avoid borrow checker issues
-        let (consensus_id, prestate_hash, operation_hash, operation_bytes, timeout_ms, witness_set, threshold) = {
+        let (
+            consensus_id,
+            prestate_hash,
+            operation_hash,
+            operation_bytes,
+            timeout_ms,
+            witness_set,
+            threshold,
+        ) = {
             let instance = self
                 .instances
                 .get(&instance_id)
@@ -145,7 +153,8 @@ impl ConsensusCoordinator {
         })??;
 
         // Send signature request with aggregated nonces
-        self.send_signature_requests(&nonce_commitments, consensus_id).await?;
+        self.send_signature_requests(&nonce_commitments, consensus_id)
+            .await?;
 
         // Collect partial signatures
         let partial_signatures = timeout(timeout_duration, async {
@@ -158,11 +167,9 @@ impl ConsensusCoordinator {
         })??;
 
         // Aggregate signatures using actual FROST
-        let threshold_signature = self.aggregate_frost_signatures(
-            &partial_signatures,
-            &nonce_commitments,
-            consensus_id,
-        ).await?;
+        let threshold_signature = self
+            .aggregate_frost_signatures(&partial_signatures, &nonce_commitments, consensus_id)
+            .await?;
 
         // Create commit fact
         let commit_fact = CommitFact::new(
@@ -291,7 +298,7 @@ impl ConsensusCoordinator {
     ) -> Result<WitnessSet> {
         // Production gossip and network effects implementation:
         // 1. Reach out to backup witnesses beyond the original set
-        // 2. Use anti-entropy mechanisms to sync with peers  
+        // 2. Use anti-entropy mechanisms to sync with peers
         // 3. Collect shares from any authority that can validate the prestate
         // 4. Handle network partitions and Byzantine behavior
         witness_set = Self::implement_production_gossip(witness_set, consensus_id, operation_hash)?;
@@ -361,7 +368,7 @@ impl ConsensusCoordinator {
 
         // Real convergence checks and FROST aggregation:
         // - Verify all shares are for same consensus_id and operation_hash
-        // - Detect and handle conflicting signatures (Byzantine behavior) 
+        // - Detect and handle conflicting signatures (Byzantine behavior)
         // - Use epidemic gossip theory to ensure probabilistic convergence
         // - Implement view synchronization across network partitions
         // TODO: Extract consensus_id and operation_hash from responses for validation
@@ -389,24 +396,21 @@ impl ConsensusCoordinator {
     }
 
     /// Send execute messages via transport to all witnesses
-    async fn send_execute_messages(
-        &self, 
-        execute_msg: ConsensusMessage,
-    ) -> Result<()> {
+    async fn send_execute_messages(&self, execute_msg: ConsensusMessage) -> Result<()> {
         // TODO: Implement transport layer integration for consensus messages
         // This would:
-        // 1. Serialize the execute message  
+        // 1. Serialize the execute message
         // 2. Send to each witness via TransportEffects
         // 3. Handle transport failures and retries
         // 4. Track message delivery status
-        
+
         let _ = execute_msg; // Suppress unused warning
-        
+
         // Placeholder for transport integration
         Ok(())
     }
 
-    /// Collect nonce commitments from witnesses 
+    /// Collect nonce commitments from witnesses
     async fn collect_nonce_commitments(
         &self,
         consensus_id: ConsensusId,
@@ -416,9 +420,9 @@ impl ConsensusCoordinator {
         // 2. Validate each commitment against witness identity
         // 3. Ensure threshold number of commitments received
         // 4. Handle timeouts and partial responses
-        
+
         let _ = consensus_id; // Suppress unused warning
-        
+
         // Placeholder implementation
         Ok(vec![])
     }
@@ -434,10 +438,10 @@ impl ConsensusCoordinator {
         // 2. Send to each witness that provided a commitment
         // 3. Include operation hash and consensus context
         // 4. Track request delivery status
-        
+
         let _ = nonce_commitments; // Suppress unused warning
         let _ = consensus_id; // Suppress unused warning
-        
+
         // Placeholder for signature request implementation
         Ok(())
     }
@@ -452,9 +456,9 @@ impl ConsensusCoordinator {
         // 2. Validate each partial signature
         // 3. Ensure threshold number of signatures received
         // 4. Handle invalid signatures and Byzantine behavior
-        
+
         let _ = consensus_id; // Suppress unused warning
-        
+
         // Placeholder implementation
         Ok(vec![])
     }
@@ -463,7 +467,7 @@ impl ConsensusCoordinator {
     async fn aggregate_frost_signatures(
         &self,
         partial_signatures: &[aura_core::frost::PartialSignature],
-        nonce_commitments: &[aura_core::frost::NonceCommitment], 
+        nonce_commitments: &[aura_core::frost::NonceCommitment],
         consensus_id: ConsensusId,
     ) -> Result<aura_core::frost::ThresholdSignature> {
         // TODO: Implement actual FROST signature aggregation:
@@ -471,18 +475,18 @@ impl ConsensusCoordinator {
         // 2. Use FROST aggregation algorithm
         // 3. Produce final group signature
         // 4. Validate against group public key
-        
+
         let _ = partial_signatures; // Suppress unused warning
         let _ = nonce_commitments; // Suppress unused warning
         let _ = consensus_id; // Suppress unused warning
-        
+
         // Placeholder implementation
         Ok(aura_core::frost::ThresholdSignature::new(vec![], vec![]))
     }
 
     /// Implement production gossip protocols
     fn implement_production_gossip(
-        mut witness_set: WitnessSet,
+        witness_set: WitnessSet,
         consensus_id: ConsensusId,
         operation_hash: Hash32,
     ) -> Result<WitnessSet> {
@@ -491,10 +495,10 @@ impl ConsensusCoordinator {
         // 2. Anti-entropy with backup witnesses
         // 3. Network partition tolerance
         // 4. Byzantine fault tolerance
-        
+
         let _ = consensus_id; // Suppress unused warning
         let _ = operation_hash; // Suppress unused warning
-        
+
         // Placeholder - return original witness set
         Ok(witness_set)
     }
@@ -510,11 +514,11 @@ impl ConsensusCoordinator {
         // 2. Detect conflicting operation hashes (Byzantine behavior)
         // 3. Verify signature consistency across witnesses
         // 4. Implement view synchronization checks
-        
+
         let _ = witness_set; // Suppress unused warning
         let _ = consensus_id; // Suppress unused warning
         let _ = operation_hash; // Suppress unused warning
-        
+
         // Placeholder implementation
         Ok(())
     }
@@ -526,9 +530,9 @@ impl ConsensusCoordinator {
         // 2. Validate signature consistency
         // 3. Use FROST aggregation algorithm
         // 4. Verify final signature against group public key
-        
+
         let _ = witness_set; // Suppress unused warning
-        
+
         // Placeholder implementation
         Ok(())
     }

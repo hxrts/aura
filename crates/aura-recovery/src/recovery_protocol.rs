@@ -5,10 +5,10 @@
 
 #![allow(clippy::disallowed_methods)] // TODOs use Utc::now() temporarily
 
-use aura_core::{AuraError, AuthorityId, Hash32, Result};
-use aura_macros::choreography;
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
 use aura_core::Prestate;
+use aura_core::{AuraError, AuthorityId, Hash32, Result};
+use aura_macros::choreography;
 use aura_relational::RelationalContext;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

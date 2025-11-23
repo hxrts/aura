@@ -5,7 +5,7 @@
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
-use aura_core::effects::{ConsoleEffects, CryptoEffects, JournalEffects, RandomEffects, StorageEffects, TimeEffects};
+use aura_core::effects::{JournalEffects, StorageEffects, TimeEffects};
 use aura_core::identifiers::GuardianId;
 use aura_core::{AccountId, AuthorityId, DeviceId};
 use aura_recovery::types::{GuardianProfile, GuardianSet};
@@ -14,6 +14,10 @@ use std::path::Path;
 
 use crate::RecoveryAction;
 
+/// Handle recovery action requests from CLI
+///
+/// Processes recovery operations including starting recovery, submitting approvals,
+/// and handling recovery responses based on the action type.
 pub async fn handle_recovery(
     ctx: &EffectContext,
     effects: &AuraEffectSystem,
@@ -164,7 +168,7 @@ async fn start_recovery(
     let guardian_authorities: Vec<AuthorityId> = recovery_request
         .guardians
         .iter()
-        .map(|g| AuthorityId::new()) // Mock authority IDs
+        .map(|_g| AuthorityId::new()) // Mock authority IDs
         .collect();
     // Create a mock relational context for demo
     let recovery_context = Arc::new(RelationalContext::new(guardian_authorities.clone()));
@@ -527,7 +531,8 @@ async fn dispute_recovery(
                 .get("dispute_window_ends_at")
                 .and_then(|v| v.as_u64())
             {
-                let current_time = <AuraEffectSystem as TimeEffects>::current_timestamp(effects).await;
+                let current_time =
+                    <AuraEffectSystem as TimeEffects>::current_timestamp(effects).await;
                 if current_time > dispute_window_ends {
                     return Err(anyhow::anyhow!(
                         "Dispute window has closed for evidence {}",
@@ -718,7 +723,7 @@ async fn generate_guardian_approval(
     commitments.insert(*identifier, signing_commitments);
 
     // Generate partial signature
-    let partial_signature = FrostCrypto::generate_partial_signature(
+    let _partial_signature = FrostCrypto::generate_partial_signature(
         &context,
         &recovery_message,
         key_package,

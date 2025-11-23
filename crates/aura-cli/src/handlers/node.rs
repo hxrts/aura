@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
-use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects, TimeEffects};
+use aura_protocol::effect_traits::{StorageEffects, TimeEffects};
 use std::path::Path;
 
 /// Handle node operations through effects

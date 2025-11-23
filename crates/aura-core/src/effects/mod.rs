@@ -116,7 +116,7 @@ pub use system::{SystemEffects, SystemError};
 pub use testing::{TestingEffects, TestingError};
 pub use time::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
 pub use transport::{
-    TransportEffects, TransportError, TransportEnvelope, TransportReceipt, TransportStats,
+    TransportEffects, TransportEnvelope, TransportError, TransportReceipt, TransportStats,
 };
 
 // Re-export unified error system
@@ -166,7 +166,9 @@ impl ExecutionMode {
 ///
 /// Categorizes all effects in the Aura system for efficient dispatch
 /// and middleware composition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub enum EffectType {
     /// Cryptographic operations (FROST, DKD, hashing, key derivation)
     Crypto,

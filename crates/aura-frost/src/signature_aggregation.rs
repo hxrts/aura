@@ -5,11 +5,10 @@
 
 #![allow(missing_docs)]
 
-use crate::{
-    threshold_signing::{FrostCrypto, ThresholdSigningConfig},
-    FrostResult,
+use crate::FrostResult;
+use aura_core::frost::{
+    NonceCommitment, PartialSignature, PublicKeyPackage, ThresholdSignature, TreeSigningContext,
 };
-use aura_core::frost::{NonceCommitment, PartialSignature, PublicKeyPackage, ThresholdSignature, TreeSigningContext};
 use aura_core::{identifiers::AuthorityId, AuraError};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
@@ -143,8 +142,7 @@ pub async fn perform_frost_aggregation(
     nonce_commitments: &std::collections::HashMap<AuthorityId, NonceCommitment>,
     public_key_package: &PublicKeyPackage,
 ) -> FrostResult<ThresholdSignature> {
-    use aura_core::frost::tree_signing::{binding_message, frost_aggregate, TreeSigningContext};
-    use frost_ed25519 as frost;
+    use aura_core::frost::tree_signing::{binding_message, frost_aggregate};
     use std::collections::BTreeMap;
 
     if partial_signatures.len() < public_key_package.threshold as usize {
@@ -180,8 +178,7 @@ pub async fn perform_frost_aggregation(
     .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {}", e)))?;
 
     // Create threshold signature result
-    let participating_signers: Vec<u16> =
-        partial_signatures.iter().map(|p| p.signer).collect();
+    let participating_signers: Vec<u16> = partial_signatures.iter().map(|p| p.signer).collect();
 
     Ok(ThresholdSignature::new(
         signature_bytes,
@@ -204,9 +201,7 @@ fn frost_commitments_from_nonce(
         let identifier = commitment
             .frost_identifier()
             .map_err(|e| AuraError::invalid(e))?;
-        let signing_commitments = commitment
-            .to_frost()
-            .map_err(|e| AuraError::invalid(e))?;
+        let signing_commitments = commitment.to_frost().map_err(|e| AuraError::invalid(e))?;
         frost_commitments.insert(identifier, signing_commitments);
     }
 
@@ -221,6 +216,7 @@ fn frost_commitments_from_nonce(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::threshold_signing::{FrostCrypto, ThresholdSigningConfig};
     use aura_macros::aura_test;
     use aura_testkit::create_test_fixture;
 
@@ -287,12 +283,9 @@ mod tests {
         let authorities: Vec<_> = (0..config.total_signers)
             .map(|_| aura_core::AuthorityId::new())
             .collect();
-        let key_material = FrostCrypto::generate_key_material(
-            &authorities,
-            &config,
-            &*effects.random_effects(),
-        )
-        .await?;
+        let key_material =
+            FrostCrypto::generate_key_material(&authorities, &config, &*effects.random_effects())
+                .await?;
 
         let mut nonce_commitments = std::collections::HashMap::new();
         let mut signer_nonces =
@@ -333,8 +326,9 @@ mod tests {
         }
 
         // Convert frost PublicKeyPackage to aura-core PublicKeyPackage
-        let aura_public_key_package = PublicKeyPackage::from(key_material.public_key_package.clone());
-        
+        let aura_public_key_package =
+            PublicKeyPackage::from(key_material.public_key_package.clone());
+
         let result = perform_frost_aggregation(
             &partial_signatures,
             message,
@@ -380,11 +374,9 @@ mod tests {
                     .key_packages
                     .get(authority)
                     .expect("missing key package");
-                let (nonces, commitment) = FrostCrypto::generate_nonce_commitment(
-                    key_pkg,
-                    &*effects.random_effects(),
-                )
-                .await?;
+                let (nonces, commitment) =
+                    FrostCrypto::generate_nonce_commitment(key_pkg, &*effects.random_effects())
+                        .await?;
                 signer_nonces.insert(*authority, nonces);
                 nonce_commitments.insert(*authority, commitment);
             }
@@ -413,8 +405,9 @@ mod tests {
             }
 
             // Convert frost PublicKeyPackage to aura-core PublicKeyPackage
-            let aura_public_key_package = PublicKeyPackage::from(key_material.public_key_package.clone());
-            
+            let aura_public_key_package =
+                PublicKeyPackage::from(key_material.public_key_package.clone());
+
             let result = perform_frost_aggregation(
                 &partial_signatures,
                 b"round message",

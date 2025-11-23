@@ -201,6 +201,7 @@ pub struct SessionCreationFailed {
 
 /// Internal approval response for choreography simulation
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ApprovalResponse {
     /// Session ID being responded to
     pub session_id: String,
@@ -336,7 +337,7 @@ where
                 tracing::debug!("Session creation successful for {}", request.session_id);
                 Ok(session_ticket)
             }
-            false => Err(AuraError::invalid(&format!(
+            false => Err(AuraError::invalid(format!(
                 "Session creation rejected: {}",
                 approval_response.reason
             ))),

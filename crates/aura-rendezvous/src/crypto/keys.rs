@@ -29,7 +29,7 @@ fn derive_relationship_key(
     // Add identity context
     match &spec.identity_context {
         IdentityKeyContext::RelationshipKeys { relationship_id } => {
-            derivation_input.extend_from_slice(&relationship_id);
+            derivation_input.extend_from_slice(relationship_id);
         }
         _ => {
             derivation_input.extend_from_slice(b"default_context");

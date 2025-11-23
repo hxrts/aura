@@ -1,9 +1,8 @@
 //! Admin maintenance commands (replacement, fork controls).
 
 use anyhow::{anyhow, Result};
-use aura_agent::{AgentBuilder, AuraEffectSystem, EffectContext};
+use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::identifiers::{AccountId, AuthorityId, DeviceId};
-use aura_protocol::effect_traits::ConsoleEffects;
 
 use crate::AdminAction;
 
@@ -44,7 +43,7 @@ async fn replace_admin(
     );
 
     // Convert DeviceId to AuthorityId (1:1 mapping for single-device authorities)
-    let authority_id = AuthorityId(device_id.0);
+    let _authority_id = AuthorityId(device_id.0);
 
     // Placeholder implementation - replace_admin method not available in current architecture
     println!("Admin replacement not yet implemented in new architecture");

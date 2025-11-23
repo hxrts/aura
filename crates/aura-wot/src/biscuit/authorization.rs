@@ -4,8 +4,8 @@
 //! Web of Trust system. It implements cryptographic verification, Datalog policy
 //! evaluation, and resource-specific authorization checks.
 
-use aura_core::{identifiers::DeviceId, time::current_unix_timestamp};
 use crate::{BiscuitError, ResourceScope};
+use aura_core::{identifiers::DeviceId, time::current_unix_timestamp};
 use biscuit_auth::{macros::*, Biscuit, PublicKey};
 
 pub struct BiscuitAuthorizationBridge {

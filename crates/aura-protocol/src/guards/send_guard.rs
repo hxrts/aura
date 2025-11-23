@@ -277,7 +277,9 @@ impl SendGuardChain {
         let resource = parts.get(1).unwrap_or(&"default");
 
         // Retrieve Biscuit token for the required capability from effect system
-        let token = self.retrieve_send_token(capability, resource, _effect_system).await?;
+        let token = self
+            .retrieve_send_token(capability, resource, _effect_system)
+            .await?;
 
         // Create resource scope for authorization check
         // Create resource scope for authorization check
@@ -327,7 +329,7 @@ impl SendGuardChain {
     ) -> AuraResult<Biscuit> {
         // Try to retrieve token from storage based on capability and context
         let token_key = format!("send_tokens/{}_{}", capability, self.context);
-        
+
         // First try to get a stored token for this capability and context
         if let Some(token_data) = effect_system.get_metadata(&token_key) {
             // Try to deserialize the token from storage (assume it's hex-encoded bytes for now)
@@ -347,7 +349,8 @@ impl SendGuardChain {
         }
 
         // If no token found or deserialization failed, create a new one using the authorization bridge
-        self.create_fresh_send_token(capability, resource, effect_system).await
+        self.create_fresh_send_token(capability, resource, effect_system)
+            .await
     }
 
     /// Create a fresh Biscuit token for send authorization using authorization bridge
@@ -389,7 +392,8 @@ impl SendGuardChain {
             expiry = (std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
-                .as_secs() + 3600) as i64 // 1 hour from now
+                .as_secs()
+                + 3600) as i64 // 1 hour from now
         )
         .build(&keypair)
         .map_err(|e| AuraError::invalid(format!("Failed to build Biscuit token: {}", e)))?;

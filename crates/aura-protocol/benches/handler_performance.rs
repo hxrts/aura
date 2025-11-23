@@ -13,9 +13,7 @@ use aura_core::{
     effects::{CryptoEffects, RandomEffects, StorageEffects},
     identifiers::DeviceId,
 };
-use aura_effects::{
-    FilesystemStorageHandler, RealCryptoHandler, RealRandomHandler,
-};
+use aura_effects::{FilesystemStorageHandler, RealCryptoHandler, RealRandomHandler};
 use aura_testkit::stateful_effects::{
     crypto::MockCryptoHandler, random::MockRandomHandler, storage::MemoryStorageHandler,
 };

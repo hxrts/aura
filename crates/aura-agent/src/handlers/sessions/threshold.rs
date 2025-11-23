@@ -4,10 +4,9 @@
 
 use super::{coordination::SessionOperations, shared::*};
 use crate::core::{AgentError, AgentResult};
-use aura_core::identifiers::DeviceId;
 use aura_core::effects::TimeEffects;
+use aura_core::identifiers::DeviceId;
 use aura_protocol::effects::SessionType;
-use std::collections::HashMap;
 
 impl SessionOperations {
     /// Create threshold operation session

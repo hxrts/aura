@@ -2,9 +2,9 @@
 //!
 //! Configuration types for agent runtime behavior.
 
+use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use aura_core::DeviceId;
 
 /// Agent configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

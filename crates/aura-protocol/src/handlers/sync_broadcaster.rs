@@ -1,6 +1,6 @@
 use crate::effects::sync::{BloomDigest, SyncEffects, SyncError};
-use crate::guards::send_guard::{create_send_guard, SendGuardChain};
 use crate::guards::effect_system_trait::GuardEffectSystem;
+use crate::guards::send_guard::create_send_guard;
 use async_trait::async_trait;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{tree::AttestedOp, Hash32};
@@ -210,7 +210,7 @@ impl SyncEffects for BroadcasterHandler {
         for op in ops {
             let cid = Hash32::from(op.op.parent_commitment);
             oplog.insert(cid, op);
-            
+
             // Add to pending announcements if not at capacity
             if pending.len() < self.config.max_pending_announcements {
                 pending.insert(cid, BTreeSet::new());
@@ -222,20 +222,18 @@ impl SyncEffects for BroadcasterHandler {
 
     async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
         let mut pending = self.pending_announcements.write().await;
-        
+
         if pending.len() >= self.config.max_pending_announcements {
             return Err(SyncError::OperationNotFound); // Using as "capacity exceeded"
         }
-        
+
         pending.insert(cid, BTreeSet::new());
         Ok(())
     }
 
     async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
         let oplog = self.oplog.read().await;
-        oplog.get(&cid)
-            .cloned()
-            .ok_or(SyncError::OperationNotFound)
+        oplog.get(&cid).cloned().ok_or(SyncError::OperationNotFound)
     }
 
     async fn push_op_to_peers(&self, op: AttestedOp, _peers: Vec<Uuid>) -> Result<(), SyncError> {
@@ -309,11 +307,11 @@ impl BroadcasterHandler {
         effect_system: &E,
     ) -> Result<(), SyncError> {
         let cid = Hash32::from(op.op.parent_commitment);
-        
+
         for peer_uuid in peers {
             // Convert UUID to AuthorityId for guard chain
             let peer_authority = AuthorityId::from(peer_uuid);
-            
+
             // Create guard chain for sync operation
             let guard_chain = create_send_guard(
                 "sync:broadcast_op".to_string(), // authorization requirement
@@ -322,15 +320,16 @@ impl BroadcasterHandler {
                 50, // flow cost for broadcast operation
             )
             .with_operation_id(format!("broadcast_op_{}", cid));
-            
+
             // Evaluate guard chain before sending
             match guard_chain.evaluate(effect_system).await {
                 Ok(result) if result.authorized => {
                     tracing::debug!(
                         "Guard chain authorized broadcast of op {:?} to peer: {:?}",
-                        cid, peer_uuid
+                        cid,
+                        peer_uuid
                     );
-                    
+
                     // TODO: Implement actual transport.send() with receipt from guard chain
                     // transport.send_with_receipt(peer, OpPush { op: op.clone() }, result.receipt).await?;
                     tracing::debug!("Op {:?} sent to peer: {:?} (mocked)", cid, peer_uuid);
@@ -338,37 +337,41 @@ impl BroadcasterHandler {
                 Ok(result) => {
                     tracing::warn!(
                         "Guard chain denied broadcast of op {:?} to peer {:?}: {:?}",
-                        cid, peer_uuid, result.denial_reason
+                        cid,
+                        peer_uuid,
+                        result.denial_reason
                     );
                     return Err(SyncError::AuthorizationFailed);
                 }
                 Err(err) => {
                     tracing::error!(
                         "Guard chain evaluation failed for op {:?} to peer {:?}: {}",
-                        cid, peer_uuid, err
+                        cid,
+                        peer_uuid,
+                        err
                     );
                     return Err(SyncError::AuthorizationFailed);
                 }
             }
         }
-        
+
         // Remove from pending announcements after successful sends
         let mut pending = self.pending_announcements.write().await;
         pending.remove(&cid);
-        
+
         Ok(())
     }
 
     async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
         // Legacy interface - deprecated, use push_op_to_peers_with_guard_chain instead
         tracing::warn!("push_op_to_peers called without guard chain - this bypasses security");
-        
+
         let cid = Hash32::from(op.op.parent_commitment);
         for peer in peers {
             tracing::debug!("Pushing op {:?} to peer: {:?} (INSECURE)", cid, peer);
             // NOTE: This bypasses the guard chain and should not be used in production
         }
-        
+
         let mut pending = self.pending_announcements.write().await;
         pending.remove(&cid);
         Ok(())

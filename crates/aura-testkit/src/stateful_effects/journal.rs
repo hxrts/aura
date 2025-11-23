@@ -1,11 +1,10 @@
 //! Mock journal effect handlers for testing
 
-use aura_core::{
-    effects::JournalEffects,
-    AuraError, AuthorityId, ContextId, FlowBudget, Journal as CoreJournal,
-    session_epochs::Epoch,
-};
 use async_trait::async_trait;
+use aura_core::{
+    effects::JournalEffects, session_epochs::Epoch, AuraError, AuthorityId, ContextId, FlowBudget,
+    Journal as CoreJournal,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::sync::RwLock;
@@ -87,7 +86,7 @@ impl JournalEffects for MockJournalHandler {
     async fn get_journal(&self) -> Result<CoreJournal, AuraError> {
         // Mock implementation: return a journal based on our mock state
         let _journal = self.journal.read().await;
-        
+
         // For testing, just return a default journal
         // In a real implementation, we'd convert our internal state to the CoreJournal format
         Ok(CoreJournal::new())
@@ -98,10 +97,12 @@ impl JournalEffects for MockJournalHandler {
         let mut our_journal = self.journal.write().await;
         let mut counter = self.operation_counter.lock().unwrap();
         *counter += 1;
-        
+
         // Add a mock entry representing this journal persistence
-        our_journal.entries.push(format!("persist_journal_{}", counter));
-        
+        our_journal
+            .entries
+            .push(format!("persist_journal_{}", counter));
+
         Ok(())
     }
 
@@ -112,7 +113,7 @@ impl JournalEffects for MockJournalHandler {
     ) -> Result<FlowBudget, AuraError> {
         let budgets = self.flow_budgets.read().await;
         let key = (*context, *peer);
-        
+
         Ok(budgets.get(&key).cloned().unwrap_or_else(|| {
             // Default flow budget for testing
             FlowBudget::new(1000, Epoch(0))
@@ -139,14 +140,15 @@ impl JournalEffects for MockJournalHandler {
     ) -> Result<FlowBudget, AuraError> {
         let mut budgets = self.flow_budgets.write().await;
         let key = (*context, *peer);
-        
-        let mut budget = budgets.get(&key).cloned().unwrap_or_else(|| {
-            FlowBudget::new(1000, Epoch(0))
-        });
-        
+
+        let mut budget = budgets
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| FlowBudget::new(1000, Epoch(0)));
+
         budget.spent += cost as u64;
         budgets.insert(key, budget.clone());
-        
+
         Ok(budget)
     }
 }

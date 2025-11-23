@@ -39,8 +39,10 @@ impl<E: GuardEffectSystem> BiscuitGuardIntegration<E> {
         resource_scope: &ResourceScope,
     ) -> Result<bool, aura_wot::BiscuitError> {
         // Use the authorization bridge to verify the token
-        let auth_result = self.auth_bridge.authorize(token, operation, resource_scope)?;
-        
+        let auth_result = self
+            .auth_bridge
+            .authorize(token, operation, resource_scope)?;
+
         // Check if the effect system can perform this operation
         if !self.effect_system.can_perform_operation(operation) {
             tracing::debug!(

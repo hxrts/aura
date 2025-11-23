@@ -355,10 +355,14 @@ impl PeerManager {
         // Create discovery service and query for sync-capable peers
         let mut discovery_service = self.create_discovery_service(effects).await?;
         let discovery_query = self.create_sync_discovery_query();
-        
+
         // Query for peers using aura-rendezvous
-        let discovery_results = discovery_service.query_peers(discovery_query).await
-            .map_err(|e| sync_peer_error("discovery", &format!("Rendezvous discovery failed: {}", e)))?;
+        let discovery_results = discovery_service
+            .query_peers(discovery_query)
+            .await
+            .map_err(|e| {
+                sync_peer_error("discovery", &format!("Rendezvous discovery failed: {}", e))
+            })?;
 
         // Convert discovered peers to DeviceIds and validate
         let mut discovered_peers = Vec::new();
@@ -398,18 +402,22 @@ impl PeerManager {
     }
 
     /// Create discovery service instance for peer discovery
-    async fn create_discovery_service<E>(&self, _effects: &E) -> SyncResult<aura_rendezvous::discovery::DiscoveryService>
+    async fn create_discovery_service<E>(
+        &self,
+        _effects: &E,
+    ) -> SyncResult<aura_rendezvous::discovery::DiscoveryService>
     where
         E: aura_core::effects::NetworkEffects + Send + Sync,
     {
         // Create discovery service with our device ID
         let service_id = aura_core::DeviceId::new(); // In practice, use actual device ID
-        
-        let discovery_service = aura_rendezvous::discovery::DiscoveryService::new(
+
+        let discovery_service = aura_rendezvous::discovery::DiscoveryService::new(service_id);
+
+        tracing::debug!(
+            "Created rendezvous discovery service with ID: {}",
             service_id
         );
-
-        tracing::debug!("Created rendezvous discovery service with ID: {}", service_id);
         Ok(discovery_service)
     }
 
@@ -457,14 +465,18 @@ impl PeerManager {
         self.validate_peer_sync_capabilities(&peer_result.capabilities)?;
 
         // Optional: Verify peer identity using aura-verify
-        self.verify_peer_identity(&device_id, &peer_result, effects).await?;
+        self.verify_peer_identity(&device_id, &peer_result, effects)
+            .await?;
 
         // Check trust level meets our requirements
         if trust_level_score(peer_result.required_trust_level) < self.config.min_trust_level {
-            return Err(sync_peer_error("trust_validation", &format!(
-                "Peer {} required trust level {:?} below minimum {:?}",
-                device_id, peer_result.required_trust_level, self.config.min_trust_level
-            )));
+            return Err(sync_peer_error(
+                "trust_validation",
+                &format!(
+                    "Peer {} required trust level {:?} below minimum {:?}",
+                    device_id, peer_result.required_trust_level, self.config.min_trust_level
+                ),
+            ));
         }
 
         tracing::debug!(
@@ -525,7 +537,10 @@ impl PeerManager {
             ));
         }
 
-        tracing::debug!("Peer capabilities validation passed: {} capabilities", capabilities.len());
+        tracing::debug!(
+            "Peer capabilities validation passed: {} capabilities",
+            capabilities.len()
+        );
         Ok(())
     }
 
@@ -541,7 +556,7 @@ impl PeerManager {
     {
         // In a full implementation, this would use aura-verify to verify
         // the peer's identity credentials and signatures
-        
+
         // For now, perform basic validation
         if peer_result.peer_token == [0u8; 32] {
             return Err(sync_peer_error("validation", "Empty peer token"));
@@ -623,6 +638,7 @@ impl PeerManager {
     }
 
     /// Validate a Biscuit token using proper root public key verification
+    #[allow(dead_code)]
     async fn validate_biscuit_token(
         &self,
         token_bytes: &[u8],
@@ -663,6 +679,7 @@ impl PeerManager {
     }
 
     /// Get the root public key for Biscuit token validation
+    #[allow(dead_code)]
     async fn get_root_public_key(&self) -> SyncResult<biscuit_auth::PublicKey> {
         // In a real implementation, this would:
         // 1. Load from configuration file or environment
@@ -674,8 +691,9 @@ impl PeerManager {
         // This would typically come from the authority's cryptographic material
         // Generated via: openssl rand -hex 32
         let dev_key_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
-        let dev_key_bytes = hex::decode(dev_key_hex)
-            .map_err(|e| sync_peer_error("key_loading", &format!("Failed to decode dev key: {}", e)))?;
+        let dev_key_bytes = hex::decode(dev_key_hex).map_err(|e| {
+            sync_peer_error("key_loading", &format!("Failed to decode dev key: {}", e))
+        })?;
 
         if dev_key_bytes.len() != 32 {
             return Err(sync_peer_error(
@@ -687,11 +705,12 @@ impl PeerManager {
         let mut key_array = [0u8; 32];
         key_array.copy_from_slice(&dev_key_bytes);
 
-        biscuit_auth::PublicKey::from_bytes(&key_array)
-            .map_err(|e| sync_peer_error(
+        biscuit_auth::PublicKey::from_bytes(&key_array).map_err(|e| {
+            sync_peer_error(
                 "key_loading",
                 &format!("Failed to load root public key: {}", e),
-            ))
+            )
+        })
     }
 
     /// Legacy method for backward compatibility - use update_peer_token instead
@@ -885,22 +904,26 @@ impl PeerManager {
     /// Mark peer as degraded
     pub fn mark_peer_degraded(&mut self, peer: &DeviceId) {
         if let Some(peer_info) = self.peers.get_mut(peer) {
-            peer_info.metadata.set_status(PeerStatus::Degraded, 
+            peer_info.metadata.set_status(
+                PeerStatus::Degraded,
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
-                    .as_secs());
+                    .as_secs(),
+            );
         }
     }
 
     /// Mark peer as healthy
     pub fn mark_peer_healthy(&mut self, peer: &DeviceId) {
         if let Some(peer_info) = self.peers.get_mut(peer) {
-            peer_info.metadata.set_status(PeerStatus::Connected, 
+            peer_info.metadata.set_status(
+                PeerStatus::Connected,
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
-                    .as_secs());
+                    .as_secs(),
+            );
         }
     }
 

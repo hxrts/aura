@@ -6,13 +6,13 @@
 //! and that the system meets expected performance targets.
 
 use aura_core::{DeviceId, FlowBudget};
-use aura_testkit::stateful_effects::storage::MemoryStorageHandler as InMemoryStorageHandler;
-use aura_testkit::stateful_effects::network::MockNetworkHandler;
 use aura_protocol::effects::{
     allocations::{Arena, BufferPool, SmallVec, StringInterner},
     AuraEffectSystem, CachingNetworkHandler, CachingStorageHandler, EffectRegistry, NetworkEffects,
     StorageEffects,
 };
+use aura_testkit::stateful_effects::network::MockNetworkHandler;
+use aura_testkit::stateful_effects::storage::MemoryStorageHandler as InMemoryStorageHandler;
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 

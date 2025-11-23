@@ -4,20 +4,25 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{
-    ByzantineFault, CheckpointId, FaultInjectionEffects, FaultInjectionConfig, FaultType,
-    OperationStats, ScenarioId, SimulationCheckpoint, SimulationControlEffects,
-    SimulationMetrics, SimulationObservationEffects, SimulationScenario, SimulationTime,
-    StorageEffects, TimeEffects,
+    ByzantineFault, CheckpointId, FaultInjectionConfig, FaultInjectionEffects, FaultType,
+    OperationStats, ScenarioId, SimulationCheckpoint, SimulationControlEffects, SimulationMetrics,
+    SimulationObservationEffects, SimulationScenario, SimulationTime, StorageEffects, TimeEffects,
 };
 use aura_core::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Minimal simulation handler for testing and local development
+///
+/// Provides stubbed implementations of simulation control, observation, and fault injection
+/// effects. Real simulation logic resides in higher layers (aura-simulator).
 #[derive(Debug, Clone)]
 pub struct StatelessSimulationHandler<S, T> {
+    /// Storage effects handler reference
     #[allow(dead_code)]
     storage: Arc<S>,
+    /// Time effects handler reference
     #[allow(dead_code)]
     time: Arc<T>,
 }
@@ -27,6 +32,7 @@ where
     S: StorageEffects,
     T: TimeEffects,
 {
+    /// Create a new simulation handler with storage and time effects
     pub fn new(storage: Arc<S>, time: Arc<T>) -> Self {
         Self { storage, time }
     }
@@ -79,7 +85,10 @@ where
         Ok(())
     }
 
+    #[allow(clippy::disallowed_methods)]
     async fn get_simulation_time(&self) -> Result<SimulationTime> {
+        // SystemTime::now() is allowed in production handlers (Layer 3) that bridge to system time.
+        // In actual simulation mode, this would be overridden with a simulation-specific implementation.
         Ok(SimulationTime::new(std::time::SystemTime::now()))
     }
 

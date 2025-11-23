@@ -16,7 +16,6 @@ use crate::{
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_core::identifiers::DeviceId;
-use aura_protocol::effect_traits::ConsoleEffects;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -114,7 +113,7 @@ impl CliHandler {
 
     /// Handle scenarios command through effects
     pub async fn handle_scenarios(&self, action: &ScenarioAction) -> Result<()> {
-        scenarios::handle_scenarios(&self.effect_context, &self.effect_system, action).await
+        scenarios::handle_scenarios(&self.effect_context, self.effect_system.clone(), action).await
     }
 
     /// Handle version command through effects

@@ -111,8 +111,8 @@ impl TestkitSimulatorBridge {
                 SimulatorError::OperationFailed(format!("Effect system creation failed: {}", e))
             })?;
         let config = aura_agent::core::AgentConfig::default();
-        let effect_system =
-            AuraEffectSystem::testing(&config).map_err(|e| SimulatorError::OperationFailed(e.to_string()))?;
+        let effect_system = AuraEffectSystem::testing(&config)
+            .map_err(|e| SimulatorError::OperationFailed(e.to_string()))?;
         Ok(Arc::new(effect_system))
     }
 }

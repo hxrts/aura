@@ -188,6 +188,7 @@ pub fn get_device_auth_choreography() {
 }
 
 /// Device authentication coordinator using choreographic protocol
+#[allow(dead_code)]
 pub struct DeviceAuthCoordinator<E>
 where
     E: AuraEffects + ?Sized,
@@ -313,7 +314,7 @@ where
                 })?;
                 Ok((verified_identity, session_ticket))
             }
-            false => Err(AuraError::invalid(&format!(
+            false => Err(AuraError::invalid(format!(
                 "Authentication verification failed: {}",
                 auth_result
                     .error
@@ -325,7 +326,7 @@ where
     /// Generate challenge for device authentication
     async fn generate_challenge(
         &self,
-        request: &ChallengeRequest,
+        _request: &ChallengeRequest,
     ) -> AuraResult<ChallengeResponse> {
         // Generate random challenge
         let challenge_bytes = self.effects.random_bytes(32).await;
@@ -411,7 +412,10 @@ where
 
         // Verify signature against provided key material
         let verified_identity = match &proof_submission.identity_proof {
-            IdentityProof::Device { device_id, signature } => {
+            IdentityProof::Device {
+                device_id,
+                signature,
+            } => {
                 let verifying_key = proof_submission
                     .key_material
                     .get_device_public_key(device_id)
@@ -421,7 +425,9 @@ where
                 let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
                 verifying_key
                     .verify(&challenge_response.challenge, &sig)
-                    .map_err(|e| AuraError::crypto(format!("Signature verification failed: {}", e)))?;
+                    .map_err(|e| {
+                        AuraError::crypto(format!("Signature verification failed: {}", e))
+                    })?;
 
                 VerifiedIdentity {
                     proof: proof_submission.identity_proof.clone(),

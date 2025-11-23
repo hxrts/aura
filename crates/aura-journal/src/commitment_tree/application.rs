@@ -446,7 +446,7 @@ fn apply_operation_to_state(
             state.remove_leaf(leaf);
 
             // Track parent nodes for affected node calculation
-            if let Some(parent_node) = find_parent_node(leaf, &state) {
+            if let Some(parent_node) = find_parent_node(leaf, state) {
                 affected_nodes.push(parent_node);
             }
         }
@@ -488,16 +488,13 @@ fn find_parent_node(_leaf: &LeafId, state: &TreeState) -> Option<NodeIndex> {
     // 2. Return the immediate parent node for commitment recomputation
     // 3. Handle case where leaf is at root level (no parent)
     // 4. Use efficient tree traversal for large trees
-    
+
     // For now, return the first available branch as a placeholder
     // In production, this would maintain parent/child pointers in TreeState
-    state.list_branch_indices()
-        .into_iter()
-        .next()
-        .or_else(|| {
-            // If no branches exist, create a default root node
-            Some(NodeIndex(0))
-        })
+    state.list_branch_indices().into_iter().next().or({
+        // If no branches exist, create a default root node
+        Some(NodeIndex(0))
+    })
 }
 
 /// Check if new policy is stricter or equal to old policy (meet-semilattice)
@@ -547,27 +544,26 @@ fn recompute_commitments(
         // Efficient update: only recompute affected paths
         recompute_affected_paths(state, _affected_nodes)?;
     }
-    
+
     return Ok(());
-    
+
     // Legacy full recomputation (kept for fallback)
     fn recompute_full_tree(state: &mut TreeState) -> ApplicationResult<()> {
+        let mut h = hash::hasher();
+        h.update(&state.current_epoch().to_le_bytes());
 
-    let mut h = hash::hasher();
-    h.update(&state.current_epoch().to_le_bytes());
+        // Hash all leaf commitments
+        for (leaf_id, leaf_commitment) in state.iter_leaf_commitments() {
+            h.update(&leaf_id.0.to_le_bytes());
+            h.update(leaf_commitment);
+        }
 
-    // Hash all leaf commitments
-    for (leaf_id, leaf_commitment) in state.iter_leaf_commitments() {
-        h.update(&leaf_id.0.to_le_bytes());
-        h.update(leaf_commitment);
-    }
-
-    // Hash all branch commitments
-    for branch in state.iter_branches() {
-        h.update(&branch.node.0.to_le_bytes());
-        h.update(&branch.commitment);
-        h.update(&aura_core::policy_hash(&branch.policy));
-    }
+        // Hash all branch commitments
+        for branch in state.iter_branches() {
+            h.update(&branch.node.0.to_le_bytes());
+            h.update(&branch.commitment);
+            h.update(&aura_core::policy_hash(&branch.policy));
+        }
 
         let root_commitment = h.finalize();
         state.set_root_commitment(root_commitment);
@@ -575,22 +571,25 @@ fn recompute_commitments(
     }
 
     // Efficient recomputation for affected paths only
-    fn recompute_affected_paths(state: &mut TreeState, affected_nodes: &[NodeIndex]) -> ApplicationResult<()> {
+    fn recompute_affected_paths(
+        state: &mut TreeState,
+        affected_nodes: &[NodeIndex],
+    ) -> ApplicationResult<()> {
         use std::collections::HashSet;
-        
+
         // Implement efficient path recomputation:
         // 1. Start from affected nodes and collect their upward path
         // 2. Recompute commitments only for nodes in affected paths
         // 3. Propagate changes up to parents until reaching root
         // 4. Skip unaffected subtrees for performance
-        
+
         let mut nodes_to_update = HashSet::new();
-        
+
         // Collect all nodes that need updating (affected nodes + their ancestors)
         for &node in affected_nodes {
             let mut current = node;
             nodes_to_update.insert(current);
-            
+
             // Walk up the tree to root, marking ancestors for update
             while let Some(parent) = state.get_parent(current) {
                 if nodes_to_update.contains(&parent) {
@@ -600,32 +599,32 @@ fn recompute_commitments(
                 current = parent;
             }
         }
-        
+
         // Recompute commitments for affected nodes in bottom-up order
         let mut sorted_nodes: Vec<_> = nodes_to_update.into_iter().collect();
         sorted_nodes.sort_by_key(|node| std::cmp::Reverse(node.0)); // Process deepest first
-        
+
         for node in sorted_nodes {
             recompute_node_commitment(state, node)?;
         }
-        
+
         // Update root commitment based on recomputed tree
         recompute_root_commitment_from_tree(state)?;
-        
+
         Ok(())
     }
-    
+
     // Helper function to recompute commitment for a single node
     fn recompute_node_commitment(state: &mut TreeState, node: NodeIndex) -> ApplicationResult<()> {
         let mut h = hash::hasher();
-        
+
         // Include node metadata
         h.update(&node.0.to_le_bytes());
-        
+
         // Get branch information if it exists
         if let Some(branch) = state.get_branch(&node) {
             h.update(&aura_core::policy_hash(&branch.policy));
-            
+
             // Hash children commitments
             for child in state.get_children(node) {
                 if let Some(child_branch) = state.get_branch(&child) {
@@ -633,41 +632,41 @@ fn recompute_commitments(
                 }
             }
         }
-        
+
         // Update the node's commitment
         let new_commitment = h.finalize();
         if let Some(branch) = state.branches.get_mut(&node) {
             branch.commitment = new_commitment;
         }
-        
+
         Ok(())
     }
-    
+
     // Helper function to recompute root commitment from updated tree
     fn recompute_root_commitment_from_tree(state: &mut TreeState) -> ApplicationResult<()> {
         let mut h = hash::hasher();
         h.update(&state.current_epoch().to_le_bytes());
-        
+
         // Hash all updated branch commitments in deterministic order
         let mut branch_nodes: Vec<_> = state.list_branch_indices();
         branch_nodes.sort_by_key(|node| node.0);
-        
+
         for node in branch_nodes {
             if let Some(branch) = state.get_branch(&node) {
                 h.update(&node.0.to_le_bytes());
                 h.update(&branch.commitment);
             }
         }
-        
+
         // Include leaf commitments
         for (leaf_id, leaf_commitment) in state.iter_leaf_commitments() {
             h.update(&leaf_id.0.to_le_bytes());
             h.update(leaf_commitment);
         }
-        
+
         let root_commitment = h.finalize();
         state.set_root_commitment(root_commitment);
-        
+
         Ok(())
     }
 }

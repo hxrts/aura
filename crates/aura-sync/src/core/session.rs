@@ -666,19 +666,18 @@ where
     /// Close a session for a specific peer
     pub fn close_session(&mut self, peer: DeviceId) -> SyncResult<()> {
         // Find sessions involving this peer and close them
-        let session_ids_to_remove: Vec<SessionId> = self.sessions
+        let session_ids_to_remove: Vec<SessionId> = self
+            .sessions
             .iter()
-            .filter_map(|(session_id, session_state)| {
-                match session_state {
-                    SessionState::Active { participants, .. } => {
-                        if participants.contains(&peer) {
-                            Some(*session_id)
-                        } else {
-                            None
-                        }
+            .filter_map(|(session_id, session_state)| match session_state {
+                SessionState::Active { participants, .. } => {
+                    if participants.contains(&peer) {
+                        Some(*session_id)
+                    } else {
+                        None
                     }
-                    _ => None,
                 }
+                _ => None,
             })
             .collect();
 

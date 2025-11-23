@@ -11,13 +11,13 @@ use crate::amp::{get_channel_state, AmpJournalEffects};
 use crate::consensus::finalize_amp_bump_with_journal_default;
 use crate::guards::effect_system_trait::GuardEffectSystem;
 use aura_core::effects::NetworkEffects;
+use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{AuraError, Result};
 use aura_journal::fact::ProposedChannelEpochBump;
 use aura_transport::amp::{
     derive_for_recv, derive_for_send, AmpError, AmpHeader, RatchetDerivation,
 };
-use aura_core::frost::{Share, PublicKeyPackage};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Instant;

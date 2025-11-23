@@ -52,7 +52,7 @@ fn apply_add_leaf(tree_state: &TreeState, public_key: &[u8]) -> TreeState {
 
 /// Apply add leaf operation to tree state with device/guardian role distinction
 fn apply_add_leaf_with_role(
-    tree_state: &TreeState, 
+    tree_state: &TreeState,
     public_key: &[u8],
     role: aura_core::tree::LeafRole,
 ) -> TreeState {
@@ -279,7 +279,7 @@ pub fn reduce_authority(journal: &Journal) -> aura_core::authority::AuthoritySta
             let facts: BTreeSet<aura_core::journal::Fact> = journal
                 .facts
                 .iter()
-                .map(|f| convert_to_core_fact(f))
+                .map(convert_to_core_fact)
                 .collect::<Result<_, _>>()
                 .unwrap_or_else(|_| BTreeSet::new());
 
@@ -303,7 +303,9 @@ pub fn reduce_account_facts(journal: &Journal) -> TreeState {
 ///
 /// This performs the same reduction but also validates that operations
 /// are applied in the correct order based on their parent commitments.
-pub fn reduce_authority_with_validation(journal: &Journal) -> Result<aura_core::authority::AuthorityState, String> {
+pub fn reduce_authority_with_validation(
+    journal: &Journal,
+) -> Result<aura_core::authority::AuthorityState, String> {
     match &journal.namespace {
         JournalNamespace::Authority(_) => {
             // Extract all attested operations with their parent commitments
@@ -345,7 +347,7 @@ pub fn reduce_authority_with_validation(journal: &Journal) -> Result<aura_core::
             let facts: BTreeSet<aura_core::journal::Fact> = journal
                 .facts
                 .iter()
-                .map(|f| convert_to_core_fact(f))
+                .map(convert_to_core_fact)
                 .collect::<Result<_, _>>()
                 .unwrap_or_else(|_| BTreeSet::new());
 
@@ -781,18 +783,23 @@ pub fn can_prune_proposed_bump(
 /// Convert aura-journal::Fact to aura-core::journal::Fact
 ///
 /// This bridges the two fact representations until the architecture is fully unified.
-fn convert_to_core_fact(journal_fact: &crate::fact::Fact) -> Result<aura_core::journal::Fact, String> {
+fn convert_to_core_fact(
+    journal_fact: &crate::fact::Fact,
+) -> Result<aura_core::journal::Fact, String> {
     // For now, create a simple aura-core Fact with the journal fact information
     // In a full implementation, this would properly map the content types
-    
+
     // Create a new aura-core fact with basic information
     let mut core_fact = aura_core::journal::Fact::new();
-    
+
     // Add fact ID as a string key-value pair (simplified conversion)
     let fact_id_key = "fact_id";
     let fact_id_value = format!("{}", journal_fact.fact_id.0);
-    core_fact.insert(&*fact_id_key, aura_core::journal::FactValue::String(fact_id_value));
-    
+    core_fact.insert(
+        fact_id_key,
+        aura_core::journal::FactValue::String(fact_id_value),
+    );
+
     // Add content type information
     let content_type_key = "content_type";
     let content_type_value = match &journal_fact.content {
@@ -802,13 +809,19 @@ fn convert_to_core_fact(journal_fact: &crate::fact::Fact) -> Result<aura_core::j
         crate::fact::FactContent::Snapshot(_) => "snapshot",
         crate::fact::FactContent::RendezvousReceipt { .. } => "rendezvous_receipt",
     };
-    core_fact.insert(content_type_key, aura_core::journal::FactValue::String(content_type_value.to_string()));
-    
+    core_fact.insert(
+        content_type_key,
+        aura_core::journal::FactValue::String(content_type_value.to_string()),
+    );
+
     // Add a simplified content representation
     let content_key = "content_summary";
     let content_summary = format!("{:?}", journal_fact.content);
-    core_fact.insert(&*content_key, aura_core::journal::FactValue::String(content_summary));
-    
+    core_fact.insert(
+        content_key,
+        aura_core::journal::FactValue::String(content_summary),
+    );
+
     Ok(core_fact)
 }
 

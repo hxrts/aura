@@ -5,12 +5,9 @@
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use uuid::Uuid;
 
 use aura_core::{AuthorityId, DeviceId};
-use aura_simulator::{
-    ComposedSimulationEnvironment, ScenarioExecutor, SimulationEffectComposer, SimulatorConfig,
-};
+use aura_simulator::{ComposedSimulationEnvironment, SimulationEffectComposer};
 
 use super::human_agent::{DemoPhase, DemoState};
 use crate::tui::DemoEvent;
@@ -28,9 +25,6 @@ pub struct SimulatedGuardianAgent {
 
     /// Simulation environment
     environment: Arc<Mutex<ComposedSimulationEnvironment>>,
-
-    /// Scenario executor for complex operations
-    scenario_executor: Arc<Mutex<ScenarioExecutor>>,
 
     /// Agent configuration
     config: GuardianAgentConfig,
@@ -80,7 +74,7 @@ pub struct GuardianAgentState {
     /// Whether agent is actively monitoring
     pub monitoring: bool,
 
-    /// Number of recovery requests processed  
+    /// Number of recovery requests processed
     pub recovery_requests_processed: usize,
 
     /// Number of messages sent
@@ -103,9 +97,6 @@ impl SimulatedGuardianAgent {
         // Create simulation environment
         let environment = SimulationEffectComposer::for_simulation(device_id, config.seed)?;
 
-        // Create scenario executor for complex operations
-        let scenario_executor = ScenarioExecutor::new(config.seed);
-
         tracing::info!(
             "Created simulated guardian agent: {} (device: {}, authority: {})",
             name,
@@ -118,7 +109,6 @@ impl SimulatedGuardianAgent {
             authority_id,
             device_id,
             environment: Arc::new(Mutex::new(environment)),
-            scenario_executor: Arc::new(Mutex::new(scenario_executor)),
             config,
             state: GuardianAgentState::default(),
         })
@@ -267,7 +257,7 @@ impl SimulatedGuardianAgent {
 
         // Start periodic heartbeat and status updates
         let name = self.name.clone();
-        let authority_id = self.authority_id;
+        let _authority_id = self.authority_id;
 
         tokio::spawn(async move {
             loop {
@@ -398,11 +388,11 @@ impl SimulatedGuardianAgent {
     pub async fn register_as_guardian(&mut self) -> anyhow::Result<()> {
         tracing::info!("Registering {} as guardian", self.name);
 
-        let mut environment = self.environment.lock().await;
+        let environment = self.environment.lock().await;
 
         // Use simulation environment to register as guardian
         // This would integrate with actual guardian registration protocol
-        let effect_system = environment.effect_system();
+        let _effect_system = environment.effect_system();
 
         // Execute guardian registration through effect system
         // Placeholder for actual implementation
@@ -418,9 +408,6 @@ impl SimulatedGuardianAgent {
         }
 
         // Process any pending scenarios or actions
-        let mut executor = self.scenario_executor.lock().await;
-        executor.process_pending_scenarios().await?;
-
         self.state.last_action_time = Some(std::time::Instant::now());
 
         Ok(())
@@ -458,13 +445,21 @@ impl SimulatedGuardianAgent {
 /// Guardian agent statistics
 #[derive(Debug, Clone)]
 pub struct GuardianAgentStatistics {
+    /// Guardian name
     pub name: String,
+    /// Guardian authority identifier
     pub authority_id: AuthorityId,
+    /// Guardian device identifier
     pub device_id: DeviceId,
+    /// Whether guardian is currently monitoring
     pub monitoring: bool,
+    /// Number of recovery requests processed
     pub recovery_requests_processed: usize,
+    /// Number of messages sent
     pub messages_sent: usize,
+    /// Current demo phase
     pub current_phase: Option<DemoPhase>,
+    /// Guardian uptime duration
     pub uptime: std::time::Duration,
 }
 
@@ -524,7 +519,6 @@ impl std::fmt::Debug for SimulatedGuardianAgent {
             .field("config", &self.config)
             .field("state", &self.state)
             .field("environment", &"<ComposedSimulationEnvironment>")
-            .field("scenario_executor", &"<ScenarioExecutor>")
             .finish()
     }
 }

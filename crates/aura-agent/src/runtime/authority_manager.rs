@@ -23,40 +23,55 @@ impl AuthorityManager {
 
     /// Register an authority
     pub fn register_authority(&self, authority_id: AuthorityId) -> Result<(), AuthorityError> {
-        let mut authorities = self.authorities.write()
+        let mut authorities = self
+            .authorities
+            .write()
             .map_err(|_| AuthorityError::LockError)?;
-        
+
         authorities.insert(authority_id, AuthorityState::new(authority_id));
         Ok(())
     }
 
     /// Get authority state
-    pub fn get_authority(&self, authority_id: AuthorityId) -> Result<Option<AuthorityState>, AuthorityError> {
-        let authorities = self.authorities.read()
+    pub fn get_authority(
+        &self,
+        authority_id: AuthorityId,
+    ) -> Result<Option<AuthorityState>, AuthorityError> {
+        let authorities = self
+            .authorities
+            .read()
             .map_err(|_| AuthorityError::LockError)?;
-        
+
         Ok(authorities.get(&authority_id).cloned())
     }
 
     /// List all registered authorities
     pub fn list_authorities(&self) -> Result<Vec<AuthorityId>, AuthorityError> {
-        let authorities = self.authorities.read()
+        let authorities = self
+            .authorities
+            .read()
             .map_err(|_| AuthorityError::LockError)?;
-        
+
         Ok(authorities.keys().cloned().collect())
     }
 
     /// Remove an authority
-    pub fn remove_authority(&self, authority_id: AuthorityId) -> Result<Option<AuthorityState>, AuthorityError> {
-        let mut authorities = self.authorities.write()
+    pub fn remove_authority(
+        &self,
+        authority_id: AuthorityId,
+    ) -> Result<Option<AuthorityState>, AuthorityError> {
+        let mut authorities = self
+            .authorities
+            .write()
             .map_err(|_| AuthorityError::LockError)?;
-        
+
         Ok(authorities.remove(&authority_id))
     }
 
     /// Check if authority is registered
     pub fn has_authority(&self, authority_id: AuthorityId) -> bool {
-        self.authorities.read()
+        self.authorities
+            .read()
             .map(|authorities| authorities.contains_key(&authority_id))
             .unwrap_or(false)
     }
@@ -146,5 +161,8 @@ pub enum AuthorityError {
     #[error("Authority already exists: {authority_id:?}")]
     AuthorityAlreadyExists { authority_id: AuthorityId },
     #[error("Invalid state transition: {from:?} -> {to:?}")]
-    InvalidStateTransition { from: AuthorityStatus, to: AuthorityStatus },
+    InvalidStateTransition {
+        from: AuthorityStatus,
+        to: AuthorityStatus,
+    },
 }

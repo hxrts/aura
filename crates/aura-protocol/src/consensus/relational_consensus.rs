@@ -71,14 +71,14 @@ pub async fn run_consensus_with_config<T: Serialize>(
 /// Compute the hash of an operation for consensus
 fn compute_operation_hash<T: Serialize>(operation: &T) -> Result<Hash32> {
     use aura_core::hash;
-    
+
     let mut hasher = hash::hasher();
     hasher.update(b"AURA_RELATIONAL_OPERATION");
-    
+
     // Serialize operation to get deterministic hash
     let operation_bytes = serde_json::to_vec(operation)
-        .map_err(|e| AuraError::invalid(&format!("Failed to serialize operation: {}", e)))?;
-    
+        .map_err(|e| AuraError::invalid(format!("Failed to serialize operation: {}", e)))?;
+
     hasher.update(&operation_bytes);
     Ok(Hash32(hasher.finalize()))
 }
@@ -98,16 +98,9 @@ fn validate_config(config: ConsensusConfig) -> Result<ConsensusConfig> {
         ));
     }
 
-    // Validate timeout (reasonable bounds)
+    // Validate timeout (reasonable bounds: 1 second to 5 minutes)
     let mut validated_config = config;
-    if validated_config.timeout_ms > 300000 {
-        // Cap at 5 minutes
-        validated_config.timeout_ms = 300000;
-    }
-    if validated_config.timeout_ms < 1000 {
-        // Minimum 1 second
-        validated_config.timeout_ms = 1000;
-    }
+    validated_config.timeout_ms = validated_config.timeout_ms.clamp(1000, 300000);
 
     Ok(validated_config)
 }
@@ -136,9 +129,9 @@ pub async fn integrate_with_choreographic_consensus<T: Serialize>(
     // 1. Converting relational operations to consensus choreography messages
     // 2. Running the standard Aura Consensus protocol
     // 3. Converting the result back to ConsensusProof
-    
+
     Err(AuraError::invalid(
-        "Choreographic consensus integration not yet implemented"
+        "Choreographic consensus integration not yet implemented",
     ))
 }
 
@@ -208,7 +201,7 @@ mod tests {
         };
 
         let proof = run_consensus(&prestate, &op).await.unwrap();
-        
+
         assert_eq!(proof.prestate_hash, prestate.compute_hash());
         assert!(proof.threshold_met());
         assert_eq!(proof.attester_count(), 1);

@@ -48,11 +48,7 @@ impl AuraEffectSystem {
 
     /// Create a new execution context for operations
     pub fn create_context(&self, context_id: ContextId) -> super::EffectContext {
-        super::EffectContext::new(
-            self.authority_id,
-            context_id,
-            self.execution_mode.clone(),
-        )
+        super::EffectContext::new(self.authority_id, context_id, self.execution_mode.clone())
     }
 
     /// Get current timestamp in milliseconds (stub)

@@ -6,7 +6,7 @@
 
 use crate::amp::AmpJournalEffects;
 use crate::consensus::{run_consensus, CommitFact};
-use aura_core::frost::{Share, PublicKeyPackage};
+use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::{AuthorityId, Prestate, Result};
 use aura_journal::fact::{CommittedChannelEpochBump, ProposedChannelEpochBump};
 use std::collections::HashMap;
@@ -149,8 +149,8 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::frost::{PublicKeyPackage, Share};
     use aura_core::AuthorityId;
-    use aura_core::frost::{Share, PublicKeyPackage};
     use std::collections::HashMap;
 
     #[tokio::test]

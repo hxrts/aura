@@ -10,11 +10,11 @@ use tokio::sync::{mpsc, Mutex};
 use uuid::Uuid;
 
 use super::{
-    scenario_bridge::{DemoScenarioBridge, DemoSetupConfig, DemoSetupResult},
-    simulator_integration::{GuardianAgentConfig, GuardianAgentFactory, SimulatedGuardianAgent},
+    scenario_bridge::{DemoScenarioBridge, DemoSetupConfig},
+    simulator_integration::SimulatedGuardianAgent,
 };
 use crate::tui::{DemoEvent, TuiApp};
-use aura_core::{AuthorityId, DeviceId};
+use aura_core::AuthorityId;
 
 /// Human-agent demo coordinator
 ///
@@ -411,7 +411,7 @@ impl HumanAgentDemo {
             std::time::Duration::from_millis(self.config.guardian_response_time_ms);
 
         // Alice approves after delay
-        let alice_authority = self.demo_state.alice_authority.unwrap();
+        let _alice_authority = self.demo_state.alice_authority.unwrap();
         tokio::spawn(async move {
             tokio::time::sleep(response_delay).await;
             // Would send approval through actual system
@@ -419,7 +419,7 @@ impl HumanAgentDemo {
         });
 
         // Charlie approves after different delay
-        let charlie_authority = self.demo_state.charlie_authority.unwrap();
+        let _charlie_authority = self.demo_state.charlie_authority.unwrap();
         let charlie_delay = response_delay + std::time::Duration::from_millis(1000);
         tokio::spawn(async move {
             tokio::time::sleep(charlie_delay).await;

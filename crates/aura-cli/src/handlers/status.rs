@@ -4,7 +4,6 @@
 
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
-use aura_protocol::effect_traits::ConsoleEffects;
 use std::path::Path;
 
 /// Handle status display through effects

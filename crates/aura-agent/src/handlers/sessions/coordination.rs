@@ -5,15 +5,14 @@
 use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::identifiers::{AccountId, DeviceId};
 use aura_core::effects::TimeEffects;
-use aura_protocol::effects::{ChoreographicRole, SessionType};
+use aura_core::identifiers::{AccountId, DeviceId};
 use aura_macros::choreography;
+use aura_protocol::effects::{ChoreographicRole, SessionType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 // Session coordination choreography protocol
 //
@@ -205,14 +204,23 @@ impl SessionOperations {
         };
 
         // Execute the choreographic protocol
-        match self.execute_session_creation_choreography(&session_request, &*effects).await {
+        match self
+            .execute_session_creation_choreography(&session_request, &*effects)
+            .await
+        {
             Ok(session_handle) => {
-                tracing::info!("Session created successfully using choreography: {}", session_id);
+                tracing::info!(
+                    "Session created successfully using choreography: {}",
+                    session_id
+                );
                 Ok(session_handle)
             }
             Err(e) => {
                 tracing::error!("Session creation choreography failed: {}", e);
-                Err(AgentError::internal(format!("Choreography execution failed: {}", e)))
+                Err(AgentError::internal(format!(
+                    "Choreography execution failed: {}",
+                    e
+                )))
             }
         }
     }
@@ -229,20 +237,24 @@ impl SessionOperations {
         );
 
         // Phase 1: As initiator, create session request (already done)
-        
+
         // Phase 2: As coordinator, validate request and invite participants
         self.validate_session_request(request, effects).await?;
-        
-        let participant_responses = self.invite_participants_choreographically(request, effects).await?;
-        
+
+        let participant_responses = self
+            .invite_participants_choreographically(request, effects)
+            .await?;
+
         // Phase 3: Process participant responses
-        let accepted_participants = participant_responses.iter()
+        let accepted_participants = participant_responses
+            .iter()
             .filter(|response| response.accepted)
             .count();
-        
+
         // Phase 4: Create session if sufficient participants accepted
         if accepted_participants >= request.participants.len() / 2 {
-            self.create_session_handle_choreographically(request, effects).await
+            self.create_session_handle_choreographically(request, effects)
+                .await
         } else {
             Err(AgentError::invalid(format!(
                 "Insufficient participant acceptance: {}/{}",
@@ -265,11 +277,16 @@ impl SessionOperations {
 
         // Validate initiator is included in participants
         if !request.participants.contains(&request.initiator_id) {
-            return Err(AgentError::invalid("Initiator must be included in participants"));
+            return Err(AgentError::invalid(
+                "Initiator must be included in participants",
+            ));
         }
 
         // Additional validation would go here (e.g., check authorization)
-        tracing::debug!("Session request validation passed for session {}", request.session_id);
+        tracing::debug!(
+            "Session request validation passed for session {}",
+            request.session_id
+        );
         Ok(())
     }
 
@@ -287,13 +304,13 @@ impl SessionOperations {
             if *participant_id != request.initiator_id {
                 // Simulate participant decision (in real implementation, this would involve network communication)
                 let accepted = self.simulate_participant_decision(participant_id).await;
-                
+
                 responses.push(ParticipantResponse {
                     participant_id: *participant_id,
                     accepted,
                     timestamp,
                 });
-                
+
                 tracing::debug!(
                     "Participant {} {} session {}",
                     participant_id,
@@ -328,7 +345,7 @@ impl SessionOperations {
 
         // In a full implementation, this would journal the session creation
         tracing::info!("Session handle created for session {}", request.session_id);
-        
+
         Ok(session_handle)
     }
 
@@ -338,7 +355,7 @@ impl SessionOperations {
         // 1. Send invitation via NetworkEffects
         // 2. Wait for response with timeout
         // 3. Return actual participant decision
-        
+
         // For simulation, approve most participants
         // Using a simple heuristic instead of rand for deterministic behavior
         _participant_id.0.as_u128() % 5 != 0 // 80% chance of acceptance based on device ID
@@ -353,160 +370,160 @@ struct ParticipantResponse {
     timestamp: u64,
 }
 
-    // TODO: Move these methods to appropriate impl block
-    /* 
-    /// Get session information
-    pub async fn get_session(&self, session_id: &str) -> AgentResult<Option<SessionHandle>> {
-        let effects = self.effects.read().await;
+// TODO: Move these methods to appropriate impl block
+/*
+/// Get session information
+pub async fn get_session(&self, session_id: &str) -> AgentResult<Option<SessionHandle>> {
+    let effects = self.effects.read().await;
 
-        // Convert string to SessionId by parsing the UUID part
-        let session_id_typed = if let Some(uuid_str) = session_id.strip_prefix("session-") {
-            match uuid::Uuid::parse_str(uuid_str) {
-                Ok(uuid) => aura_core::identifiers::SessionId::from_uuid(uuid),
-                Err(_) => aura_core::identifiers::SessionId::new(),
-            }
-        } else {
-            aura_core::identifiers::SessionId::new()
-        };
-
-        // Implement session status lookup via effects system
-        match self
-            .get_session_status_via_effects(&*effects, &session_id_typed)
-            .await
-        {
-            Ok(Some(handle)) => Ok(Some(handle)),
-            Ok(None) => Ok(None),
-            Err(_) => Ok(None), // Session doesn't exist or is inactive
+    // Convert string to SessionId by parsing the UUID part
+    let session_id_typed = if let Some(uuid_str) = session_id.strip_prefix("session-") {
+        match uuid::Uuid::parse_str(uuid_str) {
+            Ok(uuid) => aura_core::identifiers::SessionId::from_uuid(uuid),
+            Err(_) => aura_core::identifiers::SessionId::new(),
         }
+    } else {
+        aura_core::identifiers::SessionId::new()
+    };
+
+    // Implement session status lookup via effects system
+    match self
+        .get_session_status_via_effects(&*effects, &session_id_typed)
+        .await
+    {
+        Ok(Some(handle)) => Ok(Some(handle)),
+        Ok(None) => Ok(None),
+        Err(_) => Ok(None), // Session doesn't exist or is inactive
     }
+}
 
-    /// End a session
-    pub async fn end_session(&self, session_id: &str) -> AgentResult<SessionHandle> {
-        let effects = self.effects.read().await;
-        self.end_session_via_effects(&*effects, session_id).await
-    }
+/// End a session
+pub async fn end_session(&self, session_id: &str) -> AgentResult<SessionHandle> {
+    let effects = self.effects.read().await;
+    self.end_session_via_effects(&*effects, session_id).await
+}
 
-    /// List all active sessions
-    pub async fn list_active_sessions(&self) -> AgentResult<Vec<String>> {
-        let effects = self.effects.read().await;
-        self.list_sessions_via_effects(&*effects).await
-    }
+/// List all active sessions
+pub async fn list_active_sessions(&self) -> AgentResult<Vec<String>> {
+    let effects = self.effects.read().await;
+    self.list_sessions_via_effects(&*effects).await
+}
 
-    /// Get session statistics
-    pub async fn get_session_stats(&self) -> AgentResult<SessionStats> {
-        let effects = self.effects.read().await;
-        self.get_session_stats_via_effects(&*effects).await
-    }
+/// Get session statistics
+pub async fn get_session_stats(&self) -> AgentResult<SessionStats> {
+    let effects = self.effects.read().await;
+    self.get_session_stats_via_effects(&*effects).await
+}
 
-    /// Cleanup expired sessions
-    pub async fn cleanup_expired_sessions(&self, max_age_seconds: u64) -> AgentResult<Vec<String>> {
-        let effects = self.effects.read().await;
-        self.cleanup_sessions_via_effects(&*effects, max_age_seconds)
-            .await
-    }
+/// Cleanup expired sessions
+pub async fn cleanup_expired_sessions(&self, max_age_seconds: u64) -> AgentResult<Vec<String>> {
+    let effects = self.effects.read().await;
+    self.cleanup_sessions_via_effects(&*effects, max_age_seconds)
+        .await
+}
 
-    // Private implementation methods
+// Private implementation methods
 
-    /// Create session via effects system
-    async fn create_session_via_effects(
-        &self,
-        effects: &AuraEffectSystem,
-        session_type: &SessionType,
-    ) -> AgentResult<String> {
-        use aura_core::identifiers::SessionId;
+/// Create session via effects system
+async fn create_session_via_effects(
+    &self,
+    effects: &AuraEffectSystem,
+    session_type: &SessionType,
+) -> AgentResult<String> {
+    use aura_core::identifiers::SessionId;
 
-        // Generate session ID through effects system
-        let session_id = SessionId::new();
-        let session_id_string = format!("session-{}", session_id.uuid().simple());
+    // Generate session ID through effects system
+    let session_id = SessionId::new();
+    let session_id_string = format!("session-{}", session_id.uuid().simple());
 
-        // Session created successfully (logging removed for simplicity)
+    // Session created successfully (logging removed for simplicity)
 
-        Ok(session_id_string)
-    }
+    Ok(session_id_string)
+}
 
-    /// Get session status via effects system
-    async fn get_session_status_via_effects(
-        &self,
-        effects: &AuraEffectSystem,
-        session_id: &aura_core::identifiers::SessionId,
-    ) -> AgentResult<Option<SessionHandle>> {
-        // Lookup session status (logging removed for simplicity)
+/// Get session status via effects system
+async fn get_session_status_via_effects(
+    &self,
+    effects: &AuraEffectSystem,
+    session_id: &aura_core::identifiers::SessionId,
+) -> AgentResult<Option<SessionHandle>> {
+    // Lookup session status (logging removed for simplicity)
 
-        // For now, simulate that no sessions are found (no persistent storage yet)
-        Ok(None)
-    }
+    // For now, simulate that no sessions are found (no persistent storage yet)
+    Ok(None)
+}
 
-    /// End session via effects system
-    async fn end_session_via_effects(
-        &self,
-        effects: &AuraEffectSystem,
-        session_id: &str,
-    ) -> AgentResult<SessionHandle> {
-        // End session (logging removed for simplicity)
-        let current_time = effects.current_timestamp_millis().await;
+/// End session via effects system
+async fn end_session_via_effects(
+    &self,
+    effects: &AuraEffectSystem,
+    session_id: &str,
+) -> AgentResult<SessionHandle> {
+    // End session (logging removed for simplicity)
+    let current_time = effects.current_timestamp_millis().await;
 
-        let device_id = self.device_id();
-        Ok(SessionHandle {
-            session_id: session_id.to_string(),
-            session_type: SessionType::Coordination,
-            participants: vec![device_id],
-            my_role: ChoreographicRole::new(device_id.0, 0),
-            epoch: 0,
-            start_time: current_time,
-            metadata: {
-                let mut metadata = HashMap::new();
-                metadata.insert(
-                    "status".to_string(),
-                    serde_json::Value::String("ended".to_string()),
-                );
-                metadata.insert(
-                    "ended_at".to_string(),
-                    serde_json::Value::Number(current_time.into()),
-                );
-                metadata
-            },
-        })
-    }
+    let device_id = self.device_id();
+    Ok(SessionHandle {
+        session_id: session_id.to_string(),
+        session_type: SessionType::Coordination,
+        participants: vec![device_id],
+        my_role: ChoreographicRole::new(device_id.0, 0),
+        epoch: 0,
+        start_time: current_time,
+        metadata: {
+            let mut metadata = HashMap::new();
+            metadata.insert(
+                "status".to_string(),
+                serde_json::Value::String("ended".to_string()),
+            );
+            metadata.insert(
+                "ended_at".to_string(),
+                serde_json::Value::Number(current_time.into()),
+            );
+            metadata
+        },
+    })
+}
 
-    /// List sessions via effects system
-    async fn list_sessions_via_effects(
-        &self,
-        effects: &AuraEffectSystem,
-    ) -> AgentResult<Vec<String>> {
-        // List sessions (logging removed for simplicity)
-        // Return empty list (no persistent storage yet)
-        Ok(Vec::new())
-    }
+/// List sessions via effects system
+async fn list_sessions_via_effects(
+    &self,
+    effects: &AuraEffectSystem,
+) -> AgentResult<Vec<String>> {
+    // List sessions (logging removed for simplicity)
+    // Return empty list (no persistent storage yet)
+    Ok(Vec::new())
+}
 
-    /// Get session statistics via effects system
-    async fn get_session_stats_via_effects(
-        &self,
-        effects: &AuraEffectSystem,
-    ) -> AgentResult<SessionStats> {
-        let current_time = effects.current_timestamp_millis().await;
+/// Get session statistics via effects system
+async fn get_session_stats_via_effects(
+    &self,
+    effects: &AuraEffectSystem,
+) -> AgentResult<SessionStats> {
+    let current_time = effects.current_timestamp_millis().await;
 
-        // Return empty stats (no persistent storage yet)
-        Ok(SessionStats {
-            active_sessions: 0,
-            sessions_by_type: HashMap::new(),
-            total_participants: 0,
-            average_duration: 0.0,
-            last_cleanup: current_time,
-        })
-    }
+    // Return empty stats (no persistent storage yet)
+    Ok(SessionStats {
+        active_sessions: 0,
+        sessions_by_type: HashMap::new(),
+        total_participants: 0,
+        average_duration: 0.0,
+        last_cleanup: current_time,
+    })
+}
 
-    /// Cleanup sessions via effects system
-    async fn cleanup_sessions_via_effects(
-        &self,
-        effects: &AuraEffectSystem,
-        max_age_seconds: u64,
-    ) -> AgentResult<Vec<String>> {
-        // Cleanup sessions (logging removed for simplicity)
+/// Cleanup sessions via effects system
+async fn cleanup_sessions_via_effects(
+    &self,
+    effects: &AuraEffectSystem,
+    max_age_seconds: u64,
+) -> AgentResult<Vec<String>> {
+    // Cleanup sessions (logging removed for simplicity)
 
-        // Return empty list (no persistent storage yet)
-        Ok(Vec::new())
-    }
-    */
+    // Return empty list (no persistent storage yet)
+    Ok(Vec::new())
+}
+*/
 
 #[cfg(test)]
 mod tests {

@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+#![allow(dead_code)]
 
 //! # Aura Simulator - Layer 6: Runtime Composition
 //!
@@ -127,9 +128,6 @@ pub mod context;
 // Scenario definitions
 pub mod scenario;
 
-// Scenario executor for CLI recovery demo
-pub mod scenario_executor;
-
 // Testkit integration bridge
 pub mod testkit_bridge;
 
@@ -155,9 +153,6 @@ pub use compat::{PerformanceMetrics, SimulatorHandler};
 
 // Re-export scenario types for convenience
 pub use handlers::{InjectionAction, ScenarioDefinition, TriggerCondition};
-
-// Re-export scenario executor
-pub use scenario_executor::{ScenarioExecutor, ExecutionResult, ExecutionStep};
 
 // Re-export Duration for convenience
 pub use std::time::Duration;

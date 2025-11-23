@@ -5,9 +5,9 @@
 //! and runtime reconfiguration of effect handlers.
 
 use async_trait::async_trait;
+use aura_core::{AccountId, DeviceId, EffectType, ExecutionMode, LocalSessionType, SessionId};
 use std::collections::HashMap;
 use thiserror::Error;
-use aura_core::{LocalSessionType, EffectType, ExecutionMode, DeviceId, SessionId, AccountId};
 use uuid::Uuid;
 
 /// Simplified context for handler execution
@@ -21,9 +21,13 @@ pub struct HandlerContext {
     pub metadata: HashMap<String, String>,
 }
 
-impl HandlerContext { // Registry helper
+impl HandlerContext {
+    // Registry helper
     /// Create a new handler context
+    #[allow(clippy::disallowed_methods)]
     pub fn new(device_id: DeviceId, execution_mode: ExecutionMode) -> Self {
+        // Uuid::new_v4() is allowed in handler context creation to generate unique operation IDs.
+        // This is a legitimate use case for runtime identifier generation in the composition layer.
         Self {
             device_id,
             execution_mode,
@@ -62,7 +66,10 @@ pub enum HandlerError {
 
     /// Operation not found within effect type
     #[error("Operation '{operation}' not found in effect {effect_type:?}")]
-    UnknownOperation { effect_type: EffectType, operation: String },
+    UnknownOperation {
+        effect_type: EffectType,
+        operation: String,
+    },
 
     /// Effect parameter serialization failed
     #[error("Failed to serialize parameters for {effect_type:?}.{operation}")]
@@ -493,7 +500,8 @@ mod tests {
         execution_mode: ExecutionMode,
     }
 
-    impl MockRegistrableHandler { // Adapter test shim
+    impl MockRegistrableHandler {
+        // Adapter test shim
         fn new(
             effect_type: EffectType,
             operations: Vec<&str>,
@@ -508,7 +516,8 @@ mod tests {
     }
 
     #[async_trait]
-    impl Handler for MockRegistrableHandler { // Adapter test shim
+    impl Handler for MockRegistrableHandler {
+        // Adapter test shim
         async fn execute_effect(
             &self,
             effect_type: EffectType,
@@ -548,7 +557,8 @@ mod tests {
     }
 
     #[async_trait]
-    impl RegistrableHandler for MockRegistrableHandler { // Adapter test shim
+    impl RegistrableHandler for MockRegistrableHandler {
+        // Adapter test shim
         async fn execute_operation_bytes(
             &self,
             _effect_type: EffectType,
@@ -559,12 +569,10 @@ mod tests {
             if self.operations.contains(&operation.to_string()) {
                 // Mock successful operation - return serialized mock result
                 let mock_result = serde_json::Value::String("mock_result".to_string());
-                bincode::serialize(&mock_result).map_err(|e| {
-                    HandlerError::EffectSerialization {
-                        effect_type: self.effect_type,
-                        operation: operation.to_string(),
-                        source: e.into(),
-                    }
+                bincode::serialize(&mock_result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type: self.effect_type,
+                    operation: operation.to_string(),
+                    source: e.into(),
                 })
             } else {
                 Err(HandlerError::UnknownOperation {

@@ -5,7 +5,6 @@
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::EffectContext;
 use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
-use std::collections::HashMap;
 
 /// Handler context combining authority context with runtime utilities
 pub struct HandlerContext {
@@ -65,15 +64,15 @@ impl HandlerUtilities {
     ) -> EffectContext {
         // Create a default context ID
         let context_id = ContextId::new();
-        let mut effect_context = EffectContext::new(
+        let effect_context = EffectContext::new(
             authority_id,
             context_id,
             aura_core::effects::ExecutionMode::Production,
         );
-        
+
         // If we have a specific session ID, we would need to update it
         // For now, the EffectContext creates its own session ID
-        
+
         effect_context
     }
 

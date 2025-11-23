@@ -185,21 +185,21 @@ impl TimeEffects for SimulatedTimeHandler {
 
     /// Wait until a condition is met (alias for yield_until with AuraError)
     async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
-        self.yield_until(condition).await.map_err(|e| {
-            AuraError::Internal {
+        self.yield_until(condition)
+            .await
+            .map_err(|e| AuraError::Internal {
                 message: format!("Simulated time operation failed: {}", e),
-            }
-        })
+            })
     }
 
     /// Set a timeout and return a handle
     async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
         let handle = Uuid::new_v4();
         let expires_at = *self.current_time.lock().unwrap() + timeout_ms;
-        
+
         let mut timeouts = self.active_timeouts.lock().unwrap();
         timeouts.insert(handle, expires_at);
-        
+
         handle
     }
 

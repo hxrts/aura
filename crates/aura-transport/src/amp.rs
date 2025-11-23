@@ -4,8 +4,8 @@
 //! message envelope handling, AEAD encryption/decryption, and ratchet advancement.
 
 use async_trait::async_trait;
-use aura_core::identifiers::{ChannelId, ContextId, AuthorityId};
-use aura_core::{Hash32, AuraError};
+use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::{AuraError, Hash32};
 use aura_journal::ChannelEpochState;
 use serde::{Deserialize, Serialize};
 
@@ -176,10 +176,7 @@ pub fn advance_send(
 
 /// Helper for recv path: validate header and surface next generation for callers
 /// to persist via facts/reduction (no local mutation).
-pub fn advance_recv(
-    state: &ChannelEpochState,
-    header: AmpHeader,
-) -> AmpResult<RatchetDerivation> {
+pub fn advance_recv(state: &ChannelEpochState, header: AmpHeader) -> AmpResult<RatchetDerivation> {
     derive_for_recv(state, header)
 }
 
@@ -242,8 +239,8 @@ pub struct AmpAead;
 impl AmpAead {
     /// Encrypt payload using derived message key and header as associated data.
     pub fn encrypt(
-        message_key: &Hash32,
-        header: &AmpHeader,
+        _message_key: &Hash32,
+        _header: &AmpHeader,
         payload: &[u8],
     ) -> CoreResult<(Vec<u8>, Vec<u8>)> {
         // TODO: Implement ChaCha20-Poly1305 AEAD encryption
@@ -255,8 +252,8 @@ impl AmpAead {
 
     /// Decrypt payload using derived message key and header as associated data.
     pub fn decrypt(
-        message_key: &Hash32,
-        header: &AmpHeader,
+        _message_key: &Hash32,
+        _header: &AmpHeader,
         encrypted_payload: &[u8],
         auth_tag: &[u8],
     ) -> CoreResult<Vec<u8>> {
@@ -298,27 +295,24 @@ impl<T: AmpTransport> AmpProtocol<T> {
             .get_channel_state(context, channel)
             .await
             .map_err(|e| AuraError::invalid(e.to_string()))?;
-        
+
         // Derive ratchet and message key for send
         let derivation = advance_send(context, channel, &state)
             .map_err(|e| AuraError::crypto(format!("ratchet derivation failed: {}", e)))?;
-        
+
         // Encrypt payload
-        let (encrypted_payload, auth_tag) = AmpAead::encrypt(
-            &derivation.message_key,
-            &derivation.header,
-            &payload,
-        )?;
-        
+        let (encrypted_payload, auth_tag) =
+            AmpAead::encrypt(&derivation.message_key, &derivation.header, &payload)?;
+
         // Create envelope
         let envelope = AmpEnvelope {
             header: derivation.header,
             encrypted_payload,
             auth_tag,
             sender: AuthorityId::new(), // TODO: Get actual sender ID from context
-            sequence: None, // TODO: Add sequence tracking
+            sequence: None,             // TODO: Add sequence tracking
         };
-        
+
         // Send through transport
         self.transport
             .send_amp_message(
@@ -330,7 +324,7 @@ impl<T: AmpTransport> AmpProtocol<T> {
             )
             .await
             .map_err(|e| AuraError::invalid(e.to_string()))?;
-        
+
         // Update state with new generation
         let mut new_state = state;
         new_state.current_gen = derivation.next_gen;
@@ -338,7 +332,7 @@ impl<T: AmpTransport> AmpProtocol<T> {
             .update_channel_state(context, channel, new_state)
             .await
             .map_err(|e| AuraError::invalid(e.to_string()))?;
-        
+
         Ok(())
     }
 
@@ -348,18 +342,18 @@ impl<T: AmpTransport> AmpProtocol<T> {
     pub async fn receive_message(&self, envelope: AmpEnvelope) -> CoreResult<Vec<u8>> {
         let context = envelope.header.context;
         let channel = envelope.header.channel;
-        
+
         // Get current channel state
         let state = self
             .transport
             .get_channel_state(context, channel)
             .await
             .map_err(|e| AuraError::invalid(e.to_string()))?;
-        
+
         // Validate header and derive message key
         let derivation = advance_recv(&state, envelope.header)
             .map_err(|e| AuraError::crypto(format!("ratchet validation failed: {}", e)))?;
-        
+
         // Decrypt payload
         let payload = AmpAead::decrypt(
             &derivation.message_key,
@@ -367,17 +361,17 @@ impl<T: AmpTransport> AmpProtocol<T> {
             &envelope.encrypted_payload,
             &envelope.auth_tag,
         )?;
-        
+
         // Update state with new generation (if higher)
         let mut new_state = state;
         if envelope.header.ratchet_gen >= new_state.current_gen {
             new_state.current_gen = derivation.next_gen;
-        self.transport
-            .update_channel_state(context, channel, new_state)
-            .await
-            .map_err(|e| AuraError::invalid(e.to_string()))?;
+            self.transport
+                .update_channel_state(context, channel, new_state)
+                .await
+                .map_err(|e| AuraError::invalid(e.to_string()))?;
         }
-        
+
         Ok(payload)
     }
 }

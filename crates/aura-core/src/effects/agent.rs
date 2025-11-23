@@ -176,7 +176,7 @@ pub enum BiometricType {
 }
 
 /// Session management effects for device-side session coordination
-/// 
+///
 /// Enhanced to support choreographic patterns and consistent protocol implementation.
 #[async_trait]
 pub trait SessionManagementEffects: Send + Sync {
@@ -332,7 +332,10 @@ pub struct ChoreographicRole {
 
 impl ChoreographicRole {
     pub fn new(device_id: uuid::Uuid, role_index: u32) -> Self {
-        Self { device_id, role_index }
+        Self {
+            device_id,
+            role_index,
+        }
     }
 }
 

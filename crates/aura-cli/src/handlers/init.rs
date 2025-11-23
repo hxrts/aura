@@ -4,8 +4,7 @@
 
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
-use aura_protocol::effect_traits::{ConsoleEffects, StorageEffects};
-use aura_core::effects::TimeEffects;
+use aura_protocol::effect_traits::StorageEffects;
 use std::path::Path;
 
 /// Handle initialization through effects
@@ -87,7 +86,8 @@ async fn create_directory_through_effects(
     effects: &AuraEffectSystem,
     path: &Path,
 ) -> Result<()> {
-    let timestamp = <AuraEffectSystem as aura_core::effects::TimeEffects>::current_timestamp(effects).await;
+    let timestamp =
+        <AuraEffectSystem as aura_core::effects::TimeEffects>::current_timestamp(effects).await;
 
     // Create directory marker via StorageEffects (since StorageEffects is key-value based)
     let dir_marker_key = format!("directory_marker:{}", path.display());

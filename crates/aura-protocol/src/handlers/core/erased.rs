@@ -6,9 +6,9 @@
 use async_trait::async_trait;
 
 use crate::handlers::{context_immutable::AuraContext, AuraHandlerError, EffectType};
+use aura_composition::registry::Handler;
 use aura_core::effects::ExecutionMode;
 use aura_core::LocalSessionType;
-use aura_composition::registry::Handler;
 
 /// Primary interface for all Aura handlers
 ///
@@ -70,7 +70,7 @@ impl AuraHandler for CompositeHandlerAdapter {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         // Convert AuraContext to HandlerContext
         let handler_ctx = aura_composition::HandlerContext::new(ctx.device_id, ctx.execution_mode);
-        
+
         // Execute through composite handler
         self.composite
             .execute_effect(effect_type, operation, parameters, &handler_ctx)
@@ -85,7 +85,7 @@ impl AuraHandler for CompositeHandlerAdapter {
     ) -> Result<(), AuraHandlerError> {
         // Convert AuraContext to HandlerContext
         let handler_ctx = aura_composition::HandlerContext::new(ctx.device_id, ctx.execution_mode);
-        
+
         // Execute through composite handler
         self.composite
             .execute_session(session, &handler_ctx)
@@ -110,7 +110,7 @@ pub struct AuraHandlerFactory;
 impl AuraHandlerFactory {
     /// Create a handler for testing
     pub fn for_testing(device_id: aura_core::identifiers::DeviceId) -> Box<dyn AuraHandler> {
-        let composite = aura_composition::CompositeHandler::for_testing(device_id.into());
+        let composite = aura_composition::CompositeHandler::for_testing(device_id);
         let adapter = CompositeHandlerAdapter::new(composite);
         Box::new(adapter)
     }
@@ -119,7 +119,7 @@ impl AuraHandlerFactory {
     pub fn for_production(
         device_id: aura_core::identifiers::DeviceId,
     ) -> Result<Box<dyn AuraHandler>, AuraHandlerError> {
-        let composite = aura_composition::CompositeHandler::for_production(device_id.into());
+        let composite = aura_composition::CompositeHandler::for_production(device_id);
         let adapter = CompositeHandlerAdapter::new(composite);
         Ok(Box::new(adapter))
     }
@@ -129,7 +129,7 @@ impl AuraHandlerFactory {
         device_id: aura_core::identifiers::DeviceId,
         _seed: u64,
     ) -> Box<dyn AuraHandler> {
-        let composite = aura_composition::CompositeHandler::for_simulation(device_id.into(), _seed);
+        let composite = aura_composition::CompositeHandler::for_simulation(device_id, _seed);
         let adapter = CompositeHandlerAdapter::new(composite);
         Box::new(adapter)
     }
@@ -154,8 +154,8 @@ impl HandlerUtils {
         T: serde::de::DeserializeOwned + Send + Sync,
     {
         // Serialize parameters
-        let param_bytes = serde_json::to_vec(&parameters)
-            .map_err(|e| AuraHandlerError::EffectSerialization {
+        let param_bytes =
+            serde_json::to_vec(&parameters).map_err(|e| AuraHandlerError::EffectSerialization {
                 effect_type,
                 operation: operation.to_string(),
                 source: e.into(),
@@ -167,12 +167,11 @@ impl HandlerUtils {
             .await?;
 
         // Deserialize the result
-        serde_json::from_slice(&result_bytes)
-            .map_err(|e| AuraHandlerError::EffectDeserialization {
-                effect_type,
-                operation: operation.to_string(),
-                source: e.into(),
-            })
+        serde_json::from_slice(&result_bytes).map_err(|e| AuraHandlerError::EffectDeserialization {
+            effect_type,
+            operation: operation.to_string(),
+            source: e.into(),
+        })
     }
 }
 

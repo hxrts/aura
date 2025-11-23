@@ -132,8 +132,8 @@ pub use system::{LoggingSystemHandler, MetricsSystemHandler, MonitoringSystemHan
 
 // Convenience re-exports for most common transport handlers
 pub use transport_effects::{
-    FramingHandler, RealTransportHandler, TcpTransportHandler, 
-    TransportError, WebSocketTransportHandler,
+    FramingHandler, RealTransportHandler, TcpTransportHandler, TransportError,
+    WebSocketTransportHandler,
 };
 
 // Re-export core effect traits for convenience

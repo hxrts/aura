@@ -138,7 +138,7 @@ impl AuthorityJournalSyncProtocol {
         peer_id: AuthorityId,
     ) -> SyncResult<AuthoritySyncResult> {
         // Create sync session
-        let session = AuthoritySyncSession {
+        let _session = AuthoritySyncSession {
             local_authority: local_authority.authority_id(),
             remote_authority: peer_id,
             session_id: uuid::Uuid::new_v4().to_string(),

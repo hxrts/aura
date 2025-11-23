@@ -58,8 +58,8 @@ where
 
         // Get timestamp using TimeEffects (following effect system guidelines)
         let timestamp_ms = self.effects.current_timestamp_millis().await;
-        let now =
-            DateTime::from_timestamp_millis(timestamp_ms as i64).unwrap_or_else(|| Utc::now()); // Fallback, but should not happen with valid timestamps
+        let now = DateTime::from_timestamp_millis(timestamp_ms as i64)
+            .expect("Valid timestamp from effects");
 
         // Create group metadata
         let mut members = Vec::new();
@@ -108,8 +108,8 @@ where
         let msg_uuid = self.effects.random_uuid().await;
         let msg_id = ChatMessageId::from_uuid(msg_uuid);
         let msg_timestamp_ms = self.effects.current_timestamp_millis().await;
-        let msg_timestamp =
-            DateTime::from_timestamp_millis(msg_timestamp_ms as i64).unwrap_or_else(|| Utc::now());
+        let msg_timestamp = DateTime::from_timestamp_millis(msg_timestamp_ms as i64)
+            .expect("Valid timestamp from effects");
 
         let system_msg = ChatMessage::new_system(
             msg_id,
@@ -157,8 +157,8 @@ where
         let msg_uuid = self.effects.random_uuid().await;
         let msg_id = ChatMessageId::from_uuid(msg_uuid);
         let timestamp_ms = self.effects.current_timestamp_millis().await;
-        let timestamp =
-            DateTime::from_timestamp_millis(timestamp_ms as i64).unwrap_or_else(|| Utc::now());
+        let timestamp = DateTime::from_timestamp_millis(timestamp_ms as i64)
+            .expect("Valid timestamp from effects");
 
         let message =
             ChatMessage::new_text(msg_id, group_id.clone(), sender_id, content, timestamp);
@@ -315,7 +315,7 @@ where
         // Add new member with timestamp from effect system
         let joined_timestamp_ms = self.effects.current_timestamp_millis().await;
         let joined_timestamp = DateTime::from_timestamp_millis(joined_timestamp_ms as i64)
-            .unwrap_or_else(|| Utc::now());
+            .expect("Valid timestamp from effects");
         group.members.push(ChatMember {
             authority_id: new_member.clone(),
             display_name: Self::display_name(&new_member),
@@ -330,8 +330,8 @@ where
         let msg_uuid = self.effects.random_uuid().await;
         let msg_id = ChatMessageId::from_uuid(msg_uuid);
         let msg_timestamp_ms = self.effects.current_timestamp_millis().await;
-        let msg_timestamp =
-            DateTime::from_timestamp_millis(msg_timestamp_ms as i64).unwrap_or_else(|| Utc::now());
+        let msg_timestamp = DateTime::from_timestamp_millis(msg_timestamp_ms as i64)
+            .expect("Valid timestamp from effects");
 
         let system_msg = ChatMessage::new_system(
             msg_id,
@@ -438,8 +438,8 @@ where
         }
 
         let timestamp_ms = self.effects.current_timestamp_millis().await;
-        let timestamp =
-            DateTime::from_timestamp_millis(timestamp_ms as i64).unwrap_or_else(|| Utc::now());
+        let timestamp = DateTime::from_timestamp_millis(timestamp_ms as i64)
+            .expect("Valid timestamp from effects");
 
         message.content = new_content.to_string();
         message.message_type = crate::types::MessageType::Edit;
@@ -484,8 +484,8 @@ where
         }
 
         let timestamp_ms = self.effects.current_timestamp_millis().await;
-        let timestamp =
-            DateTime::from_timestamp_millis(timestamp_ms as i64).unwrap_or_else(|| Utc::now());
+        let timestamp = DateTime::from_timestamp_millis(timestamp_ms as i64)
+            .expect("Valid timestamp from effects");
 
         message.message_type = crate::types::MessageType::Delete;
         message.timestamp = timestamp;
@@ -565,8 +565,8 @@ where
         let msg_uuid = self.effects.random_uuid().await;
         let msg_id = ChatMessageId::from_uuid(msg_uuid);
         let msg_timestamp_ms = self.effects.current_timestamp_millis().await;
-        let msg_timestamp =
-            DateTime::from_timestamp_millis(msg_timestamp_ms as i64).unwrap_or_else(|| Utc::now());
+        let msg_timestamp = DateTime::from_timestamp_millis(msg_timestamp_ms as i64)
+            .expect("Valid timestamp from effects");
 
         let action = if member_to_remove == authority_id {
             "left"
@@ -646,9 +646,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use aura_core::identifiers::AuthorityId;
-
     // TODO: Add comprehensive tests with mock effects
     #[tokio::test]
     async fn test_chat_service_creation() {

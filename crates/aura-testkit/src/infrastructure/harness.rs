@@ -7,8 +7,8 @@ use std::sync::Once;
 use std::time::Duration;
 
 use crate::foundation::{create_mock_test_context, SimpleTestContext};
-use aura_agent::{AuraEffectSystem, core::AgentConfig};
-use aura_core::{AuraError, AuraResult, DeviceId, AuthorityId};
+use aura_agent::{core::AgentConfig, AuraEffectSystem};
+use aura_core::{AuraError, AuraResult, DeviceId};
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 

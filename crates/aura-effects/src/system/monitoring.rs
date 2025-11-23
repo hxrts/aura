@@ -16,43 +16,61 @@ pub struct MonitoringSystemHandler {
 /// Health status levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HealthStatus {
+    /// Component is operating normally
     Healthy,
+    /// Component is operating with reduced performance or minor issues
     Degraded,
+    /// Component has encountered significant problems
     Unhealthy,
+    /// Component has encountered severe problems requiring immediate attention
     Critical,
 }
 
 /// Alert severity levels
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AlertSeverity {
+    /// Informational alert, no action required
     Info,
+    /// Warning alert, may require attention or investigation
     Warning,
+    /// Critical alert, requires immediate attention
     Critical,
 }
 
 /// Health check result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthCheckResult {
+    /// Name of the component being checked
     pub component: String,
+    /// Current health status of the component
     pub status: HealthStatus,
+    /// Status message or diagnostic information
     pub message: String,
 }
 
 /// Alert notification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Alert {
+    /// Unique alert identifier
     pub id: Uuid,
+    /// Component that triggered the alert
     pub component: String,
+    /// Alert severity level
     pub severity: AlertSeverity,
+    /// Alert title/summary
     pub title: String,
+    /// Detailed alert message
     pub message: String,
+    /// Whether the alert has been resolved
     pub resolved: bool,
+    /// Additional metadata for the alert
     pub metadata: HashMap<String, String>,
 }
 
 /// Configuration for monitoring system
 #[derive(Debug, Clone)]
 pub struct MonitoringConfig {
+    /// Maximum number of alerts to keep in buffer
     pub max_alerts: usize,
 }
 
@@ -65,12 +83,15 @@ impl Default for MonitoringConfig {
 /// Monitoring system statistics
 #[derive(Debug, Clone, Default)]
 pub struct MonitoringStats {
+    /// Total number of health checks performed
     pub total_health_checks: u64,
+    /// Number of failed health checks
     pub failed_health_checks: u64,
+    /// Total number of alerts generated
     pub total_alerts: u64,
+    /// Number of currently active (unresolved) alerts
     pub active_alerts: u64,
 }
-
 
 impl MonitoringSystemHandler {
     /// Create a new monitoring system handler
@@ -78,6 +99,7 @@ impl MonitoringSystemHandler {
         Self { config }
     }
 
+    /// Create a monitoring system handler with default configuration
     pub fn with_defaults() -> Self {
         Self::new(MonitoringConfig::default())
     }
@@ -114,11 +136,16 @@ impl MonitoringSystemHandler {
         Ok(())
     }
 
+    /// Get the most recent alerts up to the specified count
     pub async fn get_recent_alerts(&self, count: usize) -> Vec<Alert> {
-        tracing::debug!(count, "Monitoring alert retrieval is stateless; returning empty set");
+        tracing::debug!(
+            count,
+            "Monitoring alert retrieval is stateless; returning empty set"
+        );
         Vec::new()
     }
 
+    /// Resolve an alert by its ID
     pub async fn resolve_alert(&self, alert_id: Uuid) -> Result<(), SystemError> {
         tracing::debug!(%alert_id, "Monitoring resolve is stateless; no-op");
         Ok(())
@@ -181,16 +208,16 @@ impl SystemEffects for MonitoringSystemHandler {
             value = value,
             "Config update requested via monitoring handler (placeholder)"
         );
-        
+
         match key {
             "max_alerts" => {
                 // Validate the value but don't store it (stateless handler)
-                value.parse::<usize>().map_err(|_| {
-                    SystemError::InvalidConfiguration {
+                value
+                    .parse::<usize>()
+                    .map_err(|_| SystemError::InvalidConfiguration {
                         key: key.to_string(),
                         value: value.to_string(),
-                    }
-                })?;
+                    })?;
                 Ok(())
             }
             _ => Err(SystemError::InvalidConfiguration {
@@ -253,7 +280,7 @@ mod tests {
     #[tokio::test]
     async fn test_alert_operations() {
         let handler = MonitoringSystemHandler::default();
-        
+
         // Test alert sending (currently a placeholder)
         handler
             .send_alert(
@@ -267,7 +294,10 @@ mod tests {
             .expect("alert ok");
 
         // Test health check
-        let health = handler.check_component_health("test_component").await.unwrap();
+        let health = handler
+            .check_component_health("test_component")
+            .await
+            .unwrap();
         assert_eq!(health.component, "test_component");
         assert_eq!(health.status, HealthStatus::Healthy);
     }
@@ -275,11 +305,11 @@ mod tests {
     #[tokio::test]
     async fn test_system_effects() {
         let handler = MonitoringSystemHandler::default();
-        
+
         // Test system info
         let info = handler.get_system_info().await.unwrap();
         assert_eq!(info.get("component"), Some(&"monitoring".to_string()));
-        
+
         // Test config operations
         let config_value = handler.get_config("max_alerts").await.unwrap();
         assert_eq!(config_value, "256");

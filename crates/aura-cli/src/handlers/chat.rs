@@ -190,7 +190,10 @@ async fn handle_create_group(
 ) -> Result<()> {
     let creator_id = ctx.authority_id().clone();
 
-    match chat_service.create_group(name, creator_id, members.to_vec()).await {
+    match chat_service
+        .create_group(name, creator_id, members.to_vec())
+        .await
+    {
         Ok(group) => {
             ConsoleEffects::log_info(
                 effect_system,

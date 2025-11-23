@@ -50,9 +50,9 @@ impl StorageEffects for FilesystemStorageHandler {
             })?;
         }
 
-        fs::write(&file_path, value).await.map_err(|e| {
-            StorageError::WriteFailed(format!("Failed to write file: {}", e))
-        })?;
+        fs::write(&file_path, value)
+            .await
+            .map_err(|e| StorageError::WriteFailed(format!("Failed to write file: {}", e)))?;
 
         Ok(())
     }
@@ -64,9 +64,9 @@ impl StorageEffects for FilesystemStorageHandler {
             return Ok(None);
         }
 
-        let data = fs::read(&file_path).await.map_err(|e| {
-            StorageError::ReadFailed(format!("Failed to read file: {}", e))
-        })?;
+        let data = fs::read(&file_path)
+            .await
+            .map_err(|e| StorageError::ReadFailed(format!("Failed to read file: {}", e)))?;
 
         Ok(Some(data))
     }
@@ -78,17 +78,17 @@ impl StorageEffects for FilesystemStorageHandler {
             return Ok(false);
         }
 
-        fs::remove_file(&file_path).await.map_err(|e| {
-            StorageError::DeleteFailed(format!("Failed to remove file: {}", e))
-        })?;
+        fs::remove_file(&file_path)
+            .await
+            .map_err(|e| StorageError::DeleteFailed(format!("Failed to remove file: {}", e)))?;
 
         Ok(true)
     }
 
     async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-        let mut entries = fs::read_dir(&self.base_path).await.map_err(|e| {
-            StorageError::ReadFailed(format!("Failed to read directory: {}", e))
-        })?;
+        let mut entries = fs::read_dir(&self.base_path)
+            .await
+            .map_err(|e| StorageError::ReadFailed(format!("Failed to read directory: {}", e)))?;
 
         let mut keys = Vec::new();
         while let Some(entry) = entries.next_entry().await.map_err(|e| {
@@ -158,7 +158,6 @@ impl StorageEffects for FilesystemStorageHandler {
             backend_type: "filesystem".to_string(),
         })
     }
-
 }
 
 /// Encrypted storage handler for production use
@@ -196,7 +195,10 @@ impl EncryptedStorageHandler {
         let mut info = HashMap::new();
         info.insert("type".to_string(), "encrypted_filesystem".to_string());
         info.insert("encryption".to_string(), "placeholder".to_string());
-        info.insert("base_path".to_string(), self.filesystem_handler.base_path.display().to_string());
+        info.insert(
+            "base_path".to_string(),
+            self.filesystem_handler.base_path.display().to_string(),
+        );
         info
     }
 }
@@ -258,7 +260,6 @@ impl StorageEffects for EncryptedStorageHandler {
     async fn stats(&self) -> Result<StorageStats, StorageError> {
         self.filesystem_handler.stats().await
     }
-
 }
 
 #[cfg(test)]
@@ -274,14 +275,14 @@ mod tests {
         // Test store and retrieve
         let key = "test_key";
         let value = b"test_value".to_vec();
-        
+
         handler.store(key, value.clone()).await.unwrap();
         let retrieved = handler.retrieve(key).await.unwrap();
         assert_eq!(retrieved, Some(value));
 
         // Test exists
         assert!(handler.exists(key).await.unwrap());
-        
+
         // Test remove
         assert!(handler.remove(key).await.unwrap());
         assert!(!handler.exists(key).await.unwrap());
@@ -295,7 +296,7 @@ mod tests {
         // Test basic operations (currently delegates to filesystem handler)
         let key = "encrypted_test";
         let value = b"encrypted_value".to_vec();
-        
+
         handler.store(key, value.clone()).await.unwrap();
         let retrieved = handler.retrieve(key).await.unwrap();
         assert_eq!(retrieved, Some(value));
@@ -307,23 +308,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_chunk_operations() {
+    async fn test_delete_and_retrieve() {
         let temp_dir = TempDir::new().unwrap();
         let handler = FilesystemStorageHandler::new(temp_dir.path().to_path_buf());
 
-        let chunk_id = ChunkId::new();
-        let data = b"chunk_data".to_vec();
+        let key = "test_key";
+        let data = b"test_data".to_vec();
 
-        // Test write and read chunk
-        handler.write_chunk(&chunk_id, &data).await.unwrap();
-        let retrieved = handler.read_chunk(&chunk_id).await.unwrap();
-        assert_eq!(retrieved, data);
+        // Store data
+        handler.store(key, data.clone()).await.unwrap();
 
-        // Test chunk exists
-        assert!(handler.chunk_exists(&chunk_id).await.unwrap());
+        // Verify it exists
+        let retrieved = handler.retrieve(key).await.unwrap();
+        assert_eq!(retrieved, Some(data));
 
-        // Test delete chunk
-        handler.delete_chunk(&chunk_id).await.unwrap();
-        assert!(!handler.chunk_exists(&chunk_id).await.unwrap());
+        // Delete it
+        let was_deleted = handler.remove(key).await.unwrap();
+        assert!(was_deleted);
+
+        // Verify it's gone
+        let retrieved_after = handler.retrieve(key).await.unwrap();
+        assert_eq!(retrieved_after, None);
     }
 }

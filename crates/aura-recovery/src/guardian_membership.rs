@@ -10,11 +10,11 @@ use crate::{
 use aura_authenticate::guardian_auth::RecoveryContext;
 use aura_core::effects::TimeEffects;
 use aura_core::frost::ThresholdSignature;
-use aura_core::{identifiers::GuardianId, AccountId, AuraError, DeviceId};
+use aura_core::{identifiers::GuardianId, AccountId, AuraError, ContextId, DeviceId};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_protocol::guards::BiscuitGuardEvaluator;
-use aura_wot::{BiscuitTokenManager, ResourceScope};
+use aura_wot::{BiscuitTokenManager, ContextOp, ResourceScope};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -511,7 +511,7 @@ where
     /// Check if the membership change request is authorized using Biscuit tokens
     async fn check_membership_authorization(
         &self,
-        _request: &MembershipChangeRequest,
+        request: &MembershipChangeRequest,
     ) -> Result<(), String> {
         let (token_manager, guard_evaluator) = match (&self.token_manager, &self.guard_evaluator) {
             (Some(tm), Some(ge)) => (tm, ge),
@@ -520,8 +520,9 @@ where
 
         let token = token_manager.current_token();
 
-        let resource_scope = ResourceScope::Recovery {
-            recovery_type: "GuardianSet".to_string(),
+        let resource_scope = ResourceScope::Context {
+            context_id: ContextId::from_uuid(request.base.account_id.0),
+            operation: ContextOp::UpdateGuardianSet,
         };
 
         // Check authorization for membership change initiation

@@ -8,8 +8,8 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use tokio::runtime::Runtime;
 
-use aura_testkit::effect_system::TestEffectRegistry;
 use aura_core::identifiers::DeviceId;
+use aura_testkit::effect_system::TestEffectRegistry;
 
 /// Benchmark effect system initialization for testing mode
 fn bench_initialization(c: &mut Criterion) {

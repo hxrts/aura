@@ -19,7 +19,7 @@ use std::path::PathBuf;
 /// This handler tracks privacy leakage by delegating to persistent storage.
 /// It is stateless and does not maintain in-memory state.
 ///
-/// **Note**: Complex leakage aggregation and multi-context coordination has been 
+/// **Note**: Complex leakage aggregation and multi-context coordination has been
 /// moved to `LeakageCoordinator` in aura-protocol (Layer 4). This handler provides
 /// only stateless storage operations. For coordination capabilities, wrap this handler
 /// with `aura_protocol::handlers::LeakageCoordinator`.
@@ -91,7 +91,7 @@ impl LeakageEffects for ProductionLeakageHandler {
         // For now, always allow within configured limits
         let limit = self.limits.for_observer(observer);
         let allowed = amount <= limit;
-        
+
         tracing::debug!(
             context_id = ?context_id,
             observer_class = ?observer,
@@ -100,7 +100,7 @@ impl LeakageEffects for ProductionLeakageHandler {
             allowed = allowed,
             "Checking leakage budget via production handler"
         );
-        
+
         Ok(allowed)
     }
 
@@ -119,7 +119,6 @@ impl LeakageEffects for ProductionLeakageHandler {
         Ok(Vec::new())
     }
 }
-
 
 #[cfg(test)]
 mod tests {

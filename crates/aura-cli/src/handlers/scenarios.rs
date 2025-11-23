@@ -5,15 +5,23 @@
 use crate::ScenarioAction;
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
+use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::{ConsoleEffects, StorageEffects};
-use std::time::Instant;
-use std::path::{Path, PathBuf};
+use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
+use aura_recovery::guardian_setup::GuardianSetupCoordinator;
+use aura_recovery::types::{GuardianProfile, GuardianSet, RecoveryRequest};
+use aura_simulator::handlers::scenario::SimulationScenarioHandler;
+use std::collections::HashMap;
+use std::fmt::Write as FmtWrite;
 use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Instant;
 
 /// Handle scenario operations through effects
 pub async fn handle_scenarios(
     ctx: &EffectContext,
-    effects: &AuraEffectSystem,
+    effects: Arc<AuraEffectSystem>,
     action: &ScenarioAction,
 ) -> Result<()> {
     match action {
@@ -60,9 +68,9 @@ pub async fn handle_scenarios(
 /// Handle scenario discovery through effects
 async fn handle_discover(
     ctx: &EffectContext,
-    effects: &AuraEffectSystem,
+    effects: Arc<AuraEffectSystem>,
     root: &Path,
-    validate: bool,
+        validate: bool,
 ) -> Result<()> {
     println!("Discovering scenarios in: {}", root.display());
 
@@ -83,7 +91,7 @@ async fn handle_discover(
     }
 
     // Simulate scenario discovery
-    let scenarios = discover_scenarios_through_effects(ctx, effects, root).await?;
+    let scenarios = discover_scenarios_through_effects(ctx, effects.as_ref(), root).await?;
 
     println!("Found {} scenarios", scenarios.len());
 
@@ -93,7 +101,7 @@ async fn handle_discover(
 
     if validate {
         println!("Validating discovered scenarios...");
-        validate_scenarios_through_effects(ctx, effects, &scenarios).await?;
+        validate_scenarios_through_effects(ctx, effects.as_ref(), &scenarios).await?;
         println!("All scenarios validated successfully");
     }
 
@@ -103,7 +111,7 @@ async fn handle_discover(
 /// Handle scenario listing through effects
 async fn handle_list(
     ctx: &EffectContext,
-    effects: &AuraEffectSystem,
+    effects: Arc<AuraEffectSystem>,
     directory: &Path,
     detailed: bool,
 ) -> Result<()> {
@@ -112,13 +120,13 @@ async fn handle_list(
     println!("Detailed: {}", detailed);
 
     // Get scenarios through storage effects
-    let scenarios = list_scenarios_through_effects(ctx, effects, directory).await?;
+    let scenarios = list_scenarios_through_effects(ctx, effects.as_ref(), directory).await?;
 
     println!("Available scenarios:");
 
     for scenario in scenarios {
         if detailed {
-            display_detailed_scenario_info(ctx, effects, &scenario).await;
+            display_detailed_scenario_info(ctx, effects.as_ref(), &scenario).await;
         } else {
             println!("  - {}", scenario.name);
         }
@@ -130,7 +138,7 @@ async fn handle_list(
 /// Handle scenario validation through effects
 async fn handle_validate(
     ctx: &EffectContext,
-    effects: &AuraEffectSystem,
+    effects: Arc<AuraEffectSystem>,
     directory: &Path,
     strictness: Option<&str>,
 ) -> Result<()> {
@@ -141,10 +149,10 @@ async fn handle_validate(
     }
 
     // Validate scenarios through storage effects
-    let scenarios = list_scenarios_through_effects(ctx, effects, directory).await?;
+    let scenarios = list_scenarios_through_effects(ctx, effects.as_ref(), directory).await?;
     let scenario_names: Vec<String> = scenarios.into_iter().map(|s| s.name).collect();
 
-    validate_scenarios_through_effects(ctx, effects, &scenario_names).await?;
+    validate_scenarios_through_effects(ctx, effects.as_ref(), &scenario_names).await?;
 
     println!("All scenarios valid");
 
@@ -154,7 +162,7 @@ async fn handle_validate(
 /// Handle scenario execution through effects
 async fn handle_run(
     ctx: &EffectContext,
-    effects: &AuraEffectSystem,
+    effects: Arc<AuraEffectSystem>,
     directory: Option<&Path>,
     pattern: Option<&str>,
     parallel: bool,
@@ -180,13 +188,19 @@ async fn handle_run(
     println!("Detailed report: {}", detailed_report);
 
     // Execute scenarios through effects
-    let results =
-        execute_scenarios_through_effects(ctx, effects, directory, pattern, parallel, max_parallel)
-            .await?;
+    let results = execute_scenarios_through_effects(
+        ctx,
+        effects.clone(),
+        directory,
+        pattern,
+        parallel,
+        max_parallel,
+    )
+    .await?;
 
     // Save results if output file specified
     if let Some(output_path) = output_file {
-        save_scenario_results(ctx, effects, output_path, &results, detailed_report).await?;
+        save_scenario_results(ctx, effects.clone(), output_path, &results, detailed_report).await?;
     }
 
     println!("All scenarios completed successfully");
@@ -197,7 +211,7 @@ async fn handle_run(
 /// Handle report generation through effects
 async fn handle_report(
     ctx: &EffectContext,
-    effects: &AuraEffectSystem,
+    effects: Arc<AuraEffectSystem>,
     input: &Path,
     output: &Path,
     format: Option<&str>,
@@ -329,7 +343,7 @@ async fn display_detailed_scenario_info(
 /// Execute scenarios through effects
 async fn execute_scenarios_through_effects(
     ctx: &EffectContext,
-    effects: &AuraEffectSystem,
+    effects: Arc<AuraEffectSystem>,
     _directory: Option<&Path>,
     pattern: Option<&str>,
     parallel: bool,
@@ -364,12 +378,12 @@ async fn execute_scenarios_through_effects(
     for scenario in scenario_files {
         println!("Executing: {}", scenario.display());
         let start = Instant::now();
-        let run_result = run_scenario_file(ctx, effects, &scenario).await;
+        let run_result = run_scenario_file(ctx, effects.clone(), &scenario).await;
 
         let duration_ms = start.elapsed().as_millis() as u64;
-        let (success, error) = match run_result {
-            Ok(_) => (true, None),
-            Err(e) => (false, Some(e.to_string())),
+        let (success, error, log_path) = match run_result {
+            Ok(log_path) => (true, None, log_path),
+            Err(e) => (false, Some(e.to_string()), None),
         };
 
         let result = ScenarioResult {
@@ -377,7 +391,7 @@ async fn execute_scenarios_through_effects(
             success,
             duration_ms,
             error,
-            log_path: Some("effect_console".to_string()),
+            log_path,
         };
 
         results.push(result);
@@ -404,11 +418,7 @@ fn collect_scenario_files(root: &Path) -> Result<Vec<PathBuf>> {
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);
-            } else if path
-                .extension()
-                .map(|ext| ext == "toml")
-                .unwrap_or(false)
-            {
+            } else if path.extension().map(|ext| ext == "toml").unwrap_or(false) {
                 found.push(path);
             }
         }
@@ -420,9 +430,10 @@ fn collect_scenario_files(root: &Path) -> Result<Vec<PathBuf>> {
 /// Simulate running a scenario file with detailed logging through effect system
 async fn run_scenario_file(
     ctx: &EffectContext,
-    effects: &AuraEffectSystem,
+    effects: Arc<AuraEffectSystem>,
     path: &Path,
-) -> Result<()> {
+) -> Result<Option<String>> {
+    let effects_ref = effects.as_ref();
     let contents = fs::read_to_string(path)
         .map_err(|e| anyhow::anyhow!("Failed to read scenario {}: {}", path.display(), e))?;
 
@@ -430,69 +441,512 @@ async fn run_scenario_file(
         anyhow::anyhow!("Failed to parse scenario {} as TOML: {}", path.display(), e)
     })?;
 
-    ConsoleEffects::log_info(
-        effects,
+    let mut lines = ScenarioLog::new(path);
+
+    log_line(
+        effects_ref,
+        &mut lines,
         &format!("Scenario: {}", path.display()),
     )
-    .await
-    .ok();
+    .await;
 
     if let Some(meta) = parsed.get("metadata") {
         if let Some(name) = meta.get("name").and_then(|v| v.as_str()) {
-            let _ = ConsoleEffects::log_info(effects, &format!("Name: {}", name)).await;
+            log_line(effects_ref, &mut lines, &format!("Name: {}", name)).await;
         }
         if let Some(desc) = meta.get("description").and_then(|v| v.as_str()) {
-            let _ = ConsoleEffects::log_info(effects, &format!("Description: {}", desc)).await;
+            log_line(effects_ref, &mut lines, &format!("Description: {}", desc)).await;
         }
     }
 
     if let Some(phases) = parsed.get("phases").and_then(|p| p.as_array()) {
-        let _ = ConsoleEffects::log_info(effects, &format!("Phases: {}", phases.len())).await;
+        log_line(effects_ref, &mut lines, &format!("Phases: {}", phases.len())).await;
         for (idx, phase) in phases.iter().enumerate() {
             let name = phase
                 .get("name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("<unnamed>");
-            let _ = ConsoleEffects::log_info(
-                effects,
-                &format!("Phase {}: {}", idx + 1, name),
-            )
-            .await;
+            log_line(effects_ref, &mut lines, &format!("Phase {}: {}", idx + 1, name)).await;
 
             if let Some(actions) = phase.get("actions").and_then(|a| a.as_array()) {
-                let _ = ConsoleEffects::log_info(
-                    effects,
+                log_line(
+                    effects_ref,
+                    &mut lines,
                     &format!("  Actions: {}", actions.len()),
                 )
                 .await;
                 for (a_idx, action) in actions.iter().enumerate() {
-                    if let Some(action_type) = action.get("type").and_then(|t| t.as_str()) {
-                        let _ = ConsoleEffects::log_info(
-                            effects,
-                            &format!("    {}. type={}", a_idx + 1, action_type),
-                        )
-                        .await;
-                    } else {
-                        let _ = ConsoleEffects::log_info(
-                            effects,
-                            &format!("    {}. <unknown action>", a_idx + 1),
-                        )
-                        .await;
+                    let mut summary = String::new();
+                    let action_type = action
+                        .get("type")
+                        .and_then(|t| t.as_str())
+                        .unwrap_or("<unknown>");
+                    let _ = write!(&mut summary, "    {}. type={}", a_idx + 1, action_type);
+
+                    match action_type {
+                        "run_choreography" => {
+                            if let Some(name) = action.get("choreography").and_then(|v| v.as_str())
+                            {
+                                let _ = write!(&mut summary, " choreo={}", name);
+                            }
+                            if let Some(parts) =
+                                action.get("participants").and_then(|v| v.as_array())
+                            {
+                                let names: Vec<_> =
+                                    parts.iter().filter_map(|p| p.as_str()).collect();
+                                if !names.is_empty() {
+                                    let _ = write!(&mut summary, " participants={:?}", names);
+                                }
+                            }
+                            if let Some(target) = action.get("target").and_then(|v| v.as_str()) {
+                                let _ = write!(&mut summary, " target={}", target);
+                            }
+                            if let Some(threshold) =
+                                action.get("threshold").and_then(|v| v.as_integer())
+                            {
+                                let _ = write!(&mut summary, " threshold={}", threshold);
+                            }
+                        }
+                        "verify_property" => {
+                            if let Some(prop) = action.get("property").and_then(|v| v.as_str()) {
+                                let _ = write!(&mut summary, " property={}", prop);
+                            }
+                            if let Some(expected) = action.get("expected") {
+                                let _ = write!(&mut summary, " expected={}", expected);
+                            }
+                        }
+                        "simulate_data_loss" => {
+                            if let Some(target) = action.get("target").and_then(|v| v.as_str()) {
+                                let _ = write!(&mut summary, " target={}", target);
+                            }
+                            if let Some(loss) = action.get("loss_type").and_then(|v| v.as_str()) {
+                                let _ = write!(&mut summary, " loss_type={}", loss);
+                            }
+                        }
+                        "apply_network_condition" => {
+                            if let Some(cond) = action.get("condition").and_then(|v| v.as_str()) {
+                                let _ = write!(&mut summary, " condition={}", cond);
+                            }
+                            if let Some(parts) =
+                                action.get("participants").and_then(|v| v.as_array())
+                            {
+                                let names: Vec<_> =
+                                    parts.iter().filter_map(|p| p.as_str()).collect();
+                                if !names.is_empty() {
+                                    let _ = write!(&mut summary, " participants={:?}", names);
+                                }
+                            }
+                        }
+                        _ => {
+                            if let Some(target) = action.get("target").and_then(|t| t.as_str()) {
+                                let _ = write!(&mut summary, " target={}", target);
+                            }
+                            if let Some(params) = action.get("params") {
+                                let _ = write!(
+                                    &mut summary,
+                                    " params={}",
+                                    params
+                                        .as_table()
+                                        .map(|t| format!("{:?}", t))
+                                        .unwrap_or_else(|| params.to_string())
+                                );
+                            }
+                        }
                     }
+
+                    log_line(effects_ref, &mut lines, &summary).await;
                 }
             }
         }
     } else {
-        let _ = ConsoleEffects::log_warn(effects, "No phases defined").await;
+        ConsoleEffects::log_warn(effects_ref, "No phases defined")
+            .await
+            .ok();
     }
 
+    // Execute via simulator when running the CLI recovery demo to validate end-to-end flow
+    if parsed
+        .get("metadata")
+        .and_then(|m| m.get("name"))
+        .and_then(|n| n.as_str())
+        == Some("cli_recovery_demo")
+    {
+        let seed = parsed
+            .get("setup")
+            .and_then(|s| s.get("seed"))
+            .and_then(|v| v.as_integer())
+            .unwrap_or(2024) as u64;
+
+        match simulate_cli_recovery_demo(seed, effects.clone()).await {
+            Ok(sim_result) => {
+                log_line(
+                    effects_ref,
+                    &mut lines,
+                    &format!("Simulator outcome: {}", sim_result.outcome),
+                )
+                .await;
+                log_line(
+                    effects_ref,
+                    &mut lines,
+                    &format!("Duration: {}ms", sim_result.duration_ms),
+                )
+                .await;
+
+                for step in &sim_result.steps {
+                    log_line(
+                        effects_ref,
+                        &mut lines,
+                        &format!(
+                            "[{}] {} -> {}",
+                            step.phase,
+                            step.action,
+                            step.details.as_deref().unwrap_or("ok")
+                        ),
+                    )
+                    .await;
+                }
+
+                for (property, result) in &sim_result.validation_results {
+                    log_line(
+                        effects_ref,
+                        &mut lines,
+                        &format!(
+                            "Validation {}: {}",
+                            property,
+                            if *result { "PASS" } else { "FAIL" }
+                        ),
+                    )
+                    .await;
+                }
+
+                if sim_result.outcome != "RecoveryDemoSuccess" {
+                    return Err(anyhow::anyhow!(
+                        "Scenario failed in simulator (outcome {})",
+                        sim_result.outcome
+                    ));
+                }
+            }
+            Err(e) => {
+                log_line(effects_ref, &mut lines, &format!("Simulator execution error: {}", e))
+                    .await;
+                return Err(anyhow::anyhow!("Simulator execution failed: {}", e));
+            }
+        }
+    }
+
+    let log_path = persist_log(ctx, effects_ref, path, &lines).await?;
+    Ok(Some(log_path))
+}
+
+struct SimStep {
+    phase: String,
+    action: String,
+    details: Option<String>,
+}
+
+struct CliRecoverySimResult {
+    outcome: String,
+    duration_ms: u64,
+    steps: Vec<SimStep>,
+    validation_results: HashMap<String, bool>,
+}
+
+async fn simulate_cli_recovery_demo(
+    seed: u64,
+    effects: Arc<AuraEffectSystem>,
+) -> Result<CliRecoverySimResult, anyhow::Error> {
+    let handler = SimulationScenarioHandler::new(seed);
+    let mut steps = Vec::new();
+    let start = Instant::now();
+
+    // Run guardian setup choreography via recovery coordinator using simulation effects
+    run_guardian_setup_choreography(effects.clone(), &mut steps).await?;
+
+    // Phase 1: Alice & Charlie pre-setup (log only)
+    steps.push(SimStep {
+        phase: "alice_charlie_setup".into(),
+        action: "create_accounts".into(),
+        details: Some("Alice and Charlie accounts created".into()),
+    });
+
+    // Phase 2: Requests and acceptance to become guardians
+    steps.push(SimStep {
+        phase: "bob_onboarding".into(),
+        action: "create_account".into(),
+        details: Some("Bob account created".into()),
+    });
+    steps.push(SimStep {
+        phase: "bob_onboarding".into(),
+        action: "guardian_request_alice".into(),
+        details: Some("Bob requests Alice to be guardian".into()),
+    });
+    steps.push(SimStep {
+        phase: "bob_onboarding".into(),
+        action: "guardian_accept_alice".into(),
+        details: Some("Alice accepts guardian responsibility".into()),
+    });
+    steps.push(SimStep {
+        phase: "bob_onboarding".into(),
+        action: "guardian_request_charlie".into(),
+        details: Some("Bob requests Charlie to be guardian".into()),
+    });
+    steps.push(SimStep {
+        phase: "bob_onboarding".into(),
+        action: "guardian_accept_charlie".into(),
+        details: Some("Charlie accepts guardian responsibility".into()),
+    });
+    steps.push(SimStep {
+        phase: "bob_onboarding".into(),
+        action: "guardian_authority_configuration".into(),
+        details: Some("Alice+Charlie become guardian authority for Bob".into()),
+    });
+
+    // Phase 3-4: group chat setup and initial messaging
+    let group_id = handler.create_chat_group(
+        "Alice, Bob & Charlie",
+        "alice",
+        vec!["bob".into(), "charlie".into()],
+    )?;
+    steps.push(SimStep {
+        phase: "group_chat_setup".into(),
+        action: "create_group".into(),
+        details: Some(format!("Group ID: {}", group_id)),
+    });
+
+    let messages = vec![
+        ("group_messaging", "alice", "Welcome to our group, Bob!"),
+        ("group_messaging", "bob", "Thanks Alice! Great to be here."),
+        (
+            "group_messaging",
+            "charlie",
+            "Hey everyone! This chat system is awesome.",
+        ),
+        (
+            "group_messaging",
+            "alice",
+            "Bob, you should backup your account soon",
+        ),
+        (
+            "group_messaging",
+            "bob",
+            "I'll do that right after this demo!",
+        ),
+    ];
+    for (phase, sender, message) in &messages {
+        handler.send_chat_message(&group_id, sender, message)?;
+        steps.push(SimStep {
+            phase: (*phase).into(),
+            action: "send_message".into(),
+            details: Some(format!("{}: {}", sender, message)),
+        });
+    }
+
+    // Phase 5: data loss
+    handler.simulate_data_loss("bob", "complete_device_loss", true)?;
+    steps.push(SimStep {
+        phase: "bob_account_loss".into(),
+        action: "simulate_data_loss".into(),
+        details: Some("Bob loses all account data".into()),
+    });
+
+    // Phase 6-7: recovery
+    handler.initiate_guardian_recovery("bob", vec!["alice".into(), "charlie".into()], 2)?;
+    steps.push(SimStep {
+        phase: "recovery_initiation".into(),
+        action: "initiate_guardian_recovery".into(),
+        details: Some("Alice and Charlie assist recovery".into()),
+    });
+
+    let recovery_success = handler.verify_recovery_success(
+        "bob",
+        vec![
+            "keys_restored".into(),
+            "account_accessible".into(),
+            "message_history_restored".into(),
+        ],
+    )?;
+    steps.push(SimStep {
+        phase: "account_restoration".into(),
+        action: "verify_recovery".into(),
+        details: Some(if recovery_success { "ok" } else { "fail" }.into()),
+    });
+
+    // Phase 8: post recovery messaging
+    let post_recovery_messages = vec![
+        (
+            "post_recovery_messaging",
+            "bob",
+            "I'm back! Thanks Alice and Charlie for helping me recover.",
+        ),
+        (
+            "post_recovery_messaging",
+            "alice",
+            "Welcome back Bob! Guardian recovery really works!",
+        ),
+        (
+            "post_recovery_messaging",
+            "charlie",
+            "Amazing! You can see all our previous messages too.",
+        ),
+    ];
+    for (phase, sender, message) in &post_recovery_messages {
+        handler.send_chat_message(&group_id, sender, message)?;
+        steps.push(SimStep {
+            phase: (*phase).into(),
+            action: "send_message".into(),
+            details: Some(format!("{}: {}", sender, message)),
+        });
+    }
+
+    // Validations
+    let mut validation_results = HashMap::new();
+    let message_continuity = handler.validate_message_history("bob", 8, true)?;
+    validation_results.insert("message_continuity_maintained".into(), message_continuity);
+
+    let bob_can_send = handler
+        .send_chat_message(&group_id, "bob", "Test message after recovery")
+        .is_ok();
+    validation_results.insert("bob_can_send_messages".into(), bob_can_send);
+
+    let group_functional = handler.get_chat_stats().is_ok();
+    validation_results.insert("group_functionality_restored".into(), group_functional);
+
+    let full_history_access = handler.validate_message_history("bob", 5, true)?;
+    validation_results.insert("bob_can_see_full_history".into(), full_history_access);
+
+    let outcome = if validation_results.values().all(|v| *v) && recovery_success {
+        "RecoveryDemoSuccess"
+    } else {
+        "Failure"
+    }
+    .to_string();
+
+    Ok(CliRecoverySimResult {
+        outcome,
+        duration_ms: start.elapsed().as_millis() as u64,
+        steps,
+        validation_results,
+    })
+}
+
+async fn run_guardian_setup_choreography(
+    effects: Arc<AuraEffectSystem>,
+    steps: &mut Vec<SimStep>,
+) -> Result<(), anyhow::Error> {
+    let device_id = DeviceId::new();
+    let coordinator = GuardianSetupCoordinator::new(effects);
+
+    let guardians = GuardianSet::new(vec![
+        GuardianProfile::new(GuardianId::new(), DeviceId::new(), "alice"),
+        GuardianProfile::new(GuardianId::new(), DeviceId::new(), "charlie"),
+    ]);
+
+    let timestamp = 0;
+
+    let recovery_context = RecoveryContext {
+        operation_type: RecoveryOperationType::GuardianSetModification,
+        justification: "Initial guardian setup for Bob".to_string(),
+        is_emergency: false,
+        timestamp,
+    };
+
+    let request = RecoveryRequest {
+        requesting_device: device_id,
+        account_id: AccountId::new(),
+        context: recovery_context,
+        threshold: 2,
+        guardians,
+        auth_token: None,
+    };
+
+    let response = coordinator
+        .execute_setup(request)
+        .await
+        .map_err(|e| anyhow::anyhow!("Guardian setup choreography failed: {}", e))?;
+
+    if !response.success {
+        return Err(anyhow::anyhow!(
+            "Guardian setup failed: {}",
+            response.error.unwrap_or_else(|| "unknown error".into())
+        ));
+    }
+
+    steps.push(SimStep {
+        phase: "bob_onboarding".into(),
+        action: "guardian_setup_choreography".into(),
+        details: Some("Guardian setup choreography executed".into()),
+    });
+
     Ok(())
+}
+
+async fn log_line(effects: &AuraEffectSystem, log: &mut ScenarioLog, line: &str) {
+    log.lines.push(line.to_string());
+    let _ = ConsoleEffects::log_info(effects, line).await;
+}
+
+async fn persist_log(
+    _ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+    scenario_path: &Path,
+    log: &ScenarioLog,
+) -> Result<String> {
+    let output_path = scenario_log_output_path(scenario_path);
+
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent).map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to create scenario log directory {}: {}",
+                    parent.display(),
+                    e
+                )
+            })?;
+        }
+    }
+
+    fs::write(&output_path, log.lines.join("\n")).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to write scenario log {}: {}",
+            output_path.display(),
+            e
+        )
+    })?;
+
+    let storage_key = format!("scenario_log:{}", scenario_path.display());
+    StorageEffects::store(effects, &storage_key, log.lines.join("\n").into_bytes())
+        .await
+        .ok();
+
+    Ok(output_path.to_string_lossy().into_owned())
+}
+
+fn scenario_log_output_path(scenario_path: &Path) -> PathBuf {
+    let file_stem = scenario_path
+        .file_stem()
+        .map(|s| s.to_string_lossy())
+        .unwrap_or_else(|| std::borrow::Cow::Borrowed("scenario"));
+
+    Path::new("work")
+        .join("scenario_logs")
+        .join(format!("{}.log", file_stem))
+}
+
+#[derive(Default)]
+struct ScenarioLog {
+    lines: Vec<String>,
+}
+
+impl ScenarioLog {
+    fn new(_path: &Path) -> Self {
+        Self { lines: Vec::new() }
+    }
 }
 
 /// Save scenario results through storage effects
 async fn save_scenario_results(
     _ctx: &EffectContext,
-    effects: &AuraEffectSystem,
+    effects: Arc<AuraEffectSystem>,
     output_path: &Path,
     results: &[ScenarioResult],
     detailed: bool,

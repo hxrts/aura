@@ -10,7 +10,7 @@ use ratatui::{
     Frame,
 };
 
-use super::state::{AppState, GuardianState};
+use super::state::AppState;
 use aura_core::AuthorityId;
 
 /// Guardian interface for Alice/Charlie during demo
@@ -39,12 +39,7 @@ impl GuardianInterface {
     }
 
     /// Render the guardian interface
-    pub fn render(
-        &self,
-        f: &mut Frame<'_>,
-        area: ratatui::layout::Rect,
-        app_state: &AppState,
-    ) {
+    pub fn render(&self, f: &mut Frame<'_>, area: ratatui::layout::Rect, app_state: &AppState) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -222,12 +217,7 @@ impl GuardianInterface {
     }
 
     /// Render available actions
-    fn render_actions(
-        &self,
-        f: &mut Frame<'_>,
-        area: ratatui::layout::Rect,
-        app_state: &AppState,
-    ) {
+    fn render_actions(&self, f: &mut Frame<'_>, area: ratatui::layout::Rect, app_state: &AppState) {
         let mut actions = vec![];
 
         // Add context-specific actions

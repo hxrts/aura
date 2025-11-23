@@ -88,9 +88,9 @@ pub use core::{AgentBuilder, AgentConfig, AgentError, AgentResult, AuraAgent, Au
 
 // Runtime types for advanced usage
 pub use runtime::{
-    AuraHandlerAdapter as ChoreographyAdapter, EffectContext, EffectExecutor, EffectRegistry, EffectRegistryError,
-    EffectRegistryExt, EffectSystemBuilder, FlowBudgetManager, LifecycleManager,
-    ReceiptManager, RuntimeBuilder, RuntimeSystem,
+    AuraHandlerAdapter as ChoreographyAdapter, EffectContext, EffectExecutor, EffectRegistry,
+    EffectRegistryError, EffectRegistryExt, EffectSystemBuilder, FlowBudgetManager,
+    LifecycleManager, ReceiptManager, RuntimeBuilder, RuntimeSystem,
 };
 
 // Re-export core types for convenience
@@ -103,7 +103,10 @@ pub use runtime::AuraEffectSystem;
 pub use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
 
 /// Create a production agent (convenience function)
-pub async fn create_production_agent(ctx: &EffectContext, authority_id: AuthorityId) -> AgentResult<AuraAgent> {
+pub async fn create_production_agent(
+    ctx: &EffectContext,
+    authority_id: AuthorityId,
+) -> AgentResult<AuraAgent> {
     AgentBuilder::new()
         .with_authority(authority_id)
         .build_production(ctx)

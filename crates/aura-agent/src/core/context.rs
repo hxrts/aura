@@ -3,8 +3,8 @@
 //! Provides context types that expose authority/context identifiers as first-class
 //! while keeping device-local details derived internally.
 
-use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
 use aura_core::effects::TimeEffects;
+use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
 use std::collections::HashMap;
 
 /// Authority-first context for agent operations
@@ -92,7 +92,7 @@ impl AuthorityContext {
 impl RelationalContext {
     /// Create a new relational context
     pub async fn new<T: TimeEffects>(
-        context_id: ContextId, 
+        context_id: ContextId,
         participants: Vec<AuthorityId>,
         time_effects: &T,
     ) -> Self {

@@ -352,7 +352,7 @@ impl SimulationScenarioHandler {
 
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        
+
         let mut hasher = DefaultHasher::new();
         group_name.hash(&mut hasher);
         creator.hash(&mut hasher);
@@ -389,17 +389,22 @@ impl SimulationScenarioHandler {
         })?;
 
         // Verify group exists and sender is a member
-        let group = state.chat_groups.get(group_id).ok_or_else(|| {
-            TestingError::EventRecordingError {
-                event_type: "chat_message".to_string(),
-                reason: format!("Chat group '{}' not found", group_id),
-            }
-        })?;
+        let group =
+            state
+                .chat_groups
+                .get(group_id)
+                .ok_or_else(|| TestingError::EventRecordingError {
+                    event_type: "chat_message".to_string(),
+                    reason: format!("Chat group '{}' not found", group_id),
+                })?;
 
         if !group.members.contains(&sender.to_string()) {
             return Err(TestingError::EventRecordingError {
                 event_type: "chat_message".to_string(),
-                reason: format!("Sender '{}' is not a member of group '{}'", sender, group_id),
+                reason: format!(
+                    "Sender '{}' is not a member of group '{}'",
+                    sender, group_id
+                ),
             });
         }
 
@@ -493,7 +498,8 @@ impl SimulationScenarioHandler {
         if include_pre_recovery {
             if let Some(loss_info) = state.participant_data_loss.get(participant) {
                 // For recovery scenarios, participant should be able to see pre-loss messages
-                Ok(actual_count >= loss_info.pre_loss_message_count && actual_count >= expected_message_count)
+                Ok(actual_count >= loss_info.pre_loss_message_count
+                    && actual_count >= expected_message_count)
             } else {
                 Ok(actual_count >= expected_message_count)
             }
@@ -533,7 +539,9 @@ impl SimulationScenarioHandler {
             validation_steps: Vec::new(),
         };
 
-        state.recovery_state.insert(target.to_string(), recovery_info);
+        state
+            .recovery_state
+            .insert(target.to_string(), recovery_info);
 
         Ok(())
     }
@@ -571,7 +579,10 @@ impl SimulationScenarioHandler {
         })?;
 
         let mut stats = HashMap::new();
-        stats.insert("chat_groups".to_string(), state.chat_groups.len().to_string());
+        stats.insert(
+            "chat_groups".to_string(),
+            state.chat_groups.len().to_string(),
+        );
         stats.insert(
             "total_messages".to_string(),
             state
@@ -670,29 +681,27 @@ impl TestingEffects for SimulationScenarioHandler {
                     })
                 }
             }
-            "chat" => {
-                match path {
-                    "groups" => Ok(Box::new(state.chat_groups.len())),
-                    "total_messages" => Ok(Box::new(
-                        state
-                            .message_history
-                            .values()
-                            .map(|msgs| msgs.len())
-                            .sum::<usize>(),
-                    )),
-                    _ => {
-                        if let Some(group) = state.chat_groups.get(path) {
-                            Ok(Box::new(group.members.len()))
-                        } else {
-                            Err(TestingError::StateInspectionError {
-                                component: component.to_string(),
-                                path: path.to_string(),
-                                reason: "Chat group not found".to_string(),
-                            })
-                        }
+            "chat" => match path {
+                "groups" => Ok(Box::new(state.chat_groups.len())),
+                "total_messages" => Ok(Box::new(
+                    state
+                        .message_history
+                        .values()
+                        .map(|msgs| msgs.len())
+                        .sum::<usize>(),
+                )),
+                _ => {
+                    if let Some(group) = state.chat_groups.get(path) {
+                        Ok(Box::new(group.members.len()))
+                    } else {
+                        Err(TestingError::StateInspectionError {
+                            component: component.to_string(),
+                            path: path.to_string(),
+                            reason: "Chat group not found".to_string(),
+                        })
                     }
                 }
-            }
+            },
             "data_loss" => {
                 if let Some(loss_info) = state.participant_data_loss.get(path) {
                     Ok(Box::new(loss_info.pre_loss_message_count))
@@ -955,23 +964,26 @@ mod tests {
         let handler = SimulationScenarioHandler::new(123);
 
         let group_id = handler
-            .create_chat_group(
-                "Test Group",
-                "alice",
-                vec!["bob".to_string()],
-            )
+            .create_chat_group("Test Group", "alice", vec!["bob".to_string()])
             .unwrap();
 
         // Send some messages before data loss
-        handler.send_chat_message(&group_id, "alice", "Message 1").unwrap();
-        handler.send_chat_message(&group_id, "bob", "Message 2").unwrap();
+        handler
+            .send_chat_message(&group_id, "alice", "Message 1")
+            .unwrap();
+        handler
+            .send_chat_message(&group_id, "bob", "Message 2")
+            .unwrap();
 
         // Simulate data loss for Bob
         let result = handler.simulate_data_loss("bob", "complete_device_loss", true);
         assert!(result.is_ok());
 
         let stats = handler.get_chat_stats().unwrap();
-        assert_eq!(stats.get("participants_with_data_loss"), Some(&"1".to_string()));
+        assert_eq!(
+            stats.get("participants_with_data_loss"),
+            Some(&"1".to_string())
+        );
 
         // Check state inspection for data loss
         let loss_count = handler.inspect_state("data_loss", "bob").await.unwrap();
@@ -997,7 +1009,10 @@ mod tests {
         // Verify recovery completion
         let validation_result = handler.verify_recovery_success(
             "bob",
-            vec!["keys_restored".to_string(), "account_accessible".to_string()],
+            vec![
+                "keys_restored".to_string(),
+                "account_accessible".to_string(),
+            ],
         );
         assert!(validation_result.is_ok());
         assert_eq!(validation_result.unwrap(), true);
@@ -1013,20 +1028,24 @@ mod tests {
         let handler = SimulationScenarioHandler::new(123);
 
         let group_id = handler
-            .create_chat_group(
-                "Recovery Test",
-                "alice",
-                vec!["bob".to_string()],
-            )
+            .create_chat_group("Recovery Test", "alice", vec!["bob".to_string()])
             .unwrap();
 
         // Send messages before data loss
-        handler.send_chat_message(&group_id, "alice", "Message 1").unwrap();
-        handler.send_chat_message(&group_id, "bob", "Message 2").unwrap();
-        handler.send_chat_message(&group_id, "alice", "Message 3").unwrap();
+        handler
+            .send_chat_message(&group_id, "alice", "Message 1")
+            .unwrap();
+        handler
+            .send_chat_message(&group_id, "bob", "Message 2")
+            .unwrap();
+        handler
+            .send_chat_message(&group_id, "alice", "Message 3")
+            .unwrap();
 
         // Simulate data loss
-        handler.simulate_data_loss("bob", "complete_device_loss", true).unwrap();
+        handler
+            .simulate_data_loss("bob", "complete_device_loss", true)
+            .unwrap();
 
         // Test message history validation
         let validation_result = handler.validate_message_history("bob", 2, true);
@@ -1047,7 +1066,7 @@ mod tests {
         let result = handler.initiate_guardian_recovery(
             "bob",
             vec!["alice".to_string()], // Only 1 guardian
-            2, // But need 2
+            2,                         // But need 2
         );
         assert!(result.is_err());
     }

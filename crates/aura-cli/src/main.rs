@@ -220,7 +220,7 @@ async fn main() -> Result<()> {
 async fn resolve_config_path(
     cmd_config: &Option<PathBuf>,
     global_config: &Option<PathBuf>,
-    cli_handler: &CliHandler,
+    _cli_handler: &CliHandler,
 ) -> Result<PathBuf> {
     if let Some(config) = cmd_config {
         return Ok(config.clone());

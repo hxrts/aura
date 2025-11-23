@@ -8,18 +8,26 @@ use std::fmt::Write;
 /// Minimal session status for visualization
 #[derive(Debug, Clone)]
 pub enum RecoverySessionStatus {
+    /// Recovery session is pending guardian approval
     Pending,
+    /// Recovery session has been approved
     Approved,
+    /// Recovery session has failed
     Failed,
 }
 
 /// Minimal recovery session state for visualization
 #[derive(Debug, Clone)]
 pub struct RecoverySessionState {
+    /// Unique session identifier
     pub session_id: String,
+    /// Current recovery session status
     pub status: RecoverySessionStatus,
+    /// Timestamp when session started (unix epoch seconds)
     pub started_at: u64,
+    /// Timestamp when session was last updated (unix epoch seconds)
     pub updated_at: u64,
+    /// Optional recovery evidence for approved sessions
     pub evidence: Option<RecoveryEvidence>,
 }
 

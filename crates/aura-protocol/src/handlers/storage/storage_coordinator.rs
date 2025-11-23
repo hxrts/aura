@@ -115,7 +115,7 @@ impl StorageCoordinator {
     /// Create a simple coordinator with memory storage
     pub fn with_memory(device_id: DeviceId) -> Self {
         let primary = StorageBackend::Memory(Arc::new(FilesystemStorageHandler::new(
-            std::env::temp_dir().join("aura_memory_storage")
+            std::env::temp_dir().join("aura_memory_storage"),
         )));
         Self {
             primary,
@@ -373,11 +373,9 @@ mod tests {
     async fn test_coordinator_with_replicas() {
         let device_id = DeviceId::new();
         let coordinator = StorageCoordinatorBuilder::new(device_id)
-            .with_primary(StorageBackend::Memory(
-                Arc::new(FilesystemStorageHandler::new(
-                    std::env::temp_dir().join("aura_test_storage")
-                )),
-            ))
+            .with_primary(StorageBackend::Memory(Arc::new(
+                FilesystemStorageHandler::new(std::env::temp_dir().join("aura_test_storage")),
+            )))
             .add_replica(StorageBackend::Encrypted(Arc::new(
                 EncryptedStorageHandler::new("/tmp/test".to_string().into(), None),
             )))
@@ -402,11 +400,9 @@ mod tests {
     async fn test_routing_rules() {
         let device_id = DeviceId::new();
         let coordinator = StorageCoordinatorBuilder::new(device_id)
-            .with_primary(StorageBackend::Memory(
-                Arc::new(FilesystemStorageHandler::new(
-                    std::env::temp_dir().join("aura_test_storage")
-                )),
-            ))
+            .with_primary(StorageBackend::Memory(Arc::new(
+                FilesystemStorageHandler::new(std::env::temp_dir().join("aura_test_storage")),
+            )))
             .add_replica(StorageBackend::Encrypted(Arc::new(
                 EncryptedStorageHandler::new("/tmp/test".to_string().into(), None),
             )))

@@ -3,12 +3,9 @@
 //! Provides integration with the scenario system to set up initial demo configuration
 //! before handing off to the human-agent demo mode.
 
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use aura_core::AuthorityId;
-use aura_simulator::ScenarioExecutor;
 
 use super::{
     human_agent::{DemoMetrics, DemoPhase, DemoState, HumanAgentDemoConfig},
@@ -17,9 +14,6 @@ use super::{
 
 /// Bridge between scenario system and demo mode
 pub struct DemoScenarioBridge {
-    /// Scenario executor for setup operations
-    scenario_executor: Arc<Mutex<ScenarioExecutor>>,
-
     /// Configuration seed for deterministic setup
     seed: u64,
 
@@ -105,13 +99,7 @@ pub struct SetupMetrics {
 impl DemoScenarioBridge {
     /// Create new demo scenario bridge
     pub fn new(seed: u64, config: DemoSetupConfig) -> Self {
-        let scenario_executor = Arc::new(Mutex::new(ScenarioExecutor::new(seed)));
-
-        Self {
-            scenario_executor,
-            seed,
-            config,
-        }
+        Self { seed, config }
     }
 
     /// Execute complete demo setup via scenarios, then return configured system
@@ -292,7 +280,9 @@ impl DemoScenarioBridge {
             ),
         ];
 
-        let message_count = initial_messages.len().min(self.config.initial_message_count);
+        let message_count = initial_messages
+            .len()
+            .min(self.config.initial_message_count);
         tracing::info!(
             "Chat environment setup with {} initial messages",
             message_count
@@ -369,7 +359,7 @@ impl DemoScenarioBridgeBuilder {
 /// Integration function to setup demo and hand off to human-agent mode
 pub async fn setup_and_run_human_agent_demo(
     setup_config: DemoSetupConfig,
-    demo_config: HumanAgentDemoConfig,
+        demo_config: HumanAgentDemoConfig,
     seed: u64,
 ) -> anyhow::Result<()> {
     tracing::info!("Starting integrated demo setup and execution");

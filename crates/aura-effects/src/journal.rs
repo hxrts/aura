@@ -45,7 +45,11 @@ impl JournalEffects for StandardJournalHandler {
         Ok(target.clone())
     }
 
-    async fn refine_caps(&self, target: &Journal, _refinement: &Journal) -> Result<Journal, AuraError> {
+    async fn refine_caps(
+        &self,
+        target: &Journal,
+        _refinement: &Journal,
+    ) -> Result<Journal, AuraError> {
         // TODO: Standard implementation should use meet semilattice logic
         // For now, return target - this should be implemented with real domain logic
         Ok(target.clone())
@@ -77,7 +81,7 @@ impl JournalEffects for StandardJournalHandler {
         _authority: &AuthorityId,
         budget: &FlowBudget,
     ) -> Result<FlowBudget, AuraError> {
-        Ok(budget.clone())
+        Ok(*budget)
     }
 
     async fn charge_flow_budget(
@@ -112,11 +116,12 @@ mod tests {
         let handler = StandardJournalHandler::new();
         let context = ContextId::default();
         let authority = AuthorityId::default();
-        
-        let budget_result = handler.get_flow_budget(context, authority).await;
+        let budget = FlowBudget::default();
+
+        let budget_result = handler.get_flow_budget(&context, &authority).await;
         assert!(budget_result.is_ok());
-        
-        let charge_result = handler.charge_flow_budget(context, authority, 100).await;
+
+        let charge_result = handler.charge_flow_budget(&context, &authority, 100).await;
         assert!(charge_result.is_ok());
     }
 }

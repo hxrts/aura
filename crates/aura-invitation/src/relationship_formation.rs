@@ -311,7 +311,9 @@ pub async fn execute_relationship_formation<E: RelationshipFormationEffects>(
 
     // Execute appropriate role using aura-macros choreography
     let choreographic_coordinator = RelationshipFormationCoordinator::new_with_ref(effects);
-    choreographic_coordinator.execute_relationship_formation(config, is_initiator).await
+    choreographic_coordinator
+        .execute_relationship_formation(config, is_initiator)
+        .await
 }
 
 /// Choreographic relationship formation coordinator
@@ -363,7 +365,8 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
             nonce,
         };
 
-        self.send_choreographic_message(&initiation, config.responder_id).await?;
+        self.send_choreographic_message(&initiation, config.responder_id)
+            .await?;
 
         // Phase 2: Receive key offer
         let key_offer: KeyOffer = self.receive_choreographic_message().await?;
@@ -378,7 +381,8 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
             timestamp: self.effects.current_timestamp().await,
         };
 
-        self.send_choreographic_message(&key_exchange, config.responder_id).await?;
+        self.send_choreographic_message(&key_exchange, config.responder_id)
+            .await?;
 
         // Phase 4: Derive relationship keys and validate
         let relationship_keys = derive_relationship_keys(
@@ -390,8 +394,11 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
         .await?;
 
         // Phase 5: Exchange validation proofs and trust records
-        self.exchange_validation_proofs(&context_id, &relationship_keys, config).await?;
-        let trust_record_hash = self.exchange_trust_records(&context_id, &relationship_keys, config).await?;
+        self.exchange_validation_proofs(&context_id, &relationship_keys, config)
+            .await?;
+        let trust_record_hash = self
+            .exchange_trust_records(&context_id, &relationship_keys, config)
+            .await?;
 
         tracing::info!("Relationship formation choreography completed as initiator");
 
@@ -412,7 +419,7 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
 
         // Phase 1: Receive relationship initiation
         let initiation: RelationshipInitiation = self.receive_choreographic_message().await?;
-        
+
         // Validate initiation
         if initiation.initiator_id != config.initiator_id {
             return Err(RelationshipFormationError::ValidationFailed(
@@ -430,7 +437,8 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
             timestamp: self.effects.current_timestamp().await,
         };
 
-        self.send_choreographic_message(&key_offer, config.initiator_id).await?;
+        self.send_choreographic_message(&key_offer, config.initiator_id)
+            .await?;
 
         // Phase 3: Receive key exchange from initiator
         let key_exchange: KeyExchange = self.receive_choreographic_message().await?;
@@ -445,8 +453,11 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
         .await?;
 
         // Phase 5: Exchange validation proofs and trust records
-        self.exchange_validation_proofs(&initiation.context_id, &relationship_keys, config).await?;
-        let trust_record_hash = self.exchange_trust_records(&initiation.context_id, &relationship_keys, config).await?;
+        self.exchange_validation_proofs(&initiation.context_id, &relationship_keys, config)
+            .await?;
+        let trust_record_hash = self
+            .exchange_trust_records(&initiation.context_id, &relationship_keys, config)
+            .await?;
 
         tracing::info!("Relationship formation choreography completed as responder");
 
@@ -464,13 +475,16 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
         message: &T,
         peer_id: DeviceId,
     ) -> Result<(), RelationshipFormationError> {
-        let serialized = serde_json::to_vec(message)
-            .map_err(|e| RelationshipFormationError::Communication(format!("Serialization failed: {}", e)))?;
+        let serialized = serde_json::to_vec(message).map_err(|e| {
+            RelationshipFormationError::Communication(format!("Serialization failed: {}", e))
+        })?;
 
         self.effects
             .send_to_peer(peer_id.into(), serialized)
             .await
-            .map_err(|e| RelationshipFormationError::Communication(format!("Send failed: {}", e)))?;
+            .map_err(|e| {
+                RelationshipFormationError::Communication(format!("Send failed: {}", e))
+            })?;
 
         Ok(())
     }
@@ -479,13 +493,13 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
     async fn receive_choreographic_message<T: for<'de> Deserialize<'de>>(
         &self,
     ) -> Result<T, RelationshipFormationError> {
-        let (_peer_id, message_bytes) = self.effects
-            .receive()
-            .await
-            .map_err(|e| RelationshipFormationError::Communication(format!("Receive failed: {}", e)))?;
+        let (_peer_id, message_bytes) = self.effects.receive().await.map_err(|e| {
+            RelationshipFormationError::Communication(format!("Receive failed: {}", e))
+        })?;
 
-        let message: T = serde_json::from_slice(&message_bytes)
-            .map_err(|e| RelationshipFormationError::Communication(format!("Deserialization failed: {}", e)))?;
+        let message: T = serde_json::from_slice(&message_bytes).map_err(|e| {
+            RelationshipFormationError::Communication(format!("Deserialization failed: {}", e))
+        })?;
 
         Ok(message)
     }
@@ -507,11 +521,14 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
     async fn exchange_validation_proofs(
         &self,
         context_id: &ContextId,
-        relationship_keys: &RelationshipKeys,
-        config: &RelationshipFormationConfig,
+        _relationship_keys: &RelationshipKeys,
+        _config: &RelationshipFormationConfig,
     ) -> Result<(), RelationshipFormationError> {
         // Implementation would coordinate validation proof exchange
-        tracing::debug!("Exchanging validation proofs choreographically for context {}", context_id);
+        tracing::debug!(
+            "Exchanging validation proofs choreographically for context {}",
+            context_id
+        );
         Ok(())
     }
 
@@ -519,16 +536,20 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
     async fn exchange_trust_records(
         &self,
         context_id: &ContextId,
-        relationship_keys: &RelationshipKeys,
-        config: &RelationshipFormationConfig,
+        _relationship_keys: &RelationshipKeys,
+        _config: &RelationshipFormationConfig,
     ) -> Result<Hash32, RelationshipFormationError> {
         // Implementation would coordinate trust record exchange
-        tracing::debug!("Exchanging trust records choreographically for context {}", context_id);
+        tracing::debug!(
+            "Exchanging trust records choreographically for context {}",
+            context_id
+        );
         Ok(Hash32([0u8; 32])) // Placeholder hash
     }
 }
 
 /// Initiator's role in relationship formation ceremony (legacy manual implementation)
+#[allow(dead_code)]
 async fn initiator_session<E: RelationshipFormationEffects>(
     effects: &E,
     config: &RelationshipFormationConfig,
@@ -703,6 +724,7 @@ async fn initiator_session<E: RelationshipFormationEffects>(
 }
 
 /// Responder's role in relationship formation ceremony
+#[allow(dead_code)]
 async fn responder_session<E: RelationshipFormationEffects>(
     effects: &E,
     config: &RelationshipFormationConfig,

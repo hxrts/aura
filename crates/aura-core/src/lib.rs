@@ -169,12 +169,25 @@ pub use consensus::{Prestate, PrestateBuilder};
 // Messages and versioning
 #[doc = "stable: Core message types with semver guarantees"]
 pub use messages::{
-    AuthStrength, AuthTag, MessageValidation, MessageValidator, Msg, SemanticVersion, TypedMessage,
-    WireEnvelope, MessageError, MessageResult, WIRE_FORMAT_VERSION,
     // Message error helper functions
-    cid_mismatch_error, invalid_envelope_size_error, invalid_message_format_error,
-    message_deserialization_error, message_serialization_error, message_too_large_error,
+    cid_mismatch_error,
+    invalid_envelope_size_error,
+    invalid_message_format_error,
+    message_deserialization_error,
+    message_serialization_error,
+    message_too_large_error,
     unsupported_version_error,
+    AuthStrength,
+    AuthTag,
+    MessageError,
+    MessageResult,
+    MessageValidation,
+    MessageValidator,
+    Msg,
+    SemanticVersion,
+    TypedMessage,
+    WireEnvelope,
+    WIRE_FORMAT_VERSION,
 };
 #[doc = "stable: Canonical serialization with semver guarantees"]
 pub use serialization::{

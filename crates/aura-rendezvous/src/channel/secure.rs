@@ -133,7 +133,7 @@ impl SecureChannelCoordinator {
 
         let channel_id = format!(
             "channel-{}-{}",
-            format!("{:?}", self.device_id)[..8].to_string(),
+            &format!("{:?}", self.device_id)[..8],
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()

@@ -204,8 +204,8 @@ pub mod composition {
     // Use aura_composition::{EffectBuilder, EffectRegistryError} for effect building
 
     // Handler management
-    pub use crate::handlers::{AuraHandler, EffectType, HandlerUtils};
     pub use crate::handlers::core::erased::AuraHandlerFactory;
+    pub use crate::handlers::{AuraHandler, EffectType, HandlerUtils};
 }
 
 /// Individual effect trait definitions
@@ -375,6 +375,11 @@ pub use effects::WakeCondition;
 
 #[deprecated(
     since = "0.2.0",
+    note = "Use `aura_protocol::composition::AuraHandlerFactory` instead"
+)]
+pub use crate::handlers::core::erased::AuraHandlerFactory;
+#[deprecated(
+    since = "0.2.0",
     note = "Use `aura_protocol::orchestration::AuraContext` instead"
 )]
 pub use handlers::AuraContext;
@@ -388,11 +393,6 @@ pub use handlers::AuraHandler;
     note = "Use `aura_protocol::internal::AuraHandlerError` instead"
 )]
 pub use handlers::AuraHandlerError;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::composition::AuraHandlerFactory` instead"
-)]
-pub use crate::handlers::core::erased::AuraHandlerFactory;
 #[deprecated(
     since = "0.2.0",
     note = "Use `aura_protocol::composition::EffectType` instead"

@@ -7,8 +7,8 @@
 use async_trait::async_trait;
 use std::collections::HashMap;
 
-use aura_core::{EffectType, ExecutionMode, LocalSessionType, DeviceId};
-use crate::registry::{Handler, HandlerError, HandlerContext, RegistrableHandler};
+use crate::registry::{Handler, HandlerContext, HandlerError, RegistrableHandler};
+use aura_core::{DeviceId, EffectType, ExecutionMode, LocalSessionType};
 
 /// A composite handler that delegates to specialized handlers based on effect type
 pub struct CompositeHandler {
@@ -20,7 +20,8 @@ pub struct CompositeHandler {
     device_id: DeviceId,
 }
 
-impl CompositeHandler { // Adapter-style composite
+impl CompositeHandler {
+    // Adapter-style composite
     /// Create a new composite handler
     pub fn new(device_id: DeviceId, execution_mode: ExecutionMode) -> Self {
         Self {
@@ -46,7 +47,11 @@ impl CompositeHandler { // Adapter-style composite
     }
 
     /// Register a handler for a specific effect type
-    pub fn register_handler(&mut self, effect_type: EffectType, handler: Box<dyn Handler>) -> Result<(), CompositeError> {
+    pub fn register_handler(
+        &mut self,
+        effect_type: EffectType,
+        handler: Box<dyn Handler>,
+    ) -> Result<(), CompositeError> {
         if !handler.supports_effect(effect_type) {
             return Err(CompositeError::UnsupportedEffect { effect_type });
         }
@@ -97,7 +102,8 @@ pub enum CompositeError {
 }
 
 #[async_trait]
-impl Handler for CompositeHandler { // Adapter-style composite
+impl Handler for CompositeHandler {
+    // Adapter-style composite
     async fn execute_effect(
         &self,
         effect_type: EffectType,
@@ -167,7 +173,11 @@ impl CompositeHandlerBuilder {
     }
 
     /// Add a handler for an effect type
-    pub fn with_handler(mut self, effect_type: EffectType, handler: Box<dyn Handler>) -> Result<Self, CompositeError> {
+    pub fn with_handler(
+        mut self,
+        effect_type: EffectType,
+        handler: Box<dyn Handler>,
+    ) -> Result<Self, CompositeError> {
         if !handler.supports_effect(effect_type) {
             return Err(CompositeError::UnsupportedEffect { effect_type });
         }
@@ -213,7 +223,11 @@ impl CompositeHandlerAdapter {
     }
 
     /// Register a handler
-    pub fn register_handler(&mut self, effect_type: EffectType, handler: Box<dyn Handler>) -> Result<(), CompositeError> {
+    pub fn register_handler(
+        &mut self,
+        effect_type: EffectType,
+        handler: Box<dyn Handler>,
+    ) -> Result<(), CompositeError> {
         self.composite.register_handler(effect_type, handler)
     }
 
@@ -242,7 +256,9 @@ impl Handler for CompositeHandlerAdapter {
         parameters: &[u8],
         ctx: &HandlerContext,
     ) -> Result<Vec<u8>, HandlerError> {
-        self.composite.execute_effect(effect_type, operation, parameters, ctx).await
+        self.composite
+            .execute_effect(effect_type, operation, parameters, ctx)
+            .await
     }
 
     async fn execute_session(
@@ -271,20 +287,48 @@ impl RegistrableHandler for CompositeHandlerAdapter {
         parameters: &[u8],
         ctx: &HandlerContext,
     ) -> Result<Vec<u8>, HandlerError> {
-        self.execute_effect(effect_type, operation, parameters, ctx).await
+        self.execute_effect(effect_type, operation, parameters, ctx)
+            .await
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        if let Some(handler) = self.composite.handlers.get(&effect_type) {
+        if let Some(_handler) = self.composite.handlers.get(&effect_type) {
             // For now, return a basic set of operations
             // In a real implementation, this would query the specific handler
             match effect_type {
-                EffectType::Console => vec!["log_info".to_string(), "log_warn".to_string(), "log_error".to_string(), "log_debug".to_string()],
-                EffectType::Random => vec!["random_bytes".to_string(), "random_bytes_32".to_string(), "random_u64".to_string()],
-                EffectType::Crypto => vec!["hkdf_derive".to_string(), "ed25519_generate_keypair".to_string(), "ed25519_sign".to_string(), "ed25519_verify".to_string()],
-                EffectType::Network => vec!["send_to_peer".to_string(), "broadcast".to_string(), "receive".to_string()],
-                EffectType::Storage => vec!["store".to_string(), "retrieve".to_string(), "remove".to_string(), "list_keys".to_string()],
-                EffectType::Time => vec!["current_epoch".to_string(), "current_timestamp".to_string(), "sleep_ms".to_string()],
+                EffectType::Console => vec![
+                    "log_info".to_string(),
+                    "log_warn".to_string(),
+                    "log_error".to_string(),
+                    "log_debug".to_string(),
+                ],
+                EffectType::Random => vec![
+                    "random_bytes".to_string(),
+                    "random_bytes_32".to_string(),
+                    "random_u64".to_string(),
+                ],
+                EffectType::Crypto => vec![
+                    "hkdf_derive".to_string(),
+                    "ed25519_generate_keypair".to_string(),
+                    "ed25519_sign".to_string(),
+                    "ed25519_verify".to_string(),
+                ],
+                EffectType::Network => vec![
+                    "send_to_peer".to_string(),
+                    "broadcast".to_string(),
+                    "receive".to_string(),
+                ],
+                EffectType::Storage => vec![
+                    "store".to_string(),
+                    "retrieve".to_string(),
+                    "remove".to_string(),
+                    "list_keys".to_string(),
+                ],
+                EffectType::Time => vec![
+                    "current_epoch".to_string(),
+                    "current_timestamp".to_string(),
+                    "sleep_ms".to_string(),
+                ],
                 _ => Vec::new(),
             }
         } else {
@@ -309,7 +353,7 @@ mod tests {
     #[test]
     fn test_composite_handler_creation() {
         let device_id = DeviceId::new();
-        
+
         let handler = CompositeHandler::for_testing(device_id);
         assert_eq!(handler.execution_mode(), ExecutionMode::Testing);
         assert_eq!(handler.device_id(), device_id);
@@ -318,15 +362,18 @@ mod tests {
         assert_eq!(handler.execution_mode(), ExecutionMode::Production);
 
         let handler = CompositeHandler::for_simulation(device_id, 42);
-        assert_eq!(handler.execution_mode(), ExecutionMode::Simulation { seed: 42 });
+        assert_eq!(
+            handler.execution_mode(),
+            ExecutionMode::Simulation { seed: 42 }
+        );
     }
 
     #[test]
     fn test_composite_handler_builder() {
         let device_id = DeviceId::new();
-        
-        let mut builder = CompositeHandlerBuilder::new(device_id)
-            .execution_mode(ExecutionMode::Production);
+
+        let mut builder =
+            CompositeHandlerBuilder::new(device_id).execution_mode(ExecutionMode::Production);
 
         // Note: We can't easily test handler registration here without mock handlers
         // In a real test, we would create mock handlers and register them
@@ -339,7 +386,7 @@ mod tests {
     #[test]
     fn test_composite_handler_adapter() {
         let device_id = DeviceId::new();
-        
+
         let adapter = CompositeHandlerAdapter::for_testing(device_id);
         assert_eq!(adapter.execution_mode(), ExecutionMode::Testing);
 
@@ -347,7 +394,10 @@ mod tests {
         assert_eq!(adapter.execution_mode(), ExecutionMode::Production);
 
         let adapter = CompositeHandlerAdapter::for_simulation(device_id, 42);
-        assert_eq!(adapter.execution_mode(), ExecutionMode::Simulation { seed: 42 });
+        assert_eq!(
+            adapter.execution_mode(),
+            ExecutionMode::Simulation { seed: 42 }
+        );
     }
 
     #[test]
@@ -363,7 +413,7 @@ mod tests {
         // For now, we just test the registration infrastructure exists
     }
 
-    #[test] 
+    #[test]
     fn test_supported_operations() {
         let device_id = DeviceId::new();
         let adapter = CompositeHandlerAdapter::for_testing(device_id);

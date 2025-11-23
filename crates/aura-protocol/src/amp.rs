@@ -3,11 +3,11 @@
 //! These glue Layer 4 orchestration to Layer 2 facts without leaking domain types
 //! outward. Backed by core `JournalEffects` and `GuardEffectSystem`.
 
-use crate::consensus::{ConsensusId, commit_fact::ConsensusId as CommitConsensusId};
-use aura_core::identifiers::AuthorityId;
+use crate::consensus::{commit_fact::ConsensusId as CommitConsensusId, ConsensusId};
 use crate::effects::JournalEffects;
 use crate::guards::effect_system_trait::GuardEffectSystem;
 use aura_core::effects::StorageEffects;
+use aura_core::identifiers::AuthorityId;
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{AuraError, Result};
 use aura_journal::{
@@ -105,11 +105,10 @@ impl<E: GuardEffectSystem> AmpJournalEffects for E {
         // Create evidence delta recording witness participation
         let evidence_entry = format!("witness:{}:context:{}", witness, context);
         let mut delta = EvidenceDelta::default();
-        delta.entries.insert(
-            hex::encode(consensus_id.0.0),
-            evidence_entry.into_bytes(),
-        );
-        
+        delta
+            .entries
+            .insert(hex::encode(consensus_id.0 .0), evidence_entry.into_bytes());
+
         // Convert CommitConsensusId to ConsensusId for storage
         let storage_cid = ConsensusId(consensus_id.0);
         self.merge_evidence_delta(storage_cid, delta).await
@@ -153,7 +152,7 @@ pub struct EvidenceDelta {
 }
 
 fn evidence_key(cid: ConsensusId) -> String {
-    format!("amp/evidence/{}", hex::encode(cid.0.0))
+    format!("amp/evidence/{}", hex::encode(cid.0 .0))
 }
 
 fn context_journal_key(context: ContextId) -> String {

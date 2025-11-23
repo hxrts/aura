@@ -4,8 +4,8 @@
 //! to fix architectural violations. The handler uses Arc<Mutex<>> to capture log messages
 //! for verification in tests.
 
-use aura_core::{effects::ConsoleEffects, AuraError};
 use async_trait::async_trait;
+use aura_core::{effects::ConsoleEffects, AuraError};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 

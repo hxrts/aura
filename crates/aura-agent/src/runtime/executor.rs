@@ -4,8 +4,8 @@
 //! runtime, managing execution contexts, and coordinating effect handler invocation.
 
 use aura_core::effects::ExecutionMode;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
-use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
 use std::sync::Arc;
 
 /// Executor for effect operations
@@ -43,21 +43,21 @@ impl EffectExecutor {
     {
         // Validate context matches executor authority
         if context.authority_id() != self.authority_id {
-            return Err(AuraError::invalid(
-                "Context authority mismatch".to_string()));
+            return Err(AuraError::invalid("Context authority mismatch".to_string()));
         }
 
         // Get handler from registry
-        let _handler = self.registry.get::<T>(effect_type, operation)
+        let _handler = self
+            .registry
+            .get::<T>(effect_type, operation)
             .map_err(|e| AuraError::invalid(e.to_string()))?
-            .ok_or_else(|| AuraError::invalid(
-                format!("{}.{}", effect_type, operation)
-            ))?;
+            .ok_or_else(|| AuraError::invalid(format!("{}.{}", effect_type, operation)))?;
 
         // Stub execution - will be expanded with actual handler invocation
-        Ok(EffectResult::Success(
-            format!("Executed {}.{}", effect_type, operation)
-        ))
+        Ok(EffectResult::Success(format!(
+            "Executed {}.{}",
+            effect_type, operation
+        )))
     }
 
     /// Get the authority ID
@@ -77,11 +77,7 @@ impl EffectExecutor {
 
     /// Create an execution context
     pub fn create_context(&self, context_id: ContextId) -> super::EffectContext {
-        super::EffectContext::new(
-            self.authority_id,
-            context_id,
-            self.execution_mode.clone(),
-        )
+        super::EffectContext::new(self.authority_id, context_id, self.execution_mode.clone())
     }
 
     /// Production constructor
@@ -95,7 +91,11 @@ impl EffectExecutor {
     }
 
     /// Simulation constructor
-    pub fn simulation(authority_id: AuthorityId, seed: u64, registry: Arc<super::EffectRegistry>) -> Self {
+    pub fn simulation(
+        authority_id: AuthorityId,
+        seed: u64,
+        registry: Arc<super::EffectRegistry>,
+    ) -> Self {
         Self::new(authority_id, ExecutionMode::Simulation { seed }, registry)
     }
 }
@@ -138,13 +138,16 @@ impl EffectExecutorBuilder {
 
     /// Build the executor
     pub fn build(self) -> Result<EffectExecutor, AuraError> {
-        let authority_id = self.authority_id
+        let authority_id = self
+            .authority_id
             .ok_or_else(|| AuraError::invalid("Authority ID required".to_string()))?;
-        
-        let execution_mode = self.execution_mode
+
+        let execution_mode = self
+            .execution_mode
             .ok_or_else(|| AuraError::invalid("Execution mode required".to_string()))?;
-        
-        let registry = self.registry
+
+        let registry = self
+            .registry
             .ok_or_else(|| AuraError::invalid("Registry required".to_string()))?;
 
         Ok(EffectExecutor::new(authority_id, execution_mode, registry))

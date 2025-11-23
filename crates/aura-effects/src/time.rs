@@ -39,28 +39,37 @@ impl RealTimeHandler {
 
 #[async_trait]
 impl TimeEffects for RealTimeHandler {
+    #[allow(clippy::disallowed_methods)]
     async fn current_epoch(&self) -> u64 {
+        // SystemTime::now() is allowed in production handlers (Layer 3) that implement effect traits.
+        // This handler bridges from the pure effect interface to actual system time operations.
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_millis() as u64
     }
 
+    #[allow(clippy::disallowed_methods)]
     async fn current_timestamp(&self) -> u64 {
+        // SystemTime::now() is allowed in production handlers (Layer 3) that implement effect traits.
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_secs()
     }
 
+    #[allow(clippy::disallowed_methods)]
     async fn current_timestamp_millis(&self) -> u64 {
+        // SystemTime::now() is allowed in production handlers (Layer 3) that implement effect traits.
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or(Duration::ZERO)
             .as_millis() as u64
     }
 
+    #[allow(clippy::disallowed_methods)]
     async fn now_instant(&self) -> Instant {
+        // Instant::now() is allowed in production handlers (Layer 3) that implement effect traits.
         Instant::now()
     }
 
@@ -96,7 +105,10 @@ impl TimeEffects for RealTimeHandler {
         Ok(())
     }
 
+    #[allow(clippy::disallowed_methods)]
     async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
+        // Uuid::new_v4() is allowed in production handlers (Layer 3) that need to generate unique identifiers.
+        // This is a legitimate use case for timeout handle generation.
         let handle = Uuid::new_v4();
         let _ = timeout_ms;
         handle
@@ -138,10 +150,10 @@ mod tests {
     async fn test_current_timestamp() {
         let handler = RealTimeHandler::new();
         let timestamp1 = handler.current_timestamp().await;
-        
+
         // Sleep for a small amount to ensure time progresses
         tokio::time::sleep(Duration::from_millis(10)).await;
-        
+
         let timestamp2 = handler.current_timestamp().await;
         assert!(timestamp2 >= timestamp1);
     }
@@ -150,10 +162,10 @@ mod tests {
     async fn test_current_timestamp_millis() {
         let handler = RealTimeHandler::new();
         let timestamp1 = handler.current_timestamp_millis().await;
-        
+
         // Sleep for a small amount to ensure time progresses
         tokio::time::sleep(Duration::from_millis(10)).await;
-        
+
         let timestamp2 = handler.current_timestamp_millis().await;
         assert!(timestamp2 >= timestamp1);
     }
@@ -162,50 +174,29 @@ mod tests {
     async fn test_sleep_ms() {
         let handler = RealTimeHandler::new();
         let start = Instant::now();
-        
+
         handler.sleep_ms(50).await;
-        
+
         let elapsed = start.elapsed();
         assert!(elapsed >= Duration::from_millis(40)); // Allow some variance
     }
 
     #[tokio::test]
-    async fn test_timeout_operations() {
+    async fn test_set_timeout() {
         let handler = RealTimeHandler::new();
-        
-        // Test setting timeout
-        let handle = handler.set_timeout(1000, WakeCondition::Any).await;
-        assert!(handle.is_ok());
-        
-        // Test clearing timeout
-        let clear_result = handler.clear_timeout(handle.unwrap()).await;
-        assert!(clear_result.is_ok());
+
+        // Test setting timeout - returns a TimeoutHandle (UUID)
+        let handle = handler.set_timeout(1000).await;
+        assert!(!uuid::Uuid::nil().eq(&handle));
     }
 
     #[tokio::test]
-    async fn test_timeout_after_success() {
+    async fn test_cancel_timeout() {
         let handler = RealTimeHandler::new();
-        
-        // Test successful operation within timeout
-        let result = handler.timeout_after(100, async {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            42
-        }).await;
-        
+
+        // Test setting and canceling timeout
+        let handle = handler.set_timeout(1000).await;
+        let result = handler.cancel_timeout(handle).await;
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 42);
-    }
-
-    #[tokio::test]
-    async fn test_timeout_after_timeout() {
-        let handler = RealTimeHandler::new();
-        
-        // Test operation that exceeds timeout
-        let result = handler.timeout_after(10, async {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            42
-        }).await;
-        
-        assert!(result.is_err());
     }
 }

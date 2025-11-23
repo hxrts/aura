@@ -208,7 +208,6 @@ impl Default for StandardContextHandler {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,7 +294,6 @@ mod tests {
         assert!(!handler.validate_context(&context, &["session_id"]));
         assert!(!handler.validate_context(&context, &["missing_field"]));
     }
-
 
     #[test]
     fn test_metadata_merging() {

@@ -61,7 +61,7 @@
 
 use aura_core::{
     identifiers::{AuthorityId, ContextId},
-    relational::{GuardianBinding, GuardianParameters, RecoveryGrant, RelationalFact},
+    relational::{GuardianBinding, RecoveryGrant, RelationalFact},
     Hash32, Result,
 };
 use serde::{Deserialize, Serialize};
@@ -114,9 +114,10 @@ impl RelationalContext {
 
     /// Add a relational fact to the context
     pub fn add_fact(&self, fact: RelationalFact) -> Result<()> {
-        let mut journal = self.journal.lock().map_err(|_| {
-            aura_core::AuraError::internal("Failed to acquire journal lock")
-        })?;
+        let mut journal = self
+            .journal
+            .lock()
+            .map_err(|_| aura_core::AuraError::internal("Failed to acquire journal lock"))?;
         journal.add_fact(fact)
     }
 
@@ -134,7 +135,7 @@ impl RelationalContext {
         self.guardian_bindings().into_iter().find(|b| {
             // Compare authority IDs directly instead of converting to Hash32
             // since account_commitment should be derived from the authority ID
-            &b.account_commitment == &Hash32::from_bytes(&authority_id.to_bytes())
+            b.account_commitment == Hash32::from_bytes(&authority_id.to_bytes())
         })
     }
 
@@ -154,11 +155,11 @@ impl RelationalContext {
         // In production, this would use proper key agreement protocol
         let mut secret = [0u8; 32];
         let context_bytes = self.context_id.to_bytes();
-        
+
         // Use first 32 bytes of context ID as temporary shared secret
         let len = std::cmp::min(context_bytes.len(), 32);
         secret[..len].copy_from_slice(&context_bytes[..len]);
-        
+
         Some(secret)
     }
 

@@ -12,11 +12,5 @@ pub mod shared;
 pub mod threshold;
 
 // Re-export the main session operations handler
-pub use coordination::SessionOperations;
 
 // Re-export common types
-pub use shared::{
-    DeviceInfo, MetadataSync, MetadataUpdate, ParticipantChange, ParticipantUpdate,
-    SessionCreateRequest, SessionEnd, SessionEstablished, SessionFailed, SessionHandle,
-    SessionInvitation, SessionManagementRole, SessionResponse, SessionStats, SessionTerminated,
-};

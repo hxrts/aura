@@ -234,7 +234,7 @@ impl AntiEntropyProtocol {
     }
 
     /// Check if the current token authorizes sync operations with a peer
-    fn check_sync_authorization<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<()>
+    fn check_sync_authorization<E>(&self, _effects: &E, peer: DeviceId) -> SyncResult<()>
     where
         E: JournalEffects + NetworkEffects,
     {
@@ -609,15 +609,17 @@ impl AntiEntropyProtocol {
 
                 // Convert applied operations to journal deltas via effects
                 // Use the new fact-based journal system with proper effect handling
-                match self.convert_operations_to_journal_delta(effects, &merge_result).await {
+                match self
+                    .convert_operations_to_journal_delta(effects, &merge_result)
+                    .await
+                {
                     Ok(journal_delta) => {
                         // Get current journal state and merge with delta
-                        let current_journal = effects.get_journal().await
-                            .unwrap_or_else(|e| {
-                                tracing::warn!("Failed to get current journal: {}, using empty", e);
-                                aura_core::Journal::new()
-                            });
-                        
+                        let current_journal = effects.get_journal().await.unwrap_or_else(|e| {
+                            tracing::warn!("Failed to get current journal: {}, using empty", e);
+                            aura_core::Journal::new()
+                        });
+
                         // Apply journal delta using CRDT merge operation
                         match effects.merge_facts(&current_journal, &journal_delta).await {
                             Ok(updated_journal) => {
@@ -625,21 +627,24 @@ impl AntiEntropyProtocol {
                                 if let Err(e) = effects.persist_journal(&updated_journal).await {
                                     tracing::error!("Failed to persist journal after sync: {}", e);
                                     return Err(crate::core::errors::sync_protocol_with_peer(
-                                        "anti_entropy", 
-                                        format!("Journal persistence failure: {}", e), 
-                                        peer
+                                        "anti_entropy",
+                                        format!("Journal persistence failure: {}", e),
+                                        peer,
                                     ));
                                 }
-                                
-                                tracing::debug!("Successfully applied {} journal deltas from peer {}", 
-                                               merge_result.applied, peer);
+
+                                tracing::debug!(
+                                    "Successfully applied {} journal deltas from peer {}",
+                                    merge_result.applied,
+                                    peer
+                                );
                             }
                             Err(e) => {
                                 tracing::error!("Failed to merge journal facts: {}", e);
                                 return Err(crate::core::errors::sync_protocol_with_peer(
-                                    "anti_entropy", 
-                                    format!("Journal merge failed: {}", e), 
-                                    peer
+                                    "anti_entropy",
+                                    format!("Journal merge failed: {}", e),
+                                    peer,
                                 ));
                             }
                         }
@@ -647,9 +652,9 @@ impl AntiEntropyProtocol {
                     Err(e) => {
                         tracing::error!("Failed to convert operations to journal delta: {}", e);
                         return Err(crate::core::errors::sync_protocol_with_peer(
-                            "anti_entropy", 
-                            format!("Delta conversion failed: {}", e), 
-                            peer
+                            "anti_entropy",
+                            format!("Delta conversion failed: {}", e),
+                            peer,
                         ));
                     }
                 }
@@ -690,20 +695,20 @@ impl AntiEntropyProtocol {
     {
         // Create a new journal delta based on the merge result
         // In the fact-based architecture, operations are converted to facts
-        let mut journal_delta = aura_core::Journal::new();
-        
+        let journal_delta = aura_core::Journal::new();
+
         // TODO: Implement actual conversion logic based on merge_result
         // This would typically involve:
         // 1. Extract operations that were successfully applied
         // 2. Convert each operation to appropriate fact types
         // 3. Add facts to the delta journal
         // 4. Ensure CRDT semantics are preserved
-        
+
         tracing::debug!(
-            "Created journal delta with {} applied operations", 
+            "Created journal delta with {} applied operations",
             merge_result.applied
         );
-        
+
         // For now, return empty delta as placeholder
         // In production, this would contain the actual fact deltas
         Ok(journal_delta)

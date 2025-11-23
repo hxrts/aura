@@ -9,7 +9,6 @@ use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest, InvitationEnvelope},
     invitation_acceptance::InvitationAcceptanceCoordinator,
 };
-use aura_protocol::effect_traits::ConsoleEffects;
 use aura_wot::{AccountAuthority, SerializableBiscuit};
 use biscuit_auth::{KeyPair, PrivateKey};
 use std::{fs, str::FromStr};

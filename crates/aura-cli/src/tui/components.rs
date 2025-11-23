@@ -47,11 +47,7 @@ pub fn render_message_list(
 }
 
 /// Status panel with multiple sections
-pub fn render_status_panel(
-    f: &mut Frame<'_>,
-    area: Rect,
-    sections: &[(&str, Vec<Line>)],
-) {
+pub fn render_status_panel(f: &mut Frame<'_>, area: Rect, sections: &[(&str, Vec<Line>)]) {
     let constraints = vec![Constraint::Length(sections.len() as u16 * 4); sections.len()];
     let chunks = Layout::default()
         .direction(Direction::Vertical)

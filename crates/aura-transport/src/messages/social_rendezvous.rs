@@ -15,17 +15,24 @@ use std::collections::BTreeMap;
 /// Transport type enumeration for rendezvous
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TransportKind {
+    /// QUIC protocol transport with ALPN support
     Quic,
+    /// WebSocket protocol transport
     WebSocket,
+    /// WebRTC data channel transport
     WebRtc,
+    /// Tor onion service transport
     Tor,
+    /// Bluetooth Low Energy transport
     Ble,
 }
 
 /// Transport configuration and metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransportDescriptor {
+    /// Transport type (QUIC, WebSocket, WebRTC, Tor, or BLE)
     pub kind: TransportKind,
+    /// Protocol-specific metadata and configuration parameters
     pub metadata: BTreeMap<String, String>,
     /// Local addresses (direct connectivity)
     pub local_addresses: Vec<String>,
@@ -34,6 +41,7 @@ pub struct TransportDescriptor {
 }
 
 impl TransportDescriptor {
+    /// Create a QUIC transport descriptor with ALPN protocol specification
     pub fn quic(local_addr: String, alpn: String) -> Self {
         let mut metadata = BTreeMap::new();
         metadata.insert("alpn".to_string(), alpn);
@@ -45,6 +53,7 @@ impl TransportDescriptor {
         }
     }
 
+    /// Create a QUIC transport descriptor with both local and STUN-discovered reflexive addresses
     pub fn quic_with_stun(local_addr: String, reflexive_addr: String, alpn: String) -> Self {
         let mut metadata = BTreeMap::new();
         metadata.insert("alpn".to_string(), alpn);
@@ -56,6 +65,7 @@ impl TransportDescriptor {
         }
     }
 
+    /// Create a WebSocket transport descriptor with endpoint address
     pub fn websocket(local_addr: String) -> Self {
         let metadata = BTreeMap::new();
         Self {
@@ -66,6 +76,7 @@ impl TransportDescriptor {
         }
     }
 
+    /// Create a WebRTC transport descriptor with ICE credentials and candidates
     pub fn webrtc(ufrag: String, pwd: String, candidates: Vec<String>) -> Self {
         let mut metadata = BTreeMap::new();
         metadata.insert("ufrag".to_string(), ufrag);
@@ -79,6 +90,7 @@ impl TransportDescriptor {
         }
     }
 
+    /// Create a Tor transport descriptor with onion service address
     pub fn tor(onion: String) -> Self {
         let mut metadata = BTreeMap::new();
         metadata.insert("onion".to_string(), onion.clone());
@@ -90,6 +102,7 @@ impl TransportDescriptor {
         }
     }
 
+    /// Create a Bluetooth Low Energy transport descriptor with service UUID
     pub fn ble(service_uuid: String) -> Self {
         let mut metadata = BTreeMap::new();
         metadata.insert("service_uuid".to_string(), service_uuid);
@@ -126,26 +139,39 @@ impl TransportDescriptor {
 /// Message type enumeration for rendezvous payloads
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum PayloadKind {
+    /// Initial offer with available transports
     Offer,
+    /// Response selecting a transport
     Answer,
+    /// Acknowledgment of message receipt
     Ack,
+    /// Request to rekey the connection
     Rekey,
+    /// Notification to revoke a device
     RevokeDevice,
 }
 
 /// Authentication payload for rendezvous messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthenticationPayload {
+    /// Message type (Offer, Answer, Ack, Rekey, RevokeDevice)
     pub kind: PayloadKind,
+    /// Protocol version
     pub ver: u8,
+    /// Device certificate for identity verification
     pub device_cert: Vec<u8>,
+    /// Channel binding for PSK verification
     pub channel_binding: [u8; 32],
+    /// Message expiration timestamp
     pub expires: u64,
+    /// Monotonic counter for replay protection
     pub counter: u32,
+    /// Inner signature over message content
     pub inner_sig: Vec<u8>,
 }
 
 impl AuthenticationPayload {
+    /// Create a new authentication payload with provided parameters
     pub fn new(
         kind: PayloadKind,
         device_cert: Vec<u8>,
@@ -165,6 +191,7 @@ impl AuthenticationPayload {
         }
     }
 
+    /// Compute channel binding from pre-shared key and device public key
     pub fn compute_channel_binding(k_psk: &[u8; 32], device_static_pub: &[u8]) -> [u8; 32] {
         let mut data = Vec::new();
         data.extend_from_slice(k_psk);
@@ -176,24 +203,33 @@ impl AuthenticationPayload {
 /// Storage capability announcement for peer discovery
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StorageCapabilityAnnouncement {
+    /// Available storage capacity in bytes
     pub available_capacity_bytes: u64,
+    /// Maximum chunk size for storage operations
     pub max_chunk_size: u32,
+    /// Whether this device accepts new storage relationships
     pub accepting_new_relationships: bool,
 }
 
 /// Transport offer payload with capability announcements
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransportOfferPayload {
+    /// Available transports for connection
     pub transports: Vec<TransportDescriptor>,
+    /// Selected transport index (None for offers, Some for answers)
     pub selected_transport: Option<u8>,
+    /// Required permissions for this connection
     pub required_permissions: Vec<String>,
+    /// Optional capability proof for authorization
     pub capability_proof: Option<Vec<u8>>,
+    /// Optional storage capability announcement
     pub storage_announcement: Option<StorageCapabilityAnnouncement>,
     /// Punch nonce for simultaneous open coordination (hole-punching)
     pub punch_nonce: Option<[u8; 32]>,
 }
 
 impl TransportOfferPayload {
+    /// Create a basic transport offer without storage announcement
     pub fn new_offer(
         transports: Vec<TransportDescriptor>,
         required_permissions: Vec<String>,
@@ -208,6 +244,7 @@ impl TransportOfferPayload {
         }
     }
 
+    /// Create a transport offer with storage capability announcement
     pub fn new_offer_with_storage(
         transports: Vec<TransportDescriptor>,
         required_permissions: Vec<String>,
@@ -223,6 +260,7 @@ impl TransportOfferPayload {
         }
     }
 
+    /// Create a transport answer selecting one of the offered transports
     pub fn new_answer(original_transports: Vec<TransportDescriptor>, selected_index: u8) -> Self {
         Self {
             transports: original_transports,
@@ -234,6 +272,7 @@ impl TransportOfferPayload {
         }
     }
 
+    /// Create a transport answer with storage capability announcement
     pub fn new_answer_with_storage(
         original_transports: Vec<TransportDescriptor>,
         selected_index: u8,
@@ -296,22 +335,31 @@ impl TransportOfferPayload {
 /// Complete rendezvous message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RendezvousMessage {
+    /// Authentication payload with identity verification
     pub auth: AuthenticationPayload,
+    /// Transport offer with connection details
     pub transport: TransportOfferPayload,
 }
 
 /// PSK handshake transcript for verification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HandshakeTranscript {
+    /// Initiator device certificate
     pub device_cert_a: Vec<u8>,
+    /// Responder device certificate
     pub device_cert_b: Vec<u8>,
+    /// Channel binding for PSK derivation
     pub channel_binding: [u8; 32],
+    /// Serialized transport descriptor used in negotiation
     pub transport_descriptor: Vec<u8>,
+    /// Counter value from offer message
     pub offer_counter: u32,
+    /// Counter value from answer message
     pub answer_counter: u32,
 }
 
 impl HandshakeTranscript {
+    /// Create a new handshake transcript from negotiation parameters
     pub fn new(
         device_cert_a: Vec<u8>,
         device_cert_b: Vec<u8>,
@@ -346,18 +394,26 @@ impl HandshakeTranscript {
 /// PSK handshake configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PskHandshakeConfig {
+    /// Pre-shared key for PSK-based handshake
     pub k_psk: [u8; 32],
+    /// Expected peer device identifier
     pub expected_peer_device_id: aura_core::identifiers::DeviceId,
+    /// Local device certificate for identity proof
     pub local_device_cert: Vec<u8>,
+    /// Selected transport for the handshake
     pub transport_descriptor: TransportDescriptor,
 }
 
 /// Handshake completion result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HandshakeResult {
+    /// Whether handshake succeeded
     pub success: bool,
+    /// Handshake transcript if successful
     pub transcript: Option<HandshakeTranscript>,
+    /// Derived session key if successful
     pub session_key: Option<[u8; 32]>,
+    /// Error message if handshake failed
     pub error_message: Option<String>,
 }
 

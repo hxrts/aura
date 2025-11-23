@@ -2,7 +2,7 @@
 //!
 //! Handlers for session metadata operations and participant management.
 
-use super::{coordination::SessionOperations, shared::*};
+use super::coordination::SessionOperations;
 use crate::core::AgentResult;
 use aura_core::identifiers::DeviceId;
 use std::collections::HashMap;

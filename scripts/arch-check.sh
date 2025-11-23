@@ -1073,7 +1073,7 @@ if [ -d "crates/aura-core" ]; then
     fi
 fi
 
-# Layer 2: Domain crates 
+# Layer 2: Domain crates
 for crate in aura-journal aura-wot aura-verify aura-store aura-transport aura-mpst aura-macros; do
     if [ -d "crates/$crate" ]; then
         # Check both dependencies and dev-dependencies sections for testkit usage
@@ -1123,7 +1123,7 @@ for crate in aura-authenticate aura-frost aura-invitation aura-recovery aura-ren
     fi
 done
 
-# Layer 6+: Runtime and UI crates  
+# Layer 6+: Runtime and UI crates
 for crate in aura-agent aura-simulator aura-cli; do
     if [ -d "crates/$crate" ]; then
         if grep -A 20 -E "^\[dev-dependencies\]" crates/$crate/Cargo.toml 2>/dev/null | \
@@ -1505,7 +1505,7 @@ if [ -n "$alternative_contexts" ]; then
     suspicious_contexts=$(echo "$alternative_contexts" | \
         xargs grep "struct.*Context\|enum.*Context" | \
         grep -v "EffectContext\|TraceContext\|ErrorContext\|ConfigContext" || true)
-    
+
     if [ -n "$suspicious_contexts" ]; then
         warning "Custom context types found (consider using EffectContext)"
         echo "$suspicious_contexts"
@@ -1558,7 +1558,7 @@ subsection "TODO and incomplete implementation markers"
 
 # Check for various markers that indicate incomplete implementation
 todo_markers="TODO FIXME XXX HACK BUG"
-incomplete_words="simplified placeholder stub temporary workaround"
+incomplete_words="simplified placeholder stub temporary temporarily workaround"
 # incomplete_phrases defined inline below
 
 all_incomplete_indicators=""
@@ -1569,7 +1569,7 @@ for marker in $todo_markers; do
         grep -v "// Example" | \
         grep -v "docs/" | \
         head -20 || true)
-    
+
     if [ -n "$marker_violations" ]; then
         all_incomplete_indicators="$all_incomplete_indicators\n$marker_violations"
     fi
@@ -1582,7 +1582,7 @@ for word in $incomplete_words; do
         grep -v "// Example" | \
         grep -v "docs/" | \
         head -10 || true)
-    
+
     if [ -n "$word_violations" ]; then
         all_incomplete_indicators="$all_incomplete_indicators\n$word_violations"
     fi
@@ -1596,7 +1596,7 @@ while IFS= read -r phrase; do
         grep -v "// Example" | \
         grep -v "docs/" | \
         head -10 || true)
-    
+
     if [ -n "$phrase_violations" ]; then
         all_incomplete_indicators="$all_incomplete_indicators\n$phrase_violations"
     fi
@@ -1695,7 +1695,7 @@ if [ -d "crates/aura-protocol" ]; then
         grep -v "// Example" | \
         grep -v "aura-composition" | \
         head -5 || true)
-    
+
     if [ -n "$protocol_violations" ]; then
         violation "aura-protocol directly instantiates handlers (should use registration system)"
         echo "$protocol_violations"
@@ -1714,7 +1714,7 @@ for crate in aura-authenticate aura-frost aura-invitation aura-recovery aura-rel
             grep -v "// Example" | \
             grep -v "testkit" | \
             head -3 || true)
-        
+
         if [ -n "$feature_violations" ]; then
             violation "$crate directly instantiates handlers (should use composition)"
             echo "$feature_violations"
@@ -1734,7 +1734,7 @@ if [ -d "crates/aura-composition" ]; then
         grep -v "test" | \
         wc -l | tr -d ' \n' || echo 0)
     composition_usage=${composition_usage:-0}
-    
+
     if [ "$composition_usage" -gt 0 ]; then
         success "Found handler composition patterns in use ($composition_usage references)"
     else
@@ -1751,13 +1751,13 @@ subsection "Handler registration pattern validation"
 if [ -d "crates/aura-composition" ]; then
     registry_components="Registry Builder Adapter"
     missing_components=""
-    
+
     for component in $registry_components; do
         if ! grep -r "$component" crates/aura-composition/src/ 2>/dev/null >/dev/null; then
             missing_components="$missing_components $component"
         fi
     done
-    
+
     if [ -n "$missing_components" ]; then
         warning "aura-composition missing expected components:$missing_components"
         echo "   💡 SUGGESTION: Implement missing registry infrastructure"
@@ -1766,13 +1766,13 @@ if [ -d "crates/aura-composition" ]; then
     else
         success "aura-composition contains expected registration infrastructure"
     fi
-    
+
     # Check for proper separation between aura-effects and aura-composition
     effects_in_composition=$(grep -r "aura-effects" crates/aura-composition/src/ 2>/dev/null | \
         grep -v "test" | \
         grep -v "// " | \
         wc -l || echo 0)
-    
+
     if [ "$effects_in_composition" -gt 2 ]; then
         warning "aura-composition heavily coupled to aura-effects implementations"
         echo "   💡 SUGGESTION: Use trait abstractions instead of concrete handler types"
@@ -1806,10 +1806,10 @@ subsection "Registration system architecture validation"
 if [ -d "crates/aura-effects" ] && [ -d "crates/aura-composition" ]; then
     # aura-effects should contain stateless handlers
     stateless_handlers=$(find crates/aura-effects/src/ -name "*.rs" -exec grep -l "Handler.*Effects" {} \; 2>/dev/null | wc -l)
-    
-    # aura-composition should contain composition infrastructure  
+
+    # aura-composition should contain composition infrastructure
     composition_infra=$(find crates/aura-composition/src/ -name "*.rs" -exec grep -l "Registry\|Builder\|Compose" {} \; 2>/dev/null | wc -l)
-    
+
     if [ "$stateless_handlers" -gt 0 ] && [ "$composition_infra" -gt 0 ]; then
         success "Split Layer 3 architecture properly implemented"
         echo "   📊 METRICS: $stateless_handlers handler files, $composition_infra composition files"

@@ -3,8 +3,8 @@
 //! Minimal public API surface for the agent runtime.
 
 use super::{AgentConfig, AgentError, AgentResult, AuthorityContext};
-use crate::runtime::{EffectContext, EffectSystemBuilder};
 use crate::runtime::system::RuntimeSystem;
+use crate::runtime::{EffectContext, EffectSystemBuilder};
 use aura_core::identifiers::AuthorityId;
 
 /// Main agent interface - thin facade delegating to runtime
@@ -42,7 +42,10 @@ impl AuraAgent {
 
     /// Shutdown the agent
     pub async fn shutdown(self, ctx: &EffectContext) -> AgentResult<()> {
-        self.runtime.shutdown(ctx).await.map_err(|e| AgentError::runtime(e))
+        self.runtime
+            .shutdown(ctx)
+            .await
+            .map_err(|e| AgentError::runtime(e))
     }
 }
 
@@ -85,7 +88,7 @@ impl AgentBuilder {
             aura_core::identifiers::ContextId::new(),
             aura_core::effects::ExecutionMode::Production,
         );
-        
+
         let runtime = EffectSystemBuilder::production()
             .with_config(self.config)
             .with_authority(authority_id)

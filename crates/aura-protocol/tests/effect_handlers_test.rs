@@ -7,19 +7,16 @@
 
 mod common;
 
-use aura_protocol::{effects::*, handlers::choreographic::MemoryChoreographicHandler};
 use aura_composition::CompositeHandler;
+use aura_protocol::{effects::*, handlers::choreographic::MemoryChoreographicHandler};
 // Import handlers from aura-effects and aura-testkit
 use aura_effects::{
-    console::RealConsoleHandler as StdoutConsoleHandler,
-    crypto::RealCryptoHandler,
-    network::{TcpNetworkHandler as RealNetworkHandler},
-    storage::{FilesystemStorageHandler},
+    console::RealConsoleHandler as StdoutConsoleHandler, crypto::RealCryptoHandler,
+    network::TcpNetworkHandler as RealNetworkHandler, storage::FilesystemStorageHandler,
 };
 // Import test-specific stateful handlers from aura-testkit
 use aura_testkit::stateful_effects::{
-    storage::MemoryStorageHandler,
-    transport::InMemoryTransportHandler as MemoryNetworkHandler,
+    storage::MemoryStorageHandler, transport::InMemoryTransportHandler as MemoryNetworkHandler,
 };
 // Import testkit instead of legacy helpers
 use aura_testkit::{DeviceTestFixture, TestEffectsBuilder};

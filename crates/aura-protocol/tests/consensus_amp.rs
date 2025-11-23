@@ -1,9 +1,9 @@
 //! Consensus integration smoke test for AMP bumps.
 
+use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::AuthorityId;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_protocol::consensus::run_amp_channel_epoch_bump;
-use aura_core::frost::{Share, PublicKeyPackage};
 use std::collections::HashMap;
 
 #[tokio::test]

@@ -5,12 +5,12 @@
 //! This module implements synchronization for the fact-based journal model
 //! with proper namespace isolation for authorities and contexts.
 
+use crate::core::config::SyncConfig;
+use crate::core::errors::{sync_network_error, sync_serialization_error, sync_session_error};
 use aura_core::identifiers::ContextId;
 use aura_core::{AuraError, AuthorityId, Result};
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
-use crate::core::config::SyncConfig;
-use crate::core::errors::{sync_network_error, sync_serialization_error, sync_session_error};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -178,7 +178,10 @@ impl NamespacedSync {
         let peer_token_bytes = match effects.retrieve(&peer_token_key).await {
             Ok(Some(token_data)) => token_data,
             Ok(None) => {
-                tracing::warn!("No Biscuit token found for peer {} during authority sync", peer);
+                tracing::warn!(
+                    "No Biscuit token found for peer {} during authority sync",
+                    peer
+                );
                 // For now, allow if no token found (placeholder until proper token management)
                 return Ok(true);
             }
@@ -192,7 +195,11 @@ impl NamespacedSync {
         // For now, do basic validation and allow access
         // TODO: Implement full Biscuit token validation when token infrastructure is ready
         if peer_token_bytes.len() >= 32 {
-            tracing::debug!("Peer {} has valid token for authority {} sync", peer, authority);
+            tracing::debug!(
+                "Peer {} has valid token for authority {} sync",
+                peer,
+                authority
+            );
             Ok(true)
         } else {
             tracing::warn!("Invalid token for peer {} during authority sync", peer);
@@ -214,12 +221,16 @@ impl NamespacedSync {
             Ok(None) => {
                 tracing::debug!("No explicit participants found for context {}", context);
                 // If no explicit participants list, check via token-based authorization
-                return self.check_context_authorization_via_token(effects, peer, context).await;
+                return self
+                    .check_context_authorization_via_token(effects, peer, context)
+                    .await;
             }
             Err(e) => {
                 tracing::debug!("Could not get context participants for {}: {}", context, e);
                 // Fall back to token authorization if storage lookup fails
-                return self.check_context_authorization_via_token(effects, peer, context).await;
+                return self
+                    .check_context_authorization_via_token(effects, peer, context)
+                    .await;
             }
         };
 
@@ -228,13 +239,18 @@ impl NamespacedSync {
             // Simple format: comma-separated authority IDs
             let peer_str = peer.to_string();
             if participants_str.contains(&peer_str) {
-                tracing::debug!("Peer {} is explicit participant in context {}", peer, context);
+                tracing::debug!(
+                    "Peer {} is explicit participant in context {}",
+                    peer,
+                    context
+                );
                 return Ok(true);
             }
         }
 
         // If not in explicit participants list, check via token authorization
-        self.check_context_authorization_via_token(effects, peer, context).await
+        self.check_context_authorization_via_token(effects, peer, context)
+            .await
     }
 
     /// Check context authorization via token-based capabilities
@@ -249,7 +265,10 @@ impl NamespacedSync {
         let peer_token_bytes = match effects.retrieve(&peer_token_key).await {
             Ok(Some(token)) => token,
             Ok(None) => {
-                tracing::debug!("No authorization token found for peer {} during context sync", peer);
+                tracing::debug!(
+                    "No authorization token found for peer {} during context sync",
+                    peer
+                );
                 // For now, allow if no token found (placeholder until proper token management)
                 return Ok(true);
             }
@@ -295,15 +314,14 @@ impl NamespacedSync {
         let facts = self.sync_facts(effects, &request.requester).await?;
 
         // Create paginated response using helper method
-        let response = self.create_paginated_response(
-            facts,
-            &request.known_fact_ids,
-            request.max_facts,
-        );
+        let response =
+            self.create_paginated_response(facts, &request.known_fact_ids, request.max_facts);
 
         tracing::debug!(
             "Sync request for namespace {:?}: returning {} facts, has_more: {}",
-            self.namespace, response.facts.len(), response.has_more
+            self.namespace,
+            response.facts.len(),
+            response.has_more
         );
 
         Ok(response)
@@ -329,12 +347,9 @@ impl NamespacedSync {
         unknown_facts.sort_by(|a, b| a.fact_id.cmp(&b.fact_id));
 
         let total_unknown = unknown_facts.len();
-        
+
         // Take the requested page size
-        let page_facts: Vec<Fact> = unknown_facts
-            .into_iter()
-            .take(max_facts)
-            .collect();
+        let page_facts: Vec<Fact> = unknown_facts.into_iter().take(max_facts).collect();
 
         // Determine if there are more facts available
         let has_more = total_unknown > max_facts;
@@ -442,9 +457,12 @@ impl NamespacedAntiEntropy {
         let peer_uuid: Uuid = peer.into();
 
         // Serialize the sync request
-        let request_data = serde_json::to_vec(&request)
-            .map_err(|e| sync_serialization_error("SyncRequest", 
-                &format!("Failed to serialize sync request: {}", e)))?;
+        let request_data = serde_json::to_vec(&request).map_err(|e| {
+            sync_serialization_error(
+                "SyncRequest",
+                &format!("Failed to serialize sync request: {}", e),
+            )
+        })?;
 
         // Send request to peer and receive response with timeout
         let exchange_future = async {
@@ -452,13 +470,20 @@ impl NamespacedAntiEntropy {
             effects
                 .send_to_peer(peer_uuid, request_data)
                 .await
-                .map_err(|e| sync_network_error(&format!("Failed to send sync request to peer {}: {}", peer, e)))?;
+                .map_err(|e| {
+                    sync_network_error(&format!(
+                        "Failed to send sync request to peer {}: {}",
+                        peer, e
+                    ))
+                })?;
 
             // Receive response from the peer
-            let (sender_id, response_data) = effects
-                .receive()
-                .await
-                .map_err(|e| sync_network_error(&format!("Failed to receive sync response from peer {}: {}", peer, e)))?;
+            let (sender_id, response_data) = effects.receive().await.map_err(|e| {
+                sync_network_error(&format!(
+                    "Failed to receive sync response from peer {}: {}",
+                    peer, e
+                ))
+            })?;
 
             // Verify the response came from the expected peer
             if sender_id != peer_uuid {
@@ -469,9 +494,15 @@ impl NamespacedAntiEntropy {
             }
 
             // Deserialize the sync response
-            let response: SyncResponse = serde_json::from_slice(&response_data)
-                .map_err(|e| sync_serialization_error("SyncResponse", 
-                    &format!("Failed to deserialize sync response from peer {}: {}", peer, e)))?;
+            let response: SyncResponse = serde_json::from_slice(&response_data).map_err(|e| {
+                sync_serialization_error(
+                    "SyncResponse",
+                    &format!(
+                        "Failed to deserialize sync response from peer {}: {}",
+                        peer, e
+                    ),
+                )
+            })?;
 
             // Verify namespace consistency
             if response.namespace != request.namespace {
@@ -491,7 +522,7 @@ impl NamespacedAntiEntropy {
             Err(_) => Err(sync_network_error(&format!(
                 "Sync request to peer {} timed out after {:?}",
                 peer, timeout_duration
-            )))
+            ))),
         }
     }
 }

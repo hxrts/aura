@@ -1,6 +1,6 @@
 use crate::effects::sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
-use crate::guards::send_guard::{create_send_guard, SendGuardChain};
 use crate::guards::effect_system_trait::GuardEffectSystem;
+use crate::guards::send_guard::create_send_guard;
 use async_trait::async_trait;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{tree::AttestedOp, Hash32};
@@ -51,7 +51,9 @@ impl AntiEntropyHandler {
         let local_digest = self.get_oplog_digest().await?;
 
         // Step 2: Request remote digest
-        tracing::warn!("sync_with_peer_impl: Cannot use guard chain without effect system parameter");
+        tracing::warn!(
+            "sync_with_peer_impl: Cannot use guard chain without effect system parameter"
+        );
         let remote_digest = self.request_digest_from_peer(peer_id).await?;
 
         // Step 3: Compute differences
@@ -63,7 +65,9 @@ impl AntiEntropyHandler {
         // Step 4: Push our ops to peer
         if !ops_to_push.is_empty() {
             // Note: This now requires an effect system parameter to use guard chain
-            tracing::warn!("sync_with_peer_impl: Cannot use guard chain without effect system parameter");
+            tracing::warn!(
+                "sync_with_peer_impl: Cannot use guard chain without effect system parameter"
+            );
             self.push_op_to_peers(ops_to_push[0].clone(), vec![peer_id])
                 .await?;
         }
@@ -71,7 +75,9 @@ impl AntiEntropyHandler {
         // Step 5: Pull missing ops from peer
         if !cids_to_pull.is_empty() {
             // Note: This now requires an effect system parameter to use guard chain
-            tracing::warn!("sync_with_peer_impl: Cannot use guard chain without effect system parameter");
+            tracing::warn!(
+                "sync_with_peer_impl: Cannot use guard chain without effect system parameter"
+            );
             let missing_ops = self.request_ops_from_peer(peer_id, cids_to_pull).await?;
 
             // Step 6: Verify and merge
@@ -89,7 +95,7 @@ impl AntiEntropyHandler {
     ) -> Result<BloomDigest, SyncError> {
         // Convert UUID to AuthorityId for guard chain
         let peer_authority = AuthorityId::from(peer_id);
-        
+
         // Create guard chain for digest request
         let guard_chain = create_send_guard(
             "sync:request_digest".to_string(),
@@ -98,7 +104,7 @@ impl AntiEntropyHandler {
             10, // low cost for digest request
         )
         .with_operation_id(format!("digest_request_{}", peer_id));
-        
+
         // Evaluate guard chain before requesting
         match guard_chain.evaluate(effect_system).await {
             Ok(result) if result.authorized => {
@@ -106,10 +112,10 @@ impl AntiEntropyHandler {
                     "Guard chain authorized digest request from peer: {:?}",
                     peer_id
                 );
-                
+
                 // TODO: Implement actual transport.request() with receipt
                 // let digest = transport.request_with_receipt(peer_id, DigestRequest, result.receipt).await?;
-                
+
                 // For now, return empty digest as placeholder
                 Ok(BloomDigest {
                     cids: BTreeSet::new(),
@@ -118,23 +124,27 @@ impl AntiEntropyHandler {
             Ok(result) => {
                 tracing::warn!(
                     "Guard chain denied digest request from peer {:?}: {:?}",
-                    peer_id, result.denial_reason
+                    peer_id,
+                    result.denial_reason
                 );
                 Err(SyncError::AuthorizationFailed)
             }
             Err(err) => {
                 tracing::error!(
                     "Guard chain evaluation failed for digest request from peer {:?}: {}",
-                    peer_id, err
+                    peer_id,
+                    err
                 );
                 Err(SyncError::AuthorizationFailed)
             }
         }
     }
-    
+
     /// Legacy digest request (deprecated)
     async fn request_digest_from_peer(&self, peer_id: Uuid) -> Result<BloomDigest, SyncError> {
-        tracing::warn!("request_digest_from_peer called without guard chain - this bypasses security");
+        tracing::warn!(
+            "request_digest_from_peer called without guard chain - this bypasses security"
+        );
         // TODO: Remove this legacy method once all callers are updated
         Ok(BloomDigest {
             cids: BTreeSet::new(),
@@ -308,7 +318,7 @@ impl AntiEntropyHandler {
     ) -> Result<Vec<AttestedOp>, SyncError> {
         // Convert UUID to AuthorityId for guard chain
         let peer_authority = AuthorityId::from(peer_id);
-        
+
         // Create guard chain for ops request
         let guard_chain = create_send_guard(
             "sync:request_ops".to_string(),
@@ -317,42 +327,45 @@ impl AntiEntropyHandler {
             cids.len() as u32 * 5, // cost based on number of operations requested
         )
         .with_operation_id(format!("ops_request_{}_{}", peer_id, cids.len()));
-        
+
         // Evaluate guard chain before requesting
         match guard_chain.evaluate(effect_system).await {
             Ok(result) if result.authorized => {
                 tracing::debug!(
                     "Guard chain authorized ops request from peer: {:?} for {} ops",
-                    peer_id, cids.len()
+                    peer_id,
+                    cids.len()
                 );
-                
+
                 // TODO: Implement actual transport.request() with receipt
                 // let ops = transport.request_with_receipt(peer_id, OpsRequest { cids }, result.receipt).await?;
-                
+
                 // For now, simulate by looking in local oplog
                 let oplog = self.oplog.read().await;
                 let mut ops_result = Vec::new();
-                
+
                 for op in oplog.iter() {
                     let op_cid = Hash32::from(op.op.parent_commitment);
                     if cids.contains(&op_cid) {
                         ops_result.push(op.clone());
                     }
                 }
-                
+
                 Ok(ops_result)
             }
             Ok(result) => {
                 tracing::warn!(
                     "Guard chain denied ops request from peer {:?}: {:?}",
-                    peer_id, result.denial_reason
+                    peer_id,
+                    result.denial_reason
                 );
                 Err(SyncError::AuthorizationFailed)
             }
             Err(err) => {
                 tracing::error!(
                     "Guard chain evaluation failed for ops request from peer {:?}: {}",
-                    peer_id, err
+                    peer_id,
+                    err
                 );
                 Err(SyncError::AuthorizationFailed)
             }
@@ -365,10 +378,10 @@ impl AntiEntropyHandler {
         effect_system: &E,
     ) -> Result<(), SyncError> {
         let peers = self.peers.read().await;
-        
+
         for &peer_uuid in peers.iter() {
             let peer_authority = AuthorityId::from(peer_uuid);
-            
+
             // Create guard chain for announcement
             let guard_chain = create_send_guard(
                 "sync:announce_op".to_string(),
@@ -377,22 +390,25 @@ impl AntiEntropyHandler {
                 5, // low cost for announcement
             )
             .with_operation_id(format!("announce_{}_{}", cid, peer_uuid));
-            
+
             // Evaluate guard chain before announcing
             match guard_chain.evaluate(effect_system).await {
                 Ok(result) if result.authorized => {
                     tracing::debug!(
                         "Guard chain authorized announcement of op {:?} to peer: {:?}",
-                        cid, peer_uuid
+                        cid,
+                        peer_uuid
                     );
-                    
+
                     // TODO: Implement actual transport.send() with receipt
                     // transport.send_with_receipt(peer_uuid, OpAnnouncement { cid }, result.receipt).await?;
                 }
                 Ok(result) => {
                     tracing::warn!(
                         "Guard chain denied announcement of op {:?} to peer {:?}: {:?}",
-                        cid, peer_uuid, result.denial_reason
+                        cid,
+                        peer_uuid,
+                        result.denial_reason
                     );
                     // Continue with other peers rather than fail entirely
                 }
@@ -405,10 +421,10 @@ impl AntiEntropyHandler {
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
         tracing::warn!("announce_new_op called without guard chain - this bypasses security");
         // Legacy fallback - just log
@@ -434,10 +450,10 @@ impl AntiEntropyHandler {
         effect_system: &E,
     ) -> Result<(), SyncError> {
         let cid = Hash32::from(op.op.parent_commitment);
-        
+
         for peer_uuid in peers {
             let peer_authority = AuthorityId::from(peer_uuid);
-            
+
             // Create guard chain for op push
             let guard_chain = create_send_guard(
                 "sync:push_op".to_string(),
@@ -446,38 +462,43 @@ impl AntiEntropyHandler {
                 50, // higher cost for full operation push
             )
             .with_operation_id(format!("push_op_{}_{}", cid, peer_uuid));
-            
+
             // Evaluate guard chain before pushing
             match guard_chain.evaluate(effect_system).await {
                 Ok(result) if result.authorized => {
                     tracing::debug!(
                         "Guard chain authorized push of op {:?} to peer: {:?}",
-                        cid, peer_uuid
+                        cid,
+                        peer_uuid
                     );
-                    
+
                     // TODO: Implement actual transport.send() with receipt
                     // transport.send_with_receipt(peer_uuid, OpPush { op: op.clone() }, result.receipt).await?;
                 }
                 Ok(result) => {
                     tracing::warn!(
                         "Guard chain denied push of op {:?} to peer {:?}: {:?}",
-                        cid, peer_uuid, result.denial_reason
+                        cid,
+                        peer_uuid,
+                        result.denial_reason
                     );
                     return Err(SyncError::AuthorizationFailed);
                 }
                 Err(err) => {
                     tracing::error!(
                         "Guard chain evaluation failed for push of op {:?} to peer {:?}: {}",
-                        cid, peer_uuid, err
+                        cid,
+                        peer_uuid,
+                        err
                     );
                     return Err(SyncError::AuthorizationFailed);
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
         tracing::warn!("push_op_to_peers called without guard chain - this bypasses security");
         // Legacy fallback - just log

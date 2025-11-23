@@ -1,6 +1,6 @@
 //! Unified Journal implementation matching the formal specification
 //!
-//! This module implements the core Journal type from the whole system model:
+//! This module implements the core Journal type:
 //! ```rust
 //! # use aura_core::{Fact, Cap};
 //! struct Journal {
@@ -29,7 +29,6 @@ pub struct Fact {
     /// CRDT-based fact storage with operation timestamps
     entries: FactCrdt,
 }
-
 
 /// CRDT implementation for facts using Observed-Remove Set semantics
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -359,10 +358,12 @@ impl Bottom for Fact {
     }
 }
 
+#[allow(clippy::non_canonical_partial_ord_impl)]
 impl PartialOrd for Fact {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         // CRDT partial order: A ≤ B if A's operations ⊆ B's operations
         // and all LWW values in A are ≤ corresponding values in B
+        // Note: This is intentionally different from cmp() which uses serialization for total order
 
         // Check if operations are subset
         let ops_subset = self

@@ -4,17 +4,14 @@
 //! integrating TUI, simulator agents, and scenario system.
 
 use std::sync::Arc;
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
-
-use aura_core::{AuthorityId, DeviceId};
 
 use super::{
     human_agent::{DemoMetrics, DemoPhase, DemoState, HumanAgentDemo, HumanAgentDemoConfig},
-    scenario_bridge::{setup_and_run_human_agent_demo, DemoScenarioBridge, DemoSetupConfig},
-    simulator_integration::{GuardianAgentStatistics, SimulatedGuardianAgent},
+    scenario_bridge::DemoSetupConfig,
+    simulator_integration::GuardianAgentStatistics,
 };
-use crate::tui::{DemoEvent, TuiApp};
 
 /// Complete demo orchestration system
 pub struct DemoOrchestrator {
@@ -494,10 +491,7 @@ pub async fn execute_complete_demo(
             .error
             .clone()
             .unwrap_or_else(|| "Unknown error".to_string());
-        println!(
-            "Demo failed: {}",
-            error_msg
-        );
+        println!("Demo failed: {}", error_msg);
     }
 
     Ok(session_record)
@@ -521,32 +515,21 @@ impl DemoOrchestratorCli {
         println!("Aura Human-Agent Demo Orchestrator");
         println!("===================================");
 
-        loop {
-            println!("\nOptions:");
-            println!("1. Start new demo session");
-            println!("2. View statistics");
-            println!("3. View session history");
-            println!("4. Exit");
+        // Run a single demo session
+        let session_id = self.orchestrator.start_demo_session().await?;
+        println!("Started demo session: {}", session_id);
 
-            // In a full CLI, would read user input here
-            // For now, just run one demo and exit
-            let session_id = self.orchestrator.start_demo_session().await?;
-            println!("Started demo session: {}", session_id);
-
-            let record = self.orchestrator.run_active_session().await?;
-            if record.success {
-                println!(
-                    "Demo completed successfully in {:.1}s!",
-                    record.duration.as_secs_f64()
-                );
-            } else {
-                println!(
-                    "Demo failed: {}",
-                    record.error.unwrap_or("Unknown".to_string())
-                );
-            }
-
-            break; // Exit after one demo for now
+        let record = self.orchestrator.run_active_session().await?;
+        if record.success {
+            println!(
+                "Demo completed successfully in {:.1}s!",
+                record.duration.as_secs_f64()
+            );
+        } else {
+            println!(
+                "Demo failed: {}",
+                record.error.unwrap_or("Unknown".to_string())
+            );
         }
 
         Ok(())

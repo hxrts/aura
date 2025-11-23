@@ -13,7 +13,7 @@ use super::{
     GuardResult, GuardedExecutionResult, ProtocolGuard,
 };
 use crate::authorization::BiscuitAuthorizationBridge;
-use aura_core::{AuraError, AuraResult, FlowBudget, session_epochs::Epoch};
+use aura_core::{session_epochs::Epoch, AuraError, AuraResult, FlowBudget};
 use aura_wot::ResourceScope;
 use biscuit_auth::Biscuit;
 use std::future::Future;
@@ -122,8 +122,14 @@ fn verify_biscuit_token(
     };
     let flow_cost = 1; // Default minimal flow cost for verification
     let mut budget = FlowBudget::new(100, Epoch(1)); // Default budget for verification
-    
-    evaluator.evaluate_guard(token, default_capability, &default_resource, flow_cost, &mut budget)
+
+    evaluator.evaluate_guard(
+        token,
+        default_capability,
+        &default_resource,
+        flow_cost,
+        &mut budget,
+    )
 }
 
 /// Parse and verify Biscuit token requirements (legacy string-based)
@@ -229,7 +235,8 @@ fn create_biscuit_token(
         expiry = (std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_secs() + 3600) as i64 // 1 hour from now
+            .as_secs()
+            + 3600) as i64 // 1 hour from now
     )
     .build(&keypair)
     .map_err(|e| {

@@ -11,12 +11,19 @@ use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::crypto::KeyDerivationSpec;
 use aura_core::effects::TimeEffects;
 use aura_core::frost::ThresholdSignature;
-use aura_core::{hash, identifiers::GuardianId, AccountId, AuraError, DeviceId};
+use aura_core::{
+    hash,
+    identifiers::GuardianId,
+    AccountId,
+    AuraError,
+    ContextId,
+    DeviceId,
+};
 use aura_effects::crypto::derive_key_material;
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_protocol::guards::BiscuitGuardEvaluator;
-use aura_wot::{BiscuitTokenManager, ResourceScope};
+use aura_wot::{BiscuitTokenManager, ContextOp, ResourceScope};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -422,22 +429,17 @@ where
 
         let token = token_manager.current_token();
 
-        // Map recovery operation type to resource scope
-        let resource_scope = match request.context.operation_type {
-            RecoveryOperationType::DeviceKeyRecovery => ResourceScope::Recovery {
-                recovery_type: "DeviceKey".to_string(),
-            },
-            RecoveryOperationType::AccountAccessRecovery => ResourceScope::Recovery {
-                recovery_type: "AccountAccess".to_string(),
-            },
-            RecoveryOperationType::GuardianSetModification => ResourceScope::Recovery {
-                recovery_type: "GuardianSet".to_string(),
-            },
-            RecoveryOperationType::EmergencyFreeze | RecoveryOperationType::AccountUnfreeze => {
-                ResourceScope::Recovery {
-                    recovery_type: "EmergencyFreeze".to_string(),
+        // Map recovery operation type to context-scoped resource
+        let resource_scope = ResourceScope::Context {
+            context_id: ContextId::from_uuid(request.account_id.0),
+            operation: match request.context.operation_type {
+                RecoveryOperationType::DeviceKeyRecovery => ContextOp::RecoverDeviceKey,
+                RecoveryOperationType::AccountAccessRecovery => ContextOp::RecoverAccountAccess,
+                RecoveryOperationType::GuardianSetModification => ContextOp::UpdateGuardianSet,
+                RecoveryOperationType::EmergencyFreeze | RecoveryOperationType::AccountUnfreeze => {
+                    ContextOp::EmergencyFreeze
                 }
-            }
+            },
         };
 
         // Check authorization for emergency recovery initiation

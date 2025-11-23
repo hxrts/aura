@@ -73,14 +73,12 @@ pub mod authority_manager;
 use aura_core::effects::ExecutionMode;
 pub use builder::EffectSystemBuilder;
 pub use choreography_adapter::{AuraHandlerAdapter, ChoreographyAdapter};
-pub use container::EffectContainer;
 pub use context::EffectContext;
 pub use effects::AuraEffectSystem;
 
 // Runtime system type aliases for backwards compatibility
 pub type RuntimeSystem = AuraEffectSystem;
 pub type RuntimeBuilder = EffectSystemBuilder;
-pub use effect_builder::{EffectBuilder, EffectBundle, ProtocolRequirements, QuickBuilder};
 pub use registry::{EffectRegistry, EffectRegistryError, EffectRegistryExt};
 
 #[derive(Debug, Clone)]
@@ -94,7 +92,9 @@ pub struct EffectSystemConfig {
 
 impl EffectSystemConfig {
     /// Create config for production
-    pub fn for_production(device_id: aura_core::identifiers::DeviceId) -> Result<Self, aura_core::AuraError> {
+    pub fn for_production(
+        device_id: aura_core::identifiers::DeviceId,
+    ) -> Result<Self, aura_core::AuraError> {
         Ok(Self {
             device_id,
             execution_mode: ExecutionMode::Production,
@@ -147,10 +147,9 @@ impl StorageConfig {
         }
     }
 }
-pub use authority_manager::{AuthorityManager, SharedAuthorityManager};
-pub use executor::{EffectExecutor, EffectExecutorBuilder};
+pub use executor::EffectExecutor;
 pub use lifecycle::LifecycleManager;
-pub use services::{ContextManager, FlowBudgetManager, ReceiptManager};
+pub use services::{FlowBudgetManager, ReceiptManager};
 
 #[cfg(any(test, feature = "testing"))]
 pub use services::SyncContextManager;

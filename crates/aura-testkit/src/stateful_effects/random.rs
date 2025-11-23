@@ -4,8 +4,8 @@
 //! to fix architectural violations. The handler uses Arc<Mutex<>> for deterministic
 //! randomness in tests.
 
-use aura_core::effects::RandomEffects;
 use async_trait::async_trait;
+use aura_core::effects::RandomEffects;
 use std::sync::{Arc, Mutex};
 
 /// Mock random handler for deterministic testing

@@ -4,7 +4,6 @@
 
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
-use aura_protocol::effect_traits::ConsoleEffects;
 
 /// Handle version display through effects
 pub async fn handle_version(_ctx: &EffectContext, _effects: &AuraEffectSystem) -> Result<()> {

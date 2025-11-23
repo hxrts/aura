@@ -26,6 +26,8 @@ pub mod time_control;
 pub use core::CoreSimulatorHandler;
 pub use effect_composer::{ComposedSimulationEnvironment, SimulationEffectComposer};
 pub use fault_simulation::SimulationFaultHandler;
-pub use scenario::{InjectionAction, ScenarioDefinition, SimulationScenarioHandler, TriggerCondition};
+pub use scenario::{
+    InjectionAction, ScenarioDefinition, SimulationScenarioHandler, TriggerCondition,
+};
 pub use stateless_simulator::StatelessSimulatorHandler;
 pub use time_control::SimulationTimeHandler;

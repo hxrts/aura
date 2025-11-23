@@ -275,51 +275,82 @@ pub struct SyncMetricsSnapshot {
 /// Operational metrics snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperationalSnapshot {
+    /// Total number of sync sessions initiated
     pub sync_sessions_total: u64,
+    /// Number of successfully completed sync sessions
     pub sync_sessions_completed_total: u64,
+    /// Number of failed sync sessions
     pub sync_sessions_failed_total: u64,
+    /// Total operations transferred across all sessions
     pub sync_operations_transferred_total: u64,
+    /// Total bytes transferred across all sync sessions
     pub sync_bytes_transferred_total: u64,
+    /// Currently active sync sessions
     pub active_sync_sessions: i64,
+    /// Currently connected peer count
     pub connected_peers: i64,
+    /// Current queue depth (pending operations)
     pub queue_depth: i64,
+    /// Total number of rate limit violations
     pub rate_limit_violations_total: u64,
+    /// Overall success rate percentage
     pub success_rate_percent: f64,
 }
 
 /// Performance metrics snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceSnapshot {
+    /// Histogram of sync duration statistics
     pub sync_duration_stats: HistogramStats,
+    /// Histogram of network latency statistics
     pub network_latency_stats: HistogramStats,
+    /// Histogram of operation processing time statistics
     pub operation_processing_stats: HistogramStats,
+    /// Operations processed per second
     pub operations_per_second: i64,
+    /// Bytes transferred per second
     pub bytes_per_second: i64,
+    /// Average sync duration in milliseconds
     pub average_sync_duration_ms: u64,
+    /// Histogram of compression ratio statistics
     pub compression_ratio_stats: HistogramStats,
 }
 
 /// Resource metrics snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceSnapshot {
+    /// CPU usage percentage
     pub cpu_usage_percent: i64,
+    /// Memory usage in bytes
     pub memory_usage_bytes: u64,
+    /// Network bandwidth in bits per second
     pub network_bandwidth_bps: u64,
+    /// Peer connection pool size
     pub peer_connection_pool_size: i64,
+    /// Message queue size
     pub message_queue_size: i64,
+    /// Number of active timers
     pub active_timers_count: i64,
 }
 
 /// Error metrics snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorSnapshot {
+    /// Total network errors encountered
     pub network_errors_total: u64,
+    /// Total protocol-level errors
     pub protocol_errors_total: u64,
+    /// Total timeout errors
     pub timeout_errors_total: u64,
+    /// Total validation errors
     pub validation_errors_total: u64,
+    /// Total resource availability errors
     pub resource_errors_total: u64,
+    /// Total authorization errors
     pub authorization_errors_total: u64,
+    /// Error rate as a percentage
     pub error_rate_percent: i64,
+    /// Total errors across all categories
     pub total_errors: u64,
 }
 
@@ -461,7 +492,7 @@ impl MetricsCollector {
     }
 
     /// Record network latency measurement
-    pub fn record_network_latency(&self, peer: DeviceId, latency: Duration) {
+    pub fn record_network_latency(&self, _peer: DeviceId, latency: Duration) {
         if let Ok(performance) = self.registry.performance.lock() {
             performance
                 .network_latency_histogram
@@ -470,7 +501,7 @@ impl MetricsCollector {
     }
 
     /// Record operation processing time
-    pub fn record_operation_processing_time(&self, operation: &str, duration: Duration) {
+    pub fn record_operation_processing_time(&self, _operation: &str, duration: Duration) {
         if let Ok(performance) = self.registry.performance.lock() {
             performance
                 .operation_processing_histogram
@@ -521,7 +552,7 @@ impl MetricsCollector {
     }
 
     /// Record rate limit violation
-    pub fn record_rate_limit_violation(&self, peer: DeviceId) {
+    pub fn record_rate_limit_violation(&self, _peer: DeviceId) {
         if let Ok(operational) = self.registry.operational.lock() {
             operational
                 .rate_limit_violations_total
@@ -532,21 +563,27 @@ impl MetricsCollector {
     /// Increment sync attempts for a peer
     pub fn increment_sync_attempts(&self, _peer: DeviceId) {
         if let Ok(operational) = self.registry.operational.lock() {
-            operational.sync_sessions_total.fetch_add(1, Ordering::Relaxed);
+            operational
+                .sync_sessions_total
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
     /// Increment sync successes for a peer
     pub fn increment_sync_successes(&self, _peer: DeviceId) {
         if let Ok(operational) = self.registry.operational.lock() {
-            operational.sync_sessions_completed_total.fetch_add(1, Ordering::Relaxed);
+            operational
+                .sync_sessions_completed_total
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
     /// Add synced operations count for a peer
     pub fn add_synced_operations(&self, _peer: DeviceId, ops_count: usize) {
         if let Ok(operational) = self.registry.operational.lock() {
-            operational.sync_operations_transferred_total.fetch_add(ops_count as u64, Ordering::Relaxed);
+            operational
+                .sync_operations_transferred_total
+                .fetch_add(ops_count as u64, Ordering::Relaxed);
         }
     }
 
@@ -559,7 +596,9 @@ impl MetricsCollector {
     /// Increment auto sync rounds counter
     pub fn increment_auto_sync_rounds(&self) {
         if let Ok(operational) = self.registry.operational.lock() {
-            operational.sync_sessions_total.fetch_add(1, Ordering::Relaxed);
+            operational
+                .sync_sessions_total
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -583,14 +622,16 @@ impl MetricsCollector {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
-                .as_millis() as u64
+                .as_millis() as u64,
         )
     }
 
     /// Get total number of requests processed
     pub fn get_total_requests_processed(&self) -> u64 {
         if let Ok(operational) = self.registry.operational.lock() {
-            operational.sync_sessions_completed_total.load(Ordering::Relaxed)
+            operational
+                .sync_sessions_completed_total
+                .load(Ordering::Relaxed)
         } else {
             0
         }
@@ -599,11 +640,11 @@ impl MetricsCollector {
     /// Get total number of errors encountered
     pub fn get_total_errors_encountered(&self) -> u64 {
         if let Ok(errors) = self.registry.errors.lock() {
-            errors.network_errors_total.load(Ordering::Relaxed) +
-            errors.protocol_errors_total.load(Ordering::Relaxed) +
-            errors.timeout_errors_total.load(Ordering::Relaxed) +
-            errors.resource_errors_total.load(Ordering::Relaxed) +
-            errors.authorization_errors_total.load(Ordering::Relaxed)
+            errors.network_errors_total.load(Ordering::Relaxed)
+                + errors.protocol_errors_total.load(Ordering::Relaxed)
+                + errors.timeout_errors_total.load(Ordering::Relaxed)
+                + errors.resource_errors_total.load(Ordering::Relaxed)
+                + errors.authorization_errors_total.load(Ordering::Relaxed)
         } else {
             0
         }
@@ -627,7 +668,7 @@ impl MetricsCollector {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or(Duration::ZERO)
-                .as_millis() as u64
+                .as_millis() as u64,
         )
     }
 

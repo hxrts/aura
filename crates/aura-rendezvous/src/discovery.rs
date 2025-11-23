@@ -559,8 +559,7 @@ impl DiscoveryService {
             return Ok(self.rendezvous_points.keys().copied().collect());
         }
 
-        let location_hash =
-            Self::derive_location_hash(&query.encrypted_relationship_context)?;
+        let location_hash = Self::derive_location_hash(&query.encrypted_relationship_context)?;
 
         let filtered: Vec<RendezvousId> = self
             .rendezvous_points

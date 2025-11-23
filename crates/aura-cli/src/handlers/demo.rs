@@ -9,8 +9,8 @@ use aura_core::AuraError;
 use crate::{
     commands::demo::DemoCommands,
     demo::{
-        execute_complete_demo, setup_and_run_human_agent_demo, DemoOrchestratorCli,
-        DemoOrchestratorConfig, DemoScenarioBridge, DemoSetupConfig, HumanAgentDemoConfig,
+        setup_and_run_human_agent_demo, DemoOrchestratorCli, DemoOrchestratorConfig,
+        DemoScenarioBridge, DemoSetupConfig, HumanAgentDemoConfig,
     },
 };
 
@@ -118,10 +118,7 @@ impl DemoHandler {
             }
             Err(e) => {
                 eprintln!("\nDemo failed: {}", e);
-                return Err(AuraError::internal(format!(
-                    "Demo execution failed: {}",
-                    e
-                )));
+                return Err(AuraError::internal(format!("Demo execution failed: {}", e)));
             }
         }
 
@@ -240,10 +237,7 @@ impl DemoHandler {
             }
             Err(e) => {
                 eprintln!("\nScenario setup failed: {}", e);
-                return Err(AuraError::internal(format!(
-                    "Scenario setup failed: {}",
-                    e
-                )));
+                return Err(AuraError::internal(format!("Scenario setup failed: {}", e)));
             }
         }
 

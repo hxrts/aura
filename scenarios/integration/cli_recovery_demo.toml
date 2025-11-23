@@ -55,9 +55,11 @@ description = "Bob creates account and receives guardian invitations from Alice 
 timeout_seconds = 15
 actions = [
     { type = "run_choreography", choreography = "account_creation", participants = ["bob"], threshold = 1 },
-    { type = "run_choreography", choreography = "guardian_invitation", participants = ["alice", "bob"], guardian = "alice", protege = "bob" },
-    { type = "run_choreography", choreography = "guardian_invitation", participants = ["charlie", "bob"], guardian = "charlie", protege = "bob" },
-    { type = "run_choreography", choreography = "guardian_configuration", participants = ["alice", "bob", "charlie"], threshold = 2 },
+    { type = "run_choreography", choreography = "guardian_request", participants = ["bob", "alice"], requester = "bob", guardian = "alice" },
+    { type = "run_choreography", choreography = "guardian_accept", participants = ["alice", "bob"], guardian = "alice", protege = "bob" },
+    { type = "run_choreography", choreography = "guardian_request", participants = ["bob", "charlie"], requester = "bob", guardian = "charlie" },
+    { type = "run_choreography", choreography = "guardian_accept", participants = ["charlie", "bob"], guardian = "charlie", protege = "bob" },
+    { type = "run_choreography", choreography = "guardian_authority_configuration", participants = ["alice", "bob", "charlie"], threshold = 2 },
     { type = "verify_property", property = "bob_guardians_configured", expected = true },
     { type = "verify_property", property = "guardian_relationships_established", expected = true }
 ]

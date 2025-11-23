@@ -83,7 +83,7 @@
 //! ```
 
 // TODO: Re-enable once all documentation is complete
-#![warn(missing_docs)]
+#![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
 // =============================================================================

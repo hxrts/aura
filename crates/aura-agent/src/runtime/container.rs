@@ -4,8 +4,8 @@
 //! and their lifecycle within the authority-centric runtime architecture.
 
 use aura_core::effects::ExecutionMode;
-use aura_core::AuraError;
 use aura_core::identifiers::AuthorityId;
+use aura_core::AuraError;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -39,11 +39,7 @@ impl EffectContainer {
 
     /// Get a handler by name and type
     pub fn get_handler<T: Send + Sync + 'static>(&self, name: &str) -> Option<Arc<T>> {
-        self.handlers
-            .get(name)?
-            .clone()
-            .downcast::<T>()
-            .ok()
+        self.handlers.get(name)?.clone().downcast::<T>().ok()
     }
 
     /// Get all handler names

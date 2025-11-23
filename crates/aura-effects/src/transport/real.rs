@@ -2,14 +2,14 @@
 //!
 //! This module provides the production implementation of TransportEffects that handles
 //! actual network communication as the final step in the guard chain sequence.
-//! 
+//!
 //! **Stateless Design**: This handler delegates state management to external services
 //! (NetworkEffects, StorageEffects) following Layer 3 architectural constraints.
 
 use async_trait::async_trait;
 use aura_core::{
+    effects::{TransportEffects, TransportEnvelope, TransportError, TransportStats},
     AuthorityId, ContextId,
-    effects::{TransportEffects, TransportError, TransportEnvelope, TransportStats},
 };
 use tracing::{debug, info};
 
@@ -34,9 +34,7 @@ impl RealTransportHandler {
 
     /// Create a new transport handler with configuration
     pub fn with_config(config: String) -> Self {
-        Self {
-            _config: config,
-        }
+        Self { _config: config }
     }
 }
 
@@ -63,7 +61,7 @@ impl TransportEffects for RealTransportHandler {
         // 2. Establish or reuse network connection via NetworkEffects
         // 3. Send message over the secure channel
         // 4. Update statistics via external metrics service
-        
+
         info!(
             destination = ?envelope.destination,
             payload_size = envelope.payload.len(),
@@ -81,7 +79,7 @@ impl TransportEffects for RealTransportHandler {
         // 1. Poll network connections via NetworkEffects
         // 2. Receive and validate incoming messages
         // 3. Update statistics via external metrics service
-        
+
         debug!("No transport envelopes available (placeholder)");
         Err(TransportError::NoMessage)
     }
@@ -91,15 +89,23 @@ impl TransportEffects for RealTransportHandler {
         source: AuthorityId,
         context: ContextId,
     ) -> Result<TransportEnvelope, TransportError> {
-        debug!(?source, ?context, "Attempting to receive envelope from specific source");
+        debug!(
+            ?source,
+            ?context,
+            "Attempting to receive envelope from specific source"
+        );
 
         // TODO: Integrate with actual network transport layer
         // In production, this would:
         // 1. Filter incoming messages by source and context
         // 2. Return matching envelope from network queue
         // 3. Update statistics via external metrics service
-        
-        debug!(?source, ?context, "No transport envelope available from specified source (placeholder)");
+
+        debug!(
+            ?source,
+            ?context,
+            "No transport envelope available from specified source (placeholder)"
+        );
         Err(TransportError::NoMessage)
     }
 
@@ -162,7 +168,7 @@ mod tests {
         let handler = RealTransportHandler::new();
         let context = ContextId::default();
         let peer = AuthorityId::default();
-        
+
         let result = handler.is_channel_established(context, peer).await;
         assert!(!result);
     }

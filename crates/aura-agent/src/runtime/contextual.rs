@@ -16,7 +16,7 @@ pub trait Contextual {
 pub trait ContextProvider {
     /// Create a new context
     fn create_context(&self, authority_id: AuthorityId, context_id: ContextId) -> EffectContext;
-    
+
     /// Create a child context from an existing one
     fn create_child_context(&self, parent: &EffectContext, context_id: ContextId) -> EffectContext;
 }
@@ -35,7 +35,10 @@ impl ContextResult {
     }
 
     pub fn is_error(&self) -> bool {
-        matches!(self, ContextResult::Error(_) | ContextResult::BudgetExceeded(_))
+        matches!(
+            self,
+            ContextResult::Error(_) | ContextResult::BudgetExceeded(_)
+        )
     }
 }
 

@@ -4,7 +4,6 @@
 //! and protocol-specific handler selection in the authority-centric architecture.
 
 use aura_core::effects::ExecutionMode;
-use aura_core::identifiers::AuthorityId;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -32,10 +31,12 @@ impl EffectRegistry {
         handler: T,
     ) -> Result<(), EffectRegistryError> {
         let key = EffectKey::new(effect_type, operation);
-        
-        let mut handlers = self.handlers.write()
+
+        let mut handlers = self
+            .handlers
+            .write()
             .map_err(|_| EffectRegistryError::LockError)?;
-        
+
         handlers.insert(key, Arc::new(handler));
         Ok(())
     }
@@ -47,28 +48,34 @@ impl EffectRegistry {
         operation: &str,
     ) -> Result<Option<Arc<T>>, EffectRegistryError> {
         let key = EffectKey::new(effect_type.to_string(), operation.to_string());
-        
-        let handlers = self.handlers.read()
+
+        let handlers = self
+            .handlers
+            .read()
             .map_err(|_| EffectRegistryError::LockError)?;
-        
-        Ok(handlers.get(&key)
+
+        Ok(handlers
+            .get(&key)
             .and_then(|handler| handler.clone().downcast::<T>().ok()))
     }
 
     /// Check if an effect handler is registered
     pub fn has_handler(&self, effect_type: &str, operation: &str) -> bool {
         let key = EffectKey::new(effect_type.to_string(), operation.to_string());
-        
-        self.handlers.read()
+
+        self.handlers
+            .read()
             .map(|handlers| handlers.contains_key(&key))
             .unwrap_or(false)
     }
 
     /// Get all registered effect types
     pub fn effect_types(&self) -> Vec<String> {
-        self.handlers.read()
+        self.handlers
+            .read()
             .map(|handlers| {
-                handlers.keys()
+                handlers
+                    .keys()
                     .map(|key| key.effect_type.clone())
                     .collect::<std::collections::HashSet<_>>()
                     .into_iter()
@@ -79,9 +86,11 @@ impl EffectRegistry {
 
     /// Get operations for an effect type
     pub fn operations(&self, effect_type: &str) -> Vec<String> {
-        self.handlers.read()
+        self.handlers
+            .read()
             .map(|handlers| {
-                handlers.keys()
+                handlers
+                    .keys()
                     .filter(|key| key.effect_type == effect_type)
                     .map(|key| key.operation.clone())
                     .collect()
@@ -91,9 +100,11 @@ impl EffectRegistry {
 
     /// Clear all handlers
     pub fn clear(&self) -> Result<(), EffectRegistryError> {
-        let mut handlers = self.handlers.write()
+        let mut handlers = self
+            .handlers
+            .write()
             .map_err(|_| EffectRegistryError::LockError)?;
-        
+
         handlers.clear();
         Ok(())
     }
@@ -135,7 +146,10 @@ pub enum EffectRegistryError {
     #[error("Registry lock error")]
     LockError,
     #[error("Handler not found: {effect_type}.{operation}")]
-    HandlerNotFound { effect_type: String, operation: String },
+    HandlerNotFound {
+        effect_type: String,
+        operation: String,
+    },
     #[error("Handler type mismatch")]
     TypeMismatch,
     #[error("Registration failed: {reason}")]

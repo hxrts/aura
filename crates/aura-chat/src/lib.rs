@@ -81,27 +81,45 @@ pub use types::*;
 pub enum ChatError {
     /// Group not found
     #[error("Chat group not found: {group_id}")]
-    GroupNotFound { group_id: String },
+    GroupNotFound {
+        /// The group identifier that was not found
+        group_id: String,
+    },
 
     /// User not authorized for chat operation
     #[error("Not authorized for chat operation: {reason}")]
-    NotAuthorized { reason: String },
+    NotAuthorized {
+        /// Reason for authorization failure
+        reason: String,
+    },
 
     /// Message not found
     #[error("Message not found: {message_id}")]
-    MessageNotFound { message_id: String },
+    MessageNotFound {
+        /// The message identifier that was not found
+        message_id: String,
+    },
 
     /// Invalid group configuration
     #[error("Invalid group configuration: {reason}")]
-    InvalidGroup { reason: String },
+    InvalidGroup {
+        /// Reason for invalid configuration
+        reason: String,
+    },
 
     /// Transport layer error
     #[error("Transport error: {error}")]
-    Transport { error: String },
+    Transport {
+        /// Transport error message
+        error: String,
+    },
 
     /// Serialization error
     #[error("Serialization error: {error}")]
-    Serialization { error: String },
+    Serialization {
+        /// Serialization error message
+        error: String,
+    },
 
     /// Core Aura error
     #[error("Core error: {0}")]

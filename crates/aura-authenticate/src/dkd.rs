@@ -77,6 +77,12 @@ impl Default for DkdConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DkdSessionId(pub String);
 
+impl Default for DkdSessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DkdSessionId {
     /// Create a new DKD session ID
     pub fn new() -> Self {
@@ -372,7 +378,7 @@ impl DkdProtocol {
         signature_data.extend_from_slice(session_id.0.as_bytes());
 
         // Generate Ed25519 keypair for signing (in production, use device's persistent key)
-        let (public_key, private_key) = effects.ed25519_generate_keypair().await.map_err(|e| {
+        let (_public_key, private_key) = effects.ed25519_generate_keypair().await.map_err(|e| {
             DkdError::CryptographicFailure {
                 reason: e.to_string(),
             }
@@ -499,10 +505,9 @@ impl DkdProtocol {
             })?
             .clone();
 
-        let reveal_bytes =
-            serde_json::to_vec(&local).map_err(|e| DkdError::NetworkFailure {
-                reason: e.to_string(),
-            })?;
+        let reveal_bytes = serde_json::to_vec(&local).map_err(|e| DkdError::NetworkFailure {
+            reason: e.to_string(),
+        })?;
 
         for participant in &context.participants {
             if *participant != local.device_id {
@@ -859,8 +864,9 @@ mod tests {
 
             let participants = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
 
-            let effects =
-                TestEffectsBuilder::for_unit_tests(DeviceId::new()).build().expect("effects");
+            let effects = TestEffectsBuilder::for_unit_tests(DeviceId::new())
+                .build()
+                .expect("effects");
             let session_id = protocol
                 .initiate_session(&effects, participants, None)
                 .await

@@ -129,7 +129,6 @@ pub fn derive_key_material(
     Ok(output)
 }
 
-
 /// Real crypto handler using actual cryptographic operations
 #[derive(Debug, Clone)]
 pub struct RealCryptoHandler {
@@ -150,7 +149,6 @@ impl RealCryptoHandler {
         }
     }
 }
-
 
 // RandomEffects implementation for RealCryptoHandler
 #[async_trait]
@@ -191,7 +189,6 @@ impl RandomEffects for RealCryptoHandler {
 }
 
 // (MockCryptoHandler implementation moved to aura-testkit)
-
 
 // CryptoEffects implementation for RealCryptoHandler
 #[async_trait]
@@ -338,10 +335,7 @@ impl CryptoEffects for RealCryptoHandler {
         rng.fill_bytes(&mut nonce_bytes);
 
         bincode::serialize(&(nonce_bytes.clone(), nonce_bytes)).map_err(|e| {
-            CryptoError::invalid(format!(
-                "Failed to serialize FROST signing nonces: {}",
-                e
-            ))
+            CryptoError::invalid(format!("Failed to serialize FROST signing nonces: {}", e))
         })
     }
 
@@ -429,9 +423,8 @@ impl CryptoEffects for RealCryptoHandler {
         let key_package: frost::keys::KeyPackage = bincode::deserialize(&key_share_buf)
             .map_err(|e| CryptoError::invalid(format!("Invalid key share: {}", e)))?;
 
-        let (signing_nonces_bytes, _): (Vec<u8>, Vec<u8>) =
-            bincode::deserialize(&nonce_buf)
-                .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces: {}", e)))?;
+        let (signing_nonces_bytes, _): (Vec<u8>, Vec<u8>) = bincode::deserialize(&nonce_buf)
+            .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces: {}", e)))?;
 
         // Reconstruct deterministic SigningNonces from bytes (test-only stub)
         let signing_nonces = frost::round1::SigningNonces::deserialize(&signing_nonces_bytes)
@@ -802,8 +795,8 @@ mod rng_adapter_tests {
             bincode::deserialize(&key_gen_result.key_packages[0]).unwrap();
         let key_pkg2: frost::keys::KeyPackage =
             bincode::deserialize(&key_gen_result.key_packages[1]).unwrap();
-        let participant1 = u16::from_be_bytes(key_pkg1.identifier().serialize());
-        let participant2 = u16::from_be_bytes(key_pkg2.identifier().serialize());
+        let participant1 = key_pkg1.identifier();
+        let participant2 = key_pkg2.identifier();
 
         // 2. Generate nonces for signing participants
         let nonces1 = crypto.frost_generate_nonces().await.unwrap();
@@ -812,7 +805,8 @@ mod rng_adapter_tests {
         assert!(!nonces2.is_empty());
 
         // 3. Create signing package with real commitments
-        let participants = vec![participant1, participant2]; // Using first two participants for 2-of-3 threshold
+        // Convert identifiers to simple u16 indices
+        let participants = vec![1u16, 2u16]; // Using first two participants for 2-of-3 threshold
         let nonces = vec![nonces1.clone(), nonces2.clone()];
 
         let signing_package = crypto

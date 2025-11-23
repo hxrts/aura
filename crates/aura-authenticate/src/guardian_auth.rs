@@ -6,12 +6,12 @@
 #![allow(clippy::disallowed_methods)]
 #![allow(clippy::unwrap_used)]
 
-use crate::{AuraError, AuraResult, BiscuitGuardEvaluator, ResourceScope};
-use aura_core::{hash::hash, AccountId, DeviceId, Ed25519Signature, TimeEffects};
+use crate::{AuraError, AuraResult, BiscuitGuardEvaluator};
+use aura_core::{hash::hash, AccountId, ContextId, DeviceId, Ed25519Signature, TimeEffects};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
-use aura_wot::BiscuitTokenManager;
+use aura_wot::{BiscuitTokenManager, ContextOp, ResourceScope};
 use biscuit_auth::Biscuit;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -28,68 +28,32 @@ fn derived_device_id(label: &str) -> DeviceId {
 }
 
 /// Helper function to convert guard capability strings to appropriate ResourceScope
+#[allow(dead_code)]
 fn map_guard_capability_to_resource(
     guard_capability: &str,
     account_id: Option<&AccountId>,
     recovery_type: Option<&RecoveryOperationType>,
 ) -> ResourceScope {
-    match guard_capability {
-        // Guardian approval operations
-        "request_guardian_approval"
-        | "distribute_guardian_challenges"
-        | "submit_guardian_proof" => ResourceScope::Recovery {
-            recovery_type: recovery_type
-                .map(|rt| match rt {
-                    RecoveryOperationType::DeviceKeyRecovery => "DeviceKey".to_string(),
-                    RecoveryOperationType::AccountAccessRecovery => "AccountAccess".to_string(),
-                    RecoveryOperationType::GuardianSetModification => "GuardianSet".to_string(),
-                    RecoveryOperationType::EmergencyFreeze
-                    | RecoveryOperationType::AccountUnfreeze => "EmergencyFreeze".to_string(),
-                })
-                .unwrap_or_else(|| "DeviceKey".to_string()),
+    let context_id = account_id
+        .map(|id| ContextId::from_uuid(id.0))
+        .unwrap_or_else(ContextId::new);
+
+    let operation = match guard_capability {
+        "notify_guardians_success" | "notify_guardians_failure" => ContextOp::ApproveRecovery,
+        _ if guard_capability.contains("journal") => ContextOp::UpdateParams,
+        _ => match recovery_type {
+            Some(RecoveryOperationType::DeviceKeyRecovery) => ContextOp::RecoverDeviceKey,
+            Some(RecoveryOperationType::AccountAccessRecovery) => ContextOp::RecoverAccountAccess,
+            Some(RecoveryOperationType::GuardianSetModification) => ContextOp::UpdateGuardianSet,
+            Some(RecoveryOperationType::EmergencyFreeze)
+            | Some(RecoveryOperationType::AccountUnfreeze) => ContextOp::EmergencyFreeze,
+            None => ContextOp::ApproveRecovery,
         },
-        // Guardian decision operations
-        "approve_recovery_request" | "deny_recovery_request" => ResourceScope::Recovery {
-            recovery_type: recovery_type
-                .map(|rt| match rt {
-                    RecoveryOperationType::DeviceKeyRecovery => "DeviceKey".to_string(),
-                    RecoveryOperationType::AccountAccessRecovery => "AccountAccess".to_string(),
-                    RecoveryOperationType::GuardianSetModification => "GuardianSet".to_string(),
-                    RecoveryOperationType::EmergencyFreeze
-                    | RecoveryOperationType::AccountUnfreeze => "EmergencyFreeze".to_string(),
-                })
-                .unwrap_or_else(|| "DeviceKey".to_string()),
-        },
-        // Guardian coordination operations
-        "grant_recovery_approval"
-        | "deny_recovery_approval"
-        | "notify_guardians_success"
-        | "notify_guardians_failure" => ResourceScope::Recovery {
-            recovery_type: recovery_type
-                .map(|rt| match rt {
-                    RecoveryOperationType::DeviceKeyRecovery => "DeviceKey".to_string(),
-                    RecoveryOperationType::AccountAccessRecovery => "AccountAccess".to_string(),
-                    RecoveryOperationType::GuardianSetModification => "GuardianSet".to_string(),
-                    RecoveryOperationType::EmergencyFreeze
-                    | RecoveryOperationType::AccountUnfreeze => "EmergencyFreeze".to_string(),
-                })
-                .unwrap_or_else(|| "DeviceKey".to_string()),
-        },
-        // Journal operations
-        _ if guard_capability.contains("journal") => ResourceScope::Journal {
-            account_id: account_id.map(|id| id.to_string()).unwrap_or_default(),
-            operation: if guard_capability.contains("write") {
-                "Write".to_string()
-            } else if guard_capability.contains("sync") {
-                "Sync".to_string()
-            } else {
-                "Read".to_string()
-            },
-        },
-        // Default fallback
-        _ => ResourceScope::Recovery {
-            recovery_type: "DeviceKey".to_string(),
-        },
+    };
+
+    ResourceScope::Context {
+        context_id,
+        operation,
     }
 }
 
@@ -743,7 +707,7 @@ where
     async fn execute_requester(
         &self,
         request: GuardianAuthRequest,
-        now: u64,
+        _now: u64,
     ) -> AuraResult<GuardianAuthResponse> {
         tracing::info!(
             "Executing guardian auth as requester for account: {}",
@@ -783,7 +747,7 @@ where
         // 2. Web of trust relationships
         // 3. Recovery configuration
         // Discover guardians from network peers; fall back to deterministic set from account id
-        let mut guardian_devices: Vec<DeviceId> = self
+        let guardian_devices: Vec<DeviceId> = self
             .effect_system
             .connected_peers()
             .await
@@ -862,7 +826,6 @@ where
                             tracing::warn!("Error receiving from guardian {}: {}", guardian_id, e);
                         }
                     }
-
                 }
 
                 // Avoid busy-looping if no messages received
@@ -1118,31 +1081,31 @@ where
         if let (Some(token_manager), Some(guard_evaluator)) =
             (&self.token_manager, &self.guard_evaluator)
         {
+            let context_scope = ResourceScope::Context {
+                context_id: ContextId::from_uuid(request.account_id.0),
+                operation: match request.recovery_context.operation_type {
+                    RecoveryOperationType::DeviceKeyRecovery => ContextOp::RecoverDeviceKey,
+                    RecoveryOperationType::AccountAccessRecovery => ContextOp::RecoverAccountAccess,
+                    RecoveryOperationType::GuardianSetModification => ContextOp::UpdateGuardianSet,
+                    RecoveryOperationType::EmergencyFreeze | RecoveryOperationType::AccountUnfreeze => {
+                        ContextOp::EmergencyFreeze
+                    }
+                },
+            };
+
             return self
                 .check_biscuit_authorization(
                     token_manager.current_token(),
                     guard_evaluator,
                     "recovery:initiate",
-                    &ResourceScope::Recovery {
-                        recovery_type: match request.recovery_context.operation_type {
-                            RecoveryOperationType::DeviceKeyRecovery => "DeviceKey".to_string(),
-                            RecoveryOperationType::AccountAccessRecovery => {
-                                "AccountAccess".to_string()
-                            }
-                            RecoveryOperationType::GuardianSetModification => {
-                                "GuardianSet".to_string()
-                            }
-                            RecoveryOperationType::EmergencyFreeze => "EmergencyFreeze".to_string(),
-                            RecoveryOperationType::AccountUnfreeze => "EmergencyFreeze".to_string(), // Reuse for unfreeze
-                        },
-                    },
+                    &context_scope,
                 )
                 .await;
         }
 
         // Fallback to legacy capability system (for backward compatibility)
         let journal_result = self.effect_system.get_journal().await;
-        let journal = match journal_result {
+        let _journal = match journal_result {
             Ok(journal) => journal,
             Err(e) => {
                 tracing::error!("Failed to get journal for authorization check: {:?}", e);
@@ -1230,14 +1193,26 @@ where
         if let (Some(token_manager), Some(guard_evaluator)) =
             (&self.token_manager, &self.guard_evaluator)
         {
+            let context_scope = {
+                let state = self.state.lock().await;
+                let context_id = state
+                    .current_request
+                    .as_ref()
+                    .map(|req| ContextId::from_uuid(req.account_id.0))
+                    .unwrap_or_else(ContextId::new);
+                // Guardian approvals are tied to recovery approval within the context.
+                ResourceScope::Context {
+                    context_id,
+                    operation: ContextOp::ApproveRecovery,
+                }
+            };
+
             return self
                 .check_biscuit_authorization(
                     token_manager.current_token(),
                     guard_evaluator,
                     "recovery:approve",
-                    &ResourceScope::Recovery {
-                        recovery_type: "DeviceKey".to_string(), // General guardian approval resource
-                    },
+                    &context_scope,
                 )
                 .await;
         }
@@ -1367,8 +1342,9 @@ where
     ) -> AuraResult<()> {
         // Persist a minimal fact record via JournalEffects so downstream recovery flows
         // can audit guardian approvals.
-        let approvals_summary = serde_json::to_vec(guardian_approvals)
-            .map_err(|e| AuraError::serialization(format!("guardian approvals serialize: {}", e)))?;
+        let approvals_summary = serde_json::to_vec(guardian_approvals).map_err(|e| {
+            AuraError::serialization(format!("guardian approvals serialize: {}", e))
+        })?;
 
         let timestamp = TimeEffects::current_timestamp(self.effect_system.as_ref()).await;
 
@@ -1463,7 +1439,7 @@ where
         // In production, this would discover actual guardians from the web of trust
         let mut challenges = Vec::new();
 
-        for i in 0..3 {
+        for _ in 0..3 {
             // Simulate 3 guardians for testing
             let challenge_bytes = self.effect_system.random_bytes(32).await;
             let expires_at = aura_core::current_unix_timestamp() + 300; // 5 minutes
@@ -1540,7 +1516,7 @@ where
             } = proof.identity_proof
             {
                 // Create verified identity for the guardian
-                let message_hash = aura_core::hash::hash(&proof.request_id.as_bytes());
+                let message_hash = aura_core::hash::hash(proof.request_id.as_bytes());
                 let verified_identity = VerifiedIdentity {
                     proof: proof.identity_proof.clone(),
                     message_hash,

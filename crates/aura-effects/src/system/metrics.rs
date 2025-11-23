@@ -13,24 +13,20 @@ use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 /// Configuration for metrics collection
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MetricsConfig {
+    /// Whether to enable histogram metrics collection
     pub enable_histograms: bool,
-}
-
-impl Default for MetricsConfig {
-    fn default() -> Self {
-        Self {
-            enable_histograms: false,
-        }
-    }
 }
 
 /// Aggregated metrics statistics
 #[derive(Debug, Clone, Default)]
 pub struct MetricsStats {
+    /// Total number of metrics recorded
     pub total_metrics_recorded: u64,
+    /// Number of active counter metrics
     pub active_counters: u64,
+    /// Number of active gauge metrics
     pub active_gauges: u64,
 }
 
@@ -39,7 +35,7 @@ pub struct MetricsStats {
 /// This handler provides system metrics by delegating to external metrics services.
 /// It is stateless and does not maintain in-memory counters or gauges.
 ///
-/// **Note**: Complex metrics aggregation and multi-component coordination has been 
+/// **Note**: Complex metrics aggregation and multi-component coordination has been
 /// moved to `MetricsCoordinator` in aura-protocol (Layer 4). This handler provides
 /// only stateless metrics operations. For coordination capabilities, wrap this handler
 /// with `aura_protocol::handlers::MetricsCoordinator`.
@@ -111,7 +107,7 @@ impl MetricsSystemHandler {
         if !self.config.enable_histograms {
             return Ok(());
         }
-        
+
         // TODO: In production, this would send to external metrics service
         let key = Self::with_labels(name, &labels);
         tracing::debug!(
@@ -221,16 +217,16 @@ impl SystemEffects for MetricsSystemHandler {
             value = value,
             "Config update requested via metrics handler (placeholder)"
         );
-        
+
         match key {
             "enable_histograms" => {
                 // Validate the value but don't store it (stateless handler)
-                value.parse::<bool>().map_err(|_| {
-                    SystemError::InvalidConfiguration {
+                value
+                    .parse::<bool>()
+                    .map_err(|_| SystemError::InvalidConfiguration {
                         key: key.to_string(),
                         value: value.to_string(),
-                    }
-                })?;
+                    })?;
                 Ok(())
             }
             _ => Err(SystemError::InvalidConfiguration {
@@ -258,7 +254,14 @@ impl SystemEffects for MetricsSystemHandler {
         // TODO: In production, this would query external metrics service
         let mut metrics = HashMap::new();
         metrics.insert("uptime".to_string(), 1.0);
-        metrics.insert("enable_histograms".to_string(), if self.config.enable_histograms { 1.0 } else { 0.0 });
+        metrics.insert(
+            "enable_histograms".to_string(),
+            if self.config.enable_histograms {
+                1.0
+            } else {
+                0.0
+            },
+        );
         Ok(metrics)
     }
 
@@ -304,7 +307,7 @@ mod tests {
         // Test system effects
         let info = handler.get_system_info().await.unwrap();
         assert_eq!(info.get("component"), Some(&"metrics".to_string()));
-        
+
         // Test config operations
         let config_value = handler.get_config("enable_histograms").await.unwrap();
         assert_eq!(config_value, "false");

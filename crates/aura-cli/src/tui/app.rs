@@ -10,13 +10,13 @@ use crossterm::{
 use ratatui::{
     backend::Backend,
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Margin},
+    layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Wrap},
     Frame, Terminal,
 };
-use std::io::{self, Stdout};
+use std::io::{self};
 use tokio::sync::mpsc;
 
 use super::state::{AppState, DemoPhase};
@@ -43,18 +43,26 @@ pub struct TuiApp {
 /// Input mode for the TUI
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputMode {
+    /// Normal navigation mode
     Normal,
+    /// Text editing mode
     Editing,
 }
 
 /// Events that can be sent to the demo orchestration
 #[derive(Debug, Clone)]
 pub enum DemoEvent {
+    /// Advance to next demo phase
     AdvancePhase,
+    /// Send a message with optional content
     SendMessage(String),
+    /// Initiate account recovery
     InitiateRecovery,
+    /// Guardian approval for recovery
     GuardianApproval(aura_core::AuthorityId),
+    /// Restore messages from archive
     RestoreMessages,
+    /// Reset demo to initial state
     Reset,
 }
 

@@ -10,5 +10,3 @@ pub mod recovery;
 pub mod sessions;
 pub mod shared;
 pub mod storage;
-
-pub use shared::{HandlerContext, HandlerUtilities};

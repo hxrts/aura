@@ -6,7 +6,7 @@
 //!
 //! Enhanced for stateless effect system architecture (work/021.md).
 
-use crate::foundation::{CompositeTestHandler, SimpleTestContext};
+use crate::foundation::CompositeTestHandler;
 use crate::{DeviceTestFixture, TestEffectsBuilder, TestExecutionMode};
 use aura_core::DeviceId;
 use std::collections::HashMap;

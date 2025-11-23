@@ -4,10 +4,9 @@
 //! and managing protocol requirements in the authority-centric architecture.
 
 use aura_core::effects::ExecutionMode;
+use aura_core::identifiers::AuthorityId;
 use aura_core::AuraError;
-use aura_core::identifiers::{AuthorityId, ContextId};
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 
 /// Builder for assembling effect systems
 #[derive(Debug)]
@@ -45,7 +44,7 @@ impl EffectBuilder {
     pub fn build(self) -> Result<super::AuraEffectSystem, AuraError> {
         // Validate requirements are met by bundles
         self.validate_requirements()?;
-        
+
         // Build the effect system with a basic config (stub implementation)
         let config = crate::core::AgentConfig::default();
         super::AuraEffectSystem::new(config).map_err(|e| AuraError::agent(e.to_string()))
@@ -145,15 +144,21 @@ impl QuickBuilder {
     /// Build a production effect system
     pub fn production(authority_id: AuthorityId) -> EffectBuilder {
         EffectBuilder::new(authority_id, ExecutionMode::Production)
-            .with_bundle(EffectBundle::new("crypto".to_string())
-                .with_effect("frost_keygen".to_string())
-                .with_effect("frost_signing".to_string()))
-            .with_bundle(EffectBundle::new("storage".to_string())
-                .with_effect("read".to_string())
-                .with_effect("write".to_string()))
-            .with_bundle(EffectBundle::new("transport".to_string())
-                .with_effect("send".to_string())
-                .with_effect("receive".to_string()))
+            .with_bundle(
+                EffectBundle::new("crypto".to_string())
+                    .with_effect("frost_keygen".to_string())
+                    .with_effect("frost_signing".to_string()),
+            )
+            .with_bundle(
+                EffectBundle::new("storage".to_string())
+                    .with_effect("read".to_string())
+                    .with_effect("write".to_string()),
+            )
+            .with_bundle(
+                EffectBundle::new("transport".to_string())
+                    .with_effect("send".to_string())
+                    .with_effect("receive".to_string()),
+            )
     }
 
     /// Build a testing effect system

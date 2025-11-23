@@ -44,7 +44,10 @@ impl AuthorizationEffects for StandardAuthorizationHandler {
 
         tracing::debug!(
             "Authorization check: operation='{}', resource='{}', permission='{}', allowed={}",
-            operation, resource, required_permission, allowed
+            operation,
+            resource,
+            required_permission,
+            allowed
         );
 
         Ok(allowed)

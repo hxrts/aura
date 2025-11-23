@@ -4,8 +4,8 @@
 //! defined in `aura-core`. These handlers can be used by choreographic applications
 //! and other Aura components.
 
-use aura_core::{effects::ConsoleEffects, AuraError};
 use async_trait::async_trait;
+use aura_core::{effects::ConsoleEffects, AuraError};
 
 /// Real console handler using actual tracing
 #[derive(Debug, Clone)]

@@ -21,9 +21,7 @@
 #![allow(missing_docs)]
 
 use crate::FrostResult;
-use aura_core::frost::{
-    NonceCommitment, PartialSignature, ThresholdSignature, TreeSigningContext,
-};
+use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature, TreeSigningContext};
 use aura_core::{identifiers::AuthorityId, AccountId, AuraError, SessionId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
@@ -229,9 +227,7 @@ impl FrostCrypto {
         .map_err(|e| AuraError::crypto(format!("Failed to generate key packages: {}", e)))?;
 
         let mut key_packages = HashMap::new();
-        for (authority, (identifier, secret_share)) in
-            authorities.iter().zip(shares.into_iter())
-        {
+        for (authority, (identifier, secret_share)) in authorities.iter().zip(shares.into_iter()) {
             // In FROST v1.0, KeyPackage is created from SecretShare + PublicKeyPackage
             let key_package = frost::keys::KeyPackage::try_from(secret_share)
                 .map_err(|e| AuraError::crypto(format!("Failed to create key package: {}", e)))?;
@@ -265,7 +261,10 @@ impl FrostCrypto {
         message: &[u8],
         key_package: &frost_ed25519::keys::KeyPackage,
         signing_nonces: &frost_ed25519::round1::SigningNonces,
-        commitments: &std::collections::BTreeMap<frost_ed25519::Identifier, frost_ed25519::round1::SigningCommitments>,
+        commitments: &std::collections::BTreeMap<
+            frost_ed25519::Identifier,
+            frost_ed25519::round1::SigningCommitments,
+        >,
         random_effects: &dyn aura_core::effects::RandomEffects,
     ) -> FrostResult<PartialSignature> {
         use aura_core::frost::tree_signing::binding_message;
@@ -274,7 +273,7 @@ impl FrostCrypto {
 
         let bound_message = binding_message(context, message);
 
-        let mut rng = EffectSystemRng::from_current_runtime(random_effects);
+        let rng = EffectSystemRng::from_current_runtime(random_effects);
         let partial_signature = {
             // Convert commitments into the format expected by FROST
             let signing_package = frost::SigningPackage::new(commitments.clone(), &bound_message);
@@ -298,7 +297,6 @@ impl FrostCrypto {
         public_key_package: &frost_ed25519::keys::PublicKeyPackage,
     ) -> FrostResult<ThresholdSignature> {
         use aura_core::frost::tree_signing::{binding_message, frost_aggregate};
-        use frost_ed25519 as frost;
         use std::collections::BTreeMap;
 
         if partial_signatures.len() < config.threshold {
@@ -351,9 +349,7 @@ fn nonce_commitments_to_frost(
         let identifier = commitment
             .frost_identifier()
             .map_err(|e| AuraError::invalid(e))?;
-        let signing_commitments = commitment
-            .to_frost()
-            .map_err(|e| AuraError::invalid(e))?;
+        let signing_commitments = commitment.to_frost().map_err(|e| AuraError::invalid(e))?;
         frost_commitments.insert(identifier, signing_commitments);
     }
     Ok(frost_commitments)
@@ -420,16 +416,12 @@ mod tests {
         let authorities: Vec<_> = (0..config.total_signers)
             .map(|_| AuthorityId::new())
             .collect();
-        let key_material = FrostCrypto::generate_key_material(
-            &authorities,
-            &config,
-            &*effects.random_effects(),
-        )
-        .await?;
+        let key_material =
+            FrostCrypto::generate_key_material(&authorities, &config, &*effects.random_effects())
+                .await?;
 
         let mut nonce_commitments = HashMap::new();
-        let mut signer_nonces =
-            HashMap::<AuthorityId, frost_ed25519::round1::SigningNonces>::new();
+        let mut signer_nonces = HashMap::<AuthorityId, frost_ed25519::round1::SigningNonces>::new();
 
         for authority in &authorities {
             let key_pkg = key_material
@@ -497,16 +489,12 @@ mod tests {
         let authorities: Vec<_> = (0..config.total_signers)
             .map(|_| AuthorityId::new())
             .collect();
-        let key_material = FrostCrypto::generate_key_material(
-            &authorities,
-            &config,
-            &*effects.random_effects(),
-        )
-        .await?;
+        let key_material =
+            FrostCrypto::generate_key_material(&authorities, &config, &*effects.random_effects())
+                .await?;
 
         let mut nonce_commitments = HashMap::new();
-        let mut signer_nonces =
-            HashMap::<AuthorityId, frost_ed25519::round1::SigningNonces>::new();
+        let mut signer_nonces = HashMap::<AuthorityId, frost_ed25519::round1::SigningNonces>::new();
 
         for authority in &authorities {
             let key_pkg = key_material
@@ -597,7 +585,7 @@ mod tests {
     #[test]
     fn test_frost_crypto_compile() {
         // Test that the FrostCrypto struct compiles and has the expected methods
-        // NOTE: This is a compile-time test that violates architecture by directly 
+        // NOTE: This is a compile-time test that violates architecture by directly
         // instantiating handlers. In practice, use aura-composition for handler creation.
         fn _check_api_exists() {
             use aura_core::effects::RandomEffects;

@@ -327,7 +327,10 @@ impl SbbFlooding for SbbFloodingCoordinator {
     ) -> AuraResult<()> {
         // Serialize the envelope for transport
         let envelope_data = serde_json::to_vec(&envelope).map_err(|e| {
-            AuraError::internal(format!("Failed to serialize envelope for peer {}: {}", peer, e))
+            AuraError::internal(format!(
+                "Failed to serialize envelope for peer {}: {}",
+                peer, e
+            ))
         })?;
 
         // Convert DeviceId to UUID for NetworkEffects

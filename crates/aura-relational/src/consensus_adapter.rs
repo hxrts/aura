@@ -5,9 +5,7 @@
 //! API surface for backward compatibility.
 
 use aura_core::{relational::ConsensusProof, AuraError, AuthorityId, Prestate, Result};
-use aura_protocol::consensus::{
-    run_relational_consensus, run_relational_consensus_with_config, RelationalConsensusConfig,
-};
+use aura_protocol::consensus::{run_relational_consensus, run_relational_consensus_with_config};
 use serde::Serialize;
 
 /// Consensus configuration for relational contexts

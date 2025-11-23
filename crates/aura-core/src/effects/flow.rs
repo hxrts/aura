@@ -9,12 +9,12 @@
 //! - Used by orchestration layer (aura-protocol) for guard chain integration
 //! - Core trait definition belongs in Layer 1 (foundation)
 
-use async_trait::async_trait;
 use crate::{
-    identifiers::{AuthorityId, ContextId},
     flow::Receipt,
+    identifiers::{AuthorityId, ContextId},
     AuraResult,
 };
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 /// Hint describing which flow bucket should be charged before a send.
@@ -66,7 +66,7 @@ impl FlowHint {
 /// **Implementation Note**: This trait is typically implemented by:
 /// - Journal effects (CRDT-based flow budget tracking)
 /// - Mock handlers (testing with configurable budgets)
-/// 
+///
 /// The trait itself is pure and stateless - all state management is handled
 /// by the implementing effect handlers.
 #[async_trait]

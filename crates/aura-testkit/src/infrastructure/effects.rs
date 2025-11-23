@@ -10,7 +10,7 @@ use aura_core::{AuraResult, DeviceId};
 use std::path::PathBuf;
 
 // Use foundation-based approach instead of orchestration layer
-use crate::{CompositeTestHandler, SimpleTestContext};
+use crate::CompositeTestHandler;
 
 /// Configuration for mock handlers in test scenarios
 #[derive(Debug, Clone)]

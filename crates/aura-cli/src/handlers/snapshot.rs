@@ -1,9 +1,8 @@
 //! Snapshot maintenance command handler.
 
-use anyhow::{anyhow, Result};
-use aura_agent::{AgentBuilder, AuraEffectSystem, EffectContext};
+use anyhow::Result;
+use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::identifiers::{AuthorityId, DeviceId};
-use aura_protocol::effect_traits::ConsoleEffects;
 
 use crate::SnapshotAction;
 
