@@ -54,7 +54,7 @@ impl EffectContext {
 
     /// Get the execution mode
     pub fn execution_mode(&self) -> ExecutionMode {
-        self.execution_mode.clone()
+        self.execution_mode
     }
 
     /// Get the flow budget context
@@ -98,7 +98,7 @@ impl EffectContext {
             authority_id: self.authority_id,
             context_id,
             session_id: SessionId::new(), // New session for child
-            execution_mode: self.execution_mode.clone(),
+            execution_mode: self.execution_mode,
             flow_budget: self.flow_budget.clone(),
             leakage_budget: self.leakage_budget.clone(),
             metadata: self.metadata.clone(),

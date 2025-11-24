@@ -1,19 +1,14 @@
 # Aura Consensus
 
-Aura Consensus specifically designed for small groups communicating peer-to-peer with intermittent connectivity. Peers must form a stable committee for a given context, though members may be offline at any moment. The committee is only used when a specific decision needs agreement. The group does not maintain a global ordered log. Its only requirement is to agree on the operations that matter for that context.
+Aura consensus is designed for small groups that communicate peer-to-peer with intermittent connectivity. Each context defines a stable committee of witnesses, although individual members may be offline at any time. The committee is used only when a specific decision requires strong agreement.
 
-Aura focuses on agreement over single, important operations. Most state evolves through CRDT merges, which need no coordination. However, a small set of actions cannot merge safely, such as changes to account authority. These actions run inside a context with a fixed witness group that shares threshold key material.
+Aura targets agreement on single operations inside a context. Most state evolves through CRDT merges that require no coordination. A small set of operations cannot be merged safely, for example changes to account authority. These operations run inside a context with a fixed witness group that shares threshold key material.
 
-This setting makes fast consensus possible. Aura reaches finality in one round trip. Each witness verifies the same pre-state and produces one share, which initiator combines into a threshold signature. The signature is a complete proof of agreement.
-
-If the witnesses disagree or the initiator stalls, the group falls back to gossiping shares until some witness gathers a valid threshold. It produces the same final signature and the same commit fact.
-
-Aura provides strong agreement only when needed. It keeps the rest of the system simple and available through CRDTs.
-
+The protocol gives the initiator of an operation a one round trip decision path in the good case. All honest witnesses finalize after an additional commit broadcast. The system does not maintain a global ordered log. It only agrees on commit facts for operations that require strong coordination.
 
 ## Consensus as Fact Emission
 
-Aura does not maintain a global log. Instead it treats consensus as the production of a single commit fact. A fact is an immutable value added to the CRDT replica store, which is guaranteed to be convergent.
+Aura treats consensus as production of a single commit fact. A commit fact is an immutable value added to a CRDT replica store. The replica store is convergent under merge.
 
 ```rust
 struct CommitFact {
@@ -24,35 +19,35 @@ struct CommitFact {
 }
 ```
 
-Consensus safety reduces to agreement on which commit fact exists. Every peer merges this fact into its replica store. Once a threshold signed commitment fact exists, it is final.
-
+This structure records the consensus instance identifier, the deterministic result identifier, the threshold signature, and the set of attesting witnesses. Consensus safety reduces to agreement on which `CommitFact` exists for a given `cid`. Every peer merges this fact into its replica store. Once a threshold signed commit fact exists, it is final and stable under CRDT merges.
 
 ## Fast Path
 
-The initiator begins by sending an `Execute` message to all witnesses. This message carries the operation and a hash of the pre-state it must apply to. Each witness validates this pre-state. If it matches, the witness executes the operation deterministically and returns a `WitnessShare` that includes the result id and its share.
+The fast path is a single shot threshold signing protocol coordinated by an initiator. The initiator sends a proposal to all witnesses. Witnesses validate the pre state and execute the operation deterministically. Each witness produces a signature share on the resulting `rid`. The initiator collects shares, forms a threshold signature, writes a commit fact, and broadcasts a commit message.
 
-The initiator collects at least *t* matching shares. It combines them into a threshold signature and forms the attester set directly from the witnesses whose shares were used. It writes a commit fact to the replica store and broadcasts a `Commit` message.
-
-The initiator coordinates the fast path, which completes in one round trip.
-
+The initiator decides when it has collected enough matching shares to form a threshold signature. Honest witnesses decide when they receive and verify the commit. In a synchronous period with an honest initiator and agreement on pre state, the initiator decides in one round trip. Witnesses decide after an additional one way commit broadcast. This corresponds to three message steps among all parties.
 
 **Messages**
 
-- `Execute(cid, Op, prestate_hash, evidΔ)`
-- `WitnessShare(cid, rid, share, prestate_hash, evidΔ)`
-- `Commit(cid, rid, sig, attesters, evidΔ)`
+* `Execute(cid, Op, prestate_hash, evidΔ)`
+* `WitnessShare(cid, rid, share, prestate_hash, evidΔ)`
+* `Commit(cid, rid, sig, attesters, evidΔ)`
 
-Assume witness set `W`, threshold `t`, fallback timeout `T_fallback`.
+Assume witness set `W`, threshold `t`, and fallback timeout `T_fallback`.
 
+**Initiator**
 
-**Initiator i**
+The initiator reads the pre state, proposes an operation with its pre state hash, collects witness shares, and decides when it can form a valid threshold signature. It then emits a commit fact and broadcasts a commit message that lets other witnesses finalize.
+
 
 ```haskell
+-- Initiator i
+
 State:
   cid      := fresh_consensus_id()
   Op       := input operation
-  shares   := {}                  // witness_id -> (rid, share)
-  decided  := {}                  // decided[cid] = Bool, initially false
+  shares   := {}                  -- witness_id -> (rid, share)
+  decided  := {}                  -- decided[cid] = Bool, initially false
 
 1. Start:
     prestate := ReadState()
@@ -81,20 +76,24 @@ State:
 ```
 
 
-**Witness w**
+**Witness**
+
+A witness verifies that its local pre state matches the hash, computes a deterministic result identifier, signs it, and starts a fallback timer. If it later receives a valid commit, it finalizes the commit fact and stops the timer. If the timer expires without a commit, it moves into the fallback protocol.
 
 ```haskell
+-- Witness w
+
 State:
-  proposals := {}                 // rid -> set(w, share, prestate_hash)
-  decided   := {}                 // decided[cid] = Bool
-  timers    := {}                 // timers[cid]
+  proposals := {}                 -- rid -> set(w, share, prestate_hash)
+  decided   := {}                 -- decided[cid] = Bool
+  timers    := {}                 -- timers[cid]
 
 1. On Execute(cid, Op, prestate_hash, evidΔ) from i:
     MergeEvidence(cid, evidΔ)
     If decided[cid] = false:
         prestate := ReadState()
         If H(prestate) != prestate_hash:
-            // Explicitly notify initiator and participate in fallback
+            -- Explicitly notify initiator and participate in fallback
             Send StateMismatch(cid, prestate_hash, H(prestate), EvidenceDelta(cid)) to i
             StartTimer(cid, T_fallback)
             return
@@ -118,12 +117,35 @@ State:
         periodic.Start(cid)
 ```
 
+### Fast Path Sequence
+
+The initiator broadcasts `Execute`, collects `WitnessShare` messages from a threshold of witnesses, builds a threshold signature, and broadcasts `Commit`. The initiator can decide after it forms `sig`. Each witness decides after it verifies `Commit`.
+
+```mermaid
+sequenceDiagram
+    participant I as Initiator
+    participant W1 as Witness 1
+    participant W2 as Witness 2
+    participant Wn as Witness n
+
+    I->>W1: Execute(cid, Op, prestate_hash)
+    I->>W2: Execute(cid, Op, prestate_hash)
+    I->>Wn: Execute(cid, Op, prestate_hash)
+
+    W1->>I: WitnessShare(cid, rid, share1)
+    W2->>I: WitnessShare(cid, rid, share2)
+    Wn->>I: WitnessShare(cid, rid, sharen)
+
+    I->>W1: Commit(cid, rid, sig, attesters)
+    I->>W2: Commit(cid, rid, sig, attesters)
+    I->>Wn: Commit(cid, rid, sig, attesters)
+```
 
 ## Evidence Propagation
 
-Evidence is a CRDT keyed by `cid`. It tracks the final attesters and signature once known and merges only monotonically. A commit fact is always inserted with an monotonic commit rule: once a threshold signature appears for `cid`, it cannot be replaced.
+Evidence is a CRDT keyed by `cid`. It tracks the final attesters and signature once known. It merges monotonically. A commit fact is always inserted under a monotonic rule. Once a threshold signature appears for `cid`, it is never replaced.
 
-Every message that participates in a consensus instance carries an evidence delta. The session protocol is structured so that these deltas move with the communication pattern. Peers merge evidence on send and receive. Reconvergent peers align automatically.
+Every message that participates in a consensus instance carries an evidence delta. The session protocol is structured so that these deltas follow the communication pattern. Peers merge evidence on send and receive. Peers that reconnect after being offline converge automatically.
 
 ```haskell
 EvidenceDelta(cid):
@@ -133,41 +155,45 @@ MergeEvidence(cid, evidΔ):
     CRDT_Merge(cid, evidΔ)
 ```
 
+This interface exposes evidence as a per consensus instance CRDT. `EvidenceDelta` returns a delta for a given `cid`. `MergeEvidence` merges an incoming delta into local state. This makes commit evidence durable and convergent even under partitions and reconnection.
 
 ## Fallback
 
-Fallback runs when witnesses disagree on the result id, disagree on the pre-state hash, or when the initiator fails to return a commit within a timeout. Each witness forms proposals keyed by `(rid, prestate_hash)`. Each proposal contains the signature share produced by that witness.
+Fallback runs when witnesses disagree on the result identifier, disagree on the pre state hash, or when the initiator fails to produce a commit in time. Each witness forms proposals keyed by `(rid, prestate_hash)`. Each proposal contains its own signature share.
 
-Witnesses exchange their proposal maps with a sparse overlay. Each witness merges incoming maps, checking for equivocation, where equivocation is defined strictly as a witness producing two shares for the same `cid` and the same `prestate_hash` but different `rid`. When any proposal accumulates *t* valid, non-equivocating shares, the witness produces a threshold signature and broadcasts a ThresholdComplete message.
-
-All witnesses accept the first valid signature they see.
-
+Witnesses exchange proposal maps over a sparse overlay. Each witness merges incoming maps and checks for equivocation. Equivocation is defined as a witness producing two shares for the same `cid` and `prestate_hash` but different `rid`. When any proposal accumulates `t` valid and non equivocating shares, the witness produces a threshold signature and broadcasts a `ThresholdComplete` message. All witnesses accept the first valid threshold signature they see.
 
 **Messages**
 
-- `Conflict(cid, proposals, evidΔ)`
-- `AggregateShare(cid, proposals, evidΔ)`
-- `ThresholdComplete(cid, rid, sig, attesters, evidΔ)`
-- `StateMismatch(cid, expected_hash, actual_hash, evidΔ)`
+* `Conflict(cid, proposals, evidΔ)`
+* `AggregateShare(cid, proposals, evidΔ)`
+* `ThresholdComplete(cid, rid, sig, attesters, evidΔ)`
+* `StateMismatch(cid, expected_hash, actual_hash, evidΔ)`
 
+**Initiator**
 
-**Initiator i (trigger)**
+The initiator can trigger fallback early when it observes conflict in shares. It packages conflicting proposals and sends them to all witnesses along with the current evidence delta.
 
 ```haskell
+-- Initiator i (trigger)
+
 1. On detecting conflicting rids or prestate_hashes in shares for cid:
     conflicts := proposals extracted from received shares
     For all w in W:
         Send Conflict(cid, conflicts, EvidenceDelta(cid)) to w
 ```
 
+**Witness**
 
-**Witness w (fallback)**
+Witnesses maintain proposal sets, merge them through gossip, and produce a threshold signature once any candidate reaches `t` non equivocating shares. The first valid `ThresholdComplete` defines the committed result. Evidence and commit facts are propagated as CRDTs, which keeps state convergent.
 
 ```haskell
+-- Witness w (fallback)
+
 State:
-  proposals := {}                // (rid, prestate_hash) -> set(w, share)
-  decided   := {}                // decided[cid]
-  k         := 3                 // fanout
+  proposals := {}                -- (rid, prestate_hash) -> set(w, share)
+  decided   := {}                -- decided[cid]
+  k         := 3                 -- fanout
   periodic  := per-cid periodic timers
 
 1. On Conflict(cid, conflicts, evidΔ):
@@ -214,186 +240,46 @@ HasEquivocated(proposals, witness, cid, pre_hash):
     Otherwise false
 ```
 
-
 ## Properties
 
-Aura consensus uses an initiator for the 1-RTT fast path and a leaderless gossip protocol for fallback. It relies on local timers and does not assume synchronous links. It is scoped to a context rather than to the entire network. It achieves atomic agreement on a single operation rather than maintaining a total order.
+Aura runs a single shot consensus instance inside a context scoped group with shared threshold key material. The initiator first attempts a fast path. It sends `Execute`, witnesses verify the pre state, compute a deterministic `rid`, and return shares. If the initiator collects `t` matching shares it produces a threshold signature and commits. If witnesses disagree on the `rid` or the initiator fails, witnesses switch to a leaderless fallback. They gossip proposal maps until some witness sees `t` non equivocating shares and produces a threshold signature.
 
-Aura tolerates peers going offline, message delays, and partitions. It produces compact signatures that propagate efficiently. It integrates with CRDT state and session typed protocols already used in Aura.
+The protocol assumes partial synchrony with a global stabilization time `GST`. After `GST`, every message between honest peers arrives within delay `Δ`. Honest parties only finalize after verifying a valid threshold signature. The adversary controls fewer than `t` key shares. Each honest witness signs at most one `(cid, rid, prestate_hash)` triple.
 
-Consensus is only invoked when needed. Most operations rely on CRDT merge. When required, the system can produce strong agreement with minimal coordination.
+### Liveness in the Fast Path
 
+If all honest witnesses compute the same `rid = H(Op, prestate)` and the initiator is honest, the fast path completes in a bounded number of message delays. The initiator decides after one round trip. Honest witnesses decide after the commit broadcast.
 
-## Extended Properties
+This property describes the common case behavior that gives initiators low latency. It does not claim fewer than three message steps among all parties. It only specifies decision points for the initiator and witnesses under the model assumptions.
 
-Aura runs a single-shot consensus instance inside a context-scoped group with shared threshold key material. The initiator first attempts a fast path: it sends `Execute`, witnesses verify the pre-state, compute a deterministic `rid`, and return shares. If the initiator collects `t` matching shares it produces a threshold signature and commits. If witnesses disagree on the `rid` or the initiator fails, witnesses switch to a leaderless fallback: they gossip their proposal maps until some witness sees `t` non-equivocating shares for one candidate and produces a threshold signature. Evidence and commit facts are CRDTs, so all peers converge even after offline periods.
+### Eventual Liveness in Fallback
 
-We assume partial synchrony with a global stabilization time `GST`. After `GST`, every message between honest peers arrives within delay `Δ` (and we write `δ ≤ Δ` for the actual delay). The adversary controls fewer than `t` key shares and each honest witness signs at most one `(cid, rid, prestate_hash)` triple.
+If witnesses disagree on the result identifier or the initiator stalls, fallback gossip ensures eventual completion whenever `t` honest witnesses eventually become connected. Honest shares for a fixed `(rid, prestate_hash)` diffuse by epidemic gossip.
 
-A party finalizes `(cid, rid)` only after verifying a valid threshold signature on `rid`.
+This property relies on the random overlay induced by the `AggregateShare` fanout. If the connected component of honest witnesses remains connected for long enough, some honest witness eventually gathers `t` non equivocating shares. That witness produces a threshold signature and broadcasts `ThresholdComplete`. All honest parties that receive and verify `ThresholdComplete` eventually finalize.
 
+### Agreement
 
-### 1. Liveness (Fast Path)
+Two different result identifiers cannot both be finalized for the same `cid`. Producing a threshold signature requires at least `t` valid shares. Each honest witness produces at most one share per `(cid, prestate_hash)`. Fallback rejects equivocation when it detects multiple shares from the same witness under the same pre state hash.
 
-If all honest witnesses compute the same `rid = H(Op, prestate)` and the initiator is honest, the fast path completes in one round trip.
+This implies that two different result identifiers would require two disjoint sets of honest signers. This is impossible when honest witnesses follow the rule that they sign at most one candidate per instance and pre state hash. Therefore at most one threshold signature can exist for a given `(cid, prestate_hash)`.
 
-**1-RTT finality Claim**
-Let `t > f`. Suppose the initiator is honest and at least `t` honest witnesses compute the same `rid` for `(cid, Op)`. Then all honest parties finalize within `O(δ)` time after the initiator sends `Execute`.
+### Validity
 
-**Proof Sketch**
+Finalized results correspond to deterministic execution of the intended operation on a consistent pre state. Honest witnesses sign only after verifying the pre state hash and executing the operation deterministically.
 
-At time `t0 > GST`, the initiator performs:
-
-```haskell
-// Initiator
-broadcast Execute(cid, Op, prestate_hash)
-```
-
-Within `δ`, every honest witness receives it:
-
-```haskell
-// Witness w
-if H(ReadState()) == prestate_hash:
-    rid := H(Op, ReadState())
-    share := SignShare(cid, rid)
-    send WitnessShare(cid, rid, share)
-```
-
-All honest witnesses compute the same `rid`. Within another `δ`, the initiator receives `t` matching shares:
-
-```haskell
-// Initiator
-if |{share_w | rid_w == rid}| >= t:
-    sig := CombineShares(...)
-    broadcast Commit(cid, rid, sig)
-```
-
-Every honest witness verifies `sig`:
-
-```haskell
-// Witness
-if Verify(sig, rid):
-    finalize(cid, rid)
-```
-
-All honest parties have finalized by time `t0 + 3δ`.
-
-∎
-
-
-### 2. Eventual Liveness (Fallback)
-
-If witnesses disagree on the result id or the initiator stalls, fallback gossip ensures eventual completion whenever `t` honest witnesses eventually become connected.
-
-**Eventual Liveness Claim**
-If after some time `T ≥ GST`, at least `t` honest witnesses can exchange messages eventually, then with probability 1 some honest witness produces a threshold signature for some `(cid, rid)`, and all honest parties eventually finalize.
-
-**Proof Sketch**
-
-Each witness maintains merged proposals:
-
-```haskell
-// proposals : Map[(rid, prestate_hash) -> Set[(w, share)]]
-on AggregateShare(msg):
-    merge(msg.proposals)
-```
-
-Every gossip step pushes proposals to random peers:
-
-```haskell
-periodic:
-    pset := SampleRandomSubset(W, k)
-    for p in pset:
-        send AggregateShare(cid, proposals)
-```
-
-Honest shares for a fixed `(rid, prestate_hash)` diffuse like epidemic gossip. Because eventually connected honest witnesses form a connected overlay with probability 1, every honest witness in that component eventually gathers all honest shares.
-
-Once some witness has `t` non-equivocating shares:
-
-```haskell
-// Witness w
-if |proposals[(rid, pre_hash)]| >= t:
-    sig := CombineShares(proposals[(rid, pre_hash)])
-    broadcast ThresholdComplete(cid, rid, sig)
-```
-
-Every honest peer eventually receives `ThresholdComplete`, verifies it, and finalizes. Only one threshold signature can exist (by Agreement below), so all honest peers converge on the same commit fact.
-
-∎
-
-
-### 3. Agreement
-
-Two different result ids cannot both be finalized for the same `cid`.
-
-**Agreement Claim**
-For a fixed `cid`, no two honest parties can finalize different `(cid, rid1)` and `(cid, rid2)` with `rid1 ≠ rid2`.
-
-**Proof Sketch**
-
-An honest party finalizes only after verifying a threshold signature:
-
-```haskell
-if VerifyThresholdSig(rid, sig):
-    finalize(cid, rid)
-```
-
-Producing a threshold signature for `rid` requires at least `t` valid shares. Each honest witness produces at most one share per `(cid, prestate_hash)`, and equivocation is rejected in fallback:
-
-```haskell
-// reject if same witness signs two rids under same prestate hash
-if witness signed (rid1, pre_hash) and (rid2, pre_hash):
-    discard share
-```
-
-Thus, for two different result ids to obtain valid threshold signatures:
-
-- `rid1` would require `t` honest shares
-- `rid2` would also require `t` honest shares
-- The two sets of honest signers would have to be disjoint
-
-This is impossible when signing is scoped to the same consensus instance—an honest witness cannot contribute to two different candidates. Therefore only one threshold signature can exist.
-
-∎
-
-
-### 4. Validity
-
-Finalized results correspond to deterministic execution of the intended operation.
-
-**Validity Claim**
-If `(cid, rid)` is finalized, then `rid = H(Op, prestate)` for some honest witness’s deterministic execution of `Op`.
-
-**Proof Sketch**
-
-Honest witnesses sign only after verifying the pre-state hash and executing the operation deterministically:
-
-```haskell
-// Witness
-if H(ReadState()) == prestate_hash:
-    rid := H(Op, ReadState())
-    share := SignShare(cid, rid)
-```
-
-Thus every honest share corresponds to a correct deterministic execution. A valid threshold signature necessarily includes at least one honest share (since the adversary controls fewer than `t` key shares), and therefore `rid` must come from some honest execution.
-
-∎
-
+A valid threshold signature includes at least one honest share because the adversary controls fewer than `t` key shares. Therefore any finalized `rid` equals `H(Op, prestate)` for some honest execution. This connects the abstract result identifier to a concrete deterministic computation.
 
 ## Comparison
 
-CRDTs ensure eventual consistency and availability, but typically lack atomic agreement.
+CRDTs provide eventual consistency and high availability for the majority of operations. They do not provide atomic agreement for updates that must not be merged independently. Aura invokes consensus only for those updates. The rest of the system can operate offline and converge via CRDT merge.
 
-Threshold-signing systems have strong atomicity for a single value, but lack consensus semantics. They assume fixed participants, no adversarial message flow, no fallback path, no accountability, no recovery.
+Threshold signing systems provide strong atomicity for a single chosen value. They often assume fixed participants and reliable communication patterns. Aura adds a concrete protocol around threshold signatures. It includes evidence propagation as a CRDT, a fast path with an initiator, a leaderless fallback, and explicit handling of equivocation and reconnection.
 
-Classical consensus protocols have full consensus semantics, but lack 1-RTT deterministic finality and on-demand operation in intermittently connected groups. They require ordering, coordinators or view changes, and stable committees.
-
+Classical consensus protocols for ordered logs provide a total order of operations across a fixed or slowly changing committee. They require continuous coordination and view changes. Aura does not maintain a total order. It focuses on single shot agreement inside scoped contexts and uses threshold signatures to produce compact, composable commit facts.
 
 ## Summary
 
-These properties give Aura 1-RTT deterministic finality in the normal case, leaderless eventual completion in disagreement or initiator failure, strict agreement via threshold signature uniqueness, and semantic validity through deterministic execution and pre-state checking. CRDT-based commit facts ensure convergence even under offline operation or partial message loss.
+Aura consensus uses an initiator for low latency decision in the common case and a leaderless gossip protocol for fallback. It relies on local timers and partial synchrony assumptions. It scopes consensus to a context level witness group and a single operation per instance.
 
-Aura provides a consensus protocol designed for mobile devices and privacy scoped groups. It builds on CRDTs, session types, and threshold signatures to provide 1-RTT deterministic finality in the happy path. It resolves conflicts using a threshold race over a sparse random overlay.
-
-Aura consensus fits the needs of social recovery and account level control. It avoids global validators, global logs, and global epochs. It provides atomic agreement inside a context without sacrificing the peer-to-peer and offline friendly model.
+The protocol integrates CRDT based state, threshold signatures, and session style message flows. Aura's novelty is the combination of context scoped single shot consensus, CRDT based evidence and commit facts, and a threshold signature based fast path with a gossip based fallback. This design provides strong agreement when required while keeping most of the system available and convergent through CRDT merges.

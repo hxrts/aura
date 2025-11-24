@@ -7,11 +7,11 @@ This guide covers Aura's testing infrastructure built on the stateless effect sy
 Aura's testing approach is built on four key principles:
 
 1. **Async-Native Testing** - The `#[aura_test]` macro provides automatic tracing setup and timeout handling
-2. **Effect System Compliance** - Tests MUST use effect traits, never direct impure function access
+2. **Effect System Compliance** - Tests MUST use [effect traits](106_effect_system_and_runtime.md), never direct impure function access
 3. **Protocol Fidelity** - Tests run actual protocol logic through real effect implementations
 4. **Deterministic Execution** - Controlled effects enable reproducible test environments
 
-**Critical**: Tests must follow the same effect system guidelines as production code. Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or other impure functions is forbidden. All impure operations must flow through effect traits to ensure deterministic simulation and WASM compatibility.
+**Critical**: Tests must follow the same [effect system](106_effect_system_and_runtime.md) guidelines as production code. Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or other impure functions is forbidden. All impure operations must flow through effect traits to ensure deterministic simulation and WASM compatibility.
 
 This approach eliminates boilerplate while providing testing capabilities through automatic tracing, timeout protection, and reusable test fixtures.
 
@@ -120,7 +120,7 @@ async fn test_with_custom_config() -> aura_core::AuraResult<()> {
 
 ### Effect System Compliance in Tests
 
-**Tests must use effect traits for all impure operations**:
+**Tests must use [effect traits](106_effect_system_and_runtime.md) for all impure operations**:
 
 ```rust
 use aura_agent::runtime::AuraEffectSystem;

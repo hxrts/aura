@@ -4,11 +4,12 @@
 //! all timeout, retry, batch size, and peer management settings scattered
 //! across the aura-sync crate into a single, coherent structure.
 
+use aura_core::effects::RandomEffects;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Master configuration for all aura-sync operations
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SyncConfig {
     /// Network and transport configuration
     pub network: NetworkConfig,
@@ -74,10 +75,15 @@ impl Default for RetryConfig {
 
 impl RetryConfig {
     /// Calculate delay for attempt number with jitter
-    pub fn delay_for_attempt(&self, attempt: u32) -> Duration {
+    pub async fn delay_for_attempt<R: RandomEffects + ?Sized>(
+        &self,
+        attempt: u32,
+        random: &R,
+    ) -> Duration {
         let base_ms = self.base_delay.as_millis() as f64;
         let exponential_delay = base_ms * 2_f64.powi(attempt as i32);
-        let jittered_delay = exponential_delay * (1.0 + self.jitter_factor * rand::random::<f64>());
+        let jitter_sample = random.random_range(0, 10_000).await as f64 / 10_000.0;
+        let jittered_delay = exponential_delay * (1.0 + self.jitter_factor * jitter_sample);
         let clamped_delay = jittered_delay.min(self.max_delay.as_millis() as f64);
         Duration::from_millis(clamped_delay as u64)
     }
@@ -143,7 +149,7 @@ impl Default for PeerManagementConfig {
 }
 
 /// Protocol-specific configuration grouping
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProtocolConfigs {
     /// OTA upgrade protocol configuration
     pub ota_upgrade: OTAConfig,
@@ -151,16 +157,6 @@ pub struct ProtocolConfigs {
     pub verification: VerificationConfig,
     /// Anti-entropy protocol configuration
     pub anti_entropy: AntiEntropyConfig,
-}
-
-impl Default for ProtocolConfigs {
-    fn default() -> Self {
-        Self {
-            ota_upgrade: OTAConfig::default(),
-            verification: VerificationConfig::default(),
-            anti_entropy: AntiEntropyConfig::default(),
-        }
-    }
 }
 
 /// OTA (Over-The-Air) upgrade protocol configuration
@@ -270,19 +266,6 @@ impl PerformanceConfig {
             return Err("memory_limit must be >= 1MB".to_string());
         }
         Ok(())
-    }
-}
-
-impl Default for SyncConfig {
-    fn default() -> Self {
-        Self {
-            network: NetworkConfig::default(),
-            retry: RetryConfig::default(),
-            batching: BatchConfig::default(),
-            peer_management: PeerManagementConfig::default(),
-            protocols: ProtocolConfigs::default(),
-            performance: PerformanceConfig::default(),
-        }
     }
 }
 
@@ -465,18 +448,19 @@ mod tests {
         assert_eq!(config.performance.max_cpu_usage, 60);
     }
 
-    #[test]
-    fn test_retry_config_delay_calculation() {
+    #[tokio::test]
+    async fn test_retry_config_delay_calculation() {
         let retry_config = RetryConfig::default();
+        let random = aura_effects::random::RealRandomHandler::default();
 
-        let delay1 = retry_config.delay_for_attempt(0);
-        let delay2 = retry_config.delay_for_attempt(1);
+        let delay1 = retry_config.delay_for_attempt(0, &random).await;
+        let delay2 = retry_config.delay_for_attempt(1, &random).await;
 
         // Second attempt should have longer delay (exponential backoff)
         assert!(delay2 > delay1);
 
         // Should not exceed max delay
-        let delay_long = retry_config.delay_for_attempt(10);
+        let delay_long = retry_config.delay_for_attempt(10, &random).await;
         assert!(delay_long <= retry_config.max_delay);
     }
 

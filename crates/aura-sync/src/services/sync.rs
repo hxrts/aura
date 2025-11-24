@@ -27,13 +27,9 @@
 //! # }
 //! ```
 
-// TODO: Refactor to use TimeEffects for timing. Current Instant::now() usage is for
-// sync timing metrics and should be replaced with effect system integration.
-#![allow(clippy::disallowed_methods)]
-
 use parking_lot::RwLock;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
@@ -43,121 +39,44 @@ use super::{HealthCheck, HealthStatus, Service, ServiceMetrics, ServiceState};
 use crate::core::{sync_session_error, MetricsCollector, SessionManager, SyncResult};
 use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
 use crate::protocols::{JournalSyncConfig, JournalSyncProtocol};
-use aura_core::effects::{TimeEffects, TimeError, WakeCondition};
+use aura_core::effects::{PhysicalTimeEffects, TimeError};
+use aura_core::time::PhysicalTime;
 use aura_core::{AuraError, DeviceId};
-use uuid::Uuid;
 
 /// Simple time effects implementation for aura-sync
 /// This is kept minimal since aura-sync intentionally avoids depending on aura-effects
 struct SimpleSyncTimeEffects;
 
-#[async_trait::async_trait]
-impl TimeEffects for SimpleSyncTimeEffects {
-    async fn current_epoch(&self) -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-    }
-
-    async fn current_timestamp(&self) -> u64 {
-        self.current_epoch().await
-    }
-
-    async fn current_timestamp_millis(&self) -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
-    }
-
-    async fn now_instant(&self) -> Instant {
+impl SimpleSyncTimeEffects {
+    fn now_instant() -> Instant {
         Instant::now()
     }
 
-    async fn sleep_ms(&self, ms: u64) {
+    async fn current_timestamp_ms() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
+    }
+}
+
+#[async_trait::async_trait]
+impl PhysicalTimeEffects for SimpleSyncTimeEffects {
+    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+        Ok(PhysicalTime {
+            ts_ms: Self::current_timestamp_ms().await,
+            uncertainty: None,
+        })
+    }
+
+    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
         tokio::time::sleep(Duration::from_millis(ms)).await;
-    }
-
-    async fn sleep_until(&self, epoch: u64) {
-        if let Some(target) = std::time::UNIX_EPOCH.checked_add(Duration::from_secs(epoch)) {
-            if let Ok(duration) = target.duration_since(std::time::SystemTime::now()) {
-                tokio::time::sleep(duration).await;
-            }
-        }
-    }
-
-    async fn delay(&self, duration: Duration) {
-        tokio::time::sleep(duration).await;
-    }
-
-    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
-        tokio::time::sleep(Duration::from_millis(duration_ms)).await;
         Ok(())
     }
+}
 
-    async fn yield_until(&self, _condition: WakeCondition) -> Result<(), TimeError> {
-        // Simple implementation: just yield once
-        tokio::task::yield_now().await;
-        Ok(())
-    }
-
-    async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
-        match condition {
-            WakeCondition::Immediate => Ok(()),
-            WakeCondition::EpochReached { target } => {
-                let current = self.current_timestamp_millis().await;
-                if target > current {
-                    tokio::time::sleep(Duration::from_millis(target - current)).await;
-                }
-                Ok(())
-            }
-            _ => {
-                // For other conditions, just yield
-                tokio::task::yield_now().await;
-                Ok(())
-            }
-        }
-    }
-
-    async fn set_timeout(&self, timeout_ms: u64) -> aura_core::effects::TimeoutHandle {
-        let id = Uuid::new_v4();
-        // In a real implementation, we'd track this timeout
-        // For simplicity, we'll just spawn a task
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
-        });
-        id // TimeoutHandle is just a Uuid
-    }
-
-    async fn cancel_timeout(
-        &self,
-        _handle: aura_core::effects::TimeoutHandle,
-    ) -> Result<(), TimeError> {
-        // In a real implementation, we'd cancel the timeout
-        // For simplicity, we'll just return ok
-        Ok(())
-    }
-
-    fn is_simulated(&self) -> bool {
-        false
-    }
-
-    fn register_context(&self, _context_id: Uuid) {
-        // No-op for simple implementation
-    }
-
-    fn unregister_context(&self, _context_id: Uuid) {
-        // No-op for simple implementation
-    }
-
-    async fn notify_events_available(&self) {
-        // No-op for simple implementation
-    }
-
-    fn resolution_ms(&self) -> u64 {
-        1 // 1ms resolution
-    }
+fn time_error_to_aura(err: TimeError) -> AuraError {
+    AuraError::internal(format!("time error: {err}"))
 }
 
 // =============================================================================
@@ -261,21 +180,27 @@ pub struct SyncService {
     shutdown_tx: Arc<RwLock<Option<watch::Sender<bool>>>>,
     /// Background task handles
     task_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
+
+    /// Time effects for unified time operations
+    time_effects: SimpleSyncTimeEffects,
 }
 
 impl SyncService {
     /// Create a new sync service
     pub fn new(config: SyncServiceConfig) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
-        // TODO: Should obtain Instant via TimeEffects
-        #[allow(clippy::disallowed_methods)]
-        let now_instant = std::time::Instant::now();
+        let now_instant = SimpleSyncTimeEffects::now_instant();
         let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
-        // TODO: Obtain actual timestamp via TimeEffects
-        let now = 0u64;
+        // Use current system time for initialization (replaced by PhysicalTimeEffects later)
+        #[allow(clippy::disallowed_methods)]
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
         let session_manager = SessionManager::new(Default::default(), now);
         let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
         let metrics = MetricsCollector::new();
+        let time_effects = SimpleSyncTimeEffects;
 
         Ok(Self {
             config,
@@ -288,20 +213,25 @@ impl SyncService {
             started_at: Arc::new(RwLock::new(None)),
             shutdown_tx: Arc::new(RwLock::new(None)),
             task_handles: Arc::new(RwLock::new(Vec::new())),
+            time_effects,
         })
     }
 
-    /// Create a new sync service with TimeEffects (preferred for deterministic testing)
-    pub async fn new_with_time_effects<T: TimeEffects>(
+    /// Create a new sync service with PhysicalTimeEffects (preferred for deterministic testing)
+    pub async fn new_with_time_effects<T: PhysicalTimeEffects>(
         config: SyncServiceConfig,
         time_effects: &T,
     ) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
-        // Use TimeEffects for deterministic time access
-        let now_instant = time_effects.now_instant().await;
+        // Use PhysicalTimeEffects for deterministic time access
+        let now_instant = SimpleSyncTimeEffects::now_instant();
         let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
-        // Use TimeEffects for current timestamp
-        let now = time_effects.current_timestamp().await;
+        // Use PhysicalTimeEffects for current timestamp
+        let now = time_effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .map_err(time_error_to_aura)?;
         let session_manager = SessionManager::new(Default::default(), now);
         let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
         let metrics = MetricsCollector::new();
@@ -317,6 +247,7 @@ impl SyncService {
             started_at: Arc::new(RwLock::new(None)),
             shutdown_tx: Arc::new(RwLock::new(None)),
             task_handles: Arc::new(RwLock::new(Vec::new())),
+            time_effects: SimpleSyncTimeEffects,
         })
     }
 
@@ -342,7 +273,8 @@ impl SyncService {
 
         // 2. Create sessions for allowed peers
         let session_peers =
-            Self::create_sync_sessions(&self.session_manager, &allowed_peers).await?;
+            Self::create_sync_sessions(&self.session_manager, &allowed_peers, &self.time_effects)
+                .await?;
 
         // 3. Execute journal sync protocol
         let sync_results = self
@@ -506,8 +438,8 @@ impl SyncService {
         .await
     }
 
-    /// Perform one round of automatic synchronization with TimeEffects
-    async fn perform_auto_sync_with_time_effects<T: TimeEffects>(
+    /// Perform one round of automatic synchronization with PhysicalTimeEffects
+    async fn perform_auto_sync_with_time_effects<T: PhysicalTimeEffects>(
         peer_manager: &Arc<RwLock<PeerManager>>,
         session_manager: &Arc<RwLock<SessionManager<serde_json::Value>>>,
         journal_sync: &Arc<RwLock<JournalSyncProtocol>>,
@@ -515,6 +447,11 @@ impl SyncService {
         max_concurrent: usize,
         time_effects: &T,
     ) -> SyncResult<()> {
+        let tick_ts = time_effects
+            .physical_time()
+            .await
+            .map_err(time_error_to_aura)?;
+
         // Get available peers for synchronization
         let peers = {
             let manager = peer_manager.read();
@@ -526,12 +463,13 @@ impl SyncService {
         }
 
         // Check rate limits before proceeding
-        let now = time_effects.now_instant().await;
+        tracing::debug!("Auto-sync tick at {}", tick_ts.ts_ms);
+        let now = SimpleSyncTimeEffects::now_instant();
         {
             let mut limiter = rate_limiter.write();
             for peer in &peers {
                 match limiter.check_rate_limit(*peer, 100, now) {
-                    aura_core::RateLimitResult::Allowed { .. } => continue,
+                    aura_core::RateLimitResult::Allowed => continue,
                     aura_core::RateLimitResult::Denied { .. } => {
                         return Ok(()); // Rate limited, skip this round
                     }
@@ -551,7 +489,7 @@ impl SyncService {
         }
 
         // Implement actual peer synchronization via journal_sync
-        let available_sessions = max_concurrent.saturating_sub(active_sessions as usize);
+        let available_sessions = max_concurrent.saturating_sub(active_sessions);
 
         if available_sessions == 0 {
             tracing::debug!("No available session slots for auto-sync");
@@ -571,7 +509,8 @@ impl SyncService {
         }
 
         // 2. Initiate sync sessions with selected peers
-        let session_peers = Self::create_sync_sessions(session_manager, &selected_peers).await?;
+        let session_peers =
+            Self::create_sync_sessions(session_manager, &selected_peers, time_effects).await?;
 
         // 3. Execute anti-entropy and journal sync protocols
         let sync_results = Self::execute_auto_sync_protocols(journal_sync, &session_peers).await?;
@@ -622,12 +561,18 @@ impl SyncService {
         E: aura_core::effects::JournalEffects + aura_core::effects::NetworkEffects + Send + Sync,
     {
         let mut sync_results = Vec::new();
-        let mut journal_sync = self.journal_sync.write();
 
         for &peer in peers {
             tracing::debug!("Executing journal sync with peer {}", peer);
 
-            match journal_sync.sync_with_peer(effects, peer).await {
+            // TODO: Refactor to use tokio::sync::Mutex or restructure to avoid holding lock across await
+            #[allow(clippy::await_holding_lock)]
+            let result = {
+                let mut journal_sync = self.journal_sync.write();
+                journal_sync.sync_with_peer(effects, peer).await
+            }; // Lock dropped here
+
+            match result {
                 Ok(synced_operations) => {
                     sync_results.push((peer, synced_operations));
                     tracing::info!(
@@ -762,14 +707,14 @@ impl SyncService {
             .await
     }
 
-    /// Wait for active sessions to complete with timeout using TimeEffects
-    async fn wait_for_sessions_to_complete_with_time_effects<T: TimeEffects>(
+    /// Wait for active sessions to complete with timeout using PhysicalTimeEffects
+    async fn wait_for_sessions_to_complete_with_time_effects<T: PhysicalTimeEffects>(
         &self,
         time_effects: &T,
     ) -> SyncResult<()> {
         let timeout = Duration::from_secs(30); // 30 second timeout
         let check_interval = Duration::from_millis(100);
-        let start = time_effects.now_instant().await;
+        let start = SimpleSyncTimeEffects::now_instant();
 
         while start.elapsed() < timeout {
             let active_sessions = {
@@ -781,7 +726,10 @@ impl SyncService {
                 break;
             }
 
-            tokio::time::sleep(check_interval).await;
+            time_effects
+                .sleep_ms(check_interval.as_millis() as u64)
+                .await
+                .map_err(time_error_to_aura)?;
         }
 
         Ok(())
@@ -814,17 +762,23 @@ impl SyncService {
     }
 
     /// Create sync sessions for selected peers (static method)
-    async fn create_sync_sessions(
+    async fn create_sync_sessions<T: PhysicalTimeEffects>(
         session_manager: &Arc<RwLock<SessionManager<serde_json::Value>>>,
         peers: &[DeviceId],
+        time_effects: &T,
     ) -> SyncResult<Vec<DeviceId>> {
         let mut session_peers = Vec::new();
-        let mut manager = session_manager.write();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
 
+        // Get timestamp first to avoid holding lock across await
+        let now = time_effects
+            .physical_time()
+            .await
+            .map_err(time_error_to_aura)?
+            .ts_ms
+            / 1000;
+
+        // Now acquire lock and create sessions
+        let mut manager = session_manager.write();
         for &peer in peers {
             match manager.create_session(vec![peer], now) {
                 Ok(_session_id) => {
@@ -972,7 +926,10 @@ impl Service for SyncService {
         Ok(HealthCheck {
             status: health.status,
             message: Some("Sync service operational".to_string()),
-            checked_at: SimpleSyncTimeEffects.current_timestamp().await,
+            checked_at: {
+                let time_effects = SimpleSyncTimeEffects;
+                time_effects.physical_time().await.unwrap().ts_ms / 1000
+            },
             details,
         })
     }
@@ -1061,7 +1018,7 @@ mod tests {
 
         assert!(!service.is_running());
 
-        let now = SimpleSyncTimeEffects.now_instant().await;
+        let now = SimpleSyncTimeEffects::now_instant();
         service.start(now).await.unwrap();
         assert!(service.is_running());
 
@@ -1072,7 +1029,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_service_health_check() {
         let service = SyncService::builder().build().unwrap();
-        let now = SimpleSyncTimeEffects.now_instant().await;
+        let now = SimpleSyncTimeEffects::now_instant();
         service.start(now).await.unwrap();
 
         let health = service.health_check().await.unwrap();

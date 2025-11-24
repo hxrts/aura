@@ -55,7 +55,7 @@ use aura_core::DeviceId;
 
 /// Check rate limit and convert to SyncResult (convenience function)
 ///
-/// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+/// Note: Callers should obtain `now` as Unix timestamp via their time provider
 pub fn check_rate_limit_sync(
     limiter: &mut RateLimiter,
     peer_id: DeviceId,
@@ -71,7 +71,7 @@ pub fn check_rate_limit_sync(
     limiter
         .check_rate_limit(peer_id, cost, now_instant)
         .into_result()
-        .map_err(|e| sync_resource_exhausted("rate_limit", &e.to_string()))
+        .map_err(|e| sync_resource_exhausted("rate_limit", e.to_string()))
 }
 
 /// Create a default rate limiter for sync operations (convenience function)

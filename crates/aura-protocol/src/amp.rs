@@ -7,11 +7,13 @@ use crate::consensus::{commit_fact::ConsensusId as CommitConsensusId, ConsensusI
 use crate::effects::JournalEffects;
 use crate::guards::effect_system_trait::GuardEffectSystem;
 use aura_core::effects::StorageEffects;
+use aura_core::hash::hash;
 use aura_core::identifiers::AuthorityId;
 use aura_core::identifiers::{ChannelId, ContextId};
+use aura_core::time::{OrderTime, TimeStamp};
 use aura_core::{AuraError, Result};
 use aura_journal::{
-    fact::{Fact, FactContent, FactId, JournalNamespace, RelationalFact},
+    fact::{Fact, FactContent, JournalNamespace, RelationalFact},
     reduce_context, ChannelEpochState, FactJournal,
 };
 use serde::{Deserialize, Serialize};
@@ -74,9 +76,14 @@ impl<E: GuardEffectSystem> AmpJournalEffects for E {
     async fn insert_relational_fact(&self, fact: RelationalFact) -> Result<()> {
         let context = fact_context(&fact)?;
         let mut journal = self.fetch_context_journal(context).await?;
+        let ts = TimeStamp::OrderClock(OrderTime(hash(Uuid::new_v4().as_bytes())));
         journal
             .add_fact(Fact {
-                fact_id: FactId::from_uuid(Uuid::new_v4()),
+                order: match &ts {
+                    TimeStamp::OrderClock(id) => id.clone(),
+                    _ => OrderTime([0u8; 32]),
+                },
+                timestamp: ts,
                 content: FactContent::Relational(fact),
             })
             .map_err(|e| AuraError::invalid(format!("failed to add fact: {}", e)))?;
@@ -190,9 +197,14 @@ impl<'a, E: ?Sized + JournalEffects + StorageEffects> AmpContextStore<'a, E> {
     pub async fn insert_relational_fact(&self, fact: RelationalFact) -> Result<()> {
         let context = fact_context(&fact)?;
         let mut journal = self.fetch_context_journal(context).await?;
+        let ts = TimeStamp::OrderClock(OrderTime(hash(Uuid::new_v4().as_bytes())));
         journal
             .add_fact(Fact {
-                fact_id: FactId::from_uuid(Uuid::new_v4()),
+                order: match &ts {
+                    TimeStamp::OrderClock(id) => id.clone(),
+                    _ => OrderTime([0u8; 32]),
+                },
+                timestamp: ts,
                 content: FactContent::Relational(fact),
             })
             .map_err(|e| AuraError::invalid(format!("failed to add fact: {}", e)))?;

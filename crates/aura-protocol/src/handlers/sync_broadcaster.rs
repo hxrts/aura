@@ -300,7 +300,9 @@ impl BroadcasterHandler {
         self.lazy_pull_response(peer_id, cid).await
     }
 
-    async fn push_op_to_peers_with_guard_chain_impl<E: GuardEffectSystem>(
+    async fn push_op_to_peers_with_guard_chain_impl<
+        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+    >(
         &self,
         op: AttestedOp,
         peers: Vec<Uuid>,

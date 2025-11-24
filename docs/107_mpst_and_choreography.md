@@ -1,6 +1,6 @@
 # Multi-party Session Types and Choreography
 
-This document describes the architecture of choreographic protocols in Aura. It explains how global protocols are defined, projected, and executed. It defines the structure of local session types, the integration with the effect system, and the use of guard chains and journal coupling.
+This document describes the architecture of choreographic protocols in Aura. It explains how global protocols are defined, projected, and executed. It defines the structure of local session types, the integration with the [effect system](106_effect_system_and_runtime.md), and the use of [guard chains](109_authorization.md) and journal coupling.
 
 ## 1. DSL and Projection
 
@@ -64,7 +64,7 @@ This annotation specifies a capability requirement and a flow budget cost for th
 
 ## 5. Guard Chain Integration
 
-Each send action in a session type is evaluated through a guard chain. The chain contains `CapGuard`, `FlowGuard`, and `JournalCoupler`. These guards enforce authorization and budget constraints.
+Each send action in a session type is evaluated through a [guard chain](109_authorization.md). The chain contains `CapGuard`, `FlowGuard`, and `JournalCoupler`. These guards enforce authorization and budget constraints.
 
 `CapGuard` checks that the active capabilities satisfy the message requirements. `FlowGuard` checks that flow budget is available for the context and peer. `JournalCoupler` synchronizes journal updates with protocol execution.
 

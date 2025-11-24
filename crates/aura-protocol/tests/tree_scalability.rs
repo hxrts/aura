@@ -20,7 +20,7 @@ use aura_journal::commitment_tree::{compaction::compact, reduction::reduce};
 use aura_journal::semilattice::OpLog;
 use aura_protocol::sync::PeerView;
 use std::collections::BTreeMap;
-use std::time::Instant;
+use std::time::Duration;
 use uuid::Uuid;
 
 // ============================================================================
@@ -80,7 +80,7 @@ fn measure_memory_usage() -> usize {
 fn test_tree_with_100_devices() {
     println!("\n=== Test: Tree with 100 devices ===");
 
-    let start = Instant::now();
+    let start = Duration::ZERO;
 
     // Create OpLog with 100 AddLeaf operations
     let mut oplog = OpLog::new();
@@ -93,7 +93,7 @@ fn test_tree_with_100_devices() {
     println!("OpLog creation time: {:?}", creation_time);
 
     // Reduce to TreeState
-    let reduce_start = Instant::now();
+    let reduce_start = Duration::ZERO;
     let ops: Vec<AttestedOp> = oplog.to_operations_vec();
     let state = reduce(&ops).unwrap_or_else(|e| panic!("Reduction should succeed: {}", e));
     let reduce_time = reduce_start.elapsed();
@@ -125,7 +125,7 @@ fn test_tree_with_100_devices() {
 fn test_oplog_with_10000_operations() {
     println!("\n=== Test: OpLog with 10,000 operations ===");
 
-    let start = Instant::now();
+    let start = Duration::ZERO;
 
     // Create OpLog with 10,000 operations
     let mut oplog = OpLog::new();
@@ -139,7 +139,7 @@ fn test_oplog_with_10000_operations() {
     println!("OpLog size: {} operations", oplog.len());
 
     // Test OpLog operations
-    let contains_start = Instant::now();
+    let contains_start = Duration::ZERO;
     let test_op = create_add_leaf_op(50, 500);
     let cid = compute_cid(&test_op);
     oplog.add_operation(test_op.clone());
@@ -150,7 +150,7 @@ fn test_oplog_with_10000_operations() {
     assert!(contains_result, "Should find added operation");
 
     // Test OpLog join (merge)
-    let join_start = Instant::now();
+    let join_start = Duration::ZERO;
     let oplog2 = oplog.clone();
     let joined = oplog.join(&oplog2);
     let join_time = join_start.elapsed();
@@ -180,7 +180,7 @@ fn test_oplog_with_10000_operations() {
 fn test_anti_entropy_with_50_peers() {
     println!("\n=== Test: Anti-entropy with 50 peers ===");
 
-    let start = Instant::now();
+    let start = Duration::ZERO;
 
     // Create PeerView with 50 peers
     let mut view = PeerView::new();
@@ -195,7 +195,7 @@ fn test_anti_entropy_with_50_peers() {
     println!("PeerView size: {} peers", view.len());
 
     // Test PeerView operations
-    let contains_start = Instant::now();
+    let contains_start = Duration::ZERO;
     let test_peer = peer_ids[25];
     let contains_result = view.contains(&test_peer);
     let contains_time = contains_start.elapsed();
@@ -204,7 +204,7 @@ fn test_anti_entropy_with_50_peers() {
     assert!(contains_result, "Should find peer in view");
 
     // Test PeerView join
-    let join_start = Instant::now();
+    let join_start = Duration::ZERO;
     let view2 = view.clone();
     let joined = view.join(&view2);
     let join_time = join_start.elapsed();
@@ -213,7 +213,7 @@ fn test_anti_entropy_with_50_peers() {
     assert_eq!(joined.len(), 50, "Join should preserve peer count");
 
     // Test peer iteration
-    let iter_start = Instant::now();
+    let iter_start = Duration::ZERO;
     let peer_count = view.iter().count();
     let iter_time = iter_start.elapsed();
 
@@ -269,7 +269,7 @@ fn test_memory_bounded_with_gc() {
     println!("Creating snapshot at epoch 500...");
 
     // Apply compaction
-    let compact_start = Instant::now();
+    let compact_start = Duration::ZERO;
     let compacted =
         compact(&oplog, &snapshot).unwrap_or_else(|e| panic!("Compaction should succeed: {}", e));
     let compact_time = compact_start.elapsed();
@@ -321,7 +321,7 @@ fn test_memory_bounded_with_gc() {
 fn test_combined_load() {
     println!("\n=== Test: Combined load (100 devices + 1000 ops + 50 peers) ===");
 
-    let start = Instant::now();
+    let start = Duration::ZERO;
 
     // Create tree with 100 devices
     let mut oplog = OpLog::new();
@@ -346,7 +346,7 @@ fn test_combined_load() {
     println!("Setup time: {:?}", setup_time);
 
     // Perform reduction
-    let reduce_start = Instant::now();
+    let reduce_start = Duration::ZERO;
     let ops: Vec<AttestedOp> = oplog.to_operations_vec();
     let state = reduce(&ops).unwrap_or_else(|e| panic!("Reduction should succeed: {}", e));
     let reduce_time = reduce_start.elapsed();

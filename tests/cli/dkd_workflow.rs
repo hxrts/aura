@@ -134,7 +134,6 @@ impl DkdTestHarness {
             // For now, skip adding to fact journal since the API is incomplete
             // This would need proper implementation in journal_api.rs
             // let fact = Fact {
-            //     fact_id: FactId::new(),
             //     content: FactContent::Relational(dkd_fact),
             // };
             // journal.fact_journal_mut().add_fact(fact)?;
@@ -195,7 +194,6 @@ impl DkdTestHarness {
             
             // For now, skip adding completion fact since the API is incomplete
             // let completion_fact_obj = Fact {
-            //     fact_id: FactId::new(),
             //     content: FactContent::Relational(completion_fact),
             // };
             // journal.fact_journal_mut().add_fact(completion_fact_obj)?;

@@ -10,13 +10,13 @@
 //! # Architecture Constraints
 //!
 //! **Layer 2 depends only on aura-core** (foundation).
-//! - ✅ Domain logic for journal semantics (no effects)
-//! - ✅ Fact model, validation rules, deterministic reduction
-//! - ✅ Semilattice operations and CRDT laws
-//! - ✅ Implement application effects (e.g., `JournalEffects`) by composing infrastructure effects
-//! - ❌ NO effect handler implementations (use aura-effects or domain crates)
-//! - ❌ NO multi-party coordination (that's aura-protocol)
-//! - ❌ NO runtime composition (that's aura-composition/aura-agent)
+//! - YES Domain logic for journal semantics (no effects)
+//! - YES Fact model, validation rules, deterministic reduction
+//! - YES Semilattice operations and CRDT laws
+//! - YES Implement application effects (e.g., `JournalEffects`) by composing infrastructure effects
+//! - NO effect handler implementations (use aura-effects or domain crates)
+//! - NO multi-party coordination (that's aura-protocol)
+//! - NO runtime composition (that's aura-composition/aura-agent)
 //!
 //! # Key Concepts
 //!
@@ -29,6 +29,9 @@
 // Core modules
 mod error;
 mod types;
+
+// Application effects implementation (Layer 2 pattern)
+pub mod effects;
 
 // Domain modules moved from aura-core
 pub mod effect_api;
@@ -59,7 +62,11 @@ pub mod authority_state;
 pub use error::{AuraError, Result};
 // Note: Sync types moved to aura-sync (Layer 5)
 
+// Application effect handler re-export
+pub use effects::{JournalHandler, JournalHandlerFactory};
+
 // Core type re-exports
+pub use aura_core::time::OrderTime;
 pub use aura_core::Hash32;
 
 // Domain re-exports
@@ -67,8 +74,8 @@ pub use effect_api::{CapabilityId, CapabilityRef, Intent, IntentId, IntentStatus
 
 // New fact-based journal exports
 pub use fact::{
-    AttestedOp as FactAttestedOp, Fact, FactContent, FactId, FlowBudgetFact,
-    Journal as FactJournal, JournalNamespace, RelationalFact, SnapshotFact, TreeOpKind,
+    AttestedOp as FactAttestedOp, Fact, FactContent, Journal as FactJournal, JournalNamespace,
+    RelationalFact, SnapshotFact, TreeOpKind,
 };
 pub use reduction::{reduce_authority, reduce_context, ChannelEpochState, RelationalState};
 // Primary Journal API (STABLE)
@@ -100,7 +107,8 @@ pub use commitment_tree::{
 };
 
 // Causal context re-exports
-pub use causal_context::{ActorId, CausalContext, OperationId, VectorClock};
+pub use aura_core::time::VectorClock;
+pub use causal_context::{ActorId, CausalContext, OperationId, VectorClockExt};
 
 // Selective re-exports to avoid conflicts
 pub use types::{GuardianMetadata, Session};

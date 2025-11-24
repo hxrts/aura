@@ -26,7 +26,6 @@ aura-sync = { path = "../aura-sync" }
 aura-wot = { path = "../aura-wot" }
 aura-chat = { path = "../aura-chat" }
 aura-simulator = { path = "../aura-simulator" }
-aura-frost = { path = "../aura-frost" }
 aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }
 

@@ -1,13 +1,13 @@
-use aura_core::{
-    effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition},
-    AuraError,
+use aura_core::effects::time::{
+    LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeError,
 };
+use aura_core::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
+use aura_core::DeviceId;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::time::Duration;
 use uuid::Uuid;
 
-/// Controllable time source for deterministic testing
+/// Controllable time source for deterministic testing (PhysicalTimeEffects)
 #[derive(Clone)]
 pub struct ControllableTimeSource {
     current_time: Arc<Mutex<u64>>,
@@ -15,6 +15,8 @@ pub struct ControllableTimeSource {
     frozen: Arc<Mutex<bool>>,
     timeouts: Arc<Mutex<HashMap<Uuid, u64>>>, // timeout_id -> expiry_time
     contexts: Arc<Mutex<HashMap<Uuid, bool>>>, // context_id -> active
+    logical_clock: Arc<Mutex<VectorClock>>,
+    order_counter: Arc<Mutex<u64>>, // for deterministic order generation
 }
 
 impl ControllableTimeSource {
@@ -26,6 +28,8 @@ impl ControllableTimeSource {
             frozen: Arc::new(Mutex::new(false)),
             timeouts: Arc::new(Mutex::new(HashMap::new())),
             contexts: Arc::new(Mutex::new(HashMap::new())),
+            logical_clock: Arc::new(Mutex::new(VectorClock::new())),
+            order_counter: Arc::new(Mutex::new(0)),
         }
     }
 
@@ -34,14 +38,14 @@ impl ControllableTimeSource {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
-            .as_secs();
+            .as_millis() as u64;
         Self::new(now)
     }
 
-    /// Advance time by given number of seconds
-    pub fn advance_time(&self, seconds: u64) {
+    /// Advance time by given number of milliseconds
+    pub fn advance_time(&self, millis: u64) {
         let mut current = self.current_time.lock().unwrap();
-        *current += seconds;
+        *current += millis;
     }
 
     /// Set absolute time
@@ -82,153 +86,84 @@ impl ControllableTimeSource {
 }
 
 #[async_trait::async_trait]
-impl TimeEffects for ControllableTimeSource {
-    async fn current_epoch(&self) -> u64 {
-        let current = self.current_time.lock().unwrap();
-        *current
+impl PhysicalTimeEffects for ControllableTimeSource {
+    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+        Ok(PhysicalTime {
+            ts_ms: *self.current_time.lock().unwrap(),
+            uncertainty: None,
+        })
     }
 
-    async fn current_timestamp(&self) -> u64 {
-        let current = self.current_time.lock().unwrap();
-        *current
-    }
-
-    async fn current_timestamp_millis(&self) -> u64 {
-        let current = self.current_time.lock().unwrap();
-        *current * 1000
-    }
-
-    async fn now_instant(&self) -> std::time::Instant {
-        // For controllable time, we use a fixed instant based on current timestamp
-        let base = std::time::Instant::now();
-        let current = self.current_timestamp();
-        base + Duration::from_secs(current)
-    }
-
-    async fn sleep_ms(&self, ms: u64) {
-        // In controllable time, sleep just advances time if not frozen
-        if !self.is_frozen() {
-            let seconds = ms / 1000;
-            if seconds > 0 {
-                self.advance_time(seconds);
-            }
+    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
+        if self.is_frozen() {
+            return Ok(());
         }
-        // Don't actually sleep in tests - return immediately
-    }
-
-    async fn sleep_until(&self, epoch: u64) {
-        let current = self.current_timestamp();
-        if epoch > current && !self.is_frozen() {
-            let wait_time = epoch - current;
-            self.advance_time(wait_time);
-        }
-    }
-
-    async fn delay(&self, duration: Duration) {
-        let ms = duration.as_millis() as u64;
-        self.sleep_ms(ms).await;
-    }
-
-    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
-        self.sleep_ms(duration_ms).await;
+        let scale = *self.time_scale.lock().unwrap();
+        let scaled = (ms as f64 * scale).round() as u64;
+        self.advance_time(scaled);
         Ok(())
     }
+}
 
-    async fn yield_until(&self, condition: WakeCondition) -> Result<(), TimeError> {
-        match condition {
-            WakeCondition::NewEvents => {
-                // In test mode, assume events are always available
-                Ok(())
-            }
-            WakeCondition::EpochReached { target } => {
-                let current = self.current_timestamp() * 1000; // convert to millis
-                if target > current && !self.is_frozen() {
-                    let wait_time = (target - current) / 1000; // convert back to seconds
-                    self.advance_time(wait_time);
-                }
-                Ok(())
-            }
-            WakeCondition::TimeoutAt(timestamp) => {
-                self.sleep_until(timestamp).await;
-                Ok(())
-            }
-            WakeCondition::TimeoutExpired { timeout_id } => {
-                // Check if timeout exists and is expired
-                let timeouts = self.timeouts.lock().unwrap();
-                let current = self.current_timestamp();
-                if let Some(&expiry) = timeouts.get(&timeout_id) {
-                    if current >= expiry {
-                        Ok(())
-                    } else {
-                        Err(TimeError::TimeoutNotFound {
-                            handle: timeout_id.to_string(),
-                        })
-                    }
-                } else {
-                    Err(TimeError::TimeoutNotFound {
-                        handle: timeout_id.to_string(),
-                    })
-                }
-            }
-            WakeCondition::Immediate => Ok(()),
-            WakeCondition::Custom(_) => Ok(()),
-            WakeCondition::EventMatching(_) => Ok(()),
-            WakeCondition::ThresholdEvents { timeout_ms, .. } => {
-                // Simulate waiting for the timeout
-                self.sleep_ms(timeout_ms).await;
-                Ok(())
+#[async_trait::async_trait]
+impl LogicalClockEffects for ControllableTimeSource {
+    async fn logical_now(&self) -> Result<LogicalTime, TimeError> {
+        let clock = self.logical_clock.lock().unwrap();
+        let lamport = clock.iter().map(|(_, counter)| *counter).max().unwrap_or(0);
+        Ok(LogicalTime {
+            vector: clock.clone(),
+            lamport,
+        })
+    }
+
+    async fn logical_advance(
+        &self,
+        observed: Option<&VectorClock>,
+    ) -> Result<LogicalTime, TimeError> {
+        let mut clock = self.logical_clock.lock().unwrap();
+
+        // Merge observed clocks if provided
+        if let Some(obs) = observed {
+            for (device, counter) in obs.iter() {
+                let current = clock.get(device).copied().unwrap_or(0);
+                clock.insert(*device, current.max(*counter));
             }
         }
+
+        // Increment local counter using placeholder device id for tests
+        let test_device = DeviceId::new(); // Create new device ID for testing
+        let current = clock.get(&test_device).copied().unwrap_or(0);
+        clock.insert(test_device, current + 1);
+        let lamport = clock.iter().map(|(_, counter)| *counter).max().unwrap_or(0);
+
+        Ok(LogicalTime {
+            vector: clock.clone(),
+            lamport,
+        })
     }
+}
 
-    async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
-        self.yield_until(condition)
-            .await
-            .map_err(|e| AuraError::internal(format!("Time operation failed: {}", e)))
-    }
+#[async_trait::async_trait]
+impl OrderClockEffects for ControllableTimeSource {
+    async fn order_time(&self) -> Result<OrderTime, TimeError> {
+        let mut counter = self.order_counter.lock().unwrap();
+        *counter += 1;
 
-    async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
-        let timeout_id = Uuid::new_v4();
-        let current = self.current_timestamp();
-        let expiry_time = current + (timeout_ms / 1000); // convert to seconds
+        // Create deterministic order token from counter and current time
+        let mut token = [0u8; 32];
+        let counter_bytes = counter.to_be_bytes();
+        let time_bytes = self.current_time.lock().unwrap().to_be_bytes();
 
-        let mut timeouts = self.timeouts.lock().unwrap();
-        timeouts.insert(timeout_id, expiry_time);
+        // Mix counter and time for deterministic but unique tokens
+        token[..8].copy_from_slice(&counter_bytes);
+        token[8..16].copy_from_slice(&time_bytes);
 
-        timeout_id
-    }
-
-    async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
-        let mut timeouts = self.timeouts.lock().unwrap();
-        if timeouts.remove(&handle).is_some() {
-            Ok(())
-        } else {
-            Err(TimeError::TimeoutNotFound {
-                handle: handle.to_string(),
-            })
+        // Fill remaining bytes with deterministic pattern
+        for i in 16..32 {
+            token[i] = ((i as u64 + *counter + *self.current_time.lock().unwrap()) % 256) as u8;
         }
-    }
 
-    fn is_simulated(&self) -> bool {
-        true
-    }
-
-    fn register_context(&self, context_id: Uuid) {
-        let mut contexts = self.contexts.lock().unwrap();
-        contexts.insert(context_id, true);
-    }
-
-    fn unregister_context(&self, context_id: Uuid) {
-        let mut contexts = self.contexts.lock().unwrap();
-        contexts.remove(&context_id);
-    }
-
-    async fn notify_events_available(&self) {
-        // In test mode, this is a no-op since we control time directly
-    }
-
-    fn resolution_ms(&self) -> u64 {
-        1000 // 1 second resolution for tests
+        Ok(OrderTime(token))
     }
 }
 
@@ -255,11 +190,29 @@ enum TimeAction {
 
 impl TimeScenarioBuilder {
     /// Create new scenario starting at given time
-    pub fn new(start_time: u64) -> Self {
+    pub fn new() -> Self {
         Self {
-            source: ControllableTimeSource::new(start_time),
+            source: ControllableTimeSource::new(0),
             events: Vec::new(),
         }
+    }
+
+    /// Set initial time for the scenario
+    pub fn with_initial_time(self, start_time: u64) -> Self {
+        self.source.set_time(start_time);
+        self
+    }
+
+    /// Configure devices for logical clock testing (placeholder)
+    pub fn with_devices(self, _devices: &[DeviceId]) -> Self {
+        // In practice, would configure device-specific logical clocks
+        self
+    }
+
+    /// Configure time skew tolerance for testing
+    pub fn with_time_skew(self, _skew_ms: u64) -> Self {
+        // In practice, would configure uncertainty ranges
+        self
     }
 
     /// Add time advancement event
@@ -298,8 +251,8 @@ impl TimeScenarioBuilder {
         self
     }
 
-    /// Build the scenario and get the controllable time source
-    pub fn build(mut self) -> ControllableTimeSource {
+    /// Build the scenario and get the time scenario wrapper
+    pub fn build(mut self) -> TimeScenario {
         // Sort events by time
         self.events.sort_by_key(|e| e.at_time);
 
@@ -307,7 +260,7 @@ impl TimeScenarioBuilder {
         for event in self.events {
             self.source.set_time(event.at_time);
             match event.action {
-                TimeAction::AdvanceBy(seconds) => self.source.advance_time(seconds),
+                TimeAction::AdvanceBy(millis) => self.source.advance_time(millis),
                 TimeAction::SetTime(time) => self.source.set_time(time),
                 TimeAction::Freeze => self.source.freeze(),
                 TimeAction::Unfreeze => self.source.unfreeze(),
@@ -315,7 +268,26 @@ impl TimeScenarioBuilder {
             }
         }
 
-        self.source
+        TimeScenario {
+            time_source: self.source,
+        }
+    }
+}
+
+/// Time scenario wrapper for test scenarios
+pub struct TimeScenario {
+    time_source: ControllableTimeSource,
+}
+
+impl TimeScenario {
+    /// Get the underlying time source
+    pub fn time_source(&self) -> &ControllableTimeSource {
+        &self.time_source
+    }
+
+    /// Advance all clocks by the given amount
+    pub fn advance_all_clocks(&self, millis: u64) {
+        self.time_source.advance_time(millis);
     }
 }
 
@@ -342,35 +314,42 @@ mod tests {
 
         // Normal sleep should advance time
         time_source.sleep_ms(5000).await;
-        assert_eq!(time_source.current_timestamp(), 1005);
+        assert_eq!(time_source.current_timestamp(), 6000);
 
         // Frozen sleep should not advance time
         time_source.freeze();
         time_source.sleep_ms(5000).await;
-        assert_eq!(time_source.current_timestamp(), 1005);
+        assert_eq!(time_source.current_timestamp(), 6000);
     }
 
     #[tokio::test]
     async fn test_scenario_builder() {
-        let time_source = TimeScenarioBuilder::new(1000)
+        let scenario = TimeScenarioBuilder::new()
+            .with_initial_time(1000)
             .advance_at(1000, 100)
             .freeze_at(1100)
             .set_time_at(1100, 2000)
             .build();
+        let time_source = scenario.time_source();
 
         assert_eq!(time_source.current_timestamp(), 2000);
         assert!(time_source.is_frozen());
     }
 
     #[tokio::test]
-    async fn test_sleep_until() {
+    async fn test_time_effects_traits() {
         let time_source = ControllableTimeSource::new(1000);
 
-        time_source.sleep_until(1500).await;
-        assert_eq!(time_source.current_timestamp(), 1500);
+        // Test PhysicalTimeEffects trait
+        let physical_time = time_source.physical_time().await.unwrap();
+        assert_eq!(physical_time.ts_ms, 1000);
 
-        // Sleep until past time should not change current time
-        time_source.sleep_until(1200).await;
-        assert_eq!(time_source.current_timestamp(), 1500);
+        // Test LogicalClockEffects trait
+        let logical_time = time_source.logical_now().await.unwrap();
+        assert_eq!(logical_time.lamport, 0);
+
+        // Test OrderClockEffects trait
+        let order_time = time_source.order_time().await.unwrap();
+        assert_eq!(order_time.0.len(), 32); // 32-byte order token
     }
 }

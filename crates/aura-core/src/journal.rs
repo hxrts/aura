@@ -146,7 +146,7 @@ impl Fact {
     /// Insert or update a fact value using CRDT semantics
     pub fn insert(&mut self, key: impl Into<String>, value: FactValue) {
         let key = key.into();
-        let timestamp = crate::current_unix_timestamp();
+        let timestamp = 0;
         let actor_id = std::env::var("AURA_DEVICE_ID").unwrap_or_else(|_| "localhost".to_string()); // Device ID from environment or localhost default
         let op_id = format!("{}:{}:{}", actor_id, timestamp, key);
 
@@ -192,7 +192,7 @@ impl Fact {
     /// Remove a fact value (creates remove operation)
     pub fn remove(&mut self, key: impl Into<String>) {
         let key = key.into();
-        let timestamp = crate::current_unix_timestamp();
+        let timestamp = 0;
         let actor_id = "local".to_string();
         let op_id = format!("{}:{}:remove:{}", actor_id, timestamp, key);
 
@@ -233,6 +233,15 @@ impl Fact {
         }
 
         self.entries.lww_map.get(key).map(|v| &v.value)
+    }
+
+    /// Iterate over all key/value pairs honoring removals
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &FactValue)> {
+        self.entries
+            .lww_map
+            .iter()
+            .filter(move |(k, _)| !self.is_key_removed(k))
+            .map(|(k, v)| (k, &v.value))
     }
 
     /// Check if a key has been removed according to OR-Set semantics

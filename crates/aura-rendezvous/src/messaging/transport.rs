@@ -10,9 +10,11 @@ use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_protocol::effects::AuraEffects;
 use aura_protocol::guards::effect_system_trait::GuardEffectSystem;
 use aura_protocol::guards::send_guard::create_send_guard;
+use futures::executor;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 /// Real NetworkTransport implementation using aura-effects transport handlers
@@ -49,7 +51,7 @@ impl NetworkTransport {
     }
 
     /// Send data to a specific peer using guard chain and network effect system
-    pub async fn send_with_guard_chain<E: GuardEffectSystem>(
+    pub async fn send_with_guard_chain<E: GuardEffectSystem + aura_core::PhysicalTimeEffects>(
         &self,
         recipient: &DeviceId,
         data: Vec<u8>,
@@ -178,7 +180,9 @@ impl NetworkTransport {
     }
 
     /// Broadcast a message to all connected peers using guard chain
-    pub async fn broadcast_with_guard_chain<E: GuardEffectSystem>(
+    pub async fn broadcast_with_guard_chain<
+        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+    >(
         &self,
         data: Vec<u8>,
         effect_system: &E,
@@ -289,6 +293,7 @@ pub enum TransportMethod {
 }
 
 /// Transport answer payload for rendezvous
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransportAnswerPayload {
     /// Device ID answering the offer
@@ -304,7 +309,6 @@ pub struct TransportAnswerPayload {
 }
 
 /// SBB transport bridge connecting flooding to actual transport
-#[derive(Debug)]
 pub struct SbbTransportBridge {
     /// SBB flooding coordinator
     flooding_coordinator: Arc<RwLock<SbbFloodingCoordinator>>,
@@ -312,6 +316,16 @@ pub struct SbbTransportBridge {
     transport_sender: Option<BoxedTransportSender>,
     /// Pending transport offers we've sent (waiting for answers)
     pending_offers: Arc<RwLock<HashMap<DeviceId, TransportOfferPayload>>>,
+}
+
+impl std::fmt::Debug for SbbTransportBridge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SbbTransportBridge")
+            .field("flooding_coordinator", &"<SbbFloodingCoordinator>")
+            .field("transport_sender", &self.transport_sender)
+            .field("pending_offers", &self.pending_offers)
+            .finish()
+    }
 }
 
 /// Transport sender interface (placeholder - would integrate with real transport)
@@ -334,8 +348,10 @@ pub struct MockTransportSender {
 impl SbbTransportBridge {
     /// Create new SBB transport bridge
     pub fn new(device_id: DeviceId, effects: Arc<dyn AuraEffects>) -> Self {
-        let flooding_coordinator =
-            Arc::new(RwLock::new(SbbFloodingCoordinator::new(device_id, effects)));
+        let flooding_coordinator = Arc::new(RwLock::new(SbbFloodingCoordinator::new(
+            device_id,
+            effects.clone(),
+        )));
 
         Self {
             flooding_coordinator,
@@ -350,9 +366,11 @@ impl SbbTransportBridge {
         transport: Arc<RwLock<NetworkTransport>>,
         effects: Arc<dyn AuraEffects>,
     ) -> Self {
-        let flooding_coordinator =
-            Arc::new(RwLock::new(SbbFloodingCoordinator::new(device_id, effects)));
-        let sender = NetworkTransportSender::new(transport);
+        let flooding_coordinator = Arc::new(RwLock::new(SbbFloodingCoordinator::new(
+            device_id,
+            effects.clone(),
+        )));
+        let sender = NetworkTransportSender::new(transport, effects.clone());
 
         Self {
             flooding_coordinator,
@@ -398,7 +416,7 @@ impl SbbTransportBridge {
 
         // Flood through SBB
         let mut coordinator = self.flooding_coordinator.write().await;
-        let now = crate::sbb::current_timestamp();
+        let now = coordinator.current_time_secs().await;
         let result = coordinator.flood_envelope(envelope, None, now).await?;
 
         match result {
@@ -440,7 +458,7 @@ impl SbbTransportBridge {
     ) -> AuraResult<()> {
         // Process through flooding coordinator for further propagation
         let mut coordinator = self.flooding_coordinator.write().await;
-        let now = crate::sbb::current_timestamp();
+        let now = coordinator.current_time_secs().await;
         let _result = coordinator.flood_envelope(envelope, from_peer, now).await?;
 
         // TODO: If this device is interested in the offer, process it
@@ -477,6 +495,7 @@ impl SbbTransportBridge {
     }
 
     /// Check if this device should respond to a transport offer
+    #[allow(dead_code)]
     async fn should_respond_to_offer(
         &self,
         offer: &TransportOfferPayload,
@@ -488,6 +507,7 @@ impl SbbTransportBridge {
     }
 
     /// Create and send transport answer for an offer
+    #[allow(dead_code)]
     async fn create_and_send_transport_answer(
         &self,
         offer: &TransportOfferPayload,
@@ -502,24 +522,19 @@ impl SbbTransportBridge {
         let answer = TransportAnswerPayload {
             device_id: coordinator.device_id(),
             selected_method: selected_method.clone(),
-            expires_at: crate::sbb::current_timestamp() + 300, // 5 minutes
+            expires_at: self
+                .flooding_coordinator
+                .read()
+                .await
+                .current_time_secs()
+                .await
+                + 300, // 5 minutes
             connection_params: self.get_connection_params(&selected_method).await,
             nonce: self.generate_nonce(),
         };
 
         // Send answer via SBB flooding
         self.send_transport_answer(answer, offer.device_id).await
-    }
-
-    /// Check if we should accept a transport offer
-    async fn should_accept_offer(
-        &self,
-        offer: &TransportOfferPayload,
-        coordinator: &SbbFloodingCoordinator,
-    ) -> bool {
-        // Accept offers from friends or guardians
-        coordinator.friends().contains(&offer.device_id)
-            || coordinator.guardians().contains(&offer.device_id)
     }
 
     /// Select the best transport method from available options
@@ -529,35 +544,24 @@ impl SbbTransportBridge {
     ) -> AuraResult<TransportMethod> {
         // Prefer QUIC, then WebSocket, then TCP
         for method in methods {
-            if let TransportMethod::Quic { .. } = method { return Ok(method.clone()) }
+            if let TransportMethod::Quic { .. } = method {
+                return Ok(method.clone());
+            }
         }
         for method in methods {
-            if let TransportMethod::WebSocket { .. } = method { return Ok(method.clone()) }
+            if let TransportMethod::WebSocket { .. } = method {
+                return Ok(method.clone());
+            }
         }
         for method in methods {
-            if let TransportMethod::Tcp { .. } = method { return Ok(method.clone()) }
+            if let TransportMethod::Tcp { .. } = method {
+                return Ok(method.clone());
+            }
         }
 
         Err(AuraError::invalid(
             "No supported transport methods available",
         ))
-    }
-
-    /// Create transport answer for an offer
-    async fn create_transport_answer(
-        &self,
-        offer: &TransportOfferPayload,
-        selected_method: &TransportMethod,
-    ) -> AuraResult<TransportAnswerPayload> {
-        let coordinator = self.flooding_coordinator.read().await;
-
-        Ok(TransportAnswerPayload {
-            device_id: coordinator.device_id(),
-            selected_method: selected_method.clone(),
-            expires_at: crate::sbb::current_timestamp() + 300, // 5 minutes
-            connection_params: self.get_connection_params(selected_method).await,
-            nonce: self.generate_nonce(),
-        })
     }
 
     /// Send transport answer via SBB flooding
@@ -575,71 +579,11 @@ impl SbbTransportBridge {
 
         // Flood through SBB
         let mut coordinator = self.flooding_coordinator.write().await;
-        let now = crate::sbb::current_timestamp();
+        let now = coordinator.current_time_secs().await;
         coordinator.flood_envelope(envelope, None, now).await?;
 
         tracing::info!("Sent transport answer to device {}", target_device);
         Ok(())
-    }
-
-    /// Establish connection using selected transport method
-    async fn establish_connection(
-        &self,
-        method: &TransportMethod,
-        target_device: &DeviceId,
-    ) -> AuraResult<()> {
-        match method {
-            TransportMethod::WebSocket { url } => {
-                tracing::info!(
-                    "Establishing WebSocket connection to {} at {}",
-                    target_device,
-                    url
-                );
-                // TODO: Implement actual WebSocket connection
-                Ok(())
-            }
-            TransportMethod::Quic { addr, port } => {
-                tracing::info!(
-                    "Establishing QUIC connection to {} at {}:{}",
-                    target_device,
-                    addr,
-                    port
-                );
-                // TODO: Implement actual QUIC connection
-                Ok(())
-            }
-            TransportMethod::Tcp { addr, port } => {
-                tracing::info!(
-                    "Establishing TCP connection to {} at {}:{}",
-                    target_device,
-                    addr,
-                    port
-                );
-                // TODO: Implement actual TCP connection
-                Ok(())
-            }
-        }
-    }
-
-    /// Get pending offer for a device
-    async fn get_pending_offer(&self, device_id: &DeviceId) -> Option<TransportOfferPayload> {
-        self.pending_offers.read().await.get(device_id).cloned()
-    }
-
-    /// Remove pending offer for a device
-    async fn remove_pending_offer(&self, device_id: &DeviceId) {
-        self.pending_offers.write().await.remove(device_id);
-    }
-
-    /// Check if transport method selection is valid
-    fn is_valid_method_selection(
-        &self,
-        selected: &TransportMethod,
-        offered: &[TransportMethod],
-    ) -> bool {
-        offered
-            .iter()
-            .any(|method| std::mem::discriminant(method) == std::mem::discriminant(selected))
     }
 
     /// Get connection parameters for transport method
@@ -699,16 +643,232 @@ impl MockTransportSender {
 pub struct NetworkTransportSender {
     /// Reference to the network transport
     transport: Arc<RwLock<NetworkTransport>>,
+    /// Effect system used for guard chain enforcement
+    effects: GuardEffectArc,
+}
+
+/// Local wrapper to provide GuardEffectSystem over Arc<dyn AuraEffects>
+#[derive(Clone)]
+struct GuardEffectArc {
+    inner: Arc<dyn AuraEffects>,
+}
+
+impl GuardEffectArc {
+    fn new(inner: Arc<dyn AuraEffects>) -> Self {
+        Self { inner }
+    }
+}
+
+impl aura_protocol::guards::effect_system_trait::GuardEffectSystem for GuardEffectArc {
+    fn authority_id(&self) -> AuthorityId {
+        match executor::block_on(async { self.inner.get_config("authority_id").await }) {
+            Ok(id_str) => id_str.parse().unwrap_or_else(|_| AuthorityId::new()),
+            Err(_) => AuthorityId::new(),
+        }
+    }
+
+    fn execution_mode(&self) -> aura_core::effects::ExecutionMode {
+        AuraEffects::execution_mode(self.inner.as_ref())
+    }
+
+    fn get_metadata(&self, key: &str) -> Option<String> {
+        executor::block_on(async { self.inner.get_config(key).await }).ok()
+    }
+
+    fn can_perform_operation(&self, _operation: &str) -> bool {
+        true
+    }
+}
+
+#[async_trait::async_trait]
+impl aura_core::effects::PhysicalTimeEffects for GuardEffectArc {
+    async fn physical_time(
+        &self,
+    ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+        let ts_ms = aura_core::effects::time::TimeEffects::current_timestamp(&*self.inner).await;
+        Ok(aura_core::time::PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        })
+    }
+
+    async fn sleep_ms(&self, ms: u64) -> Result<(), aura_core::effects::TimeError> {
+        tokio::time::sleep(Duration::from_millis(ms)).await;
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl aura_core::effects::FlowBudgetEffects for GuardEffectArc {
+    async fn charge_flow(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+        cost: u32,
+    ) -> AuraResult<aura_core::Receipt> {
+        // Journal-backed charge to honor charge-before-send semantics
+        let updated_budget = self.inner.charge_flow_budget(context, peer, cost).await?;
+
+        Ok(aura_core::Receipt::new(
+            *context,
+            AuthorityId::new(),
+            *peer,
+            updated_budget.epoch,
+            cost,
+            updated_budget.spent,
+            aura_core::Hash32::default(),
+            Vec::new(),
+        ))
+    }
+}
+
+#[async_trait::async_trait]
+impl aura_core::effects::RandomEffects for GuardEffectArc {
+    async fn random_bytes(&self, len: usize) -> Vec<u8> {
+        self.inner.random_bytes(len).await
+    }
+
+    async fn random_bytes_32(&self) -> [u8; 32] {
+        self.inner.random_bytes_32().await
+    }
+
+    async fn random_u64(&self) -> u64 {
+        self.inner.random_u64().await
+    }
+
+    async fn random_range(&self, min: u64, max: u64) -> u64 {
+        self.inner.random_range(min, max).await
+    }
+
+    async fn random_uuid(&self) -> uuid::Uuid {
+        self.inner.random_uuid().await
+    }
+}
+
+#[async_trait::async_trait]
+#[async_trait::async_trait]
+impl aura_core::effects::StorageEffects for GuardEffectArc {
+    async fn store(
+        &self,
+        key: &str,
+        value: Vec<u8>,
+    ) -> Result<(), aura_core::effects::StorageError> {
+        self.inner.store(key, value).await
+    }
+
+    async fn retrieve(
+        &self,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
+        self.inner.retrieve(key).await
+    }
+
+    async fn remove(&self, key: &str) -> Result<bool, aura_core::effects::StorageError> {
+        self.inner.remove(key).await
+    }
+
+    async fn list_keys(
+        &self,
+        prefix: Option<&str>,
+    ) -> Result<Vec<String>, aura_core::effects::StorageError> {
+        self.inner.list_keys(prefix).await
+    }
+
+    async fn exists(&self, key: &str) -> Result<bool, aura_core::effects::StorageError> {
+        self.inner.exists(key).await
+    }
+
+    async fn store_batch(
+        &self,
+        pairs: std::collections::HashMap<String, Vec<u8>>,
+    ) -> Result<(), aura_core::effects::StorageError> {
+        self.inner.store_batch(pairs).await
+    }
+
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<std::collections::HashMap<String, Vec<u8>>, aura_core::effects::StorageError> {
+        self.inner.retrieve_batch(keys).await
+    }
+
+    async fn clear_all(&self) -> Result<(), aura_core::effects::StorageError> {
+        self.inner.clear_all().await
+    }
+
+    async fn stats(
+        &self,
+    ) -> Result<aura_core::effects::StorageStats, aura_core::effects::StorageError> {
+        self.inner.stats().await
+    }
+}
+
+#[async_trait::async_trait]
+impl aura_protocol::effects::JournalEffects for GuardEffectArc {
+    async fn merge_facts(
+        &self,
+        target: &aura_core::Journal,
+        delta: &aura_core::Journal,
+    ) -> Result<aura_core::Journal, AuraError> {
+        self.inner.merge_facts(target, delta).await
+    }
+
+    async fn refine_caps(
+        &self,
+        target: &aura_core::Journal,
+        refinement: &aura_core::Journal,
+    ) -> Result<aura_core::Journal, AuraError> {
+        self.inner.refine_caps(target, refinement).await
+    }
+
+    async fn get_journal(&self) -> Result<aura_core::Journal, AuraError> {
+        self.inner.get_journal().await
+    }
+
+    async fn persist_journal(&self, journal: &aura_core::Journal) -> Result<(), AuraError> {
+        self.inner.persist_journal(journal).await
+    }
+
+    async fn get_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+    ) -> Result<aura_core::FlowBudget, AuraError> {
+        self.inner.get_flow_budget(context, peer).await
+    }
+
+    async fn update_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+        budget: &aura_core::FlowBudget,
+    ) -> Result<aura_core::FlowBudget, AuraError> {
+        self.inner.update_flow_budget(context, peer, budget).await
+    }
+
+    async fn charge_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+        cost: u32,
+    ) -> Result<aura_core::FlowBudget, AuraError> {
+        self.inner.charge_flow_budget(context, peer, cost).await
+    }
 }
 
 impl NetworkTransportSender {
     /// Create new transport sender from NetworkTransport
-    pub fn new(transport: Arc<RwLock<NetworkTransport>>) -> Self {
-        Self { transport }
+    pub fn new(transport: Arc<RwLock<NetworkTransport>>, effects: Arc<dyn AuraEffects>) -> Self {
+        Self {
+            transport,
+            effects: GuardEffectArc::new(effects),
+        }
     }
 
     /// Send message with guard chain enforcement
-    pub async fn send_to_peer_with_guard_chain<E: GuardEffectSystem>(
+    pub async fn send_to_peer_with_guard_chain<
+        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+    >(
         &self,
         peer: DeviceId,
         message: SbbMessageType,
@@ -736,18 +896,16 @@ impl std::fmt::Debug for NetworkTransportSender {
 #[async_trait::async_trait]
 impl TransportSender for NetworkTransportSender {
     async fn send_to_peer(&self, peer: DeviceId, message: SbbMessageType) -> AuraResult<()> {
-        tracing::warn!(
-            "NetworkTransportSender::send_to_peer called without guard chain - this bypasses security"
-        );
-
         // Serialize SBB message
         let payload = bincode::serialize(&message).map_err(|e| {
             AuraError::serialization(format!("Failed to serialize SBB message: {}", e))
         })?;
 
-        // Send via network transport (legacy method)
+        // Send via network transport with guard chain enforcement
         let transport = self.transport.read().await;
-        transport.send(&peer, payload).await
+        transport
+            .send_with_guard_chain(&peer, payload, &self.effects)
+            .await
     }
 
     async fn is_peer_reachable(&self, peer: &DeviceId) -> bool {
@@ -943,12 +1101,13 @@ mod tests {
         let fixture = DeviceTestFixture::new(0);
         let device_id = fixture.device_id();
         let builder = TestEffectsBuilder::for_unit_tests(device_id);
-        let system = builder.build().expect("Failed to build test effect system");
-        let effects = Arc::new(system) as Arc<dyn NetworkEffects>;
+        let system = Arc::new(builder.build().expect("Failed to build test effect system"));
+        let effects = system.clone() as Arc<dyn NetworkEffects>;
+        let guard_effects = system.clone() as Arc<dyn AuraEffects>;
         let context_id = ContextId::new();
         let transport = NetworkTransport::new(device_id, effects, context_id);
 
-        let sender = NetworkTransportSender::new(transport);
+        let sender = NetworkTransportSender::new(transport, guard_effects);
 
         // Should create successfully
         let unreachable_peer = DeviceId::new();
@@ -966,11 +1125,12 @@ mod tests {
 
         // Set up real transport sender using testkit
         let builder = TestEffectsBuilder::for_unit_tests(device_id);
-        let system = builder.build().expect("Failed to build test effect system");
-        let network_effects = Arc::new(system) as Arc<dyn NetworkEffects>;
+        let system = Arc::new(builder.build().expect("Failed to build test effect system"));
+        let network_effects = system.clone() as Arc<dyn NetworkEffects>;
+        let guard_effects = system.clone() as Arc<dyn AuraEffects>;
         let context_id = ContextId::new();
         let transport = NetworkTransport::new(device_id, network_effects, context_id);
-        let sender = NetworkTransportSender::new(transport);
+        let sender = NetworkTransportSender::new(transport, guard_effects);
 
         bridge.set_transport_sender(Box::new(sender));
 

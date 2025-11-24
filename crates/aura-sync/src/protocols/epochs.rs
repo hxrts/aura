@@ -13,6 +13,7 @@ use std::time::SystemTime;
 /// Epoch rotation coordinator using choreographic protocols
 #[derive(Debug, Clone)]
 pub struct EpochRotationCoordinator {
+    #[allow(dead_code)]
     device_id: DeviceId,
     current_epoch: u64,
     epoch_config: EpochConfig,
@@ -113,12 +114,12 @@ impl EpochRotationCoordinator {
     pub fn initiate_rotation(
         &mut self,
         participants: Vec<DeviceId>,
-        context_id: ContextId,
+        _context_id: ContextId,
     ) -> Result<String, SyncError> {
         if participants.len() < self.epoch_config.rotation_threshold {
             return Err(sync_protocol_error(
                 "epochs",
-                &format!(
+                format!(
                     "Insufficient participants: {} < {}",
                     participants.len(),
                     self.epoch_config.rotation_threshold
@@ -159,7 +160,7 @@ impl EpochRotationCoordinator {
             .ok_or_else(|| {
                 sync_protocol_error(
                     "epochs",
-                    &format!("Rotation not found: {}", confirmation.rotation_id),
+                    format!("Rotation not found: {}", confirmation.rotation_id),
                 )
             })?;
 
@@ -167,7 +168,7 @@ impl EpochRotationCoordinator {
         if confirmation.ready_for_epoch != rotation.target_epoch {
             return Err(sync_protocol_error(
                 "epochs",
-                &format!(
+                format!(
                     "Epoch mismatch: expected {}, got {}",
                     rotation.target_epoch, confirmation.ready_for_epoch
                 ),
@@ -194,12 +195,12 @@ impl EpochRotationCoordinator {
         let rotation = self
             .pending_rotations
             .get_mut(rotation_id)
-            .ok_or_else(|| SyncError::not_found(&format!("Rotation not found: {}", rotation_id)))?;
+            .ok_or_else(|| SyncError::not_found(format!("Rotation not found: {}", rotation_id)))?;
 
         if rotation.status != RotationStatus::Synchronizing {
             return Err(sync_protocol_error(
                 "epochs",
-                &format!("Invalid rotation status: {:?}", rotation.status),
+                format!("Invalid rotation status: {:?}", rotation.status),
             ));
         }
 

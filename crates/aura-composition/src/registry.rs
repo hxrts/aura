@@ -369,6 +369,11 @@ impl EffectRegistry {
         Ok(())
     }
 
+    /// Get the execution mode of the registry
+    pub fn execution_mode(&self) -> ExecutionMode {
+        self.default_execution_mode
+    }
+
     /// Get a summary of registry capabilities
     pub fn capability_summary(&self) -> RegistryCapabilities {
         let mut capabilities = RegistryCapabilities {

@@ -178,7 +178,7 @@ impl ProtocolGuard {
         operation: F,
     ) -> AuraResult<GuardedExecutionResult<T>>
     where
-        E: GuardEffectSystem,
+        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {

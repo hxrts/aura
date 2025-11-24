@@ -4,11 +4,9 @@
 //! maintaining state, device identity, execution mode, and operation tracking.
 
 use crate::guards::FlowHint;
-use aura_core::{
-    effects::{RandomEffects, TimeEffects},
-    identifiers::{DeviceId, SessionId},
-    AccountId,
-};
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
+use aura_core::identifiers::{DeviceId, SessionId};
+use aura_core::AccountId;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -76,7 +74,7 @@ impl AuraContext {
     ) -> Self
     where
         R: RandomEffects,
-        T: TimeEffects,
+        T: PhysicalTimeEffects,
     {
         // Generate UUID using random effects
         let bytes_vec = random_effects.random_bytes(16).await;
@@ -85,7 +83,11 @@ impl AuraContext {
         let operation_id = Uuid::from_bytes(bytes);
 
         // Get current time using time effects
-        let epoch = time_effects.current_timestamp().await;
+        let epoch = time_effects
+            .physical_time()
+            .await
+            .map(|p| p.ts_ms)
+            .unwrap_or_default();
 
         Self {
             device_id,

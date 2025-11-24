@@ -23,6 +23,7 @@ aura-quint = { path = "../aura-quint" }
 # Cryptography
 blake3 = { workspace = true }
 ed25519-dalek = { workspace = true }
+frost-ed25519 = { workspace = true }
 
 # Core dependencies
 uuid = { workspace = true }

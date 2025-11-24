@@ -214,7 +214,9 @@ impl SearchIndexEntry {
             content_id,
             terms,
             required_capabilities,
-            timestamp: aura_core::time::current_unix_timestamp(),
+            // TODO: Replace with PhysicalTimeEffects from context
+            // Using placeholder to avoid violating effect system architecture
+            timestamp: 0, // Will be replaced with proper time from effect context
         }
     }
 

@@ -111,15 +111,15 @@ fn test_vec_join_laws() {
 #[test]
 fn test_btreemap_join_laws() {
     let mut a = BTreeMap::new();
-    a.insert("key1".to_string(), 10u64);
-    a.insert("key2".to_string(), 20u64);
+    a.insert(String::from("key1"), 10u64);
+    a.insert(String::from("key2"), 20u64);
 
     let mut b = BTreeMap::new();
-    b.insert("key2".to_string(), 15u64);
-    b.insert("key3".to_string(), 30u64);
+    b.insert(String::from("key2"), 15u64);
+    b.insert(String::from("key3"), 30u64);
 
     let mut c = BTreeMap::new();
-    c.insert("key1".to_string(), 5u64);
+    c.insert(String::from("key1"), 5u64);
 
     // Associativity: (a ⊔ b) ⊔ c = a ⊔ (b ⊔ c)
     assert_eq!(a.join(&b).join(&c), a.join(&b.join(&c)));

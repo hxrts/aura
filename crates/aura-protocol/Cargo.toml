@@ -28,7 +28,7 @@ aura-transport = { path = "../aura-transport" }
 aura-mpst = { path = "../aura-mpst" }
 aura-macros = { path = "../aura-macros" }
 aura-store = { path = "../aura-store" }
-aura-frost = { path = "../aura-frost" }
+frost-ed25519 = { workspace = true }
 
 # Curve operations
 curve25519-dalek = { workspace = true }

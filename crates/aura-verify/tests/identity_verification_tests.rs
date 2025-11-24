@@ -8,7 +8,6 @@
 use aura_core::Ed25519SigningKey;
 use aura_core::{identifiers::DeviceId, GuardianId};
 use aura_verify::{verify_identity_proof, IdentityProof, KeyMaterial};
-use signature::Signer;
 use uuid::Uuid;
 
 /// Test that device identity verification works correctly

@@ -1,5 +1,6 @@
 // Core types for the CRDT effect_api
 
+use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 
@@ -29,8 +30,8 @@ pub struct GuardianMetadata {
     pub email: String,
     /// Ed25519 public key for signature verification
     pub public_key: Ed25519VerifyingKey,
-    /// Timestamp when this guardian was added
-    pub added_at: u64,
+    /// Time when this guardian was added (using unified time system)
+    pub added_at: TimeStamp,
     /// Policy controlling guardian recovery actions
     pub policy: GuardianPolicy,
 }
@@ -79,10 +80,10 @@ pub struct Session {
     pub protocol_type: ProtocolType,
     /// List of participants in this session
     pub participants: Vec<ParticipantId>,
-    /// Timestamp when session was started
-    pub started_at: u64,
-    /// Timestamp when session will expire
-    pub expires_at: u64,
+    /// Time when session was started (using unified time system)
+    pub started_at: TimeStamp,
+    /// Time when session will expire (using unified time system)
+    pub expires_at: TimeStamp,
     /// Current status of the session
     pub status: SessionStatus,
     /// Additional metadata stored with the session
@@ -96,23 +97,31 @@ impl Session {
     /// * `session_id` - Unique identifier for the session
     /// * `protocol_type` - Type of protocol being executed
     /// * `participants` - List of participating device IDs
-    /// * `started_at` - Timestamp when session starts
-    /// * `ttl_in_epochs` - Time-to-live in epochs
-    /// * `_timestamp` - Current timestamp (unused)
+    /// * `started_at` - Time when session starts (using unified time system)
+    /// * `ttl_ms` - Time-to-live in milliseconds
     pub fn new(
         session_id: SessionId,
         protocol_type: ProtocolType,
         participants: Vec<ParticipantId>,
-        started_at: u64,
-        ttl_in_epochs: u64,
-        _timestamp: u64,
+        started_at: TimeStamp,
+        ttl_ms: u64,
     ) -> Self {
+        // Calculate expiration time based on the type of timestamp
+        let expires_at = match &started_at {
+            TimeStamp::PhysicalClock(physical) => TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: physical.ts_ms + ttl_ms,
+                uncertainty: physical.uncertainty,
+            }),
+            // For non-physical timestamps, use the same timestamp type but with a deterministic offset
+            _ => started_at.clone(), // For simplicity, will implement proper offset later if needed
+        };
+
         Self {
             session_id,
             protocol_type,
             participants,
             started_at,
-            expires_at: started_at + ttl_in_epochs,
+            expires_at,
             status: SessionStatus::Active,
             metadata: std::collections::BTreeMap::new(),
         }
@@ -122,8 +131,7 @@ impl Session {
     ///
     /// # Arguments
     /// * `status` - New status for the session
-    /// * `_timestamp` - Current timestamp (unused)
-    pub fn update_status(&mut self, status: SessionStatus, _timestamp: u64) {
+    pub fn update_status(&mut self, status: SessionStatus) {
         self.status = status;
     }
 
@@ -131,9 +139,8 @@ impl Session {
     ///
     /// # Arguments
     /// * `_outcome` - Protocol outcome (unused)
-    /// * `timestamp` - Timestamp of completion
-    pub fn complete(&mut self, _outcome: SessionOutcome, timestamp: u64) {
-        self.update_status(SessionStatus::Completed, timestamp);
+    pub fn complete(&mut self, _outcome: SessionOutcome) {
+        self.update_status(SessionStatus::Completed);
     }
 
     /// Abort the session due to failure
@@ -141,9 +148,8 @@ impl Session {
     /// # Arguments
     /// * `_reason` - Reason for abort (unused)
     /// * `_blamed_party` - Party responsible for failure (unused)
-    /// * `timestamp` - Timestamp of abort
-    pub fn abort(&mut self, _reason: &str, _blamed_party: Option<ParticipantId>, timestamp: u64) {
-        self.update_status(SessionStatus::Failed, timestamp);
+    pub fn abort(&mut self, _reason: &str, _blamed_party: Option<ParticipantId>) {
+        self.update_status(SessionStatus::Failed);
     }
 
     /// Check if session is in a terminal state
@@ -160,17 +166,21 @@ impl Session {
     /// Check if session has timed out
     ///
     /// # Arguments
-    /// * `current_epoch` - Current epoch for comparison
-    pub fn is_timed_out(&self, current_epoch: u64) -> bool {
-        current_epoch > self.expires_at
+    /// * `current_time` - Current time for comparison
+    pub fn is_timed_out(&self, current_time: &TimeStamp) -> bool {
+        use aura_core::time::{OrderingPolicy, TimeOrdering};
+        matches!(
+            current_time.compare(&self.expires_at, OrderingPolicy::DeterministicTieBreak),
+            TimeOrdering::After
+        )
     }
 
     /// Check if session has expired
     ///
     /// # Arguments
-    /// * `current_epoch` - Current epoch for comparison
-    pub fn is_expired(&self, current_epoch: u64) -> bool {
-        self.is_timed_out(current_epoch)
+    /// * `current_time` - Current time for comparison
+    pub fn is_expired(&self, current_time: &TimeStamp) -> bool {
+        self.is_timed_out(current_time)
     }
 }
 

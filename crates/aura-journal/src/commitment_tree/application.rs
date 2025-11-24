@@ -15,6 +15,7 @@
 //! Any failure in these steps rejects the operation entirely.
 
 use super::{reduction::ReductionError, TreeState};
+use aura_core::crypto::tree_signing::tree_op_binding_message;
 use aura_core::hash;
 use aura_core::{
     commit_leaf, AttestedOp, CryptoEffects, Hash32, LeafId, NodeIndex, Policy, TreeOp, TreeOpKind,
@@ -153,7 +154,7 @@ fn validate_acyclicity(state: &TreeState) -> ApplicationResult<()> {
 ///
 /// ## Steps
 ///
-/// 1. Verify aggregate signature (FROST verification implemented ✅)
+/// 1. Verify aggregate signature
 /// 2. Verify parent binding matches current state
 /// 3. Apply the operation to tree state
 /// 4. Recompute commitments for affected nodes
@@ -213,9 +214,9 @@ fn apply_verified_common(state: &mut TreeState, attested: &AttestedOp) -> Applic
     Ok(())
 }
 
-/// Verify aggregate FROST signature for attested operation
+/// Verify aggregate threshold signature for attested operation
 ///
-/// Verifies the FROST threshold signature on the operation to ensure it was
+/// Verifies the threshold signature on the operation to ensure it was
 /// properly authorized by the required threshold of devices.
 async fn verify_aggregate_signature(
     attested: &AttestedOp,
@@ -241,10 +242,10 @@ async fn verify_aggregate_signature(
     let group_public_key = vec![0u8; 32]; // Placeholder
 
     // Compute binding message: H("TREE_OP_SIG" || node_id || epoch || policy_hash || op_bytes)
-    let binding_message = compute_binding_message(attested, state)?;
+    let binding_message = tree_op_binding_message(attested, state.current_epoch());
 
-    // Verify aggregate signature using FROST verification
-    verify_frost_signature(
+    // Verify aggregate signature using effect-based verification
+    verify_threshold_signature(
         signature,
         &binding_message,
         &group_public_key,
@@ -271,68 +272,8 @@ fn extract_group_public_key(state: &TreeState, node_id: &NodeIndex) -> Applicati
     Ok(vec![0u8; 32])
 }
 
-/// Compute binding message for FROST signature verification
-fn compute_binding_message(attested: &AttestedOp, state: &TreeState) -> ApplicationResult<Vec<u8>> {
-    let mut h = hash::hasher();
-
-    // Add domain separator
-    h.update(b"TREE_OP_SIG");
-
-    // Add node ID
-    // Hash the operation details directly from the TreeOp
-    h.update(&attested.op.parent_epoch.to_le_bytes());
-    h.update(&attested.op.parent_commitment);
-    h.update(&attested.op.version.to_le_bytes());
-
-    // Add current epoch
-    h.update(&state.epoch.to_be_bytes());
-
-    // Serialize and hash the operation kind
-    let op_bytes = serialize_tree_op_for_verification(&attested.op);
-    h.update(&op_bytes);
-
-    Ok(h.finalize().to_vec())
-}
-
-/// Serialize a TreeOp for verification purposes
-fn serialize_tree_op_for_verification(op: &TreeOp) -> Vec<u8> {
-    // Simple serialization for verification - in production use proper serialization
-    let mut buffer = Vec::new();
-
-    // Serialize the operation kind
-    match &op.op {
-        aura_core::TreeOpKind::AddLeaf { leaf, under } => {
-            buffer.extend_from_slice(b"AddLeaf");
-            buffer.extend_from_slice(&leaf.leaf_id.0.to_le_bytes());
-            buffer.extend_from_slice(&under.0.to_le_bytes());
-        }
-        aura_core::TreeOpKind::RemoveLeaf { leaf, reason } => {
-            buffer.extend_from_slice(b"RemoveLeaf");
-            buffer.extend_from_slice(&leaf.0.to_le_bytes());
-            buffer.push(*reason);
-        }
-        aura_core::TreeOpKind::ChangePolicy {
-            node,
-            new_policy: _,
-        } => {
-            buffer.extend_from_slice(b"ChangePolicy");
-            buffer.extend_from_slice(&node.0.to_le_bytes());
-            // Policy serialization would go here
-        }
-        aura_core::TreeOpKind::RotateEpoch { affected } => {
-            buffer.extend_from_slice(b"RotateEpoch");
-            buffer.extend_from_slice(&(affected.len() as u32).to_le_bytes());
-            for node in affected {
-                buffer.extend_from_slice(&node.0.to_le_bytes());
-            }
-        }
-    }
-
-    buffer
-}
-
-/// Verify FROST threshold signature
-async fn verify_frost_signature(
+/// Verify threshold signature via CryptoEffects
+async fn verify_threshold_signature(
     signature: &[u8],
     message: &[u8],
     public_key: &[u8],
@@ -357,12 +298,12 @@ async fn verify_frost_signature(
         ));
     }
 
-    // Use the crypto effect system for FROST verification
+    // Use the crypto effect system for verification
     let is_valid = crypto_effects
         .frost_verify(message, signature, public_key)
         .await
         .map_err(|e| {
-            ApplicationError::verification_failed(format!("FROST verification error: {}", e))
+            ApplicationError::verification_failed(format!("threshold verification error: {}", e))
         })?;
 
     if !is_valid {
@@ -372,7 +313,7 @@ async fn verify_frost_signature(
     }
 
     tracing::debug!(
-        "FROST signature verified successfully: sig_len={}, msg_len={}, key_len={}",
+        "threshold signature verified successfully: sig_len={}, msg_len={}, key_len={}",
         signature.len(),
         message.len(),
         public_key.len()
@@ -483,18 +424,14 @@ fn apply_operation_to_state(
 
 /// Find parent node for a given leaf in the tree structure
 fn find_parent_node(_leaf: &LeafId, state: &TreeState) -> Option<NodeIndex> {
-    // TODO: Implement proper parent tracking:
-    // 1. Traverse tree structure to find leaf's parent branch
-    // 2. Return the immediate parent node for commitment recomputation
-    // 3. Handle case where leaf is at root level (no parent)
-    // 4. Use efficient tree traversal for large trees
+    // Walk the tree to find a parent branch that references this leaf; fall back to root.
+    // Prefer the explicit leaf->parent mapping when available
+    if let Some(parent) = state.get_leaf_parent(*_leaf) {
+        return Some(parent);
+    }
 
-    // For now, return the first available branch as a placeholder
-    // In production, this would maintain parent/child pointers in TreeState
-    state.list_branch_indices().into_iter().next().or({
-        // If no branches exist, create a default root node
-        Some(NodeIndex(0))
-    })
+    // If we can't find a parent (new leaf or empty tree), default to root node.
+    Some(NodeIndex(0))
 }
 
 /// Check if new policy is stricter or equal to old policy (meet-semilattice)

@@ -248,7 +248,7 @@ impl SnapshotProtocol {
             Some(
                 self.fence
                     .acquire()
-                    .map_err(|e| sync_protocol_error("sync", &e.to_string()))?,
+                    .map_err(|e| sync_protocol_error("sync", e.to_string()))?,
             )
         } else {
             None
@@ -295,7 +295,7 @@ impl SnapshotProtocol {
         if approvals.len() < self.config.approval_threshold {
             return Err(sync_protocol_error(
                 "sync",
-                &format!(
+                format!(
                     "insufficient approvals: {} < {}",
                     approvals.len(),
                     self.config.approval_threshold

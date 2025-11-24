@@ -55,7 +55,6 @@
 
 pub mod adapters;
 pub mod composite;
-pub mod factory;
 pub mod registry;
 
 // Re-export core types for convenience
@@ -64,16 +63,11 @@ pub use registry::{
     RegistryCapabilities, RegistryError,
 };
 
-pub use factory::{
-    FactoryError, HandlerConfig, HandlerConfigBuilder, HandlerFactory, PlatformDetector,
-};
-
 pub use composite::{
     CompositeError, CompositeHandler, CompositeHandlerAdapter, CompositeHandlerBuilder,
 };
 
 pub use adapters::{
-    AuthorizationHandlerAdapter, ConsoleHandlerAdapter, CryptoHandlerAdapter,
-    JournalHandlerAdapter, LoggingSystemHandlerAdapter, RandomHandlerAdapter,
+    ConsoleHandlerAdapter, CryptoHandlerAdapter, LoggingSystemHandlerAdapter, RandomHandlerAdapter,
     StorageHandlerAdapter, TimeHandlerAdapter, TransportHandlerAdapter,
 };

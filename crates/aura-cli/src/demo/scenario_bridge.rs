@@ -208,8 +208,8 @@ impl DemoScenarioBridge {
     /// Setup guardian registrations in the system
     async fn setup_guardian_registrations(
         &self,
-        alice_authority: AuthorityId,
-        charlie_authority: AuthorityId,
+        _alice_authority: AuthorityId,
+        _charlie_authority: AuthorityId,
         threshold: usize,
     ) -> anyhow::Result<usize> {
         tracing::info!(
@@ -224,8 +224,8 @@ impl DemoScenarioBridge {
     /// Create and configure automated guardian agents
     async fn create_configured_agents(
         &self,
-        alice_authority: AuthorityId,
-        charlie_authority: AuthorityId,
+        _alice_authority: AuthorityId,
+        _charlie_authority: AuthorityId,
     ) -> anyhow::Result<(SimulatedGuardianAgent, SimulatedGuardianAgent)> {
         tracing::info!("Creating configured guardian agents");
 
@@ -257,7 +257,7 @@ impl DemoScenarioBridge {
         let chat_group_id = Uuid::new_v4();
 
         // Add initial messages
-        let initial_messages = vec![
+        let initial_messages = [
             (
                 bob_authority,
                 "Hey everyone! Welcome to our secure chat group.",
@@ -359,7 +359,7 @@ impl DemoScenarioBridgeBuilder {
 /// Integration function to setup demo and hand off to human-agent mode
 pub async fn setup_and_run_human_agent_demo(
     setup_config: DemoSetupConfig,
-        demo_config: HumanAgentDemoConfig,
+    _demo_config: HumanAgentDemoConfig,
     seed: u64,
 ) -> anyhow::Result<()> {
     tracing::info!("Starting integrated demo setup and execution");

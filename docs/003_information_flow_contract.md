@@ -26,6 +26,15 @@ Only `spent` and `epoch` values appear as facts inside the journal. The `limit` 
 
 For multi-hop forwarding, relays validate a signed per-hop receipt from the previous hop, then charge their own budget before forwarding. Limits update deterministically via the shared Biscuit/policy evaluation on every device, so replicas converge even though only `spent` charges are recorded. Guard evaluation follows the sequence described in [Authorization](109_authorization.md).
 
+### Time Domain Semantics and Leakage
+
+- **PhysicalClock** timestamps are used for guard-chain charging, receipts, and cooldowns. They are obtained exclusively through `PhysicalTimeEffects` implementations (production or simulator) and never via direct `SystemTime::now()`.
+- **LogicalClock** is used for CRDT causal delivery and journal conflict resolution; it does not leak wall-clock information.
+- **OrderClock** provides a privacy-preserving total order for cases where ordering is required without causal or wall-clock meaning.
+- **Range** expresses validity windows (e.g., dispute/cooldown periods) and is derived from physical time plus policy-defined uncertainty.
+
+Cross-domain comparisons are explicit via `TimeStamp::compare(policy)`; the system never infers ordering across domains implicitly. Facts store `TimeStamp` directly (legacy FactId removed), keeping time semantics auditable within the leakage model.
+
 ### Budget Formulas
 
 The limit for a context and peer is computed as:
@@ -405,7 +414,7 @@ async fn protocol_step_with_leakage(
 
 Aura 1.0 ties privacy guarantees to the FlowBudget system described in [Flow Budget System](003_information_flow_contract.md#flow-budget-system-reference).
 
-Per-context activity requires `spent(ctx)` not exceed `limit(ctx)` per epoch, enforced by FlowGuard charge before every transport call. Leakage per observer class requires `L(τ, class)` not exceed `Budget(class)`, enforced by guard mechanisms. Timing dispersion requires high-sensitivity protocols add at least 2 seconds jitter via optional delay guard. Reservation fairness requires at most one outstanding FlowBudget reservation per context and authority.
+Per-context activity requires `spent(ctx)` not exceed `limit(ctx)` per epoch, enforced by FlowGuard charge before every transport call. Leakage per observer class requires `L(τ, class)` not exceed `Budget(class)`, enforced by [guard mechanisms](109_authorization.md). Timing dispersion requires high-sensitivity protocols add at least 2 seconds jitter via optional delay guard. Reservation fairness requires at most one outstanding FlowBudget reservation per context and authority.
 
 ## Flow Budget System Reference
 
@@ -511,7 +520,7 @@ Implementation requires careful attention to cryptographic details, metadata han
 
 ## Implementation References
 
-- **Guard Chain Implementation**: `crates/aura-protocol/src/guards/`
+- **Guard Chain Implementation**: `crates/aura-protocol/src/guards/` (see [Authorization](109_authorization.md))
 - **Authority Privacy**: `crates/aura-effects/src/authority/`
 - **Context Isolation**: `crates/aura-relational/src/privacy/`
 - **Flow Budget System**: `crates/aura-protocol/src/flow_budget/`

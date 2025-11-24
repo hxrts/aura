@@ -7,8 +7,12 @@ use crate::commands::chat::ChatCommands;
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_chat::{ChatGroupId, ChatMessageId, ChatService};
-use aura_core::{effects::ConsoleEffects, identifiers::AuthorityId, AuraError};
-use chrono::{DateTime, Utc};
+use aura_core::{
+    effects::ConsoleEffects,
+    identifiers::AuthorityId,
+    time::{PhysicalTime, TimeStamp},
+    AuraError,
+};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
@@ -188,7 +192,7 @@ async fn handle_create_group(
     description: Option<&str>,
     members: &[AuthorityId],
 ) -> Result<()> {
-    let creator_id = ctx.authority_id().clone();
+    let creator_id = ctx.authority_id();
 
     match chat_service
         .create_group(name, creator_id, members.to_vec())
@@ -237,20 +241,17 @@ async fn handle_send_message(
     message_content: &str,
 ) -> Result<()> {
     let group_id = ChatGroupId::from_uuid(*group_id);
-    let sender_id = ctx.authority_id().clone();
+    let sender_id = ctx.authority_id();
 
     match chat_service
         .send_message(&group_id, sender_id, message_content.to_string())
         .await
     {
         Ok(message) => {
+            let ts_display = format_timestamp(&message.timestamp);
             ConsoleEffects::log_info(
                 effect_system,
-                &format!(
-                    "✓ Message sent to group {} at {}",
-                    group_id,
-                    message.timestamp.format("%H:%M:%S")
-                ),
+                &format!("✓ Message sent to group {} at {}", group_id, ts_display),
             )
             .await?;
         }
@@ -266,7 +267,7 @@ async fn handle_send_message(
 
 /// Handle message history retrieval
 async fn handle_get_history(
-    ctx: &EffectContext,
+    _ctx: &EffectContext,
     chat_service: &ChatService<AuraEffectSystem>,
     effect_system: &AuraEffectSystem,
     group_id: &Uuid,
@@ -276,21 +277,7 @@ async fn handle_get_history(
     sender: Option<&AuthorityId>,
 ) -> Result<()> {
     let group_id = ChatGroupId::from_uuid(*group_id);
-    let before_ts = if let Some(raw) = before {
-        match DateTime::parse_from_rfc3339(raw) {
-            Ok(ts) => Some(ts.with_timezone(&Utc)),
-            Err(e) => {
-                ConsoleEffects::log_error(
-                    effect_system,
-                    &format!("Invalid timestamp '{}': {}", raw, e),
-                )
-                .await?;
-                None
-            }
-        }
-    } else {
-        None
-    };
+    let before_ts = parse_timestamp(before, effect_system).await?;
 
     let history = chat_service
         .get_history(&group_id, Some(limit), before_ts)
@@ -340,7 +327,7 @@ async fn handle_get_history(
     .await?;
 
     for message in filtered {
-        let ts = message.timestamp.format("%Y-%m-%d %H:%M:%S");
+        let ts = format_timestamp(&message.timestamp);
         let sender_display = message.sender_id.to_string();
         let kind = format!("{:?}", message.message_type);
         let content = if message.message_type == aura_chat::types::MessageType::Delete {
@@ -408,7 +395,7 @@ async fn handle_list_groups(
 
 /// Handle group details display
 async fn handle_show_group(
-    ctx: &EffectContext,
+    _ctx: &EffectContext,
     chat_service: &ChatService<AuraEffectSystem>,
     effect_system: &AuraEffectSystem,
     group_id: &Uuid,
@@ -424,14 +411,8 @@ async fn handle_show_group(
 
             ConsoleEffects::log_info(effect_system, &format!("  ID: {}", group.id)).await?;
 
-            ConsoleEffects::log_info(
-                effect_system,
-                &format!(
-                    "  Created: {}",
-                    group.created_at.format("%Y-%m-%d %H:%M:%S UTC")
-                ),
-            )
-            .await?;
+            let created_at = format_timestamp(&group.created_at);
+            ConsoleEffects::log_info(effect_system, &format!("  Created: {}", created_at)).await?;
 
             if !group.description.is_empty() {
                 ConsoleEffects::log_info(
@@ -455,7 +436,7 @@ async fn handle_show_group(
                             "    • {} ({:?}, joined {})",
                             member.display_name,
                             member.role,
-                            member.joined_at.format("%Y-%m-%d")
+                            format_timestamp(&member.joined_at)
                         ),
                     )
                     .await?;
@@ -497,10 +478,10 @@ async fn handle_invite_member(
     authority_id: &AuthorityId,
 ) -> Result<()> {
     let group_id = ChatGroupId::from_uuid(*group_id);
-    let inviter_id = ctx.authority_id().clone();
+    let inviter_id = ctx.authority_id();
 
     match chat_service
-        .add_member(&group_id, inviter_id, authority_id.clone())
+        .add_member(&group_id, inviter_id, *authority_id)
         .await
     {
         Ok(()) => {
@@ -531,10 +512,10 @@ async fn handle_leave_group(
     group_id: &Uuid,
 ) -> Result<()> {
     let group_id = ChatGroupId::from_uuid(*group_id);
-    let member_id = ctx.authority_id().clone();
+    let member_id = ctx.authority_id();
 
     match chat_service
-        .remove_member(&group_id, member_id.clone(), member_id)
+        .remove_member(&group_id, member_id, member_id)
         .await
     {
         Ok(()) => {
@@ -563,10 +544,10 @@ async fn handle_remove_member(
     member_id: &AuthorityId,
 ) -> Result<()> {
     let group_id = ChatGroupId::from_uuid(*group_id);
-    let admin_id = ctx.authority_id().clone();
+    let admin_id = ctx.authority_id();
 
     match chat_service
-        .remove_member(&group_id, admin_id, member_id.clone())
+        .remove_member(&group_id, admin_id, *member_id)
         .await
     {
         Ok(()) => {
@@ -610,7 +591,7 @@ async fn handle_update_group(
     let updated = chat_service
         .update_group_details(
             &group_id,
-            ctx.authority_id().clone(),
+            ctx.authority_id(),
             name.clone(),
             description.clone(),
             if metadata_map.is_empty() {
@@ -678,7 +659,7 @@ async fn handle_search_messages(
     .await?;
 
     for msg in results {
-        let ts = msg.timestamp.format("%Y-%m-%d %H:%M:%S");
+        let ts = format_timestamp(&msg.timestamp);
         ConsoleEffects::log_info(
             effect_system,
             &format!("[{}][{}] {}", ts, msg.group_id, msg.content),
@@ -702,13 +683,14 @@ async fn handle_edit_message(
     let message_id = ChatMessageId::from_uuid(*message_id);
 
     match chat_service
-        .edit_message(&group_id, ctx.authority_id().clone(), &message_id, content)
+        .edit_message(&group_id, ctx.authority_id(), &message_id, content)
         .await
     {
         Ok(updated) => {
+            let ts_display = format_timestamp(&updated.timestamp);
             ConsoleEffects::log_info(
                 effect_system,
-                &format!("✏️ Message {} updated at {}", updated.id, updated.timestamp),
+                &format!("✏️ Message {} updated at {}", updated.id, ts_display),
             )
             .await?;
         }
@@ -734,7 +716,7 @@ async fn handle_delete_message(
     let message_id = ChatMessageId::from_uuid(*message_id);
 
     match chat_service
-        .delete_message(&group_id, ctx.authority_id().clone(), &message_id)
+        .delete_message(&group_id, ctx.authority_id(), &message_id)
         .await
     {
         Ok(()) => {
@@ -780,7 +762,7 @@ async fn handle_export_history(
             for msg in filtered {
                 let line = format!(
                     "[{}][{}] {}\n",
-                    msg.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                    format_timestamp(&msg.timestamp),
                     msg.sender_id,
                     msg.content
                 );
@@ -792,7 +774,7 @@ async fn handle_export_history(
             for msg in filtered {
                 let line = format!(
                     "{},{},{},\"{}\"\n",
-                    msg.timestamp.to_rfc3339(),
+                    format_timestamp(&msg.timestamp),
                     msg.sender_id,
                     msg.group_id,
                     msg.content.replace('"', "\"\"")
@@ -808,4 +790,48 @@ async fn handle_export_history(
     ConsoleEffects::log_info(effect_system, &format!("📤 Exported history to {}", output)).await?;
 
     Ok(())
+}
+
+fn format_timestamp(ts: &TimeStamp) -> String {
+    match ts {
+        TimeStamp::PhysicalClock(PhysicalTime { ts_ms, .. }) => {
+            let secs = (*ts_ms / 1000) as i64;
+            let nanos = (*ts_ms % 1000) as u32 * 1_000_000;
+            if let Some(dt) = chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nanos) {
+                dt.format("%Y-%m-%d %H:%M:%S").to_string()
+            } else {
+                format!("physical:{}ms", ts_ms)
+            }
+        }
+        TimeStamp::LogicalClock(l) => format!("logical:{}", l.lamport),
+        TimeStamp::OrderClock(o) => format!("order:{}", hex::encode(o.0)),
+        TimeStamp::Range(r) => format!("range:{}-{}", r.earliest_ms, r.latest_ms),
+    }
+}
+
+async fn parse_timestamp(
+    raw: Option<&str>,
+    effect_system: &AuraEffectSystem,
+) -> Result<Option<TimeStamp>> {
+    if let Some(raw_ts) = raw {
+        match chrono::DateTime::parse_from_rfc3339(raw_ts) {
+            Ok(dt) => {
+                let millis = dt.timestamp_millis() as u64;
+                Ok(Some(TimeStamp::PhysicalClock(PhysicalTime {
+                    ts_ms: millis,
+                    uncertainty: None,
+                })))
+            }
+            Err(e) => {
+                ConsoleEffects::log_error(
+                    effect_system,
+                    &format!("Invalid timestamp '{}': {}", raw_ts, e),
+                )
+                .await?;
+                Ok(None)
+            }
+        }
+    } else {
+        Ok(None)
+    }
 }

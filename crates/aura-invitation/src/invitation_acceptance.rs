@@ -6,7 +6,7 @@ use crate::{
     transport::deliver_via_rendezvous,
     InvitationError, InvitationResult,
 };
-use aura_core::effects::{NetworkEffects, TimeEffects};
+use aura_core::effects::NetworkEffects;
 use aura_core::{AccountId, DeviceId, RelationshipId, TrustLevel};
 use aura_journal::semilattice::InvitationRecordRegistry;
 use aura_protocol::effect_traits::EffectApiEffects;
@@ -129,12 +129,21 @@ where
         &self,
         envelope: InvitationEnvelope,
     ) -> InvitationResult<InvitationAcceptance> {
-        let now = TimeEffects::current_timestamp(self.effects.as_ref()).await;
+        let now_physical =
+            self.effects
+                .physical_time()
+                .await
+                .unwrap_or(aura_core::time::PhysicalTime {
+                    ts_ms: 0,
+                    uncertainty: None,
+                });
+        let now_ms = now_physical.ts_ms;
+        let now_timestamp = aura_core::time::TimeStamp::PhysicalClock(now_physical.clone());
 
         // Validate invitation
-        if now > envelope.expires_at {
+        if now_ms > envelope.expires_at {
             let mut registry = self.registry.lock().await;
-            registry.mark_expired(&envelope.invitation_id, now);
+            registry.mark_expired(&envelope.invitation_id, now_timestamp.clone());
             return Ok(InvitationAcceptance {
                 invitation_id: envelope.invitation_id.clone(),
                 invitee: envelope.invitee,
@@ -142,7 +151,7 @@ where
                 account_id: envelope.account_id,
                 granted_token: envelope.granted_token.clone(),
                 device_role: envelope.device_role,
-                accepted_at: now,
+                accepted_at: now_ms,
                 relationship_id: None,
                 success: false,
                 error_message: Some("invitation has expired".to_string()),
@@ -152,7 +161,7 @@ where
         // Mark as accepted in registry
         {
             let mut registry = self.registry.lock().await;
-            registry.mark_accepted(&envelope.invitation_id, now);
+            registry.mark_accepted(&envelope.invitation_id, now_timestamp.clone());
         }
 
         let mut acceptance = InvitationAcceptance {
@@ -162,7 +171,7 @@ where
             account_id: envelope.account_id,
             granted_token: envelope.granted_token.clone(),
             device_role: envelope.device_role.clone(),
-            accepted_at: now,
+            accepted_at: now_ms,
             relationship_id: None,
             success: false,
             error_message: None,
@@ -241,7 +250,12 @@ where
             "from": envelope.invitee,
             "to": envelope.inviter,
             "trust_level": self.config.default_trust_level,
-            "timestamp": TimeEffects::current_timestamp(self.effects.as_ref()).await,
+            "timestamp": self
+                .effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
             "context": "invitation_acceptance"
         });
 
@@ -269,7 +283,12 @@ where
             "role": envelope.device_role,
             "capabilities": "biscuit_token_serialized", // Token would be serialized to bytes
             "added_by": envelope.inviter,
-            "timestamp": TimeEffects::current_timestamp(self.effects.as_ref()).await,
+            "timestamp": self
+                .effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
             "invitation_id": envelope.invitation_id
         });
 
@@ -284,6 +303,8 @@ where
     }
 
     /// Wait for transport layer confirmation of acceptance
+    /// TODO: Replace with actual transport confirmation mechanism
+    #[allow(dead_code)]
     async fn wait_for_transport_confirmation(
         &self,
         envelope: &InvitationEnvelope,
@@ -291,6 +312,8 @@ where
         // In a full implementation, this would wait for a confirmation message
         // from the transport layer indicating successful delivery and processing
         // For now, we simulate this with a small delay
+        // TODO: Replace with PhysicalTimeEffects::sleep_ms() when this is properly implemented
+        #[allow(clippy::disallowed_methods)]
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         // Log confirmation for observability
@@ -306,7 +329,12 @@ where
     async fn send_acceptance_ack(&self, envelope: &InvitationEnvelope) -> InvitationResult<()> {
         // Flow hints removed - no longer needed in stateless effect system
 
-        let now = TimeEffects::current_timestamp(self.effects.as_ref()).await;
+        let now = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
         let ack = serde_json::json!({
             "type": "invitation_accepted",
             "invitation_id": envelope.invitation_id,

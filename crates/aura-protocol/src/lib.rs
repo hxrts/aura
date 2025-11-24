@@ -62,7 +62,9 @@
 //! - **NetworkEffects**: Peer communication, message passing
 //! - **StorageEffects**: Data persistence, key-value operations
 //! - **CryptoEffects**: Cryptographic operations, secure randomness
-//! - **TimeEffects**: Scheduling, timeouts, temporal coordination
+//! - **PhysicalTimeEffects**: Physical clock access, timestamp generation
+//! - **LogicalClockEffects**: Causal ordering, vector clocks
+//! - **OrderClockEffects**: Privacy-preserving deterministic ordering
 //! - **ConsoleEffects**: Logging, debugging, visualization
 //! - **EffectApiEffects**: Account state, event sourcing
 //! - **ChoreographicEffects**: Distributed protocol coordination
@@ -101,7 +103,7 @@
 //! ```rust,ignore
 //! async fn my_protocol<E>(effects: &E) -> Result<Vec<u8>, ProtocolError>
 //! where
-//!     E: NetworkEffects + CryptoEffects + TimeEffects,
+//!     E: NetworkEffects + CryptoEffects + PhysicalTimeEffects,
 //! {
 //!     // Generate random nonce
 //!     let nonce = effects.random_bytes(32).await;
@@ -217,8 +219,9 @@ pub mod composition {
 pub mod effect_traits {
     // Core traits
     pub use crate::effects::{
-        ConsoleEffects, CryptoEffects, EffectApiEffects, JournalEffects, NetworkEffects,
-        RandomEffects, StorageEffects, SyncEffects, TimeEffects,
+        ConsoleEffects, CryptoEffects, EffectApiEffects, JournalEffects, LogicalClockEffects,
+        NetworkEffects, OrderClockEffects, PhysicalTimeEffects, RandomEffects, StorageEffects,
+        SyncEffects,
     };
 
     // Associated types and errors
@@ -334,6 +337,21 @@ pub use effects::ProtocolRequirements;
 // NOTE: QuickBuilder removed - it's from aura-agent (Layer 6), not aura-protocol (Layer 4)
 #[deprecated(
     since = "0.2.0",
+    note = "Use `aura_protocol::effect_traits::LogicalClockEffects` instead"
+)]
+pub use effects::LogicalClockEffects;
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `aura_protocol::effect_traits::OrderClockEffects` instead"
+)]
+pub use effects::OrderClockEffects;
+#[deprecated(
+    since = "0.2.0",
+    note = "Use `aura_protocol::effect_traits::PhysicalTimeEffects` instead"
+)]
+pub use effects::PhysicalTimeEffects;
+#[deprecated(
+    since = "0.2.0",
     note = "Use `aura_protocol::effect_traits::RandomEffects` instead"
 )]
 pub use effects::RandomEffects;
@@ -362,11 +380,6 @@ pub use effects::SyncEffects;
     note = "Use `aura_protocol::effect_traits::SyncError` instead"
 )]
 pub use effects::SyncError;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::TimeEffects` instead"
-)]
-pub use effects::TimeEffects;
 #[deprecated(
     since = "0.2.0",
     note = "Use `aura_protocol::effect_traits::WakeCondition` instead"

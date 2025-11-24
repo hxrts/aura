@@ -3,6 +3,7 @@
 //! This module defines the domain types used for guardian configuration
 //! and relationships in cross-authority contexts.
 
+use crate::time::{PhysicalTime, TimeStamp};
 use crate::Hash32;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -12,7 +13,7 @@ use std::time::Duration;
 /// This binding establishes a guardian relationship that allows
 /// the guardian to participate in recovery operations for the account.
 /// It is a pure domain type with no protocol logic.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuardianBinding {
     /// Commitment hash of the account authority
     pub account_commitment: Hash32,
@@ -60,12 +61,13 @@ impl GuardianBinding {
     }
 
     /// Check if this binding has expired at the given time
-    pub fn is_expired_at(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
-        if let Some(expiration) = self.parameters.expiration {
-            now > expiration
-        } else {
-            false
-        }
+    pub fn is_expired_at_ms(&self, now_ms: u64) -> bool {
+        self.parameters.is_expired_at_ms(now_ms)
+    }
+
+    /// Check if this binding has expired at the given physical time
+    pub fn is_expired_at_time(&self, now: &PhysicalTime) -> bool {
+        self.parameters.is_expired_at_ms(now.ts_ms)
     }
 
     /// Get the recovery delay for this binding
@@ -83,14 +85,14 @@ impl GuardianBinding {
 ///
 /// These parameters define the operational constraints and policies
 /// for a guardian relationship.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuardianParameters {
     /// Time delay required before recovery can be executed
     pub recovery_delay: Duration,
     /// Whether notification to the account is required
     pub notification_required: bool,
     /// Optional expiration time for this binding
-    pub expiration: Option<chrono::DateTime<chrono::Utc>>,
+    pub expiration: Option<TimeStamp>, // PhysicalClock only
 }
 
 impl Default for GuardianParameters {
@@ -108,7 +110,7 @@ impl GuardianParameters {
     pub fn new(
         recovery_delay: Duration,
         notification_required: bool,
-        expiration: Option<chrono::DateTime<chrono::Utc>>,
+        expiration: Option<TimeStamp>,
     ) -> Self {
         Self {
             recovery_delay,
@@ -126,19 +128,31 @@ impl GuardianParameters {
         }
     }
 
-    /// Create guardian parameters for emergency scenarios with no expiration
+    /// Create guardian parameters for emergency scenarios with 7 day expiration
     pub fn emergency() -> Self {
         Self {
             recovery_delay: Duration::from_secs(60 * 60), // 1 hour for emergencies
             notification_required: false,                 // Skip notification in emergencies
-            expiration: None,                             // Emergency parameters don't expire
+            expiration: Some(TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 7 * 24 * 60 * 60 * 1000, // 7 days from epoch (this will be replaced in practice)
+                uncertainty: None,
+            })),
         }
     }
 
-    /// Check if these parameters are expired at the given time
-    pub fn is_expired_at(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
-        if let Some(expiration) = self.expiration {
-            now > expiration
+    /// Set expiration using a physical clock timestamp (milliseconds since UNIX epoch)
+    pub fn with_expiration_ms(mut self, expiration_ms: u64) -> Self {
+        self.expiration = Some(TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: expiration_ms,
+            uncertainty: None,
+        }));
+        self
+    }
+
+    /// Check if these parameters are expired at the given time (ms)
+    pub fn is_expired_at_ms(&self, now_ms: u64) -> bool {
+        if let Some(TimeStamp::PhysicalClock(exp)) = &self.expiration {
+            now_ms > exp.ts_ms
         } else {
             false
         }
@@ -147,6 +161,60 @@ impl GuardianParameters {
     /// Check if these are emergency parameters (short delay, no notification)
     pub fn is_emergency_config(&self) -> bool {
         self.recovery_delay.as_secs() <= 3600 && !self.notification_required
+    }
+}
+
+impl GuardianParameters {
+    fn expiration_ms(&self) -> u64 {
+        match &self.expiration {
+            Some(TimeStamp::PhysicalClock(p)) => p.ts_ms,
+            Some(other) => other.to_index_ms().max(0) as u64,
+            None => 0,
+        }
+    }
+}
+
+impl PartialOrd for GuardianParameters {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for GuardianParameters {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (
+            self.recovery_delay,
+            self.notification_required,
+            self.expiration_ms(),
+        )
+            .cmp(&(
+                other.recovery_delay,
+                other.notification_required,
+                other.expiration_ms(),
+            ))
+    }
+}
+
+impl PartialOrd for GuardianBinding {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for GuardianBinding {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        (
+            self.account_commitment,
+            self.guardian_commitment,
+            &self.parameters,
+            &self.consensus_proof,
+        )
+            .cmp(&(
+                other.account_commitment,
+                other.guardian_commitment,
+                &other.parameters,
+                &other.consensus_proof,
+            ))
     }
 }
 
@@ -192,8 +260,8 @@ impl GuardianBindingBuilder {
     }
 
     /// Set expiration time
-    pub fn expires_at(mut self, expiration: chrono::DateTime<chrono::Utc>) -> Self {
-        self.parameters.expiration = Some(expiration);
+    pub fn expires_at_ms(mut self, expiration_ms: u64) -> Self {
+        self.parameters = self.parameters.with_expiration_ms(expiration_ms);
         self
     }
 
@@ -276,20 +344,32 @@ mod tests {
         let guardian = Hash32([1u8; 32]);
 
         // Create binding that expires in the past
-        let past_time = chrono::Utc::now() - chrono::Duration::hours(1);
-        let expired_params =
-            GuardianParameters::new(Duration::from_secs(3600), true, Some(past_time));
+        let now_ms = 10_000_000u64; // Large enough to avoid underflow
+        let past_ms = now_ms - 3_600_000; // one hour earlier
+        let expired_params = GuardianParameters::new(
+            Duration::from_secs(3600),
+            true,
+            Some(TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: past_ms,
+                uncertainty: None,
+            })),
+        );
 
         let binding = GuardianBinding::new(account, guardian, expired_params);
-        let now = chrono::Utc::now();
-        assert!(binding.is_expired_at(now));
+        assert!(binding.is_expired_at_ms(now_ms));
 
         // Create binding that expires in the future
-        let future_time = chrono::Utc::now() + chrono::Duration::hours(1);
-        let valid_params =
-            GuardianParameters::new(Duration::from_secs(3600), true, Some(future_time));
+        let future_ms = now_ms + 3_600_000;
+        let valid_params = GuardianParameters::new(
+            Duration::from_secs(3600),
+            true,
+            Some(TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: future_ms,
+                uncertainty: None,
+            })),
+        );
 
         let binding = GuardianBinding::new(account, guardian, valid_params);
-        assert!(!binding.is_expired_at(now));
+        assert!(!binding.is_expired_at_ms(now_ms));
     }
 }

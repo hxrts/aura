@@ -4,7 +4,7 @@
 
 use super::{coordination::SessionOperations, shared::*};
 use crate::core::{AgentError, AgentResult};
-use aura_core::effects::TimeEffects;
+use aura_core::effects::time::TimeEffects;
 use aura_core::identifiers::DeviceId;
 use aura_protocol::effects::SessionType;
 
@@ -15,7 +15,7 @@ impl SessionOperations {
         participants: Vec<DeviceId>,
         threshold: usize,
     ) -> AgentResult<SessionHandle> {
-        let effects = self.effects().read().await;
+        let _effects = self.effects().read().await;
 
         if participants.len() < threshold {
             return Err(AgentError::config("Not enough participants for threshold"));
@@ -58,7 +58,7 @@ impl SessionOperations {
             serde_json::Value::String("self_rotation".to_string()),
         );
 
-        let timestamp = effects.current_timestamp_millis().await;
+        let timestamp = effects.current_timestamp_ms().await;
 
         handle.metadata.insert(
             "requested_at".to_string(),
@@ -89,7 +89,7 @@ mod tests {
         let account_id = AccountId::new();
 
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config);
+        let effect_system = AuraEffectSystem::testing(&config).unwrap();
         let effects = Arc::new(RwLock::new(effect_system));
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
@@ -118,7 +118,7 @@ mod tests {
         let account_id = AccountId::new();
 
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config);
+        let effect_system = AuraEffectSystem::testing(&config).unwrap();
         let effects = Arc::new(RwLock::new(effect_system));
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);

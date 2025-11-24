@@ -1,14 +1,16 @@
-//! Clean Journal API (Phase 1 API Cleanup)
+//! Clean Journal API
 //!
-//! This module provides a clean, simplified API for journal operations
-//! that hides CRDT implementation details behind user-friendly abstractions.
+//! This module provides an API for journal operations
+//! that hides CRDT implementation details.
 
-use crate::fact::{Fact, FactContent, FactId, Journal as FactJournal, JournalNamespace};
+use crate::fact::{Fact, FactContent, Journal as FactJournal, JournalNamespace};
 use crate::semilattice::{AccountState, OpLog};
 
+use aura_core::effects::time::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::semilattice::JoinSemilattice;
-use aura_core::{effects::RandomEffects, AccountId, AuraError};
+use aura_core::time::{OrderTime, TimeDomain, TimeStamp};
+use aura_core::{effects::RandomEffects, AccountId, AuraError, Ed25519VerifyingKey};
 use serde::{Deserialize, Serialize};
 
 /// Simplified Journal interface using fact-based architecture
@@ -28,17 +30,16 @@ pub struct Journal {
 impl Journal {
     /// Create a new journal for an account
     pub fn new(account_id: AccountId) -> Self {
-        // Use proper constructors for the CRDT types
-        #[allow(clippy::unwrap_used)]
-        // Placeholder zero key - will be replaced with actual authority key
-        let ed25519_key = ed25519_dalek::VerifyingKey::from_bytes(&[0u8; 32]).unwrap(); // placeholder
+        use ed25519_dalek::SigningKey;
+        let ed25519_key = SigningKey::generate(&mut rand::rngs::OsRng).verifying_key();
+        let group_key = Ed25519VerifyingKey(ed25519_key.to_bytes().to_vec());
 
         // Create authority ID from account ID for namespace
         let authority_id = AuthorityId::from_uuid(account_id.0);
         let namespace = JournalNamespace::Authority(authority_id);
 
         Self {
-            account_state: AccountState::new(account_id, ed25519_key),
+            account_state: AccountState::new(account_id, group_key),
             op_log: OpLog::default(),
             fact_journal: FactJournal::new(namespace),
         }
@@ -52,6 +53,8 @@ impl Journal {
         // Create authority ID from account ID for namespace
         let authority_id = AuthorityId::from_uuid(account_id.0);
         let namespace = JournalNamespace::Authority(authority_id);
+
+        let group_key = Ed25519VerifyingKey(group_key.to_bytes().to_vec());
 
         Self {
             account_state: AccountState::new(account_id, group_key),
@@ -72,29 +75,95 @@ impl Journal {
         Ok(())
     }
 
-    /// Add a fact to the journal
+    /// Add a fact to the journal using the default order-clock domain
     pub async fn add_fact(
         &mut self,
         journal_fact: JournalFact,
         random: &dyn RandomEffects,
     ) -> Result<(), AuraError> {
-        let source_authority = journal_fact.source_authority;
+        // Bridge RandomEffects into an order-clock generator for the default path.
+        struct RandomOrder<'a> {
+            rand: &'a dyn RandomEffects,
+        }
+        #[async_trait::async_trait]
+        impl<'a> OrderClockEffects for RandomOrder<'a> {
+            async fn order_time(&self) -> Result<OrderTime, aura_core::effects::time::TimeError> {
+                Ok(OrderTime(self.rand.random_bytes_32().await))
+            }
+        }
 
-        // Convert JournalFact to proper Fact with FactContent
-        // TODO: Use proper EffectContext when available
-        let dummy_ctx = crate::fact::EffectContext::default();
+        self.add_fact_with_domain(
+            journal_fact,
+            TimeDomain::OrderClock,
+            &RandomOrder { rand: random },
+            None,
+            None,
+        )
+        .await
+    }
+
+    /// Add a fact to the journal using a specified time domain
+    pub async fn add_fact_with_domain(
+        &mut self,
+        journal_fact: JournalFact,
+        domain: TimeDomain,
+        order_clock: &dyn OrderClockEffects,
+        physical_clock: Option<&dyn PhysicalTimeEffects>,
+        logical_clock: Option<&dyn LogicalClockEffects>,
+    ) -> Result<(), AuraError> {
+        // Thread through effect context using the fact's source authority
+        let _ctx = crate::fact::EffectContext::with_authority(journal_fact.source_authority);
+        let ts = match domain {
+            TimeDomain::OrderClock => {
+                let id = order_clock
+                    .order_time()
+                    .await
+                    .map_err(|e| AuraError::internal(e.to_string()))?;
+                TimeStamp::OrderClock(id)
+            }
+            TimeDomain::PhysicalClock => {
+                let clock = physical_clock.ok_or_else(|| {
+                    AuraError::invalid("Physical clock requested but no provider supplied")
+                })?;
+                TimeStamp::PhysicalClock(
+                    clock
+                        .physical_time()
+                        .await
+                        .map_err(|e| AuraError::internal(e.to_string()))?,
+                )
+            }
+            TimeDomain::LogicalClock => {
+                let clock = logical_clock.ok_or_else(|| {
+                    AuraError::invalid("Logical clock requested but no provider supplied")
+                })?;
+                TimeStamp::LogicalClock(
+                    clock
+                        .logical_now()
+                        .await
+                        .map_err(|e| AuraError::internal(e.to_string()))?,
+                )
+            }
+            TimeDomain::Range => {
+                return Err(AuraError::invalid(
+                    "Range domain must accompany a base domain",
+                ))
+            }
+        };
+        let order = match &ts {
+            TimeStamp::OrderClock(id) => id.clone(),
+            // If not order clock, synthesize an order token for deterministic insertion
+            _ => OrderTime(aura_core::hash::hash(format!("{:?}", &ts).as_bytes())),
+        };
         let fact = Fact {
-            fact_id: FactId::generate(&dummy_ctx, random).await,
-            content: FactContent::FlowBudget(crate::fact::FlowBudgetFact {
-                context_id: ContextId::new(), // placeholder - should come from journal_fact or context
-                source: source_authority,
-                destination: source_authority, // placeholder
-                spent_amount: 0,
-                epoch: 0,
+            timestamp: ts,
+            order,
+            content: FactContent::Relational(crate::fact::RelationalFact::Generic {
+                context_id: ContextId::new(),
+                binding_type: journal_fact.content.clone(),
+                binding_data: journal_fact.content.clone().into_bytes(),
             }),
         };
 
-        // Add to fact journal
         self.fact_journal.add_fact(fact)?;
         Ok(())
     }
@@ -140,8 +209,8 @@ impl Journal {
 pub struct JournalFact {
     /// Content of the fact being recorded
     pub content: String,
-    /// Unix timestamp when the fact was created
-    pub timestamp: u64,
+    /// Time when the fact was created (using unified time system)
+    pub timestamp: TimeStamp,
     /// Authority that originated this fact
     pub source_authority: AuthorityId,
 }

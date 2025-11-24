@@ -7,7 +7,7 @@
 #![allow(clippy::unwrap_used)]
 
 use crate::{AuraError, AuraResult, BiscuitGuardEvaluator};
-use aura_core::{hash::hash, AccountId, ContextId, DeviceId, Ed25519Signature, TimeEffects};
+use aura_core::{hash::hash, AccountId, ContextId, DeviceId, Ed25519Signature};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
@@ -36,7 +36,7 @@ fn map_guard_capability_to_resource(
 ) -> ResourceScope {
     let context_id = account_id
         .map(|id| ContextId::from_uuid(id.0))
-        .unwrap_or_else(ContextId::new);
+        .unwrap_or_default();
 
     let operation = match guard_capability {
         "notify_guardians_success" | "notify_guardians_failure" => ContextOp::ApproveRecovery,
@@ -984,11 +984,7 @@ where
                                 verified_identity: VerifiedIdentity {
                                     proof: IdentityProof::Device {
                                         device_id,
-                                        signature: aura_verify::Ed25519Signature::from_slice(&signature)
-                                            .unwrap_or_else(|_|
-                                                aura_verify::Ed25519Signature::from_slice(&[0u8; 64])
-                                                    .unwrap()
-                                            ),
+                                        signature: aura_verify::Ed25519Signature::from_bytes(&signature),
                                     },
                                     message_hash: [0u8; 32], // Placeholder
                                 },
@@ -1087,9 +1083,8 @@ where
                     RecoveryOperationType::DeviceKeyRecovery => ContextOp::RecoverDeviceKey,
                     RecoveryOperationType::AccountAccessRecovery => ContextOp::RecoverAccountAccess,
                     RecoveryOperationType::GuardianSetModification => ContextOp::UpdateGuardianSet,
-                    RecoveryOperationType::EmergencyFreeze | RecoveryOperationType::AccountUnfreeze => {
-                        ContextOp::EmergencyFreeze
-                    }
+                    RecoveryOperationType::EmergencyFreeze
+                    | RecoveryOperationType::AccountUnfreeze => ContextOp::EmergencyFreeze,
                 },
             };
 
@@ -1294,40 +1289,43 @@ where
             Err(_) => return Ok(None),
         };
 
-        if let Ok(message) = serde_json::from_slice::<GuardianAuthMessage>(&raw) {
-            if let GuardianAuthMessage::ApprovalDecision {
+        if let Ok(GuardianAuthMessage::ApprovalDecision {
+            guardian_id: resp_guardian,
+            approved,
+            justification,
+            signature,
+            ..
+        }) = serde_json::from_slice::<GuardianAuthMessage>(&raw)
+        {
+            let sig_bytes: [u8; 64] = if signature.len() == 64 {
+                let mut arr = [0u8; 64];
+                arr.copy_from_slice(&signature);
+                arr
+            } else {
+                [0u8; 64]
+            };
+
+            let verified_identity = VerifiedIdentity {
+                proof: IdentityProof::Guardian {
+                    guardian_id: aura_core::GuardianId(resp_guardian.0),
+                    signature: Ed25519Signature::from_bytes(&sig_bytes),
+                },
+                message_hash: hash(&raw),
+            };
+
+            return Ok(Some(GuardianApproval {
                 guardian_id: resp_guardian,
+                verified_identity,
                 approved,
                 justification,
                 signature,
-                ..
-            } = message
-            {
-                let sig_bytes: [u8; 64] = if signature.len() == 64 {
-                    let mut arr = [0u8; 64];
-                    arr.copy_from_slice(&signature);
-                    arr
-                } else {
-                    [0u8; 64]
-                };
-
-                let verified_identity = VerifiedIdentity {
-                    proof: IdentityProof::Guardian {
-                        guardian_id: aura_core::GuardianId(resp_guardian.0),
-                        signature: Ed25519Signature::from_bytes(&sig_bytes),
-                    },
-                    message_hash: hash(&raw),
-                };
-
-                return Ok(Some(GuardianApproval {
-                    guardian_id: resp_guardian,
-                    verified_identity,
-                    approved,
-                    justification,
-                    signature,
-                    timestamp: TimeEffects::current_timestamp(self.effect_system.as_ref()).await,
-                }));
-            }
+                timestamp: self
+                    .effect_system
+                    .physical_time()
+                    .await
+                    .map(|t| t.ts_ms)
+                    .unwrap_or(0),
+            }));
         }
 
         Ok(None)
@@ -1346,7 +1344,12 @@ where
             AuraError::serialization(format!("guardian approvals serialize: {}", e))
         })?;
 
-        let timestamp = TimeEffects::current_timestamp(self.effect_system.as_ref()).await;
+        let timestamp = self
+            .effect_system
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
 
         // Build a fact delta capturing the approval outcome
         let mut facts = aura_core::Fact::new();
@@ -1442,7 +1445,12 @@ where
         for _ in 0..3 {
             // Simulate 3 guardians for testing
             let challenge_bytes = self.effect_system.random_bytes(32).await;
-            let expires_at = aura_core::current_unix_timestamp() + 300; // 5 minutes
+            let expires_at = self
+                .effect_system
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms / 1000 + 300)
+                .unwrap_or(300);
 
             challenges.push(ChallengeRequest {
                 request_id: approval_request.request_id.clone(),
@@ -1503,7 +1511,12 @@ where
         request: &GuardianAuthRequest,
     ) -> AuraResult<Vec<GuardianApproval>> {
         let mut approvals = Vec::new();
-        let current_time = aura_core::current_unix_timestamp();
+        let current_time = self
+            .effect_system
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms / 1000)
+            .unwrap_or(0);
 
         // Process each guardian's identity proof
         for (i, proof) in identity_proofs.iter().enumerate() {
@@ -1630,7 +1643,7 @@ mod tests {
         let request_id = "test_request".to_string();
         let guardian_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         let challenge = vec![1, 2, 3, 4];
-        let expires_at = aura_core::current_unix_timestamp() + 300; // 5 minutes from now
+        let expires_at = 1_000 + 300; // Dummy timestamp
 
         state.add_guardian_challenge(
             request_id.clone(),
@@ -1651,7 +1664,7 @@ mod tests {
             verified_identity: VerifiedIdentity {
                 proof: aura_verify::IdentityProof::Device {
                     device_id: guardian_id,
-                    signature: aura_verify::Ed25519Signature::from_slice(&[0u8; 64]).unwrap(),
+                    signature: aura_verify::Ed25519Signature::from_bytes(&[0u8; 64]),
                 },
                 message_hash: [0u8; 32],
             },

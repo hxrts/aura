@@ -13,7 +13,7 @@
 //! - Coordinates connection lifecycle across the system
 //! - Enforces global connection limits and cleanup policies
 
-use aura_core::effects::{NetworkEffects, StorageEffects, TimeEffects};
+use aura_core::effects::{NetworkEffects, PhysicalTimeEffects, StorageEffects};
 use aura_core::{identifiers::DeviceId, ContextId};
 use aura_effects::transport::{TransportConfig, TransportError};
 use std::collections::HashMap;
@@ -160,7 +160,7 @@ struct ConnectionState {
 
 impl<E> TransportCoordinator<E>
 where
-    E: NetworkEffects + StorageEffects + TimeEffects + Clone + Send + Sync,
+    E: NetworkEffects + StorageEffects + PhysicalTimeEffects + Clone + Send + Sync,
 {
     /// Create new transport coordinator
     pub fn new(config: TransportCoordinationConfig, effects: E) -> Self {
@@ -202,8 +202,7 @@ where
         let connection = self.transport_manager.connect_with_retry(address).await?;
 
         // Store connection state
-        // Use TimeEffects for testability and consistency
-        let now = self.effects.now_instant().await;
+        let now = std::time::Instant::now();
         let connection_state = ConnectionState {
             device_id: peer_id,
             context_id,
@@ -222,8 +221,7 @@ where
 
     /// Send data to connected peer - NO choreography
     pub async fn send_data(&self, connection_id: &str, data: Vec<u8>) -> CoordinationResult<()> {
-        // Update activity timestamp using TimeEffects for testability
-        let now = self.effects.now_instant().await;
+        let now = std::time::Instant::now();
         {
             let mut connections = self.active_connections.write().await;
             if let Some(connection_state) = connections.get_mut(connection_id) {
@@ -285,8 +283,7 @@ where
         &self,
         max_idle: std::time::Duration,
     ) -> CoordinationResult<usize> {
-        // Use TimeEffects for testability and deterministic cleanup timing
-        let now = self.effects.now_instant().await;
+        let now = std::time::Instant::now();
         let mut to_remove = Vec::new();
 
         // Find stale connections

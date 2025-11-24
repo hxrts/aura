@@ -275,7 +275,7 @@ impl SimulatedGuardianAgent {
         tracing::info!("Guardian {} acknowledging Bob's device loss", self.name);
 
         // Generate sympathetic response
-        let responses = vec![
+        let responses = [
             "Bob, we're here to help you recover your account.",
             "Don't worry Bob, this is exactly why we set up guardian recovery.",
             "I'm ready to help with your recovery process.",
@@ -310,7 +310,7 @@ impl SimulatedGuardianAgent {
             ))
         } else {
             // Random friendly responses
-            let friendly_responses = vec![
+            let friendly_responses = [
                 "That's interesting, Bob!",
                 "Good to hear from you!",
                 "Absolutely!",
@@ -372,7 +372,7 @@ impl SimulatedGuardianAgent {
     fn calculate_response_delay(&self) -> u64 {
         let (min, max) = self.config.response_delay_ms;
         let range = max - min;
-        let offset = (self.config.seed % range as u64) as u64;
+        let offset = self.config.seed % range;
         min + offset
     }
 

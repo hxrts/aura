@@ -8,6 +8,7 @@
 pub struct HandlerAdapter;
 
 impl HandlerAdapter {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }

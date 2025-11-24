@@ -6,6 +6,7 @@
 
 // Removed unused DeviceId import
 use aura_core::semilattice::{MeetSemiLattice, MvState, Top};
+use aura_core::time::{OrderingPolicy, PhysicalTime, TimeOrdering, TimeStamp};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
@@ -15,21 +16,37 @@ use std::collections::BTreeSet;
 /// overlapping periods. Critical for coordinating time-sensitive operations.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeWindow {
-    /// Window start time (Unix timestamp)
-    pub start: u64,
-    /// Window end time (Unix timestamp)
-    pub end: u64,
+    /// Window start time (using unified time system)
+    pub start: TimeStamp,
+    /// Window end time (using unified time system)
+    pub end: TimeStamp,
     /// Time zone offset in seconds from UTC
     pub timezone_offset: Option<i32>,
 }
 
 impl MeetSemiLattice for TimeWindow {
     fn meet(&self, other: &Self) -> Self {
+        // Latest start time (more restrictive)
+        let start = match self
+            .start
+            .compare(&other.start, OrderingPolicy::DeterministicTieBreak)
+        {
+            TimeOrdering::After => self.start.clone(),
+            _ => other.start.clone(),
+        };
+
+        // Earliest end time (more restrictive)
+        let end = match self
+            .end
+            .compare(&other.end, OrderingPolicy::DeterministicTieBreak)
+        {
+            TimeOrdering::Before => self.end.clone(),
+            _ => other.end.clone(),
+        };
+
         Self {
-            // Latest start time (more restrictive)
-            start: self.start.max(other.start),
-            // Earliest end time (more restrictive)
-            end: self.end.min(other.end),
+            start,
+            end,
             // For commutativity: use timezone_offset if both are the same,
             // otherwise use None (requiring UTC)
             timezone_offset: match (self.timezone_offset, other.timezone_offset) {
@@ -45,8 +62,14 @@ impl Top for TimeWindow {
     fn top() -> Self {
         // Universal time window covering all possible times
         Self {
-            start: 0,
-            end: u64::MAX,
+            start: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 0,
+                uncertainty: None,
+            }),
+            end: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: u64::MAX,
+                uncertainty: None,
+            }),
             timezone_offset: Some(0), // UTC
         }
     }
@@ -56,7 +79,7 @@ impl MvState for TimeWindow {}
 
 impl TimeWindow {
     /// Create a time window for a specific duration
-    pub fn new(start: u64, end: u64) -> Self {
+    pub fn new(start: TimeStamp, end: TimeStamp) -> Self {
         Self {
             start,
             end,
@@ -65,7 +88,7 @@ impl TimeWindow {
     }
 
     /// Create a time window with timezone
-    pub fn with_timezone(start: u64, end: u64, offset: i32) -> Self {
+    pub fn with_timezone(start: TimeStamp, end: TimeStamp, offset: i32) -> Self {
         Self {
             start,
             end,
@@ -75,22 +98,48 @@ impl TimeWindow {
 
     /// Check if window is valid (start <= end)
     pub fn is_valid(&self) -> bool {
-        self.start <= self.end
+        !matches!(
+            self.start
+                .compare(&self.end, OrderingPolicy::DeterministicTieBreak),
+            TimeOrdering::After
+        )
     }
 
     /// Check if a timestamp falls within the window
-    pub fn contains(&self, timestamp: u64) -> bool {
-        timestamp >= self.start && timestamp <= self.end
+    pub fn contains(&self, timestamp: &TimeStamp) -> bool {
+        let start_cmp = timestamp.compare(&self.start, OrderingPolicy::DeterministicTieBreak);
+        let end_cmp = timestamp.compare(&self.end, OrderingPolicy::DeterministicTieBreak);
+
+        matches!(
+            start_cmp,
+            TimeOrdering::After | TimeOrdering::Concurrent | TimeOrdering::Overlapping
+        ) && matches!(
+            end_cmp,
+            TimeOrdering::Before | TimeOrdering::Concurrent | TimeOrdering::Overlapping
+        )
     }
 
-    /// Get duration of the window in seconds
-    pub fn duration(&self) -> u64 {
-        self.end.saturating_sub(self.start)
+    /// Get duration of the window (only works for physical time windows)
+    pub fn duration_ms(&self) -> Option<u64> {
+        match (&self.start, &self.end) {
+            (TimeStamp::PhysicalClock(start), TimeStamp::PhysicalClock(end)) => {
+                Some(end.ts_ms.saturating_sub(start.ts_ms))
+            }
+            _ => None,
+        }
     }
 
     /// Check if this window overlaps with another
     pub fn overlaps(&self, other: &Self) -> bool {
-        self.start <= other.end && other.start <= self.end
+        let start_vs_other_end = self
+            .start
+            .compare(&other.end, OrderingPolicy::DeterministicTieBreak);
+        let other_start_vs_end = other
+            .start
+            .compare(&self.end, OrderingPolicy::DeterministicTieBreak);
+
+        !matches!(start_vs_other_end, TimeOrdering::After)
+            && !matches!(other_start_vs_end, TimeOrdering::After)
     }
 }
 
@@ -370,16 +419,56 @@ mod tests {
 
     #[test]
     fn test_time_window_intersection() {
-        let window1 = TimeWindow::new(100, 500);
-        let window2 = TimeWindow::new(200, 600);
+        let window1 = TimeWindow::new(
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 100,
+                uncertainty: None,
+            }),
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 500,
+                uncertainty: None,
+            }),
+        );
+        let window2 = TimeWindow::new(
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 200,
+                uncertainty: None,
+            }),
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 600,
+                uncertainty: None,
+            }),
+        );
 
         let intersection = window1.meet(&window2);
 
-        assert_eq!(intersection.start, 200); // Later start
-        assert_eq!(intersection.end, 500); // Earlier end
+        assert_eq!(
+            intersection.start,
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 200,
+                uncertainty: None
+            })
+        ); // Later start
+        assert_eq!(
+            intersection.end,
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 500,
+                uncertainty: None
+            })
+        ); // Earlier end
         assert!(intersection.is_valid());
-        assert!(intersection.contains(300));
-        assert!(!intersection.contains(150));
+        assert!(
+            intersection.contains(&TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 300,
+                uncertainty: None
+            }))
+        );
+        assert!(
+            !intersection.contains(&TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 150,
+                uncertainty: None
+            }))
+        );
     }
 
     #[test]

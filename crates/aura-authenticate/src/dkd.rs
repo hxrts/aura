@@ -25,10 +25,10 @@
 //! - `CryptoEffects` for cryptographic operations (FROST, HKDF, signatures)
 //! - `NetworkEffects` for secure peer communication
 //! - `JournalEffects` for persistent state and audit logs
-//! - `TimeEffects` for replay protection and timeouts
+//! - `PhysicalTimeEffects` for replay protection and timeouts
 
 use aura_core::{
-    effects::{CryptoEffects, JournalEffects, NetworkEffects, TimeEffects},
+    effects::{CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects},
     hash, AuraError, AuraResult, DeviceId, Hash32,
 };
 use aura_macros::choreography;
@@ -221,7 +221,7 @@ impl DkdProtocol {
         session_id: Option<DkdSessionId>,
     ) -> Result<DkdSessionId, DkdError>
     where
-        E: CryptoEffects + NetworkEffects + JournalEffects + TimeEffects + Send + Sync,
+        E: CryptoEffects + NetworkEffects + JournalEffects + PhysicalTimeEffects + Send + Sync,
     {
         // Validate configuration
         if participants.len() < self.config.threshold as usize {
@@ -237,8 +237,8 @@ impl DkdProtocol {
             });
         }
 
-        let session_id = session_id.unwrap_or_else(DkdSessionId::new);
-        let current_time = effects.current_timestamp().await;
+        let session_id = session_id.unwrap_or_default();
+        let current_time = effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0);
 
         let context = KeyDerivationContext {
             session_id: session_id.clone(),
@@ -282,7 +282,7 @@ impl DkdProtocol {
         local_device_id: DeviceId,
     ) -> Result<DkdResult, DkdError>
     where
-        E: CryptoEffects + NetworkEffects + JournalEffects + TimeEffects + Send + Sync,
+        E: CryptoEffects + NetworkEffects + JournalEffects + PhysicalTimeEffects + Send + Sync,
     {
         tracing::info!(session_id = ?session_id, device_id = ?local_device_id, "Starting DKD protocol execution");
 
@@ -358,7 +358,7 @@ impl DkdProtocol {
         device_id: DeviceId,
     ) -> Result<ParticipantContribution, DkdError>
     where
-        E: CryptoEffects + TimeEffects + Send + Sync,
+        E: CryptoEffects + PhysicalTimeEffects + Send + Sync,
     {
         tracing::debug!(session_id = ?session_id, device_id = ?device_id, "Generating contribution");
 
@@ -369,7 +369,7 @@ impl DkdProtocol {
         let commitment = hash::hash(&randomness);
 
         // Get current timestamp for replay protection
-        let timestamp = effects.current_timestamp().await;
+        let timestamp = effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0);
 
         // Create signature data (commitment + timestamp + session_id)
         let mut signature_data = Vec::new();
@@ -826,7 +826,7 @@ pub async fn execute_simple_dkd<E>(
     context: &str,
 ) -> AuraResult<DkdResult>
 where
-    E: CryptoEffects + NetworkEffects + JournalEffects + TimeEffects + Send + Sync,
+    E: CryptoEffects + NetworkEffects + JournalEffects + PhysicalTimeEffects + Send + Sync,
 {
     let config = DkdConfig {
         threshold: 2,
@@ -852,6 +852,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_agent::{AgentConfig, AuraEffectSystem};
     use aura_core::DeviceId;
     use aura_testkit::TestEffectsBuilder;
 
@@ -881,7 +882,7 @@ mod tests {
     async fn test_contribution_generation() {
         let config = create_test_config(2, 3);
         let protocol = DkdProtocol::new(config);
-        let effects = AuraEffectSystem::testing(&AgentConfig::default());
+        let effects = AuraEffectSystem::testing(&AgentConfig::default()).unwrap();
 
         let session_id = DkdSessionId::deterministic("test");
         let device_id = DeviceId::new();

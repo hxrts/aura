@@ -2,7 +2,7 @@
 
 use crate::effects::{EffectApiEffects, EffectApiError, EffectApiEventStream};
 use async_trait::async_trait;
-use aura_core::effects::{RandomEffects, TimeEffects};
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
 use std::sync::Arc;
 
 /// Memory-based effect_api handler for testing
@@ -10,7 +10,7 @@ pub struct MemoryLedgerHandler {
     // TODO fix - For now, use placeholder data structures
     _events: Vec<Vec<u8>>,
     random: Arc<dyn RandomEffects>,
-    time: Arc<dyn TimeEffects>,
+    time: Arc<dyn PhysicalTimeEffects>,
 }
 
 impl MemoryLedgerHandler {
@@ -18,11 +18,11 @@ impl MemoryLedgerHandler {
     ///
     /// # Parameters
     /// - `random`: RandomEffects implementation for UUID generation and secrets
-    /// - `time`: TimeEffects implementation for timestamp operations
+    /// - `time`: PhysicalTimeEffects implementation for timestamp operations
     ///
     /// This follows Layer 4 orchestration pattern where handlers store effect dependencies
     /// for coordinated multi-effect operations.
-    pub fn new(random: Arc<dyn RandomEffects>, time: Arc<dyn TimeEffects>) -> Self {
+    pub fn new(random: Arc<dyn RandomEffects>, time: Arc<dyn PhysicalTimeEffects>) -> Self {
         Self {
             _events: Vec::new(),
             random,
@@ -34,10 +34,10 @@ impl MemoryLedgerHandler {
 impl Default for MemoryLedgerHandler {
     fn default() -> Self {
         // Default uses mock handlers for testing
-        use aura_effects::{random::RealRandomHandler, time::RealTimeHandler};
+        use aura_effects::{random::RealRandomHandler, time::PhysicalTimeHandler};
         Self::new(
             Arc::new(RealRandomHandler::new()),
-            Arc::new(RealTimeHandler::new()),
+            Arc::new(PhysicalTimeHandler::new()),
         )
     }
 }
@@ -118,9 +118,15 @@ impl EffectApiEffects for MemoryLedgerHandler {
     }
 
     async fn current_timestamp(&self) -> Result<u64, EffectApiError> {
-        // Use TimeEffects for testable timestamp operations
-        let timestamp = self.time.current_timestamp().await;
-        Ok(timestamp)
+        let ts = self
+            .time
+            .physical_time()
+            .await
+            .map_err(|err| EffectApiError::Backend {
+                error: format!("time unavailable: {err}"),
+            })?
+            .ts_ms;
+        Ok(ts / 1000)
     }
 
     async fn effect_api_device_id(

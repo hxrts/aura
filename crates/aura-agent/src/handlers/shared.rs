@@ -60,20 +60,19 @@ impl HandlerUtilities {
     /// Create effect context from authority
     pub fn create_effect_context(
         authority_id: AuthorityId,
-        session_id: Option<SessionId>,
+        _session_id: Option<SessionId>,
     ) -> EffectContext {
         // Create a default context ID
         let context_id = ContextId::new();
-        let effect_context = EffectContext::new(
-            authority_id,
-            context_id,
-            aura_core::effects::ExecutionMode::Production,
-        );
 
         // If we have a specific session ID, we would need to update it
         // For now, the EffectContext creates its own session ID
 
-        effect_context
+        EffectContext::new(
+            authority_id,
+            context_id,
+            aura_core::effects::ExecutionMode::Production,
+        )
     }
 
     /// Validate authority context

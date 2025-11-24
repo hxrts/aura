@@ -5,11 +5,13 @@
 //! for controllable time progression in tests.
 
 use async_trait::async_trait;
-use aura_core::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
-use aura_core::AuraError;
+use aura_core::effects::{
+    time::TimeComparison, LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeError,
+};
+use aura_core::time::{LogicalTime, OrderTime, TimeStamp, VectorClock};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// Mock time handler for deterministic testing
@@ -102,140 +104,62 @@ impl SimulatedTimeHandler {
 }
 
 #[async_trait]
-impl TimeEffects for SimulatedTimeHandler {
-    /// Get the current timestamp in epoch milliseconds
-    async fn current_epoch(&self) -> u64 {
-        *self.current_time.lock().unwrap()
+impl PhysicalTimeEffects for SimulatedTimeHandler {
+    async fn physical_time(&self) -> Result<aura_core::time::PhysicalTime, TimeError> {
+        Ok(aura_core::time::PhysicalTime {
+            ts_ms: *self.current_time.lock().unwrap(),
+            uncertainty: None,
+        })
     }
 
-    /// Get current timestamp in seconds
-    async fn current_timestamp(&self) -> u64 {
-        *self.current_time.lock().unwrap() / 1000
-    }
-
-    /// Get current timestamp in milliseconds
-    async fn current_timestamp_millis(&self) -> u64 {
-        *self.current_time.lock().unwrap()
-    }
-
-    /// Get the current monotonic time instant
-    async fn now_instant(&self) -> Instant {
-        *self.base_instant.lock().unwrap()
-    }
-
-    /// Sleep for a specified number of milliseconds
-    async fn sleep_ms(&self, ms: u64) {
-        self.advance_time(ms);
-    }
-
-    /// Sleep until a specific epoch timestamp
-    async fn sleep_until(&self, epoch: u64) {
-        let current = *self.current_time.lock().unwrap();
-        if epoch > current {
-            self.advance_time(epoch - current);
-        }
-    }
-
-    /// Delay execution for a specified duration
-    async fn delay(&self, duration: Duration) {
-        let duration_ms = duration.as_millis() as u64;
-        self.advance_time(duration_ms);
-    }
-
-    /// Sleep for specified duration in milliseconds
-    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
-        self.advance_time(duration_ms);
+    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
+        let scaled_ms = (ms as f64 * self.time_scale) as u64;
+        self.advance_time(scaled_ms);
         Ok(())
     }
+}
 
-    /// Yield execution until a condition is met
-    async fn yield_until(&self, condition: WakeCondition) -> Result<(), TimeError> {
-        match condition {
-            WakeCondition::EpochReached { target } => {
-                let current = *self.current_time.lock().unwrap();
-                if current < target {
-                    self.advance_time(target - current);
-                }
-                Ok(())
-            }
-            WakeCondition::TimeoutAt(target) => {
-                let current = *self.current_time.lock().unwrap();
-                if current < target {
-                    self.advance_time(target - current);
-                }
-                Ok(())
-            }
-            WakeCondition::TimeoutExpired { timeout_id } => {
-                let timeouts = self.active_timeouts.lock().unwrap();
-                if let Some(&expires_at) = timeouts.get(&timeout_id) {
-                    let current = *self.current_time.lock().unwrap();
-                    if current < expires_at {
-                        drop(timeouts);
-                        self.advance_time(expires_at - current);
-                    }
-                }
-                Ok(())
-            }
-            _ => {
-                // For other conditions, just return immediately in simulation
-                Ok(())
+#[async_trait]
+impl LogicalClockEffects for SimulatedTimeHandler {
+    async fn logical_advance(
+        &self,
+        observed: Option<&VectorClock>,
+    ) -> Result<LogicalTime, TimeError> {
+        let mut clock = VectorClock::new();
+        if let Some(obs) = observed {
+            for (actor, val) in obs.iter() {
+                let current = clock.get(actor).copied().unwrap_or(0);
+                clock.insert(*actor, current.max(*val));
             }
         }
+        Ok(LogicalTime {
+            vector: clock,
+            lamport: 0,
+        })
     }
 
-    /// Wait until a condition is met (alias for yield_until with AuraError)
-    async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
-        self.yield_until(condition)
-            .await
-            .map_err(|e| AuraError::Internal {
-                message: format!("Simulated time operation failed: {}", e),
-            })
+    async fn logical_now(&self) -> Result<LogicalTime, TimeError> {
+        Ok(LogicalTime {
+            vector: VectorClock::new(),
+            lamport: 0,
+        })
     }
+}
 
-    /// Set a timeout and return a handle
-    async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
-        let handle = Uuid::new_v4();
-        let expires_at = *self.current_time.lock().unwrap() + timeout_ms;
-
-        let mut timeouts = self.active_timeouts.lock().unwrap();
-        timeouts.insert(handle, expires_at);
-
-        handle
+#[async_trait]
+impl OrderClockEffects for SimulatedTimeHandler {
+    async fn order_time(&self) -> Result<OrderTime, TimeError> {
+        Ok(OrderTime([0u8; 32]))
     }
+}
 
-    /// Cancel a timeout by handle
-    async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
-        let mut timeouts = self.active_timeouts.lock().unwrap();
-        timeouts.remove(&handle);
-        Ok(())
-    }
-
-    /// Check if this is a simulated time handler
-    fn is_simulated(&self) -> bool {
-        true
-    }
-
-    /// Register a context for time events
-    fn register_context(&self, context_id: Uuid) {
-        let mut contexts = self.registered_contexts.lock().unwrap();
-        if !contexts.contains(&context_id) {
-            contexts.push(context_id);
-        }
-    }
-
-    /// Unregister a context from time events
-    fn unregister_context(&self, context_id: Uuid) {
-        let mut contexts = self.registered_contexts.lock().unwrap();
-        contexts.retain(|&id| id != context_id);
-    }
-
-    /// Notify that events are available for waiting contexts
-    async fn notify_events_available(&self) {
-        // In simulation, this is a no-op as we don't have real event queues
-    }
-
-    /// Get time resolution in milliseconds
-    fn resolution_ms(&self) -> u64 {
-        1 // 1ms resolution for simulation
+#[async_trait]
+impl TimeComparison for SimulatedTimeHandler {
+    async fn compare(
+        &self,
+        a: &TimeStamp,
+        b: &TimeStamp,
+    ) -> Result<aura_core::time::TimeOrdering, TimeError> {
+        Ok(a.compare(b, aura_core::time::OrderingPolicy::Native))
     }
 }

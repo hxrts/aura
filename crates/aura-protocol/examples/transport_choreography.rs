@@ -163,7 +163,7 @@ async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error
             cpu_allocated: 2,
             memory_allocated: 512,
         },
-        timestamp: SystemTime::now(),
+        timestamp: SystemTime::UNIX_EPOCH,
     };
 
     let confirmation2 = ChannelConfirmation {
@@ -176,7 +176,7 @@ async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error
             cpu_allocated: 1,
             memory_allocated: 256,
         },
-        timestamp: SystemTime::now(),
+        timestamp: SystemTime::UNIX_EPOCH,
     };
 
     // Process confirmations through choreographic coordinator

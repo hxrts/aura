@@ -6,7 +6,7 @@
 #![allow(clippy::disallowed_methods)] // TODOs use Utc::now() and new_v4() temporarily
 
 use crate::{Guardian, GuardianId, InvitationError, InvitationResult, TrustLevel};
-use aura_core::{AccountId, DeviceId};
+use aura_core::{effects::PhysicalTimeEffects, AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
 
 /// Guardian invitation request
@@ -63,9 +63,10 @@ impl GuardianInvitationCoordinator {
     ///
     /// NOTE: Full implementation requires NetworkEffects for message passing
     /// and CryptoEffects for relationship attestation. This is a local simulation.
-    pub async fn invite_guardian(
+    pub async fn invite_guardian<E: PhysicalTimeEffects>(
         &self,
         request: GuardianInvitationRequest,
+        effects: &E,
     ) -> InvitationResult<GuardianInvitationResponse> {
         tracing::info!(
             "Starting guardian invitation from {} to {}",
@@ -90,12 +91,12 @@ impl GuardianInvitationCoordinator {
 
         if accepted {
             // Exchange cryptographic attestations via effects
-            self.exchange_guardian_attestation_via_effects(&request)
+            self.exchange_guardian_attestation_via_effects(&request, effects)
                 .await?;
 
             // Record relationship in journal via effects
             let guardian_id = self
-                .record_guardian_relationship_via_effects(&request)
+                .record_guardian_relationship_via_effects(&request, effects)
                 .await?;
 
             Ok(GuardianInvitationResponse {
@@ -110,7 +111,7 @@ impl GuardianInvitationCoordinator {
             })
         } else {
             // Record rejection in journal via effects
-            self.record_invitation_rejection_via_effects(&request)
+            self.record_invitation_rejection_via_effects(&request, effects)
                 .await?;
 
             Ok(GuardianInvitationResponse {
@@ -149,15 +150,18 @@ impl GuardianInvitationCoordinator {
         let decision = self.evaluate_invitation(request);
 
         // Simulate network delay
+        // TODO: Replace with PhysicalTimeEffects::sleep_ms() when proper network response is implemented
+        #[allow(clippy::disallowed_methods)]
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         Ok(decision)
     }
 
     /// Exchange cryptographic attestations via CryptoEffects
-    async fn exchange_guardian_attestation_via_effects(
+    async fn exchange_guardian_attestation_via_effects<E: PhysicalTimeEffects>(
         &self,
         request: &GuardianInvitationRequest,
+        effects: &E,
     ) -> InvitationResult<()> {
         // Create guardian attestation data
         let attestation_data = serde_json::json!({
@@ -168,7 +172,7 @@ impl GuardianInvitationCoordinator {
             "role_description": request.role_description,
             "required_trust_level": request.required_trust_level,
             "recovery_responsibilities": request.recovery_responsibilities,
-            "timestamp": chrono::Utc::now().timestamp(),
+            "timestamp": effects.physical_time().await.map_err(|e| InvitationError::internal(format!("Time error: {}", e)))?.ts_ms / 1000,
         });
 
         // TODO: Use actual CryptoEffects to sign and exchange attestations
@@ -178,10 +182,11 @@ impl GuardianInvitationCoordinator {
         Ok(())
     }
 
-    /// Record guardian relationship in journal via JournalEffects  
-    async fn record_guardian_relationship_via_effects(
+    /// Record guardian relationship in journal via JournalEffects
+    async fn record_guardian_relationship_via_effects<E: PhysicalTimeEffects>(
         &self,
         request: &GuardianInvitationRequest,
+        effects: &E,
     ) -> InvitationResult<GuardianId> {
         // Create guardian relationship record
         let guardian_id = GuardianId(uuid::Uuid::new_v4());
@@ -195,7 +200,7 @@ impl GuardianInvitationCoordinator {
             "role_description": request.role_description,
             "trust_level": request.required_trust_level,
             "recovery_responsibilities": request.recovery_responsibilities,
-            "established_at": chrono::Utc::now().timestamp(),
+            "established_at": effects.physical_time().await.map_err(|e| InvitationError::internal(format!("Time error: {}", e)))?.ts_ms / 1000,
         });
 
         // TODO: Use actual JournalEffects to record relationship
@@ -206,16 +211,17 @@ impl GuardianInvitationCoordinator {
     }
 
     /// Record invitation rejection in journal via JournalEffects
-    async fn record_invitation_rejection_via_effects(
+    async fn record_invitation_rejection_via_effects<E: PhysicalTimeEffects>(
         &self,
         request: &GuardianInvitationRequest,
+        effects: &E,
     ) -> InvitationResult<()> {
         let rejection_data = serde_json::json!({
             "type": "guardian_invitation_rejected",
             "inviter": request.inviter,
             "invitee": request.invitee,
             "account_id": request.account_id,
-            "rejected_at": chrono::Utc::now().timestamp(),
+            "rejected_at": effects.physical_time().await.map_err(|e| InvitationError::internal(format!("Time error: {}", e)))?.ts_ms / 1000,
             "reason": "Invitation evaluation failed requirements",
         });
 
@@ -242,10 +248,7 @@ impl GuardianInvitationCoordinator {
     fn simulate_cryptographic_attestation(&self, attestation_data: &serde_json::Value) -> bool {
         // TODO: Replace with actual effect system call
         // effect_handler.create_and_exchange_attestation(attestation_data).await
-        println!(
-            "Simulated cryptographic attestation: {}",
-            attestation_data.to_string()
-        );
+        println!("Simulated cryptographic attestation: {}", attestation_data);
         true
     }
 
@@ -255,7 +258,7 @@ impl GuardianInvitationCoordinator {
         // effect_handler.record_guardian_relationship(record_data).await
         println!(
             "Simulated journal guardian relationship record: {}",
-            record_data.to_string()
+            record_data
         );
         true
     }

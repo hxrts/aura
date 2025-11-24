@@ -134,7 +134,7 @@ pub use aura_authenticate::{
 
 // Re-export core effect types
 pub use aura_core::effects::{
-    ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, TimeEffects,
+    ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects,
 };
 
 // MPST types removed - using stateless effect system instead

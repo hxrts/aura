@@ -112,7 +112,8 @@ pub struct HealthCheck {
 pub trait Service: Send + Sync {
     /// Start the service
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    /// Note: Callers should obtain `now` from their chosen clock (e.g., `PhysicalTimeEffects`)
+    /// and pass it to this method for consistent uptime accounting.
     async fn start(&self, now: Instant) -> SyncResult<()>;
 
     /// Stop the service gracefully

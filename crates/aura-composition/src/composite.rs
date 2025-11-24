@@ -292,47 +292,43 @@ impl RegistrableHandler for CompositeHandlerAdapter {
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        if let Some(_handler) = self.composite.handlers.get(&effect_type) {
-            // For now, return a basic set of operations
-            // In a real implementation, this would query the specific handler
-            match effect_type {
-                EffectType::Console => vec![
-                    "log_info".to_string(),
-                    "log_warn".to_string(),
-                    "log_error".to_string(),
-                    "log_debug".to_string(),
-                ],
-                EffectType::Random => vec![
-                    "random_bytes".to_string(),
-                    "random_bytes_32".to_string(),
-                    "random_u64".to_string(),
-                ],
-                EffectType::Crypto => vec![
-                    "hkdf_derive".to_string(),
-                    "ed25519_generate_keypair".to_string(),
-                    "ed25519_sign".to_string(),
-                    "ed25519_verify".to_string(),
-                ],
-                EffectType::Network => vec![
-                    "send_to_peer".to_string(),
-                    "broadcast".to_string(),
-                    "receive".to_string(),
-                ],
-                EffectType::Storage => vec![
-                    "store".to_string(),
-                    "retrieve".to_string(),
-                    "remove".to_string(),
-                    "list_keys".to_string(),
-                ],
-                EffectType::Time => vec![
-                    "current_epoch".to_string(),
-                    "current_timestamp".to_string(),
-                    "sleep_ms".to_string(),
-                ],
-                _ => Vec::new(),
-            }
-        } else {
-            Vec::new()
+        // Return the standard operation mapping regardless of whether handlers are registered
+        // This allows for capability discovery even before handlers are initialized
+        match effect_type {
+            EffectType::Console => vec![
+                String::from("log_info"),
+                String::from("log_warn"),
+                String::from("log_error"),
+                String::from("log_debug"),
+            ],
+            EffectType::Random => vec![
+                String::from("random_bytes"),
+                String::from("random_bytes_32"),
+                String::from("random_u64"),
+            ],
+            EffectType::Crypto => vec![
+                String::from("hkdf_derive"),
+                String::from("ed25519_generate_keypair"),
+                String::from("ed25519_sign"),
+                String::from("ed25519_verify"),
+            ],
+            EffectType::Network => vec![
+                String::from("send_to_peer"),
+                String::from("broadcast"),
+                String::from("receive"),
+            ],
+            EffectType::Storage => vec![
+                String::from("store"),
+                String::from("retrieve"),
+                String::from("remove"),
+                String::from("list_keys"),
+            ],
+            EffectType::Time => vec![
+                String::from("current_epoch"),
+                String::from("current_timestamp"),
+                String::from("sleep_ms"),
+            ],
+            _ => Vec::new(),
         }
     }
 
@@ -348,7 +344,7 @@ impl RegistrableHandler for CompositeHandlerAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::registry::MockRegistrableHandler;
+    use crate::registry::Handler;
 
     #[test]
     fn test_composite_handler_creation() {
@@ -372,7 +368,7 @@ mod tests {
     fn test_composite_handler_builder() {
         let device_id = DeviceId::new();
 
-        let mut builder =
+        let builder =
             CompositeHandlerBuilder::new(device_id).execution_mode(ExecutionMode::Production);
 
         // Note: We can't easily test handler registration here without mock handlers
@@ -388,14 +384,14 @@ mod tests {
         let device_id = DeviceId::new();
 
         let adapter = CompositeHandlerAdapter::for_testing(device_id);
-        assert_eq!(adapter.execution_mode(), ExecutionMode::Testing);
+        assert_eq!(Handler::execution_mode(&adapter), ExecutionMode::Testing);
 
         let adapter = CompositeHandlerAdapter::for_production(device_id);
-        assert_eq!(adapter.execution_mode(), ExecutionMode::Production);
+        assert_eq!(Handler::execution_mode(&adapter), ExecutionMode::Production);
 
         let adapter = CompositeHandlerAdapter::for_simulation(device_id, 42);
         assert_eq!(
-            adapter.execution_mode(),
+            Handler::execution_mode(&adapter),
             ExecutionMode::Simulation { seed: 42 }
         );
     }
@@ -403,7 +399,7 @@ mod tests {
     #[test]
     fn test_handler_registration() {
         let device_id = DeviceId::new();
-        let mut composite = CompositeHandler::for_testing(device_id);
+        let composite = CompositeHandler::for_testing(device_id);
 
         // Initially no handlers registered
         assert!(!composite.has_handler(EffectType::Console));

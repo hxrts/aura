@@ -47,7 +47,7 @@ async fn read_config_through_effects(
     _effects: &AuraEffectSystem,
     config_path: &Path,
 ) -> Result<DeviceConfig> {
-    let config_str = std::fs::read_to_string(&config_path.display().to_string())
+    let config_str = std::fs::read_to_string(config_path.display().to_string())
         .map_err(|e| anyhow::anyhow!("Failed to read config: {}", e))?;
 
     // Parse TOML configuration

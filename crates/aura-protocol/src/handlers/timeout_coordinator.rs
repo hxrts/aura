@@ -15,11 +15,9 @@
 //! - Tracks timeout tasks globally for cancellation
 
 use async_trait::async_trait;
-use aura_core::effects::{RandomEffects, TimeEffects, TimeError, TimeoutHandle, WakeCondition};
-use aura_core::AuraError;
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects, TimeError};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 
@@ -41,7 +39,7 @@ pub struct TimeoutCoordinator<T, R> {
     registry: Arc<RwLock<ContextRegistry>>,
 }
 
-impl<T: TimeEffects + Clone, R: RandomEffects + Clone> TimeoutCoordinator<T, R> {
+impl<T: PhysicalTimeEffects + Clone, R: RandomEffects + Clone> TimeoutCoordinator<T, R> {
     /// Create a new timeout coordinator wrapping a base time handler and random effects
     pub fn new(inner: T, random: R) -> Self {
         Self {
@@ -53,111 +51,14 @@ impl<T: TimeEffects + Clone, R: RandomEffects + Clone> TimeoutCoordinator<T, R> 
 }
 
 #[async_trait]
-impl<T: TimeEffects + Clone + Send + Sync, R: RandomEffects + Clone + Send + Sync> TimeEffects
+impl<T: PhysicalTimeEffects + Clone, R: RandomEffects + Clone> PhysicalTimeEffects
     for TimeoutCoordinator<T, R>
 {
-    // Delegate stateless operations to inner handler
-
-    async fn current_epoch(&self) -> u64 {
-        self.inner.current_epoch().await
+    async fn physical_time(&self) -> Result<aura_core::time::PhysicalTime, TimeError> {
+        self.inner.physical_time().await
     }
 
-    async fn current_timestamp(&self) -> u64 {
-        self.inner.current_timestamp().await
-    }
-
-    async fn current_timestamp_millis(&self) -> u64 {
-        self.inner.current_timestamp_millis().await
-    }
-
-    async fn sleep_ms(&self, ms: u64) {
+    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
         self.inner.sleep_ms(ms).await
-    }
-
-    async fn sleep_until(&self, epoch: u64) {
-        self.inner.sleep_until(epoch).await
-    }
-
-    async fn delay(&self, duration: Duration) {
-        self.inner.delay(duration).await
-    }
-
-    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
-        self.inner.sleep(duration_ms).await
-    }
-
-    async fn yield_until(&self, condition: WakeCondition) -> Result<(), TimeError> {
-        self.inner.yield_until(condition).await
-    }
-
-    async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
-        self.inner.wait_until(condition).await
-    }
-
-    // Coordination methods (Layer 4)
-
-    async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
-        let handle = self.random.random_uuid().await;
-        let registry = Arc::clone(&self.registry);
-        let handle_clone = handle;
-        let timeout_task = tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(timeout_ms)).await;
-            let mut reg = registry.write().await;
-            reg.timeouts.remove(&handle_clone);
-        });
-        let registry = Arc::clone(&self.registry);
-        tokio::spawn(async move {
-            let mut reg = registry.write().await;
-            reg.timeouts.insert(handle, timeout_task);
-        });
-        handle
-    }
-
-    async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
-        let mut registry = self.registry.write().await;
-        if let Some(task) = registry.timeouts.remove(&handle) {
-            task.abort();
-            Ok(())
-        } else {
-            Err(TimeError::TimeoutNotFound {
-                handle: handle.to_string(),
-            })
-        }
-    }
-
-    fn is_simulated(&self) -> bool {
-        self.inner.is_simulated()
-    }
-
-    fn register_context(&self, context_id: Uuid) {
-        let registry = Arc::clone(&self.registry);
-        tokio::spawn(async move {
-            let mut reg = registry.write().await;
-            let (tx, _) = broadcast::channel(100);
-            reg.contexts.insert(context_id, tx);
-        });
-    }
-
-    fn unregister_context(&self, context_id: Uuid) {
-        let registry = Arc::clone(&self.registry);
-        tokio::spawn(async move {
-            let mut reg = registry.write().await;
-            reg.contexts.remove(&context_id);
-        });
-    }
-
-    async fn notify_events_available(&self) {
-        let registry = self.registry.read().await;
-        for (_, sender) in registry.contexts.iter() {
-            let _ = sender.send(());
-        }
-    }
-
-    fn resolution_ms(&self) -> u64 {
-        self.inner.resolution_ms()
-    }
-
-    async fn now_instant(&self) -> std::time::Instant {
-        self.inner.now_instant().await
     }
 }

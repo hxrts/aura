@@ -15,6 +15,7 @@ use crate::handlers::{
 };
 use aura_core::hash::hash;
 use aura_core::LocalSessionType;
+use std::time::Duration;
 
 /// Type-erased bridge for dynamic handler composition
 ///
@@ -425,11 +426,19 @@ impl UnifiedAuraHandlerBridge {
     ) -> Result<Vec<u8>, AuraHandlerError> {
         match operation {
             "current_epoch" => {
-                let result = aura_core::TimeEffects::current_epoch(effects).await;
+                let result = effects
+                    .physical_time()
+                    .await
+                    .map_err(|e| AuraHandlerError::ExecutionFailed { source: e.into() })?
+                    .ts_ms;
                 Ok(bincode::serialize(&result).unwrap_or_default())
             }
             "current_timestamp" => {
-                let result = aura_core::TimeEffects::current_timestamp(effects).await;
+                let result = effects
+                    .physical_time()
+                    .await
+                    .map_err(|e| AuraHandlerError::ExecutionFailed { source: e.into() })?
+                    .ts_ms;
                 Ok(bincode::serialize(&result).unwrap_or_default())
             }
             "sleep_ms" => {
@@ -437,7 +446,7 @@ impl UnifiedAuraHandlerBridge {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
 
-                effects.sleep_ms(ms).await;
+                tokio::time::sleep(Duration::from_millis(ms)).await;
                 Ok(bincode::serialize(&()).unwrap_or_default())
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {

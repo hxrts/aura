@@ -54,7 +54,7 @@ impl SimulationEffectComposer {
     /// Add core effect system using agent runtime
     pub fn with_effect_system(mut self) -> Result<Self, SimulationComposerError> {
         let authority_id = AuthorityId::new();
-        let agent = AgentBuilder::new()
+        let _agent = AgentBuilder::new()
             .with_authority(authority_id)
             .build_testing()
             .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;

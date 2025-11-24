@@ -40,7 +40,7 @@ async fn test_basic_ota_coordination() -> AuraResult<()> {
         let proposal = UpgradeProposal {
             proposal_id: Uuid::new_v4(),
             package_id: Uuid::new_v4(),
-            version: "1.2.0".to_string(),
+            version: String::from("1.2.0"),
             kind: UpgradeKind::SoftFork,
             package_hash: Hash32::from([0u8; 32]), // Sample hash
             activation_epoch: None,
@@ -106,7 +106,7 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
         let proposal = UpgradeProposal {
             proposal_id: Uuid::new_v4(),
             package_id: Uuid::new_v4(),
-            version: "1.3.0".to_string(),
+            version: String::from("1.3.0"),
             kind: UpgradeKind::HardFork,
             package_hash: Hash32::from([0xdeu8; 32]),
             activation_epoch: Some(100),
@@ -131,7 +131,7 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
         println!("Proposal failed due to insufficient approvals");
 
         // This represents a failed upgrade scenario
-        Err::<(), AuraError>(AuraError::internal("Insufficient approvals".to_string()))
+        Err::<(), AuraError>(AuraError::internal(String::from("Insufficient approvals")))
     })
     .await;
 
@@ -264,7 +264,7 @@ async fn test_ota_rollback() -> AuraResult<()> {
         let rollback_proposal = UpgradeProposal {
             proposal_id: Uuid::new_v4(),
             package_id: Uuid::new_v4(),
-            version: "1.4.0".to_string(),
+            version: String::from("1.4.0"),
             kind: UpgradeKind::SoftFork, // Use SoftFork for rollback
             package_hash: Hash32::from([0x12u8; 32]),
             activation_epoch: None,

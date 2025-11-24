@@ -41,12 +41,19 @@ pub fn verify_threshold_signature(
 
     // Verify using FROST-compatible signature verification
     // FROST signatures are compatible with standard Ed25519 verification
-    aura_core::ed25519_verify(group_public_key, message, threshold_sig).map_err(|e| {
-        AuthenticationError::InvalidThresholdSignature(format!(
-            "FROST threshold signature verification failed: {}",
-            e
-        ))
-    })?;
+    let valid =
+        aura_core::ed25519_verify(message, threshold_sig, group_public_key).map_err(|e| {
+            AuthenticationError::InvalidThresholdSignature(format!(
+                "FROST threshold signature verification failed: {}",
+                e
+            ))
+        })?;
+
+    if !valid {
+        return Err(AuthenticationError::InvalidThresholdSignature(
+            "FROST threshold signature invalid".to_string(),
+        ));
+    }
 
     tracing::debug!(
         min_required = min_signers,
@@ -79,12 +86,19 @@ pub fn verify_threshold_signature_with_signers(
     group_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
     // First verify the signature itself using FROST-compatible verification
-    aura_core::ed25519_verify(group_public_key, message, threshold_sig).map_err(|e| {
-        AuthenticationError::InvalidThresholdSignature(format!(
-            "FROST threshold signature verification failed: {}",
-            e
-        ))
-    })?;
+    let valid =
+        aura_core::ed25519_verify(message, threshold_sig, group_public_key).map_err(|e| {
+            AuthenticationError::InvalidThresholdSignature(format!(
+                "FROST threshold signature verification failed: {}",
+                e
+            ))
+        })?;
+
+    if !valid {
+        return Err(AuthenticationError::InvalidThresholdSignature(
+            "FROST threshold signature invalid".to_string(),
+        ));
+    }
 
     tracing::debug!(
         signers = ?expected_signers,

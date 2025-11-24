@@ -10,10 +10,12 @@ description = "Core Quint formal verification integration for Aura - Layer 3: Im
 [dependencies]
 # Core dependencies
 aura-core = { path = "../aura-core" }
+aura-effects = { path = "../aura-effects" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+futures = { workspace = true }
 uuid = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = { workspace = true }

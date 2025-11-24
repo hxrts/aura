@@ -6,7 +6,7 @@ This document describes the effect system and runtime architecture in Aura. It d
 
 Aura defines effect traits as abstract interfaces for system capabilities. Core traits expose essential functionality. Extended traits expose coordinated or system-wide behaviors. Each trait is independent and does not assume global state.
 
-Core traits include `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `TimeEffects`, `RandomEffects`, and `JournalEffects`. Extended traits include `SystemEffects`, `LedgerEffects`, `ChoreographicEffects`, and `AgentEffects`.
+Core traits include `CryptoEffects`, `NetworkEffects`, `StorageEffects`, time domain traits (`PhysicalTimeEffects`, `LogicalClockEffects`, `OrderClockEffects`, `TimeAttestationEffects`), `RandomEffects`, and `JournalEffects`. Extended traits include `SystemEffects`, `LedgerEffects`, `ChoreographicEffects`, and `AgentEffects`.
 
 ```rust
 #[async_trait]
@@ -17,6 +17,17 @@ pub trait CryptoEffects {
 ```
 
 This example shows a core effect trait. Implementations provide cryptographic operations. Traits contain async methods for compatibility with async runtimes.
+
+### 1.1 Unified Time Traits
+
+The legacy monolithic `TimeEffects` trait is replaced by domain-specific traits:
+
+- `PhysicalTimeEffects` – returns `PhysicalTime { ts_ms, uncertainty }` and `sleep_ms` for wall-clock operations.
+- `LogicalClockEffects` – advances and reads causal vector clocks and Lamport scalars.
+- `OrderClockEffects` – produces opaque, privacy-preserving total order tokens without temporal meaning.
+- `TimeAttestationEffects` – wraps physical claims in provenance proofs when consensus/peer attestation is required.
+
+Callers select the domain appropriate to their semantics (guards/transport use physical, CRDT uses logical, privacy-preserving ordering uses order tokens). Cross-domain comparisons are explicit via `TimeStamp::compare(policy)`. Direct `SystemTime::now()` or chrono usage is forbidden outside effect implementations; testkit and simulator provide deterministic handlers for all four traits.
 
 ## 2. Handler Design
 
@@ -86,7 +97,7 @@ The effect system spans several crates. Each crate defines a specific role in th
 
 `aura-effects` contains stateless and single-party effect handlers. It provides default implementations for cryptography, storage, networking, and randomness.
 
-`aura-protocol` contains orchestrated and multi-party behavior. It bridges session types to effect calls. It implements the guard chain, journal coupling, and consensus integrations.
+`aura-protocol` contains orchestrated and multi-party behavior. It bridges session types to effect calls. It implements the [guard chain](109_authorization.md), journal coupling, and consensus integrations.
 
 `aura-agent` assembles handlers into runnable systems. It configures effect pipelines for production environments.
 
@@ -123,7 +134,7 @@ This snippet shows parallel initialization of handlers. Parallel initialization 
 
 ## 8. Guard Chain and Leakage Integration
 
-The effect runtime enforces the guard-chain sequencing defined in `109_authorization.md` and the leakage contract from `003_information_flow_contract.md`. Each projected choreography message expands to the following effect calls:
+The effect runtime enforces the guard-chain sequencing defined in [Authorization](109_authorization.md) and the leakage contract from [Privacy and Information Flow](003_information_flow_contract.md). Each projected choreography message expands to the following effect calls:
 
 1. **CapGuard / AuthorizationEffects** – evaluate Biscuit tokens plus sovereign policy to derive the capability frontier for the `(ContextId, peer)` pair.
 2. **FlowGuard / FlowBudgetEffects** – atomically increment the replicated `spent` counter (stored as journal facts) and produce a receipt if the operation succeeds.
@@ -133,6 +144,59 @@ The effect runtime enforces the guard-chain sequencing defined in `109_authoriza
 
 Handlers that implement `LeakageEffects` must surface both production-grade implementations (wired into the agent runtime) and deterministic versions for the simulator so privacy tests can assert leakage bounds. Because the effect executor orchestrates these calls explicitly, no transport observable can occur unless the preceding guards succeed, preserving the semantics laid out in the theoretical model.
 
-## 9. Summary
+## 9. Session Management and Choreography Execution
+
+The effect system provides the framework for managing the lifecycle of distributed protocols. Choreographies define the logic of a protocol, while a **session** represents a single, stateful execution of that choreography. The runtime uses the effect system to create, manage, and execute these sessions.
+
+### 9.1. The Session Management Interface
+
+The abstract interface for all session-related operations is the `SessionManagementEffects` trait defined in `aura-core`. This trait provides the API for creating sessions, joining them, sending and receiving messages within a session's context, and querying their status.
+
+```rust
+// Defined in aura-core::effects::agent
+pub trait SessionManagementEffects: Send + Sync {
+    /// Create new choreographic session with participants and roles
+    async fn create_choreographic_session(
+        &self,
+        session_type: SessionType,
+        participants: Vec<ParticipantInfo>,
+    ) -> Result<SessionId>;
+
+    /// Send choreographic message within a session context
+    async fn send_choreographic_message(
+        &self,
+        session_id: SessionId,
+        message: Vec<u8>,
+    ) -> Result<()>;
+
+    // ... other methods for joining, leaving, and status checks
+}
+```
+
+By abstracting session management into an effect, the application logic remains decoupled from the underlying implementation (e.g., in-memory vs. persistent session state).
+
+### 9.2. Session Handlers and State
+
+Concrete implementations of `SessionManagementEffects`, such as the `MemorySessionHandler` in `aura-protocol`, act as the engine for the session system. This handler maintains the state of all active sessions, including:
+- **`SessionId`**: A unique identifier for the session instance.
+- **`SessionStatus`**: The current phase of the session's lifecycle (e.g., `Initializing`, `Active`, `Completed`).
+- **`SessionEpoch`**: A version number for the session's state. It is incremented to coordinate significant state changes and invalidate old credentials or messages, which is critical for security and preventing replay attacks.
+- **Participants**: The list of devices involved in the choreography.
+
+The creation and lifecycle of sessions are themselves managed as a choreographic protocol (`SessionLifecycleChoreography` in `aura-protocol`) to ensure consistency across all participants.
+
+### 9.3. Execution Flow
+
+The relationship between the runtime, effects, sessions, and choreographies is as follows:
+
+1.  **Request**: An event triggers the need to execute a distributed protocol (e.g., FROST signing).
+2.  **Session Creation**: The `aura-agent` runtime calls `create_choreographic_session` via the effect system. The handler creates a new session instance with a unique `SessionId` and an initial `SessionEpoch`.
+3.  **Execution**: The session becomes the stateful context for executing the choreography. The agent uses the `SessionId` to route messages and drive the protocol's state machine as defined by its session type.
+4.  **State Management**: The handler updates the `SessionStatus` as the choreography progresses. If the protocol requires it, the `SessionEpoch` can be incremented to securely evolve the session state.
+5.  **Completion**: Once the choreography finishes, the handler transitions the session to a terminal state (`Completed` or `Failed`), and resources are cleaned up.
+
+In essence, the session system is the generic, stateful **executor**, and a choreography is the specific, verifiable **script** that the executor runs.
+
+## 10. Summary
 
 The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior. Performance optimizations improve scalability and responsiveness.

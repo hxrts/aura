@@ -26,7 +26,13 @@
 //!     .build()?;
 //! ```
 
-use aura_composition::{EffectRegistry as CompositionRegistry, HandlerFactory};
+use aura_composition::{
+    adapters::{
+        ConsoleHandlerAdapter, CryptoHandlerAdapter, RandomHandlerAdapter, StorageHandlerAdapter,
+        TimeHandlerAdapter, TransportHandlerAdapter,
+    },
+    EffectRegistry as CompositionRegistry,
+};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -36,9 +42,17 @@ use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
 };
 use crate::core::{AgentConfig, AuthorityContext};
+use aura_core::effects::ExecutionMode as CoreExecutionMode;
 use aura_core::identifiers::AuthorityId;
+use aura_core::EffectType;
+use aura_effects::{
+    console::RealConsoleHandler, crypto::RealCryptoHandler, random::RealRandomHandler,
+    storage::FilesystemStorageHandler, time::PhysicalTimeHandler,
+    TcpTransportHandler as RealTransportHandler,
+};
 
 /// Error types for builder operations
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum BuilderError {
     /// Composition layer error
@@ -58,6 +72,7 @@ impl From<BuilderError> for EffectRegistryError {
 }
 
 /// Error types for effect registry operations
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum EffectRegistryError {
     /// Required configuration missing
@@ -84,6 +99,7 @@ pub enum EffectRegistryError {
     },
 }
 
+#[allow(dead_code)]
 impl EffectRegistryError {
     pub fn missing_field(field: impl Into<String>) -> Self {
         Self::MissingConfiguration {
@@ -188,9 +204,7 @@ impl EffectSystemBuilder {
         };
 
         // Create a registry with appropriate execution mode
-        let registry = Arc::new(super::registry::EffectRegistry::new(
-            core_execution_mode.clone(),
-        ));
+        let registry = Arc::new(super::registry::EffectRegistry::new(core_execution_mode));
 
         // Create effect system components based on execution mode
         let (effect_executor, effect_system) = match self.execution_mode {
@@ -265,6 +279,7 @@ impl EffectSystemBuilder {
 /// Flexible effect system registry with builder pattern
 ///
 /// Note: This wraps aura-composition::EffectRegistry for Layer 6 runtime concerns.
+#[allow(dead_code)]
 pub struct EffectRegistry {
     authority_context: Option<AuthorityContext>,
     composition_registry: CompositionRegistry,
@@ -274,6 +289,57 @@ pub struct EffectRegistry {
     enable_tracing: bool,
 }
 
+fn map_registry_error(e: impl std::error::Error + Send + Sync + 'static) -> BuilderError {
+    BuilderError::CompositionError {
+        source: Box::new(e),
+    }
+}
+
+fn build_base_registry(mode: CoreExecutionMode) -> Result<CompositionRegistry, BuilderError> {
+    let mut registry = CompositionRegistry::new(mode);
+    registry
+        .register_handler(
+            EffectType::Console,
+            Box::new(ConsoleHandlerAdapter::new(RealConsoleHandler::new())),
+        )
+        .map_err(map_registry_error)?;
+    registry
+        .register_handler(
+            EffectType::Random,
+            Box::new(RandomHandlerAdapter::new(RealRandomHandler::new())),
+        )
+        .map_err(map_registry_error)?;
+    registry
+        .register_handler(
+            EffectType::Crypto,
+            Box::new(CryptoHandlerAdapter::new(RealCryptoHandler::new())),
+        )
+        .map_err(map_registry_error)?;
+    registry
+        .register_handler(
+            EffectType::Storage,
+            Box::new(StorageHandlerAdapter::new(
+                FilesystemStorageHandler::with_default_path(),
+            )),
+        )
+        .map_err(map_registry_error)?;
+    registry
+        .register_handler(
+            EffectType::Time,
+            Box::new(TimeHandlerAdapter::new(PhysicalTimeHandler::new())),
+        )
+        .map_err(map_registry_error)?;
+    registry
+        .register_handler(
+            EffectType::Network,
+            Box::new(TransportHandlerAdapter::new(RealTransportHandler::default())),
+        )
+        .map_err(map_registry_error)?;
+
+    Ok(registry)
+}
+
+#[allow(dead_code)]
 impl EffectRegistry {
     /// Create a production effect registry
     ///
@@ -283,18 +349,7 @@ impl EffectRegistry {
     /// - Network: TCP/UDP networking with TLS
     /// - Time: System clock
     pub fn production() -> Result<Self, BuilderError> {
-        let device_id = aura_core::DeviceId::new();
-        let factory = HandlerFactory::for_production(device_id).map_err(|e| {
-            BuilderError::CompositionError {
-                source: Box::new(e),
-            }
-        })?;
-        let composition_registry =
-            factory
-                .create_registry()
-                .map_err(|e| BuilderError::CompositionError {
-                    source: Box::new(e),
-                })?;
+        let composition_registry = build_base_registry(CoreExecutionMode::Production)?;
 
         Ok(Self {
             authority_context: None,
@@ -314,17 +369,7 @@ impl EffectRegistry {
     /// - Network: Local loopback or memory channels
     /// - Time: Controllable mock time
     pub fn testing() -> Result<Self, BuilderError> {
-        let device_id = aura_core::DeviceId::new();
-        let factory =
-            HandlerFactory::for_testing(device_id).map_err(|e| BuilderError::CompositionError {
-                source: Box::new(e),
-            })?;
-        let composition_registry =
-            factory
-                .create_registry()
-                .map_err(|e| BuilderError::CompositionError {
-                    source: Box::new(e),
-                })?;
+        let composition_registry = build_base_registry(CoreExecutionMode::Testing)?;
 
         Ok(Self {
             authority_context: None,
@@ -347,18 +392,7 @@ impl EffectRegistry {
     /// # Arguments
     /// * `seed` - Random seed for deterministic behavior
     pub fn simulation(seed: u64) -> Result<Self, BuilderError> {
-        let device_id = aura_core::DeviceId::new();
-        let factory = HandlerFactory::for_simulation(device_id, seed).map_err(|e| {
-            BuilderError::CompositionError {
-                source: Box::new(e),
-            }
-        })?;
-        let composition_registry =
-            factory
-                .create_registry()
-                .map_err(|e| BuilderError::CompositionError {
-                    source: Box::new(e),
-                })?;
+        let composition_registry = build_base_registry(CoreExecutionMode::Simulation { seed })?;
 
         Ok(Self {
             authority_context: None,
@@ -372,17 +406,7 @@ impl EffectRegistry {
 
     /// Create a custom effect registry for advanced configuration
     pub fn custom() -> Result<Self, BuilderError> {
-        let device_id = aura_core::DeviceId::new();
-        let factory = HandlerFactory::for_testing(device_id) // Safe default
-            .map_err(|e| BuilderError::CompositionError {
-                source: Box::new(e),
-            })?;
-        let composition_registry =
-            factory
-                .create_registry()
-                .map_err(|e| BuilderError::CompositionError {
-                    source: Box::new(e),
-                })?;
+        let composition_registry = build_base_registry(CoreExecutionMode::Testing)?;
 
         Ok(Self {
             authority_context: None,
@@ -443,7 +467,7 @@ impl EffectRegistry {
         }
 
         // Get authority_id from context for effect system creation
-        let authority_id = self
+        let _authority_id = self
             .authority_context
             .as_ref()
             .ok_or_else(|| EffectRegistryError::missing_field("authority_context"))?
@@ -464,6 +488,7 @@ impl EffectRegistry {
 }
 
 /// Extension trait providing standard configurations
+#[allow(dead_code)]
 pub trait EffectRegistryExt {
     /// Quick testing setup with authority context
     fn quick_testing(
@@ -500,8 +525,10 @@ pub trait EffectRegistryExt {
 impl EffectRegistryExt for EffectRegistry {}
 
 /// High-level runtime builder façade
+#[allow(dead_code)]
 pub struct RuntimeBuilder;
 
+#[allow(dead_code)]
 impl RuntimeBuilder {
     /// Create a production runtime with authority-first design
     pub async fn production(
@@ -547,19 +574,19 @@ mod tests {
     #[test]
     fn test_effect_registry_configurations() {
         // Test production configuration
-        let prod = EffectRegistry::production();
+        let prod = EffectRegistry::production().unwrap();
         assert!(matches!(prod.execution_mode, ExecutionMode::Production));
         assert!(prod.enable_logging);
         assert!(prod.enable_metrics);
 
         // Test testing configuration
-        let test = EffectRegistry::testing();
+        let test = EffectRegistry::testing().unwrap();
         assert!(matches!(test.execution_mode, ExecutionMode::Testing));
         assert!(!test.enable_logging);
         assert!(!test.enable_metrics);
 
         // Test simulation configuration
-        let sim = EffectRegistry::simulation(42);
+        let sim = EffectRegistry::simulation(42).unwrap();
         assert!(matches!(
             sim.execution_mode,
             ExecutionMode::Simulation { seed: 42 }
@@ -573,7 +600,7 @@ mod tests {
         let authority_id = AuthorityId::new();
         let context = AuthorityContext::new(authority_id);
 
-        let registry = EffectRegistry::custom()
+        let registry = EffectRegistry::custom().unwrap()
             .with_authority_context(context)
             .with_logging()
             .with_metrics()
@@ -589,7 +616,7 @@ mod tests {
 
     #[test]
     fn test_build_missing_context() {
-        let result = EffectRegistry::testing().build();
+        let result = EffectRegistry::testing().unwrap().build();
         assert!(result.is_err());
 
         match result.unwrap_err() {

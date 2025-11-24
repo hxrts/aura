@@ -5,10 +5,10 @@
 
 use crate::effects::{
     AuraEffectSystem, AuthMethod, AuthenticationEffects, AuthenticationResult, BiometricType,
-    ConsoleEffects, HealthStatus, StorageEffects, TimeEffects,
+    ConsoleEffects, HealthStatus, StorageEffects,
 };
 // TODO: Use BiometricEffects for platform biometric API integration
-use aura_core::effects::BiometricEffects;
+use aura_core::effects::{BiometricEffects, PhysicalTimeEffects};
 use async_trait::async_trait;
 use aura_core::hash::hash;
 use aura_core::{identifiers::DeviceId, AuraError, AuraResult as Result};
@@ -107,7 +107,11 @@ impl AuthenticationEffects for AuthenticationHandler {
         match identity_result {
             Ok(identity) if identity == self.device_id => {
                 // Device identity matches - create session token
-                let timestamp = TimeEffects::current_timestamp(&*effects).await;
+                let timestamp = effects
+                    .physical_time()
+                    .await
+                    .map(|t| t.ts_ms)
+                    .map_err(|err| AuraError::internal(format!("time unavailable: {err}")))?;
 
                 // Generate session token using crypto effects
                 let random_bytes = effects.random_bytes(32).await;
@@ -181,7 +185,11 @@ impl AuthenticationEffects for AuthenticationHandler {
         // Check if authentication has expired
         if let Some(expires_at) = state.expires_at {
             let effects = self.core_effects.read().await;
-            let current_time = TimeEffects::current_timestamp(&*effects).await;
+            let current_time = effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0);
 
             if current_time > expires_at {
                 // Authentication expired - clear state

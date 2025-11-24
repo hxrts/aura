@@ -5,26 +5,51 @@
 //! Target: <250 lines, focused on choreographic coordination.
 
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
+use aura_core::effects::PhysicalTimeEffects;
 use aura_core::{identifiers::DeviceId, ContextId};
+use aura_effects::time::PhysicalTimeHandler;
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 /// WebSocket handshake coordinator using choreographic protocols
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WebSocketHandshakeCoordinator {
     device_id: DeviceId,
     config: ChoreographicConfig,
     active_handshakes: HashMap<String, HandshakeState>,
+    time: Arc<dyn PhysicalTimeEffects>,
+}
+
+impl std::fmt::Debug for WebSocketHandshakeCoordinator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebSocketHandshakeCoordinator")
+            .field("device_id", &self.device_id)
+            .field("config", &self.config)
+            .field("active_handshakes", &self.active_handshakes)
+            .finish()
+    }
 }
 
 /// WebSocket session coordinator for active connections
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct WebSocketSessionCoordinator {
     device_id: DeviceId,
     config: ChoreographicConfig,
     active_sessions: HashMap<String, SessionState>,
+    time: Arc<dyn PhysicalTimeEffects>,
+}
+
+impl std::fmt::Debug for WebSocketSessionCoordinator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WebSocketSessionCoordinator")
+            .field("device_id", &self.device_id)
+            .field("config", &self.config)
+            .field("active_sessions", &self.active_sessions)
+            .finish()
+    }
 }
 
 /// Handshake state tracking
@@ -121,11 +146,32 @@ pub enum WebSocketHandshakeResult {
 impl WebSocketHandshakeCoordinator {
     /// Create new WebSocket handshake coordinator
     pub fn new(device_id: DeviceId, config: ChoreographicConfig) -> Self {
+        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler::new()))
+    }
+
+    /// Create coordinator with explicit time provider
+    pub fn with_time(
+        device_id: DeviceId,
+        config: ChoreographicConfig,
+        time: Arc<dyn PhysicalTimeEffects>,
+    ) -> Self {
         Self {
             device_id,
             config,
             active_handshakes: HashMap::new(),
+            time,
         }
+    }
+
+    fn now(&self) -> SystemTime {
+        let ms = futures::executor::block_on(async {
+            self.time
+                .physical_time()
+                .await
+                .map(|p| p.ts_ms)
+                .unwrap_or_default()
+        });
+        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
     }
 
     /// Initiate WebSocket handshake
@@ -144,7 +190,7 @@ impl WebSocketHandshakeCoordinator {
         let session_id = format!(
             "ws-session-{}-{}",
             &format!("{:?}", self.device_id)[..8],
-            SystemTime::now()
+            self.now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis()
@@ -154,7 +200,7 @@ impl WebSocketHandshakeCoordinator {
             session_id: session_id.clone(),
             peer_id,
             phase: HandshakePhase::Initiated,
-            started_at: SystemTime::now(),
+            started_at: self.now(),
             capabilities: self.config.required_capabilities.clone(),
         };
 
@@ -226,11 +272,31 @@ impl WebSocketHandshakeCoordinator {
 impl WebSocketSessionCoordinator {
     /// Create new WebSocket session coordinator
     pub fn new(device_id: DeviceId, config: ChoreographicConfig) -> Self {
+        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler::new()))
+    }
+
+    pub fn with_time(
+        device_id: DeviceId,
+        config: ChoreographicConfig,
+        time: Arc<dyn PhysicalTimeEffects>,
+    ) -> Self {
         Self {
             device_id,
             config,
             active_sessions: HashMap::new(),
+            time,
         }
+    }
+
+    fn now(&self) -> SystemTime {
+        let ms = futures::executor::block_on(async {
+            self.time
+                .physical_time()
+                .await
+                .map(|p| p.ts_ms)
+                .unwrap_or_default()
+        });
+        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
     }
 
     /// Establish session from completed handshake
@@ -242,8 +308,8 @@ impl WebSocketSessionCoordinator {
         let session_state = SessionState {
             session_id: session_id.clone(),
             peer_id,
-            established_at: SystemTime::now(),
-            last_activity: SystemTime::now(),
+            established_at: self.now(),
+            last_activity: self.now(),
             message_count: 0,
         };
 
@@ -253,11 +319,12 @@ impl WebSocketSessionCoordinator {
 
     /// Record session activity
     pub fn record_activity(&mut self, session_id: &str) -> ChoreographicResult<()> {
+        let now = self.now();
         let session = self.active_sessions.get_mut(session_id).ok_or_else(|| {
             ChoreographicError::ExecutionFailed(format!("Session not found: {}", session_id))
         })?;
 
-        session.last_activity = SystemTime::now();
+        session.last_activity = now;
         session.message_count += 1;
         Ok(())
     }

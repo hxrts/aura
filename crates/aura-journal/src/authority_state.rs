@@ -33,10 +33,10 @@ impl AuthorityState {
         self.coordinate_frost_threshold_signing(effects, data).await
     }
 
-    /// Coordinate FROST threshold signing across devices via effects delegation
+    /// Coordinate threshold signing across devices via effects delegation.
     ///
-    /// This properly delegates FROST operations to the effects system, following
-    /// the architectural pattern: Layer 2 (journal) → Layer 3 (effects) → Layer 5 (frost).
+    /// This properly delegates cryptography to the effects system, following
+    /// the architectural pattern: Layer 2 (journal) → Layer 3 (effects).
     async fn coordinate_frost_threshold_signing<E: CryptoEffects>(
         &self,
         _effects: &E,
@@ -57,8 +57,8 @@ impl AuthorityState {
         // For now, return an error indicating this requires full FROST protocol implementation
         // This is a proper architectural boundary - Layer 2 should delegate but not implement
         Err(AuraError::internal(
-            "FROST threshold signing requires full protocol implementation. \
-             This should be coordinated through aura-frost crate via the orchestration layer.",
+            "Threshold signing requires full protocol implementation via effects; \
+             journal does not orchestrate signing.",
         ))
 
         // TODO: When FROST architecture is fully implemented, this should:
@@ -101,7 +101,7 @@ impl DerivedAuthority {
     /// Sign operation with proper effects delegation
     ///
     /// This method provides the correct architectural pattern for threshold signing:
-    /// Layer 2 (journal) → Layer 3 (effects) → Layer 5 (frost) → Layer 4 (orchestration)
+    /// Layer 2 (journal) → Layer 3 (effects)
     pub async fn sign_operation_with_effects<E: CryptoEffects>(
         &self,
         effects: &E,

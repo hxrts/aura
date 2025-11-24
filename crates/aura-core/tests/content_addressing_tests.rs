@@ -48,7 +48,7 @@ fn test_contentid_from_value() {
 
     let data = TestData {
         id: 42,
-        name: "test".to_string(),
+        name: String::from("test"),
     };
 
     let content_id = ContentId::from_value(&data).unwrap();

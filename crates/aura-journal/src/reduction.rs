@@ -12,6 +12,7 @@ use aura_core::{
     hash,
     identifiers::{AuthorityId, ChannelId, ContextId},
     session_epochs::Epoch,
+    time::OrderTime,
     tree::{commit_leaf, policy_hash, LeafId, Policy},
     Hash32,
 };
@@ -440,7 +441,7 @@ pub fn reduce_context(journal: &Journal) -> RelationalState {
     match &journal.namespace {
         JournalNamespace::Context(context_id) => {
             let mut bindings = Vec::new();
-            let mut flow_budgets = BTreeMap::new();
+            let flow_budgets = BTreeMap::new();
             let mut channel_checkpoints: BTreeMap<(ChannelId, u64), Vec<ChannelCheckpoint>> =
                 BTreeMap::new();
             let mut proposed_bumps = Vec::new();
@@ -448,93 +449,82 @@ pub fn reduce_context(journal: &Journal) -> RelationalState {
             let mut channel_policies: BTreeMap<ChannelId, ChannelPolicy> = BTreeMap::new();
 
             for fact in &journal.facts {
-                match &fact.content {
-                    FactContent::Relational(rf) => {
-                        let binding = match rf {
-                            RelationalFact::GuardianBinding {
-                                account_id,
-                                guardian_id,
-                                binding_hash,
-                            } => RelationalBinding {
-                                binding_type: RelationalBindingType::GuardianBinding {
-                                    account_id: *account_id,
-                                    guardian_id: *guardian_id,
-                                },
-                                context_id: *context_id,
-                                data: binding_hash.0.to_vec(),
+                if let FactContent::Relational(rf) = &fact.content {
+                    let binding = match rf {
+                        RelationalFact::GuardianBinding {
+                            account_id,
+                            guardian_id,
+                            binding_hash,
+                        } => RelationalBinding {
+                            binding_type: RelationalBindingType::GuardianBinding {
+                                account_id: *account_id,
+                                guardian_id: *guardian_id,
                             },
-                            RelationalFact::RecoveryGrant {
-                                account_id,
-                                guardian_id,
-                                grant_hash,
-                            } => RelationalBinding {
-                                binding_type: RelationalBindingType::RecoveryGrant {
-                                    account_id: *account_id,
-                                    guardian_id: *guardian_id,
-                                },
-                                context_id: *context_id,
-                                data: grant_hash.0.to_vec(),
+                            context_id: *context_id,
+                            data: binding_hash.0.to_vec(),
+                        },
+                        RelationalFact::RecoveryGrant {
+                            account_id,
+                            guardian_id,
+                            grant_hash,
+                        } => RelationalBinding {
+                            binding_type: RelationalBindingType::RecoveryGrant {
+                                account_id: *account_id,
+                                guardian_id: *guardian_id,
                             },
-                            RelationalFact::Consensus {
-                                consensus_id,
-                                operation_hash,
-                                threshold_met: _,
-                                participant_count: _,
-                            } => RelationalBinding {
-                                binding_type: RelationalBindingType::Generic(
-                                    "consensus".to_string(),
-                                ),
-                                context_id: *context_id,
-                                data: [consensus_id.0.to_vec(), operation_hash.0.to_vec()].concat(),
-                            },
-                            RelationalFact::AmpChannelCheckpoint(cp) => {
-                                channel_checkpoints
-                                    .entry((cp.channel, cp.chan_epoch))
-                                    .or_default()
-                                    .push(cp.clone());
-                                continue;
-                            }
-                            RelationalFact::AmpProposedChannelEpochBump(bump) => {
-                                proposed_bumps.push(bump.clone());
-                                continue;
-                            }
-                            RelationalFact::AmpCommittedChannelEpochBump(bump) => {
-                                committed_bumps.push(bump.clone());
-                                continue;
-                            }
-                            RelationalFact::AmpChannelPolicy(policy) => {
-                                channel_policies
-                                    .entry(policy.channel)
-                                    .and_modify(|existing| {
-                                        // Prefer policies that specify a skip window override
-                                        if existing.skip_window.is_none()
-                                            && policy.skip_window.is_some()
-                                        {
-                                            *existing = policy.clone();
-                                        }
-                                    })
-                                    .or_insert_with(|| policy.clone());
-                                continue;
-                            }
-                            RelationalFact::Generic {
-                                context_id: _,
-                                binding_type,
-                                binding_data,
-                            } => RelationalBinding {
-                                binding_type: RelationalBindingType::Generic(binding_type.clone()),
-                                context_id: *context_id,
-                                data: binding_data.clone(),
-                            },
-                        };
-                        bindings.push(binding);
-                    }
-                    FactContent::FlowBudget(fb) => {
-                        // Accumulate spent amounts per (source, dest, epoch) tuple
-                        let key = (fb.source, fb.destination, fb.epoch);
-                        let current = flow_budgets.get(&key).copied().unwrap_or(0);
-                        flow_budgets.insert(key, current + fb.spent_amount);
-                    }
-                    _ => {} // Skip non-relational facts
+                            context_id: *context_id,
+                            data: grant_hash.0.to_vec(),
+                        },
+                        RelationalFact::Consensus {
+                            consensus_id,
+                            operation_hash,
+                            threshold_met: _,
+                            participant_count: _,
+                        } => RelationalBinding {
+                            binding_type: RelationalBindingType::Generic("consensus".to_string()),
+                            context_id: *context_id,
+                            data: [consensus_id.0.to_vec(), operation_hash.0.to_vec()].concat(),
+                        },
+                        RelationalFact::AmpChannelCheckpoint(cp) => {
+                            channel_checkpoints
+                                .entry((cp.channel, cp.chan_epoch))
+                                .or_default()
+                                .push(cp.clone());
+                            continue;
+                        }
+                        RelationalFact::AmpProposedChannelEpochBump(bump) => {
+                            proposed_bumps.push(bump.clone());
+                            continue;
+                        }
+                        RelationalFact::AmpCommittedChannelEpochBump(bump) => {
+                            committed_bumps.push(bump.clone());
+                            continue;
+                        }
+                        RelationalFact::AmpChannelPolicy(policy) => {
+                            channel_policies
+                                .entry(policy.channel)
+                                .and_modify(|existing| {
+                                    // Prefer policies that specify a skip window override
+                                    if existing.skip_window.is_none()
+                                        && policy.skip_window.is_some()
+                                    {
+                                        *existing = policy.clone();
+                                    }
+                                })
+                                .or_insert_with(|| policy.clone());
+                            continue;
+                        }
+                        RelationalFact::Generic {
+                            context_id: _,
+                            binding_type,
+                            binding_data,
+                        } => RelationalBinding {
+                            binding_type: RelationalBindingType::Generic(binding_type.clone()),
+                            context_id: *context_id,
+                            data: binding_data.clone(),
+                        },
+                    };
+                    bindings.push(binding);
                 }
             }
 
@@ -654,7 +644,7 @@ fn select_pending_bump(
 /// Compute snapshot state for garbage collection
 ///
 /// This identifies facts that can be superseded by a snapshot.
-pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<crate::fact::FactId>) {
+pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<OrderTime>) {
     // Compute hash of current state
     let state_hash = match &journal.namespace {
         JournalNamespace::Authority(_) => {
@@ -673,12 +663,9 @@ pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<crate:
     let superseded_facts = journal
         .facts
         .iter()
-        .filter_map(|f| {
-            // Check if fact can be superseded
-            match &f.content {
-                FactContent::Snapshot(s) if s.sequence < sequence => None, // Keep recent snapshots
-                _ => Some(f.fact_id.clone()),
-            }
+        .filter_map(|f| match &f.content {
+            FactContent::Snapshot(s) if s.sequence < sequence => None, // Keep recent snapshots
+            _ => Some(f.order.clone()),
         })
         .collect();
 
@@ -792,12 +779,12 @@ fn convert_to_core_fact(
     // Create a new aura-core fact with basic information
     let mut core_fact = aura_core::journal::Fact::new();
 
-    // Add fact ID as a string key-value pair (simplified conversion)
-    let fact_id_key = "fact_id";
-    let fact_id_value = format!("{}", journal_fact.fact_id.0);
+    // Add ordering token as a string key-value pair (simplified conversion)
+    let order_key = "order";
+    let order_value = format!("{:?}", journal_fact.timestamp);
     core_fact.insert(
-        fact_id_key,
-        aura_core::journal::FactValue::String(fact_id_value),
+        order_key,
+        aura_core::journal::FactValue::String(order_value),
     );
 
     // Add content type information
@@ -805,7 +792,6 @@ fn convert_to_core_fact(
     let content_type_value = match &journal_fact.content {
         crate::fact::FactContent::AttestedOp(_) => "attested_op",
         crate::fact::FactContent::Relational(_) => "relational",
-        crate::fact::FactContent::FlowBudget(_) => "flow_budget",
         crate::fact::FactContent::Snapshot(_) => "snapshot",
         crate::fact::FactContent::RendezvousReceipt { .. } => "rendezvous_receipt",
     };
@@ -828,9 +814,9 @@ fn convert_to_core_fact(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fact::FactId;
-    use crate::fact::{Fact, FlowBudgetFact};
+    use crate::fact::Fact;
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+    use aura_core::time::TimeStamp;
     use aura_core::Hash32;
 
     #[test]
@@ -849,7 +835,8 @@ mod tests {
 
         // Add a guardian binding fact
         let fact = Fact {
-            fact_id: FactId::from_bytes([1u8; 16]),
+            order: OrderTime([1u8; 32]),
+            timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
             content: FactContent::Relational(RelationalFact::GuardianBinding {
                 account_id: AuthorityId::new(),
                 guardian_id: AuthorityId::new(),
@@ -865,41 +852,6 @@ mod tests {
             state.bindings[0].binding_type,
             RelationalBindingType::GuardianBinding { .. }
         );
-    }
-
-    #[test]
-    fn test_flow_budget_accumulation() {
-        let ctx_id = ContextId::new();
-        let mut journal = Journal::new(JournalNamespace::Context(ctx_id));
-
-        let source = AuthorityId::new();
-        let dest = AuthorityId::new();
-        let epoch = 1u64;
-
-        // Add multiple flow budget facts
-        for i in 1..=3 {
-            let mut fact_bytes = [0u8; 16];
-            fact_bytes[0] = i as u8;
-            let fact = Fact {
-                fact_id: FactId::from_bytes(fact_bytes),
-                content: FactContent::FlowBudget(FlowBudgetFact {
-                    context_id: ctx_id,
-                    source,
-                    destination: dest,
-                    spent_amount: i * 100,
-                    epoch,
-                }),
-            };
-            journal.add_fact(fact).unwrap();
-        }
-
-        let state = reduce_context(&journal);
-        let total = state
-            .flow_budgets
-            .get(&(source, dest, epoch))
-            .copied()
-            .unwrap_or(0);
-        assert_eq!(total, 600); // 100 + 200 + 300
     }
 
     #[test]
@@ -929,13 +881,15 @@ mod tests {
 
         journal
             .add_fact(Fact {
-                fact_id: FactId::from_bytes([9u8; 16]),
+                order: OrderTime([9u8; 32]),
+                timestamp: TimeStamp::OrderClock(OrderTime([9u8; 32])),
                 content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(checkpoint)),
             })
             .unwrap();
         journal
             .add_fact(Fact {
-                fact_id: FactId::from_bytes([10u8; 16]),
+                order: OrderTime([10u8; 32]),
+                timestamp: TimeStamp::OrderClock(OrderTime([10u8; 32])),
                 content: FactContent::Relational(RelationalFact::AmpProposedChannelEpochBump(
                     proposed,
                 )),
@@ -979,13 +933,15 @@ mod tests {
 
         journal
             .add_fact(Fact {
-                fact_id: FactId::from_bytes([11u8; 16]),
+                order: OrderTime([11u8; 32]),
+                timestamp: TimeStamp::OrderClock(OrderTime([11u8; 32])),
                 content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(checkpoint)),
             })
             .unwrap();
         journal
             .add_fact(Fact {
-                fact_id: FactId::from_bytes([12u8; 16]),
+                order: OrderTime([12u8; 32]),
+                timestamp: TimeStamp::OrderClock(OrderTime([12u8; 32])),
                 content: FactContent::Relational(RelationalFact::AmpProposedChannelEpochBump(
                     emergency,
                 )),
@@ -1019,7 +975,8 @@ mod tests {
         let channel = ChannelId::from_bytes([7u8; 32]);
 
         let checkpoint = Fact {
-            fact_id: FactId::from_bytes([1u8; 16]),
+            order: OrderTime([1u8; 32]),
+            timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
             content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(
                 ChannelCheckpoint {
                     context: ctx,
@@ -1034,7 +991,8 @@ mod tests {
         };
 
         let proposed = Fact {
-            fact_id: FactId::from_bytes([2u8; 16]),
+            order: OrderTime([2u8; 32]),
+            timestamp: TimeStamp::OrderClock(OrderTime([2u8; 32])),
             content: FactContent::Relational(RelationalFact::AmpProposedChannelEpochBump(
                 ProposedChannelEpochBump {
                     context: ctx,

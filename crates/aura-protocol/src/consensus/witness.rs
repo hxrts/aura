@@ -107,12 +107,8 @@ impl WitnessShare {
         authority: AuthorityId,
         partial_signature: PartialSignature,
         operation_hash: Hash32,
+        timestamp_ms: u64,
     ) -> Self {
-        let timestamp_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-
         Self {
             consensus_id,
             authority,
@@ -284,6 +280,7 @@ mod tests {
                     signature: vec![],
                 },
                 Hash32::new([0; 32]),
+                0,
             );
 
             // Should fail without nonce commitment

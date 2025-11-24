@@ -6,6 +6,7 @@
 //! and behavioral equivalence during the refactoring process.
 
 use aura_core::{AuraError, DeviceId, SessionId};
+use aura_effects::random::RealRandomHandler;
 use aura_sync::core::{
     config::{BatchConfig, NetworkConfig, RetryConfig, SyncConfig},
     errors::{
@@ -122,7 +123,7 @@ fn test_error_context_preservation() {
 fn test_unified_message_patterns() {
     // Test session-scoped messages
     let session_id = SessionId::new();
-    let payload = "test data".to_string();
+    let payload = String::from("test data");
     let session_msg = SessionMessage::new(session_id, payload.clone());
 
     assert_eq!(session_msg.session_id, session_id);
@@ -140,21 +141,21 @@ fn test_request_response_correlation() {
     // Test request/response pattern used throughout sync protocols
     let from = DeviceId::new();
     let to = DeviceId::new();
-    let payload = "ping".to_string();
+    let payload = String::from("ping");
 
     let request = RequestMessage::new(from, to, payload, Uuid::new_v4());
-    let response = ResponseMessage::success(&request, "pong".to_string());
+    let response = ResponseMessage::success(&request, String::from("pong"));
 
     // Verify correlation
     assert_eq!(response.request_id, request.request_id);
     assert_eq!(response.from, to); // Swapped
     assert_eq!(response.to, from); // Swapped
     assert!(response.is_success());
-    assert_eq!(response.into_success(), Some("pong".to_string()));
+    assert_eq!(response.into_success(), Some(String::from("pong")));
 
     // Test error response
     let error_response: ResponseMessage<String> =
-        ResponseMessage::error(&request, "Service unavailable".to_string());
+        ResponseMessage::error(&request, String::from("Service unavailable"));
     assert!(!error_response.is_success());
     assert_eq!(error_response.into_success(), None);
 }
@@ -162,21 +163,21 @@ fn test_request_response_correlation() {
 #[test]
 fn test_sync_result_pattern() {
     // Test the common sync result pattern used across protocols
-    let success_result = MessageSyncResult::success(100, Some("metadata".to_string()), 5000);
+    let success_result = MessageSyncResult::success(100, Some(String::from("metadata")), 5000);
     assert!(success_result.success);
     assert_eq!(success_result.operations_synced, 100);
     assert_eq!(success_result.duration_ms, 5000);
     assert!(success_result.data.is_some());
 
     let failure_result: MessageSyncResult<String> =
-        MessageSyncResult::failure("Network timeout".to_string(), 3000);
+        MessageSyncResult::failure(String::from("Network timeout"), 3000);
     assert!(!failure_result.success);
     assert_eq!(failure_result.operations_synced, 0);
     assert_eq!(failure_result.duration_ms, 3000);
     assert!(failure_result.error.is_some());
 
     let partial_result: MessageSyncResult<String> =
-        MessageSyncResult::partial(75, "Incomplete transfer".to_string(), 8000);
+        MessageSyncResult::partial(75, String::from("Incomplete transfer"), 8000);
     assert!(!partial_result.success);
     assert_eq!(partial_result.operations_synced, 75);
     assert!(partial_result.error.is_some());
@@ -207,7 +208,7 @@ fn test_batch_message_functionality() {
 fn test_progress_message_tracking() {
     // Test progress tracking for long-running sync operations
     let operation_id = Uuid::new_v4();
-    let progress = ProgressMessage::new(operation_id, 0.5, "Processing".to_string())
+    let progress = ProgressMessage::new(operation_id, 0.5, String::from("Processing"))
         .with_eta(300)
         .with_metadata("items", "100");
 
@@ -215,9 +216,9 @@ fn test_progress_message_tracking() {
     assert_eq!(progress.progress, 0.5);
     assert!(!progress.is_complete());
     assert_eq!(progress.eta_seconds, Some(300));
-    assert_eq!(progress.metadata.get("items"), Some(&"100".to_string()));
+    assert_eq!(progress.metadata.get("items"), Some(&String::from("100")));
 
-    let complete_progress = ProgressMessage::new(operation_id, 1.0, "Complete".to_string());
+    let complete_progress = ProgressMessage::new(operation_id, 1.0, String::from("Complete"));
     assert!(complete_progress.is_complete());
 }
 
@@ -291,21 +292,22 @@ fn test_config_validation() {
     assert!(config.validate().is_err());
 }
 
-#[test]
-fn test_retry_config_functionality() {
+#[tokio::test]
+async fn test_retry_config_functionality() {
     // Test retry configuration behavior
     let retry_config = RetryConfig::default();
+    let random = RealRandomHandler::default();
 
     // Test exponential backoff
-    let delay1 = retry_config.delay_for_attempt(0);
-    let delay2 = retry_config.delay_for_attempt(1);
-    let delay3 = retry_config.delay_for_attempt(2);
+    let delay1 = retry_config.delay_for_attempt(0, &random).await;
+    let delay2 = retry_config.delay_for_attempt(1, &random).await;
+    let delay3 = retry_config.delay_for_attempt(2, &random).await;
 
     assert!(delay2 >= delay1); // Should increase
     assert!(delay3 >= delay2); // Should continue increasing
 
     // Test max delay cap
-    let long_delay = retry_config.delay_for_attempt(20);
+    let long_delay = retry_config.delay_for_attempt(20, &random).await;
     assert!(long_delay <= retry_config.max_delay);
 
     // Test retry limit
@@ -410,7 +412,7 @@ fn test_unified_session_management() {
         .unwrap();
 
     let initial_state = TestSyncProtocolState {
-        phase: "initialization".to_string(),
+        phase: String::from("initialization"),
         operations_pending: 100,
         bytes_transferred: 0,
     };
@@ -422,7 +424,7 @@ fn test_unified_session_management() {
 
     // Test session state transitions
     let mut updated_state = initial_state.clone();
-    updated_state.phase = "active".to_string();
+    updated_state.phase = String::from("active");
     updated_state.operations_pending = 75;
     updated_state.bytes_transferred = 1024;
 
@@ -430,7 +432,7 @@ fn test_unified_session_management() {
 
     // Test successful completion
     let mut metadata = HashMap::new();
-    metadata.insert("sync_type".to_string(), "journal".to_string());
+    metadata.insert(String::from("sync_type"), String::from("journal"));
 
     manager
         .complete_session(session_id, 100, 2048, metadata)
@@ -463,7 +465,7 @@ fn test_session_failure_handling() {
         .create_session(vec![DeviceId::new()], 1000001)
         .unwrap();
     let state = TestSyncProtocolState {
-        phase: "test".to_string(),
+        phase: String::from("test"),
         operations_pending: 50,
         bytes_transferred: 0,
     };
@@ -474,11 +476,11 @@ fn test_session_failure_handling() {
         operations_completed: 25,
         bytes_transferred: 512,
         completed_participants: vec![DeviceId::new()],
-        last_successful_operation: Some("journal_append".to_string()),
+        last_successful_operation: Some(String::from("journal_append")),
     };
 
     let error = SessionError::ProtocolViolation {
-        constraint: "operation ordering".to_string(),
+        constraint: String::from("operation ordering"),
     };
 
     manager
@@ -519,7 +521,7 @@ fn test_session_resource_limits() {
 
     // Test concurrent session limit
     let state = TestSyncProtocolState {
-        phase: "test".to_string(),
+        phase: String::from("test"),
         operations_pending: 0,
         bytes_transferred: 0,
     };
@@ -549,7 +551,7 @@ fn test_session_statistics() {
 
     // Create various session outcomes
     let state = TestSyncProtocolState {
-        phase: "test".to_string(),
+        phase: String::from("test"),
         operations_pending: 10,
         bytes_transferred: 0,
     };
@@ -603,7 +605,7 @@ fn test_cross_module_integration() {
         .unwrap();
 
     let state = TestSyncProtocolState {
-        phase: "starting".to_string(),
+        phase: String::from("starting"),
         operations_pending: config.batching.default_batch_size,
         bytes_transferred: 0,
     };
@@ -612,7 +614,7 @@ fn test_cross_module_integration() {
 
     // Simulate session progress
     let updated_state = TestSyncProtocolState {
-        phase: "syncing".to_string(),
+        phase: String::from("syncing"),
         operations_pending: 50,
         bytes_transferred: 1024,
     };
@@ -645,7 +647,7 @@ fn test_error_propagation_consistency() {
 
     // Test session errors integrate with sync errors
     let session_error = SessionError::ProtocolViolation {
-        constraint: "test".to_string(),
+        constraint: String::from("test"),
     };
 
     // Verify error can be converted/wrapped appropriately

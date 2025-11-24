@@ -7,9 +7,9 @@
 //! This module contains only production-grade stateless handlers.
 
 use async_trait::async_trait;
-use aura_core::effects::{
-    SecureStorageCapability, SecureStorageEffects, SecureStorageError, SecureStorageLocation,
-};
+#[cfg(test)]
+use aura_core::effects::SecureStorageCapability;
+use aura_core::effects::{SecureStorageEffects, SecureStorageError, SecureStorageLocation};
 
 /// Real secure storage handler for production use
 ///

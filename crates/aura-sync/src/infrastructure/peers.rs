@@ -199,7 +199,7 @@ pub struct PeerMetadata {
 impl PeerMetadata {
     /// Create new peer metadata for a discovered peer
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
     pub fn new(device_id: DeviceId, now: u64) -> Self {
         Self {
             device_id,
@@ -219,7 +219,7 @@ impl PeerMetadata {
 
     /// Update peer status
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    /// Note: Callers should obtain `now` via their time provider and pass it to this method
     pub fn set_status(&mut self, status: PeerStatus, now: u64) {
         if self.status != status {
             self.status = status;
@@ -361,7 +361,7 @@ impl PeerManager {
             .query_peers(discovery_query)
             .await
             .map_err(|e| {
-                sync_peer_error("discovery", &format!("Rendezvous discovery failed: {}", e))
+                sync_peer_error("discovery", format!("Rendezvous discovery failed: {}", e))
             })?;
 
         // Convert discovered peers to DeviceIds and validate
@@ -465,14 +465,14 @@ impl PeerManager {
         self.validate_peer_sync_capabilities(&peer_result.capabilities)?;
 
         // Optional: Verify peer identity using aura-verify
-        self.verify_peer_identity(&device_id, &peer_result, effects)
+        self.verify_peer_identity(&device_id, peer_result, effects)
             .await?;
 
         // Check trust level meets our requirements
         if trust_level_score(peer_result.required_trust_level) < self.config.min_trust_level {
             return Err(sync_peer_error(
                 "trust_validation",
-                &format!(
+                format!(
                     "Peer {} required trust level {:?} below minimum {:?}",
                     device_id, peer_result.required_trust_level, self.config.min_trust_level
                 ),
@@ -648,7 +648,7 @@ impl PeerManager {
         let root_public_key = self.get_root_public_key().await?;
 
         // Parse the Biscuit token using the root public key
-        let biscuit_token = match biscuit_auth::Biscuit::from(token_bytes, &root_public_key) {
+        let biscuit_token = match biscuit_auth::Biscuit::from(token_bytes, root_public_key) {
             Ok(token) => token,
             Err(e) => {
                 tracing::debug!("Failed to parse Biscuit token: {}", e);
@@ -692,7 +692,7 @@ impl PeerManager {
         // Generated via: openssl rand -hex 32
         let dev_key_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
         let dev_key_bytes = hex::decode(dev_key_hex).map_err(|e| {
-            sync_peer_error("key_loading", &format!("Failed to decode dev key: {}", e))
+            sync_peer_error("key_loading", format!("Failed to decode dev key: {}", e))
         })?;
 
         if dev_key_bytes.len() != 32 {
@@ -708,7 +708,7 @@ impl PeerManager {
         biscuit_auth::PublicKey::from_bytes(&key_array).map_err(|e| {
             sync_peer_error(
                 "key_loading",
-                &format!("Failed to load root public key: {}", e),
+                format!("Failed to load root public key: {}", e),
             )
         })
     }
@@ -836,7 +836,7 @@ impl PeerManager {
 
     /// Check if discovery refresh is needed
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider
     pub fn needs_refresh(&self, now: u64) -> bool {
         match self.last_refresh {
             None => true,

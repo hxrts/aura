@@ -93,17 +93,17 @@ fn test_event_nonce() {
 #[test]
 fn test_string_identifiers() {
     // Test MemberId
-    let member1 = MemberId::new("member1".to_string());
-    let member2 = MemberId::new("member2".to_string());
-    let member1_dup = MemberId::new("member1".to_string());
+    let member1 = MemberId::new(String::from("member1"));
+    let member2 = MemberId::new(String::from("member2"));
+    let member1_dup = MemberId::new(String::from("member1"));
 
     assert_ne!(member1, member2);
     assert_eq!(member1, member1_dup);
     assert_eq!(member1.as_str(), "member1");
 
     // Test IndividualId
-    let individual1 = IndividualId::new("individual1".to_string());
-    let individual2 = IndividualId::new("individual2".to_string());
+    let individual1 = IndividualId::new(String::from("individual1"));
+    let individual2 = IndividualId::new(String::from("individual2"));
 
     assert_ne!(individual1, individual2);
     assert_eq!(individual1.as_str(), "individual1");
@@ -212,9 +212,9 @@ fn test_uuid_conversions() {
 #[test]
 fn test_string_conversions() {
     // Test From<String> implementations for string-based types
-    let member_from_string = MemberId::from("test_member".to_string());
-    let individual_from_string = IndividualId::from("test_individual".to_string());
-    let data_from_string = DataId::from("test_data".to_string());
+    let member_from_string = MemberId::from(String::from("test_member"));
+    let individual_from_string = IndividualId::from(String::from("test_individual"));
+    let data_from_string = DataId::from(String::from("test_data"));
 
     assert_eq!(member_from_string.as_str(), "test_member");
     assert_eq!(individual_from_string.as_str(), "test_individual");
@@ -251,9 +251,9 @@ fn test_identifier_equality_and_ordering() {
 
     // Test string identifier ordering
     let members = vec![
-        MemberId::new("charlie".to_string()),
-        MemberId::new("alice".to_string()),
-        MemberId::new("bob".to_string()),
+        MemberId::new(String::from("charlie")),
+        MemberId::new(String::from("alice")),
+        MemberId::new(String::from("bob")),
     ];
 
     let mut sorted_members = members.clone();
@@ -282,7 +282,7 @@ fn test_identifier_determinism() {
     assert_eq!(device1, device2, "Same UUID should produce same DeviceId");
 
     // Test string identifiers determinism
-    let member1 = MemberId::new("same_id".to_string());
-    let member2 = MemberId::new("same_id".to_string());
+    let member1 = MemberId::new(String::from("same_id"));
+    let member2 = MemberId::new(String::from("same_id"));
     assert_eq!(member1, member2, "Same string should produce same MemberId");
 }

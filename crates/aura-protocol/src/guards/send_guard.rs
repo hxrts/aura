@@ -7,7 +7,7 @@
 use super::effect_system_trait::GuardEffectSystem;
 use crate::guards::{privacy::track_leakage_consumption, JournalCoupler, LeakageBudget};
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::{AuraError, AuraResult, Receipt};
+use aura_core::{AuraError, AuraResult, Receipt, TimeEffects};
 use biscuit_auth::Biscuit;
 // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
 use tracing::{debug, info, warn};
@@ -121,7 +121,7 @@ impl SendGuardChain {
     ///
     /// # Note
     /// Full evaluation with Biscuit authorization integration
-    async fn evaluate_full<E: GuardEffectSystem>(
+    async fn evaluate_full<E: GuardEffectSystem + aura_core::PhysicalTimeEffects>(
         &self,
         effect_system: &E,
     ) -> AuraResult<SendGuardResult> {
@@ -131,11 +131,11 @@ impl SendGuardChain {
     }
 
     /// Complete evaluation with Biscuit authorization and flow budget
-    pub async fn evaluate<E: GuardEffectSystem>(
+    pub async fn evaluate<E: GuardEffectSystem + aura_core::PhysicalTimeEffects>(
         &self,
         effect_system: &E,
     ) -> AuraResult<SendGuardResult> {
-        let start_time = std::time::Instant::now();
+        let start_time = effect_system.now_instant().await;
         let operation_id = self.operation_id.as_deref().unwrap_or("unnamed_send");
 
         debug!(
@@ -148,7 +148,7 @@ impl SendGuardChain {
         );
 
         // Phase 1: AuthGuard - Biscuit authorization evaluation
-        let auth_start = std::time::Instant::now();
+        let auth_start = effect_system.now_instant().await;
         let (authorization_satisfied, authorization_level) = self
             .evaluate_authorization_guard(effect_system)
             .await
@@ -182,8 +182,13 @@ impl SendGuardChain {
             });
         }
 
-        // Phase 2: FlowGuard - Evaluate headroom(ctx, cost) and charge budget
-        let flow_start = std::time::Instant::now();
+        // Phase 2: LeakageGuard - consume leakage budget if provided
+        if let Some(budget) = &self.leakage_budget {
+            track_leakage_consumption(budget, operation_id, effect_system).await?;
+        }
+
+        // Phase 3: FlowGuard - Evaluate headroom(ctx, cost) and charge budget
+        let flow_start = effect_system.now_instant().await;
         let flow_result = self.evaluate_flow_guard(effect_system).await;
         let flow_time = flow_start.elapsed();
 
@@ -253,11 +258,12 @@ impl SendGuardChain {
     /// Evaluate the authorization guard using Biscuit tokens
     async fn evaluate_authorization_guard<E: GuardEffectSystem>(
         &self,
-        _effect_system: &E,
+        effect_system: &E,
     ) -> AuraResult<(bool, String)> {
         use crate::authorization::BiscuitAuthorizationBridge;
         use crate::guards::BiscuitGuardEvaluator;
-        use aura_wot::ResourceScope;
+        use aura_wot::{ContextOp, ResourceScope};
+        use biscuit_auth::KeyPair;
 
         debug!(
             authorization = %self.message_authorization,
@@ -266,8 +272,10 @@ impl SendGuardChain {
             "Evaluating Biscuit authorization for send guard"
         );
 
-        // Create authorization bridge and evaluator
-        let auth_bridge = BiscuitAuthorizationBridge::new_mock();
+        // Build a fresh Biscuit token and bridge using a single keypair to keep verification consistent.
+        let keypair = KeyPair::new();
+        let auth_bridge =
+            BiscuitAuthorizationBridge::new(keypair.public(), aura_core::DeviceId::new());
         let evaluator = BiscuitGuardEvaluator::new(auth_bridge);
 
         // Parse authorization requirement to extract capability and resource
@@ -276,18 +284,16 @@ impl SendGuardChain {
         let capability = parts[0];
         let resource = parts.get(1).unwrap_or(&"default");
 
-        // Retrieve Biscuit token for the required capability from effect system
-        let token = self
-            .retrieve_send_token(capability, resource, _effect_system)
-            .await?;
-
         // Create resource scope for authorization check
-        // Create resource scope for authorization check
-        // Using Storage variant as a general-purpose resource scope
-        let resource_scope = ResourceScope::Storage {
-            authority_id: aura_core::AuthorityId::new(),
-            path: resource.to_string(),
+        let resource_scope = ResourceScope::Context {
+            context_id: self.context,
+            operation: ContextOp::UpdateParams,
         };
+
+        // Create Biscuit token scoped to this send operation
+        let token = self
+            .create_fresh_send_token_with_keypair(capability, resource, effect_system, &keypair)
+            .await?;
 
         // Check authorization using the Biscuit evaluator
         match evaluator.check_guard(&token, capability, &resource_scope) {
@@ -360,15 +366,29 @@ impl SendGuardChain {
         resource: &str,
         effect_system: &E,
     ) -> AuraResult<Biscuit> {
-        use biscuit_auth::{macros::*, KeyPair};
+        use biscuit_auth::KeyPair;
 
         // In production, this would use the proper authorization bridge with the root keypair
         // For now, create a properly structured token that would match real tokens
         let keypair = KeyPair::new();
+        self.create_fresh_send_token_with_keypair(capability, resource, effect_system, &keypair)
+            .await
+    }
+
+    async fn create_fresh_send_token_with_keypair<E: GuardEffectSystem>(
+        &self,
+        capability: &str,
+        resource: &str,
+        effect_system: &E,
+        keypair: &biscuit_auth::KeyPair,
+    ) -> AuraResult<Biscuit> {
+        use biscuit_auth::macros::*;
 
         let context_str = self.context.to_string();
         let peer_str = self.peer.to_string();
         let authority_str = effect_system.authority_id().to_string();
+        let timestamp_secs = effect_system.current_timestamp().await as i64;
+        let expiry_secs = timestamp_secs + 3600; // 1 hour from now
 
         // Create a Biscuit token with comprehensive send permissions
         let token = biscuit!(
@@ -385,17 +405,10 @@ impl SendGuardChain {
             authority_str = authority_str.clone(),
             context_str = context_str,
             peer_str = peer_str,
-            timestamp = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64,
-            expiry = (std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs()
-                + 3600) as i64 // 1 hour from now
+            timestamp = timestamp_secs,
+            expiry = expiry_secs
         )
-        .build(&keypair)
+        .build(keypair)
         .map_err(|e| AuraError::invalid(format!("Failed to build Biscuit token: {}", e)))?;
 
         debug!(
@@ -469,7 +482,7 @@ impl SendGuardChain {
     }
 
     /// Convenience method to evaluate and return only the authorization decision
-    pub async fn is_send_authorized<E: GuardEffectSystem>(
+    pub async fn is_send_authorized<E: GuardEffectSystem + aura_core::PhysicalTimeEffects>(
         &self,
         effect_system: &E,
     ) -> AuraResult<bool> {
@@ -478,7 +491,7 @@ impl SendGuardChain {
     }
 
     /// Convenience method to evaluate and return the receipt if authorized
-    pub async fn authorize_send<E: GuardEffectSystem>(
+    pub async fn authorize_send<E: GuardEffectSystem + aura_core::PhysicalTimeEffects>(
         &self,
         effect_system: &E,
     ) -> AuraResult<Option<Receipt>> {
@@ -495,7 +508,7 @@ impl SendGuardChain {
     }
 
     /// Evaluate the guard chain and, if authorized, apply journal coupling hooks (requires &mut).
-    pub async fn evaluate_with_coupling<E: GuardEffectSystem>(
+    pub async fn evaluate_with_coupling<E: GuardEffectSystem + aura_core::PhysicalTimeEffects>(
         &self,
         effect_system: &mut E,
     ) -> AuraResult<SendGuardResult> {

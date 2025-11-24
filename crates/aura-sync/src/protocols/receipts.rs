@@ -147,7 +147,7 @@ impl ReceiptVerificationProtocol {
         let is_valid = crypto_effects
             .ed25519_verify(&signed_data, &receipt.signature, &receipt.public_key)
             .await
-            .map_err(|e| sync_session_error(&format!("Ed25519 verification failed: {}", e)))?;
+            .map_err(|e| sync_session_error(format!("Ed25519 verification failed: {}", e)))?;
 
         if !is_valid {
             tracing::warn!(
@@ -259,21 +259,25 @@ impl ReceiptVerificationProtocol {
     }
 
     /// Create a cryptographically signed receipt
-    pub async fn create_receipt<E>(
+    pub async fn create_receipt<E, T>(
         &self,
         message_hash: Hash32,
         signer: DeviceId,
         crypto_effects: &E,
+        time_effects: &T,
         previous_receipt: Option<Box<Receipt>>,
     ) -> SyncResult<Receipt>
     where
         E: CryptoEffects + Send + Sync,
+        T: aura_core::effects::PhysicalTimeEffects + Send + Sync,
     {
-        // Get current timestamp (in production, this would use TimeEffects)
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_err(|e| sync_session_error(&format!("Failed to get timestamp: {}", e)))?
-            .as_secs();
+        // Get current timestamp from time provider (seconds precision for receipts)
+        let timestamp = time_effects
+            .physical_time()
+            .await
+            .map_err(|e| sync_session_error(format!("Failed to get timestamp: {}", e)))?
+            .ts_ms
+            / 1000;
 
         // Generate an Ed25519 key pair for signing (in production, this would retrieve the device's key)
         let (public_key, private_key) =
@@ -281,7 +285,7 @@ impl ReceiptVerificationProtocol {
                 .ed25519_generate_keypair()
                 .await
                 .map_err(|e| {
-                    sync_session_error(&format!("Failed to generate Ed25519 keypair: {}", e))
+                    sync_session_error(format!("Failed to generate Ed25519 keypair: {}", e))
                 })?;
 
         // Prepare the signed data (message hash + timestamp for replay protection)
@@ -294,7 +298,7 @@ impl ReceiptVerificationProtocol {
             .ed25519_sign(&signed_data, &private_key)
             .await
             .map_err(|e| {
-                sync_session_error(&format!("Failed to create Ed25519 signature: {}", e))
+                sync_session_error(format!("Failed to create Ed25519 signature: {}", e))
             })?;
 
         tracing::debug!(
@@ -622,11 +626,29 @@ mod tests {
     async fn test_create_receipt() {
         let protocol = ReceiptVerificationProtocol::default();
         let crypto = MockCryptoEffects;
+        struct MockTime;
+        #[async_trait::async_trait]
+        impl aura_core::effects::PhysicalTimeEffects for MockTime {
+            async fn physical_time(
+                &self,
+            ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::time::TimeError>
+            {
+                Ok(aura_core::time::PhysicalTime {
+                    ts_ms: 1_000,
+                    uncertainty: None,
+                })
+            }
+
+            async fn sleep_ms(&self, _ms: u64) -> Result<(), aura_core::effects::time::TimeError> {
+                Ok(())
+            }
+        }
+        let time = MockTime;
         let message_hash = Hash32([42; 32]);
         let signer = DeviceId::from_bytes([1; 32]);
 
         let receipt = protocol
-            .create_receipt(message_hash, signer, &crypto, None)
+            .create_receipt(message_hash, signer, &crypto, &time, None)
             .await
             .unwrap();
 

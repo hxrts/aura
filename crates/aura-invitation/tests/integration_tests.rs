@@ -7,7 +7,7 @@
 #![allow(clippy::unwrap_used)]
 
 use aura_agent::AuraEffectSystem;
-use aura_core::effects::TimeEffects;
+use aura_core::effects::PhysicalTimeEffects;
 use aura_core::{AccountId, DeviceId, TrustLevel};
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest},
@@ -95,7 +95,7 @@ impl InvitationIntegrationTest {
             invitee: self.invitee_device,
             account_id: self.account_id,
             granted_token: serializable_token,
-            device_role: role.to_string(),
+            device_role: String::from(role),
             ttl_secs: ttl,
         }
     }
@@ -201,8 +201,11 @@ async fn test_relationship_formation_coordinator_integration() -> aura_core::Aur
         relationship_type: RelationshipType::DeviceCoOwnership,
         initial_trust_level: TrustLevel::High,
         metadata: vec![
-            ("context".to_string(), "integration_test".to_string()),
-            ("test_id".to_string(), "relationship_formation".to_string()),
+            (String::from("context"), String::from("integration_test")),
+            (
+                String::from("test_id"),
+                String::from("relationship_formation"),
+            ),
         ],
     };
 
@@ -303,10 +306,10 @@ async fn test_full_invitation_to_relationship_flow() -> aura_core::AuraResult<()
         relationship_type: RelationshipType::Guardian,
         initial_trust_level: TrustLevel::High,
         metadata: vec![
-            ("role".to_string(), "guardian-device".to_string()),
+            (String::from("role"), String::from("guardian-device")),
             (
-                "established_via".to_string(),
-                "invitation_acceptance".to_string(),
+                String::from("established_via"),
+                String::from("invitation_acceptance"),
             ),
         ],
     };
@@ -426,7 +429,7 @@ async fn test_error_handling_integration() -> aura_core::AuraResult<()> {
         invitee: test.invitee_device,
         account_id: test.account_id,
         granted_token: serializable_token,
-        device_role: "test".to_string(),
+        device_role: String::from("test"),
         ttl_secs: Some(0), // Invalid TTL
     };
 

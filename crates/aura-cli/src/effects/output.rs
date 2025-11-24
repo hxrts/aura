@@ -2,6 +2,7 @@
 
 use super::OutputEffects;
 use async_trait::async_trait;
+use aura_core::effects::ConsoleEffects;
 use aura_core::AuraResult;
 use serde_json::Value;
 
@@ -21,7 +22,7 @@ impl<E> OutputEffectHandler<E> {
 #[async_trait]
 impl<E> OutputEffects for OutputEffectHandler<E>
 where
-    E: crate::ConsoleEffects + Send + Sync,
+    E: ConsoleEffects + Send + Sync,
 {
     async fn display(&self, content: &str) {
         let _ = self.inner.log_info(content).await;

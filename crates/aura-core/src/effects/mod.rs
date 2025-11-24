@@ -114,7 +114,10 @@ pub use supertraits::{
 };
 pub use system::{SystemEffects, SystemError};
 pub use testing::{TestingEffects, TestingError};
-pub use time::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
+pub use time::{
+    LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeComparison, TimeEffects,
+    TimeError, TimeoutHandle, WakeCondition,
+};
 pub use transport::{
     TransportEffects, TransportEnvelope, TransportError, TransportReceipt, TransportStats,
 };

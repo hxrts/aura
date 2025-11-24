@@ -11,10 +11,10 @@ impl SessionOperations {
     /// Update session metadata
     pub async fn update_session_metadata(
         &self,
-        session_id: &str,
-        metadata: HashMap<String, serde_json::Value>,
+        _session_id: &str,
+        _metadata: HashMap<String, serde_json::Value>,
     ) -> AgentResult<()> {
-        let effects = self.effects().read().await;
+        let _effects = self.effects().read().await;
 
         // For now, just record that we would update metadata
         // In a full implementation, this would use choreographic coordination
@@ -24,8 +24,12 @@ impl SessionOperations {
     }
 
     /// Add participant to session
-    pub async fn add_participant(&self, session_id: &str, device_id: DeviceId) -> AgentResult<()> {
-        let effects = self.effects().read().await;
+    pub async fn add_participant(
+        &self,
+        _session_id: &str,
+        _device_id: DeviceId,
+    ) -> AgentResult<()> {
+        let _effects = self.effects().read().await;
 
         // For now, just record that we would add a participant
         // In a full implementation, this would use choreographic coordination
@@ -37,10 +41,10 @@ impl SessionOperations {
     /// Remove participant from session
     pub async fn remove_participant(
         &self,
-        session_id: &str,
-        device_id: DeviceId,
+        _session_id: &str,
+        _device_id: DeviceId,
     ) -> AgentResult<()> {
-        let effects = self.effects().read().await;
+        let _effects = self.effects().read().await;
 
         // For now, just record that we would remove a participant
         // In a full implementation, this would use choreographic coordination
@@ -69,7 +73,7 @@ mod tests {
         let account_id = AccountId::new();
 
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config);
+        let effect_system = AuraEffectSystem::testing(&config).unwrap();
         let effects = Arc::new(RwLock::new(effect_system));
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
@@ -103,7 +107,7 @@ mod tests {
         let account_id = AccountId::new();
 
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config);
+        let effect_system = AuraEffectSystem::testing(&config).unwrap();
         let effects = Arc::new(RwLock::new(effect_system));
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);

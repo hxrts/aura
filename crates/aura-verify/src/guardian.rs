@@ -30,12 +30,20 @@ pub fn verify_guardian_signature(
     guardian_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
     // Verify the cryptographic signature
-    aura_core::ed25519_verify(guardian_public_key, message, signature).map_err(|e| {
-        AuthenticationError::InvalidGuardianSignature(format!(
-            "Guardian {} signature verification failed: {}",
-            guardian_id, e
-        ))
-    })?;
+    let valid =
+        aura_core::ed25519_verify(message, signature, guardian_public_key).map_err(|e| {
+            AuthenticationError::InvalidGuardianSignature(format!(
+                "Guardian {} signature verification failed: {}",
+                guardian_id, e
+            ))
+        })?;
+
+    if !valid {
+        return Err(AuthenticationError::InvalidGuardianSignature(format!(
+            "Guardian {} signature invalid",
+            guardian_id
+        )));
+    }
 
     tracing::debug!(
         guardian_id = %guardian_id,

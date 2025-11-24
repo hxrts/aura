@@ -7,14 +7,14 @@
 use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::{
-    ConsoleEffects, CryptoEffects, NetworkEffects, RandomEffects, StorageEffects, TimeEffects,
+    ConsoleEffects, CryptoEffects, NetworkEffects, PhysicalTimeEffects, RandomEffects,
+    StorageEffects,
 };
 use aura_core::{EffectType, ExecutionMode};
 use aura_effects::{
     console::RealConsoleHandler, crypto::RealCryptoHandler, random::RealRandomHandler,
     storage::FilesystemStorageHandler, system::logging::LoggingSystemHandler,
-    time::RealTimeHandler, StandardAuthorizationHandler, StandardJournalHandler,
-    TcpTransportHandler as RealTransportHandler,
+    time::PhysicalTimeHandler, TcpTransportHandler as RealTransportHandler,
 };
 
 /// Adapter for RealConsoleHandler
@@ -476,13 +476,13 @@ impl RegistrableHandler for StorageHandlerAdapter {
     }
 }
 
-/// Adapter for RealTimeHandler
+/// Adapter for PhysicalTimeHandler (domain-specific time effects)
 pub struct TimeHandlerAdapter {
-    handler: RealTimeHandler,
+    handler: PhysicalTimeHandler,
 }
 
 impl TimeHandlerAdapter {
-    pub fn new(handler: RealTimeHandler) -> Self {
+    pub fn new(handler: PhysicalTimeHandler) -> Self {
         Self { handler }
     }
 }
@@ -501,22 +501,6 @@ impl RegistrableHandler for TimeHandlerAdapter {
         }
 
         match operation {
-            "current_epoch" => {
-                let result = self.handler.current_epoch().await;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
-            "current_timestamp" => {
-                let result = self.handler.current_timestamp().await;
-                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
-                    effect_type,
-                    operation: operation.to_string(),
-                    source: Box::new(e),
-                })
-            }
             "sleep_ms" => {
                 let millis: u64 = bincode::deserialize(parameters).map_err(|e| {
                     HandlerError::EffectDeserialization {
@@ -525,7 +509,7 @@ impl RegistrableHandler for TimeHandlerAdapter {
                         source: Box::new(e),
                     }
                 })?;
-                self.handler.sleep_ms(millis).await;
+                let _ = PhysicalTimeEffects::sleep_ms(&self.handler, millis).await;
                 Ok(Vec::new()) // sleep returns void
             }
             "sleep_until" => {
@@ -548,12 +532,7 @@ impl RegistrableHandler for TimeHandlerAdapter {
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
         if effect_type == EffectType::Time {
-            vec![
-                "current_epoch".to_string(),
-                "current_timestamp".to_string(),
-                "sleep_ms".to_string(),
-                "sleep_until".to_string(),
-            ]
+            vec!["sleep_ms".to_string(), "sleep_until".to_string()]
         } else {
             Vec::new()
         }
@@ -656,57 +635,6 @@ impl RegistrableHandler for TransportHandlerAdapter {
     }
 }
 
-/// Adapter for StandardJournalHandler
-pub struct JournalHandlerAdapter {
-    #[allow(dead_code)]
-    handler: StandardJournalHandler,
-}
-
-impl JournalHandlerAdapter {
-    pub fn new(handler: StandardJournalHandler) -> Self {
-        Self { handler }
-    }
-}
-
-#[async_trait]
-impl RegistrableHandler for JournalHandlerAdapter {
-    async fn execute_operation_bytes(
-        &self,
-        effect_type: EffectType,
-        operation: &str,
-        _parameters: &[u8],
-        _ctx: &HandlerContext,
-    ) -> Result<Vec<u8>, HandlerError> {
-        if effect_type != EffectType::Journal {
-            return Err(HandlerError::UnsupportedEffect { effect_type });
-        }
-
-        // Journal operations would need to be defined based on JournalEffects trait
-        // For now, return unknown operation error
-        Err(HandlerError::UnknownOperation {
-            effect_type,
-            operation: operation.to_string(),
-        })
-    }
-
-    fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        if effect_type == EffectType::Journal {
-            // TODO: Add actual journal operations based on JournalEffects trait
-            vec![]
-        } else {
-            Vec::new()
-        }
-    }
-
-    fn supports_effect(&self, effect_type: EffectType) -> bool {
-        effect_type == EffectType::Journal
-    }
-
-    fn execution_mode(&self) -> ExecutionMode {
-        ExecutionMode::Production
-    }
-}
-
 /// Adapter for LoggingSystemHandler
 pub struct LoggingSystemHandlerAdapter {
     #[allow(dead_code)]
@@ -751,57 +679,6 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {
         effect_type == EffectType::System
-    }
-
-    fn execution_mode(&self) -> ExecutionMode {
-        ExecutionMode::Production
-    }
-}
-
-/// Adapter for StandardAuthorizationHandler
-pub struct AuthorizationHandlerAdapter {
-    #[allow(dead_code)]
-    handler: StandardAuthorizationHandler,
-}
-
-impl AuthorizationHandlerAdapter {
-    pub fn new(handler: StandardAuthorizationHandler) -> Self {
-        Self { handler }
-    }
-}
-
-#[async_trait]
-impl RegistrableHandler for AuthorizationHandlerAdapter {
-    async fn execute_operation_bytes(
-        &self,
-        effect_type: EffectType,
-        operation: &str,
-        _parameters: &[u8],
-        _ctx: &HandlerContext,
-    ) -> Result<Vec<u8>, HandlerError> {
-        if effect_type != EffectType::Authentication {
-            return Err(HandlerError::UnsupportedEffect { effect_type });
-        }
-
-        // Authorization operations would need to be defined based on AuthorizationEffects trait
-        // For now, return unknown operation error
-        Err(HandlerError::UnknownOperation {
-            effect_type,
-            operation: operation.to_string(),
-        })
-    }
-
-    fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
-        if effect_type == EffectType::Authentication {
-            // TODO: Add actual authorization operations based on AuthorizationEffects trait
-            vec![]
-        } else {
-            Vec::new()
-        }
-    }
-
-    fn supports_effect(&self, effect_type: EffectType) -> bool {
-        effect_type == EffectType::Authentication
     }
 
     fn execution_mode(&self) -> ExecutionMode {

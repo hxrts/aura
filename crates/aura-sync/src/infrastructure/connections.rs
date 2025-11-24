@@ -25,7 +25,7 @@
 //!
 //! let peer_id = DeviceId::from_bytes([1; 32]);
 //!
-//! // Obtain current time from TimeEffects (not shown here for brevity)
+//! // Obtain current time from a clock provider (not shown here for brevity)
 //! # let now = Instant::now();
 //!
 //! // Acquire connection from pool
@@ -156,7 +156,7 @@ pub struct ConnectionMetadata {
 impl ConnectionMetadata {
     /// Create new connection metadata
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
     pub fn new(connection_id: String, peer_id: DeviceId, now: u64) -> Self {
         Self {
             connection_id,
@@ -198,7 +198,7 @@ impl ConnectionMetadata {
 
     /// Check if connection has been idle for too long
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider
     pub fn is_expired(&self, timeout: Duration, now: u64) -> bool {
         if !self.is_idle() {
             return false;
@@ -209,7 +209,7 @@ impl ConnectionMetadata {
 
     /// Mark connection as acquired
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    /// Note: Callers should obtain `now` via their time provider and pass it to this method
     pub fn acquire(&mut self, session_id: SessionId, now: u64) {
         self.state = ConnectionState::Active;
         self.session_id = Some(session_id);
@@ -219,7 +219,7 @@ impl ConnectionMetadata {
 
     /// Mark connection as released
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    /// Note: Callers should obtain `now` via their time provider and pass it to this method
     pub fn release(&mut self, now: u64) {
         self.state = ConnectionState::Idle;
         self.session_id = None;
@@ -277,7 +277,7 @@ pub struct ConnectionHandle {
 impl ConnectionHandle {
     /// Create a new connection handle
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    /// Note: Callers should obtain `now` via their time provider and pass it to this method
     pub fn new(id: String, peer_id: DeviceId, session_id: SessionId, now: u64) -> Self {
         Self {
             id,
@@ -289,7 +289,7 @@ impl ConnectionHandle {
 
     /// Get connection age
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider
     pub fn age(&self, now: u64) -> Duration {
         let elapsed_secs = now.saturating_sub(self.acquired_at);
         Duration::from_secs(elapsed_secs)
@@ -361,12 +361,12 @@ impl ConnectionPool {
 
         // Check peer connection limit before creating new connection
         {
-            let peer_connections = self.connections.entry(peer_id).or_insert_with(Vec::new);
+            let peer_connections = self.connections.entry(peer_id).or_default();
             if peer_connections.len() >= self.config.max_connections_per_peer {
                 self.stats.connection_limit_hits += 1;
                 return Err(sync_resource_exhausted(
                     "connections",
-                    &format!("Per-peer connection limit reached for {:?}", peer_id),
+                    format!("Per-peer connection limit reached for {:?}", peer_id),
                 ));
             }
         } // Drop mutable borrow
@@ -383,7 +383,7 @@ impl ConnectionPool {
         metadata.acquire(session_id, now);
 
         // Get peer connections again after transport connection creation
-        let peer_connections = self.connections.entry(peer_id).or_insert_with(Vec::new);
+        let peer_connections = self.connections.entry(peer_id).or_default();
         peer_connections.push(metadata);
         self.total_connections += 1;
         self.stats.connections_created += 1;
@@ -452,7 +452,7 @@ impl ConnectionPool {
 
     /// Remove expired idle connections
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider
     pub async fn evict_expired(&mut self, now: u64) -> usize {
         let mut evicted = 0;
         let idle_timeout = self.config.idle_timeout;
@@ -530,6 +530,7 @@ impl ConnectionPool {
     }
 
     /// Establish transport connection to peer via aura-transport
+    #[allow(clippy::disallowed_methods, clippy::unwrap_used)]
     async fn establish_transport_connection(
         &self,
         peer_id: DeviceId,
@@ -660,7 +661,7 @@ mod tests {
         pool.release(peer_id, handle, now).unwrap();
 
         // Connection should be reused
-        let handle2 = pool.acquire(peer_id, now).await.unwrap();
+        let _handle2 = pool.acquire(peer_id, now).await.unwrap();
         assert_eq!(pool.total_connections(), 1);
         assert_eq!(pool.statistics().connections_reused, 1);
     }

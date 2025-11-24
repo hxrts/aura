@@ -33,7 +33,7 @@ async fn test_composite_handler_implements_all_effects() {
     let network_effect: &dyn NetworkEffects = &handler;
     let _storage_effect: &dyn StorageEffects = &handler;
     let crypto_effect: &dyn CryptoEffects = &handler;
-    let time_effect: &dyn TimeEffects = &handler;
+    let time_effect: &dyn PhysicalTimeEffects = &handler;
     let _console_effect: &dyn ConsoleEffects = &handler;
     let _effect_api_effect: &dyn EffectApiEffects = &handler;
     let _choreographic_effect: &dyn ChoreographicEffects = &handler;
@@ -45,7 +45,7 @@ async fn test_composite_handler_implements_all_effects() {
     let random_bytes = crypto_effect.random_bytes(10).await;
     assert_eq!(random_bytes.len(), 10);
 
-    let current_time = time_effect.current_epoch().await;
+    let current_time = time_effect.physical_time().await.unwrap().ts_ms;
     assert!(current_time > 0);
 }
 
@@ -115,12 +115,12 @@ async fn test_storage_effects() {
 
     // Test batch operations
     let mut batch = HashMap::new();
-    batch.insert("batch1".to_string(), b"value1".to_vec());
-    batch.insert("batch2".to_string(), b"value2".to_vec());
+    batch.insert(String::from("batch1"), b"value1".to_vec());
+    batch.insert(String::from("batch2"), b"value2".to_vec());
 
     memory_handler.store_batch(batch.clone()).await.unwrap();
     let retrieved_batch = memory_handler
-        .retrieve_batch(&["batch1".to_string(), "batch2".to_string()])
+        .retrieve_batch(&[String::from("batch1"), String::from("batch2")])
         .await
         .unwrap();
     assert_eq!(retrieved_batch.len(), 2);
@@ -231,8 +231,8 @@ async fn test_console_effects() {
     let fixture = DeviceTestFixture::new(0);
     let _device_id = fixture.device_id();
     let _event = ConsoleEvent::ProtocolStarted {
-        protocol_id: "test_protocol".to_string(),
-        protocol_type: "DKD".to_string(),
+        protocol_id: String::from("test_protocol"),
+        protocol_type: String::from("DKD"),
     };
     // Note: emit_event method not available on RealConsoleHandler - skip for now
 }
@@ -297,7 +297,7 @@ async fn test_choreographic_effects() {
     let event = ChoreographyEvent::MessageSent {
         from: role1,
         to: role2,
-        message_type: "test_message".to_string(),
+        message_type: String::from("test_message"),
     };
 
     memory_handler.emit_choreo_event(event).await.unwrap();

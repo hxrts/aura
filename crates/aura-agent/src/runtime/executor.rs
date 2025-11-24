@@ -36,7 +36,7 @@ impl EffectExecutor {
         context: &super::EffectContext,
         effect_type: &str,
         operation: &str,
-        params: T,
+        _params: T,
     ) -> Result<EffectResult, AuraError>
     where
         T: Send + Sync + 'static,
@@ -67,7 +67,7 @@ impl EffectExecutor {
 
     /// Get the execution mode
     pub fn execution_mode(&self) -> ExecutionMode {
-        self.execution_mode.clone()
+        self.execution_mode
     }
 
     /// Get the registry
@@ -77,7 +77,7 @@ impl EffectExecutor {
 
     /// Create an execution context
     pub fn create_context(&self, context_id: ContextId) -> super::EffectContext {
-        super::EffectContext::new(self.authority_id, context_id, self.execution_mode.clone())
+        super::EffectContext::new(self.authority_id, context_id, self.execution_mode)
     }
 
     /// Production constructor

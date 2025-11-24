@@ -16,6 +16,12 @@ pub struct MockSimulationHandler {
     storage: Arc<RwLock<MockSimulationStorage>>,
 }
 
+impl Default for MockSimulationHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockSimulationHandler {
     pub fn new() -> Self {
         Self {
@@ -29,6 +35,12 @@ impl MockSimulationHandler {
 /// Stateless simulation handler for testing
 #[derive(Debug)]
 pub struct StatelessSimulationHandler;
+
+impl Default for StatelessSimulationHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl StatelessSimulationHandler {
     pub fn new() -> Self {

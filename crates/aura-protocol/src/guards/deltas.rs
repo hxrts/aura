@@ -5,6 +5,7 @@
 //! monotonic fact accumulation following join-semilattice laws.
 
 use super::effect_system_trait::GuardEffectSystem;
+use aura_core::TimeEffects;
 use aura_core::{AuraError, AuraResult, Fact, FactValue, Journal};
 use serde_json::Value as JsonValue;
 use std::collections::BTreeSet;
@@ -193,11 +194,12 @@ fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOperation
                 capabilities,
             })
         }
-        // NOTE: threshold_ceremony_completion facts are now handled by the aura-frost crate
+        // NOTE: threshold_ceremony_completion facts should be handled by dedicated FROST
+        // choreography crates, not the coordination layer.
         // This coordination layer no longer processes domain-specific threshold cryptography events
         "threshold_ceremony_completion" => {
             Err(AuraError::invalid(
-                "threshold_ceremony_completion facts are handled by aura-frost crate, not coordination layer"
+                "threshold_ceremony_completion facts belong to FROST choreography, not coordination layer"
             ))
         }
         "key_derivation" => {
@@ -295,7 +297,7 @@ async fn rollback_applied_facts<E: GuardEffectSystem>(
         );
 
         // Generate compensation fact based on fact type
-        if let Some(compensation_fact) = generate_compensation_fact(fact)? {
+        if let Some(compensation_fact) = generate_compensation_fact(fact, effect_system).await? {
             tracing::info!("Applying compensation fact: {}", compensation_fact);
             if let Err(compensation_error) =
                 merge_json_fact(effect_system, &compensation_fact).await
@@ -480,7 +482,10 @@ fn parse_result_from_fact(fact: &JsonValue) -> AuraResult<JsonValue> {
 }
 
 /// Generate compensation fact for a failed operation
-fn generate_compensation_fact(fact: &JsonValue) -> AuraResult<Option<JsonValue>> {
+async fn generate_compensation_fact<E: GuardEffectSystem>(
+    fact: &JsonValue,
+    effects: &E,
+) -> AuraResult<Option<JsonValue>> {
     let fact_type = fact
         .get("type")
         .and_then(|t| t.as_str())
@@ -506,10 +511,7 @@ fn generate_compensation_fact(fact: &JsonValue) -> AuraResult<Option<JsonValue>>
                     (
                         "timestamp".to_string(),
                         JsonValue::Number(serde_json::Number::from(
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_secs(),
+                            effects.current_timestamp().await,
                         )),
                     ),
                 ]);
@@ -704,12 +706,7 @@ impl<E: GuardEffectSystem> JournalOperationExt for E {
                 device_fact_map.insert("metadata".to_string(), metadata);
                 device_fact_map.insert(
                     "timestamp".to_string(),
-                    JsonValue::Number(serde_json::Number::from(
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-                    )),
+                    JsonValue::Number(serde_json::Number::from(self.current_timestamp().await)),
                 );
                 let device_fact = JsonValue::Object(device_fact_map);
 

@@ -30,12 +30,19 @@ pub fn verify_device_signature(
     device_public_key: &Ed25519VerifyingKey,
 ) -> Result<()> {
     // Verify the cryptographic signature
-    aura_core::ed25519_verify(device_public_key, message, signature).map_err(|e| {
+    let valid = aura_core::ed25519_verify(message, signature, device_public_key).map_err(|e| {
         AuthenticationError::InvalidDeviceSignature(format!(
             "Device {} signature verification failed: {}",
             device_id, e
         ))
     })?;
+
+    if !valid {
+        return Err(AuthenticationError::InvalidDeviceSignature(format!(
+            "Device {} signature invalid",
+            device_id
+        )));
+    }
 
     tracing::debug!(
         device_id = %device_id,
@@ -54,9 +61,17 @@ pub fn verify_signature(
     message: &[u8],
     signature: &Ed25519Signature,
 ) -> Result<()> {
-    aura_core::ed25519_verify(public_key, message, signature).map_err(|e| {
+    let valid = aura_core::ed25519_verify(message, signature, public_key).map_err(|e| {
         AuthenticationError::InvalidDeviceSignature(format!("Signature verification failed: {}", e))
-    })
+    })?;
+
+    if valid {
+        Ok(())
+    } else {
+        Err(AuthenticationError::InvalidDeviceSignature(
+            "Signature verification failed".to_string(),
+        ))
+    }
 }
 
 // Tests commented out due to missing crypto functions in current aura_crypto API

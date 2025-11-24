@@ -8,6 +8,7 @@
 pub struct MigrationCoordinator;
 
 impl MigrationCoordinator {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }

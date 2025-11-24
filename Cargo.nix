@@ -102,11 +102,7 @@ rec {
       # File a bug if you depend on any for non-debug work!
       debug = internal.debugCrate { inherit packageId; };
     };
-    "aura-frost" = rec {
-      packageId = "aura-frost";
-      build = internal.buildRustCrateWithFeatures {
-        packageId = "aura-frost";
-      };
+    # aura-frost removed (deprecated)
 
       # Debug support which might change between releases.
       # File a bug if you depend on any for non-debug work!
@@ -1888,14 +1884,7 @@ with optional architecture-specific hardware acceleration
         };
         resolvedDefaultFeatures = [ "default" ];
       };
-      "aura-frost" = rec {
-        crateName = "aura-frost";
-        version = "0.1.0";
-        edition = "2021";
-        src = lib.cleanSourceWith {
-          filter = sourceFilter;
-          src = ./crates/aura-frost;
-        };
+      # aura-frost removed (deprecated)
         libName = "aura_frost";
         authors = [
           "Sam Hart"

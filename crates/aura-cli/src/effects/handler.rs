@@ -1,9 +1,9 @@
-//! CLI Effect Handler Implementation
-//!
-//! Concrete implementations of CLI effects using core effect composition.
+// CLI Effect Handler Implementation
+// Concrete implementations of CLI effects using core effect composition.
 
 use super::CliEffects;
 use async_trait::async_trait;
+use aura_core::effects::{ConsoleEffects, PhysicalTimeEffects, StorageEffects};
 use aura_core::AuraResult;
 use std::path::Path;
 
@@ -23,7 +23,7 @@ impl<E> CliEffectHandler<E> {
 #[async_trait]
 impl<E> CliEffects for CliEffectHandler<E>
 where
-    E: crate::ConsoleEffects + crate::StorageEffects + crate::TimeEffects + Send + Sync,
+    E: ConsoleEffects + StorageEffects + PhysicalTimeEffects + Send + Sync,
 {
     async fn log_info(&self, message: &str) {
         let _ = self.inner.log_info(&format!("INFO: {}", message)).await;
@@ -91,6 +91,10 @@ where
     }
 
     async fn current_timestamp(&self) -> u64 {
-        self.inner.current_timestamp().await
+        self.inner
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or_default()
     }
 }

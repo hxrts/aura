@@ -17,7 +17,7 @@
 //!
 //! ```rust,no_run
 //! use aura_testkit::foundation::{TestEffectComposer, SimpleTestContext};
-//! use aura_core::effects::{ExecutionMode, CryptoEffects, TimeEffects};
+//! use aura_core::effects::{ExecutionMode, CryptoEffects, PhysicalTimeEffects};
 //!
 //! // Create a test context with specific effect handlers
 //! let context = SimpleTestContext::new(ExecutionMode::Testing)
@@ -36,7 +36,7 @@ use aura_core::{
     effects::{
         crypto::{CryptoError, FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext},
         ConsoleEffects, CryptoEffects, ExecutionMode, JournalEffects, NetworkEffects,
-        RandomEffects, StorageEffects, TimeEffects,
+        PhysicalTimeEffects, RandomEffects, StorageEffects,
     },
     AuraResult, DeviceId,
 };
@@ -88,7 +88,7 @@ pub trait TestEffectHandler:
     CryptoEffects
     + NetworkEffects
     + StorageEffects
-    + TimeEffects
+    + PhysicalTimeEffects
     + RandomEffects
     + ConsoleEffects
     + JournalEffects
@@ -198,6 +198,17 @@ impl TestEffectHandler for CompositeTestHandler {
 // Delegate implementations for all required effect traits
 use async_trait::async_trait;
 use aura_core::effects::*;
+
+#[async_trait]
+impl PhysicalTimeEffects for CompositeTestHandler {
+    async fn physical_time(&self) -> Result<aura_core::time::PhysicalTime, TimeError> {
+        self.time.physical_time().await
+    }
+
+    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
+        self.time.sleep_ms(ms).await
+    }
+}
 
 #[async_trait]
 impl CryptoEffects for CompositeTestHandler {
@@ -354,7 +365,7 @@ impl CryptoEffects for CompositeTestHandler {
     }
 
     fn is_simulated(&self) -> bool {
-        self.crypto.is_simulated()
+        aura_core::CryptoEffects::is_simulated(&self.crypto)
     }
 
     fn crypto_capabilities(&self) -> Vec<String> {
@@ -416,85 +427,6 @@ impl StorageEffects for CompositeTestHandler {
 }
 
 #[async_trait]
-impl TimeEffects for CompositeTestHandler {
-    async fn current_epoch(&self) -> u64 {
-        self.time.current_epoch().await
-    }
-
-    async fn current_timestamp(&self) -> u64 {
-        self.time.current_timestamp().await
-    }
-
-    async fn current_timestamp_millis(&self) -> u64 {
-        self.time.current_timestamp_millis().await
-    }
-
-    async fn sleep_ms(&self, ms: u64) {
-        self.time.sleep_ms(ms).await
-    }
-
-    async fn sleep_until(&self, epoch: u64) {
-        self.time.sleep_until(epoch).await
-    }
-
-    async fn delay(&self, duration: std::time::Duration) {
-        self.time.delay(duration).await
-    }
-
-    async fn sleep(&self, duration_ms: u64) -> Result<(), aura_core::AuraError> {
-        self.time.sleep(duration_ms).await
-    }
-
-    async fn yield_until(
-        &self,
-        condition: aura_core::effects::time::WakeCondition,
-    ) -> Result<(), aura_core::effects::time::TimeError> {
-        self.time.yield_until(condition).await
-    }
-
-    async fn wait_until(
-        &self,
-        condition: aura_core::effects::time::WakeCondition,
-    ) -> Result<(), aura_core::AuraError> {
-        self.time.wait_until(condition).await
-    }
-
-    async fn set_timeout(&self, timeout_ms: u64) -> aura_core::effects::time::TimeoutHandle {
-        self.time.set_timeout(timeout_ms).await
-    }
-
-    async fn cancel_timeout(
-        &self,
-        handle: aura_core::effects::time::TimeoutHandle,
-    ) -> Result<(), aura_core::effects::time::TimeError> {
-        self.time.cancel_timeout(handle).await
-    }
-
-    fn is_simulated(&self) -> bool {
-        self.time.is_simulated()
-    }
-
-    fn register_context(&self, context_id: uuid::Uuid) {
-        self.time.register_context(context_id)
-    }
-
-    fn unregister_context(&self, context_id: uuid::Uuid) {
-        self.time.unregister_context(context_id)
-    }
-
-    async fn notify_events_available(&self) {
-        self.time.notify_events_available().await
-    }
-
-    fn resolution_ms(&self) -> u64 {
-        self.time.resolution_ms()
-    }
-
-    async fn now_instant(&self) -> std::time::Instant {
-        self.time.now_instant().await
-    }
-}
-
 #[async_trait]
 impl RandomEffects for CompositeTestHandler {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {

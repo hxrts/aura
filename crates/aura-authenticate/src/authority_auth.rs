@@ -310,7 +310,12 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
         Ok(ChallengeData {
             nonce,
             session_id: uuid::Uuid::new_v4().to_string(),
-            timestamp: aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await,
+            timestamp: self
+                .effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
         })
     }
 
@@ -325,8 +330,12 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
 
         match verification_result {
             Ok(true) => {
-                let timestamp =
-                    aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await;
+                let timestamp = self
+                    .effects
+                    .physical_time()
+                    .await
+                    .map(|t| t.ts_ms)
+                    .unwrap_or(0);
 
                 // Create session ticket
                 let mut nonce = [0u8; 16];

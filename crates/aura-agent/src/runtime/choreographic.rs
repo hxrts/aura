@@ -8,6 +8,7 @@
 pub struct ChoreographicRuntime;
 
 impl ChoreographicRuntime {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }

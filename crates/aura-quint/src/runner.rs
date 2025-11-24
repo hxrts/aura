@@ -32,6 +32,8 @@ pub struct QuintRunner {
     counterexample_generator: CounterexampleGenerator,
     /// Trace analyzer for optimization
     trace_analyzer: TraceAnalyzer,
+    /// Storage provider for reading specs (filesystem-backed by default)
+    storage: std::sync::Arc<dyn aura_core::effects::StorageEffects>,
 }
 
 /// Cache for property verification results
@@ -407,6 +409,31 @@ impl QuintRunner {
             stats: VerificationStatistics::default(),
             counterexample_generator,
             trace_analyzer,
+            storage: std::sync::Arc::new(
+                aura_effects::storage::FilesystemStorageHandler::with_default_path(),
+            ),
+        })
+    }
+
+    /// Create a new Quint runner with explicit storage provider
+    pub fn with_storage(
+        config: RunnerConfig,
+        storage: std::sync::Arc<dyn aura_core::effects::StorageEffects>,
+    ) -> AuraResult<Self> {
+        let evaluator = QuintEvaluator::new(config.quint_path.clone());
+        let property_cache = PropertyCache::new(config.cache_size_limit);
+        let counterexample_generator =
+            CounterexampleGenerator::new(config.max_counterexample_depth, config.random_seed);
+        let trace_analyzer = TraceAnalyzer::new(config.optimize_traces);
+
+        Ok(Self {
+            evaluator,
+            config,
+            property_cache,
+            stats: VerificationStatistics::default(),
+            counterexample_generator,
+            trace_analyzer,
+            storage,
         })
     }
 
@@ -1025,9 +1052,18 @@ impl QuintRunner {
 
     /// Check if specification involves capability operations
     fn involves_capability_operations(&self, spec: &PropertySpec) -> AuraResult<bool> {
-        // Read the spec file and check for capability-related patterns
-        let spec_content = std::fs::read_to_string(&spec.spec_file)
-            .map_err(|e| AuraError::invalid(format!("Failed to read spec file: {}", e)))?;
+        // Read the spec file via storage (macOS/Linux backed by filesystem)
+        let spec_content = futures::executor::block_on(async {
+            match self.storage.retrieve(&spec.spec_file).await {
+                Ok(Some(bytes)) => String::from_utf8(bytes)
+                    .map_err(|e| AuraError::invalid(format!("Spec not UTF-8: {}", e))),
+                Ok(None) => Ok(String::new()),
+                Err(e) => Err(AuraError::invalid(format!(
+                    "Failed to read spec file: {}",
+                    e
+                ))),
+            }
+        })?;
 
         let capability_patterns = [
             "Cap",
@@ -1049,9 +1085,18 @@ impl QuintRunner {
 
     /// Check if specification involves privacy operations
     fn involves_privacy_operations(&self, spec: &PropertySpec) -> AuraResult<bool> {
-        // Read the spec file and check for privacy-related patterns
-        let spec_content = std::fs::read_to_string(&spec.spec_file)
-            .map_err(|e| AuraError::invalid(format!("Failed to read spec file: {}", e)))?;
+        // Read the spec file via storage (macOS/Linux backed by filesystem)
+        let spec_content = futures::executor::block_on(async {
+            match self.storage.retrieve(&spec.spec_file).await {
+                Ok(Some(bytes)) => String::from_utf8(bytes)
+                    .map_err(|e| AuraError::invalid(format!("Spec not UTF-8: {}", e))),
+                Ok(None) => Ok(String::new()),
+                Err(e) => Err(AuraError::invalid(format!(
+                    "Failed to read spec file: {}",
+                    e
+                ))),
+            }
+        })?;
 
         let privacy_patterns = [
             "privacy",

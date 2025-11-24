@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Container for effect handler instances
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct EffectContainer {
     authority_id: AuthorityId,
@@ -17,6 +18,7 @@ pub struct EffectContainer {
     handlers: HashMap<String, Arc<dyn std::any::Any + Send + Sync>>,
 }
 
+#[allow(dead_code)]
 impl EffectContainer {
     /// Create a new effect container for the given authority
     pub fn new(authority_id: AuthorityId, execution_mode: ExecutionMode) -> Self {
@@ -54,7 +56,7 @@ impl EffectContainer {
 
     /// Get the execution mode
     pub fn execution_mode(&self) -> ExecutionMode {
-        self.execution_mode.clone()
+        self.execution_mode
     }
 
     /// Clear all handlers
@@ -72,7 +74,7 @@ impl Clone for EffectContainer {
     fn clone(&self) -> Self {
         Self {
             authority_id: self.authority_id,
-            execution_mode: self.execution_mode.clone(),
+            execution_mode: self.execution_mode,
             handlers: self.handlers.clone(),
         }
     }

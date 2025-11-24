@@ -46,7 +46,10 @@ impl LedgerTestFixture {
     pub async fn new(account_id: AccountId) -> Self {
         // Create a minimal AccountState for testing
         let (_, group_public_key) = crate::test_key_pair(42);
-        let initial_state = AccountState::new(account_id, group_public_key);
+        let initial_state = AccountState::new(
+            account_id,
+            aura_core::Ed25519VerifyingKey(group_public_key.to_bytes().to_vec()),
+        );
         let effect_api = Arc::new(RwLock::new(
             AccountEffectApi::new(initial_state).expect("Failed to create AccountEffectApi"),
         ));
@@ -150,10 +153,10 @@ pub mod effect_api_helpers {
     pub async fn test_effect_api_threshold(
         _threshold: u16,
     ) -> Result<LedgerTestFixture, Box<dyn std::error::Error>> {
-        Ok(LedgerBuilder::new()
+        LedgerBuilder::new()
             .with_threshold(_threshold)
             .build()
-            .await?)
+            .await
     }
 
     /// Get device count and threshold for a named scenario

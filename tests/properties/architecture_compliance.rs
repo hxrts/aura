@@ -15,7 +15,7 @@ enum Layer {
     Specification = 2,  // Domain crates, aura-mpst, aura-macros
     Implementation = 3, // aura-effects
     Orchestration = 4,  // aura-protocol
-    Feature = 5,        // aura-frost, aura-invitation, etc.
+    Feature = 5,        // aura-invitation, etc. (aura-frost deprecated)
     Runtime = 6,        // aura-agent, aura-simulator
     UI = 7,             // aura-cli
     Testing = 8,        // aura-testkit, aura-quint
@@ -38,8 +38,8 @@ impl Layer {
             "aura-protocol" => Some(Layer::Orchestration),
 
             // Layer 5: Feature/Protocol
-            "aura-authenticate" | "aura-frost" | "aura-invitation" | "aura-recovery"
-            | "aura-rendezvous" | "aura-storage" | "aura-sync" => Some(Layer::Feature),
+            "aura-authenticate" | "aura-invitation" | "aura-recovery" | "aura-rendezvous"
+            | "aura-storage" | "aura-sync" => Some(Layer::Feature),
 
             // Layer 6: Runtime Composition
             "aura-agent" => Some(Layer::Runtime),
@@ -258,7 +258,7 @@ fn test_layer_boundaries() {
         eprintln!("  Layer 2: Specification (domain crates, aura-mpst, aura-macros)");
         eprintln!("  Layer 3: Implementation (aura-effects)");
         eprintln!("  Layer 4: Orchestration (aura-protocol)");
-        eprintln!("  Layer 5: Feature/Protocol (aura-frost, etc.)");
+        eprintln!("  Layer 5: Feature/Protocol (aura-frost deprecated)");
         eprintln!("  Layer 6: Runtime Composition (aura-agent, aura-simulator)");
         eprintln!("  Layer 7: User Interface (aura-cli)");
         eprintln!("  Layer 8: Testing/Tools (aura-testkit, aura-quint)\n");

@@ -12,6 +12,7 @@ pub struct AgentRuntime {
 }
 
 impl AgentRuntime {
+    #[allow(dead_code)]
     pub fn new(authority_id: AuthorityId) -> Self {
         Self { authority_id }
     }

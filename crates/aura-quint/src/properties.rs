@@ -395,10 +395,10 @@ mod tests {
             .with_invariant("x > 0")
             .with_context("x", QuintType::Int);
 
-        let spec = property.to_quint_spec();
-        assert!(spec.contains("module test_property"));
-        assert!(spec.contains("const x: int"));
-        assert!(spec.contains("inv test_property: x > 0"));
+        let _spec = property.to_quint_spec();
+        assert!(_spec.contains("module test_property"));
+        assert!(_spec.contains("const x: int"));
+        assert!(_spec.contains("inv test_property: x > 0"));
     }
 
     #[test]

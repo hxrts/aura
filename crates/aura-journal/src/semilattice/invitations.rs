@@ -1,6 +1,7 @@
 //! Invitation registry semilattice used by aura-invitation.
 
 use aura_core::semilattice::{Bottom, JoinSemilattice};
+use aura_core::time::TimeStamp;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -40,25 +41,29 @@ pub struct InvitationRecord {
     pub invitation_id: String,
     /// Current registry status.
     pub status: InvitationStatus,
-    /// Timestamp of the last update.
-    pub updated_at: u64,
-    /// Expiry timestamp.
-    pub expires_at: u64,
+    /// Time of the last update (using unified time system).
+    pub updated_at: TimeStamp,
+    /// Expiry time (using unified time system).
+    pub expires_at: TimeStamp,
 }
 
 impl InvitationRecord {
     /// Create a pending record.
-    pub fn pending(invitation_id: impl Into<String>, expires_at: u64, timestamp: u64) -> Self {
+    pub fn pending(
+        invitation_id: impl Into<String>,
+        expires_at: TimeStamp,
+        updated_at: TimeStamp,
+    ) -> Self {
         Self {
             invitation_id: invitation_id.into(),
             status: InvitationStatus::Pending,
-            updated_at: timestamp,
+            updated_at,
             expires_at,
         }
     }
 
     /// Update status while retaining metadata.
-    pub fn set_status(&mut self, status: InvitationStatus, timestamp: u64) {
+    pub fn set_status(&mut self, status: InvitationStatus, timestamp: TimeStamp) {
         if self.status.merge(status) != self.status {
             self.status = status;
             self.updated_at = timestamp;
@@ -108,14 +113,14 @@ impl InvitationRecordRegistry {
     }
 
     /// Mark a record as accepted.
-    pub fn mark_accepted(&mut self, invitation_id: &str, timestamp: u64) {
+    pub fn mark_accepted(&mut self, invitation_id: &str, timestamp: TimeStamp) {
         if let Some(record) = self.entries.get_mut(invitation_id) {
             record.set_status(InvitationStatus::Accepted, timestamp);
         }
     }
 
     /// Mark a record as expired.
-    pub fn mark_expired(&mut self, invitation_id: &str, timestamp: u64) {
+    pub fn mark_expired(&mut self, invitation_id: &str, timestamp: TimeStamp) {
         if let Some(record) = self.entries.get_mut(invitation_id) {
             record.set_status(InvitationStatus::Expired, timestamp);
         }

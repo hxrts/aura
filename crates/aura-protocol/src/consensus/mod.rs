@@ -31,6 +31,7 @@ pub mod amp;
 pub mod choreography;
 pub mod commit_fact;
 pub mod coordinator;
+pub mod frost_adapter;
 pub mod relational_consensus;
 pub mod witness;
 
@@ -46,10 +47,12 @@ pub use relational_consensus::{
 };
 pub use witness::{WitnessMessage, WitnessSet, WitnessShare};
 
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::{hash, AuthorityId, Hash32, Prestate, Result};
+use aura_effects::random::RealRandomHandler;
+use aura_effects::time::PhysicalTimeHandler;
 use serde::Serialize;
-use serde_json;
 
 /// Run consensus on an operation with the specified witnesses
 ///
@@ -63,21 +66,52 @@ pub async fn run_consensus<T: Serialize>(
     key_packages: std::collections::HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
 ) -> Result<CommitFact> {
-    let prestate_hash = prestate.compute_hash();
-    let operation_bytes = serde_json::to_vec(operation)
-        .map_err(|e| aura_core::AuraError::serialization(e.to_string()))?;
-    let operation_hash = hash_operation(&operation_bytes)?;
-
-    run_consensus_choreography(
-        prestate_hash,
-        operation_hash,
-        operation_bytes,
+    let random = RealRandomHandler;
+    let time = PhysicalTimeHandler::new();
+    run_consensus_with_effects(
+        prestate,
+        operation,
         witnesses,
         threshold,
         key_packages,
         group_public_key,
+        &random,
+        &time,
     )
     .await
+}
+
+/// Run consensus on an operation with the specified witnesses using provided randomness and time sources
+///
+/// This variant allows deterministic testing by supplying controlled `RandomEffects`
+/// and `PhysicalTimeEffects` implementations instead of relying on system resources.
+pub async fn run_consensus_with_effects<T: Serialize>(
+    prestate: &Prestate,
+    operation: &T,
+    witnesses: Vec<AuthorityId>,
+    threshold: u16,
+    key_packages: std::collections::HashMap<AuthorityId, Share>,
+    group_public_key: PublicKeyPackage,
+    random: &(impl RandomEffects + ?Sized),
+    time: &(impl PhysicalTimeEffects + ?Sized),
+) -> Result<CommitFact> {
+    let _ = random;
+    let _ = time;
+
+    // Coordinator-driven fast-path using real FROST signing.
+    let mut coordinator = ConsensusCoordinator::new();
+    let instance_id = coordinator
+        .start_consensus(
+            prestate.clone(),
+            operation,
+            witnesses,
+            threshold,
+            key_packages,
+            group_public_key,
+        )
+        .await?;
+
+    coordinator.run_protocol(instance_id).await
 }
 
 /// Consensus configuration

@@ -17,6 +17,12 @@ pub struct MockSecureStorageHandler {
     current_time: Arc<Mutex<u64>>,
 }
 
+impl Default for MockSecureStorageHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockSecureStorageHandler {
     pub fn new() -> Self {
         Self {

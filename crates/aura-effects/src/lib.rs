@@ -65,14 +65,15 @@
 //!     .build();
 //! ```
 
-pub mod authorization;
+// NOTE: AuthorizationEffects moved to aura-wot (domain crate) per Layer 2 pattern
 pub mod biometric;
 pub mod bloom;
+pub mod configuration;
 pub mod console;
 pub mod context;
 /// Cryptographic effect handlers for signing, verification, and key derivation
 pub mod crypto;
-pub mod journal;
+// NOTE: JournalEffects moved to aura-journal (domain crate) per Layer 2 pattern
 pub mod leakage_handler;
 pub mod random;
 pub mod secure;
@@ -83,19 +84,25 @@ pub mod time;
 pub mod transport;
 
 // Re-export production handlers only - mock handlers moved to aura-testkit
-pub use authorization::StandardAuthorizationHandler;
+// NOTE: WotAuthorizationHandler moved to aura-wot per Layer 2 pattern
 pub use biometric::RealBiometricHandler;
 pub use bloom::BloomHandler;
+pub use configuration::RealConfigurationHandler;
 pub use console::RealConsoleHandler;
 pub use context::{ExecutionContext, StandardContextHandler};
-pub use crypto::{EffectSystemRng, RealCryptoHandler};
-pub use journal::StandardJournalHandler;
+pub use crypto::RealCryptoHandler;
+// NOTE: JournalHandler moved to aura-journal per Layer 2 pattern
 pub use leakage_handler::ProductionLeakageHandler;
 pub use random::RealRandomHandler;
 pub use secure::RealSecureStorageHandler;
 pub use simulation::StatelessSimulationHandler;
 pub use storage::{EncryptedStorageHandler, FilesystemStorageHandler};
-pub use time::RealTimeHandler;
+pub use time::{
+    LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler, TimeComparisonHandler,
+};
+
+// Note: AuthorizationEffects + JournalEffects are provided by layer 2 domain crates
+
 // Transport effect handlers - organized by functionality
 pub mod transport_effects {
     //! Transport effect implementations - Layer 3 stateless handlers

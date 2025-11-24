@@ -12,7 +12,7 @@ The target is 20 close friends using the system twice weekly. This constraint fo
 
 Most existing approaches cannot meet the requirements for a practical web-of-trust system. Centralized services violate peer-to-peer and alignment constraints. Eventually-consistent systems without strong semantics fail unpredictably during network partitions. Ad-hoc peer-to-peer protocols cannot safely evolve because protocol changes fragment the network.
 
-Aura's design solves these problems by combining threshold cryptography, choreographic protocols, fact-based semilattices, session types, guard-chain-enforced effects, and deterministic simulation.
+ Aura's design solves these problems by combining threshold cryptography (FROST primitives in `aura-core::crypto::tree_signing`—the legacy `aura-frost` crate has been removed), [choreographic protocols](107_mpst_and_choreography.md), fact-based semilattices, [session types](107_mpst_and_choreography.md), [guard-chain-enforced effects](109_authorization.md), and deterministic simulation.
 
 ## Eight Constraints
 
@@ -56,11 +56,11 @@ Aura uses social trust through M-of-N cryptographic guarantees across devices, f
 
 Aura's architecture rests on three pillars that work together to meet all constraints.
 
-**First pillar: Algebraic state management.** The Journal is a fact-based CRDT that captures account and relational events. Facts form a join-semilattice and merge via set union. Capability frontiers are evaluated at runtime as a meet-semilattice using Biscuit tokens plus sovereign policy. Flow budgets only replicate `spent` counters. Limits are derived deterministically from current tokens and policy. This design preserves atomic consistency without storing privileged state.
+**First pillar: Algebraic state management.** The [Journal](102_journal.md) is a fact-based CRDT that captures account and relational events. See [Theoretical Model](002_theoretical_model.md) for mathematical foundations. Facts form a join-semilattice and merge via set union. Capability frontiers are evaluated at runtime as a meet-semilattice using Biscuit tokens plus sovereign policy. Flow budgets only replicate `spent` counters. Limits are derived deterministically from current tokens and policy. This design preserves atomic consistency without storing privileged state.
 
-**Second pillar: Protocol specification and safety.** Multi-party session types (MPST) specify distributed protocols from a global viewpoint. Automatic projection to local roles provides deadlock freedom and compile-time safety. Choreographic programming ensures that complex multi-party coordination is verifiable before deployment. Session types prevent entire classes of distributed protocol errors.
+**Second pillar: Protocol specification and safety.** [Multi-party session types (MPST)](107_mpst_and_choreography.md) specify distributed protocols from a global viewpoint. Automatic projection to local roles provides deadlock freedom and compile-time safety. Choreographic programming ensures that complex multi-party coordination is verifiable before deployment. Session types prevent entire classes of distributed protocol errors.
 
-**Third pillar: Stateless effect system composition.** Effects are capabilities code can request without shared mutable state. Effect traits live in `aura-core`. Stateless production handlers are in `aura-effects`. Handler composition infrastructure is in `aura-composition`. Multi-party orchestrators are in `aura-protocol`. Mock and stateful test handlers are in `aura-testkit`. The guard chain is explicit and ordered: `AuthorizationEffects` (Biscuit/policy evaluation) flows to `FlowBudgetEffects` (charge-before-send) to `LeakageEffects` (observer-class budgets) to `JournalEffects` (fact commit) to `TransportEffects`. This sequencing eliminates deadlocks, enables deterministic testing, and keeps architectural boundaries clean.
+**Third pillar: Stateless effect system composition.** Effects are capabilities code can request without shared mutable state. See [Effect System and Runtime](106_effect_system_and_runtime.md) for implementation details. Effect traits live in `aura-core`. Stateless production handlers are in `aura-effects`. Handler composition infrastructure is in `aura-composition`. Multi-party orchestrators are in `aura-protocol`. Mock and stateful test handlers are in `aura-testkit`. The guard chain is explicit and ordered: `AuthorizationEffects` (Biscuit/policy evaluation) flows to `FlowBudgetEffects` (charge-before-send) to `LeakageEffects` (observer-class budgets) to `JournalEffects` (fact commit) to `TransportEffects`. This sequencing eliminates deadlocks, enables deterministic testing, and keeps architectural boundaries clean.
 
 ## Implementation Architecture
 
@@ -178,7 +178,7 @@ Garbage collection runs with statistics tracking and device state cleanup. Over-
 
 ### Guardian Recovery
 
-Guardian-based recovery implements a four-level dispute escalation system for account recovery scenarios.
+Guardian-based recovery implements a four-level dispute escalation system for account recovery scenarios. See [Relational Contexts](103_relational_contexts.md) for guardian relationship management.
 
 Severity levels are Low, Medium, High, and Critical. Each level has different escalation policies and auto-cancel logic. A persistent recovery effect_api maintains audit trails of all recovery operations for transparency and accountability.
 

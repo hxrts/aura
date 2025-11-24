@@ -16,5 +16,5 @@ bincode = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 
-[dev-dependencies]
-aura-testkit = { path = "../aura-testkit" }
+# No dev-dependencies - Layer 3 crates should use internal test utilities
+# to avoid circular dependencies with aura-testkit (Layer 8)

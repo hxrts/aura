@@ -30,7 +30,6 @@ tokio = { workspace = true }
 once_cell = { workspace = true }
 hex = { workspace = true }
 biscuit-auth = { workspace = true }
-chrono = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

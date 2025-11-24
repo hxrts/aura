@@ -4,6 +4,12 @@
 #[derive(Debug)]
 pub struct MockAuthorizationHandler;
 
+impl Default for MockAuthorizationHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockAuthorizationHandler {
     pub fn new() -> Self {
         Self

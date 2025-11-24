@@ -15,6 +15,12 @@ pub mod metrics {
     #[derive(Debug)]
     pub struct MetricsHandler;
 
+    impl Default for MetricsHandler {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl MetricsHandler {
         pub fn new() -> Self {
             Self
@@ -28,6 +34,12 @@ pub mod logging {
     #[derive(Debug)]
     pub struct LoggingHandler;
 
+    impl Default for LoggingHandler {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl LoggingHandler {
         pub fn new() -> Self {
             Self
@@ -40,6 +52,12 @@ pub mod monitoring {
     // Placeholder for monitoring handlers that will be moved from aura-effects/system/monitoring.rs
     #[derive(Debug)]
     pub struct MonitoringHandler;
+
+    impl Default for MonitoringHandler {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
 
     impl MonitoringHandler {
         pub fn new() -> Self {

@@ -23,7 +23,7 @@
 //! let bytes = handler.random_bytes(32).await;
 //! ```
 
-use crate::effects::params::{DelayParams, RandomBytesParams, RandomRangeParams};
+use crate::effects::params::{RandomBytesParams, RandomRangeParams};
 use crate::effects::*;
 use crate::handlers::{context::immutable::AuraContext, AuraHandler, EffectType, HandlerUtils};
 use async_trait::async_trait;
@@ -31,7 +31,6 @@ use aura_core::effects::crypto::FrostKeyGenResult;
 use aura_core::effects::CryptoError;
 use aura_core::{identifiers::DeviceId, AuraError};
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::RwLock;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -414,180 +413,6 @@ impl CryptoEffects for TypedHandlerBridge {
 // ═══════════════════════════════════════════════════════════════════════════
 // TimeEffects Blanket Implementation
 // ═══════════════════════════════════════════════════════════════════════════
-
-#[async_trait]
-impl TimeEffects for TypedHandlerBridge {
-    async fn current_epoch(&self) -> u64 {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
-
-        HandlerUtils::execute_typed_effect::<u64>(
-            &mut **handler,
-            EffectType::Time,
-            "current_epoch",
-            (),
-            &ctx,
-        )
-        .await
-        .unwrap_or(0)
-    }
-
-    async fn current_timestamp(&self) -> u64 {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
-
-        HandlerUtils::execute_typed_effect::<u64>(
-            &mut **handler,
-            EffectType::Time,
-            "current_timestamp",
-            (),
-            &ctx,
-        )
-        .await
-        .unwrap_or(0)
-    }
-
-    async fn current_timestamp_millis(&self) -> u64 {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
-
-        HandlerUtils::execute_typed_effect::<u64>(
-            &mut **handler,
-            EffectType::Time,
-            "current_timestamp_millis",
-            (),
-            &ctx,
-        )
-        .await
-        .unwrap_or(0)
-    }
-
-    async fn sleep_ms(&self, ms: u64) {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
-
-        let _ = HandlerUtils::execute_typed_effect::<()>(
-            &mut **handler,
-            EffectType::Time,
-            "sleep_ms",
-            ms,
-            &ctx,
-        )
-        .await;
-    }
-
-    async fn sleep_until(&self, epoch: u64) {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
-
-        let _ = HandlerUtils::execute_typed_effect::<()>(
-            &mut **handler,
-            EffectType::Time,
-            "sleep_until",
-            epoch,
-            &ctx,
-        )
-        .await;
-    }
-
-    async fn delay(&self, duration: Duration) {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
-
-        let _ = HandlerUtils::execute_typed_effect::<()>(
-            &mut **handler,
-            EffectType::Time,
-            "delay",
-            DelayParams {
-                duration_ms: duration.as_millis() as u64,
-            },
-            &ctx,
-        )
-        .await;
-    }
-
-    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
-
-        HandlerUtils::execute_typed_effect::<()>(
-            &mut **handler,
-            EffectType::Time,
-            "sleep",
-            duration_ms,
-            &ctx,
-        )
-        .await
-        .map_err(|e| AuraError::internal(format!("Sleep failed: {}", e)))
-    }
-
-    async fn yield_until(&self, _condition: WakeCondition) -> Result<(), TimeError> {
-        Err(TimeError::ServiceUnavailable)
-    }
-
-    async fn wait_until(&self, _condition: WakeCondition) -> Result<(), AuraError> {
-        Err(AuraError::internal(
-            "wait_until not implemented through bridge",
-        ))
-    }
-
-    async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
-
-        HandlerUtils::execute_typed_effect::<TimeoutHandle>(
-            &mut **handler,
-            EffectType::Time,
-            "set_timeout",
-            timeout_ms,
-            &ctx,
-        )
-        .await
-        .unwrap_or_else(|_| uuid::Uuid::nil())
-    }
-
-    async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
-        let mut handler = self.0.write().await;
-        let ctx = get_context();
-
-        HandlerUtils::execute_typed_effect::<()>(
-            &mut **handler,
-            EffectType::Time,
-            "cancel_timeout",
-            handle,
-            &ctx,
-        )
-        .await
-        .map_err(|_| TimeError::ServiceUnavailable)
-    }
-
-    // timeout method removed to make TimeEffects dyn-compatible
-    // Use tokio::time::timeout directly where needed
-
-    fn is_simulated(&self) -> bool {
-        false // Bridge implementations assume production mode
-    }
-
-    fn register_context(&self, _context_id: uuid::Uuid) {
-        // Placeholder
-    }
-
-    fn unregister_context(&self, _context_id: uuid::Uuid) {
-        // Placeholder
-    }
-
-    async fn notify_events_available(&self) {
-        // Placeholder
-    }
-
-    fn resolution_ms(&self) -> u64 {
-        1 // Default 1ms resolution
-    }
-
-    async fn now_instant(&self) -> std::time::Instant {
-        std::time::Instant::now()
-    }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // ConsoleEffects Blanket Implementation

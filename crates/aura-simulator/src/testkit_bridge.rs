@@ -24,7 +24,7 @@ impl TestkitSimulatorBridge {
     /// using the device fixtures as the foundation for multi-device scenarios.
     pub fn create_simulation_effects(
         fixtures: &[DeviceTestFixture],
-        seed: u64,
+        _seed: u64,
     ) -> SimResult<Vec<(DeviceId, Arc<AuraEffectSystem>)>> {
         let mut effect_systems = Vec::new();
 
@@ -33,7 +33,7 @@ impl TestkitSimulatorBridge {
 
             // Create real effect system configured for simulation
             let authority_id = AuthorityId::new();
-            let agent = AgentBuilder::new()
+            let _agent = AgentBuilder::new()
                 .with_authority(authority_id)
                 .build_testing()
                 .map_err(|e| {
@@ -99,12 +99,12 @@ impl TestkitSimulatorBridge {
     /// Convert harness to effect system
     pub fn harness_to_effects<H>(
         _harness: H,
-        device_id: DeviceId,
-        seed: u64,
+        _device_id: DeviceId,
+        _seed: u64,
     ) -> SimResult<Arc<AuraEffectSystem>> {
         // Convert test harness to effect system instead of middleware stack
         let authority_id = AuthorityId::new();
-        let agent = AgentBuilder::new()
+        let _agent = AgentBuilder::new()
             .with_authority(authority_id)
             .build_testing()
             .map_err(|e| {

@@ -8,11 +8,11 @@ use crate::{
     ChatGroup, ChatGroupId, ChatMessage, ChatMessageId,
 };
 use aura_core::{
-    effects::{RandomEffects, StorageEffects, TimeEffects},
+    effects::{PhysicalTimeEffects, RandomEffects, StorageEffects},
     identifiers::AuthorityId,
+    time::TimeStamp,
     AuraError, Result,
 };
-use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -24,8 +24,12 @@ pub struct ChatService<E> {
 
 impl<E> ChatService<E>
 where
-    E: StorageEffects + RandomEffects + TimeEffects + Send + Sync,
+    E: StorageEffects + RandomEffects + PhysicalTimeEffects + Send + Sync,
 {
+    fn map_time_err(err: aura_core::effects::time::TimeError) -> AuraError {
+        AuraError::internal(format!("time error: {err}"))
+    }
+
     fn display_name(authority_id: &AuthorityId) -> String {
         let id_str = authority_id.to_string();
         let short = &id_str[..12.min(id_str.len())];
@@ -56,19 +60,22 @@ where
         let group_uuid = self.effects.random_uuid().await;
         let group_id = ChatGroupId::from_uuid(group_uuid);
 
-        // Get timestamp using TimeEffects (following effect system guidelines)
-        let timestamp_ms = self.effects.current_timestamp_millis().await;
-        let now = DateTime::from_timestamp_millis(timestamp_ms as i64)
-            .expect("Valid timestamp from effects");
+        // Get timestamp using PhysicalTimeEffects (unified time system)
+        let physical_time = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(Self::map_time_err)?;
+        let now = TimeStamp::PhysicalClock(physical_time);
 
         // Create group metadata
         let mut members = Vec::new();
 
         // Creator becomes admin
         members.push(ChatMember {
-            authority_id: creator_id.clone(),
+            authority_id: creator_id,
             display_name: Self::display_name(&creator_id),
-            joined_at: now,
+            joined_at: now.clone(),
             role: ChatRole::Admin,
         });
 
@@ -78,7 +85,7 @@ where
                 members.push(ChatMember {
                     authority_id: member_id,
                     display_name: Self::display_name(&member_id),
-                    joined_at: now,
+                    joined_at: now.clone(),
                     role: ChatRole::Member,
                 });
             }
@@ -102,19 +109,22 @@ where
         self.effects
             .store(&group_key, group_data)
             .await
-            .map_err(|e| AuraError::from(e))?;
+            .map_err(AuraError::from)?;
 
         // Create system message for group creation using effect system
         let msg_uuid = self.effects.random_uuid().await;
         let msg_id = ChatMessageId::from_uuid(msg_uuid);
-        let msg_timestamp_ms = self.effects.current_timestamp_millis().await;
-        let msg_timestamp = DateTime::from_timestamp_millis(msg_timestamp_ms as i64)
-            .expect("Valid timestamp from effects");
+        let msg_physical_time = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(Self::map_time_err)?;
+        let msg_timestamp = TimeStamp::PhysicalClock(msg_physical_time);
 
         let system_msg = ChatMessage::new_system(
             msg_id,
             group_id.clone(),
-            creator_id.clone(), // Creator acts as system for group creation
+            creator_id, // Creator acts as system for group creation
             format!("Chat group '{}' created", name),
             msg_timestamp,
         );
@@ -156,9 +166,12 @@ where
         // Create message using effect system
         let msg_uuid = self.effects.random_uuid().await;
         let msg_id = ChatMessageId::from_uuid(msg_uuid);
-        let timestamp_ms = self.effects.current_timestamp_millis().await;
-        let timestamp = DateTime::from_timestamp_millis(timestamp_ms as i64)
-            .expect("Valid timestamp from effects");
+        let physical_time = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(Self::map_time_err)?;
+        let timestamp = TimeStamp::PhysicalClock(physical_time);
 
         let message =
             ChatMessage::new_text(msg_id, group_id.clone(), sender_id, content, timestamp);
@@ -188,14 +201,14 @@ where
         &self,
         group_id: &ChatGroupId,
         limit: Option<usize>,
-        before: Option<DateTime<Utc>>,
+        before: Option<TimeStamp>,
     ) -> Result<Vec<ChatMessage>> {
         let key_prefix = format!("chat_group_message:{}:", group_id);
         let all_keys = self
             .effects
             .list_keys(Some(&key_prefix))
             .await
-            .map_err(|e| AuraError::from(e))?;
+            .map_err(AuraError::from)?;
 
         let mut entries: Vec<(i64, String)> = Vec::new();
         for key in all_keys {
@@ -210,9 +223,9 @@ where
             }
         }
 
-        // Apply before filter
+        // Apply before filter using unified time conversion
         if let Some(before_ts) = before {
-            let cutoff = before_ts.timestamp_millis();
+            let cutoff = before_ts.to_index_ms();
             entries.retain(|(ts, _)| *ts < cutoff);
         }
 
@@ -268,7 +281,7 @@ where
             .effects
             .list_keys(Some("chat_group:"))
             .await
-            .map_err(|e| AuraError::from(e))?;
+            .map_err(AuraError::from)?;
 
         let mut groups = Vec::new();
         for key in keys {
@@ -313,11 +326,14 @@ where
         }
 
         // Add new member with timestamp from effect system
-        let joined_timestamp_ms = self.effects.current_timestamp_millis().await;
-        let joined_timestamp = DateTime::from_timestamp_millis(joined_timestamp_ms as i64)
-            .expect("Valid timestamp from effects");
+        let joined_physical_time = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(Self::map_time_err)?;
+        let joined_timestamp = TimeStamp::PhysicalClock(joined_physical_time);
         group.members.push(ChatMember {
-            authority_id: new_member.clone(),
+            authority_id: new_member,
             display_name: Self::display_name(&new_member),
             joined_at: joined_timestamp,
             role: ChatRole::Member,
@@ -329,14 +345,17 @@ where
         // Create system message using effect system
         let msg_uuid = self.effects.random_uuid().await;
         let msg_id = ChatMessageId::from_uuid(msg_uuid);
-        let msg_timestamp_ms = self.effects.current_timestamp_millis().await;
-        let msg_timestamp = DateTime::from_timestamp_millis(msg_timestamp_ms as i64)
-            .expect("Valid timestamp from effects");
+        let msg_physical_time = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(Self::map_time_err)?;
+        let msg_timestamp = TimeStamp::PhysicalClock(msg_physical_time);
 
         let system_msg = ChatMessage::new_system(
             msg_id,
             group_id.clone(),
-            authority_id.clone(), // Admin who added the member acts as system
+            authority_id, // Admin who added the member acts as system
             format!("Member {} joined the group", new_member),
             msg_timestamp,
         );
@@ -437,9 +456,12 @@ where
             ));
         }
 
-        let timestamp_ms = self.effects.current_timestamp_millis().await;
-        let timestamp = DateTime::from_timestamp_millis(timestamp_ms as i64)
-            .expect("Valid timestamp from effects");
+        let physical_time = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(Self::map_time_err)?;
+        let timestamp = TimeStamp::PhysicalClock(physical_time);
 
         message.content = new_content.to_string();
         message.message_type = crate::types::MessageType::Edit;
@@ -483,9 +505,12 @@ where
             ));
         }
 
-        let timestamp_ms = self.effects.current_timestamp_millis().await;
-        let timestamp = DateTime::from_timestamp_millis(timestamp_ms as i64)
-            .expect("Valid timestamp from effects");
+        let physical_time = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(Self::map_time_err)?;
+        let timestamp = TimeStamp::PhysicalClock(physical_time);
 
         message.message_type = crate::types::MessageType::Delete;
         message.timestamp = timestamp;
@@ -564,9 +589,12 @@ where
         // Create system message using effect system
         let msg_uuid = self.effects.random_uuid().await;
         let msg_id = ChatMessageId::from_uuid(msg_uuid);
-        let msg_timestamp_ms = self.effects.current_timestamp_millis().await;
-        let msg_timestamp = DateTime::from_timestamp_millis(msg_timestamp_ms as i64)
-            .expect("Valid timestamp from effects");
+        let msg_physical_time = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(Self::map_time_err)?;
+        let msg_timestamp = TimeStamp::PhysicalClock(msg_physical_time);
 
         let action = if member_to_remove == authority_id {
             "left"
@@ -576,7 +604,7 @@ where
         let system_msg = ChatMessage::new_system(
             msg_id,
             group_id.clone(),
-            authority_id.clone(), // Authority performing the action
+            authority_id, // Authority performing the action
             format!("Member {} {} the group", member_to_remove, action),
             msg_timestamp,
         );
@@ -595,19 +623,19 @@ where
         self.effects
             .store(&message_key, message_data)
             .await
-            .map_err(|e| AuraError::from(e))?;
+            .map_err(AuraError::from)?;
 
         // Index by group_id and timestamp for efficient queries
         let index_key = format!(
             "chat_group_message:{}:{}:{}",
             message.group_id,
-            message.timestamp.timestamp_millis(),
+            message.timestamp.to_index_ms(),
             message.id
         );
         self.effects
             .store(&index_key, b"1".to_vec())
             .await
-            .map_err(|e| AuraError::from(e))?;
+            .map_err(AuraError::from)?;
 
         Ok(())
     }
@@ -621,7 +649,7 @@ where
         self.effects
             .store(&group_key, group_data)
             .await
-            .map_err(|e| AuraError::from(e))?;
+            .map_err(AuraError::from)?;
 
         Ok(())
     }

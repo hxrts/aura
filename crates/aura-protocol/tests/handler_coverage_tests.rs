@@ -154,10 +154,12 @@ async fn test_effect_registry_validation() {
 
         fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
             match effect_type {
-                EffectType::Crypto => vec!["hash".to_string(), "random_bytes".to_string()],
-                EffectType::Network => vec!["send_to_peer".to_string(), "broadcast".to_string()],
-                EffectType::Storage => vec!["store".to_string(), "retrieve".to_string()],
-                EffectType::System => vec!["log".to_string(), "health_check".to_string()],
+                EffectType::Crypto => vec![String::from("hash"), String::from("random_bytes")],
+                EffectType::Network => {
+                    vec![String::from("send_to_peer"), String::from("broadcast")]
+                }
+                EffectType::Storage => vec![String::from("store"), String::from("retrieve")],
+                EffectType::System => vec![String::from("log"), String::from("health_check")],
                 _ => vec![],
             }
         }

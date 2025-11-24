@@ -4,6 +4,8 @@
 
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
+use aura_core::effects::time::PhysicalTimeEffects;
+use aura_core::time::TimeStamp;
 use aura_protocol::effect_traits::StorageEffects;
 use std::path::Path;
 
@@ -86,13 +88,21 @@ async fn create_directory_through_effects(
     effects: &AuraEffectSystem,
     path: &Path,
 ) -> Result<()> {
-    let timestamp =
-        <AuraEffectSystem as aura_core::effects::TimeEffects>::current_timestamp(effects).await;
+    // Use unified time system to get physical time
+    let physical_time = effects
+        .physical_time()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to get physical time: {}", e))?;
 
-    // Create directory marker via StorageEffects (since StorageEffects is key-value based)
+    let timestamp = TimeStamp::PhysicalClock(physical_time);
+
+    // Create directory marker via StorageEffects with proper TimeStamp serialization
     let dir_marker_key = format!("directory_marker:{}", path.display());
+    let timestamp_bytes = serde_json::to_vec(&timestamp)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize timestamp: {}", e))?;
+
     effects
-        .store(&dir_marker_key, timestamp.to_le_bytes().to_vec())
+        .store(&dir_marker_key, timestamp_bytes)
         .await
         .map_err(|e| {
             anyhow::anyhow!(
@@ -106,15 +116,17 @@ async fn create_directory_through_effects(
 
 /// Create placeholder effect API data
 async fn create_placeholder_effect_api(
-    _ctx: &EffectContext,
+    ctx: &EffectContext,
     effects: &AuraEffectSystem,
     threshold: u32,
     num_devices: u32,
 ) -> Result<Vec<u8>> {
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    // Use unified time system to get physical time
+    let physical_time = effects
+        .physical_time()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to get physical time: {}", e))?;
+    let timestamp = physical_time.ts_ms / 1000; // Convert to seconds
 
     // Create a simple CBOR-like structure
     let effect_api_data = format!(

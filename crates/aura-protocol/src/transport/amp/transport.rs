@@ -11,6 +11,8 @@ use crate::amp::{get_channel_state, AmpJournalEffects};
 use crate::consensus::finalize_amp_bump_with_journal_default;
 use crate::guards::effect_system_trait::GuardEffectSystem;
 use aura_core::effects::NetworkEffects;
+use aura_core::TimeEffects;
+// TimeEffects removed - using PhysicalTimeEffects directly
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{AuraError, Result};
@@ -20,7 +22,6 @@ use aura_transport::amp::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Instant;
 fn map_amp_error(err: AmpError) -> AuraError {
     AuraError::invalid(format!("AMP ratchet error: {}", err))
 }
@@ -172,9 +173,14 @@ pub async fn amp_send<E>(
     payload: Vec<u8>,
 ) -> Result<AmpHeader>
 where
-    E: AmpJournalEffects + NetworkEffects + GuardEffectSystem + crate::effects::CryptoEffects,
+    E: AmpJournalEffects
+        + NetworkEffects
+        + GuardEffectSystem
+        + crate::effects::CryptoEffects
+        + aura_core::PhysicalTimeEffects,
 {
-    let overall_start = Instant::now();
+    let time = aura_effects::time::PhysicalTimeHandler::new();
+    let overall_start = time.now_instant().await;
     let payload_size = payload.len();
 
     // Phase 1: Prepare send (journal reduction and ratchet derivation)
@@ -188,7 +194,7 @@ where
     let header = deriv.header;
 
     // Phase 2: AEAD encryption
-    let crypto_start = Instant::now();
+    let crypto_start = time.now_instant().await;
     let key = deriv.message_key.0;
     let nonce = nonce_from_header(&header);
     let sealed = match effects.aes_gcm_encrypt(&payload, &key, &nonce).await {
@@ -236,7 +242,7 @@ where
     };
 
     // Phase 3: Guard chain execution (authorization and flow budget)
-    let guard_start = Instant::now();
+    let guard_start = time.now_instant().await;
     let peer = effects.authority_id();
     let flow_cost = 1u32; // Minimal cost for AMP message
     let guard_chain = build_amp_send_guard(context, peer, Some(flow_cost));
@@ -347,7 +353,8 @@ pub async fn amp_recv<E>(effects: &E, context: ContextId, bytes: Vec<u8>) -> Res
 where
     E: AmpJournalEffects + crate::effects::CryptoEffects,
 {
-    let overall_start = Instant::now();
+    let time = aura_effects::time::PhysicalTimeHandler::new();
+    let overall_start = time.now_instant().await;
     let wire_size = bytes.len();
 
     // Phase 1: Deserialize wire message
@@ -444,7 +451,7 @@ where
     };
 
     // Phase 4: AEAD decryption
-    let crypto_start = Instant::now();
+    let crypto_start = time.now_instant().await;
     let key = deriv.message_key.0;
     let nonce = nonce_from_header(&wire.header);
     let opened = match effects.aes_gcm_decrypt(&wire.payload, &key, &nonce).await {

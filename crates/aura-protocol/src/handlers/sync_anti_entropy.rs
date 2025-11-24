@@ -88,7 +88,9 @@ impl AntiEntropyHandler {
     }
 
     /// Request digest from peer using guard chain
-    async fn request_digest_from_peer_with_guard_chain<E: GuardEffectSystem>(
+    async fn request_digest_from_peer_with_guard_chain<
+        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+    >(
         &self,
         peer_id: Uuid,
         effect_system: &E,
@@ -310,7 +312,9 @@ impl AntiEntropyHandler {
         self.get_missing_ops(remote_digest).await
     }
 
-    async fn request_ops_from_peer_with_guard_chain_impl<E: GuardEffectSystem>(
+    async fn request_ops_from_peer_with_guard_chain_impl<
+        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+    >(
         &self,
         peer_id: Uuid,
         cids: Vec<Hash32>,
@@ -372,7 +376,9 @@ impl AntiEntropyHandler {
         }
     }
 
-    async fn announce_new_op_with_guard_chain_impl<E: GuardEffectSystem>(
+    async fn announce_new_op_with_guard_chain_impl<
+        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+    >(
         &self,
         cid: Hash32,
         effect_system: &E,
@@ -443,7 +449,9 @@ impl AntiEntropyHandler {
             .ok_or(SyncError::OperationNotFound)
     }
 
-    async fn push_op_to_peers_with_guard_chain_impl<E: GuardEffectSystem>(
+    async fn push_op_to_peers_with_guard_chain_impl<
+        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+    >(
         &self,
         op: AttestedOp,
         peers: Vec<Uuid>,

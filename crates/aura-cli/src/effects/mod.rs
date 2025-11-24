@@ -1,16 +1,15 @@
-//! Layer 4: CLI Effect Traits - Command-Line Operation Composition
+//! Layer 7: CLI Effect Traits - Command-Line Operation Composition
 //!
-//! CLI-specific effect traits composing core effects (Layer 1) for command-line operations.
-//! Belongs in aura-protocol (Layer 4) because it composes ConsoleEffects, StorageEffects,
-//! TimeEffects into higher-level orchestration capabilities for CLI applications.
+//! CLI-specific effect traits for command-line operations.
+//! Located in aura-cli (Layer 7) because these are UI-specific abstractions.
 //!
-//! **Effect Composition** (per docs/106_effect_system_and_runtime.md):
+//! **Effect Composition**:
 //! - **CliEffects**: Base CLI operations (logging, file I/O, formatting, timestamps)
 //! - **ConfigEffects**: Configuration management (load, save, validate)
 //! - **OutputEffects**: Display formatting (JSON, text, progress, colors)
 //!
-//! **Integration**: Used by aura-cli (Layer 7) to drive agent runtime and scenario execution.
-//! Messages from protocols flow through guards before CLI display.
+//! These traits compose core infrastructure effects (ConsoleEffects, StorageEffects,
+//! PhysicalTimeEffects) with CLI-specific formatting and display logic.
 
 use async_trait::async_trait;
 use aura_core::AuraResult;

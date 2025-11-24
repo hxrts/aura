@@ -22,7 +22,6 @@ pub use meet_types::{
     ConsensusConstraint, DeviceCapability, ResourceQuota, SecurityPolicy, TimeWindow,
 };
 pub use op_log::{OpLog, OpLogSummary};
-pub use relay_capability::{BudgetDecayPolicy, RelayCapability};
 pub use types::{GCounter, GSet, LwwRegister, Replica};
 
 pub mod account_state;
@@ -30,7 +29,6 @@ pub mod concrete_types;
 pub mod invitations;
 pub mod meet_types;
 pub mod op_log;
-pub mod relay_capability;
 pub mod types;
 
 // Re-export foundation types for convenience

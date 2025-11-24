@@ -7,10 +7,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use super::trace_converter::{ExecutionTrace, QuintTrace, TraceConversionConfig, TraceConverter};
 use super::{ChaosGenerator, QuintCliRunner};
 use crate::quint::simulation_evaluator::SimulationPropertyEvaluator;
+use async_trait::async_trait;
+use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::AuraError;
 
 /// ITF trace with Model-Based Testing metadata
@@ -171,6 +174,7 @@ pub struct ITFBasedFuzzer {
     chaos_generator: ChaosGenerator, // Existing
     quint_cli: QuintCliRunner,       // Quint CLI interface
     config: ITFFuzzConfig,
+    storage: Arc<dyn StorageEffects>,
 }
 
 /// Errors that can occur during ITF-based fuzzing
@@ -204,6 +208,14 @@ impl ITFBasedFuzzer {
 
     /// Create new ITF-based fuzzer with custom configuration
     pub fn with_config(config: ITFFuzzConfig) -> Result<Self, ITFFuzzError> {
+        Self::with_config_and_storage(config, default_storage_provider())
+    }
+
+    /// Create new ITF-based fuzzer with explicit storage provider
+    pub fn with_config_and_storage(
+        config: ITFFuzzConfig,
+        storage: Arc<dyn StorageEffects>,
+    ) -> Result<Self, ITFFuzzError> {
         let quint_cli = QuintCliRunner::new(
             Some(config.quint_executable.clone()),
             config.working_dir.clone(),
@@ -219,6 +231,7 @@ impl ITFBasedFuzzer {
             chaos_generator: ChaosGenerator::new(),
             quint_cli,
             config,
+            storage,
         })
     }
 
@@ -231,8 +244,27 @@ impl ITFBasedFuzzer {
 
     /// Parse ITF trace from file
     pub fn parse_itf_file(&self, path: &Path) -> Result<ITFTrace, ITFFuzzError> {
-        let content = std::fs::read_to_string(path)?;
+        let content = self.read_path_to_string(path)?;
         self.parse_itf_trace(&content)
+    }
+
+    fn read_path_to_string(&self, path: &Path) -> Result<String, ITFFuzzError> {
+        let key = path.to_string_lossy();
+        let bytes = futures::executor::block_on(self.storage.retrieve(key.as_ref()))
+            .map_err(|e| ITFFuzzError::FileSystemError(e.to_string()))?
+            .ok_or_else(|| {
+                ITFFuzzError::FileSystemError(format!("File not found: {}", key.as_ref()))
+            })?;
+
+        String::from_utf8(bytes).map_err(|e| {
+            ITFFuzzError::FileSystemError(format!("Invalid UTF-8 for {}: {}", key.as_ref(), e))
+        })
+    }
+
+    fn write_string_to_path(&self, path: &Path, content: String) -> Result<(), ITFFuzzError> {
+        let key = path.to_string_lossy();
+        futures::executor::block_on(self.storage.store(key.as_ref(), content.into_bytes()))
+            .map_err(|e| ITFFuzzError::FileSystemError(e.to_string()))
     }
 
     /// Validate ITF trace structure
@@ -507,7 +539,7 @@ impl ITFBasedFuzzer {
         // Run `quint verify` with the specific bound
         let output = std::process::Command::new(&self.config.quint_executable)
             .current_dir(&self.config.working_dir)
-            .args(&[
+            .args([
                 "verify",
                 "--invariant",
                 property,
@@ -524,12 +556,21 @@ impl ITFBasedFuzzer {
         let mut counterexample_trace = None;
 
         // If property was violated, parse the counterexample
-        if !satisfied && counterexample_file.exists() {
+        if !satisfied
+            && futures::executor::block_on(
+                self.storage
+                    .exists(counterexample_file.to_string_lossy().as_ref()),
+            )
+            .unwrap_or(false)
+        {
             match self.parse_itf_file(&counterexample_file) {
                 Ok(trace) => {
                     counterexample_trace = Some(trace);
                     // Clean up temporary file
-                    let _ = std::fs::remove_file(&counterexample_file);
+                    let _ = futures::executor::block_on(
+                        self.storage
+                            .remove(counterexample_file.to_string_lossy().as_ref()),
+                    );
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to parse counterexample file: {}", e);
@@ -730,7 +771,7 @@ impl ITFBasedFuzzer {
             std::time::Duration::from_millis(config.run_timeout_ms),
             async {
                 let mut tokio_cmd = tokio::process::Command::new(&self.config.quint_executable);
-                tokio_cmd.current_dir(&self.config.working_dir).args(&[
+                tokio_cmd.current_dir(&self.config.working_dir).args([
                     "run",
                     "--max-samples",
                     "1",
@@ -746,7 +787,7 @@ impl ITFBasedFuzzer {
                 }
 
                 if let Some(seed) = config.seed {
-                    tokio_cmd.args(&["--seed", &(seed + run_id as u64).to_string()]);
+                    tokio_cmd.args(["--seed", &(seed + run_id as u64).to_string()]);
                 }
 
                 tokio_cmd.output().await
@@ -769,7 +810,9 @@ impl ITFBasedFuzzer {
         let trace = self.parse_itf_file(&output_file)?;
 
         // Clean up temporary file
-        let _ = std::fs::remove_file(&output_file);
+        let _ = futures::executor::block_on(
+            self.storage.remove(output_file.to_string_lossy().as_ref()),
+        );
 
         Ok(trace)
     }
@@ -1266,7 +1309,7 @@ impl ITFBasedFuzzer {
         }
 
         if let Some(sim_result) = simulation_result {
-            if sim_result.simulation_result.errors.len() > 0 {
+            if !sim_result.simulation_result.errors.is_empty() {
                 recommendations.push("Review simulation errors for potential issues".to_string());
             }
         }
@@ -1294,9 +1337,7 @@ impl ITFBasedFuzzer {
             CIOutputFormat::Text => self.generate_text_report(result),
         };
 
-        std::fs::write(export_path, content).map_err(|e| {
-            ITFFuzzError::FileSystemError(format!("Failed to write export file: {}", e))
-        })?;
+        self.write_string_to_path(export_path, content)?;
 
         Ok(())
     }
@@ -1335,9 +1376,10 @@ impl ITFBasedFuzzer {
             if result
                 .model_checking_result
                 .as_ref()
-                .map_or(false, |mc| !mc.violations.is_empty())
+                .is_some_and(|mc| !mc.violations.is_empty())
             {
-                format!("<failure message=\"Model checking failed\">Property violations detected</failure>")
+                "<failure message=\"Model checking failed\">Property violations detected</failure>"
+                    .to_string()
             } else {
                 "".to_string()
             },
@@ -1349,9 +1391,9 @@ impl ITFBasedFuzzer {
             if result
                 .simulation_result
                 .as_ref()
-                .map_or(false, |sim| !sim.simulation_result.errors.is_empty())
+                .is_some_and(|sim| !sim.simulation_result.errors.is_empty())
             {
-                format!("<failure message=\"Simulation testing failed\">Simulation errors detected</failure>")
+                "<failure message=\"Simulation testing failed\">Simulation errors detected</failure>".to_string()
             } else {
                 "".to_string()
             },
@@ -1500,9 +1542,7 @@ Goals Achieved: {}
             if coverage.goals_achieved { "Yes" } else { "No" }
         );
 
-        std::fs::write(export_path, report).map_err(|e| {
-            ITFFuzzError::FileSystemError(format!("Failed to write coverage report: {}", e))
-        })?;
+        self.write_string_to_path(export_path, report)?;
 
         Ok(())
     }
@@ -1547,6 +1587,12 @@ pub struct PerformanceMonitor {
     phase_start_times: std::collections::HashMap<String, std::time::Instant>,
     phase_durations: std::collections::HashMap<String, std::time::Duration>,
     start_memory: Option<u64>,
+}
+
+impl Default for PerformanceMonitor {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PerformanceMonitor {
@@ -1639,9 +1685,9 @@ impl PerformanceMonitor {
 
     #[cfg(target_os = "linux")]
     fn get_memory_usage() -> Option<u64> {
-        use std::fs;
-
-        let status = fs::read_to_string("/proc/self/status").ok()?;
+        let storage = default_storage_provider();
+        let status = futures::executor::block_on(storage.retrieve("/proc/self/status")).ok()??;
+        let status = String::from_utf8(status).ok()?;
         for line in status.lines() {
             if line.starts_with("VmRSS:") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
@@ -1869,6 +1915,92 @@ pub struct ResourceUtilization {
     pub disk_operations: u64,
     /// Network operations (if applicable)
     pub network_operations: u64,
+}
+
+fn default_storage_provider() -> Arc<dyn StorageEffects> {
+    Arc::new(PathStorageAdapter)
+}
+
+#[derive(Debug, Clone, Default)]
+struct PathStorageAdapter;
+
+#[async_trait]
+impl StorageEffects for PathStorageAdapter {
+    async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+        let path = PathBuf::from(key);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
+        }
+
+        tokio::fs::write(&path, value)
+            .await
+            .map_err(|e| StorageError::WriteFailed(e.to_string()))
+    }
+
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        let path = PathBuf::from(key);
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        tokio::fs::read(&path)
+            .await
+            .map(Some)
+            .map_err(|e| StorageError::ReadFailed(e.to_string()))
+    }
+
+    async fn remove(&self, key: &str) -> Result<bool, StorageError> {
+        let path = PathBuf::from(key);
+        if !path.exists() {
+            return Ok(false);
+        }
+
+        tokio::fs::remove_file(&path)
+            .await
+            .map(|_| true)
+            .map_err(|e| StorageError::DeleteFailed(e.to_string()))
+    }
+
+    async fn list_keys(&self, _prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+        Ok(Vec::new())
+    }
+
+    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
+        Ok(PathBuf::from(key).exists())
+    }
+
+    async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
+        for (key, value) in pairs {
+            self.store(&key, value).await?;
+        }
+        Ok(())
+    }
+
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+        let mut out = HashMap::new();
+        for key in keys {
+            if let Some(value) = self.retrieve(key).await? {
+                out.insert(key.clone(), value);
+            }
+        }
+        Ok(out)
+    }
+
+    async fn clear_all(&self) -> Result<(), StorageError> {
+        Ok(())
+    }
+
+    async fn stats(&self) -> Result<StorageStats, StorageError> {
+        Ok(StorageStats {
+            backend_type: "path".to_string(),
+            ..Default::default()
+        })
+    }
 }
 
 /// Coverage summary across all testing phases

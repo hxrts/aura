@@ -10,7 +10,10 @@ use super::{
     state::{AppState, DemoPhase},
 };
 use aura_chat::{ChatGroupId, ChatMessage, ChatMessageId};
-use aura_core::AuthorityId;
+use aura_core::{
+    time::{PhysicalTime, TimeStamp},
+    AuthorityId,
+};
 
 /// Demo orchestration interface
 pub struct DemoInterface {
@@ -19,6 +22,7 @@ pub struct DemoInterface {
     /// Demo event receiver
     demo_rx: mpsc::UnboundedReceiver<DemoEvent>,
     /// Demo event sender for TUI
+    #[allow(dead_code)]
     demo_tx: mpsc::UnboundedSender<DemoEvent>,
     /// Mock authorities for demo
     authorities: HashMap<String, AuthorityId>,
@@ -81,7 +85,10 @@ impl DemoInterface {
 
         // Create sample messages for restoration demo
         let group_id = ChatGroupId::from_uuid(uuid::Uuid::new_v4());
-        let timestamp = chrono::Utc::now();
+        let timestamp = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1000,
+            uncertainty: None,
+        });
 
         self.saved_messages = vec![
             ChatMessage::new_text(
@@ -89,21 +96,21 @@ impl DemoInterface {
                 group_id.clone(),
                 AuthorityId::new(),
                 "Hey everyone! Welcome to our group chat.".to_string(),
-                timestamp,
+                timestamp.clone(),
             ),
             ChatMessage::new_text(
                 ChatMessageId::from_uuid(uuid::Uuid::new_v4()),
                 group_id.clone(),
                 AuthorityId::new(),
                 "This is so cool! Secure messaging with social recovery.".to_string(),
-                timestamp,
+                timestamp.clone(),
             ),
             ChatMessage::new_text(
                 ChatMessageId::from_uuid(uuid::Uuid::new_v4()),
                 group_id,
                 AuthorityId::new(),
                 "I love how we can recover our data if something goes wrong!".to_string(),
-                timestamp,
+                timestamp.clone(),
             ),
         ];
 
@@ -222,7 +229,10 @@ impl DemoInterface {
                 group_id.clone(),
                 self.authorities["bob"],
                 content.to_string(),
-                chrono::Utc::now(),
+                TimeStamp::PhysicalClock(PhysicalTime {
+                    ts_ms: 2000,
+                    uncertainty: None,
+                }),
             );
             self.app.state_mut().add_message(message);
         }
@@ -246,7 +256,10 @@ impl DemoInterface {
                 group_id.clone(),
                 self.authorities["bob"],
                 content,
-                chrono::Utc::now(),
+                TimeStamp::PhysicalClock(PhysicalTime {
+                    ts_ms: 3000,
+                    uncertainty: None,
+                }),
             );
 
             self.app.state_mut().add_message(message);

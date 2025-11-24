@@ -18,7 +18,7 @@ pub type SyncError = AuraError;
 
 /// Convenience functions for sync-specific error types.
 /// These now map to unified AuraError variants.
-
+///
 /// Create a protocol error (maps to Internal).
 pub fn sync_protocol_error(protocol: impl Into<String>, message: impl Into<String>) -> AuraError {
     AuraError::internal(format!(

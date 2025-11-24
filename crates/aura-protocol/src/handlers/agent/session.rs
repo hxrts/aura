@@ -124,7 +124,7 @@ pub struct SessionEnded {
 
 /// Choreography-aware session handler for testing and production
 #[derive(Debug, Clone)]
-pub struct MemorySessionHandler<T: aura_core::TimeEffects> {
+pub struct MemorySessionHandler<T: aura_core::PhysicalTimeEffects> {
     device_id: DeviceId,
     sessions: Arc<RwLock<HashMap<SessionId, SessionData>>>,
     session_messages: Arc<RwLock<HashMap<SessionId, Vec<SessionMessage>>>>,
@@ -164,7 +164,7 @@ struct SessionData {
     updated_at: u64,
 }
 
-impl<T: aura_core::TimeEffects> MemorySessionHandler<T> {
+impl<T: aura_core::PhysicalTimeEffects> MemorySessionHandler<T> {
     /// Create a new choreography-aware memory session handler
     pub fn new(device_id: DeviceId, time_effects: Arc<T>) -> Self {
         Self {
@@ -271,7 +271,7 @@ impl<T: aura_core::TimeEffects> MemorySessionHandler<T> {
 }
 
 #[async_trait]
-impl<T: aura_core::TimeEffects> SessionManagementEffects for MemorySessionHandler<T> {
+impl<T: aura_core::PhysicalTimeEffects> SessionManagementEffects for MemorySessionHandler<T> {
     async fn create_session(&self, session_type: SessionType) -> Result<SessionId> {
         let session_id = SessionId::new();
         let timestamp = self.current_timestamp().await;
@@ -480,7 +480,7 @@ mod tests {
     struct TestTimeEffects;
     
     #[async_trait::async_trait]
-    impl aura_core::TimeEffects for TestTimeEffects {
+    impl aura_core::PhysicalTimeEffects for TestTimeEffects {
         async fn current_timestamp(&self) -> u64 {
             1234567890 // Fixed timestamp for testing
         }

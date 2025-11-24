@@ -9,16 +9,16 @@
 //! # Architecture Constraints
 //!
 //! **Layer 1 has ZERO dependencies on other Aura crates** (foundation).
-//! - ✅ Effect trait definitions (interfaces, no implementations)
-//! - ✅ Domain types: `AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`
-//! - ✅ Semantic traits: `JoinSemilattice`, `MeetSemilattice`, `CvState`, `MvState`
-//! - ✅ Cryptographic utilities: key derivation, FROST types, merkle trees
-//! - ✅ Error types: `AuraError`, error codes, and guard metadata
-//! - ✅ Configuration system with validation
-//! - ✅ Extension traits providing convenience methods (e.g., `LeakageChoreographyExt`)
-//! - ❌ NO implementations (those go in aura-effects or domain crates)
-//! - ❌ NO application logic (that goes in feature crates)
-//! - ❌ NO handler composition (that's aura-composition)
+//! - YES Effect trait definitions (interfaces, no implementations)
+//! - YES Domain types: `AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`
+//! - YES Semantic traits: `JoinSemilattice`, `MeetSemiLattice`, `CvState`, `MvState`
+//! - YES Cryptographic utilities: key derivation, FROST types, merkle trees
+//! - YES Error types: `AuraError`, error codes, and guard metadata
+//! - YES Configuration system with validation
+//! - YES Extension traits providing convenience methods (e.g., `LeakageChoreographyExt`)
+//! - NO implementations (those go in aura-effects or domain crates)
+//! - NO application logic (that goes in feature crates)
+//! - NO handler composition (that's aura-composition)
 //!
 //! # Core Abstractions
 //!
@@ -34,7 +34,7 @@
 //! - `CryptoEffects`: Signing, hashing, key derivation
 //! - `NetworkEffects`: TCP, message sending/receiving
 //! - `StorageEffects`: File I/O, chunk operations
-//! - `TimeEffects`: Current time, delays
+//! - `PhysicalTimeEffects`: Physical clock access, timestamps\n//! - `LogicalClockEffects`: Causal ordering, vector clocks\n//! - `OrderClockEffects`: Privacy-preserving deterministic ordering
 //! - `RandomEffects`: Cryptographic randomness
 //!
 //! **Application Effects** (implemented in domain crates with infrastructure effects):
@@ -58,81 +58,59 @@
 
 // === Core Modules ===
 
-/// Core algebraic types and semilattice laws
-pub mod semilattice;
-
-/// Journal CRDT with facts (⊔) and capabilities (⊓)
-pub mod journal;
-
-/// Device, account, and context identifiers
-pub mod identifiers;
-
-/// Context derivation for privacy partitions
-pub mod context_derivation;
-
-/// Core message envelopes and versioning
-pub mod messages;
-
-/// Pure effect interfaces (no implementations)
-pub mod effects;
-
-/// Unified error handling
-pub mod errors;
-
-/// DAG-CBOR serialization (canonical format)
-pub mod serialization;
-
-/// Time utilities for deterministic simulation
-pub mod time;
-
-/// Content addressing and IPLD compatibility
-pub mod content;
-
-/// Protocol type definitions
-pub mod protocols;
-
-/// API stability annotations
-pub mod stability;
-
-/// Relationship and web-of-trust types
-pub mod relationships;
-
-/// Session epochs and participant management
-pub mod session_epochs;
-
-/// Tree operation types
-pub mod tree;
-
-/// FlowBudget primitives
-pub mod flow;
-
 /// Authority abstraction (new architecture)
 pub mod authority;
-
 /// Core consensus types and prestate management
 pub mod consensus;
-
+/// Content addressing and IPLD compatibility
+pub mod content;
+/// Context derivation for privacy partitions
+pub mod context_derivation;
 /// Type conversion utilities (internal helpers)
 #[doc(hidden)]
 pub mod conversions;
-
-/// Pure synchronous hash trait for content addressing
-pub mod hash;
-
 /// Cryptographic domain types and utilities
 pub mod crypto;
-
+/// Pure effect interfaces (no implementations)
+pub mod effects;
+/// Unified error handling
+pub mod errors;
+/// FlowBudget primitives
+pub mod flow;
+/// Pure synchronous hash trait for content addressing
+pub mod hash;
+/// Device, account, and context identifiers
+pub mod identifiers;
+/// Journal CRDT with facts (⊔) and capabilities (⊓)
+pub mod journal;
 /// Maintenance operation types
 pub mod maintenance;
-
+/// Core message envelopes and versioning
+pub mod messages;
+/// Protocol type definitions
+pub mod protocols;
 /// Relational domain types for cross-authority coordination
 pub mod relational;
-
+/// Relationship and web-of-trust types
+pub mod relationships;
+/// Core algebraic types and semilattice laws
+pub mod semilattice;
+/// DAG-CBOR serialization (canonical format)
+pub mod serialization;
+/// Session epochs and participant management
+pub mod session_epochs;
+/// API stability annotations
+pub mod stability;
 /// Internal test utilities (Layer 1 - does not use aura-testkit to avoid circular dependencies)
 #[doc(hidden)]
 pub mod test_utils;
-
+/// Time semantics (Logical/Order/Physical/Range)
+pub mod time;
+/// Tree operation types
+pub mod tree;
 // === Public API Re-exports ===
+
+pub use time::TimeDomain;
 
 // Core algebraic types
 #[doc = "stable: Core journal types with semver guarantees"]
@@ -154,9 +132,6 @@ pub use identifiers::{
     EventNonce, GroupId, GuardianId, IndividualId, IndividualIdExt, MemberId, MessageContext,
     OperationId, RelayId, SessionId,
 };
-
-// DeviceId is now internal to aura-journal/src/commitment_tree/ only
-// For migration: use AuthorityId for external APIs, DeviceId only within commitment tree
 
 // Authority abstraction (new architecture)
 #[doc = "unstable: Authority model is under active development - migration from AccountId ongoing"]
@@ -217,7 +192,10 @@ pub use effects::{
     FlowBudgetEffects,
     FlowHint,
     JournalEffects,
+    LogicalClockEffects,
     MinimalEffects,
+    OrderClockEffects,
+    PhysicalTimeEffects,
     RandomEffects,
     RateLimit,
     // Rate limiting types (unified rate limiting implementation)
@@ -235,27 +213,29 @@ pub use effects::{
     TestingEffects,
     TimeEffects,
     TreeEffects,
+    WakeCondition,
 };
 
 // Cryptographic utilities
 #[doc = "stable: Core cryptographic utilities with semver guarantees"]
 pub use crypto::{
-    build_commitment_tree, build_merkle_root, ed25519_verify, generate_uuid, verify_merkle_proof,
+    build_commitment_tree, build_merkle_root, ed25519_verify, verify_merkle_proof,
     Ed25519Signature, Ed25519SigningKey, Ed25519VerifyingKey, HpkeKeyPair, HpkePrivateKey,
     HpkePublicKey, IdentityKeyContext, KeyDerivationSpec, MerkleProof, PermissionKeyContext,
     SimpleMerkleProof,
 };
 
-// FROST threshold cryptography module (re-export for aura-frost compatibility)
+// FROST threshold cryptography module (primitives live here; aura-frost deprecated)
 #[doc = "unstable: FROST implementation may change significantly"]
 pub use crypto::frost;
 
 // Time and content
 #[doc = "stable: Content addressing types with semver guarantees"]
 pub use content::{ChunkId, ContentId, ContentSize, Hash32};
-#[doc = "stable: Time utilities with semver guarantees"]
+#[doc = "stable: Time semantics with semver guarantees"]
 pub use time::{
-    current_system_time, current_unix_timestamp, current_unix_timestamp_millis, LamportTimestamp,
+    AttestationValidity, LogicalTime, OrderTime, OrderingPolicy, PhysicalTime, RangeTime,
+    TimeConfidence, TimeMetadata, TimeOrdering, TimeProof, TimeStamp,
 };
 
 // Protocol and session types (temporary - will move to app layer)
@@ -280,9 +260,6 @@ pub use tree::{
     Epoch, LeafId, LeafNode, LeafRole, NodeIndex, NodeKind, Policy, TreeCommitment, TreeOp,
     TreeOpKind,
 };
-
-// Utilities
-// Note: CausalContext, OperationId, VectorClock moved to aura-journal
 
 // Maintenance events
 #[deprecated(

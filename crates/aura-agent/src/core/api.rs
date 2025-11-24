@@ -45,7 +45,7 @@ impl AuraAgent {
         self.runtime
             .shutdown(ctx)
             .await
-            .map_err(|e| AgentError::runtime(e))
+            .map_err(AgentError::runtime)
     }
 }
 
@@ -77,7 +77,7 @@ impl AgentBuilder {
     }
 
     /// Build a production agent
-    pub async fn build_production(self, ctx: &EffectContext) -> AgentResult<AuraAgent> {
+    pub async fn build_production(self, _ctx: &EffectContext) -> AgentResult<AuraAgent> {
         let authority_id = self
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;

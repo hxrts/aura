@@ -8,7 +8,7 @@ use crate::{
     ChatGroupId,
 };
 use aura_core::identifiers::AuthorityId;
-use chrono::{DateTime, Utc};
+use aura_core::time::TimeStamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -21,8 +21,8 @@ pub struct ChatGroup {
     pub name: String,
     /// Optional group description
     pub description: String,
-    /// When the group was created
-    pub created_at: DateTime<Utc>,
+    /// When the group was created (using unified time system)
+    pub created_at: TimeStamp,
     /// Authority that created the group
     pub created_by: AuthorityId,
     /// List of group members
@@ -83,18 +83,23 @@ impl ChatGroup {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::time::PhysicalTime;
     use uuid::Uuid;
 
     fn create_test_group() -> ChatGroup {
         let group_id = ChatGroupId::from_uuid(Uuid::new_v4());
         let creator_id = AuthorityId::new();
-        let now = Utc::now();
+        // Use deterministic time for tests instead of system time
+        let now = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1000,
+            uncertainty: None,
+        });
 
         ChatGroup {
             id: group_id,
             name: "Test Group".to_string(),
             description: "A test group".to_string(),
-            created_at: now,
+            created_at: now.clone(),
             created_by: creator_id.clone(),
             members: vec![ChatMember {
                 authority_id: creator_id,

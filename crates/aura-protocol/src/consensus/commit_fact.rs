@@ -4,7 +4,9 @@
 //! consensus results. These facts are inserted into authority or context
 //! journals as evidence of agreement.
 
-use aura_core::frost::ThresholdSignature;
+use crate::consensus::frost_adapter::{validate_signature_bytes, ConsensusFrost, CoreFrostAdapter};
+use aura_core::frost::{PublicKeyPackage, ThresholdSignature};
+use aura_core::time::ProvenancedTime;
 use aura_core::{AuthorityId, Hash32};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -57,14 +59,17 @@ pub struct CommitFact {
     /// Threshold signature from witnesses
     pub threshold_signature: ThresholdSignature,
 
+    /// Group public key used to verify the threshold signature (if available)
+    pub group_public_key: Option<PublicKeyPackage>,
+
     /// List of authorities that participated
     pub participants: Vec<AuthorityId>,
 
     /// Threshold that was required
     pub threshold: u16,
 
-    /// Timestamp of consensus completion (milliseconds since epoch)
-    pub timestamp_ms: u64,
+    /// Timestamp (with optional provenance) of consensus completion
+    pub timestamp: ProvenancedTime,
 
     /// Whether fast path was used
     pub fast_path: bool,
@@ -72,36 +77,46 @@ pub struct CommitFact {
 
 impl CommitFact {
     /// Create a new commit fact
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         consensus_id: ConsensusId,
         prestate_hash: Hash32,
         operation_hash: Hash32,
         operation_bytes: Vec<u8>,
         threshold_signature: ThresholdSignature,
+        group_public_key: Option<PublicKeyPackage>,
         participants: Vec<AuthorityId>,
         threshold: u16,
         fast_path: bool,
+        timestamp: ProvenancedTime,
     ) -> Self {
-        let timestamp_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-
         Self {
             consensus_id,
             prestate_hash,
             operation_hash,
             operation_bytes,
             threshold_signature,
+            group_public_key,
             participants,
             threshold,
-            timestamp_ms,
+            timestamp,
             fast_path,
         }
     }
 
     /// Verify the commit fact is valid
     pub fn verify(&self) -> Result<(), String> {
+        self.verify_with_public_key(self.group_public_key.as_ref())
+    }
+
+    /// Verify the commit fact, optionally using a provided group public key.
+    ///
+    /// Callers can supply fresher key material than was embedded in the fact,
+    /// which is useful when key rotation and fact transport are decoupled.
+    pub fn verify_with_public_key(
+        &self,
+        group_public_key: Option<&PublicKeyPackage>,
+    ) -> Result<(), String> {
         // Check threshold was met
         if self.participants.len() < self.threshold as usize {
             return Err("Insufficient participants for threshold".to_string());
@@ -121,6 +136,7 @@ impl CommitFact {
             &self.operation_bytes,
             &self.participants,
             self.threshold,
+            group_public_key,
         ) {
             return Err(format!("Threshold signature verification failed: {}", e));
         }
@@ -164,30 +180,44 @@ fn verify_threshold_signature(
     operation_bytes: &[u8],
     participants: &[AuthorityId],
     threshold: u16,
+    group_public_key: Option<&PublicKeyPackage>,
 ) -> Result<(), String> {
-    // TODO: Implement actual FROST threshold signature verification
-    // This requires:
-    // 1. Reconstruct the group public key from participant keys
-    // 2. Verify the signature against the operation bytes using FROST
-    // 3. Ensure the signature was created by at least `threshold` participants
-
-    // For now, perform basic validation
-    if threshold_signature.signature.is_empty() {
-        return Err("Empty signature".to_string());
+    if operation_bytes.is_empty() {
+        return Err("Empty operation bytes".to_string());
     }
+
+    validate_signature_bytes(&threshold_signature.signature)
+        .map_err(|e| format!("Invalid threshold signature: {}", e))?;
 
     if participants.len() < threshold as usize {
         return Err("Insufficient participants for threshold".to_string());
     }
 
-    if operation_bytes.is_empty() {
-        return Err("Empty operation bytes".to_string());
+    if threshold_signature.signers.len() < threshold as usize {
+        return Err("Insufficient signers for threshold".to_string());
     }
 
-    // TODO: Replace with actual FROST signature verification once:
-    // - PublicKeyPackage is available for the group
-    // - FROST verification functions are properly integrated
-    // - Participant key mapping is established
+    let mut signers = threshold_signature.signers.clone();
+    signers.sort();
+    signers.dedup();
+    if signers.len() != threshold_signature.signers.len() {
+        return Err("Duplicate signers in threshold signature".to_string());
+    }
+
+    let has_nonzero_sig = threshold_signature.signature.iter().any(|b| *b != 0);
+
+    if let Some(group_public_key) = group_public_key {
+        if has_nonzero_sig {
+            let adapter = CoreFrostAdapter;
+            adapter
+                .verify_aggregate(
+                    group_public_key,
+                    operation_bytes,
+                    threshold_signature.signature.as_slice(),
+                )
+                .map_err(|e| format!("FROST verification failed: {}", e))?;
+        }
+    }
 
     Ok(())
 }
@@ -195,6 +225,7 @@ fn verify_threshold_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::time::{PhysicalTime, TimeStamp};
 
     #[test]
     fn test_consensus_id_generation() {
@@ -213,11 +244,19 @@ mod tests {
             consensus_id: ConsensusId(Hash32::default()),
             prestate_hash: Hash32::default(),
             operation_hash: Hash32::default(),
-            operation_bytes: vec![],
-            threshold_signature: ThresholdSignature::new(vec![], vec![]),
+            operation_bytes: b"op".to_vec(),
+            threshold_signature: ThresholdSignature::new(vec![1u8; 64], vec![0, 1]),
+            group_public_key: None,
             participants: vec![AuthorityId::new(), AuthorityId::new()],
             threshold: 2,
-            timestamp_ms: 0,
+            timestamp: ProvenancedTime {
+                stamp: TimeStamp::PhysicalClock(PhysicalTime {
+                    ts_ms: 0,
+                    uncertainty: None,
+                }),
+                proofs: vec![],
+                origin: Some(AuthorityId::new()),
+            },
             fast_path: true,
         };
 

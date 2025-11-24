@@ -5,26 +5,51 @@
 //! Target: <250 lines, focused on choreographic channel lifecycle.
 
 use super::{ChoreographicConfig, ChoreographicError, ChoreographicResult};
+use aura_core::effects::PhysicalTimeEffects;
 use aura_core::{identifiers::DeviceId, ContextId};
+use aura_effects::time::PhysicalTimeHandler;
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 /// Channel establishment coordinator using choreographic protocols
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ChannelEstablishmentCoordinator {
     device_id: DeviceId,
     config: ChoreographicConfig,
     establishing_channels: HashMap<String, ChannelEstablishmentState>,
+    time: Arc<dyn PhysicalTimeEffects>,
 }
 
 /// Channel teardown coordinator using choreographic protocols
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ChannelTeardownCoordinator {
     device_id: DeviceId,
     config: ChoreographicConfig,
     tearing_down_channels: HashMap<String, ChannelTeardownState>,
+    time: Arc<dyn PhysicalTimeEffects>,
+}
+
+impl std::fmt::Debug for ChannelEstablishmentCoordinator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChannelEstablishmentCoordinator")
+            .field("device_id", &self.device_id)
+            .field("config", &self.config)
+            .field("establishing_channels", &self.establishing_channels)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for ChannelTeardownCoordinator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ChannelTeardownCoordinator")
+            .field("device_id", &self.device_id)
+            .field("config", &self.config)
+            .field("tearing_down_channels", &self.tearing_down_channels)
+            .finish()
+    }
 }
 
 /// Channel establishment state tracking
@@ -201,11 +226,32 @@ pub enum CleanupStatus {
 impl ChannelEstablishmentCoordinator {
     /// Create new channel establishment coordinator
     pub fn new(device_id: DeviceId, config: ChoreographicConfig) -> Self {
+        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler::new()))
+    }
+
+    /// Create coordinator with explicit time provider
+    pub fn with_time(
+        device_id: DeviceId,
+        config: ChoreographicConfig,
+        time: Arc<dyn PhysicalTimeEffects>,
+    ) -> Self {
         Self {
             device_id,
             config,
             establishing_channels: HashMap::new(),
+            time,
         }
+    }
+
+    fn now(&self) -> SystemTime {
+        let ms = futures::executor::block_on(async {
+            self.time
+                .physical_time()
+                .await
+                .map(|p| p.ts_ms)
+                .unwrap_or_default()
+        });
+        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
     }
 
     /// Initiate channel establishment
@@ -224,7 +270,7 @@ impl ChannelEstablishmentCoordinator {
         let channel_id = format!(
             "channel-{}-{}",
             &format!("{:?}", self.device_id)[..8],
-            SystemTime::now()
+            self.now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis()
@@ -234,7 +280,7 @@ impl ChannelEstablishmentCoordinator {
             channel_id: channel_id.clone(),
             participants: participants.clone(),
             phase: EstablishmentPhase::Initiating,
-            started_at: SystemTime::now(),
+            started_at: self.now(),
             confirmations: HashMap::new(),
         };
 
@@ -281,11 +327,32 @@ impl ChannelEstablishmentCoordinator {
 impl ChannelTeardownCoordinator {
     /// Create new channel teardown coordinator
     pub fn new(device_id: DeviceId, config: ChoreographicConfig) -> Self {
+        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler::new()))
+    }
+
+    /// Create coordinator with explicit time provider
+    pub fn with_time(
+        device_id: DeviceId,
+        config: ChoreographicConfig,
+        time: Arc<dyn PhysicalTimeEffects>,
+    ) -> Self {
         Self {
             device_id,
             config,
             tearing_down_channels: HashMap::new(),
+            time,
         }
+    }
+
+    fn now(&self) -> SystemTime {
+        let ms = futures::executor::block_on(async {
+            self.time
+                .physical_time()
+                .await
+                .map(|p| p.ts_ms)
+                .unwrap_or_default()
+        });
+        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
     }
 
     /// Initiate channel teardown
@@ -299,7 +366,7 @@ impl ChannelTeardownCoordinator {
             channel_id: channel_id.clone(),
             participants,
             phase: TeardownPhase::Initiating,
-            started_at: SystemTime::now(),
+            started_at: self.now(),
             acknowledgments: HashMap::new(),
         };
 

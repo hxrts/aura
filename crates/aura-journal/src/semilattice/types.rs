@@ -1,6 +1,7 @@
 //! Concrete CRDT implementations aligned with docs/001_theoretical_foundations.md
 
 use aura_core::semilattice::{Bottom, CvState, JoinSemilattice};
+use aura_core::time::{OrderingPolicy, TimeOrdering, TimeStamp};
 use std::collections::{BTreeMap, HashSet};
 
 /// CRDT operation errors
@@ -161,23 +162,34 @@ impl<T: Clone + Eq + std::hash::Hash> CvState for GSet<T> {}
 #[derive(Debug, Clone)]
 pub struct LwwRegister<T: Clone> {
     value: Option<T>,
-    timestamp: u64,
+    timestamp: TimeStamp,
     actor_id: Replica,
 }
 
 impl<T: Clone> LwwRegister<T> {
     /// Create a new empty LWW register
     pub fn new() -> Self {
+        use aura_core::time::PhysicalTime;
         Self {
             value: None,
-            timestamp: 0,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 0,
+                uncertainty: None,
+            }),
             actor_id: String::new(),
         }
     }
 
     /// Set the value in the register with metadata
-    pub fn set(&mut self, value: T, timestamp: u64, actor_id: Replica) {
-        if timestamp > self.timestamp || (timestamp == self.timestamp && actor_id > self.actor_id) {
+    pub fn set(&mut self, value: T, timestamp: TimeStamp, actor_id: Replica) {
+        let ordering = timestamp.compare(&self.timestamp, OrderingPolicy::DeterministicTieBreak);
+        let should_update = match ordering {
+            TimeOrdering::After => true,
+            TimeOrdering::Concurrent | TimeOrdering::Overlapping => actor_id > self.actor_id,
+            _ => false,
+        };
+
+        if should_update {
             self.value = Some(value);
             self.timestamp = timestamp;
             self.actor_id = actor_id;
@@ -198,9 +210,16 @@ impl<T: Clone> Default for LwwRegister<T> {
 
 impl<T: Clone> JoinSemilattice for LwwRegister<T> {
     fn join(&self, other: &Self) -> Self {
-        if other.timestamp > self.timestamp
-            || (other.timestamp == self.timestamp && other.actor_id > self.actor_id)
-        {
+        let ordering = other
+            .timestamp
+            .compare(&self.timestamp, OrderingPolicy::DeterministicTieBreak);
+        let use_other = match ordering {
+            TimeOrdering::After => true,
+            TimeOrdering::Concurrent | TimeOrdering::Overlapping => other.actor_id > self.actor_id,
+            _ => false,
+        };
+
+        if use_other {
             other.clone()
         } else {
             self.clone()

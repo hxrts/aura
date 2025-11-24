@@ -18,7 +18,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 │         (aura-agent, aura-simulator)        │
 ├─────────────────────────────────────────────┤
 │ Layer 5: Feature/Protocol Implementation    │
-│    (aura-frost, aura-invitation, etc.)      │
+│    (aura-invitation, etc.)                  │
 ├─────────────────────────────────────────────┤
 │ Layer 4: Orchestration                      │
 │         (aura-protocol)                     │
@@ -149,9 +149,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 | Crate | Protocol | Purpose |
 |-------|----------|---------|
 | `aura-authenticate` | Authentication | Device, threshold, and guardian auth flows |
-| `aura-chat` | Secure messaging | Group chat with AMP transport integration |
-| `aura-frost` | Threshold signatures | FROST ceremonies and key resharing |
-| `aura-invitation` | Invitations | Peer onboarding and relational facts |
+| `aura-chat` | Secure messaging | Group chat with AMP transport integration || `aura-invitation` | Invitations | Peer onboarding and relational facts |
 | `aura-recovery` | Guardian recovery | Recovery grants and dispute escalation |
 | `aura-relational` | Cross-authority relationships | RelationalContext protocols (domain types in aura-core) |
 | `aura-rendezvous` | Peer discovery | Context-scoped rendezvous and routing |
@@ -222,7 +220,7 @@ crates/
 ├── aura-composition     Handler composition and effect system assembly
 ├── aura-core            Foundation types and effect traits
 ├── aura-effects         Effect handler implementations
-├── aura-frost           FROST threshold signatures
+├── aura-frost (removed)  FROST ceremonies (use core primitives)
 ├── aura-invitation      Invitation choreographies
 ├── aura-journal         Fact-based journal domain
 ├── aura-macros          Choreography DSL compiler
@@ -271,7 +269,7 @@ graph TD
     chat[aura-chat]
     recovery[aura-recovery]
     invitation[aura-invitation]
-    frost[aura-frost]
+    frost[aura-core]
     relational[aura-relational]
     rendezvous[aura-rendezvous]
     sync[aura-sync]
@@ -701,7 +699,7 @@ impl<C: CryptoEffects, S: StorageEffects> JournalEffects for JournalHandler<C, S
 
 #### ❌ Violation: Direct impure access in domain logic
 ```rust
-// File: crates/aura-frost/src/ceremony.rs  
+// File: crates/aura-core/src/crypto/tree_signing.rs  
 pub async fn start_frost_ceremony() -> Result<()> {
     let start_time = SystemTime::now(); // ❌ VIOLATION: Should use TimeEffects
     let session_id = Uuid::new_v4();    // ❌ VIOLATION: Should use RandomEffects
@@ -787,6 +785,60 @@ The `just arch-check` command validates these principles by:
 
 Run before every commit to maintain architectural compliance and simulation determinism.
 
+## Task-Oriented Crate Selection
+
+### "I'm implementing..."
+- **A new hash function** → `aura-core` (pure function) + `aura-effects` (if OS integration needed)
+- **FROST ceremony logic** → use core primitives or colocate with callers (aura-frost removed)
+- **Guardian recovery flow** → `aura-recovery`
+- **Journal fact validation** → `aura-journal`
+- **Network transport** → `aura-transport` (abstractions) + `aura-effects` (TCP implementation)
+- **CLI command** → `aura-cli`
+- **Test scenario** → `aura-testkit`
+- **Choreography protocol** → Feature crate + `aura-mpst`
+- **Authorization logic** → `aura-wot`
+- **Consensus protocol** → `aura-protocol` (orchestration) + domain crates (state)
+- **Effect handler** → `aura-effects` (infrastructure) or domain crate (application logic)
+
+### "I need to understand..."
+- **How authorities work** → `docs/100_authority_and_identity.md`
+- **How consensus works** → `docs/104_consensus.md`
+- **How effects compose** → `docs/106_effect_system_and_runtime.md`
+- **How protocols are designed** → `docs/107_mpst_and_choreography.md`
+- **How the guard chain works** → `docs/001_system_architecture.md` (sections 2.1-2.3)
+- **How journals work** → `docs/102_journal.md`
+- **How testing works** → `docs/805_testing_guide.md` + `docs/806_simulation_guide.md`
+- **How to write tests** → `docs/805_testing_guide.md`
+- **How privacy and flow budgets work** → `docs/003_information_flow_contract.md`
+- **How distributed system guarantees work** → `docs/004_distributed_systems_contract.md`
+- **How commitment trees work** → `docs/101_accounts_and_commitment_tree.md`
+- **How relational contexts work** → `docs/103_relational_contexts.md`
+- **How transport and receipts work** → `docs/108_transport_and_information_flow.md`
+- **How rendezvous and peer discovery work** → `docs/110_rendezvous.md`
+- **How state reduction works** → `docs/110_state_reduction.md`
+- **How the mathematical model works** → `docs/002_theoretical_model.md`
+- **How identifiers and boundaries work** → `docs/105_identifiers_and_boundaries.md`
+- **How authorization and capabilities work** → `docs/109_authorization.md`
+- **How Biscuit tokens work** → `docs/109_authorization.md` + `aura-wot/src/biscuit/`
+- **How to get started as a new developer** → `docs/801_hello_world_guide.md`
+- **How core systems work together** → `docs/802_core_systems_guide.md`
+- **How to design advanced protocols** → `docs/804_advanced_coordination_guide.md`
+- **How simulation works** → `docs/806_simulation_guide.md`
+- **How maintenance and OTA updates work** → `docs/807_maintenance_ota_guide.md` + `docs/111_maintenance.md`
+- **How development patterns work** → `docs/805_development_patterns.md`
+- **The project's goals and constraints** → `docs/000_project_overview.md`
+- **How to debug architecture** → `just arch-check` + this document
+
+### Layer-Based Development Workflow
+**Working on Layer 1 (Foundation)?** Read: `docs/106_effect_system_and_runtime.md`  
+**Working on Layer 2 (Domains)?** Read: Domain-specific docs (`docs/100-112`)  
+**Working on Layer 3 (Effects)?** Read: `docs/805_development_patterns.md`  
+**Working on Layer 4 (Protocols)?** Read: `docs/107_mpst_and_choreography.md`  
+**Working on Layer 5 (Features)?** Read: `docs/803_coordination_guide.md`  
+**Working on Layer 6 (Runtime)?** Read: `aura-agent/` and `aura-simulator/`  
+**Working on Layer 7 (CLI)?** Read: `aura-cli/` + scenario docs  
+**Working on Layer 8 (Testing)?** Read: `docs/805_testing_guide.md`
+
 ## Crate Summary
 
 ### aura-core
@@ -831,8 +883,8 @@ Device, threshold, and guardian authentication protocols.
 ### aura-chat
 Secure group messaging with authority-first design and AMP transport integration.
 
-### aura-frost
-FROST threshold signatures and key resharing operations.
+### FROST placement
+Core FROST primitives (key packages, signing, verification, binding) live in `aura-core::crypto::tree_signing`. Higher-level ceremonies should be colocated with their callers or folded into core adapters. Consensus and journal consume primitives via adapters/effects.
 
 ### aura-invitation
 Peer onboarding and relationship formation choreographies.
@@ -860,3 +912,10 @@ Comprehensive testing infrastructure including test fixtures, scenario builders,
 
 ### aura-quint
 Formal verification integration for protocol specifications.
+
+## Documents That Reference This Guide
+
+- [System Architecture](001_system_architecture.md) - References the 8-layer architecture defined here
+- [Development Patterns and Workflows](805_development_patterns.md) - Uses crate organization patterns from this guide
+- [Effect System and Runtime](106_effect_system_and_runtime.md) - Implements the effect system architecture described here
+- [Testing Guide](805_testing_guide.md) - Uses the testing infrastructure organization from this guide

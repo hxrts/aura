@@ -70,7 +70,7 @@ async fn handle_discover(
     ctx: &EffectContext,
     effects: Arc<AuraEffectSystem>,
     root: &Path,
-        validate: bool,
+    validate: bool,
 ) -> Result<()> {
     println!("Discovering scenarios in: {}", root.display());
 
@@ -210,7 +210,7 @@ async fn handle_run(
 
 /// Handle report generation through effects
 async fn handle_report(
-    ctx: &EffectContext,
+    _ctx: &EffectContext,
     effects: Arc<AuraEffectSystem>,
     input: &Path,
     output: &Path,
@@ -442,6 +442,12 @@ async fn run_scenario_file(
     })?;
 
     let mut lines = ScenarioLog::new(path);
+    let sim_seed = parsed
+        .get("setup")
+        .and_then(|s| s.get("seed"))
+        .and_then(|v| v.as_integer())
+        .unwrap_or(0) as u64;
+    let sim_handler = SimulationScenarioHandler::new(sim_seed);
 
     log_line(
         effects_ref,
@@ -460,13 +466,23 @@ async fn run_scenario_file(
     }
 
     if let Some(phases) = parsed.get("phases").and_then(|p| p.as_array()) {
-        log_line(effects_ref, &mut lines, &format!("Phases: {}", phases.len())).await;
+        log_line(
+            effects_ref,
+            &mut lines,
+            &format!("Phases: {}", phases.len()),
+        )
+        .await;
         for (idx, phase) in phases.iter().enumerate() {
             let name = phase
                 .get("name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("<unnamed>");
-            log_line(effects_ref, &mut lines, &format!("Phase {}: {}", idx + 1, name)).await;
+            log_line(
+                effects_ref,
+                &mut lines,
+                &format!("Phase {}: {}", idx + 1, name),
+            )
+            .await;
 
             if let Some(actions) = phase.get("actions").and_then(|a| a.as_array()) {
                 log_line(
@@ -506,6 +522,34 @@ async fn run_scenario_file(
                             {
                                 let _ = write!(&mut summary, " threshold={}", threshold);
                             }
+                            let participants: Vec<String> = action
+                                .get("participants")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|p| p.as_str().map(|s| s.to_string()))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            let mut params = HashMap::new();
+                            if let Some(target) = action.get("target").and_then(|v| v.as_str()) {
+                                params.insert("target".to_string(), target.to_string());
+                            }
+                            if let Some(threshold) =
+                                action.get("threshold").and_then(|v| v.as_integer())
+                            {
+                                params.insert("threshold".to_string(), threshold.to_string());
+                            }
+                            if let Some(app_id) = action.get("app_id").and_then(|v| v.as_str()) {
+                                params.insert("app_id".to_string(), app_id.to_string());
+                            }
+                            if let Some(context) = action.get("context").and_then(|v| v.as_str()) {
+                                params.insert("context".to_string(), context.to_string());
+                            }
+                            if let Some(name) = action.get("choreography").and_then(|v| v.as_str())
+                            {
+                                let _ = sim_handler.run_choreography(name, participants, params);
+                            }
                         }
                         "verify_property" => {
                             if let Some(prop) = action.get("property").and_then(|v| v.as_str()) {
@@ -514,6 +558,12 @@ async fn run_scenario_file(
                             if let Some(expected) = action.get("expected") {
                                 let _ = write!(&mut summary, " expected={}", expected);
                             }
+                            let property = action
+                                .get("property")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+                            let expected_str = action.get("expected").map(|v| v.to_string());
+                            let _ = sim_handler.verify_property_stub(property, expected_str);
                         }
                         "simulate_data_loss" => {
                             if let Some(target) = action.get("target").and_then(|v| v.as_str()) {
@@ -521,6 +571,28 @@ async fn run_scenario_file(
                             }
                             if let Some(loss) = action.get("loss_type").and_then(|v| v.as_str()) {
                                 let _ = write!(&mut summary, " loss_type={}", loss);
+                            }
+                            let target = action
+                                .get("target")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or_default();
+                            let loss_type = action
+                                .get("loss_type")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+                            let recovery_required = action
+                                .get("recovery_required")
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(true);
+                            if let Err(e) =
+                                sim_handler.simulate_data_loss(target, loss_type, recovery_required)
+                            {
+                                log_line(
+                                    effects_ref,
+                                    &mut lines,
+                                    &format!("Simulator data loss error for {}: {}", target, e),
+                                )
+                                .await;
                             }
                         }
                         "apply_network_condition" => {
@@ -535,6 +607,101 @@ async fn run_scenario_file(
                                 if !names.is_empty() {
                                     let _ = write!(&mut summary, " participants={:?}", names);
                                 }
+                            }
+                            let duration_ticks = action
+                                .get("duration_ticks")
+                                .and_then(|v| v.as_integer())
+                                .unwrap_or(0)
+                                as u64;
+                            if let Some(cond) = action.get("condition").and_then(|v| v.as_str()) {
+                                let participants: Vec<String> = action
+                                    .get("participants")
+                                    .and_then(|v| v.as_array())
+                                    .map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|p| p.as_str().map(|s| s.to_string()))
+                                            .collect()
+                                    })
+                                    .unwrap_or_default();
+                                let _ = sim_handler.apply_network_condition(
+                                    cond,
+                                    participants,
+                                    duration_ticks,
+                                );
+                            }
+                        }
+                        "inject_byzantine" | "inject_failure" => {
+                            let participant = action
+                                .get("participant")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+                            let behavior = action
+                                .get("behavior")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(action_type);
+                            let _ = sim_handler.inject_fault(participant, behavior);
+                        }
+                        "create_checkpoint" => {
+                            let label = action
+                                .get("label")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("checkpoint");
+                            if let Ok(id) = sim_handler.create_checkpoint(label) {
+                                let _ = write!(&mut summary, " id={}", id);
+                            }
+                        }
+                        "export_choreo_trace" => {
+                            let fmt = action
+                                .get("format")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("console");
+                            let output = action
+                                .get("output")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("trace.log");
+                            let _ = sim_handler.export_choreo_trace(fmt, output);
+                        }
+                        "generate_timeline" => {
+                            if let Some(output) = action.get("output").and_then(|v| v.as_str()) {
+                                let _ = sim_handler.generate_timeline(output);
+                            }
+                        }
+                        "verify_all_properties" => {
+                            let _ = sim_handler.verify_all_properties();
+                        }
+                        "setup_choreography" => {
+                            let protocol = action
+                                .get("protocol")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("unknown");
+                            let participants: Vec<String> = action
+                                .get("participants")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|p| p.as_str().map(|s| s.to_string()))
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            let _ = sim_handler.setup_choreography(protocol, participants);
+                        }
+                        "load_key_shares" => {
+                            let threshold = action
+                                .get("threshold")
+                                .and_then(|v| v.as_integer())
+                                .unwrap_or(0) as usize;
+                            let _ = sim_handler.load_key_shares(threshold);
+                        }
+                        "wait_ticks" => {
+                            if let Some(ticks) = action.get("ticks").and_then(|v| v.as_integer()) {
+                                let _ = write!(&mut summary, " ticks={}", ticks);
+                                let _ = sim_handler.wait_ticks(ticks as u64);
+                            }
+                        }
+                        "wait_ms" => {
+                            if let Some(ms) = action.get("duration").and_then(|v| v.as_integer()) {
+                                let _ = write!(&mut summary, " duration_ms={}", ms);
+                                let _ = sim_handler.wait_ms(ms as u64);
                             }
                         }
                         _ => {
@@ -627,8 +794,12 @@ async fn run_scenario_file(
                 }
             }
             Err(e) => {
-                log_line(effects_ref, &mut lines, &format!("Simulator execution error: {}", e))
-                    .await;
+                log_line(
+                    effects_ref,
+                    &mut lines,
+                    &format!("Simulator execution error: {}", e),
+                )
+                .await;
                 return Err(anyhow::anyhow!("Simulator execution failed: {}", e));
             }
         }

@@ -8,6 +8,7 @@
 pub struct EffectApiBridge;
 
 impl EffectApiBridge {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }

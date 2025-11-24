@@ -370,7 +370,7 @@ impl MetricsCollector {
 
     /// Record sync session start
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
     pub fn record_sync_start(&self, session_id: &str, now: u64) {
         if let Ok(operational) = self.registry.operational.lock() {
             operational
@@ -389,7 +389,7 @@ impl MetricsCollector {
 
     /// Record sync session completion
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
     pub fn record_sync_completion(
         &self,
         session_id: &str,

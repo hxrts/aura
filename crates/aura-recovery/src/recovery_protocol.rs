@@ -6,6 +6,7 @@
 #![allow(clippy::disallowed_methods)] // TODOs use Utc::now() temporarily
 
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
+use aura_core::time::TimeStamp;
 use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
@@ -79,7 +80,7 @@ pub struct GuardianApproval {
     /// Guardian's signature over the recovery grant
     pub signature: Vec<u8>,
     /// Timestamp
-    pub timestamp: u64,
+    pub timestamp: TimeStamp,
 }
 
 /// Recovery result
@@ -345,7 +346,10 @@ impl RecoveryProtocolHandler {
             "recovery_id": recovery_id,
             "state": state,
             "approvals_count": approvals.len(),
-            "timestamp": chrono::Utc::now().timestamp(),
+            "timestamp": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         });
 
         // TODO: Use actual JournalEffects to record recovery state
@@ -386,10 +390,7 @@ impl RecoveryProtocolHandler {
     fn simulate_journal_update(&self, state_data: &serde_json::Value) -> bool {
         // TODO: Replace with actual effect system call
         // effect_handler.record_recovery_state(state_data).await
-        println!(
-            "Simulated journal recovery state update: {}",
-            state_data.to_string()
-        );
+        println!("Simulated journal recovery state update: {}", state_data);
         true
     }
 }

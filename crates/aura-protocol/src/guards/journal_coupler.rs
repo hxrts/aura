@@ -19,9 +19,10 @@
 
 use super::effect_system_trait::GuardEffectSystem;
 use super::ProtocolGuard;
-use aura_core::{AuraResult, Journal};
+use aura_core::{AuraResult, Journal, TimeEffects};
 use aura_mpst::journal::{JournalAnnotation, JournalOpType};
 use serde_json::Value as JsonValue;
+use std::time::Duration;
 use std::{collections::HashMap, future::Future};
 use tracing::{debug, error, info, warn};
 
@@ -340,10 +341,7 @@ impl JournalCoupler {
                             "Journal annotation application failed, retrying"
                         );
                         // Small delay before retry
-                        tokio::time::sleep(tokio::time::Duration::from_millis(
-                            10 * (attempt + 1) as u64,
-                        ))
-                        .await;
+                        tokio::time::sleep(Duration::from_millis(10 * (attempt + 1) as u64)).await;
                     }
                 }
             }

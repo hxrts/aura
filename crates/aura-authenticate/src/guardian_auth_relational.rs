@@ -4,6 +4,7 @@
 //! model, replacing the device-centric guardian authentication.
 
 use aura_core::relational::GuardianBinding;
+use aura_core::TimeEffects;
 use aura_core::{
     relational::{GenericBinding, RelationalFact},
     AuraError, Authority, AuthorityId, Hash32, Result,
@@ -74,10 +75,11 @@ pub struct GuardianAuthResponse {
 }
 
 /// Authenticate a guardian through relational context
-pub async fn authenticate_guardian(
+pub async fn authenticate_guardian<T: aura_core::effects::PhysicalTimeEffects>(
     context: &RelationalContext,
     guardian_authority: &dyn Authority,
     request: &GuardianAuthRequest,
+    time_effects: &T,
 ) -> Result<GuardianAuthProof> {
     // Verify guardian is in this context
     if !context
@@ -103,18 +105,16 @@ pub async fn authenticate_guardian(
         guardian_id: guardian_authority.authority_id(),
         binding_proof: binding.consensus_proof.clone(),
         operation_signature: signature.to_bytes().to_vec(),
-        issued_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
+        issued_at: time_effects.current_timestamp().await,
     })
 }
 
 /// Verify a guardian authentication proof
-pub async fn verify_guardian_proof(
+pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
     context: &RelationalContext,
     request: &GuardianAuthRequest,
     proof: &GuardianAuthProof,
+    time_effects: &T,
 ) -> Result<GuardianAuthResponse> {
     // Verify context ID matches
     if context.context_id != proof.context_id {
@@ -140,10 +140,7 @@ pub async fn verify_guardian_proof(
         .ok_or_else(|| AuraError::not_found("Guardian binding not found"))?;
 
     // Basic freshness check (10 minutes)
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now = time_effects.current_timestamp().await;
     if now.saturating_sub(proof.issued_at) > 600 {
         return Ok(GuardianAuthResponse {
             success: false,
@@ -279,25 +276,24 @@ impl GuardianAuthHandler {
     }
 
     /// Process guardian authentication request
-    pub async fn process_auth_request(
+    pub async fn process_auth_request<T: aura_core::effects::PhysicalTimeEffects>(
         &self,
         request: GuardianAuthRequest,
         guardian: Arc<dyn Authority>,
+        time_effects: &T,
     ) -> Result<GuardianAuthResponse> {
         // Authenticate guardian
-        let proof = authenticate_guardian(&self.context, guardian.as_ref(), &request).await?;
+        let proof =
+            authenticate_guardian(&self.context, guardian.as_ref(), &request, time_effects).await?;
 
         // Verify proof
-        let verified = verify_guardian_proof(&self.context, &request, &proof).await?;
+        let verified = verify_guardian_proof(&self.context, &request, &proof, time_effects).await?;
 
         // Record request for delay enforcement
         let record = RecoveryRequestRecord {
             guardian_id: guardian.authority_id(),
             account_id: request.account_id,
-            requested_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            requested_at: time_effects.current_timestamp().await,
             operation: request.operation.clone(),
         };
 
@@ -314,10 +310,11 @@ impl GuardianAuthHandler {
     }
 
     /// Check if guardian can approve operation
-    pub async fn check_guardian_approval(
+    pub async fn check_guardian_approval<T: aura_core::effects::PhysicalTimeEffects>(
         &self,
         guardian_id: AuthorityId,
         operation: &GuardianOperation,
+        time_effects: &T,
     ) -> Result<bool> {
         // Check guardian binding exists
         let binding = self
@@ -350,10 +347,7 @@ impl GuardianAuthHandler {
                     .max()
                     .unwrap_or(0);
 
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
+                let now = time_effects.current_timestamp().await;
 
                 if latest_request_time > 0 && now < latest_request_time + recovery_delay.as_secs() {
                     return Ok(false);

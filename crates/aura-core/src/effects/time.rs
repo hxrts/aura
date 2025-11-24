@@ -1,153 +1,112 @@
-//! Time effects trait definitions
+//! Domain-specific time trait definitions (v2).
 //!
-//! This module defines the pure trait interface for time operations.
-//! Concrete implementations are provided by application crates (aura-protocol).
+//! These traits correspond to the semantic time types defined in `crate::time`.
 
-use crate::AuraError;
+use crate::time::{OrderTime, PhysicalTime, TimeOrdering};
 use async_trait::async_trait;
-use std::time::{Duration, Instant};
+use serde::{Deserialize, Serialize};
+use std::time::Instant;
 use uuid::Uuid;
 
-/// Wake conditions for cooperative yielding
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub enum WakeCondition {
-    /// Wake when new events are available
-    NewEvents,
-    /// Wake when a specific epoch/timestamp is reached
-    EpochReached {
-        /// Target epoch timestamp in milliseconds
-        target: u64,
-    },
-    /// Wake after a timeout at specific timestamp
-    TimeoutAt(u64),
-    /// Wake when an event matching criteria is received
-    EventMatching(String),
-    /// Wake when threshold number of events received
-    ThresholdEvents {
-        /// Number of events to wait for before waking
-        threshold: usize,
-        /// Maximum time to wait in milliseconds
-        timeout_ms: u64,
-    },
-    /// Wake immediately (no wait)
-    Immediate,
-    /// Custom wake condition with arbitrary string
-    Custom(String),
-    /// Wake when a timeout expires
-    TimeoutExpired {
-        /// Unique identifier for the timeout that expired
-        timeout_id: Uuid,
-    },
-}
-
-/// Time operation errors
-#[derive(Debug, thiserror::Error)]
+/// Error type for time operations.
+#[derive(Debug, thiserror::Error, Serialize, Deserialize)]
 pub enum TimeError {
-    /// Invalid epoch timestamp provided
-    #[error("Invalid epoch: {epoch}")]
-    InvalidEpoch {
-        /// The invalid epoch value
-        epoch: u64,
-    },
-    /// Operation timed out
     #[error("Timeout after {timeout_ms}ms")]
-    Timeout {
-        /// Timeout duration in milliseconds
-        timeout_ms: u64,
-    },
-    /// Clock synchronization failed
+    Timeout { timeout_ms: u64 },
+    #[error("Timeout handle not found: {handle}")]
+    TimeoutNotFound { handle: TimeoutHandle },
     #[error("Clock sync failed: {reason}")]
-    ClockSyncFailed {
-        /// Reason for failure
-        reason: String,
-    },
-    /// Time service unavailable
+    ClockSyncFailed { reason: String },
     #[error("Time service unavailable")]
     ServiceUnavailable,
-    /// Timeout not found
-    #[error("Timeout not found: {handle}")]
-    TimeoutNotFound {
-        /// Handle that was not found
-        handle: String,
-    },
-    /// Serialization of effect parameters failed
-    #[error("Time operation serialization failed: {reason}")]
-    SerializationFailed {
-        /// Details for the serialization failure
-        reason: String,
-    },
-    /// Generic operation failure wrapper
-    #[error("Time operation failed: {reason}")]
-    OperationFailed {
-        /// Error details
-        reason: String,
-    },
+    #[error("Operation failed: {reason}")]
+    OperationFailed { reason: String },
 }
 
-/// Handle for timeout operations
+/// Handle for timeout operations.
 pub type TimeoutHandle = Uuid;
 
-/// Time effects interface
-///
-/// This trait provides time operations for the Aura effects system.
-/// Implementations in application crates provide:
-/// - Production: Real system time operations
-/// - Testing: Controllable time for deterministic tests
-/// - Simulation: Time acceleration and scenarios
-#[async_trait]
-pub trait TimeEffects: Send + Sync {
-    /// Get the current timestamp in epoch milliseconds
-    async fn current_epoch(&self) -> u64;
-
-    /// Get current timestamp in seconds
-    async fn current_timestamp(&self) -> u64;
-
-    /// Get current timestamp in milliseconds
-    async fn current_timestamp_millis(&self) -> u64;
-
-    /// Get the current monotonic time instant
-    /// This is useful for deadlines and duration measurements
-    async fn now_instant(&self) -> Instant;
-
-    /// Sleep for a specified number of milliseconds
-    async fn sleep_ms(&self, ms: u64);
-
-    /// Sleep until a specific epoch timestamp
-    async fn sleep_until(&self, epoch: u64);
-
-    /// Delay execution for a specified duration
-    async fn delay(&self, duration: Duration);
-
-    /// Sleep for specified duration in milliseconds
-    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError>;
-
-    /// Yield execution until a condition is met
-    async fn yield_until(&self, condition: WakeCondition) -> Result<(), TimeError>;
-
-    /// Wait until a condition is met (alias for yield_until with AuraError)
-    async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError>;
-
-    /// Set a timeout and return a handle
-    async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle;
-
-    /// Cancel a timeout by handle
-    async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError>;
-
-    /// Check if this is a simulated time handler
-    fn is_simulated(&self) -> bool;
-
-    /// Register a context for time events
-    fn register_context(&self, context_id: Uuid);
-
-    /// Unregister a context from time events
-    fn unregister_context(&self, context_id: Uuid);
-
-    /// Notify that events are available for waiting contexts
-    async fn notify_events_available(&self);
-
-    /// Get time resolution in milliseconds
-    fn resolution_ms(&self) -> u64;
+/// Wake conditions for cooperative scheduling.
+#[derive(Debug, Clone)]
+pub enum WakeCondition {
+    Immediate,
+    NewEvents,
+    EpochReached { target: u64 },
+    TimeoutAt(u64),
+    TimeoutExpired { timeout_id: TimeoutHandle },
+    EventMatching(String),
+    ThresholdEvents { threshold: usize, timeout_ms: u64 },
+    Custom(String),
 }
 
-// Note: Concrete implementations of TimeEffects should be provided by application crates.
-// The foundation (aura-core) only contains pure trait definitions.
+#[async_trait]
+pub trait PhysicalTimeEffects: Send + Sync {
+    async fn physical_time(&self) -> Result<PhysicalTime, TimeError>;
+    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError>;
+}
+
+#[async_trait]
+pub trait LogicalClockEffects: Send + Sync {
+    async fn logical_advance(
+        &self,
+        observed: Option<&crate::time::VectorClock>,
+    ) -> Result<crate::time::LogicalTime, TimeError>;
+    async fn logical_now(&self) -> Result<crate::time::LogicalTime, TimeError>;
+}
+
+#[async_trait]
+pub trait OrderClockEffects: Send + Sync {
+    async fn order_time(&self) -> Result<OrderTime, TimeError>;
+}
+
+#[async_trait]
+pub trait TimeComparison: Send + Sync {
+    async fn compare(
+        &self,
+        a: &crate::time::TimeStamp,
+        b: &crate::time::TimeStamp,
+    ) -> Result<TimeOrdering, TimeError>;
+}
+
+/// Compatibility shim for legacy time accessors.
+///
+/// New code should prefer the domain-specific traits above, but many callers
+/// still expect helper methods like `current_timestamp()` and `now_instant()`.
+/// This trait delegates to `PhysicalTimeEffects` and should be blanket
+/// implemented for any physical clock provider.
+#[async_trait]
+pub trait TimeEffects: PhysicalTimeEffects {
+    /// Monotonic clock instant - must be implemented by effect handlers.
+    /// This cannot have a default implementation as it violates effect system architecture.
+    async fn now_instant(&self) -> Instant;
+
+    /// Current Unix timestamp in seconds.
+    async fn current_timestamp(&self) -> u64 {
+        self.physical_time()
+            .await
+            .map(|t| t.ts_ms / 1000)
+            .unwrap_or(0)
+    }
+
+    /// Current Unix timestamp in milliseconds.
+    async fn current_timestamp_ms(&self) -> u64 {
+        self.physical_time().await.map(|t| t.ts_ms).unwrap_or(0)
+    }
+
+    /// Alias for current epoch seconds.
+    async fn current_epoch(&self) -> u64 {
+        self.current_timestamp().await
+    }
+}
+
+#[async_trait]
+impl<T> TimeEffects for T
+where
+    T: PhysicalTimeEffects + ?Sized,
+{
+    /// Default implementation that panics - effect handlers must override this.
+    /// This violates the effect system but is kept for compatibility until handlers are updated.
+    async fn now_instant(&self) -> Instant {
+        panic!("now_instant must be implemented by effect handlers, not used with default implementation")
+    }
+}

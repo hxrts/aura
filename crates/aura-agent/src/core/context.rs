@@ -3,8 +3,9 @@
 //! Provides context types that expose authority/context identifiers as first-class
 //! while keeping device-local details derived internally.
 
-use aura_core::effects::TimeEffects;
+use aura_core::effects::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
+use aura_core::TimeEffects;
 use std::collections::HashMap;
 
 /// Authority-first context for agent operations
@@ -23,6 +24,7 @@ pub struct AuthorityContext {
     pub session_id: Option<SessionId>,
 
     /// Internal device identifier (derived from authority, not exposed publicly)
+    #[allow(dead_code)]
     pub(crate) device_id: aura_core::identifiers::DeviceId,
 }
 
@@ -48,7 +50,7 @@ pub struct ContextMetadata {
     /// Context creation timestamp
     pub created_at: u64,
 
-    /// Last activity timestamp  
+    /// Last activity timestamp
     pub last_activity: u64,
 }
 
@@ -84,6 +86,7 @@ impl AuthorityContext {
     }
 
     /// Internal access to device ID (crate-private)
+    #[allow(dead_code)]
     pub(crate) fn device_id(&self) -> aura_core::identifiers::DeviceId {
         self.device_id
     }
@@ -91,7 +94,7 @@ impl AuthorityContext {
 
 impl RelationalContext {
     /// Create a new relational context
-    pub async fn new<T: TimeEffects>(
+    pub async fn new<T: PhysicalTimeEffects>(
         context_id: ContextId,
         participants: Vec<AuthorityId>,
         time_effects: &T,
@@ -109,7 +112,7 @@ impl RelationalContext {
     }
 
     /// Update last activity timestamp
-    pub async fn touch<T: TimeEffects>(&mut self, time_effects: &T) {
+    pub async fn touch<T: PhysicalTimeEffects>(&mut self, time_effects: &T) {
         self.metadata.last_activity = time_effects.current_timestamp().await;
     }
 }

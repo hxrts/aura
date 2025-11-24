@@ -24,6 +24,7 @@
 //! - FROST paper: https://eprint.iacr.org/2020/852
 
 use crate::hash;
+use crate::{AttestedOp, TreeOpKind};
 // use crate::effects::SecureStorageLocation; // TODO: Import when using SecureStorageEffects
 use frost_ed25519 as frost;
 use serde::{Deserialize, Serialize};
@@ -323,6 +324,60 @@ pub fn binding_message(ctx: &TreeSigningContext, op_bytes: &[u8]) -> Vec<u8> {
     h.update(op_bytes);
 
     h.finalize().to_vec()
+}
+
+/// Compute a binding message for an attested tree operation using core types.
+///
+/// This mirrors the binding used by journal verification and keeps the logic
+/// near the canonical tree types to avoid duplicated hashing code elsewhere.
+pub fn tree_op_binding_message(attested: &AttestedOp, current_epoch: u64) -> Vec<u8> {
+    let mut h = hash::hasher();
+
+    // Domain separator
+    h.update(b"TREE_OP_SIG");
+
+    // Parent metadata
+    h.update(&attested.op.parent_epoch.to_le_bytes());
+    h.update(&attested.op.parent_commitment);
+    h.update(&attested.op.version.to_le_bytes());
+
+    // Current epoch
+    h.update(&current_epoch.to_be_bytes());
+
+    // Serialize operation specifics
+    let op_bytes = serialize_tree_op_for_binding(&attested.op.op);
+    h.update(&op_bytes);
+
+    h.finalize().to_vec()
+}
+
+/// Lightweight serialization for tree operations used in binding calculation.
+fn serialize_tree_op_for_binding(op: &TreeOpKind) -> Vec<u8> {
+    let mut buffer = Vec::new();
+    match op {
+        TreeOpKind::AddLeaf { leaf, under } => {
+            buffer.extend_from_slice(b"AddLeaf");
+            buffer.extend_from_slice(&leaf.leaf_id.0.to_le_bytes());
+            buffer.extend_from_slice(&under.0.to_le_bytes());
+        }
+        TreeOpKind::RemoveLeaf { leaf, reason } => {
+            buffer.extend_from_slice(b"RemoveLeaf");
+            buffer.extend_from_slice(&leaf.0.to_le_bytes());
+            buffer.push(*reason);
+        }
+        TreeOpKind::ChangePolicy { node, .. } => {
+            buffer.extend_from_slice(b"ChangePolicy");
+            buffer.extend_from_slice(&node.0.to_le_bytes());
+        }
+        TreeOpKind::RotateEpoch { affected } => {
+            buffer.extend_from_slice(b"RotateEpoch");
+            buffer.extend_from_slice(&(affected.len() as u32).to_le_bytes());
+            for node in affected {
+                buffer.extend_from_slice(&node.0.to_le_bytes());
+            }
+        }
+    }
+    buffer
 }
 
 /// Generate a nonce and its commitment using FROST

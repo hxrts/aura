@@ -13,6 +13,7 @@ use super::{
     GuardResult, GuardedExecutionResult, ProtocolGuard,
 };
 use crate::authorization::BiscuitAuthorizationBridge;
+use aura_core::TimeEffects;
 use aura_core::{session_epochs::Epoch, AuraError, AuraResult, FlowBudget};
 use aura_wot::ResourceScope;
 use biscuit_auth::Biscuit;
@@ -212,13 +213,14 @@ fn parse_and_verify_biscuit_token(
 fn create_biscuit_token(
     capability: &str,
     resource: &str,
-    auth_bridge: &crate::authorization::BiscuitAuthorizationBridge,
+    _auth_bridge: &crate::authorization::BiscuitAuthorizationBridge,
 ) -> Result<Biscuit, GuardError> {
     use biscuit_auth::{macros::*, KeyPair};
 
     // In production, this would use the proper root keypair from the authorization bridge
     // For now, we still use a generated keypair but with proper token structure
     let keypair = KeyPair::new();
+    let expiry_secs: i64 = 3_600; // deterministic placeholder expiry
 
     // Create a properly structured Biscuit token with comprehensive authorization facts
     let token = biscuit!(
@@ -232,11 +234,7 @@ fn create_biscuit_token(
         "#,
         resource = resource,
         capability = capability,
-        expiry = (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-            + 3600) as i64 // 1 hour from now
+        expiry = expiry_secs
     )
     .build(&keypair)
     .map_err(|e| {
@@ -276,18 +274,18 @@ pub async fn execute_guarded_operation<E, T, F, Fut>(
     operation: F,
 ) -> AuraResult<GuardedExecutionResult<T>>
 where
-    E: GuardEffectSystem,
+    E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
     F: FnOnce(&mut E) -> Fut,
     Fut: Future<Output = AuraResult<T>>,
 {
-    let total_start_time = std::time::Instant::now();
+    let total_start_time = effect_system.now_instant().await;
     let span = tracing::info_span!("guarded_execution", operation_id = %guard.operation_id);
 
     async move {
         debug!("Starting guarded protocol execution");
 
         // Phase 1: Evaluate capability guards (meet-guarded preconditions)
-        let guard_start_time = std::time::Instant::now();
+        let guard_start_time = effect_system.now_instant().await;
         // Evaluate capability guards using Biscuit authorization
         let guard_result = evaluate_guard(guard, effect_system).await?;
         let guard_eval_time = guard_start_time.elapsed();
@@ -310,7 +308,7 @@ where
         info!("All guards passed, proceeding with execution");
 
         // Phase 2: Execute the protocol operation
-        let execution_start_time = std::time::Instant::now();
+        let execution_start_time = effect_system.now_instant().await;
         let execution_result = operation(effect_system).await;
         let execution_time = execution_start_time.elapsed();
 
@@ -319,7 +317,7 @@ where
                 debug!("Protocol execution succeeded, applying deltas");
 
                 // Phase 3: Apply delta facts (join-only commits)
-                let delta_start_time = std::time::Instant::now();
+                let delta_start_time = effect_system.now_instant().await;
                 let applied_deltas = if !guard.delta_facts.is_empty() {
                     apply_delta_facts(&guard.delta_facts, effect_system)
                         .await
@@ -418,9 +416,9 @@ pub async fn execute_guarded_sequence<E, T>(
     effect_system: &mut E,
 ) -> AuraResult<Vec<GuardedExecutionResult<T>>>
 where
-    E: GuardEffectSystem,
+    E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
 {
-    let sequence_start = std::time::Instant::now();
+    let sequence_start = effect_system.now_instant().await;
     let span = tracing::info_span!("guarded_sequence", operations = guards_and_operations.len());
 
     async move {
@@ -455,7 +453,7 @@ where
         let mut all_deltas = Vec::new();
 
         for (guard, operation) in guards_and_operations {
-            let execution_start = std::time::Instant::now();
+            let execution_start = effect_system.now_instant().await;
             let result = operation(effect_system).await;
             let execution_time = execution_start.elapsed();
 

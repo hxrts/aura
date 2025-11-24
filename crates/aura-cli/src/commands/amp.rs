@@ -4,6 +4,7 @@ use clap::Subcommand;
 
 /// AMP commands for inspecting state and triggering bumps.
 #[derive(Debug, Clone, Subcommand)]
+#[allow(missing_docs)]
 pub enum AmpAction {
     /// Show channel epoch/windows for a context/channel.
     Inspect {

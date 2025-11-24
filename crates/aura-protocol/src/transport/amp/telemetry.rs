@@ -476,7 +476,9 @@ pub static AMP_TELEMETRY: AmpTelemetry = AmpTelemetry {
 #[macro_export]
 macro_rules! time_amp_operation {
     ($operation:expr, $block:block) => {{
-        let start = std::time::Instant::now();
+        let start = aura_effects::time::RealTimeHandler::default()
+            .now_instant()
+            .await;
         let result = $block;
         let duration = start.elapsed();
         tracing::debug!(

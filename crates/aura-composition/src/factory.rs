@@ -8,8 +8,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use crate::adapters::{
-    AuthorizationHandlerAdapter, ConsoleHandlerAdapter, CryptoHandlerAdapter,
-    JournalHandlerAdapter, LoggingSystemHandlerAdapter, RandomHandlerAdapter,
+    ConsoleHandlerAdapter, CryptoHandlerAdapter, LoggingSystemHandlerAdapter, RandomHandlerAdapter,
     StorageHandlerAdapter, TimeHandlerAdapter, TransportHandlerAdapter,
 };
 use crate::registry::{EffectRegistry, HandlerContext, RegistrableHandler};
@@ -21,7 +20,6 @@ use aura_effects::{
     storage::FilesystemStorageHandler,
     system::logging::{LoggingConfig, LoggingSystemHandler},
     time::RealTimeHandler,
-    StandardAuthorizationHandler, StandardJournalHandler,
     TcpTransportHandler as RealTransportHandler,
 };
 
@@ -393,8 +391,11 @@ impl HandlerFactory {
                     self.register_handler(registry, *effect_type, Box::new(handler))?;
                 }
                 EffectType::Journal => {
-                    let handler = JournalHandlerAdapter::new(StandardJournalHandler::new());
-                    self.register_handler(registry, *effect_type, Box::new(handler))?;
+                    // Journal handler moved to aura-journal domain crate
+                    tracing::warn!(
+                        "No production handler available for effect type: {:?}",
+                        effect_type
+                    );
                 }
                 EffectType::System => {
                     let handler = LoggingSystemHandlerAdapter::new(LoggingSystemHandler::new(
@@ -417,10 +418,11 @@ impl HandlerFactory {
             if !registry.is_registered(*effect_type) {
                 match effect_type {
                     EffectType::Authentication => {
-                        let handler = AuthorizationHandlerAdapter::new(
-                            StandardAuthorizationHandler::with_standard_rules(),
+                        // Authorization handler moved to aura-wot domain crate
+                        tracing::debug!(
+                            "Optional effect handler not implemented: {:?}",
+                            effect_type
                         );
-                        self.register_handler(registry, *effect_type, Box::new(handler))?;
                     }
                     _ => {
                         // Skip optional effects that aren't implemented
@@ -545,8 +547,12 @@ impl HandlerFactory {
                 self.register_handler(registry, effect_type, Box::new(handler))
             }
             EffectType::Journal => {
-                let handler = JournalHandlerAdapter::new(StandardJournalHandler::new());
-                self.register_handler(registry, effect_type, Box::new(handler))
+                // Journal handler moved to aura-journal domain crate
+                tracing::warn!(
+                    "No production handler available for effect type: {:?}",
+                    effect_type
+                );
+                Err(FactoryError::RequiredEffectUnavailable { effect_type })
             }
             EffectType::System => {
                 let handler = LoggingSystemHandlerAdapter::new(LoggingSystemHandler::new(
@@ -555,10 +561,12 @@ impl HandlerFactory {
                 self.register_handler(registry, effect_type, Box::new(handler))
             }
             EffectType::Authentication => {
-                let handler = AuthorizationHandlerAdapter::new(
-                    StandardAuthorizationHandler::with_standard_rules(),
+                // Authorization handler moved to aura-wot domain crate
+                tracing::warn!(
+                    "No production handler available for effect type: {:?}",
+                    effect_type
                 );
-                self.register_handler(registry, effect_type, Box::new(handler))
+                Err(FactoryError::RequiredEffectUnavailable { effect_type })
             }
             _ => {
                 tracing::warn!(

@@ -3,86 +3,135 @@
 //! This module provides vector clock and causal dependency tracking
 //! for implementing proper causal ordering in CmRDT handlers.
 //!
-//! This is the unified implementation combining functionality from both
-//! aura-core and aura-protocol's CausalContext types.
+//! This module now uses the unified time system from aura-core for all time-related types.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-// Import from aura-core for types and hash
+// Import unified time types from aura-core
 use aura_core::hash;
 use aura_core::identifiers::DeviceId;
+use aura_core::time::{LogicalTime, VectorClock};
 
 /// Device/Actor identifier for vector clocks
 pub type ActorId = DeviceId;
 
-/// Vector clock for causal ordering
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct VectorClock {
-    /// Clock values for each known actor
-    pub clocks: BTreeMap<ActorId, u64>,
+/// Extension trait providing vector clock helpers for the unified `VectorClock` type.
+pub trait VectorClockExt {
+    /// Get the clock value for an actor (0 if absent)
+    fn get_time(&self, actor: &ActorId) -> u64;
+    /// Set the clock value for an actor
+    fn set_time(&mut self, actor: ActorId, time: u64);
+    /// Increment the clock value for an actor
+    fn increment(&mut self, actor: ActorId);
+    /// Merge with another clock, taking element-wise maxima
+    fn update(&mut self, other: &Self);
+    /// Merge with another clock (alias for update)
+    fn merge(&mut self, other: &Self) {
+        self.update(other);
+    }
+    /// True if self happens-before other (strict)
+    fn happens_before(&self, other: &Self) -> bool;
+    /// True if clocks are concurrent (no happens-before relation)
+    fn concurrent_with(&self, other: &Self) -> bool;
+    /// True if clocks are concurrent (alias for concurrent_with)
+    fn is_concurrent_with(&self, other: &Self) -> bool {
+        self.concurrent_with(other)
+    }
+    /// True if this clock dominates other (other happens-before self or equal)
+    fn dominates(&self, other: &Self) -> bool
+    where
+        Self: PartialEq,
+    {
+        other.happens_before(self) || self == other
+    }
 }
 
-impl VectorClock {
-    /// Create a new empty vector clock
-    pub fn new() -> Self {
-        Self {
-            clocks: BTreeMap::new(),
+impl VectorClockExt for VectorClock {
+    fn get_time(&self, actor: &ActorId) -> u64 {
+        match self {
+            VectorClock::Single { device, counter } => {
+                if device == actor {
+                    *counter
+                } else {
+                    0
+                }
+            }
+            VectorClock::Multiple(map) => map.get(actor).copied().unwrap_or(0),
         }
     }
 
-    /// Create a vector clock with a single actor
-    pub fn single(actor: ActorId, time: u64) -> Self {
-        let mut clocks = BTreeMap::new();
-        clocks.insert(actor, time);
-        Self { clocks }
-    }
-
-    /// Get the clock value for an actor
-    pub fn get(&self, actor: &ActorId) -> u64 {
-        self.clocks.get(actor).copied().unwrap_or(0)
-    }
-
-    /// Set the clock value for an actor
-    pub fn set(&mut self, actor: ActorId, time: u64) {
-        self.clocks.insert(actor, time);
-    }
-
-    /// Increment the clock for an actor
-    pub fn increment(&mut self, actor: ActorId) {
-        let current = self.get(&actor);
-        self.clocks.insert(actor, current + 1);
-    }
-
-    /// Update this clock with another clock (taking maximum of each actor)
-    pub fn update(&mut self, other: &VectorClock) {
-        for (actor, other_time) in &other.clocks {
-            let current_time = self.get(actor);
-            if *other_time > current_time {
-                self.clocks.insert(*actor, *other_time);
+    fn set_time(&mut self, actor: ActorId, time: u64) {
+        match self {
+            VectorClock::Single { device, counter } => {
+                if device == &actor {
+                    *counter = time;
+                } else {
+                    // Need to convert to Multiple variant
+                    let mut map = BTreeMap::new();
+                    map.insert(*device, *counter);
+                    map.insert(actor, time);
+                    *self = VectorClock::Multiple(map);
+                }
+            }
+            VectorClock::Multiple(map) => {
+                map.insert(actor, time);
             }
         }
     }
 
-    /// Merge with another clock (alias for update for compatibility)
-    pub fn merge(&mut self, other: &VectorClock) {
-        self.update(other);
+    fn increment(&mut self, actor: ActorId) {
+        let current = self.get_time(&actor);
+        self.set_time(actor, current + 1);
     }
 
-    /// Check if this clock happens-before another clock
-    pub fn happens_before(&self, other: &VectorClock) -> bool {
-        // VC1 < VC2 if VC1[i] <= VC2[i] for all i AND VC1 != VC2
+    fn update(&mut self, other: &Self) {
+        match other {
+            VectorClock::Single { device, counter } => {
+                let current_time = self.get_time(device);
+                if *counter > current_time {
+                    self.set_time(*device, *counter);
+                }
+            }
+            VectorClock::Multiple(other_map) => {
+                for (actor, other_time) in other_map {
+                    let current_time = self.get_time(actor);
+                    if *other_time > current_time {
+                        self.set_time(*actor, *other_time);
+                    }
+                }
+            }
+        }
+    }
+
+    fn happens_before(&self, other: &Self) -> bool {
         let mut all_leq = true;
         let mut some_less = false;
 
-        // Check all actors in both clocks
         let mut all_actors = BTreeSet::new();
-        all_actors.extend(self.clocks.keys());
-        all_actors.extend(other.clocks.keys());
+
+        // Collect all actors from both clocks
+        match self {
+            VectorClock::Single { device, .. } => {
+                all_actors.insert(device);
+            }
+            VectorClock::Multiple(map) => {
+                all_actors.extend(map.keys());
+            }
+        }
+
+        match other {
+            VectorClock::Single { device, .. } => {
+                all_actors.insert(device);
+            }
+            VectorClock::Multiple(map) => {
+                all_actors.extend(map.keys());
+            }
+        }
 
         for actor in all_actors {
-            let self_time = self.get(actor);
-            let other_time = other.get(actor);
+            let self_time = self.get_time(actor);
+            let other_time = other.get_time(actor);
 
             if self_time > other_time {
                 all_leq = false;
@@ -96,33 +145,16 @@ impl VectorClock {
         all_leq && some_less
     }
 
-    /// Check if this clock is concurrent with another clock
-    pub fn concurrent_with(&self, other: &VectorClock) -> bool {
+    fn concurrent_with(&self, other: &Self) -> bool {
         !self.happens_before(other) && !other.happens_before(self) && self != other
     }
-
-    /// Check if this clock is concurrent with another clock (alias for compatibility)
-    pub fn is_concurrent_with(&self, other: &VectorClock) -> bool {
-        self.concurrent_with(other)
-    }
-
-    /// Check if this clock dominates another (happens-after or equal)
-    pub fn dominates(&self, other: &VectorClock) -> bool {
-        other.happens_before(self) || self == other
-    }
 }
 
-impl Default for VectorClock {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// Causal context containing vector clock and dependency information
+/// Causal context containing logical time and dependency information
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CausalContext {
-    /// Vector clock representing the causal time
-    pub clock: VectorClock,
+    /// Logical time representing the causal time (vector clock + lamport clock)
+    pub logical_time: LogicalTime,
     /// Optional explicit dependencies this operation requires
     pub dependencies: BTreeSet<OperationId>,
     /// The actor that created this context
@@ -134,7 +166,10 @@ impl CausalContext {
     /// Useful for testing or initializing contexts that will be merged later
     pub fn empty() -> Self {
         Self {
-            clock: VectorClock::new(),
+            logical_time: LogicalTime {
+                vector: VectorClock::new(),
+                lamport: 0,
+            },
             dependencies: BTreeSet::new(),
             actor: DeviceId::placeholder(),
         }
@@ -142,8 +177,10 @@ impl CausalContext {
 
     /// Create a new causal context for an actor
     pub fn new(actor: ActorId) -> Self {
+        let mut vector = VectorClock::new();
+        vector.set_time(actor, 1);
         Self {
-            clock: VectorClock::single(actor, 1),
+            logical_time: LogicalTime { vector, lamport: 1 },
             dependencies: BTreeSet::new(),
             actor,
         }
@@ -151,10 +188,11 @@ impl CausalContext {
 
     /// Create a context that happens after another context
     pub fn after(actor: ActorId, previous: &CausalContext) -> Self {
-        let mut clock = previous.clock.clone();
-        clock.increment(actor);
+        let mut vector = previous.logical_time.vector.clone();
+        vector.increment(actor);
+        let lamport = previous.logical_time.lamport + 1;
         Self {
-            clock,
+            logical_time: LogicalTime { vector, lamport },
             dependencies: BTreeSet::new(),
             actor,
         }
@@ -168,30 +206,36 @@ impl CausalContext {
 
     /// Increment clock for a device
     pub fn increment(&mut self, device: DeviceId) {
-        self.clock.increment(device);
+        self.logical_time.vector.increment(device);
+        self.logical_time.lamport += 1;
     }
 
     /// Merge with another context (take maximum of all clocks)
     pub fn merge(&mut self, other: &CausalContext) {
-        self.clock.merge(&other.clock);
+        self.logical_time.vector.merge(&other.logical_time.vector);
+        self.logical_time.lamport = self.logical_time.lamport.max(other.logical_time.lamport) + 1;
         self.dependencies.extend(other.dependencies.iter().cloned());
     }
 
     /// Check if this context happens before another (delegates to vector clock)
     pub fn happens_before(&self, other: &CausalContext) -> bool {
-        self.clock.happens_before(&other.clock)
+        self.logical_time
+            .vector
+            .happens_before(&other.logical_time.vector)
     }
 
     /// Check if contexts are concurrent (neither happens before the other)
     pub fn is_concurrent_with(&self, other: &CausalContext) -> bool {
-        self.clock.is_concurrent_with(&other.clock)
+        self.logical_time
+            .vector
+            .is_concurrent_with(&other.logical_time.vector)
     }
 
-    /// Check if this context is ready given the current state
+    /// Check if this context is ready given the current logical time
     /// A context is ready if:
     /// 1. All explicit dependencies have been satisfied
     /// 2. The vector clock dependencies are satisfied
-    pub fn is_ready<F>(&self, dependency_check: F, current_clock: &VectorClock) -> bool
+    pub fn is_ready<F>(&self, dependency_check: F, current_logical_time: &LogicalTime) -> bool
     where
         F: Fn(&OperationId) -> bool,
     {
@@ -205,13 +249,14 @@ impl CausalContext {
         // Check vector clock causality
         // We can deliver an operation with clock C if our current clock dominates
         // all entries in C except for the sender's entry
-        let mut required_clock = self.clock.clone();
-        // Remove the sender's entry since they can have advanced beyond what we've seen
-        required_clock.clocks.remove(&self.actor);
-
         // Check if we've seen enough from each actor to satisfy causal dependencies
-        for (actor, required_time) in &required_clock.clocks {
-            if current_clock.get(actor) < *required_time {
+        for (actor, required_time) in self.logical_time.vector.iter() {
+            // Skip the sender's entry since they can have advanced beyond what we've seen
+            if actor == &self.actor {
+                continue;
+            }
+
+            if current_logical_time.vector.get_time(actor) < *required_time {
                 return false;
             }
         }
@@ -275,13 +320,13 @@ mod tests {
         let mut vc1 = VectorClock::new();
         let actor = test_actor();
 
-        assert_eq!(vc1.get(&actor), 0);
+        assert_eq!(vc1.get_time(&actor), 0);
 
         vc1.increment(actor);
-        assert_eq!(vc1.get(&actor), 1);
+        assert_eq!(vc1.get_time(&actor), 1);
 
-        vc1.set(actor, 5);
-        assert_eq!(vc1.get(&actor), 5);
+        vc1.set_time(actor, 5);
+        assert_eq!(vc1.get_time(&actor), 5);
     }
 
     #[test]
@@ -290,12 +335,12 @@ mod tests {
         let actor2 = test_actor();
 
         let mut vc1 = VectorClock::new();
-        vc1.set(actor1, 1);
-        vc1.set(actor2, 2);
+        vc1.set_time(actor1, 1);
+        vc1.set_time(actor2, 2);
 
         let mut vc2 = VectorClock::new();
-        vc2.set(actor1, 2);
-        vc2.set(actor2, 3);
+        vc2.set_time(actor1, 2);
+        vc2.set_time(actor2, 3);
 
         assert!(vc1.happens_before(&vc2));
         assert!(!vc2.happens_before(&vc1));
@@ -307,12 +352,12 @@ mod tests {
         let actor2 = test_actor();
 
         let mut vc1 = VectorClock::new();
-        vc1.set(actor1, 2);
-        vc1.set(actor2, 1);
+        vc1.set_time(actor1, 2);
+        vc1.set_time(actor2, 1);
 
         let mut vc2 = VectorClock::new();
-        vc2.set(actor1, 1);
-        vc2.set(actor2, 2);
+        vc2.set_time(actor1, 1);
+        vc2.set_time(actor2, 2);
 
         assert!(vc1.concurrent_with(&vc2));
         assert!(vc2.concurrent_with(&vc1));
@@ -324,15 +369,16 @@ mod tests {
         let actor2 = test_actor();
 
         let ctx = CausalContext::new(actor1);
-        let mut current_clock = VectorClock::new();
+        let mut current_vector = VectorClock::new();
+        current_vector.set_time(actor1, 1);
+        current_vector.set_time(actor2, 1);
+        let current_logical_time = LogicalTime {
+            vector: current_vector,
+            lamport: 2,
+        };
 
-        // Should be ready when we have no dependencies
-        assert!(ctx.is_ready(|_| true, &current_clock));
-
-        // Should be ready when current clock dominates required clock
-        current_clock.set(actor1, 1);
-        current_clock.set(actor2, 1);
-        assert!(ctx.is_ready(|_| true, &current_clock));
+        // Should be ready when we have no dependencies and current time dominates
+        assert!(ctx.is_ready(|_| true, &current_logical_time));
     }
 
     #[test]
@@ -341,12 +387,15 @@ mod tests {
         let dep_id = OperationId::new(actor, 42);
 
         let ctx = CausalContext::new(actor).with_dependency(dep_id.clone());
-        let current_clock = VectorClock::new();
+        let current_logical_time = LogicalTime {
+            vector: VectorClock::new(),
+            lamport: 0,
+        };
 
         // Should not be ready when dependency is not satisfied
-        assert!(!ctx.is_ready(|id| id != &dep_id, &current_clock));
+        assert!(!ctx.is_ready(|id| id != &dep_id, &current_logical_time));
 
         // Should be ready when dependency is satisfied
-        assert!(ctx.is_ready(|id| id == &dep_id, &current_clock));
+        assert!(ctx.is_ready(|id| id == &dep_id, &current_logical_time));
     }
 }

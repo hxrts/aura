@@ -133,7 +133,7 @@ mod session_safety_tests {
 
         // Test that operations complete within reasonable time (no deadlocks)
         let result = timeout(Duration::from_secs(5), async {
-            TimeEffects::current_epoch(&handler).await
+            handler.physical_time().await.unwrap().ts_ms
         })
         .await;
 
@@ -180,14 +180,14 @@ mod performance_tests {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
-        let start_epoch = TimeEffects::current_epoch(&handler).await;
+        let start_epoch = handler.physical_time().await.unwrap().ts_ms;
 
         // Perform many operations to test overhead
         for _ in 0..1000 {
-            let _ = TimeEffects::current_epoch(&handler).await;
+            let _ = handler.physical_time().await.unwrap().ts_ms;
         }
 
-        let end_epoch = TimeEffects::current_epoch(&handler).await;
+        let end_epoch = handler.physical_time().await.unwrap().ts_ms;
         let duration_epochs = end_epoch.saturating_sub(start_epoch);
 
         // Should be fast (operations should complete quickly)
@@ -200,7 +200,7 @@ mod performance_tests {
         let handler = CompositeHandler::for_testing(device_id.into());
 
         let test_data = vec![0u8; 1024]; // 1KB test data
-        let start_epoch = TimeEffects::current_epoch(&handler).await;
+        let start_epoch = handler.physical_time().await.unwrap().ts_ms;
 
         // Test serialization performance
         for i in 0..100 {
@@ -208,7 +208,7 @@ mod performance_tests {
             let _ = handler.store(&key, test_data.clone()).await;
         }
 
-        let end_epoch = TimeEffects::current_epoch(&handler).await;
+        let end_epoch = handler.physical_time().await.unwrap().ts_ms;
         let duration_epochs = end_epoch.saturating_sub(start_epoch);
 
         // Should be efficient (operations should complete quickly)
@@ -220,15 +220,15 @@ mod performance_tests {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
-        let start_epoch = TimeEffects::current_epoch(&handler).await;
+        let start_epoch = handler.physical_time().await.unwrap().ts_ms;
 
         // Test parallel execution
         let futures: Vec<_> = (0..10)
-            .map(|_| TimeEffects::current_epoch(&handler))
+            .map(|_| async { handler.physical_time().await.unwrap().ts_ms })
             .collect();
 
         let results = futures::future::join_all(futures).await;
-        let end_epoch = TimeEffects::current_epoch(&handler).await;
+        let end_epoch = handler.physical_time().await.unwrap().ts_ms;
         let duration_epochs = end_epoch.saturating_sub(start_epoch);
 
         // Parallel execution should be faster than sequential
@@ -249,8 +249,8 @@ mod basic_functionality_tests {
         let handler2 = CompositeHandler::for_testing(device_id2.into());
 
         // Same device ID should create handlers successfully
-        let epoch1 = TimeEffects::current_epoch(&handler1).await;
-        let epoch2 = TimeEffects::current_epoch(&handler2).await;
+        let epoch1 = handler1.physical_time().await.unwrap().ts_ms;
+        let epoch2 = handler2.physical_time().await.unwrap().ts_ms;
 
         // Both should return valid epochs
         assert!(epoch1 > 0);
@@ -265,7 +265,7 @@ mod basic_functionality_tests {
         // All operations should terminate within reasonable time
         let result = timeout(Duration::from_secs(5), async {
             for _ in 0..10 {
-                let _ = TimeEffects::current_epoch(&handler).await;
+                let _ = handler.physical_time().await.unwrap().ts_ms;
             }
         })
         .await;
@@ -280,7 +280,7 @@ mod basic_functionality_tests {
 
         // Concurrent access should be safe
         let futures: Vec<_> = (0..5)
-            .map(|_| TimeEffects::current_epoch(&handler))
+            .map(|_| async { handler.physical_time().await.unwrap().ts_ms })
             .collect();
 
         let results = futures::future::join_all(futures).await;

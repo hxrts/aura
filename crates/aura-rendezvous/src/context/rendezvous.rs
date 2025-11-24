@@ -5,6 +5,7 @@
 
 use crate::sbb::{EnvelopeId, FloodResult};
 use aura_core::identifiers::ContextId;
+use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
 use aura_core::{AuraError, AuraResult, AuthorityId};
 use aura_protocol::effects::AuraEffects;
 use aura_relational::RelationalContext;
@@ -445,6 +446,7 @@ impl ContextRendezvousCoordinator {
     }
 
     /// Decrypt descriptor received from peer
+    #[allow(dead_code)]
     async fn decrypt_descriptor(
         &self,
         context_id: &ContextId,
@@ -508,7 +510,7 @@ impl ContextRendezvousCoordinator {
         use aura_protocol::guards::{LeakageBudget, ProtocolGuard};
 
         // Get context for guard chain construction
-        let context = self
+        let _context = self
             .contexts
             .get(context_id)
             .ok_or_else(|| AuraError::not_found("Context not found for guard chain"))?;
@@ -801,7 +803,7 @@ impl ContextRendezvousCoordinator {
         context_id: &ContextId,
     ) -> AuraResult<Vec<aura_core::DeviceId>> {
         // Get context to access authority-device mappings
-        let context = self
+        let _context = self
             .contexts
             .get(context_id)
             .ok_or_else(|| AuraError::not_found("Context not found for device lookup"))?;
@@ -827,8 +829,6 @@ impl ContextRendezvousCoordinator {
         device_id: aura_core::DeviceId,
         envelope: &ContextEnvelope,
     ) -> AuraResult<()> {
-        use aura_core::effects::NetworkEffects as _;
-
         // Create message for network transport
         let message = RendezvousMessage {
             message_type: RendezvousMessageType::ContextEnvelope,
@@ -997,6 +997,7 @@ impl ContextRendezvousCoordinator {
     }
 
     /// Validate receipt signature
+    #[allow(dead_code)]
     async fn validate_receipt(
         &self,
         receipt: &RendezvousReceipt,
@@ -1043,6 +1044,7 @@ impl ContextRendezvousCoordinator {
     }
 
     /// Derive public key for receipt verification
+    #[allow(dead_code)]
     async fn derive_context_public_key(
         &self,
         context_id: &ContextId,
@@ -1090,28 +1092,30 @@ impl ContextRendezvousCoordinator {
 
     /// Store receipt as journal fact
     async fn store_receipt_fact(&self, receipt: RendezvousReceipt) -> AuraResult<()> {
-        use aura_journal::FactId;
-
         // Generate random fact ID using effect system
         let random_bytes = self.effects.random_bytes_32().await;
-        // FactId expects 16 bytes, so take first half of 32-byte random
-        let mut fact_id_bytes = [0u8; 16];
-        fact_id_bytes.copy_from_slice(&random_bytes[0..16]);
-        let fact_id = FactId::from_bytes(fact_id_bytes);
+        let mut fact_id_bytes = [0u8; 32];
+        fact_id_bytes.copy_from_slice(&random_bytes);
+        let order_id = OrderTime(fact_id_bytes);
+        let fact_ts = TimeStamp::OrderClock(order_id.clone());
 
         let fact = Fact {
-            fact_id,
+            order: order_id,
             content: FactContent::RendezvousReceipt {
                 envelope_id: receipt.envelope_id,
                 authority_id: receipt.authority_id,
-                timestamp: receipt.timestamp,
+                timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                    ts_ms: receipt.timestamp,
+                    uncertainty: None,
+                }),
                 signature: receipt.signature,
             },
+            timestamp: fact_ts,
         };
 
         // Store fact in journal for audit trail
         // Note: In production this should use journal namespacing once available
-        tracing::debug!("Storing receipt fact: {:?}", fact.fact_id);
+        tracing::debug!("Storing receipt fact: {:?}", fact.order);
 
         // Currently rendezvous receipts are logged for observability
         // Future: Integrate with JournalEffects::append_fact once journal

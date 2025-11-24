@@ -26,7 +26,7 @@ Authorities interact with other authorities through relational contexts. These i
 
 ### 1.2 Account Authority Structure
 
-An account authority maintains internal state through a commitment tree and an account journal. The commitment tree defines device membership and threshold policies. The journal stores facts that represent signed tree operations. The reduction function reconstructs canonical tree state from accumulated facts.
+An account authority maintains internal state through a [commitment tree](101_accounts_and_commitment_tree.md) and an account journal. The commitment tree defines device membership and threshold policies. The journal stores facts that represent signed tree operations. The reduction function reconstructs canonical tree state from accumulated facts.
 
 ```rust
 pub struct AccountAuthority {
@@ -73,7 +73,7 @@ flowchart LR
 
 Each guard must succeed before the next guard executes. Any failure returns locally and produces no observable side effect. This design ensures that unauthorized or over-budget sends do not create side channels.
 
-The `CapGuard` evaluates Biscuit capabilities and sovereign policy to derive the capability frontier for the context and peer pair. The `FlowGuard` charges the replicated spent counter and produces a signed receipt if headroom exists. The `JournalCoupler` merges protocol facts together with budget charges to preserve charge-before-send invariants.
+The `CapGuard` evaluates Biscuit capabilities and sovereign policy to derive the capability frontier for the context and peer pair. The `FlowGuard` charges the replicated spent counter and produces a signed receipt if headroom exists. The `JournalCoupler` merges protocol facts together with budget charges to preserve charge-before-send invariants. See [Transport and Information Flow](108_transport_and_information_flow.md) for detailed implementation.
 
 ### 2.2 Flow Budget System
 
@@ -130,9 +130,9 @@ Effect traits define abstract capabilities without exposing implementation detai
 
 Effect traits are organized into three categories that determine implementation location and usage patterns.
 
-Infrastructure effects are foundational capabilities that every Aura system needs. These traits define OS-level operations that are universal across all use cases. Examples include `CryptoEffects`, `NetworkEffects`, `StorageEffects`, `TimeEffects`, and `RandomEffects`. These traits must have corresponding handlers in `aura-effects`.
+Infrastructure effects are foundational capabilities that every Aura system needs. These traits define OS-level operations that are universal across all use cases. Examples include `CryptoEffects`, `NetworkEffects`, `StorageEffects`, the time domain traits (`PhysicalTimeEffects`, `LogicalClockEffects`, `OrderClockEffects`, `TimeAttestationEffects`), and `RandomEffects`. These traits must have corresponding handlers in `aura-effects`. See [Effect System and Runtime](106_effect_system_and_runtime.md) for implementation details.
 
-Application effects encode Aura-specific abstractions and business logic. These traits capture domain concepts meaningful only within Aura's architecture. Examples include `JournalEffects`, `AuthorityEffects`, `FlowBudgetEffects`, `LeakageEffects`, and `AuthorizationEffects`. These traits are implemented in their respective domain crates.
+Application effects encode Aura-specific abstractions and business logic. These traits capture domain concepts meaningful only within Aura's architecture. Examples include `JournalEffects` (see [Journal System](102_journal.md)), `AuthorityEffects` (see [Authority and Identity](100_authority_and_identity.md)), `FlowBudgetEffects`, `LeakageEffects` (see [Privacy and Information Flow](003_information_flow_contract.md)), and `AuthorizationEffects` (see [Authorization](109_authorization.md)). These traits are implemented in their respective domain crates.
 
 Composite effects provide convenience methods that combine multiple lower-level operations. These are typically extension traits that add domain-specific convenience to infrastructure effects. Examples include `TreeEffects` and `LeakageChoreographyExt`.
 
@@ -185,7 +185,27 @@ This registration architecture provides:
 - **Testing isolation**: Mock handlers live in `aura-testkit`, maintaining clean separation from production code
 - **Deployment flexibility**: Production vs. simulation handler selection happens at runtime assembly
 
-### 3.4 Context Propagation and Guard Integration
+### 3.4 Unified Time System
+
+Aura consolidates time handling into a single `TimeStamp` enum with four domains:
+
+- **PhysicalClock**: milliseconds since UNIX epoch plus optional uncertainty, provided by `PhysicalTimeEffects`.
+- **LogicalClock**: vector clock plus Lamport scalar for causal ordering, advanced via `LogicalClockEffects`.
+- **OrderClock**: opaque, privacy-preserving total order token with no temporal meaning, produced by `OrderClockEffects`.
+- **Range**: validity window for constraints; composed with other domains where needed.
+
+An orthogonal provenance wrapper (`ProvenancedTime`) adds attestation proofs when consensus or multi-party validation is required via `TimeAttestationEffects`.
+
+Ordering across domains is explicit—call `TimeStamp::compare(policy)` for native partial ordering or deterministic tie-breaks. Facts store `TimeStamp` directly (legacy FactId removed), and guard/journal logic uses domain-appropriate timestamps:
+
+- Transport/guards charge and log with `PhysicalClock`.
+- CRDT coordination uses `LogicalClock`.
+- Privacy-preserving ordering (e.g., gossip shuffles) uses `OrderClock`.
+- Validity windows use `Range`.
+
+Effect handlers expose time through domain-specific traits; no direct `SystemTime::now()` calls are permitted outside effect implementations. Simulator/testkit provide deterministic implementations for all domains so simulations stay reproducible.
+
+### 3.5 Context Propagation and Guard Integration
 
 The effect system propagates `EffectContext` through async tasks. The context carries authority identification, optional session context, and metadata without ambient state.
 
@@ -232,7 +252,7 @@ This ensures WASM compatibility, predictable testing, and simulation determinism
 
 ### 4.1 Global Protocol Specification
 
-Choreographies define global interaction patterns from a bird's eye view. Aura extends multi-party session types with capability guards, journal coupling, and leakage budgets.
+Choreographies define global interaction patterns from a bird's eye view. Aura extends [multi-party session types](107_mpst_and_choreography.md) with capability guards, journal coupling, and leakage budgets.
 
 ```rust
 choreography! {
@@ -330,7 +350,7 @@ The consensus identifier binds operations to prestates through the hash commitme
 
 The codebase follows strict 8-layer architecture with zero circular dependencies. Each layer builds on lower layers without reaching back down. This enables independent testing, reusability, and clear responsibility boundaries.
 
-Layer 1 Foundation contains `aura-core` with effect traits, domain types, cryptographic utilities, semilattice traits, and unified errors. Layer 2 Specification contains domain crates, `aura-mpst`, and `aura-macros` that define semantics without implementations. Layer 3 Implementation contains `aura-effects` and `aura-composition` for stateless handlers and composition infrastructure.
+Layer 1 Foundation contains `aura-core` with effect traits, domain types, cryptographic utilities (including FROST primitives in `crypto::tree_signing`), semilattice traits, and unified errors. Layer 2 Specification contains domain crates, `aura-mpst`, and `aura-macros` that define semantics without implementations. Layer 3 Implementation contains `aura-effects` and `aura-composition` for stateless handlers and composition infrastructure. The legacy `aura-frost` crate has been removed; higher-level ceremonies should be colocated with their callers and use the core primitives via adapters/effects.
 
 Layer 4 Orchestration contains `aura-protocol` for multi-party coordination and guard infrastructure. Layer 5 Feature contains protocol crates for authentication, recovery, rendezvous, and storage. Layer 6 Runtime contains `aura-agent` and `aura-simulator` for system assembly. Layer 7 Interface contains `aura-cli` for user applications. Layer 8 Testing contains `aura-testkit` and `aura-quint` for shared fixtures and verification.
 
@@ -364,7 +384,7 @@ impl CryptoEffects for RealCryptoHandler {
 
 // Application effect in domain crate
 impl<C: CryptoEffects, S: StorageEffects> JournalEffects for JournalHandler<C, S> {
-    async fn append_fact(&self, fact: Fact) -> Result<FactId> {
+    async fn append_fact(&self, fact: Fact) -> Result<OrderTime> {
         self.validate_fact_semantics(&fact)?; // Domain validation
         let signature = self.crypto.sign(&fact.hash()).await?;
         self.storage.write_chunk(&entry.id(), &entry.encode()).await?;
@@ -390,6 +410,15 @@ Testing uses mock effect handlers from `aura-testkit`. Mock handlers provide con
 Simulation uses `aura-simulator` for deterministic execution with virtual time and controlled failures. The simulator provides the same effect interfaces as production but with complete determinism for property testing.
 
 Both testing and simulation maintain the same architectural patterns as production. Effect traits provide abstraction boundaries. Guard chains enforce the same constraints. Context isolation remains intact.
+
+## Documents That Reference This Guide
+
+- [Effect System and Runtime](106_effect_system_and_runtime.md) - Implementation details for the effect system architecture
+- [Development Patterns and Workflows](805_development_patterns.md) - Practical application of architectural principles
+- [Project Structure](999_project_structure.md) - Crate organization that implements this architecture
+- [Coordination Guide](803_coordination_guide.md) - Protocol design patterns using these architectural components
+- [MPST and Choreography](107_mpst_and_choreography.md) - Choreographic protocol design within this architecture
+- [Testing Guide](805_testing_guide.md) - Testing patterns that leverage architectural boundaries
 
 ## See Also
 

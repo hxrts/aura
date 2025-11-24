@@ -11,7 +11,7 @@ Aura's simulation approach is built on four key principles:
 3. **Middleware Pattern** - Fault injection and monitoring via middleware layer  
 4. **Deterministic Execution** - Controlled effects enable fully reproducible simulations
 
-**Critical**: Simulation determinism depends on effect system compliance. Protocol code must use effect traits (`TimeEffects`, `RandomEffects`, etc.) instead of direct system calls (`SystemTime::now()`, `thread_rng()`, etc.). This enables controlled time, seeded randomness, and predictable I/O for reliable simulation results.
+**Critical**: Simulation determinism depends on [effect system](106_effect_system_and_runtime.md) compliance. Protocol code must use effect traits (`TimeEffects`, `RandomEffects`, etc.) instead of direct system calls (`SystemTime::now()`, `thread_rng()`, etc.). This enables controlled time, seeded randomness, and predictable I/O for reliable simulation results.
 
 The simulation system leverages Aura's stateless effect architecture, providing simulation capabilities through specialized handlers rather than a separate simulation runtime.
 
@@ -488,4 +488,4 @@ Aura's simulation infrastructure provides:
 
 The simulation emphasizes composition and explicit control rather than implicit coordination. This aligns with Aura's stateless effect architecture and provides flexibility for different testing scenarios.
 
-For testing infrastructure that complements simulation, see [Testing Guide](805_testing_guide.md). Learn about the effect system in [Effect System Guide](106_effect_system_and_runtime.md).
+For testing infrastructure that complements simulation, see [Testing Guide](805_testing_guide.md). Learn about the [effect system](106_effect_system_and_runtime.md) and [architectural patterns](001_system_architecture.md).

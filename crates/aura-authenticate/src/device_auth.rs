@@ -5,13 +5,11 @@
 
 use crate::{AccountId, AuraError, AuraResult, BiscuitGuardEvaluator};
 use aura_core::DeviceId;
-use aura_core::TimeEffects;
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_verify::session::{SessionScope, SessionTicket};
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 use aura_wot::BiscuitTokenManager;
-use ed25519_dalek::Verifier;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -330,7 +328,12 @@ where
     ) -> AuraResult<ChallengeResponse> {
         // Generate random challenge
         let challenge_bytes = self.effects.random_bytes(32).await;
-        let current_time = TimeEffects::current_timestamp(self.effects.as_ref()).await;
+        let current_time = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
         let expires_at = current_time + 300; // 5 minute expiry
 
         Ok(ChallengeResponse {
@@ -399,7 +402,12 @@ where
         proof_submission: &ProofSubmission,
     ) -> AuraResult<AuthResult> {
         // Verify challenge hasn't expired
-        let current_time = TimeEffects::current_timestamp(self.effects.as_ref()).await;
+        let current_time = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
         if current_time > challenge_response.expires_at {
             return Ok(AuthResult {
                 session_id: proof_submission.session_id.clone(),
@@ -421,10 +429,8 @@ where
                     .get_device_public_key(device_id)
                     .map_err(|e| AuraError::crypto(format!("Missing device key: {}", e)))?;
 
-                let sig_bytes: [u8; 64] = signature.to_bytes();
-                let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
                 verifying_key
-                    .verify(&challenge_response.challenge, &sig)
+                    .verify(&challenge_response.challenge, signature)
                     .map_err(|e| {
                         AuraError::crypto(format!("Signature verification failed: {}", e))
                     })?;
@@ -465,7 +471,12 @@ where
         session_id: &str,
         verified_identity: &VerifiedIdentity,
     ) -> AuraResult<SessionTicket> {
-        let current_time = TimeEffects::current_timestamp(self.effects.as_ref()).await;
+        let current_time = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
         let expires_at = current_time + 3600; // 1 hour session
 
         // Generate nonce for session ticket

@@ -210,9 +210,7 @@ pub mod core;
 pub use core::{AuraHandler, BoxedHandler, HandlerUtils};
 
 // Re-export composition infrastructure from aura-composition
-pub use aura_composition::{
-    CompositeHandler, EffectRegistry, FactoryError, HandlerFactory, RegistrableHandler,
-};
+pub use aura_composition::{CompositeHandler, EffectRegistry, RegistrableHandler};
 
 // Context management
 pub mod context;
@@ -259,21 +257,6 @@ mod tests {
         assert!(simulation.is_deterministic());
         assert!(!simulation.is_production());
         assert_eq!(simulation.seed(), Some(42));
-    }
-
-    #[test]
-    fn test_effect_type_classification() {
-        assert!(EffectType::Crypto.is_protocol_effect());
-        assert!(!EffectType::Crypto.is_agent_effect());
-        assert!(!EffectType::Crypto.is_simulation_effect());
-
-        assert!(!EffectType::Authentication.is_protocol_effect());
-        assert!(EffectType::Authentication.is_agent_effect());
-        assert!(!EffectType::Authentication.is_simulation_effect());
-
-        assert!(!EffectType::FaultInjection.is_protocol_effect());
-        assert!(!EffectType::FaultInjection.is_agent_effect());
-        assert!(EffectType::FaultInjection.is_simulation_effect());
     }
 
     #[test]

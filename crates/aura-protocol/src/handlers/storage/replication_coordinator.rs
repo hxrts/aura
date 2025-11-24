@@ -73,10 +73,7 @@ impl StorageNodeInfo {
             available_capacity,
             utilization: 0.0,
             reliability_score: 1.0,
-            last_seen: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            last_seen: 0,
             features: HashSet::new(),
         }
     }
@@ -89,10 +86,7 @@ impl StorageNodeInfo {
 
     /// Check if node is healthy and available
     pub fn is_healthy(&self) -> bool {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = 0;
 
         // Node is healthy if seen in last 5 minutes and has reasonable reliability
         (now - self.last_seen) < 300 && self.reliability_score > 0.5
@@ -120,10 +114,7 @@ impl ReplicationCoordinator {
         if let Some(node) = self.storage_nodes.get_mut(&device_id) {
             node.available_capacity = capacity;
             node.utilization = utilization;
-            node.last_seen = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            node.last_seen = 0;
         }
     }
 

@@ -4,20 +4,25 @@
 //! combinations to improve type signature readability and maintainability.
 
 use super::{
-    ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, RandomEffects, StorageEffects,
-    TimeEffects,
+    ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects,
+    RandomEffects, StorageEffects,
 };
 
 /// Sealed supertrait for FROST threshold signing operations
 ///
 /// Combines effects needed for cryptographic threshold signing protocols:
 /// network communication, cryptographic operations, time tracking, and logging.
-pub trait SigningEffects: NetworkEffects + CryptoEffects + TimeEffects + ConsoleEffects {
+pub trait SigningEffects:
+    NetworkEffects + CryptoEffects + PhysicalTimeEffects + ConsoleEffects
+{
     // Sealed trait - users cannot implement this directly
 }
 
 /// Automatic implementation for types that satisfy the required bounds
-impl<T> SigningEffects for T where T: NetworkEffects + CryptoEffects + TimeEffects + ConsoleEffects {}
+impl<T> SigningEffects for T where
+    T: NetworkEffects + CryptoEffects + PhysicalTimeEffects + ConsoleEffects
+{
+}
 
 /// Sealed supertrait for CRDT synchronization operations
 ///
@@ -39,7 +44,7 @@ pub trait ChoreographyEffects:
     NetworkEffects
     + CryptoEffects
     + RandomEffects
-    + TimeEffects
+    + PhysicalTimeEffects
     + StorageEffects
     + JournalEffects
     + ConsoleEffects
@@ -52,7 +57,7 @@ impl<T> ChoreographyEffects for T where
     T: NetworkEffects
         + CryptoEffects
         + RandomEffects
-        + TimeEffects
+        + PhysicalTimeEffects
         + StorageEffects
         + JournalEffects
         + ConsoleEffects
@@ -81,14 +86,14 @@ impl<T> AntiEntropyEffects for T where
 /// network communication, cryptographic operations, time tracking,
 /// storage access, and logging.
 pub trait TreeEffects:
-    NetworkEffects + CryptoEffects + TimeEffects + StorageEffects + ConsoleEffects
+    NetworkEffects + CryptoEffects + PhysicalTimeEffects + StorageEffects + ConsoleEffects
 {
     // Sealed trait - users cannot implement this directly
 }
 
 /// Automatic implementation for types that satisfy the required bounds
 impl<T> TreeEffects for T where
-    T: NetworkEffects + CryptoEffects + TimeEffects + StorageEffects + ConsoleEffects
+    T: NetworkEffects + CryptoEffects + PhysicalTimeEffects + StorageEffects + ConsoleEffects
 {
 }
 
@@ -109,7 +114,12 @@ impl<T> MinimalEffects for T where T: CryptoEffects + RandomEffects + ConsoleEff
 /// network communication, cryptographic operations, time tracking,
 /// storage access, journal operations, and logging.
 pub trait SnapshotEffects:
-    NetworkEffects + CryptoEffects + TimeEffects + StorageEffects + JournalEffects + ConsoleEffects
+    NetworkEffects
+    + CryptoEffects
+    + PhysicalTimeEffects
+    + StorageEffects
+    + JournalEffects
+    + ConsoleEffects
 {
     // Sealed trait - users cannot implement this directly
 }
@@ -118,7 +128,7 @@ pub trait SnapshotEffects:
 impl<T> SnapshotEffects for T where
     T: NetworkEffects
         + CryptoEffects
-        + TimeEffects
+        + PhysicalTimeEffects
         + StorageEffects
         + JournalEffects
         + ConsoleEffects

@@ -76,6 +76,7 @@
 
 pub mod commands;
 pub mod demo;
+pub mod effects;
 pub mod handlers;
 pub mod tui;
 pub mod visualization;

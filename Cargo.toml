@@ -22,7 +22,6 @@ members = [
     "crates/aura-core",
     "crates/aura-authenticate",
     "crates/aura-sync",
-    "crates/aura-frost",
     "crates/aura-invitation",
     "crates/aura-recovery",
     "crates/aura-rendezvous",

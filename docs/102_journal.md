@@ -4,7 +4,7 @@ This document describes the journal architecture and state reduction system in A
 
 ## 1. Journal Namespaces
 
-Aura maintains a separate journal namespace for each authority and each relational context. A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an `AuthorityId` or a `ContextId`. No namespace shares state with another. Identifier definitions appear in [Identifiers and Boundaries](105_identifiers_and_boundaries.md).
+Aura maintains a separate journal namespace for each authority and each [relational context](103_relational_contexts.md). A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an `AuthorityId` (see [Authority and Identity](100_authority_and_identity.md)) or a `ContextId`. No namespace shares state with another. Identifier definitions appear in [Identifiers and Boundaries](105_identifiers_and_boundaries.md).
 
 A journal namespace evolves through fact insertion. Facts accumulate monotonically. No fact is removed except through garbage collection rules that preserve logical meaning.
 
@@ -22,7 +22,7 @@ Facts represent immutable events or operations that contribute to the state of a
 
 ```rust
 pub struct Fact {
-    pub fact_id: FactId,
+    pub order: OrderTime,
     pub content: FactContent,
 }
 
@@ -112,7 +112,7 @@ The effect_api writes facts to persistent storage. Replica synchronization loads
 ```rust
 #[async_trait]
 pub trait LedgerEffects {
-    async fn append_fact(&self, fact: Fact) -> Result<FactId>;
+    async fn append_fact(&self, fact: Fact) -> Result<OrderTime>;
     async fn read_facts(&self, namespace: &str) -> Result<Vec<Fact>>;
 }
 ```

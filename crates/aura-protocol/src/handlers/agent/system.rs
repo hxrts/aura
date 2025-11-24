@@ -13,7 +13,7 @@ use crate::effects::{
     AuthenticationResult, BiometricType, ConfigValidationError, ConfigurationEffects,
     CredentialBackup, DeviceConfig, DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle,
     SessionInfo, SessionManagementEffects, SessionMessage, SessionStatus, SessionType,
-    StorageEffects, TimeEffects,
+    StorageEffects, PhysicalTimeEffects,
 };
 use aura_core::hash::hash;
 use aura_core::{identifiers::DeviceId, AuraResult as Result};
@@ -92,7 +92,13 @@ impl AgentEffects for AgentEffectSystemHandler {
             device_name: "Aura Device".to_string(),
             hardware_security: true, // Assume hardware security is available
             attestation_available: true,
-            last_sync: Some(TimeEffects::current_timestamp(&*effects).await),
+            last_sync: Some(
+                effects
+                    .physical_time()
+                    .await
+                    .map(|t| t.ts_ms)
+                    .unwrap_or(0),
+            ),
             storage_usage,
             storage_limit: 100 * 1024 * 1024, // 100 MB default
         })
@@ -159,7 +165,11 @@ impl AgentEffects for AgentEffectSystemHandler {
             network_status: network_health,
             authentication_status: auth_health,
             session_status: session_health,
-            last_check: TimeEffects::current_timestamp(&*effects).await,
+            last_check: effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
         })
     }
 }
@@ -229,7 +239,7 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
 
     async fn backup_credentials(&self) -> Result<CredentialBackup> {
         let effects = self.core_effects.read().await;
-        let timestamp = TimeEffects::current_timestamp(&*effects).await;
+        let timestamp = effects.physical_time().await?.ts_ms;
 
         // Get all credentials
         let credentials = self.list_credentials().await?;

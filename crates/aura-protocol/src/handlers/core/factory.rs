@@ -345,8 +345,12 @@
 //! ```
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 use thiserror::Error;
+
+use async_trait::async_trait;
+use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 
 use crate::handlers::{EffectType, ExecutionMode};
 use aura_core::identifiers::DeviceId;
@@ -976,17 +980,26 @@ pub struct PlatformDetector;
 impl PlatformDetector {
     /// Detect the current platform
     pub fn detect_platform() -> Result<PlatformInfo, FactoryError> {
+        let storage: std::sync::Arc<dyn StorageEffects> =
+            std::sync::Arc::new(PathStorageAdapter::default());
+        Self::detect_platform_with_storage(&storage)
+    }
+
+    /// Detect the current platform using provided storage effects (for deterministic tests)
+    pub fn detect_platform_with_storage(
+        storage: &dyn StorageEffects,
+    ) -> Result<PlatformInfo, FactoryError> {
         Ok(PlatformInfo {
             os: std::env::consts::OS.to_string(),
             arch: std::env::consts::ARCH.to_string(),
-            has_secure_enclave: Self::detect_secure_enclave(),
+            has_secure_enclave: Self::detect_secure_enclave(storage),
             available_storage_backends: Self::detect_storage_backends(),
             available_network_interfaces: Self::detect_network_interfaces(),
         })
     }
 
     /// Detect if secure enclave is available
-    fn detect_secure_enclave() -> bool {
+    fn detect_secure_enclave(storage: &dyn StorageEffects) -> bool {
         // Platform-specific detection logic
         match std::env::consts::OS {
             "macos" => {
@@ -1002,9 +1015,18 @@ impl PlatformDetector {
                 // Check for Intel SGX or AMD SEV on Linux
                 std::path::Path::new("/dev/sgx_enclave").exists()
                     || std::path::Path::new("/dev/sgx/enclave").exists()
-                    || std::fs::read_to_string("/proc/cpuinfo")
-                        .map(|content| content.contains("sgx") || content.contains("sev"))
-                        .unwrap_or(false)
+                    || futures::executor::block_on(async {
+                        storage
+                            .retrieve("/proc/cpuinfo")
+                            .await
+                            .map(|content| {
+                                content
+                                    .map(|bytes| String::from_utf8_lossy(&bytes).to_lowercase())
+                                    .map(|cpuinfo| cpuinfo.contains("sgx") || cpuinfo.contains("sev"))
+                                    .unwrap_or(false)
+                            })
+                            .unwrap_or(false)
+                    })
             }
             "windows" => {
                 // Check for Intel SGX on Windows (conservative approach)
@@ -1088,6 +1110,89 @@ impl PlatformDetector {
         }
 
         interfaces
+    }
+}
+
+/// Path-based storage adapter to allow platform detection to use StorageEffects
+#[derive(Debug, Clone, Default)]
+struct PathStorageAdapter;
+
+#[async_trait]
+impl StorageEffects for PathStorageAdapter {
+    async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+        let path = PathBuf::from(key);
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
+        }
+
+        tokio::fs::write(&path, value)
+            .await
+            .map_err(|e| StorageError::WriteFailed(e.to_string()))
+    }
+
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        let path = PathBuf::from(key);
+        if !path.exists() {
+            return Ok(None);
+        }
+
+        tokio::fs::read(&path)
+            .await
+            .map(Some)
+            .map_err(|e| StorageError::ReadFailed(e.to_string()))
+    }
+
+    async fn remove(&self, key: &str) -> Result<bool, StorageError> {
+        let path = PathBuf::from(key);
+        if !path.exists() {
+            return Ok(false);
+        }
+
+        tokio::fs::remove_file(&path)
+            .await
+            .map(|_| true)
+            .map_err(|e| StorageError::DeleteFailed(e.to_string()))
+    }
+
+    async fn list_keys(&self, _prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+        Ok(Vec::new())
+    }
+
+    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
+        Ok(PathBuf::from(key).exists())
+    }
+
+    async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
+        for (key, value) in pairs {
+            self.store(&key, value).await?;
+        }
+        Ok(())
+    }
+
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+        let mut map = HashMap::new();
+        for key in keys {
+            if let Some(value) = self.retrieve(key).await? {
+                map.insert(key.clone(), value);
+            }
+        }
+        Ok(map)
+    }
+
+    async fn clear_all(&self) -> Result<(), StorageError> {
+        Ok(())
+    }
+
+    async fn stats(&self) -> Result<StorageStats, StorageError> {
+        Ok(StorageStats {
+            backend_type: "path".to_string(),
+            ..Default::default()
+        })
     }
 }
 

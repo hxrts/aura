@@ -25,12 +25,14 @@ console/styles/*.rs
 *~
 .DS_Store
 # CLAUDE.md
-AGENTS.md
 .claude/
+AGENTS.md
+GEMINI.md
 
 # Aura test artifacts
 .aura/
 .aura-test/
+aura-data/
 *.sealed
 *.dat
 outcomes/

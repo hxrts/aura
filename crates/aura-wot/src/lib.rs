@@ -41,6 +41,10 @@
 
 pub mod errors;
 
+// Application effects implementation (Layer 2 pattern)
+pub mod effects;
+pub mod flow_budget;
+
 // Legacy capability system removed - Phase 4 of authorization unification complete
 // Use Biscuit tokens via BiscuitTokenManager instead
 
@@ -51,6 +55,9 @@ pub mod biscuit_token;
 pub mod resource_scope; // Authority-based resource scopes
 
 pub use errors::{AuraError, AuraResult, WotError, WotResult};
+
+// Application effect handler re-export
+pub use effects::WotAuthorizationHandler;
 
 // Legacy capability types removed - use Biscuit tokens instead
 // Legacy tree policy types removed - use authority-based ResourceScope instead
@@ -64,6 +71,7 @@ pub use biscuit_resources::{
     AdminOperation, JournalOp, RecoveryType, ResourceScope as LegacyResourceScope, StorageCategory,
 };
 pub use biscuit_token::{AccountAuthority, BiscuitError, BiscuitTokenManager, SerializableBiscuit};
+pub use flow_budget::FlowBudgetHandler;
 
 // Re-export authority-based resource scopes
 pub use resource_scope::{AuthorityOp, ContextOp, ResourceScope};

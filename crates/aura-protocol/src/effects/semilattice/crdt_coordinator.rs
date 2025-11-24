@@ -53,12 +53,14 @@
 use super::{CmHandler, CvHandler, DeltaHandler, MvHandler};
 use crate::choreography::{CrdtSyncData, CrdtSyncRequest, CrdtSyncResponse, CrdtType};
 use aura_core::{
+    identifiers::DeviceId,
     semilattice::{
         Bottom, CausalOp, CmApply, CvState, Dedup, Delta, DeltaState, MvState, OpWithCtx, Top,
     },
+    time::{LogicalTime, VectorClock},
     AuraError, AuthorityId, SessionId,
 };
-use aura_journal::{CausalContext, VectorClock};
+use aura_journal::CausalContext;
 use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
 
@@ -86,6 +88,24 @@ impl From<CrdtCoordinatorError> for AuraError {
     }
 }
 
+fn merge_vector_clocks(target: &mut VectorClock, other: &VectorClock) {
+    for (actor, time) in other.iter() {
+        let current = target.get(actor).copied().unwrap_or(0);
+        if *time > current {
+            target.insert(*actor, *time);
+        }
+    }
+}
+
+fn max_counter(clock: &VectorClock) -> u64 {
+    clock.iter().map(|(_, counter)| *counter).max().unwrap_or(0)
+}
+
+fn increment_actor(clock: &mut VectorClock, actor: DeviceId) {
+    let current = clock.get(&actor).copied().unwrap_or(0);
+    clock.insert(actor, current.saturating_add(1));
+}
+
 /// CRDT Coordinator managing all four CRDT handler types
 ///
 /// This coordinator enables choreographic protocols to interact with CRDT handlers
@@ -111,6 +131,8 @@ where
     mv_handler: Option<MvHandler<MvS>>,
     /// Authority identifier for this coordinator
     authority_id: AuthorityId,
+    /// Optional actor/device identifier to advance local logical time
+    actor: Option<DeviceId>,
     /// Current vector clock for causal ordering
     vector_clock: VectorClock,
     /// Type markers
@@ -136,8 +158,17 @@ where
             delta_handler: None,
             mv_handler: None,
             authority_id,
+            actor: None,
             vector_clock: VectorClock::new(),
             _phantom: PhantomData,
+        }
+    }
+
+    /// Create a CRDT coordinator with an explicit actor/device id for logical time advancement.
+    pub fn new_with_actor(authority_id: AuthorityId, actor: DeviceId) -> Self {
+        Self {
+            actor: Some(actor),
+            ..Self::new(authority_id)
         }
     }
 
@@ -175,7 +206,8 @@ where
     ) -> Result<CrdtSyncResponse, CrdtCoordinatorError> {
         // Update vector clock from request
         let peer_clock = self.deserialize_vector_clock(&request.vector_clock)?;
-        self.vector_clock.update(&peer_clock);
+        merge_vector_clocks(&mut self.vector_clock, &peer_clock);
+        self.bump_local();
 
         let sync_data = match request.crdt_type {
             CrdtType::Convergent => {
@@ -351,10 +383,11 @@ where
 
     /// Create a sync request for a specific CRDT type
     pub fn create_sync_request(
-        &self,
+        &mut self,
         session_id: SessionId,
         crdt_type: CrdtType,
     ) -> Result<CrdtSyncRequest, CrdtCoordinatorError> {
+        self.bump_local();
         let vector_clock_bytes = self.serialize_vector_clock(&self.vector_clock)?;
 
         Ok(CrdtSyncRequest {
@@ -367,6 +400,21 @@ where
     /// Get current vector clock
     pub fn current_vector_clock(&self) -> &VectorClock {
         &self.vector_clock
+    }
+
+    /// Expose the logical clock in unified time format (vector + derived lamport).
+    pub fn current_logical_time(&self) -> LogicalTime {
+        LogicalTime {
+            vector: self.vector_clock.clone(),
+            lamport: max_counter(&self.vector_clock),
+        }
+    }
+
+    /// Increment local actor clock if configured.
+    fn bump_local(&mut self) {
+        if let Some(actor) = self.actor {
+            increment_actor(&mut self.vector_clock, actor);
+        }
     }
 
     /// Get authority ID
@@ -638,7 +686,7 @@ mod tests {
     #[test]
     fn test_builder_with_cv() {
         let authority_id = AuthorityId::new();
-        let coordinator: CrdtCoordinator<
+        let mut coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
             DummyDeltaState,

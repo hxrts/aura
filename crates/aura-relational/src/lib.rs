@@ -59,6 +59,8 @@
 //! This crate implements the RelationalContext abstraction that manages
 //! relationships between authorities without exposing internal structure.
 
+#[cfg(test)]
+use aura_core::relational::GuardianParameters;
 use aura_core::{
     identifiers::{AuthorityId, ContextId},
     relational::{GuardianBinding, RecoveryGrant, RelationalFact},

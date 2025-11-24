@@ -8,12 +8,16 @@ use aura_composition::CompositeHandlerAdapter;
 use aura_core::effects::crypto::FrostSigningPackage;
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::storage::{StorageError, StorageStats};
-use aura_core::effects::time::{TimeError, TimeoutHandle, WakeCondition};
 use aura_core::effects::*;
 use aura_core::Journal;
 use aura_core::{
     AttestedOp, AuraError, AuthorityId, ContextId, DeviceId, FlowBudget, Hash32, LeafId, LeafNode,
     NodeIndex, Policy, TreeOpKind,
+};
+use aura_effects::{
+    crypto::RealCryptoHandler,
+    storage::FilesystemStorageHandler,
+    time::{LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler},
 };
 use aura_journal::commitment_tree::state::TreeState;
 use aura_protocol::effects::tree::{Cut, Partial, ProposalId, Snapshot};
@@ -22,8 +26,9 @@ use aura_protocol::effects::{
     ChoreographyMetrics, EffectApiEffects, EffectApiError, EffectApiEventStream, TreeEffects,
 };
 use aura_protocol::guards::effect_system_trait::GuardEffectSystem;
+use aura_wot::{BiscuitAuthorizationBridge, FlowBudgetHandler};
+use biscuit_auth::{Biscuit, KeyPair};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
 
 /// Effect executor for dispatching effect calls
 ///
@@ -36,28 +41,28 @@ pub struct EffectExecutor {
 impl EffectExecutor {
     /// Create new effect executor
     pub fn new(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = aura_core::DeviceId::from(config.device_id());
+        let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_testing(device_id);
         Ok(Self { config, composite })
     }
 
     /// Create production effect executor
     pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = aura_core::DeviceId::from(config.device_id());
+        let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_production(device_id);
         Ok(Self { config, composite })
     }
 
     /// Create testing effect executor
     pub fn testing(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = aura_core::DeviceId::from(config.device_id());
+        let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_testing(device_id);
         Ok(Self { config, composite })
     }
 
     /// Create simulation effect executor
     pub fn simulation(config: AgentConfig, seed: u64) -> Result<Self, crate::core::AgentError> {
-        let device_id = aura_core::DeviceId::from(config.device_id());
+        let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_simulation(device_id, seed);
         Ok(Self { config, composite })
     }
@@ -85,40 +90,99 @@ pub trait EffectCall: Send + Sync {
 pub struct AuraEffectSystem {
     config: AgentConfig,
     composite: CompositeHandlerAdapter,
+    flow_budget: FlowBudgetHandler,
+    crypto_handler: aura_effects::crypto::RealCryptoHandler,
+    storage_handler: aura_effects::storage::FilesystemStorageHandler,
+    time_handler: PhysicalTimeHandler,
+    logical_clock: LogicalClockHandler,
+    order_clock: OrderClockHandler,
+    journal_policy: Option<(biscuit_auth::Biscuit, aura_wot::BiscuitAuthorizationBridge)>,
+    journal_verifying_key: Option<Vec<u8>>,
+    authority_id: AuthorityId,
 }
 
 impl AuraEffectSystem {
     /// Create new effect system with configuration
     pub fn new(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = aura_core::DeviceId::from(config.device_id());
+        let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_testing(device_id);
-        Ok(Self { config, composite })
+        let authority = AuthorityId::from_uuid(config.device_id().0);
+        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
+        let storage_base = config.storage.base_path.clone();
+        Ok(Self {
+            config,
+            composite,
+            flow_budget: FlowBudgetHandler::new(authority),
+            crypto_handler: RealCryptoHandler::new(),
+            storage_handler: FilesystemStorageHandler::new(storage_base),
+            time_handler: PhysicalTimeHandler::new(),
+            logical_clock: LogicalClockHandler::new(Some(device_id)),
+            order_clock: OrderClockHandler::default(),
+            journal_policy,
+            journal_verifying_key,
+            authority_id: authority,
+        })
     }
 
     /// Create effect system for production
     pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = aura_core::DeviceId::from(config.device_id());
+        let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_production(device_id);
-        Ok(Self { config, composite })
+        let authority = AuthorityId::from_uuid(config.device_id().0);
+        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
+        let storage_base = config.storage.base_path.clone();
+        Ok(Self {
+            config,
+            composite,
+            flow_budget: FlowBudgetHandler::new(authority),
+            crypto_handler: RealCryptoHandler::new(),
+            storage_handler: FilesystemStorageHandler::new(storage_base),
+            time_handler: PhysicalTimeHandler::new(),
+            logical_clock: LogicalClockHandler::new(Some(device_id)),
+            order_clock: OrderClockHandler::default(),
+            journal_policy,
+            journal_verifying_key,
+            authority_id: authority,
+        })
     }
 
     /// Create effect system for testing with default configuration
     pub fn testing(config: &AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = aura_core::DeviceId::from(config.device_id());
+        let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_testing(device_id);
+        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
         Ok(Self {
             config: config.clone(),
             composite,
+            flow_budget: FlowBudgetHandler::new(AuthorityId::from_uuid(config.device_id().0)),
+            crypto_handler: RealCryptoHandler::new(),
+            storage_handler: FilesystemStorageHandler::new(config.storage.base_path.clone()),
+            time_handler: PhysicalTimeHandler::new(),
+            logical_clock: LogicalClockHandler::new(Some(device_id)),
+            order_clock: OrderClockHandler::default(),
+            journal_policy,
+            journal_verifying_key,
+            authority_id: AuthorityId::from_uuid(config.device_id().0),
         })
     }
 
     /// Create effect system for simulation with controlled seed
     pub fn simulation(config: &AgentConfig, seed: u64) -> Result<Self, crate::core::AgentError> {
-        let device_id = aura_core::DeviceId::from(config.device_id());
+        let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_simulation(device_id, seed);
+        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
         Ok(Self {
             config: config.clone(),
             composite,
+            flow_budget: FlowBudgetHandler::new(AuthorityId::from_uuid(config.device_id().0)),
+            crypto_handler: RealCryptoHandler::new(),
+            storage_handler: FilesystemStorageHandler::new(config.storage.base_path.clone()),
+            time_handler: PhysicalTimeHandler::new(),
+            logical_clock: LogicalClockHandler::new(Some(device_id)),
+            order_clock: OrderClockHandler::default(),
+            journal_policy,
+            journal_verifying_key,
+            authority_id: AuthorityId::from_uuid(config.device_id().0),
         })
     }
 
@@ -131,11 +195,76 @@ impl AuraEffectSystem {
     pub fn composite(&self) -> &CompositeHandlerAdapter {
         &self.composite
     }
+
+    /// Build a permissive Biscuit policy/bridge pair for journal enforcement.
+    fn init_journal_policy(
+        device_id: DeviceId,
+    ) -> (
+        Option<(Biscuit, BiscuitAuthorizationBridge)>,
+        Option<Vec<u8>>,
+    ) {
+        let keypair = KeyPair::new();
+        match Biscuit::builder().build(&keypair) {
+            Ok(token) => {
+                let bridge = BiscuitAuthorizationBridge::new(keypair.public(), device_id);
+                let verifying_key = keypair.public().to_bytes().to_vec();
+                (Some((token, bridge)), Some(verifying_key))
+            }
+            Err(_) => (None, None),
+        }
+    }
+
+    /// Construct a journal handler with current policy hooks.
+    fn journal_handler(
+        &self,
+    ) -> aura_journal::JournalHandler<RealCryptoHandler, FilesystemStorageHandler> {
+        aura_journal::JournalHandlerFactory::create(
+            self.authority_id,
+            self.crypto_handler.clone(),
+            self.storage_handler.clone(),
+            self.journal_policy.clone(),
+            self.journal_verifying_key.clone(),
+        )
+    }
+}
+
+// Time effects backed by the production physical clock handler.
+#[async_trait]
+impl PhysicalTimeEffects for AuraEffectSystem {
+    async fn physical_time(&self) -> Result<aura_core::time::PhysicalTime, TimeError> {
+        self.time_handler.physical_time().await
+    }
+
+    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
+        self.time_handler.sleep_ms(ms).await
+    }
+}
+
+#[async_trait]
+impl LogicalClockEffects for AuraEffectSystem {
+    async fn logical_advance(
+        &self,
+        observed: Option<&aura_core::time::VectorClock>,
+    ) -> Result<aura_core::time::LogicalTime, TimeError> {
+        self.logical_clock.logical_advance(observed).await
+    }
+
+    async fn logical_now(&self) -> Result<aura_core::time::LogicalTime, TimeError> {
+        self.logical_clock.logical_now().await
+    }
+}
+
+#[async_trait]
+impl OrderClockEffects for AuraEffectSystem {
+    async fn order_time(&self) -> Result<aura_core::time::OrderTime, TimeError> {
+        self.order_clock.order_time().await
+    }
 }
 
 // Implementation of RandomEffects
 #[async_trait]
 impl RandomEffects for AuraEffectSystem {
+    #[allow(clippy::disallowed_methods)]
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         use rand::RngCore;
         let mut rng = rand::thread_rng();
@@ -144,6 +273,7 @@ impl RandomEffects for AuraEffectSystem {
         bytes
     }
 
+    #[allow(clippy::disallowed_methods)]
     async fn random_bytes_32(&self) -> [u8; 32] {
         use rand::RngCore;
         let mut rng = rand::thread_rng();
@@ -152,18 +282,21 @@ impl RandomEffects for AuraEffectSystem {
         bytes
     }
 
+    #[allow(clippy::disallowed_methods)]
     async fn random_u64(&self) -> u64 {
         use rand::Rng;
         let mut rng = rand::thread_rng();
         rng.gen()
     }
 
+    #[allow(clippy::disallowed_methods)]
     async fn random_range(&self, min: u64, max: u64) -> u64 {
         use rand::Rng;
         let mut rng = rand::thread_rng();
         rng.gen_range(min..=max)
     }
 
+    #[allow(clippy::disallowed_methods)]
     async fn random_uuid(&self) -> uuid::Uuid {
         uuid::Uuid::new_v4()
     }
@@ -174,183 +307,179 @@ impl RandomEffects for AuraEffectSystem {
 impl CryptoEffects for AuraEffectSystem {
     async fn hkdf_derive(
         &self,
-        _ikm: &[u8],
-        _salt: &[u8],
-        _info: &[u8],
+        ikm: &[u8],
+        salt: &[u8],
+        info: &[u8],
         output_len: usize,
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - in production this would use HKDF
-        Ok(vec![0u8; output_len])
+        self.crypto_handler
+            .hkdf_derive(ikm, salt, info, output_len)
+            .await
     }
 
     async fn derive_key(
         &self,
-        _master_key: &[u8],
-        _context: &crypto::KeyDerivationContext,
+        master_key: &[u8],
+        context: &crypto::KeyDerivationContext,
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation
-        Ok(vec![0u8; 32])
+        self.crypto_handler.derive_key(master_key, context).await
     }
 
     async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
-        // Mock implementation
-        Ok((vec![1u8; 32], vec![2u8; 32]))
+        self.crypto_handler.ed25519_generate_keypair().await
     }
 
     async fn ed25519_sign(
         &self,
-        _message: &[u8],
-        _private_key: &[u8],
+        message: &[u8],
+        private_key: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation
-        Ok(vec![3u8; 64])
+        self.crypto_handler.ed25519_sign(message, private_key).await
     }
 
     async fn ed25519_verify(
         &self,
-        _message: &[u8],
-        _signature: &[u8],
-        _public_key: &[u8],
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
     ) -> Result<bool, CryptoError> {
-        // Mock implementation
-        Ok(true)
+        self.crypto_handler
+            .ed25519_verify(message, signature, public_key)
+            .await
     }
 
     async fn frost_generate_keys(
         &self,
-        _threshold: u16,
-        _max_signers: u16,
+        threshold: u16,
+        max_signers: u16,
     ) -> Result<crypto::FrostKeyGenResult, CryptoError> {
-        // Mock implementation
-        Err(AuraError::crypto(
-            "frost_generate_keys not implemented in mock",
-        ))
+        self.crypto_handler
+            .frost_generate_keys(threshold, max_signers)
+            .await
+    }
+
+    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
+        self.crypto_handler.frost_generate_nonces().await
     }
 
     async fn frost_sign_share(
         &self,
-        _signing_package: &crypto::FrostSigningPackage,
-        _key_share: &[u8],
-        _nonces: &[u8],
+        signing_package: &crypto::FrostSigningPackage,
+        key_share: &[u8],
+        nonces: &[u8],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation
-        Ok(vec![4u8; 32])
+        self.crypto_handler
+            .frost_sign_share(signing_package, key_share, nonces)
+            .await
     }
 
     async fn frost_aggregate_signatures(
         &self,
-        _signing_package: &crypto::FrostSigningPackage,
-        _signature_shares: &[Vec<u8>],
+        signing_package: &crypto::FrostSigningPackage,
+        signature_shares: &[Vec<u8>],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation
-        Ok(vec![5u8; 64])
+        self.crypto_handler
+            .frost_aggregate_signatures(signing_package, signature_shares)
+            .await
     }
 
     async fn frost_verify(
         &self,
-        _message: &[u8],
-        _signature: &[u8],
-        _public_key: &[u8],
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
     ) -> Result<bool, CryptoError> {
-        // Mock implementation
-        Ok(true)
-    }
-
-    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation
-        Ok(vec![6u8; 32])
+        self.crypto_handler
+            .frost_verify(message, signature, public_key)
+            .await
     }
 
     fn is_simulated(&self) -> bool {
-        self.config.is_simulation()
+        aura_core::CryptoEffects::is_simulated(&self.crypto_handler)
     }
 
     fn crypto_capabilities(&self) -> Vec<String> {
-        vec!["ed25519".to_string(), "hkdf".to_string()]
+        self.crypto_handler.crypto_capabilities()
     }
 
     fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-        use subtle::ConstantTimeEq;
-        a.ct_eq(b).into()
+        self.crypto_handler.constant_time_eq(a, b)
     }
 
     fn secure_zero(&self, data: &mut [u8]) {
-        use zeroize::Zeroize;
-        data.zeroize();
+        self.crypto_handler.secure_zero(data)
     }
 
     async fn frost_create_signing_package(
         &self,
-        _message: &[u8],
-        _nonces: &[Vec<u8>],
-        _participants: &[u16],
-        _public_key_package: &[u8],
+        message: &[u8],
+        nonces: &[Vec<u8>],
+        participants: &[u16],
+        public_key_package: &[u8],
     ) -> Result<FrostSigningPackage, CryptoError> {
-        // Mock implementation
-        Ok(FrostSigningPackage {
-            message: vec![0u8; 32],
-            package: vec![0u8; 32],
-            participants: vec![1, 2],
-            public_key_package: vec![0u8; 32],
-        })
+        self.crypto_handler
+            .frost_create_signing_package(message, nonces, participants, public_key_package)
+            .await
     }
 
-    async fn ed25519_public_key(&self, _private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation
-        Ok(vec![8u8; 32])
+    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        self.crypto_handler.ed25519_public_key(private_key).await
     }
 
     async fn chacha20_encrypt(
         &self,
-        _plaintext: &[u8],
-        _key: &[u8; 32],
-        _nonce: &[u8; 12],
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation
-        Ok(vec![9u8; 64])
+        self.crypto_handler
+            .chacha20_encrypt(plaintext, key, nonce)
+            .await
     }
 
     async fn chacha20_decrypt(
         &self,
-        _ciphertext: &[u8],
-        _key: &[u8; 32],
-        _nonce: &[u8; 12],
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation
-        Ok(vec![10u8; 32])
+        self.crypto_handler
+            .chacha20_decrypt(ciphertext, key, nonce)
+            .await
     }
 
     async fn aes_gcm_encrypt(
         &self,
-        _plaintext: &[u8],
-        _key: &[u8; 32],
-        _nonce: &[u8; 12],
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation
-        Ok(vec![11u8; 48])
+        self.crypto_handler
+            .aes_gcm_encrypt(plaintext, key, nonce)
+            .await
     }
 
     async fn aes_gcm_decrypt(
         &self,
-        _ciphertext: &[u8],
-        _key: &[u8; 32],
-        _nonce: &[u8; 12],
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation
-        Ok(vec![12u8; 32])
+        self.crypto_handler
+            .aes_gcm_decrypt(ciphertext, key, nonce)
+            .await
     }
 
     async fn frost_rotate_keys(
         &self,
-        _old_shares: &[Vec<u8>],
-        _old_threshold: u16,
-        _new_threshold: u16,
-        _new_max_signers: u16,
+        old_shares: &[Vec<u8>],
+        old_threshold: u16,
+        new_threshold: u16,
+        new_max_signers: u16,
     ) -> Result<crypto::FrostKeyGenResult, CryptoError> {
-        // Mock implementation
-        Err(AuraError::crypto(
-            "frost_rotate_keys not implemented in mock",
-        ))
+        self.crypto_handler
+            .frost_rotate_keys(old_shares, old_threshold, new_threshold, new_max_signers)
+            .await
     }
 }
 
@@ -400,142 +529,48 @@ impl NetworkEffects for AuraEffectSystem {
 // Implementation of StorageEffects
 #[async_trait]
 impl StorageEffects for AuraEffectSystem {
-    async fn store(&self, _key: &str, _value: Vec<u8>) -> Result<(), StorageError> {
-        // Mock implementation
-        Ok(())
+    async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+        self.storage_handler.store(key, value).await
     }
 
-    async fn retrieve(&self, _key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        // Mock implementation
-        Ok(None)
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        self.storage_handler.retrieve(key).await
     }
 
-    async fn remove(&self, _key: &str) -> Result<bool, StorageError> {
-        // Mock implementation
-        Ok(false)
+    async fn remove(&self, key: &str) -> Result<bool, StorageError> {
+        self.storage_handler.remove(key).await
     }
 
-    async fn list_keys(&self, _prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-        // Mock implementation
-        Ok(vec![])
+    async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+        self.storage_handler.list_keys(prefix).await
     }
 
-    async fn exists(&self, _key: &str) -> Result<bool, StorageError> {
-        // Mock implementation
-        Ok(false)
+    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
+        self.storage_handler.exists(key).await
     }
 
-    async fn store_batch(&self, _pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
-        // Mock implementation
-        Ok(())
+    async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
+        self.storage_handler.store_batch(pairs).await
     }
 
     async fn retrieve_batch(
         &self,
-        _keys: &[String],
+        keys: &[String],
     ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
-        // Mock implementation
-        Ok(HashMap::new())
+        self.storage_handler.retrieve_batch(keys).await
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {
-        // Mock implementation
-        Ok(())
+        self.storage_handler.clear_all().await
     }
 
     async fn stats(&self) -> Result<StorageStats, StorageError> {
-        // Mock implementation
-        Ok(StorageStats::default())
+        self.storage_handler.stats().await
     }
 }
 
-// Implementation of TimeEffects
+// Time helper implementations (compat)
 #[async_trait]
-impl TimeEffects for AuraEffectSystem {
-    async fn current_epoch(&self) -> u64 {
-        // Mock implementation
-        0
-    }
-
-    async fn current_timestamp(&self) -> u64 {
-        // Mock implementation - return current UNIX timestamp
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-    }
-
-    async fn current_timestamp_millis(&self) -> u64 {
-        // Mock implementation - return current UNIX timestamp in milliseconds
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
-    }
-
-    async fn now_instant(&self) -> Instant {
-        Instant::now()
-    }
-
-    async fn sleep_ms(&self, ms: u64) {
-        tokio::time::sleep(Duration::from_millis(ms)).await;
-    }
-
-    async fn sleep_until(&self, _epoch: u64) {
-        // Mock implementation - sleep for 100ms
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-
-    async fn delay(&self, duration: Duration) {
-        tokio::time::sleep(duration).await;
-    }
-
-    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
-        tokio::time::sleep(Duration::from_millis(duration_ms)).await;
-        Ok(())
-    }
-
-    async fn yield_until(&self, _condition: WakeCondition) -> Result<(), TimeError> {
-        // Mock implementation
-        Ok(())
-    }
-
-    async fn wait_until(&self, _condition: WakeCondition) -> Result<(), AuraError> {
-        // Mock implementation
-        Ok(())
-    }
-
-    async fn set_timeout(&self, _timeout_ms: u64) -> TimeoutHandle {
-        // Mock implementation
-        TimeoutHandle::default()
-    }
-
-    async fn cancel_timeout(&self, _handle: TimeoutHandle) -> Result<(), TimeError> {
-        // Mock implementation
-        Ok(())
-    }
-
-    fn is_simulated(&self) -> bool {
-        self.config.is_simulation()
-    }
-
-    fn register_context(&self, _context_id: uuid::Uuid) {
-        // Mock implementation
-    }
-
-    fn unregister_context(&self, _context_id: uuid::Uuid) {
-        // Mock implementation
-    }
-
-    async fn notify_events_available(&self) {
-        // Mock implementation
-    }
-
-    fn resolution_ms(&self) -> u64 {
-        1
-    }
-}
-
 // Implementation of ConsoleEffects
 #[async_trait]
 impl ConsoleEffects for AuraEffectSystem {
@@ -563,28 +598,24 @@ impl ConsoleEffects for AuraEffectSystem {
 // Implementation of JournalEffects
 #[async_trait]
 impl JournalEffects for AuraEffectSystem {
-    async fn merge_facts(&self, target: &Journal, _delta: &Journal) -> Result<Journal, AuraError> {
-        // Mock implementation - return target unchanged
-        Ok(target.clone())
+    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
+        self.journal_handler().merge_facts(target, delta).await
     }
 
     async fn refine_caps(
         &self,
         target: &Journal,
-        _refinement: &Journal,
+        refinement: &Journal,
     ) -> Result<Journal, AuraError> {
-        // Mock implementation - return target unchanged
-        Ok(target.clone())
+        self.journal_handler().refine_caps(target, refinement).await
     }
 
     async fn get_journal(&self) -> Result<Journal, AuraError> {
-        // Mock implementation - return empty journal
-        Ok(Journal::new())
+        self.journal_handler().get_journal().await
     }
 
     async fn persist_journal(&self, _journal: &Journal) -> Result<(), AuraError> {
-        // Mock implementation
-        Ok(())
+        self.journal_handler().persist_journal(_journal).await
     }
 
     async fn get_flow_budget(
@@ -592,8 +623,9 @@ impl JournalEffects for AuraEffectSystem {
         _context: &ContextId,
         _peer: &AuthorityId,
     ) -> Result<FlowBudget, AuraError> {
-        // Mock implementation
-        Ok(FlowBudget::default())
+        self.journal_handler()
+            .get_flow_budget(_context, _peer)
+            .await
     }
 
     async fn update_flow_budget(
@@ -602,8 +634,9 @@ impl JournalEffects for AuraEffectSystem {
         _peer: &AuthorityId,
         budget: &FlowBudget,
     ) -> Result<FlowBudget, AuraError> {
-        // Mock implementation - return unchanged
-        Ok(budget.clone())
+        self.journal_handler()
+            .update_flow_budget(_context, _peer, budget)
+            .await
     }
 
     async fn charge_flow_budget(
@@ -612,8 +645,9 @@ impl JournalEffects for AuraEffectSystem {
         _peer: &AuthorityId,
         _cost: u32,
     ) -> Result<FlowBudget, AuraError> {
-        // Mock implementation
-        Ok(FlowBudget::default())
+        self.journal_handler()
+            .charge_flow_budget(_context, _peer, _cost)
+            .await
     }
 }
 
@@ -704,6 +738,7 @@ impl ChoreographicEffects for AuraEffectSystem {
         Ok(())
     }
 
+    #[allow(clippy::disallowed_methods)]
     fn current_role(&self) -> ChoreographicRole {
         // Mock implementation
         ChoreographicRole::new(uuid::Uuid::new_v4(), 0)
@@ -929,11 +964,15 @@ impl EffectApiEffects for AuraEffectSystem {
     }
 
     async fn current_timestamp(&self) -> Result<u64, EffectApiError> {
-        // Mock implementation
-        Ok(std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs())
+        // Use PhysicalTimeEffects instead of direct SystemTime
+        let physical_time =
+            self.time_handler
+                .physical_time()
+                .await
+                .map_err(|e| EffectApiError::Backend {
+                    error: format!("time unavailable: {e}"),
+                })?;
+        Ok(physical_time.ts_ms / 1000)
     }
 
     async fn effect_api_device_id(&self) -> Result<DeviceId, EffectApiError> {
@@ -941,6 +980,7 @@ impl EffectApiEffects for AuraEffectSystem {
         Ok(DeviceId::new())
     }
 
+    #[allow(clippy::disallowed_methods)]
     async fn new_uuid(&self) -> Result<uuid::Uuid, EffectApiError> {
         // Mock implementation
         Ok(uuid::Uuid::new_v4())
@@ -956,22 +996,7 @@ impl FlowBudgetEffects for AuraEffectSystem {
         peer: &AuthorityId,
         cost: u32,
     ) -> aura_core::AuraResult<aura_core::Receipt> {
-        // Use the journal-backed flow budget charge to honor charge-before-send
-        let updated_budget = JournalEffects::charge_flow_budget(self, context, peer, cost).await?;
-
-        // Build a receipt chained by spent value as a monotone nonce
-        let nonce = updated_budget.spent;
-        let epoch = updated_budget.epoch;
-        Ok(aura_core::Receipt::new(
-            *context,
-            AuthorityId::new(), // Mock source authority
-            *peer,
-            epoch,
-            cost,
-            nonce,
-            aura_core::Hash32::default(),
-            Vec::new(), // Empty signature in mock
-        ))
+        self.flow_budget.charge_flow(context, peer, cost).await
     }
 }
 
@@ -1050,7 +1075,7 @@ mod tests {
 
 // Note: RelationshipFormationEffects is a composite trait that is automatically implemented
 // when all required component traits are implemented: ConsoleEffects, CryptoEffects,
-// NetworkEffects, RandomEffects, TimeEffects, and JournalEffects
+// NetworkEffects, RandomEffects, and JournalEffects
 
 /// Execution mode for the effect system
 #[derive(Debug, Clone)]
@@ -1071,5 +1096,17 @@ impl AuraEffectSystem {
         } else {
             ExecutionMode::Production
         }
+    }
+}
+
+// Manual Debug implementation since some fields don't implement Debug
+impl std::fmt::Debug for AuraEffectSystem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AuraEffectSystem")
+            .field("config", &self.config)
+            .field("authority_id", &self.authority_id)
+            .field("journal_policy", &self.journal_policy.is_some())
+            .field("journal_verifying_key", &self.journal_verifying_key.is_some())
+            .finish_non_exhaustive()
     }
 }

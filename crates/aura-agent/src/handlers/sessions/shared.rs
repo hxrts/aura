@@ -47,7 +47,7 @@ pub struct SessionStats {
 pub struct DeviceInfo {
     /// Authority identifier (public identity)
     pub authority_id: aura_core::identifiers::AuthorityId,
-    /// Account this authority belongs to  
+    /// Account this authority belongs to
     pub account_id: Option<AccountId>,
     /// Authority display name
     pub device_name: String,
@@ -192,7 +192,7 @@ pub struct SessionTerminated {
 }
 
 /// Helper functions
-
+///
 /// Get session type suffix for session IDs
 pub fn session_type_suffix(session_type: &SessionType) -> &'static str {
     match session_type {

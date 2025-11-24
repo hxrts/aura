@@ -286,7 +286,7 @@ async fn execute_dkd_protocol(
 /// Handle DKD testing with specific parameters
 pub async fn handle_dkd_test(
     _ctx: &EffectContext,
-    effects: &AuraEffectSystem,
+    _effects: &AuraEffectSystem,
     app_id: &str,
     context: &str,
     threshold: u16,

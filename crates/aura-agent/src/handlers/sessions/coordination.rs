@@ -5,7 +5,8 @@
 use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::TimeEffects;
+use aura_core::effects::time::TimeEffects;
+use aura_core::effects::RandomEffects;
 use aura_core::identifiers::{AccountId, DeviceId};
 use aura_macros::choreography;
 use aura_protocol::effects::{ChoreographicRole, SessionType};
@@ -189,10 +190,11 @@ impl SessionOperations {
     ) -> AgentResult<SessionHandle> {
         let effects = self.effects.read().await;
         let device_id = self.device_id();
-        let timestamp_millis = effects.current_timestamp_millis().await;
+        let _timestamp_millis = effects.current_timestamp_ms().await;
 
         // Generate unique session ID
-        let session_id = format!("session-{}", uuid::Uuid::new_v4().simple());
+        let session_uuid = effects.random_uuid().await;
+        let session_id = format!("session-{}", session_uuid.simple());
 
         // Create session request message for choreography
         let session_request = SessionRequest {
@@ -205,7 +207,7 @@ impl SessionOperations {
 
         // Execute the choreographic protocol
         match self
-            .execute_session_creation_choreography(&session_request, &*effects)
+            .execute_session_creation_choreography(&session_request, &effects)
             .await
         {
             Ok(session_handle) => {
@@ -330,7 +332,7 @@ impl SessionOperations {
         effects: &AuraEffectSystem,
     ) -> AgentResult<SessionHandle> {
         let device_id = self.device_id();
-        let timestamp_millis = effects.current_timestamp_millis().await;
+        let timestamp_millis = effects.current_timestamp_ms().await;
         let my_role = ChoreographicRole::new(device_id.0, 0);
 
         let session_handle = SessionHandle {

@@ -133,7 +133,9 @@ impl ChunkManifest {
             chunk_id,
             size,
             required_capabilities,
-            created_at: aura_core::time::current_unix_timestamp(),
+            // TODO: Replace with PhysicalTimeEffects from context
+            // Using placeholder to avoid violating effect system architecture
+            created_at: 0, // Will be replaced with proper time from effect context
             metadata: BTreeMap::new(),
         }
     }
@@ -195,7 +197,9 @@ impl ContentManifest {
             layout,
             chunk_manifests,
             metadata: BTreeMap::new(),
-            created_at: aura_core::time::current_unix_timestamp(),
+            // TODO: Replace with PhysicalTimeEffects from context
+            // Using placeholder to avoid violating effect system architecture
+            created_at: 0, // Will be replaced with proper time from effect context
         })
     }
 

@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use aura_core::effects::{
     ByzantineFault, CheckpointId, FaultInjectionConfig, FaultInjectionEffects, FaultType,
     OperationStats, ScenarioId, SimulationCheckpoint, SimulationControlEffects, SimulationMetrics,
-    SimulationObservationEffects, SimulationScenario, SimulationTime, StorageEffects, TimeEffects,
+    SimulationObservationEffects, SimulationScenario, SimulationTime, StorageEffects,
 };
 use aura_core::Result;
 use std::collections::HashMap;
@@ -30,7 +30,7 @@ pub struct StatelessSimulationHandler<S, T> {
 impl<S, T> StatelessSimulationHandler<S, T>
 where
     S: StorageEffects,
-    T: TimeEffects,
+    T: Send + Sync,
 {
     /// Create a new simulation handler with storage and time effects
     pub fn new(storage: Arc<S>, time: Arc<T>) -> Self {
@@ -42,7 +42,7 @@ where
 impl<S, T> SimulationControlEffects for StatelessSimulationHandler<S, T>
 where
     S: StorageEffects + Send + Sync,
-    T: TimeEffects + Send + Sync,
+    T: Send + Sync,
 {
     async fn create_scenario(
         &self,
@@ -132,7 +132,7 @@ where
 impl<S, T> FaultInjectionEffects for StatelessSimulationHandler<S, T>
 where
     S: StorageEffects + Send + Sync,
-    T: TimeEffects + Send + Sync,
+    T: Send + Sync,
 {
     async fn inject_fault(&self, _fault: FaultInjectionConfig) -> Result<()> {
         Ok(())
@@ -178,7 +178,7 @@ where
 impl<S, T> SimulationObservationEffects for StatelessSimulationHandler<S, T>
 where
     S: StorageEffects + Send + Sync,
-    T: TimeEffects + Send + Sync,
+    T: Send + Sync,
 {
     async fn record_metric(&self, _name: String, _value: f64) -> Result<()> {
         Ok(())

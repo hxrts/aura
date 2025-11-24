@@ -6,10 +6,12 @@
 //! **Effect Hierarchy** (per docs/001_system_architecture.md, docs/106_effect_system_and_runtime.md):
 //! - **Core effects** (aura-core): Network, Crypto, Storage, Time, Random, Console, Random
 //!   - Layer 1, foundational, no dependencies
-//! - **Protocol effects** (aura-protocol): Choreographic, EffectAPI, Tree, Semilattice, Sync, CLI
+//! - **Protocol effects** (aura-protocol): Choreographic, EffectAPI, Tree, Semilattice, Sync
 //!   - Layer 4, compose core effects for distributed coordination
 //! - **Domain effects** (aura-journal, aura-wot, etc.): Journal, Authorization, Capability
 //!   - Layer 2, domain-specific application effects
+//! - **UI effects** (aura-cli): CLI-specific effects for command-line interface
+//!   - Layer 7, user interface abstractions
 //!
 //! **Key Protocol Effect Traits**:
 //! - **Choreographic**: Multi-party protocol coordination, choreographic projections
@@ -17,11 +19,10 @@
 //! - **Tree**: Commitment tree operations, group key management
 //! - **Semilattice**: CRDT coordination with mathematical invariants (⊔, ⊓)
 //! - **Sync**: Anti-entropy, state reconciliation, gossip protocols
-//! - **CLI**: CLI-specific output and error effects (Layer 7)
 //!
 //! **Guard Chain Integration**: Each protocol message expands through effects in order
 //! (per docs/109_authorization.md): Authorization → FlowBudget → Leakage → Journal → Transport.
-//! use crate::effects::{NetworkEffects, CryptoEffects, TimeEffects};
+//! use crate::effects::{NetworkEffects, CryptoEffects, PhysicalTimeEffects};
 //!
 //! // Pure protocol function that accepts effects
 //! async fn execute_protocol_phase<E>(
@@ -29,7 +30,7 @@
 //!     effects: &E,
 //! ) -> Result<ProtocolState, ProtocolError>
 //! where
-//!     E: NetworkEffects + CryptoEffects + TimeEffects,
+//!     E: NetworkEffects + CryptoEffects + PhysicalTimeEffects,
 //! {
 //!     // Use effects for side-effect operations
 //!     let signature = effects.ed25519_sign(&data, &key).await?;
@@ -43,7 +44,6 @@
 // Effect trait definitions
 // NOTE: Agent effect traits moved to aura-core (Layer 1) - foundational capability definitions
 pub mod choreographic;
-pub mod cli;
 pub mod effect_api;
 pub mod params;
 pub mod semilattice;
@@ -61,17 +61,15 @@ pub use choreographic::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
     ChoreographyMetrics,
 };
-pub use cli::{
-    CliConfig, CliEffectHandler, CliEffects, ConfigEffects, LoggingConfig, NetworkConfig,
-    OutputEffectHandler, OutputEffects, OutputFormat,
-};
 // Import core effects from aura-core
 pub use aura_core::effects::{
     ConsoleEffects, CryptoEffects, CryptoError, JournalEffects, NetworkAddress, NetworkEffects,
     NetworkError, PeerEvent, PeerEventStream, RandomEffects, StorageEffects, StorageError,
-    StorageLocation, StorageStats, SystemEffects, SystemError, TimeEffects, TimeError,
-    TimeoutHandle, WakeCondition,
+    StorageLocation, StorageStats, SystemEffects, SystemError, TimeError, TimeoutHandle,
+    WakeCondition,
 };
+// Domain-specific time traits (unified time system)
+pub use aura_core::effects::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects};
 
 // Import crypto-specific types from crypto module
 pub use aura_core::effects::crypto::{FrostSigningPackage, KeyDerivationContext};
@@ -109,7 +107,9 @@ pub trait AuraEffects:
     CryptoEffects
     + NetworkEffects
     + StorageEffects
-    + TimeEffects
+    + PhysicalTimeEffects
+    + LogicalClockEffects
+    + OrderClockEffects
     + RandomEffects
     + ConsoleEffects
     + JournalEffects

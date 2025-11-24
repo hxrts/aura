@@ -3,8 +3,8 @@
 //! This module provides conversion from tree operations to journal facts,
 //! enabling the commitment tree to integrate with the fact-based journal model.
 
-use crate::fact::{AttestedOp, Fact, FactContent, FactId, TreeOpKind};
-use aura_core::{effects::RandomEffects, AuthorityId, Hash32, Result};
+use crate::fact::{AttestedOp, Fact, FactContent, TreeOpKind};
+use aura_core::{effects::RandomEffects, AuthorityId, Hash32, OrderTime, Result, TimeStamp};
 
 /// Tree operation with context for conversion
 pub struct TreeOp {
@@ -33,7 +33,11 @@ impl TreeOp {
     /// This method properly separates the deterministic conversion from ID generation,
     /// using RandomEffects to generate fact IDs that integrate with the effect system.
     /// This enables deterministic testing and proper effect boundaries.
-    pub async fn to_fact(self, random: &dyn RandomEffects) -> Result<Fact> {
+    pub async fn to_fact(
+        self,
+        random: &dyn RandomEffects,
+        _ctx: &crate::fact::EffectContext,
+    ) -> Result<Fact> {
         let attested = AttestedOp {
             tree_op: self.kind,
             parent_commitment: self.parent,
@@ -43,12 +47,12 @@ impl TreeOp {
         };
 
         // Use the effect system to generate a proper random fact ID
-        // TODO: Use proper EffectContext when available
-        let dummy_ctx = crate::fact::EffectContext::default();
-        let fact_id = FactId::generate(&dummy_ctx, random).await;
+        let id = OrderTime(random.random_bytes_32().await);
+        let ts = TimeStamp::OrderClock(id.clone());
 
         Ok(Fact {
-            fact_id,
+            order: id,
+            timestamp: ts,
             // Note: authority_id removed - facts are scoped by Journal namespace
             content: FactContent::AttestedOp(attested),
         })
@@ -69,18 +73,20 @@ impl TreeOp {
 
         // Create deterministic ID based on commitment hash
         let fact_id_bytes = {
-            let mut bytes = [0u8; 16];
-            bytes.copy_from_slice(&self.commitment.as_bytes()[..16]);
+            let mut bytes = [0u8; 32];
+            let commitment_bytes = self.commitment.as_bytes();
+            let len = commitment_bytes.len().min(32);
+            bytes[..len].copy_from_slice(&commitment_bytes[..len]);
             bytes
         };
 
+        let id = OrderTime(fact_id_bytes);
+        let ts = TimeStamp::OrderClock(id.clone());
         Fact {
-            fact_id: FactId::from_bytes(fact_id_bytes),
+            order: id,
+            timestamp: ts,
             // Note: authority_id removed - facts are scoped by Journal namespace
             content: FactContent::AttestedOp(attested),
         }
     }
 }
-
-// NOTE: From<CoreAttestedOp> for AttestedOp implementation moved to commitment_integration.rs
-// to avoid duplicate trait implementations. See commitment_integration.rs for the canonical conversion.

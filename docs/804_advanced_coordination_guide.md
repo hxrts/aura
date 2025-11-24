@@ -222,7 +222,7 @@ Role-controlled loops allow participants to decide when to continue or exit. The
 
 ## Aura-Specific Extensions
 
-Aura extends rumpsteak-aura with domain-specific annotations for security, performance, and state management. These extensions integrate with aura-mpst for runtime enforcement and verification.
+Aura extends rumpsteak-aura with domain-specific annotations for security, performance, and state management. These extensions integrate with [aura-mpst](107_mpst_and_choreography.md) for runtime enforcement and verification.
 
 ### Guard Capabilities
 
@@ -384,11 +384,11 @@ Protocol composition uses the `then` method for sequential execution. Complex pr
 
 ## Integration with Aura Systems
 
-Choreographic protocols integrate with broader Aura infrastructure through standardized interfaces. Protocol execution uses effect handlers from aura-effects and coordination primitives from aura-protocol. Guard capabilities integrate with the web of trust system.
+Choreographic protocols integrate with broader [Aura infrastructure](001_system_architecture.md) through standardized interfaces. Protocol execution uses effect handlers from aura-effects and coordination primitives from aura-protocol. Guard capabilities integrate with the web of trust system.
 
 Choreographies compose with CRDT programming patterns for state consistency. Flow budget enforcement prevents excessive resource usage. Journal facts enable distributed auditability across protocol execution.
 
-For foundational concepts, see [Coordination Systems Guide](803_coordination_guide.md). For testing approaches, see [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md).
+For foundational concepts, see [Coordination Systems Guide](803_coordination_guide.md). For theoretical foundations, see [Theoretical Model](002_theoretical_model.md). For testing approaches, see [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md).
 
 Ring protocols ensure ordered processing across participants. Token passing accumulates state changes. Each node contributes to the final decision. Journal merging synchronizes accumulated state.
 

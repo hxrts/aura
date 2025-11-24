@@ -1,121 +1,176 @@
-//! Layer 1: Cryptographic Domain Types
-//!
-//! Pure domain types and functions for threshold cryptography. Contains only
-//! domain specification; implementations are effect-based and layered.
-//!
-//! **Core Components**:
-//! - **Key Derivation (amp)**: Deterministic KDF (HKDF-SHA256) per docs/001_system_architecture.md
-//! - **FROST Integration**: Domain types (Share, PartialSignature, ThresholdSignature)
-//! - **Merkle Utilities**: Content-addressed tree operations for commitment verification
-//! - **Ed25519**: Re-exports of ed25519-dalek for signature verification
-//!
-//! **Layered Implementation** (per docs/001_system_architecture.md):
-//! - Basic crypto effects (sign, verify, key derive) → aura-effects/crypto (Layer 3)
-//! - Multi-party FROST coordination → aura-protocol/guards (Layer 4)
-//! - End-to-end FROST ceremonies → aura-frost (Layer 5)
-//! - No effect handlers in this layer (pure functions/types only)
-
-// Domain modules - pure functions and types only
 pub mod amp;
 pub mod key_derivation_types;
 pub mod merkle;
 pub mod tree_signing;
 
-// Re-export commonly used cryptographic types
-pub use ed25519_dalek::{
-    Signature as Ed25519Signature, SigningKey as Ed25519SigningKey,
-    VerifyingKey as Ed25519VerifyingKey,
+use ed25519_dalek::Signer;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+// Re-export frost-friendly tree signing primitives under the legacy `frost` path.
+pub mod frost {
+    pub mod tree_signing {
+        pub use crate::crypto::tree_signing::*;
+    }
+    pub use crate::crypto::tree_signing::*;
+}
+
+// Merkle helpers
+pub use merkle::{
+    build_commitment_tree, build_merkle_root, generate_merkle_proof, verify_merkle_proof,
+    SimpleMerkleProof,
 };
 
-// Re-export key derivation types
+// Deterministic key derivation types
 pub use key_derivation_types::{IdentityKeyContext, KeyDerivationSpec, PermissionKeyContext};
 
-// Re-export merkle utilities
-pub use merkle::{
-    build_commitment_tree, build_merkle_root, verify_merkle_proof, SimpleMerkleProof,
-};
+/// Basic Ed25519 signature wrapper (bytes form for serialization).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Ed25519Signature(pub Vec<u8>);
 
-// Re-export tree signing utilities
-pub use tree_signing::*;
+impl Ed25519Signature {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        Self(bytes.to_vec())
+    }
 
-// Create frost module for backwards compatibility with aura-frost crate
-pub mod frost {
-    //! FROST threshold cryptography compatibility module
-    //!
-    //! This module provides backwards compatibility for the aura-frost crate
-    //! by re-exporting tree signing functionality under the frost namespace.
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
 
-    pub use super::tree_signing;
-
-    // Re-export specific types that aura-frost expects at the frost module level
-    pub use super::tree_signing::{
-        Nonce, NonceCommitment, PartialSignature, PublicKeyPackage, Share, SigningSession,
-        ThresholdSignature, TreeSigningContext,
-    };
+    pub fn to_bytes(&self) -> [u8; 64] {
+        let mut arr = [0u8; 64];
+        let len = self.0.len().min(64);
+        arr[..len].copy_from_slice(&self.0[..len]);
+        arr
+    }
 }
 
-/// HPKE private key - 32 bytes for X25519
-pub type HpkePrivateKey = [u8; 32];
-/// HPKE public key - 32 bytes for X25519
-pub type HpkePublicKey = [u8; 32];
-/// Merkle proof using simple node hashes
-pub type MerkleProof = SimpleMerkleProof;
-
-/// Generate a UUID for compatibility
-///
-/// This is a basic utility function. For more sophisticated effects-based UUID generation,
-/// use the RandomEffects trait implementations from aura-effects.
-#[allow(clippy::disallowed_methods)]
-pub fn generate_uuid() -> uuid::Uuid {
-    uuid::Uuid::from_bytes([0u8; 16])
+impl From<[u8; 64]> for Ed25519Signature {
+    fn from(value: [u8; 64]) -> Self {
+        Self(value.to_vec())
+    }
 }
 
-/// Simple HPKE key pair implementation (placeholder)
-#[derive(Debug, Clone)]
+/// Basic Ed25519 signing key wrapper.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Ed25519SigningKey(pub Vec<u8>);
+
+impl Ed25519SigningKey {
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        Self(bytes.to_vec())
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.0.clone()
+    }
+
+    pub fn verifying_key(&self) -> Ed25519VerifyingKey {
+        let key =
+            ed25519_dalek::SigningKey::from_bytes(&self.0.clone().try_into().unwrap_or([0u8; 32]));
+        Ed25519VerifyingKey(key.verifying_key().to_bytes().to_vec())
+    }
+
+    pub fn sign(&self, message: &[u8]) -> Ed25519Signature {
+        let key =
+            ed25519_dalek::SigningKey::from_bytes(&self.0.clone().try_into().unwrap_or([0u8; 32]));
+        let sig = key.sign(message);
+        Ed25519Signature(sig.to_bytes().to_vec())
+    }
+}
+
+/// Basic Ed25519 verifying key wrapper.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Ed25519VerifyingKey(pub Vec<u8>);
+
+impl Ed25519VerifyingKey {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let arr: [u8; 32] = bytes.try_into().map_err(|_| "invalid key length")?;
+        ed25519_dalek::VerifyingKey::from_bytes(&arr)
+            .map(|_| Ed25519VerifyingKey(arr.to_vec()))
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+
+    /// Convenience verification helper.
+    pub fn verify(
+        &self,
+        message: &[u8],
+        signature: &Ed25519Signature,
+    ) -> Result<(), crate::AuraError> {
+        if ed25519_verify(message, signature, self)? {
+            Ok(())
+        } else {
+            Err(crate::AuraError::crypto("signature verification failed"))
+        }
+    }
+}
+
+/// HPKE key types (opaque placeholders for now).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct HpkePublicKey(pub Vec<u8>);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct HpkePrivateKey(pub Vec<u8>);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct HpkeKeyPair {
-    /// Private key for decryption (X25519)
-    pub private_key: HpkePrivateKey,
-    /// Public key for encryption (X25519)
-    pub public_key: HpkePublicKey,
+    pub public: HpkePublicKey,
+    pub private: HpkePrivateKey,
 }
 
 impl HpkeKeyPair {
-    /// Generate a new HPKE key pair using a random number generator
-    pub fn generate<R: rand::RngCore>(rng: &mut R) -> Self {
-        let mut private_key = [0u8; 32];
-        let mut public_key = [0u8; 32];
-        rng.fill_bytes(&mut private_key);
-        rng.fill_bytes(&mut public_key);
-
+    pub fn new(public: Vec<u8>, private: Vec<u8>) -> Self {
         Self {
-            private_key,
-            public_key,
+            public: HpkePublicKey(public),
+            private: HpkePrivateKey(private),
         }
     }
-
-    /// Get the private key
-    pub fn private_key(&self) -> &HpkePrivateKey {
-        &self.private_key
-    }
-
-    /// Get the public key
-    pub fn public_key(&self) -> &HpkePublicKey {
-        &self.public_key
-    }
 }
 
-/// Verify an Ed25519 signature using a public key
-///
-/// This is a convenience function that verifies a signature against a message
-/// using the provided public key. Works for both regular Ed25519 signatures
-/// and FROST threshold signatures (which produce standard Ed25519 signatures).
+/// Generate a UUID (legacy helper) - DEPRECATED: Use RandomEffects instead.
+/// This function violates the effect system architecture and will be removed.
+#[deprecated(note = "Use RandomEffects trait instead")]
+pub fn generate_uuid() -> Uuid {
+    // This is a temporary compatibility shim that will be removed
+    // All UUID generation should go through RandomEffects
+    panic!("generate_uuid is deprecated - use RandomEffects trait instead")
+}
+
+/// Verify an Ed25519 signature using dalek.
 pub fn ed25519_verify(
-    public_key: &Ed25519VerifyingKey,
     message: &[u8],
     signature: &Ed25519Signature,
-) -> crate::AuraResult<()> {
-    use ed25519_dalek::Verifier;
-    public_key
-        .verify(message, signature)
-        .map_err(|e| crate::AuraError::crypto(format!("Signature verification failed: {}", e)))
+    public_key: &Ed25519VerifyingKey,
+) -> Result<bool, crate::AuraError> {
+    let pk_bytes: [u8; 32] = public_key
+        .0
+        .clone()
+        .try_into()
+        .map_err(|_| crate::AuraError::crypto("invalid public key length"))?;
+    let sig_bytes: [u8; 64] = signature
+        .0
+        .clone()
+        .try_into()
+        .map_err(|_| crate::AuraError::crypto("invalid signature length"))?;
+
+    let pk = ed25519_dalek::VerifyingKey::from_bytes(&pk_bytes)
+        .map_err(|e| crate::AuraError::crypto(e.to_string()))?;
+    let sig = ed25519_dalek::Signature::from_bytes(&sig_bytes);
+    Ok(pk.verify_strict(message, &sig).is_ok())
 }
+
+/// Derive verifying key from signing key bytes.
+pub fn ed25519_verifying_key(signing_key: &Ed25519SigningKey) -> Ed25519VerifyingKey {
+    let arr: [u8; 32] = signing_key.0.clone().try_into().unwrap_or([0u8; 32]);
+    let key = ed25519_dalek::SigningKey::from_bytes(&arr);
+    Ed25519VerifyingKey(key.verifying_key().to_bytes().to_vec())
+}
+
+/// Alias for Merkle proof re-export.
+pub type MerkleProof = SimpleMerkleProof;
+
+/// Opaque permission key context alias retained for compatibility.
+pub type PermissionKeyContextCompat = PermissionKeyContext;

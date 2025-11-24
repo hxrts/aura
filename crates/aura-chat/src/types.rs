@@ -1,7 +1,7 @@
 //! Chat data types and structures
 
 use aura_core::identifiers::AuthorityId;
-use chrono::{DateTime, Utc};
+use aura_core::time::TimeStamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -56,8 +56,8 @@ pub struct ChatMember {
     pub authority_id: AuthorityId,
     /// Display name for the member
     pub display_name: String,
-    /// When the member joined the group
-    pub joined_at: DateTime<Utc>,
+    /// When the member joined the group (using unified time system)
+    pub joined_at: TimeStamp,
     /// Role in the group (admin, member, etc.)
     pub role: ChatRole,
 }
@@ -99,8 +99,8 @@ pub struct ChatMessage {
     pub content: String,
     /// Type of message
     pub message_type: MessageType,
-    /// When the message was sent
-    pub timestamp: DateTime<Utc>,
+    /// When the message was sent (using unified time system)
+    pub timestamp: TimeStamp,
     /// Optional message this is a reply to
     pub reply_to: Option<ChatMessageId>,
     /// Message metadata
@@ -114,7 +114,7 @@ impl ChatMessage {
         group_id: ChatGroupId,
         sender_id: AuthorityId,
         content: String,
-        timestamp: DateTime<Utc>,
+        timestamp: TimeStamp,
     ) -> Self {
         Self {
             id,
@@ -134,7 +134,7 @@ impl ChatMessage {
         group_id: ChatGroupId,
         system_authority: AuthorityId,
         content: String,
-        timestamp: DateTime<Utc>,
+        timestamp: TimeStamp,
     ) -> Self {
         Self {
             id,

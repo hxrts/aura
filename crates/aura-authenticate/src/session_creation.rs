@@ -5,7 +5,6 @@
 
 use crate::{AccountId, AuraError, AuraResult, BiscuitGuardEvaluator};
 use aura_core::DeviceId;
-use aura_core::TimeEffects;
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_verify::session::{SessionScope, SessionTicket};
@@ -398,7 +397,12 @@ where
 
     /// Create session ticket after successful approval
     async fn create_session_ticket(&self, request: &SessionRequest) -> AuraResult<SessionTicket> {
-        let current_time = TimeEffects::current_timestamp(self.effects.as_ref()).await;
+        let current_time = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
         let expiry_time = current_time + request.duration_seconds;
 
         // Generate random nonce

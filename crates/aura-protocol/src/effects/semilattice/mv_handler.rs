@@ -240,10 +240,7 @@ impl<S: MvState + Top> Default for MultiConstraintHandler<S> {
 
 /// Get current timestamp in seconds since epoch
 fn current_timestamp() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+    0
 }
 
 #[cfg(test)]

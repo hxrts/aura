@@ -4,7 +4,9 @@
 
 use aura_chat::{ChatGroupId, ChatMessage};
 use aura_core::identifiers::AuthorityId;
+use aura_core::time::{PhysicalTime, TimeStamp};
 use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Application state for the TUI demo interface
 #[derive(Debug, Clone)]
@@ -76,8 +78,8 @@ pub struct GuardianState {
     pub online: bool,
     /// Whether guardian has approved recovery
     pub approved_recovery: bool,
-    /// Last activity timestamp
-    pub last_activity: chrono::DateTime<chrono::Utc>,
+    /// Last activity timestamp (PhysicalClock ms)
+    pub last_activity: TimeStamp,
 }
 
 impl Default for AppState {
@@ -142,7 +144,7 @@ impl AppState {
                 name: "Alice".to_string(),
                 online: true,
                 approved_recovery: false,
-                last_activity: chrono::Utc::now(),
+                last_activity: Self::now_ts(),
             },
         );
         self.add_status("Alice setup as guardian".to_string());
@@ -158,7 +160,7 @@ impl AppState {
                 name: "Charlie".to_string(),
                 online: true,
                 approved_recovery: false,
-                last_activity: chrono::Utc::now(),
+                last_activity: Self::now_ts(),
             },
         );
         self.add_status("Charlie setup as guardian".to_string());
@@ -262,5 +264,16 @@ impl AppState {
         } else {
             "Not initiated".to_string()
         }
+    }
+
+    fn now_ts() -> TimeStamp {
+        let ts_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        })
     }
 }

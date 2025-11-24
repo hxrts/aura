@@ -244,9 +244,7 @@ pub mod composition {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_composition::{
-        EffectRegistry, HandlerConfig, HandlerConfigBuilder, RegistrableHandler,
-    };
+    use aura_composition::{EffectRegistry, RegistrableHandler};
     use aura_core::semilattice::{Bottom, JoinSemilattice};
 
     // Test CRDT type

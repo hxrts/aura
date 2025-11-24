@@ -4,8 +4,11 @@
 //! chat message history with efficient pagination and filtering.
 
 use crate::{ChatGroupId, ChatMessage, ChatMessageId};
-use aura_core::{effects::StorageEffects, AuraError, Result};
-use chrono::{DateTime, Utc};
+use aura_core::{
+    effects::StorageEffects,
+    time::{OrderingPolicy, TimeStamp},
+    AuraError, Result,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -37,11 +40,11 @@ where
         self.storage
             .store(&message_key, message_data)
             .await
-            .map_err(|e| AuraError::from(e))?;
+            .map_err(AuraError::from)?;
 
         // Update group message index for efficient queries
         let index_key = format!("chat_group_messages:{}", message.group_id);
-        self.add_to_message_index(&index_key, &message.id, message.timestamp)
+        self.add_to_message_index(&index_key, &message.id, message.timestamp.clone())
             .await?;
 
         Ok(())
@@ -68,7 +71,7 @@ where
         &self,
         group_id: &ChatGroupId,
         limit: usize,
-        before: Option<DateTime<Utc>>,
+        before: Option<TimeStamp>,
     ) -> Result<Vec<ChatMessage>> {
         let key_prefix = format!("chat_group_message:{}:", group_id);
         let mut entries: Vec<(i64, String)> = Vec::new();
@@ -90,13 +93,13 @@ where
             }
         }
 
-        // Apply before filter
+        // Apply before filter using unified time conversion
         if let Some(before_ts) = before {
-            let cutoff = before_ts.timestamp_millis();
+            let cutoff = before_ts.to_index_ms();
             entries.retain(|(ts, _)| *ts < cutoff);
         }
 
-        // Sort newest first then apply limit
+        // Sort newest first then apply limit (using raw i64 for index keys)
         entries.sort_by(|a, b| b.0.cmp(&a.0));
         entries.truncate(limit);
 
@@ -109,6 +112,12 @@ where
                 }
             }
         }
+
+        // Sort messages using proper unified time comparison (for cases where index ordering is imperfect)
+        messages.sort_by(|a, b| {
+            a.timestamp
+                .sort_compare(&b.timestamp, OrderingPolicy::DeterministicTieBreak)
+        });
 
         Ok(messages)
     }
@@ -160,14 +169,9 @@ where
         &self,
         index_key: &str,
         message_id: &ChatMessageId,
-        timestamp: DateTime<Utc>,
+        timestamp: TimeStamp,
     ) -> Result<()> {
-        let index_entry_key = format!(
-            "{}{}:{}",
-            index_key,
-            timestamp.timestamp_millis(),
-            message_id
-        );
+        let index_entry_key = format!("{}{}:{}", index_key, timestamp.to_index_ms(), message_id);
         self.storage
             .store(&index_entry_key, b"1".to_vec())
             .await
@@ -181,7 +185,7 @@ pub struct MessageIndexEntry {
     /// Message ID
     pub message_id: ChatMessageId,
     /// Message timestamp for sorting
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: TimeStamp,
     /// Message type for filtering
     pub message_type: crate::types::MessageType,
     /// Sender for filtering/authorization
@@ -192,7 +196,7 @@ pub struct MessageIndexEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HistoryCursor {
     /// Timestamp cursor
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: TimeStamp,
     /// Message ID for tie-breaking
     pub message_id: ChatMessageId,
 }

@@ -130,10 +130,10 @@ async fn load_account_authority(
     // Create and persist a new authority for future use
     let authority = AccountAuthority::new(account_id);
     let private_bytes = authority.root_keypair().private().to_bytes();
-    let _ = effects
+    effects
         .store(&key, private_bytes.to_vec())
         .await
-        .map_err(|e| anyhow::Error::from(e))?;
+        .map_err(anyhow::Error::from)?;
 
     Ok(authority)
 }

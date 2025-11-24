@@ -1,10 +1,10 @@
 # Consensus
 
-This document describes the architecture of Aura Consensus. It defines the problem model, protocol phases, data structures, and integration with journals. It explains how consensus provides single-shot agreement for non-monotone operations such as account updates or relational context operations.
+This document describes the architecture of Aura Consensus. It defines the problem model, protocol phases, data structures, and integration with [journals](102_journal.md). It explains how consensus provides single-shot agreement for non-monotone operations such as account updates or relational context operations.
 
 ## 1. Problem Model
 
-Aura uses consensus only for operations that cannot be expressed as monotone growth. Consensus produces a commit fact. The commit fact is inserted into one or more journals and drives deterministic reduction. Aura does not maintain a global log. Consensus operates in the scope of an authority or a relational context.
+Aura uses consensus only for operations that cannot be expressed as monotone growth. Consensus produces a commit fact. The commit fact is inserted into one or more [journals](102_journal.md) and drives deterministic reduction. Aura does not maintain a global log. Consensus operates in the scope of an authority or a relational context.
 
 Consensus is single-shot. It agrees on a single operation and a single prestate. Commit facts are immutable and merge by join in journal namespaces.
 
@@ -14,7 +14,7 @@ A consensus instance uses a context-scoped committee. The committee contains wit
 
 Aura Consensus has two paths. The fast path completes in one round trip. The fallback path uses epidemic gossip and a threshold race. Both paths produce the same commit fact once enough matching witness shares exist.
 
-The fast path uses direct communication. The initiator broadcasts an execute message. Witnesses run the operation against the prestate. Witnesses return FROST shares. The initiator aggregates shares and produces a threshold signature.
+The fast path uses direct communication. The initiator broadcasts an execute message. Witnesses run the operation against the prestate. Witnesses return FROST shares. The initiator aggregates shares and produces a threshold signature (via core FROST primitives in `aura-core::crypto::tree_signing`; consensus calls a thin adapter—`aura-frost` is deprecated).
 
 The fallback path triggers when witnesses disagree or when the initiator stalls. Witnesses exchange share proposals using bounded fanout gossip. Any witness that assembles a valid threshold signature broadcasts a complete commit fact.
 
@@ -306,7 +306,7 @@ Any witness reaching threshold broadcasts the commit fact. The first valid thres
 
 Consensus emits commit facts. Journals merge commit facts using set union. Reduction interprets commit facts as confirmed non-monotone events.
 
-Account journals integrate commit facts that represent tree operations. Relational context journals integrate commit facts that represent guardian bindings or recovery grants.
+Account journals integrate commit facts that represent tree operations. [Relational context](103_relational_contexts.md) journals integrate commit facts that represent guardian bindings or recovery grants.
 
 Reduction remains deterministic. Commit facts simply appear as additional facts in the semilattice.
 

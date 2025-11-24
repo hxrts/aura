@@ -61,7 +61,7 @@ choreography! {
 }
 ```
 
-The choreography defines a global protocol. Alice sends a ping to Bob. Bob responds with a pong. Guard capabilities control access and flow costs manage rate limiting.
+The choreography defines a global protocol. Alice sends a ping to Bob. Bob responds with a pong. [Guard capabilities](109_authorization.md) control access and flow costs manage rate limiting.
 
 Implement the Alice session:
 
@@ -86,7 +86,7 @@ pub async fn execute_alice_session<E: PingPongEffects>(
 }
 ```
 
-Alice serializes the ping message and sends it to Bob. She then waits for Bob's response and deserializes the pong message.
+Alice serializes the ping message and sends it to Bob. She then waits for Bob's response and deserializes the pong message. See [Effect System and Runtime](106_effect_system_and_runtime.md) for details on effect-based execution.
 
 ## Local Deployment
 
@@ -183,7 +183,7 @@ async fn test_hello_world_protocol() -> aura_core::AuraResult<()> {
 }
 ```
 
-This test creates stateless effect systems for Alice and Bob using testing configuration. The systems are context-free and provide deterministic behavior for testing protocol logic.
+This test creates stateless effect systems for Alice and Bob using testing configuration. The systems are context-free and provide deterministic behavior for testing protocol logic. For comprehensive testing approaches, see [Testing Guide](805_testing_guide.md).
 
 Run the test:
 
@@ -197,6 +197,6 @@ The test validates protocol correctness without requiring network infrastructure
 
 You now have a working Aura development environment. The hello world protocol demonstrates basic choreographic programming concepts.
 
-Continue with [Core Systems Guide](802_core_systems_guide.md) to learn about effect systems, authentication, and capabilities. Learn advanced coordination patterns in [Coordination Systems Guide](803_coordination_guide.md).
+Continue with [Core Systems Guide](802_core_systems_guide.md) to learn about effect systems, authentication, and capabilities. Learn advanced coordination patterns in [Coordination Systems Guide](803_coordination_guide.md). For detailed protocol development, see [MPST and Choreography](107_mpst_and_choreography.md).
 
 Explore the simulation system in [Testing Guide](805_testing_guide.md) and [Simulation Guide](806_simulation_guide.md) for comprehensive protocol testing approaches.

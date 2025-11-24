@@ -218,6 +218,12 @@ pub mod snapshot {
         pub timestamp: Duration,
     }
 
+    impl Default for EffectSnapshot {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl EffectSnapshot {
         /// Create a new empty snapshot
         pub fn new() -> Self {

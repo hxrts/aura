@@ -128,8 +128,8 @@ impl JournalEffects for MockJournalHandler {
     ) -> Result<FlowBudget, AuraError> {
         let mut budgets = self.flow_budgets.write().await;
         let key = (*context, *peer);
-        budgets.insert(key, budget.clone());
-        Ok(budget.clone())
+        budgets.insert(key, *budget);
+        Ok(*budget)
     }
 
     async fn charge_flow_budget(
@@ -147,7 +147,7 @@ impl JournalEffects for MockJournalHandler {
             .unwrap_or_else(|| FlowBudget::new(1000, Epoch(0)));
 
         budget.spent += cost as u64;
-        budgets.insert(key, budget.clone());
+        budgets.insert(key, budget);
 
         Ok(budget)
     }

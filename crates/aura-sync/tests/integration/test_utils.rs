@@ -137,7 +137,7 @@ impl MultiDeviceTestFixture {
             }
         })
         .await
-        .map_err(|_| AuraError::internal("Session timeout".to_string()))?
+        .map_err(|_| AuraError::internal(String::from("Session timeout")))?
     }
 }
 
@@ -213,9 +213,9 @@ pub async fn create_divergent_journal_states(
     // For now, we simulate the setup that would create divergent states
 
     if fixture.devices.len() < 3 {
-        return Err(AuraError::internal(
-            "Need at least 3 devices for divergence test".to_string(),
-        ));
+        return Err(AuraError::internal(String::from(
+            "Need at least 3 devices for divergence test",
+        )));
     }
 
     // Simulate device 0 and 1 syncing while device 2 is partitioned
@@ -282,7 +282,7 @@ pub async fn assert_sync_success<T>(
 ) -> AuraResult<T> {
     timeout(timeout_duration, future)
         .await
-        .map_err(|_| AuraError::internal("Sync operation timeout".to_string()))?
+        .map_err(|_| AuraError::internal(String::from("Sync operation timeout")))?
         .map_err(|e| AuraError::internal(format!("Sync failed: {}", e)))
 }
 
@@ -291,14 +291,14 @@ pub async fn assert_sync_failure<T>(
     future: impl std::future::Future<Output = SyncResult<T>>,
     timeout_duration: Duration,
 ) -> AuraResult<()> {
-    let result = timeout(timeout_duration, future)
-        .await
-        .map_err(|_| AuraError::internal("Expected failure but operation timed out".to_string()))?;
+    let result = timeout(timeout_duration, future).await.map_err(|_| {
+        AuraError::internal(String::from("Expected failure but operation timed out"))
+    })?;
 
     match result {
-        Ok(_) => Err(AuraError::internal(
-            "Expected failure but operation succeeded".to_string(),
-        )),
+        Ok(_) => Err(AuraError::internal(String::from(
+            "Expected failure but operation succeeded",
+        ))),
         Err(_) => Ok(()),
     }
 }

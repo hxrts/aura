@@ -18,7 +18,7 @@ Facts merge via set union and never retract. See [Journal System](102_journal.md
 
 ### Charge-before-send
 
-Every transport observable is preceded by `CapGuard`, `FlowGuard`, and `JournalCoupler`. See [Effect System and Runtime](106_effect_system_and_runtime.md) and [Authorization](109_authorization.md). No packet is emitted without a successful charge. This invariant is enforced by the guard chain.
+Every transport observable is preceded by `CapGuard`, `FlowGuard`, and `JournalCoupler`. See [Effect System and Runtime](106_effect_system_and_runtime.md) and [Authorization](109_authorization.md). No packet is emitted without a successful charge. This invariant is enforced by the [guard chain](109_authorization.md).
 
 ### Consensus agreement
 
@@ -133,7 +133,7 @@ Monitor receipt acceptance rates, consensus backlog, and budget utilization. See
 
 ## 10. References
 
-[System Architecture](001_system_architecture.md) describes runtime layering and the guard chain.
+[System Architecture](001_system_architecture.md) describes runtime layering and the [guard chain](109_authorization.md).
 
 [Theoretical Model](002_theoretical_model.md) covers the formal calculus and semilattice laws.
 

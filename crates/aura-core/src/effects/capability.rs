@@ -405,12 +405,26 @@ impl CapabilityTokenRequest {
     }
 
     /// Create a short-lived token request (5 minutes)
+    ///
+    /// Note: This method requires PhysicalTimeEffects to set expiration.
+    /// Use `short_lived_with_time` for production code.
     pub fn short_lived(subject: &str, permissions: &[String]) -> Self {
-        let expires_at = Some(chrono::Utc::now().timestamp() as u64 + 300); // 5 minutes
         Self {
             subject: subject.to_string(),
             permissions: permissions.to_vec(),
-            expires_at,
+            expires_at: None, // Must be set separately using PhysicalTimeEffects
+            claims: HashMap::new(),
+            format: CapabilityTokenFormat::Jwt,
+            context: None,
+        }
+    }
+
+    /// Create a short-lived token request with explicit expiration time
+    pub fn short_lived_with_expiry(subject: &str, permissions: &[String], expires_at: u64) -> Self {
+        Self {
+            subject: subject.to_string(),
+            permissions: permissions.to_vec(),
+            expires_at: Some(expires_at),
             claims: HashMap::new(),
             format: CapabilityTokenFormat::Jwt,
             context: None,
@@ -443,15 +457,21 @@ impl CapabilityTokenRequest {
 }
 
 impl CapabilityVerificationResult {
-    /// Check if the token is valid and not expired
-    pub fn is_valid_and_current(&self) -> bool {
+    /// Check if the token is valid (signature verification passed)
+    pub fn is_valid(&self) -> bool {
+        self.valid
+    }
+
+    /// Check if the token is valid and not expired at the given time
+    pub fn is_valid_at(&self, current_time_ms: u64) -> bool {
         if !self.valid {
             return false;
         }
 
         if let Some(expires_at) = self.expires_at {
-            let now = chrono::Utc::now().timestamp() as u64;
-            return now < expires_at;
+            // Convert seconds to milliseconds for consistent time representation
+            let expires_at_ms = expires_at * 1000;
+            return current_time_ms < expires_at_ms;
         }
 
         true
@@ -462,11 +482,11 @@ impl CapabilityVerificationResult {
         required.iter().all(|perm| self.permissions.contains(perm))
     }
 
-    /// Get the remaining validity time in seconds
-    pub fn remaining_validity_seconds(&self) -> Option<u64> {
+    /// Get the remaining validity time in seconds at the given time
+    pub fn remaining_validity_seconds(&self, current_time_ms: u64) -> Option<u64> {
         self.expires_at.map(|expires| {
-            let now = chrono::Utc::now().timestamp() as u64;
-            expires.saturating_sub(now)
+            let current_seconds = current_time_ms / 1000;
+            expires.saturating_sub(current_seconds)
         })
     }
 }
@@ -483,28 +503,7 @@ impl TokenStatus {
     }
 }
 
-// Add chrono dependency for timestamp handling (would be added to Cargo.toml)
-mod chrono {
-    pub struct Utc;
-    impl Utc {
-        pub fn now() -> DateTime {
-            // Mock implementation for compilation
-            DateTime {
-                timestamp: 1640995200,
-            }
-        }
-    }
-
-    pub struct DateTime {
-        timestamp: i64,
-    }
-
-    impl DateTime {
-        pub fn timestamp(&self) -> i64 {
-            self.timestamp
-        }
-    }
-}
+// Removed chrono dependency - use PhysicalTimeEffects trait for time operations
 
 #[cfg(test)]
 mod tests {
@@ -528,7 +527,19 @@ mod tests {
 
         assert_eq!(request.subject, "admin");
         assert_eq!(request.format, CapabilityTokenFormat::Jwt);
-        assert!(request.expires_at.is_some());
+        assert!(request.expires_at.is_none()); // Must be set separately
+    }
+
+    #[test]
+    fn test_capability_token_request_short_lived_with_expiry() {
+        let permissions = vec!["admin:all".to_string()];
+        let expires_at = 1234567890;
+        let request =
+            CapabilityTokenRequest::short_lived_with_expiry("admin", &permissions, expires_at);
+
+        assert_eq!(request.subject, "admin");
+        assert_eq!(request.format, CapabilityTokenFormat::Jwt);
+        assert_eq!(request.expires_at, Some(expires_at));
     }
 
     #[test]
@@ -555,11 +566,32 @@ mod tests {
     }
 
     #[test]
+    fn test_verification_result_expiration_times() {
+        let result = CapabilityVerificationResult {
+            valid: true,
+            permissions: vec![],
+            expires_at: Some(1640999400), // 70 minutes after epoch start
+            subject: None,
+            issuer: None,
+            claims: HashMap::new(),
+            errors: vec![],
+            verification_level: VerificationLevel::Standard,
+        };
+
+        // Test remaining time calculation
+        let current_time_ms = 1640995800000; // 1 hour after epoch start
+        assert_eq!(
+            result.remaining_validity_seconds(current_time_ms),
+            Some(3600)
+        ); // 1 hour remaining
+    }
+
+    #[test]
     fn test_verification_result_validation() {
         let result = CapabilityVerificationResult {
             valid: true,
             permissions: vec!["read:data".to_string(), "write:logs".to_string()],
-            expires_at: Some(9999999999), // Far future
+            expires_at: Some(9999999999), // Far future in seconds
             subject: Some("user".to_string()),
             issuer: Some("auth_service".to_string()),
             claims: HashMap::new(),
@@ -567,10 +599,18 @@ mod tests {
             verification_level: VerificationLevel::Standard,
         };
 
-        assert!(result.is_valid_and_current());
+        assert!(result.is_valid());
+        // Test with current time well before expiration (using milliseconds)
+        let current_time_ms = 1640995200000; // 2022-01-01 in milliseconds
+        assert!(result.is_valid_at(current_time_ms));
+
         assert!(result.has_permissions(&["read:data".to_string()]));
         assert!(result.has_permissions(&["read:data".to_string(), "write:logs".to_string()]));
         assert!(!result.has_permissions(&["admin:all".to_string()]));
+
+        // Test expiration
+        let far_future_ms = 99999999990000; // Beyond expiration
+        assert!(!result.is_valid_at(far_future_ms));
     }
 
     #[test]

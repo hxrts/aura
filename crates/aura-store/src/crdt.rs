@@ -188,7 +188,9 @@ impl StorageOperation {
         Self {
             op_type,
             counter,
-            timestamp: aura_core::time::current_unix_timestamp(),
+            // TODO: Replace with PhysicalTimeEffects from context
+            // Using placeholder to avoid violating effect system architecture
+            timestamp: 0, // Will be replaced with proper time from effect context
             actor,
         }
     }
@@ -341,8 +343,9 @@ impl ChunkAvailability {
             .or_default()
             .insert(node_id.clone());
 
-        self.node_timestamps
-            .insert(node_id, aura_core::time::current_unix_timestamp());
+        // TODO: Replace with PhysicalTimeEffects from context
+        // Using placeholder to avoid violating effect system architecture
+        self.node_timestamps.insert(node_id, 0); // Will be replaced with proper time from effect context
     }
 
     /// Remove chunk from a node

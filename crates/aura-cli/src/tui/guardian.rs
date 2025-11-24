@@ -233,10 +233,7 @@ impl GuardianInterface {
         actions.push("Tab: Switch View");
         actions.push("q: Quit");
 
-        let action_text: Vec<Line> = actions
-            .into_iter()
-            .map(|action| Line::from(action))
-            .collect();
+        let action_text: Vec<Line> = actions.into_iter().map(Line::from).collect();
 
         let actions_panel = Paragraph::new(action_text)
             .block(Block::default().borders(Borders::ALL).title("Actions"))

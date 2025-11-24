@@ -36,7 +36,7 @@
 //! - Handler composition or registry (belong in aura-composition)
 //! - Low-level multi-party coordination (belong in aura-protocol)
 //! - Guardian relationship definitions (belong in aura-relational)
-//! - Cryptographic threshold signing (belong in aura-frost)
+//! - Cryptographic threshold signing (via core FROST primitives; aura-frost removed)
 //!
 //! ## Design Principles
 //!
@@ -56,16 +56,22 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
+/// Common utilities for recovery operations (DRY infrastructure)
+pub mod utils;
+
+/// Base coordinator infrastructure for all recovery operations
+pub mod coordinator;
+
 /// Guardian setup choreography for initial relationship establishment
 pub mod guardian_setup;
+
+/// Guardian key recovery approvals (placeholder types)
+pub mod guardian_key_recovery;
 
 /// Guardian membership change choreography for adding/removing guardians
 pub mod guardian_membership;
 
-/// Guardian key recovery choreography for emergency key recovery (deprecated)
-pub mod guardian_key_recovery;
-
-/// Recovery protocol using relational contexts (new model)
+/// Recovery protocol using relational contexts
 pub mod recovery_protocol;
 
 /// Shared types for guardian operations
@@ -90,9 +96,11 @@ pub use aura_authenticate::guardian_auth::{
 };
 
 // Re-export choreography coordinators
-pub use guardian_key_recovery::GuardianKeyRecoveryCoordinator;
 pub use guardian_membership::GuardianMembershipCoordinator;
 pub use guardian_setup::GuardianSetupCoordinator;
+
+// Re-export new recovery protocol
+pub use recovery_protocol::{RecoveryProtocol, RecoveryProtocolHandler};
 
 // Re-export Biscuit types for convenience
 pub use aura_protocol::guards::BiscuitGuardEvaluator;

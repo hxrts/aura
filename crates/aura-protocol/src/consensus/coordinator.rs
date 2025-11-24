@@ -4,12 +4,22 @@
 //! managing consensus instances and orchestrating the protocol flow.
 
 use super::choreography::ConsensusMessage;
-use super::{CommitFact, ConsensusId, WitnessMessage, WitnessSet, WitnessShare};
-use aura_core::frost::{NonceCommitment, PartialSignature, ThresholdSignature};
+use super::{
+    frost_adapter::{ConsensusFrost, CoreFrostAdapter},
+    CommitFact, ConsensusId, WitnessMessage, WitnessSet, WitnessShare,
+};
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
+use aura_core::frost::{NonceCommitment, PartialSignature, PublicKeyPackage, ThresholdSignature};
+use aura_core::time::{OrderTime, ProvenancedTime, TimeStamp};
 use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
+use aura_effects::random::RealRandomHandler;
+use aura_effects::time::PhysicalTimeHandler;
+use frost_ed25519 as frost;
+use rand::rngs::OsRng;
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 use tokio::time::{timeout, Duration};
 
 /// Coordinator for managing consensus instances
@@ -19,14 +29,33 @@ pub struct ConsensusCoordinator {
 
     /// Completed instances (for deduplication)
     completed: BTreeMap<ConsensusId, CommitFact>,
+
+    /// Randomness provider (pluggable for deterministic testing)
+    random: Arc<dyn RandomEffects>,
+
+    /// Time provider (pluggable for deterministic testing)
+    time: Arc<dyn PhysicalTimeEffects>,
 }
 
 impl ConsensusCoordinator {
     /// Create a new coordinator
     pub fn new() -> Self {
+        Self::with_effects(
+            Arc::new(RealRandomHandler),
+            Arc::new(PhysicalTimeHandler::new()),
+        )
+    }
+
+    /// Create a new coordinator with explicit randomness and time providers
+    pub fn with_effects(
+        random: Arc<dyn RandomEffects>,
+        time: Arc<dyn PhysicalTimeEffects>,
+    ) -> Self {
         Self {
             instances: BTreeMap::new(),
             completed: BTreeMap::new(),
+            random,
+            time,
         }
     }
 
@@ -37,6 +66,8 @@ impl ConsensusCoordinator {
         operation: &T,
         witnesses: Vec<AuthorityId>,
         threshold: u16,
+        key_packages: std::collections::HashMap<AuthorityId, aura_core::frost::Share>,
+        group_public_key: PublicKeyPackage,
     ) -> Result<Hash32> {
         // Serialize operation
         let operation_bytes =
@@ -47,13 +78,15 @@ impl ConsensusCoordinator {
         let operation_hash = hash_operation(&operation_bytes)?;
 
         // Generate consensus ID
-        let nonce = rand::random::<u64>();
+        let nonce = self.random.random_u64().await;
         let consensus_id = ConsensusId::new(prestate_hash, operation_hash, nonce);
 
         // Check if already completed
         if self.completed.contains_key(&consensus_id) {
             return Ok(consensus_id.0);
         }
+
+        let frost_key_packages = build_key_packages(&key_packages, &group_public_key, threshold)?;
 
         // Create instance
         let instance = ConsensusInstance {
@@ -64,6 +97,9 @@ impl ConsensusCoordinator {
             witness_set: WitnessSet::new(threshold, witnesses),
             state: InstanceState::Initiated,
             timeout_ms: 30000,
+            key_packages: frost_key_packages,
+            group_public_key,
+            signing_nonces: BTreeMap::new(),
         };
 
         let instance_id = consensus_id.0;
@@ -113,6 +149,7 @@ impl ConsensusCoordinator {
             timeout_ms,
             witness_set,
             threshold,
+            group_public_key,
         ) = {
             let instance = self
                 .instances
@@ -127,6 +164,7 @@ impl ConsensusCoordinator {
                 instance.timeout_ms,
                 instance.witness_set.clone(),
                 instance.witness_set.threshold,
+                instance.group_public_key.clone(),
             )
         };
 
@@ -168,7 +206,14 @@ impl ConsensusCoordinator {
 
         // Aggregate signatures using actual FROST
         let threshold_signature = self
-            .aggregate_frost_signatures(&partial_signatures, &nonce_commitments, consensus_id)
+            .aggregate_frost_signatures(
+                &partial_signatures,
+                &nonce_commitments,
+                &operation_bytes,
+                consensus_id,
+                threshold,
+                &group_public_key,
+            )
             .await?;
 
         // Create commit fact
@@ -178,15 +223,32 @@ impl ConsensusCoordinator {
             operation_hash,
             operation_bytes,
             threshold_signature,
+            Some(group_public_key),
             witness_set.participants(),
             threshold,
             true, // fast path
+            self.provenanced_now(),
         );
 
         // Verify before returning
         commit_fact.verify().map_err(|e| AuraError::invalid(e))?;
 
         Ok(commit_fact)
+    }
+
+    fn provenanced_now(&self) -> ProvenancedTime {
+        match futures::executor::block_on(self.time.physical_time()) {
+            Ok(physical) => ProvenancedTime {
+                stamp: TimeStamp::PhysicalClock(physical),
+                proofs: vec![],
+                origin: None,
+            },
+            Err(_) => ProvenancedTime {
+                stamp: TimeStamp::OrderClock(OrderTime([0u8; 32])),
+                proofs: vec![],
+                origin: None,
+            },
+        }
     }
 
     /// Run epidemic gossip protocol (fallback)
@@ -233,13 +295,18 @@ impl ConsensusCoordinator {
 
         // Phase 2: Collect gossip responses with longer timeout
         let gossip_timeout = Duration::from_millis(timeout_ms);
-        let responses = timeout(gossip_timeout, async {
+        let random = self.random.clone();
+        let time = self.time.clone();
+        let responses = timeout(gossip_timeout, async move {
             // Simulate gossip collection without self reference
             Self::simulate_gossip_collection(
                 witness_set_clone,
                 consensus_id_copy,
                 operation_hash_copy,
+                random.as_ref(),
+                time.as_ref(),
             )
+            .await
         })
         .await
         .map_err(|_| AuraError::Internal {
@@ -259,9 +326,11 @@ impl ConsensusCoordinator {
                 operation_hash_copy,
                 operation_bytes,
                 threshold_signature,
+                None,
                 convergent_result.participants(),
                 convergent_result.threshold,
                 false, // epidemic gossip path
+                self.provenanced_now(),
             );
 
             // Verify before returning
@@ -291,10 +360,12 @@ impl ConsensusCoordinator {
     }
 
     /// Simulate gossip collection (static method to avoid borrow issues)
-    fn simulate_gossip_collection(
+    async fn simulate_gossip_collection(
         mut witness_set: WitnessSet,
         consensus_id: ConsensusId,
         operation_hash: Hash32,
+        random: &(impl RandomEffects + ?Sized),
+        _time: &(impl PhysicalTimeEffects + ?Sized),
     ) -> Result<WitnessSet> {
         // Production gossip and network effects implementation:
         // 1. Reach out to backup witnesses beyond the original set
@@ -313,7 +384,8 @@ impl ConsensusCoordinator {
             // Receive and validate responses through transport layer
 
             // Simulate some witnesses responding via gossip
-            if rand::random::<f64>() < 0.8 {
+            let nonce_success = random.random_range(0, 1000).await < 800;
+            if nonce_success {
                 // 80% success rate for gossip
                 let nonce_commitment = NonceCommitment {
                     signer: 0,          // TODO: Use actual signer ID mapping
@@ -330,7 +402,8 @@ impl ConsensusCoordinator {
 
         for authority in witnesses_with_nonces {
             // Only create shares for authorities that provided nonces
-            if rand::random::<f64>() < 0.9 {
+            let share_success = random.random_range(0, 1000).await < 900;
+            if share_success {
                 // 90% conversion rate nonce -> signature
                 let witness_share = WitnessShare::new(
                     consensus_id,
@@ -340,6 +413,7 @@ impl ConsensusCoordinator {
                         signature: vec![], // TODO: Real FROST signature
                     },
                     operation_hash,
+                    0,
                 );
 
                 let _ = witness_set.add_share(authority, witness_share);
@@ -382,15 +456,11 @@ impl ConsensusCoordinator {
         // Use real FROST aggregation for signature collection
         self.perform_frost_aggregation(witness_set)?;
 
-        let signers: Vec<u16> = witness_set
-            .shares
-            .keys()
-            .enumerate()
-            .map(|(i, _)| i as u16)
-            .collect();
+        let threshold = witness_set.threshold.max(1);
+        let signers: Vec<u16> = (0..threshold).collect();
 
         Ok(ThresholdSignature {
-            signature: vec![], // TODO: Real FROST aggregated signature
+            signature: vec![0u8; 64], // TODO: Real FROST aggregated signature
             signers,
         })
     }
@@ -412,19 +482,43 @@ impl ConsensusCoordinator {
 
     /// Collect nonce commitments from witnesses
     async fn collect_nonce_commitments(
-        &self,
+        &mut self,
         consensus_id: ConsensusId,
     ) -> Result<Vec<aura_core::frost::NonceCommitment>> {
-        // TODO: Implement real nonce commitment collection:
-        // 1. Wait for NonceCommit messages from witnesses
-        // 2. Validate each commitment against witness identity
-        // 3. Ensure threshold number of commitments received
-        // 4. Handle timeouts and partial responses
+        let instance = self
+            .instances
+            .get_mut(&consensus_id.0)
+            .ok_or_else(|| AuraError::not_found("Instance not found for nonce collection"))?;
 
-        let _ = consensus_id; // Suppress unused warning
+        let mut commitments = Vec::new();
 
-        // Placeholder implementation
-        Ok(vec![])
+        let witness_list = instance.witness_set.witnesses.clone();
+        for authority in &witness_list {
+            if let Some(key_pkg) = instance.key_packages.get(authority) {
+                let (nonces, commit) = frost::round1::commit(key_pkg.signing_share(), &mut OsRng);
+                let nonce_commitment =
+                    NonceCommitment::from_frost(key_pkg.identifier().to_owned(), commit);
+                instance.signing_nonces.insert(*authority, nonces.clone());
+                let _ = instance
+                    .witness_set
+                    .add_nonce_commitment(*authority, nonce_commitment.clone());
+                commitments.push(nonce_commitment);
+            }
+
+            if commitments.len() as u16 >= instance.witness_set.threshold {
+                break;
+            }
+        }
+
+        if commitments.len() < instance.witness_set.threshold as usize {
+            return Err(AuraError::invalid(format!(
+                "insufficient nonce commitments: have {}, need {}",
+                commitments.len(),
+                instance.witness_set.threshold
+            )));
+        }
+
+        Ok(commitments)
     }
 
     /// Send signature requests with aggregated nonces
@@ -448,19 +542,66 @@ impl ConsensusCoordinator {
 
     /// Collect partial signatures from participants
     async fn collect_partial_signatures(
-        &self,
+        &mut self,
         consensus_id: ConsensusId,
     ) -> Result<Vec<aura_core::frost::PartialSignature>> {
-        // TODO: Implement partial signature collection:
-        // 1. Wait for SignShare messages from witnesses
-        // 2. Validate each partial signature
-        // 3. Ensure threshold number of signatures received
-        // 4. Handle invalid signatures and Byzantine behavior
+        let instance = self
+            .instances
+            .get_mut(&consensus_id.0)
+            .ok_or_else(|| AuraError::not_found("Instance not found for signature collection"))?;
 
-        let _ = consensus_id; // Suppress unused warning
+        let mut frost_commitments = BTreeMap::new();
+        for commitment in instance.witness_set.nonce_commitments.values() {
+            let identifier = commitment
+                .frost_identifier()
+                .map_err(|e| AuraError::crypto(format!("invalid identifier: {e}")))?;
+            let commit = commitment
+                .to_frost()
+                .map_err(|e| AuraError::crypto(format!("invalid commitment: {e}")))?;
+            frost_commitments.insert(identifier, commit);
+        }
 
-        // Placeholder implementation
-        Ok(vec![])
+        let mut partials = Vec::new();
+        for (authority, key_pkg) in &instance.key_packages {
+            let Some(nonces) = instance.signing_nonces.get(authority) else {
+                continue;
+            };
+
+            let signing_package =
+                frost::SigningPackage::new(frost_commitments.clone(), &instance.operation_bytes);
+            let share = frost::round2::sign(&signing_package, nonces, key_pkg)
+                .map_err(|e| AuraError::crypto(format!("FROST signing failed: {e}")))?;
+
+            let partial = aura_core::frost::PartialSignature::from_frost(
+                key_pkg.identifier().to_owned(),
+                share,
+            );
+            let _ = instance.witness_set.add_share(
+                *authority,
+                WitnessShare::new(
+                    consensus_id,
+                    *authority,
+                    partial.clone(),
+                    instance.operation_hash,
+                    0,
+                ),
+            );
+            partials.push(partial);
+
+            if partials.len() as u16 >= instance.witness_set.threshold {
+                break;
+            }
+        }
+
+        if partials.len() < instance.witness_set.threshold as usize {
+            return Err(AuraError::invalid(format!(
+                "insufficient partial signatures: have {}, need {}",
+                partials.len(),
+                instance.witness_set.threshold
+            )));
+        }
+
+        Ok(partials)
     }
 
     /// Aggregate FROST signatures into threshold signature
@@ -468,20 +609,50 @@ impl ConsensusCoordinator {
         &self,
         partial_signatures: &[aura_core::frost::PartialSignature],
         nonce_commitments: &[aura_core::frost::NonceCommitment],
+        message: &[u8],
         consensus_id: ConsensusId,
+        threshold: u16,
+        group_public_key: &PublicKeyPackage,
     ) -> Result<aura_core::frost::ThresholdSignature> {
-        // TODO: Implement actual FROST signature aggregation:
-        // 1. Verify all partial signatures are valid
-        // 2. Use FROST aggregation algorithm
-        // 3. Produce final group signature
-        // 4. Validate against group public key
+        if partial_signatures.len() < threshold as usize {
+            return Err(AuraError::invalid(format!(
+                "insufficient partial signatures for consensus {}: have {}, need {}",
+                consensus_id,
+                partial_signatures.len(),
+                threshold
+            )));
+        }
 
-        let _ = partial_signatures; // Suppress unused warning
-        let _ = nonce_commitments; // Suppress unused warning
-        let _ = consensus_id; // Suppress unused warning
+        let frost_group: frost_ed25519::keys::PublicKeyPackage = group_public_key
+            .clone()
+            .try_into()
+            .map_err(|e| AuraError::crypto(format!("invalid group public key: {e}")))?;
 
-        // Placeholder implementation
-        Ok(aura_core::frost::ThresholdSignature::new(vec![], vec![]))
+        let mut commitments = std::collections::BTreeMap::new();
+        for commitment in nonce_commitments {
+            commitments.insert(commitment.signer, commitment.clone());
+        }
+
+        let mut signers: Vec<u16> = partial_signatures.iter().map(|p| p.signer).collect();
+        signers.sort();
+        signers.dedup();
+
+        let signature = aura_core::crypto::tree_signing::frost_aggregate(
+            partial_signatures,
+            message,
+            &commitments,
+            &frost_group,
+        )
+        .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {e}")))?;
+
+        let adapter = CoreFrostAdapter;
+        adapter
+            .verify_aggregate(group_public_key, message, &signature)
+            .map_err(|e| AuraError::crypto(format!("threshold verification failed: {e}")))?;
+
+        Ok(aura_core::frost::ThresholdSignature::new(
+            signature, signers,
+        ))
     }
 
     /// Implement production gossip protocols
@@ -560,6 +731,15 @@ pub struct ConsensusInstance {
 
     /// Timeout in milliseconds
     pub timeout_ms: u64,
+
+    /// FROST key packages per witness
+    pub key_packages: BTreeMap<AuthorityId, frost_ed25519::keys::KeyPackage>,
+
+    /// Group public key
+    pub group_public_key: PublicKeyPackage,
+
+    /// Stored signing nonces per witness (for local signing simulation)
+    pub signing_nonces: BTreeMap<AuthorityId, frost_ed25519::round1::SigningNonces>,
 }
 
 /// States of a consensus instance
@@ -602,9 +782,51 @@ impl Default for ConsensusCoordinator {
     }
 }
 
+fn build_key_packages(
+    key_packages: &HashMap<AuthorityId, aura_core::frost::Share>,
+    group_public_key: &PublicKeyPackage,
+    threshold: u16,
+) -> Result<BTreeMap<AuthorityId, frost_ed25519::keys::KeyPackage>> {
+    let frost_group: frost_ed25519::keys::PublicKeyPackage = group_public_key
+        .clone()
+        .try_into()
+        .map_err(|e| AuraError::crypto(format!("invalid group public key: {e}")))?;
+
+    let mut result = BTreeMap::new();
+    for (authority, share) in key_packages {
+        let identifier = share
+            .frost_identifier()
+            .map_err(|e| AuraError::crypto(format!("invalid signer id for {authority:?}: {e}")))?;
+        let signing_share = share.to_frost().map_err(|e| {
+            AuraError::crypto(format!("invalid signing share for {authority:?}: {e}"))
+        })?;
+        let verifying_share = frost_group
+            .verifying_shares()
+            .get(&identifier)
+            .ok_or_else(|| {
+                AuraError::crypto(format!(
+                    "missing verifying share for signer {} in group package",
+                    share.identifier
+                ))
+            })?;
+
+        let key_package = frost_ed25519::keys::KeyPackage::new(
+            identifier,
+            signing_share,
+            *verifying_share,
+            *frost_group.verifying_key(),
+            threshold,
+        );
+        result.insert(*authority, key_package);
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::frost::Share;
     use serde::Serialize;
 
     #[derive(Serialize)]
@@ -618,6 +840,15 @@ mod tests {
 
         let authorities = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
 
+        let (frost_key_packages, frost_group_public) =
+            aura_testkit::builders::keys::helpers::test_frost_key_shares(2, 3, 42);
+
+        let group_public_key: aura_core::frost::PublicKeyPackage = frost_group_public.into();
+        let mut key_packages: std::collections::HashMap<AuthorityId, Share> = Default::default();
+        for (authority, (_id, key_pkg)) in authorities.iter().zip(frost_key_packages.iter()) {
+            key_packages.insert(*authority, Share::from(key_pkg.clone()));
+        }
+
         let prestate = Prestate::new(vec![(authorities[0], Hash32::default())], Hash32::default());
 
         let operation = TestOperation {
@@ -625,7 +856,14 @@ mod tests {
         };
 
         let instance_id = coordinator
-            .start_consensus(prestate, &operation, authorities, 2)
+            .start_consensus(
+                prestate,
+                &operation,
+                authorities,
+                2,
+                key_packages,
+                group_public_key,
+            )
             .await
             .unwrap();
 

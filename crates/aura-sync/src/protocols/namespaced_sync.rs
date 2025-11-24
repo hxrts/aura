@@ -8,7 +8,7 @@
 use crate::core::config::SyncConfig;
 use crate::core::errors::{sync_network_error, sync_serialization_error, sync_session_error};
 use aura_core::identifiers::ContextId;
-use aura_core::{AuraError, AuthorityId, Result};
+use aura_core::{time::OrderTime, AuraError, AuthorityId, Result};
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
 use parking_lot::RwLock;
@@ -29,7 +29,7 @@ pub struct NamespacedSync {
 ///
 /// Supports pagination by including known_fact_ids from previous requests.
 /// For the first page, leave known_fact_ids empty. For subsequent pages,
-/// include all fact_ids received in previous responses to continue pagination.
+/// include all ordering tokens received in previous responses to continue pagination.
 ///
 /// # Example
 /// ```rust,ignore
@@ -41,9 +41,9 @@ pub struct NamespacedSync {
 ///     max_facts: 100,
 /// };
 ///
-/// // Subsequent pages (accumulate all previous fact_ids)
+/// // Subsequent pages (accumulate all previous order tokens)
 /// let mut all_known_facts = previous_response.facts.iter()
-///     .map(|f| f.fact_id.clone()).collect();
+///     .map(|f| f.order.clone()).collect();
 /// let next_request = SyncRequest {
 ///     namespace: my_namespace,
 ///     requester: authority_id,
@@ -58,7 +58,7 @@ pub struct SyncRequest {
     /// Requesting authority
     pub requester: AuthorityId,
     /// Facts already known (for delta sync and pagination)
-    pub known_fact_ids: Vec<aura_journal::FactId>,
+    pub known_fact_ids: Vec<OrderTime>,
     /// Maximum facts to return per page
     pub max_facts: usize,
 }
@@ -67,9 +67,9 @@ pub struct SyncRequest {
 ///
 /// Supports pagination through the has_more field. When has_more is true,
 /// the client should make another request including all previously received
-/// fact_ids in the known_fact_ids field to get the next page.
+/// fact ordering tokens in the known_fact_ids field to get the next page.
 ///
-/// Facts are returned in deterministic order (sorted by fact_id) to ensure
+/// Facts are returned in deterministic order (sorted by order token) to ensure
 /// consistent pagination across requests.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncResponse {
@@ -294,11 +294,11 @@ impl NamespacedSync {
     ///
     /// Pagination is implemented by:
     /// 1. Filtering out facts already known to the requester (via known_fact_ids)
-    /// 2. Sorting remaining facts by fact_id for deterministic ordering
+    /// 2. Sorting remaining facts by ordering token for deterministic ordering
     /// 3. Taking up to max_facts from the sorted list
     /// 4. Setting has_more=true if more facts are available
     ///
-    /// The requester should include all previously received fact_ids in subsequent
+    /// The requester should include all previously received ordering tokens in subsequent
     /// requests to continue pagination.
     pub async fn handle_sync_request<E: AuraEffects>(
         &self,
@@ -334,17 +334,17 @@ impl NamespacedSync {
     fn create_paginated_response(
         &self,
         facts: Vec<Fact>,
-        known_fact_ids: &[aura_journal::FactId],
+        known_fact_ids: &[OrderTime],
         max_facts: usize,
     ) -> SyncResponse {
         // Filter out already known facts
         let mut unknown_facts: Vec<Fact> = facts
             .into_iter()
-            .filter(|f| !known_fact_ids.contains(&f.fact_id))
+            .filter(|f| !known_fact_ids.contains(&f.order))
             .collect();
 
         // Sort facts for deterministic pagination ordering
-        unknown_facts.sort_by(|a, b| a.fact_id.cmp(&b.fact_id));
+        unknown_facts.sort_by(|a, b| a.order.cmp(&b.order));
 
         let total_unknown = unknown_facts.len();
 
@@ -429,7 +429,7 @@ impl NamespacedAntiEntropy {
                 .journal
                 .read()
                 .iter_facts()
-                .map(|f| f.fact_id.clone())
+                .map(|f| f.order.clone())
                 .collect(),
             max_facts: self.config.protocols.anti_entropy.max_digest_entries,
         };
@@ -460,7 +460,7 @@ impl NamespacedAntiEntropy {
         let request_data = serde_json::to_vec(&request).map_err(|e| {
             sync_serialization_error(
                 "SyncRequest",
-                &format!("Failed to serialize sync request: {}", e),
+                format!("Failed to serialize sync request: {}", e),
             )
         })?;
 
@@ -471,7 +471,7 @@ impl NamespacedAntiEntropy {
                 .send_to_peer(peer_uuid, request_data)
                 .await
                 .map_err(|e| {
-                    sync_network_error(&format!(
+                    sync_network_error(format!(
                         "Failed to send sync request to peer {}: {}",
                         peer, e
                     ))
@@ -479,7 +479,7 @@ impl NamespacedAntiEntropy {
 
             // Receive response from the peer
             let (sender_id, response_data) = effects.receive().await.map_err(|e| {
-                sync_network_error(&format!(
+                sync_network_error(format!(
                     "Failed to receive sync response from peer {}: {}",
                     peer, e
                 ))
@@ -487,7 +487,7 @@ impl NamespacedAntiEntropy {
 
             // Verify the response came from the expected peer
             if sender_id != peer_uuid {
-                return Err(sync_session_error(&format!(
+                return Err(sync_session_error(format!(
                     "Received sync response from unexpected peer: expected {}, got {}",
                     peer, sender_id
                 )));
@@ -497,7 +497,7 @@ impl NamespacedAntiEntropy {
             let response: SyncResponse = serde_json::from_slice(&response_data).map_err(|e| {
                 sync_serialization_error(
                     "SyncResponse",
-                    &format!(
+                    format!(
                         "Failed to deserialize sync response from peer {}: {}",
                         peer, e
                     ),
@@ -506,7 +506,7 @@ impl NamespacedAntiEntropy {
 
             // Verify namespace consistency
             if response.namespace != request.namespace {
-                return Err(sync_session_error(&format!(
+                return Err(sync_session_error(format!(
                     "Sync response namespace mismatch: expected {:?}, got {:?}",
                     request.namespace, response.namespace
                 )));
@@ -519,7 +519,7 @@ impl NamespacedAntiEntropy {
         let timeout_duration = self.config.network.sync_timeout;
         match tokio::time::timeout(timeout_duration, exchange_future).await {
             Ok(result) => result,
-            Err(_) => Err(sync_network_error(&format!(
+            Err(_) => Err(sync_network_error(format!(
                 "Sync request to peer {} timed out after {:?}",
                 peer, timeout_duration
             ))),

@@ -9,8 +9,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::SyncResult;
 use crate::infrastructure::RetryPolicy;
+use aura_core::time::OrderTime;
 use aura_core::{Authority, AuthorityId};
-use aura_journal::{Fact, FactId, FactJournal as Journal, JournalNamespace};
+use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
 
 /// Authority-based journal sync configuration
@@ -39,6 +40,7 @@ impl Default for AuthorityJournalSyncConfig {
 
 /// Authority journal sync protocol
 pub struct AuthorityJournalSyncProtocol {
+    #[allow(dead_code)]
     config: AuthorityJournalSyncConfig,
 }
 
@@ -217,7 +219,7 @@ impl AuthorityJournalSyncProtocol {
         local_journal: &Journal,
         _local_digest: &AuthorityJournalDigest,
         _remote_digest: &AuthorityJournalDigest,
-    ) -> SyncResult<(Vec<Fact>, Vec<FactId>)> {
+    ) -> SyncResult<(Vec<Fact>, Vec<OrderTime>)> {
         // TODO: Implement efficient delta computation
         // For now, send all facts and request none
         let to_send: Vec<Fact> = local_journal.iter_facts().cloned().collect();
@@ -243,7 +245,7 @@ impl AuthorityJournalSyncProtocol {
         &self,
         _effects: &E,
         _peer_id: AuthorityId,
-        _fact_ids: Vec<FactId>,
+        _fact_ids: Vec<OrderTime>,
     ) -> SyncResult<Vec<Fact>> {
         // TODO: Implement network receive
         Ok(vec![])

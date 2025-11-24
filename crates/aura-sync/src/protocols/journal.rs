@@ -33,7 +33,7 @@
 //! }
 //! ```
 
-// TODO: Refactor to use TimeEffects. Uses Instant::now() for sync timing
+// TODO: Refactor to use PhysicalTimeEffects/Logical clocks. Uses Instant::now() for sync timing
 // which should be replaced with effect system integration.
 #![allow(clippy::disallowed_methods)]
 
@@ -223,7 +223,7 @@ impl JournalSyncProtocol {
     /// - Uses `PeerManager` from infrastructure for peer selection
     /// - Uses `RetryPolicy` for resilient operations
     ///
-    /// Note: Callers should obtain `start` via `TimeEffects::now_instant()` and pass it to this method
+    /// Note: Callers should obtain `start` via their time provider (e.g., `PhysicalTimeEffects`) and pass it to this method
     pub async fn sync_with_peers<E>(
         &mut self,
         effects: &E,
@@ -349,7 +349,7 @@ impl JournalSyncProtocol {
                     .anti_entropy
                     .execute(effects, peer)
                     .await
-                    .map_err(|e| sync_session_error(&format!("Anti-entropy sync failed: {}", e)))?;
+                    .map_err(|e| sync_session_error(format!("Anti-entropy sync failed: {}", e)))?;
 
                 tracing::debug!(
                 "Anti-entropy sync with peer {} completed: {} applied, {} duplicates, {} rounds",
@@ -375,10 +375,7 @@ impl JournalSyncProtocol {
         tokio::time::timeout(self.config.sync_timeout, sync_future)
             .await
             .map_err(|_| {
-                sync_timeout_error(
-                    &format!("Sync with peer {}", peer),
-                    self.config.sync_timeout,
-                )
+                sync_timeout_error(format!("Sync with peer {}", peer), self.config.sync_timeout)
             })?
     }
 

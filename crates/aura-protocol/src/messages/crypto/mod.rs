@@ -1,7 +1,7 @@
 //! Threshold cryptography protocol messages
 //!
 //! This module contains message types for distributed cryptographic protocols:
-//! - FROST threshold signatures (use aura-frost crate)
+//! - FROST threshold signatures (via core primitives; higher-level ceremonies may live elsewhere)
 //! - Key resharing and rotation
 //!
 //! Note: DKD protocol messages removed - will be implemented in dedicated aura-dkd feature crate

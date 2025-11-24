@@ -5,7 +5,7 @@
 
 use super::envelope::{EnvelopeId, RendezvousEnvelope, SBB_MESSAGE_SIZE};
 use aura_core::context_derivation::RelayContextDerivation;
-use aura_core::{AuraError, AuraResult, DeviceId};
+use aura_core::{effects::PhysicalTimeEffects, AuraError, AuraResult, DeviceId};
 use aura_protocol::effects::AuraEffects;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -167,6 +167,14 @@ impl SbbFloodingCoordinator {
             self.envelope_cache.remove(&id);
             self.seen_envelopes.remove(&id);
         }
+    }
+
+    /// Get the current wall-clock time in seconds using the effect system.
+    pub async fn current_time_secs(&self) -> u64 {
+        PhysicalTimeEffects::physical_time(self.effects.as_ref())
+            .await
+            .map(|t| t.ts_ms / 1000)
+            .unwrap_or(0)
     }
 }
 

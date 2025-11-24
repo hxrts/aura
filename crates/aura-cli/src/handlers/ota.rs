@@ -108,10 +108,10 @@ async fn propose_upgrade(
     proposal.validate().context("Invalid upgrade proposal")?;
 
     let key = format!("ota:proposal:{}", proposal.package_id);
-    let _ = effects
+    effects
         .store(&key, serde_json::to_vec(&proposal)?)
         .await
-        .map_err(|e| anyhow::Error::from(e))?;
+        .map_err(anyhow::Error::from)?;
 
     ConsoleEffects::log_info(
         effects,
@@ -130,7 +130,7 @@ async fn set_policy(_ctx: &EffectContext, effects: &AuraEffectSystem, policy: &s
     effects
         .store(key, policy.as_bytes().to_vec())
         .await
-        .map_err(|e| anyhow::Error::from(e))?;
+        .map_err(anyhow::Error::from)?;
     ConsoleEffects::log_info(effects, &format!("OTA policy set to: {}", policy)).await?;
     Ok(())
 }
@@ -174,7 +174,7 @@ async fn opt_in(_ctx: &EffectContext, effects: &AuraEffectSystem, proposal_id: &
     effects
         .store(&key, b"opted-in".to_vec())
         .await
-        .map_err(|e| anyhow::Error::from(e))?;
+        .map_err(anyhow::Error::from)?;
 
     ConsoleEffects::log_info(effects, &format!("Opted into proposal: {}", proposal_uuid)).await?;
     Ok(())

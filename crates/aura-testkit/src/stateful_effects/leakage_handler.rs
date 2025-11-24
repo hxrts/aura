@@ -26,6 +26,12 @@ pub struct ProductionLeakageHandler {
     history: Arc<RwLock<Vec<LeakageEvent>>>,
 }
 
+impl Default for ProductionLeakageHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ProductionLeakageHandler {
     pub fn new() -> Self {
         Self {
@@ -39,6 +45,12 @@ impl ProductionLeakageHandler {
 #[derive(Debug)]
 pub struct TestLeakageHandler {
     pub events: Arc<RwLock<Vec<LeakageEvent>>>,
+}
+
+impl Default for TestLeakageHandler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TestLeakageHandler {

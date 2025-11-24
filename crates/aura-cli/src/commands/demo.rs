@@ -87,4 +87,17 @@ pub enum DemoCommands {
         #[arg(long)]
         setup_only: bool,
     },
+
+    /// Run the CLI recovery demo workflow (Bob + guardians)
+    RecoveryWorkflow {
+        /// Scenario root directory (defaults to bundled scenarios/)
+        #[arg(long)]
+        directory: Option<PathBuf>,
+        /// Deterministic seed for simulation
+        #[arg(long, default_value = "2024")]
+        seed: u64,
+        /// Emit detailed simulator report
+        #[arg(long)]
+        detailed_report: bool,
+    },
 }

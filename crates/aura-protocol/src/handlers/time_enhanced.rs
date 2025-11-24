@@ -1,19 +1,17 @@
 //! Enhanced time handler for production use with advanced scheduling capabilities
 //!
-//! TODO: Refactor to use TimeEffects and RandomEffects from the effect system instead of direct
+//! TODO: Refactor to use PhysicalTimeEffects and RandomEffects from the effect system instead of direct
 //! calls to SystemTime::now(), Instant::now(), and Uuid::new_v4().
 
 #![allow(clippy::disallowed_methods)]
 
-use crate::effects::{TimeEffects, TimeError, TimeoutHandle, WakeCondition};
-use async_trait::async_trait;
-use aura_core::AuraError;
+use crate::effects::{TimeoutHandle, WakeCondition};
+use aura_core::effects::PhysicalTimeEffects;
+use aura_core::{AuraError, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, Notify, RwLock};
-use tokio::time::{sleep, Instant};
-use tracing::{debug, info, warn};
+use tokio::time::Instant;
 use uuid::Uuid;
 
 /// Scheduled task information
@@ -51,6 +49,8 @@ pub struct EnhancedTimeHandler {
     timeout_rx: Arc<RwLock<Option<mpsc::UnboundedReceiver<TimeoutHandle>>>>,
     /// Time handler statistics
     stats: Arc<RwLock<TimeHandlerStats>>,
+    /// Underlying time provider for deterministic/testing overrides
+    provider: Arc<dyn PhysicalTimeEffects>,
 }
 
 /// Statistics for the time handler
@@ -67,6 +67,175 @@ pub struct TimeHandlerStats {
 impl EnhancedTimeHandler {
     /// Create a new enhanced time handler
     pub fn new() -> Self {
+        Self::with_provider(Arc::new(aura_effects::time::PhysicalTimeHandler::new()))
+    }
+
+    /// Check if this is a simulated time handler (for testing)
+    pub fn is_simulated(&self) -> bool {
+        // In practice, this would check if provider is a mock/simulated implementation
+        // For now, return false for production handlers
+        false
+    }
+
+    /// Get current instant (for timing operations)
+    pub async fn now_instant(&self) -> tokio::time::Instant {
+        tokio::time::Instant::now()
+    }
+
+    /// Sleep for a given number of milliseconds
+    pub async fn sleep_ms(&self, ms: u64) {
+        let mut stats = self.stats.write().await;
+        stats.total_sleeps += 1;
+        drop(stats);
+
+        // Delegate to the underlying provider
+        let _ = self.provider.sleep_ms(ms).await;
+    }
+
+    /// Set a timeout and return a handle
+    pub async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
+        let timeout_id = uuid::Uuid::new_v4();
+        let expires_at =
+            tokio::time::Instant::now() + tokio::time::Duration::from_millis(timeout_ms);
+
+        let timeout_task = TimeoutTask {
+            id: timeout_id,
+            expires_at,
+            completed: false,
+        };
+
+        {
+            let mut timeouts = self.timeouts.write().await;
+            timeouts.insert(timeout_id, timeout_task);
+        }
+
+        {
+            let mut stats = self.stats.write().await;
+            stats.total_timeouts_set += 1;
+            stats.active_timeouts += 1;
+        }
+
+        timeout_id
+    }
+
+    /// Cancel a timeout
+    pub async fn cancel_timeout(&self, timeout_handle: TimeoutHandle) -> Result<()> {
+        let mut timeouts = self.timeouts.write().await;
+
+        if timeouts.remove(&timeout_handle).is_some() {
+            let mut stats = self.stats.write().await;
+            stats.total_timeouts_cancelled += 1;
+            stats.active_timeouts = stats.active_timeouts.saturating_sub(1);
+            Ok(())
+        } else {
+            Err(AuraError::not_found("Timeout not found"))
+        }
+    }
+
+    /// Register a context for time notifications
+    pub fn register_context(&self, context_id: uuid::Uuid) {
+        let notifier = Arc::new(tokio::sync::Notify::new());
+        let contexts = self.contexts.clone();
+
+        tokio::spawn(async move {
+            let mut contexts_guard = contexts.write().await;
+            contexts_guard.insert(context_id, notifier);
+        });
+    }
+
+    /// Unregister a context
+    pub fn unregister_context(&self, context_id: uuid::Uuid) {
+        let contexts = self.contexts.clone();
+
+        tokio::spawn(async move {
+            let mut contexts_guard = contexts.write().await;
+            contexts_guard.remove(&context_id);
+        });
+    }
+
+    /// Yield until a wake condition is met
+    pub async fn yield_until(&self, condition: WakeCondition) -> Result<()> {
+        let mut stats = self.stats.write().await;
+        stats.total_yield_operations += 1;
+        drop(stats);
+
+        match condition {
+            WakeCondition::Immediate => Ok(()),
+            WakeCondition::TimeoutAt(target_timestamp) => {
+                let current = self.current_timestamp().await;
+                if current >= target_timestamp {
+                    return Ok(());
+                }
+
+                let sleep_duration = target_timestamp.saturating_sub(current);
+                self.sleep_ms(sleep_duration).await;
+                Ok(())
+            }
+            WakeCondition::ThresholdEvents {
+                threshold,
+                timeout_ms,
+            } => {
+                let start_count = self.get_event_count().await;
+                let target_count = start_count + threshold;
+
+                let timeout_future = self.sleep_ms(timeout_ms);
+                let wait_future = async {
+                    loop {
+                        let current_count = self.get_event_count().await;
+                        if current_count >= target_count {
+                            return Ok(());
+                        }
+
+                        // Wait for global notification
+                        self.global_notify.notified().await;
+                    }
+                };
+
+                tokio::select! {
+                    result = wait_future => result,
+                    _ = timeout_future => Err(AuraError::invalid("Threshold events not reached within timeout")),
+                }
+            }
+            _ => {
+                // For other conditions, check if satisfied immediately
+                if self.check_wake_condition(&condition).await {
+                    Ok(())
+                } else {
+                    Err(AuraError::invalid(
+                        "Wake condition not supported or not met",
+                    ))
+                }
+            }
+        }
+    }
+
+    /// Notify that events are available
+    pub async fn notify_events_available(&self) {
+        self.increment_event_count().await;
+        self.global_notify.notify_waiters();
+    }
+
+    /// Current timestamp in milliseconds
+    pub async fn current_timestamp(&self) -> u64 {
+        self.provider
+            .physical_time()
+            .await
+            .map(|p| p.ts_ms)
+            .unwrap_or_default()
+    }
+
+    /// Current epoch in milliseconds (alias)
+    pub async fn current_epoch(&self) -> u64 {
+        self.current_timestamp().await
+    }
+
+    /// Millisecond precision helper
+    pub async fn current_timestamp_millis(&self) -> u64 {
+        self.current_timestamp().await
+    }
+
+    /// Create a new enhanced time handler with explicit time provider
+    pub fn with_provider(provider: Arc<dyn PhysicalTimeEffects>) -> Self {
         let (timeout_tx, timeout_rx) = mpsc::unbounded_channel();
 
         let handler = Self {
@@ -78,6 +247,7 @@ impl EnhancedTimeHandler {
             timeout_tx: Arc::new(RwLock::new(Some(timeout_tx))),
             timeout_rx: Arc::new(RwLock::new(Some(timeout_rx))),
             stats: Arc::new(RwLock::new(TimeHandlerStats::default())),
+            provider,
         };
 
         // Start the timeout processing background task
@@ -196,268 +366,23 @@ impl EnhancedTimeHandler {
     }
 }
 
-impl Default for EnhancedTimeHandler {
-    fn default() -> Self {
-        Self::new()
+#[async_trait::async_trait]
+impl aura_core::effects::PhysicalTimeEffects for EnhancedTimeHandler {
+    async fn physical_time(
+        &self,
+    ) -> std::result::Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+        self.provider.physical_time().await
+    }
+
+    async fn sleep_ms(&self, ms: u64) -> std::result::Result<(), aura_core::effects::TimeError> {
+        self.sleep_ms(ms).await;
+        Ok(())
     }
 }
 
-#[async_trait]
-impl TimeEffects for EnhancedTimeHandler {
-    async fn current_epoch(&self) -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
-    }
-
-    async fn current_timestamp(&self) -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-    }
-
-    async fn current_timestamp_millis(&self) -> u64 {
-        self.current_epoch().await
-    }
-
-    async fn sleep_ms(&self, ms: u64) {
-        debug!("Sleeping for {} milliseconds", ms);
-
-        let mut stats = self.stats.write().await;
-        stats.total_sleeps += 1;
-        drop(stats);
-
-        sleep(Duration::from_millis(ms)).await;
-    }
-
-    async fn sleep_until(&self, epoch: u64) {
-        debug!("Sleeping until epoch: {}", epoch);
-
-        let current = self.current_epoch().await;
-        if epoch <= current {
-            return; // Already past target time
-        }
-
-        let sleep_duration = epoch - current;
-        self.sleep_ms(sleep_duration).await;
-    }
-
-    async fn delay(&self, duration: Duration) {
-        debug!("Delaying for {:?}", duration);
-
-        let mut stats = self.stats.write().await;
-        stats.total_sleeps += 1;
-        drop(stats);
-
-        sleep(duration).await;
-    }
-
-    async fn sleep(&self, duration_ms: u64) -> Result<(), AuraError> {
-        self.sleep_ms(duration_ms).await;
-        Ok(())
-    }
-
-    async fn yield_until(&self, condition: WakeCondition) -> Result<(), TimeError> {
-        debug!("Yielding until condition: {:?}", condition);
-
-        let mut stats = self.stats.write().await;
-        stats.total_yield_operations += 1;
-        drop(stats);
-
-        // Handle timeout-based conditions immediately
-        match &condition {
-            WakeCondition::TimeoutAt(target_timestamp) => {
-                let current = self.current_timestamp().await;
-                if *target_timestamp > current {
-                    let delay_seconds = target_timestamp - current;
-                    sleep(Duration::from_secs(delay_seconds)).await;
-                }
-                return Ok(());
-            }
-            WakeCondition::ThresholdEvents { timeout_ms, .. } => {
-                let timeout_duration = Duration::from_millis(*timeout_ms);
-                let start_time = Instant::now();
-
-                loop {
-                    if self.check_wake_condition(&condition).await {
-                        return Ok(());
-                    }
-
-                    if start_time.elapsed() >= timeout_duration {
-                        return Err(TimeError::Timeout {
-                            timeout_ms: *timeout_ms,
-                        });
-                    }
-
-                    sleep(Duration::from_millis(10)).await; // Poll every 10ms
-                }
-            }
-            _ => {}
-        }
-
-        // For other conditions, create a scheduled task
-        let task_id = Uuid::new_v4();
-        let notifier = Arc::new(Notify::new());
-
-        let task = ScheduledTask {
-            id: task_id,
-            wake_condition: condition.clone(),
-            created_at: Instant::now(),
-            context_id: None,
-            notifier: notifier.clone(),
-        };
-
-        {
-            let mut tasks = self.scheduled_tasks.write().await;
-            tasks.insert(task_id, task);
-        }
-
-        // Wait for notification or condition to be satisfied
-        loop {
-            if self.check_wake_condition(&condition).await {
-                break;
-            }
-
-            // Wait for notification with timeout
-            tokio::select! {
-                _ = notifier.notified() => {
-                    // Check condition again after notification
-                    continue;
-                }
-                _ = sleep(Duration::from_millis(100)) => {
-                    // Periodic check
-                    continue;
-                }
-            }
-        }
-
-        // Remove completed task
-        {
-            let mut tasks = self.scheduled_tasks.write().await;
-            tasks.remove(&task_id);
-        }
-
-        Ok(())
-    }
-
-    async fn wait_until(&self, condition: WakeCondition) -> Result<(), AuraError> {
-        self.yield_until(condition).await.map_err(|e| {
-            AuraError::internal(format!("System time error: wait_until failed: {}", e))
-        })
-    }
-
-    async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
-        debug!("Setting timeout for {} milliseconds", timeout_ms);
-
-        let handle = Uuid::new_v4();
-        let expires_at = Instant::now() + Duration::from_millis(timeout_ms);
-
-        let timeout_task = TimeoutTask {
-            id: handle,
-            expires_at,
-            completed: false,
-        };
-
-        {
-            let mut timeouts = self.timeouts.write().await;
-            timeouts.insert(handle, timeout_task);
-        }
-
-        let mut stats = self.stats.write().await;
-        stats.total_timeouts_set += 1;
-        stats.active_timeouts += 1;
-        drop(stats);
-
-        // Schedule timeout completion
-        let timeout_tx = self.timeout_tx.clone();
-        tokio::spawn(async move {
-            sleep(Duration::from_millis(timeout_ms)).await;
-
-            if let Some(ref sender) = *timeout_tx.read().await {
-                let _ = sender.send(handle);
-            }
-        });
-
-        handle
-    }
-
-    async fn cancel_timeout(&self, handle: TimeoutHandle) -> Result<(), TimeError> {
-        debug!("Cancelling timeout: {}", handle);
-
-        let mut timeouts = self.timeouts.write().await;
-        if timeouts.remove(&handle).is_some() {
-            let mut stats = self.stats.write().await;
-            stats.total_timeouts_cancelled += 1;
-            stats.active_timeouts = stats.active_timeouts.saturating_sub(1);
-
-            info!("Timeout cancelled: {}", handle);
-            Ok(())
-        } else {
-            warn!("Attempted to cancel non-existent timeout: {}", handle);
-            Err(TimeError::ServiceUnavailable)
-        }
-    }
-
-    fn is_simulated(&self) -> bool {
-        false
-    }
-
-    fn register_context(&self, context_id: Uuid) {
-        debug!("Registering context: {}", context_id);
-
-        let contexts = self.contexts.clone();
-        let stats = self.stats.clone();
-
-        tokio::spawn(async move {
-            let notifier = Arc::new(Notify::new());
-            contexts.write().await.insert(context_id, notifier);
-
-            let mut stats_guard = stats.write().await;
-            stats_guard.active_contexts += 1;
-        });
-    }
-
-    fn unregister_context(&self, context_id: Uuid) {
-        debug!("Unregistering context: {}", context_id);
-
-        let contexts = self.contexts.clone();
-        let stats = self.stats.clone();
-
-        tokio::spawn(async move {
-            contexts.write().await.remove(&context_id);
-
-            let mut stats_guard = stats.write().await;
-            stats_guard.active_contexts = stats_guard.active_contexts.saturating_sub(1);
-        });
-    }
-
-    async fn notify_events_available(&self) {
-        debug!("Notifying all waiters that events are available");
-
-        self.increment_event_count().await;
-        self.global_notify.notify_waiters();
-
-        // Notify all registered contexts
-        let contexts = self.contexts.read().await;
-        for notifier in contexts.values() {
-            notifier.notify_waiters();
-        }
-
-        // Notify scheduled tasks
-        let tasks = self.scheduled_tasks.read().await;
-        for task in tasks.values() {
-            task.notifier.notify_waiters();
-        }
-    }
-
-    fn resolution_ms(&self) -> u64 {
-        1 // 1 millisecond resolution
-    }
-
-    async fn now_instant(&self) -> std::time::Instant {
-        std::time::Instant::now()
+impl Default for EnhancedTimeHandler {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -494,7 +419,7 @@ mod tests {
     async fn test_sleep_operations() {
         let handler = EnhancedTimeHandler::default();
 
-        let start = Instant::now();
+        let start = handler.now_instant().await;
         handler.sleep_ms(50).await;
         let elapsed = start.elapsed();
 
@@ -533,7 +458,7 @@ mod tests {
         handler.register_context(context_id);
 
         // Give some time for async registration
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        handler.sleep_ms(10).await;
 
         let stats = handler.get_statistics().await;
         assert_eq!(stats.active_contexts, 1);
@@ -542,7 +467,7 @@ mod tests {
         handler.unregister_context(context_id);
 
         // Give some time for async unregistration
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        handler.sleep_ms(10).await;
 
         let stats = handler.get_statistics().await;
         assert_eq!(stats.active_contexts, 0);
@@ -591,7 +516,7 @@ mod tests {
             let handler = handler.clone();
             async move {
                 for _ in 0..3 {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
+                    handler.sleep_ms(10).await;
                     handler.simulate_event().await;
                 }
             }
@@ -623,7 +548,7 @@ mod tests {
         let timeout_handle = handler.set_timeout(1).await;
 
         // Wait for it to expire
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        handler.sleep_ms(10).await;
 
         // Cleanup expired timeouts
         handler.cleanup_expired_timeouts().await;

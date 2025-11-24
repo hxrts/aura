@@ -120,7 +120,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
     ///
     /// # Arguments
     /// * `timestamp_ms` - Current timestamp in milliseconds since UNIX epoch.
-    ///   Should be obtained from `TimeEffects` to maintain effect system boundaries.
+    ///   Should be obtained from `PhysicalTimeEffects` to maintain effect system boundaries.
     async fn record_send_leakage(
         &self,
         source: AuthorityId,
@@ -149,7 +149,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
     ///
     /// # Arguments
     /// * `timestamp_ms` - Current timestamp in milliseconds since UNIX epoch.
-    ///   Should be obtained from `TimeEffects` to maintain effect system boundaries.
+    ///   Should be obtained from `PhysicalTimeEffects` to maintain effect system boundaries.
     async fn record_recv_leakage(
         &self,
         source: AuthorityId,

@@ -92,13 +92,13 @@ The network layer does not reveal authority structure. Context identifiers do no
 Secure channels follow a lifecycle aligned with rendezvous and epoch semantics:
 
 1. **Establishment**:
-   - Ranch rendezvous per `108_rendezvous.md` to exchange descriptors inside the relational context journal.
+   - Ranch rendezvous per [Rendezvous Architecture](110_rendezvous.md) to exchange descriptors inside the [relational context](103_relational_contexts.md) journal.
    - Each descriptor contains transport hints, a handshake PSK derived from the context key, and a `punch_nonce`.
    - Once both parties receive offer/answer envelopes, they perform Noise IKpsk2 using the context-derived keys and establish a QUIC or relay-backed channel bound to `(ContextId, peer)`.
 
 2. **Steady state**:
    - Guard chain enforces CapGuard → FlowGuard → JournalCoupler for every send.
-   - FlowBudget receipts created on each hop are inserted into the relational context journal so downstream peers can audit path compliance.
+   - FlowBudget receipts created on each hop are inserted into the [relational context](103_relational_contexts.md) journal so downstream peers can audit path compliance.
 
 3. **Re-keying on epoch change**:
    - When the account or context epoch changes (as recorded in `101_accounts_and_commitment_tree.md` / `103_relational_contexts.md`), the channel detects the mismatch, tears down the existing Noise session, and triggers rendezvous to derive fresh keys.

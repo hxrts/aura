@@ -74,3 +74,11 @@ default = []
 [dev-dependencies]
 # For testing
 proptest = { workspace = true }
+# For benchmarking
+criterion = { workspace = true, features = ["async_tokio"] }
+async-trait = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[[bench]]
+name = "time_system"
+harness = false

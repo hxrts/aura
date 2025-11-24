@@ -14,13 +14,13 @@ pub struct AuthorityId(Uuid);
 
 This identifier selects the journal namespace associated with the authority. The identifier does not encode structure or membership. The authority publishes its current public key and root commitment inside its own journal.
 
-Authorities can interact with other authorities through relational contexts. These interactions do not change the authority's internal structure. The authority remains isolated except where relational state is explicitly shared.
+Authorities can interact with other authorities through [relational contexts](103_relational_contexts.md). These interactions do not change the authority's internal structure. The authority remains isolated except where relational state is explicitly shared.
 
 ## 2. Account Authorities
 
 An account authority is an authority with long term state. An account maintains device membership through its commitment tree. An account contains its own journal namespace. An account evolves through attested operations stored as facts.
 
-An account authority uses a commitment tree to define its internal threshold structure. The commitment tree stores device leaves and branch policies. The commitment tree determines which devices can sign operations under the account root. The account root commitment identifies the current state of the commitment tree.
+An account authority uses a [commitment tree](101_accounts_and_commitment_tree.md) to define its internal threshold structure. The commitment tree stores device leaves and branch policies. The commitment tree determines which devices can sign operations under the account root. The account root commitment identifies the current state of the commitment tree.
 
 ```rust
 pub struct AccountAuthority {
@@ -31,7 +31,7 @@ pub struct AccountAuthority {
 
 This structure references the account authority. The reduction function computes the current `root_commitment` from the account journal. The account authority does not reveal device structure to external parties.
 
-An account authority derives context specific keys using deterministic key derivation. These derived authorities represent application scoped identities. A derived authority does not expose any structure of the account authority.
+An account authority derives context specific keys using deterministic key derivation. These derived authorities represent application scoped identities. See [Core Systems Guide](802_core_systems_guide.md) for implementation examples. A derived authority does not expose any structure of the account authority.
 
 ## 3. Operators and Devices
 
@@ -61,7 +61,7 @@ pub struct ContextId(Uuid);
 
 A `ContextId` identifies a relational context. It does not encode membership. It does not reveal which authorities participate. The context stores only the relational facts required by the participants.
 
-Identity inside a context may include display names or other profile attributes. These values are private to that context. No external party can observe them. Petnames and local mappings allow a device to associate multiple authorities with a single local contact.
+Identity inside a context may include display names or other profile attributes. These values are private to that context. See [Identifiers and Boundaries](105_identifiers_and_boundaries.md) for context isolation mechanisms. No external party can observe them. Petnames and local mappings allow a device to associate multiple authorities with a single local contact.
 
 ## 5. Authority Relationships
 
@@ -86,3 +86,11 @@ Every relationship is private to its participants. Each relationship forms its o
 ## 7. Summary
 
 Authorities are cryptographic actors with private internal state. Accounts are authorities with commitment tree based state machines. Operators control devices that implement authority operations. Identity emerges only inside relational contexts. No identifier in Aura encodes global identity. Each context defines its own small scope of identity and relationship meaning.
+
+## See Also
+
+- [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) - Implementation of account authority internal structure
+- [Relational Contexts](103_relational_contexts.md) - Cross-authority relationship management
+- [Identifiers and Boundaries](105_identifiers_and_boundaries.md) - Context isolation mechanisms
+- [Core Systems Guide](802_core_systems_guide.md) - Practical implementation patterns
+- [Privacy and Information Flow](003_information_flow_contract.md) - Privacy guarantees and isolation

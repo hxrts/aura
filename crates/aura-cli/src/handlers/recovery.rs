@@ -6,13 +6,29 @@ use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::{JournalEffects, StorageEffects, TimeEffects};
-use aura_core::identifiers::GuardianId;
-use aura_core::{AccountId, AuthorityId, DeviceId};
+use aura_core::identifiers::{ContextId, GuardianId};
+use aura_core::time::TimeStamp;
+use aura_core::{AccountId, AuthorityId, DeviceId, FactValue};
+use aura_journal::fact::{FactContent, RelationalFact};
 use aura_recovery::types::{GuardianProfile, GuardianSet};
 use aura_recovery::{RecoveryRequest, RecoveryResponse};
 use std::path::Path;
 
 use crate::RecoveryAction;
+
+/// Extract a millisecond timestamp from any TimeStamp variant for display/logging.
+fn timestamp_ms(ts: &TimeStamp) -> u64 {
+    match ts {
+        TimeStamp::PhysicalClock(p) => p.ts_ms,
+        TimeStamp::LogicalClock(l) => l.lamport,
+        TimeStamp::OrderClock(o) => {
+            let mut buf = [0u8; 8];
+            buf.copy_from_slice(&o.0[..8]);
+            u64::from_be_bytes(buf)
+        }
+        TimeStamp::Range(r) => r.latest_ms,
+    }
+}
 
 /// Handle recovery action requests from CLI
 ///
@@ -52,6 +68,19 @@ pub async fn handle_recovery(
             dispute_recovery(ctx, effects, evidence, reason).await
         }
     }
+}
+
+fn encode_recovery_fact<T: serde::Serialize>(kind: &str, payload: &T) -> Result<FactValue> {
+    let content = FactContent::Relational(RelationalFact::Generic {
+        context_id: ContextId::new(),
+        binding_type: kind.to_string(),
+        binding_data: serde_json::to_vec(payload)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize recovery payload: {}", e))?,
+    });
+
+    serde_json::to_vec(&content)
+        .map(FactValue::Bytes)
+        .map_err(|e| anyhow::anyhow!("Failed to encode fact content: {}", e))
 }
 
 async fn start_recovery(
@@ -101,8 +130,7 @@ async fn start_recovery(
                     guardian_id = ?guardian_id,
                     "Guardian device ID not found in Journal, using generated ID"
                 );
-                DeviceId::try_from(format!("guardian-device-{}", i).as_str())
-                    .map_err(|e| anyhow::anyhow!("Failed to create device ID: {}", e))?
+                DeviceId::from(format!("guardian-device-{}", i).as_str())
             }
         };
 
@@ -216,10 +244,7 @@ async fn start_recovery(
 
     // Update journal with recovery initiation using proper effects
     let recovery_fact_key = format!("recovery_initiated.{}", account_id);
-    let recovery_fact_value = aura_core::FactValue::String(
-        serde_json::to_string(&recovery_request)
-            .map_err(|e| anyhow::anyhow!("Failed to serialize recovery fact: {}", e))?,
-    );
+    let recovery_fact_value = encode_recovery_fact("recovery_initiated", &recovery_request)?;
 
     let mut journal_delta = aura_core::Journal::new();
     journal_delta
@@ -326,10 +351,13 @@ async fn approve_recovery(
 
     // Generate real guardian approval using FROST threshold signing
     let approval_result =
-        generate_guardian_approval(ctx, effects, &recovery_request, &guardian_profile).await?;
+        generate_guardian_approval(ctx, effects, &recovery_request, guardian_profile).await?;
 
     println!("Guardian approval completed successfully!");
-    println!("Approval timestamp: {}", approval_result.timestamp);
+    println!(
+        "Approval timestamp (ms): {}",
+        timestamp_ms(&approval_result.timestamp)
+    );
     println!("Key share size: {} bytes", approval_result.key_share.len());
 
     // Build recovery share and evidence (placeholder aggregation)
@@ -337,16 +365,16 @@ async fn approve_recovery(
         guardian: guardian_profile.clone(),
         share: approval_result.key_share.clone(),
         partial_signature: approval_result.partial_signature.clone(),
-        issued_at: approval_result.timestamp,
+        issued_at: timestamp_ms(&approval_result.timestamp),
     };
 
     let evidence = aura_recovery::types::RecoveryEvidence {
         account_id: recovery_request.account_id,
         recovering_device: recovery_request.requesting_device,
         guardians: vec![guardian_profile.guardian_id],
-        issued_at: approval_result.timestamp,
-        cooldown_expires_at: approval_result.timestamp + 24 * 3600,
-        dispute_window_ends_at: approval_result.timestamp + 48 * 3600,
+        issued_at: timestamp_ms(&approval_result.timestamp) / 1000,
+        cooldown_expires_at: timestamp_ms(&approval_result.timestamp) / 1000 + 24 * 3600,
+        dispute_window_ends_at: timestamp_ms(&approval_result.timestamp) / 1000 + 48 * 3600,
         guardian_profiles: vec![guardian_profile.clone()],
         disputes: Vec::new(),
         threshold_signature: None,
@@ -522,23 +550,24 @@ async fn dispute_recovery(
 
     // Look up recovery evidence by ID in Journal
     let evidence_key = format!("recovery_evidence.{}", evidence);
-    if let Some(aura_core::FactValue::String(evidence_data)) =
-        dispute_journal.facts.get(&evidence_key)
-    {
-        // Parse evidence data to check dispute window
-        if let Ok(evidence_json) = serde_json::from_str::<serde_json::Value>(&evidence_data) {
-            if let Some(dispute_window_ends) = evidence_json
-                .get("dispute_window_ends_at")
-                .and_then(|v| v.as_u64())
-            {
-                let current_time =
-                    <AuraEffectSystem as TimeEffects>::current_timestamp(effects).await;
-                if current_time > dispute_window_ends {
-                    return Err(anyhow::anyhow!(
-                        "Dispute window has closed for evidence {}",
-                        evidence
-                    ));
-                }
+    if let Some(value) = dispute_journal.facts.get(&evidence_key) {
+        let evidence_json: serde_json::Value = match value {
+            FactValue::String(data) => serde_json::from_str(data),
+            FactValue::Bytes(bytes) => serde_json::from_slice(bytes),
+            _ => Ok(serde_json::Value::Null),
+        }
+        .map_err(|e| anyhow::anyhow!("Failed to parse evidence JSON: {}", e))?;
+
+        if let Some(dispute_window_ends) = evidence_json
+            .get("dispute_window_ends_at")
+            .and_then(|v| v.as_u64())
+        {
+            let current_time = <AuraEffectSystem as TimeEffects>::current_timestamp(effects).await;
+            if current_time > dispute_window_ends {
+                return Err(anyhow::anyhow!(
+                    "Dispute window has closed for evidence {}",
+                    evidence
+                ));
             }
         }
     }
@@ -571,10 +600,7 @@ async fn dispute_recovery(
 
     // Store dispute in Journal using proper JournalEffects API
     let dispute_key = format!("recovery_dispute.{}.{}", evidence, dispute.guardian_id);
-    let dispute_value = aura_core::FactValue::String(
-        serde_json::to_string(&dispute)
-            .map_err(|e| anyhow::anyhow!("Failed to serialize dispute: {}", e))?,
-    );
+    let dispute_value = encode_recovery_fact("recovery_dispute", &dispute)?;
 
     // Create a journal delta with the new dispute fact
     let mut journal_delta = aura_core::Journal::new();
@@ -618,23 +644,23 @@ async fn query_guardian_device_id(
     guardian_id: &GuardianId,
 ) -> Result<DeviceId, anyhow::Error> {
     // Query Journal for guardian metadata using proper JournalEffects
-    let journal = effects
-        .get_journal()
-        .await
-        .map_err(|e| anyhow::Error::new(e))?;
+    let journal = effects.get_journal().await.map_err(anyhow::Error::new)?;
 
     // Look for guardian device mapping in journal facts
     let guardian_key = format!("guardian.{}.device_id", guardian_id);
     if let Some(fact) = journal.facts.get(&guardian_key) {
-        if let aura_core::FactValue::String(device_str) = fact {
-            return DeviceId::try_from(device_str.as_str())
-                .map_err(|e| anyhow::anyhow!("Invalid device ID in journal: {}", e));
+        let device_str = match fact {
+            aura_core::FactValue::String(device_str) => Some(device_str.clone()),
+            aura_core::FactValue::Bytes(bytes) => String::from_utf8(bytes.clone()).ok(),
+            _ => None,
+        };
+        if let Some(device_str) = device_str {
+            return Ok(DeviceId::from(device_str.as_str()));
         }
     }
 
     // If not found in journal, try guardian ID as device ID
-    DeviceId::try_from(guardian_id.to_string().as_str())
-        .map_err(|e| anyhow::anyhow!("Failed to create device ID for guardian: {}", e))
+    Ok(DeviceId::from(guardian_id.to_string().as_str()))
 }
 
 /// Get current device ID from agent configuration
@@ -643,14 +669,16 @@ async fn get_current_device_id(
     effects: &AuraEffectSystem,
 ) -> Result<DeviceId, anyhow::Error> {
     // Try to get device ID from journal facts using proper JournalEffects
-    let journal = effects
-        .get_journal()
-        .await
-        .map_err(|e| anyhow::Error::new(e))?;
+    let journal = effects.get_journal().await.map_err(anyhow::Error::new)?;
 
     // Look for device ID in journal facts
     if let Some(fact) = journal.facts.get("agent.device_id") {
-        if let aura_core::FactValue::String(device_str) = fact {
+        let device_str = match fact {
+            aura_core::FactValue::String(device_str) => Some(device_str.clone()),
+            aura_core::FactValue::Bytes(bytes) => String::from_utf8(bytes.clone()).ok(),
+            _ => None,
+        };
+        if let Some(device_str) = device_str {
             return DeviceId::try_from(device_str.as_str())
                 .map_err(|e| anyhow::anyhow!("Invalid device ID in journal: {}", e));
         }
@@ -668,81 +696,38 @@ async fn generate_guardian_approval(
     request: &RecoveryRequest,
     guardian: &GuardianProfile,
 ) -> Result<aura_recovery::guardian_key_recovery::GuardianKeyApproval, anyhow::Error> {
-    use aura_core::frost::TreeSigningContext;
-    use aura_frost::{FrostCrypto, ThresholdSigningConfig};
     use aura_recovery::guardian_key_recovery::GuardianKeyApproval;
 
     // Get current timestamp
-    let timestamp = <AuraEffectSystem as TimeEffects>::current_timestamp(effects).await;
+    let timestamp_ms = <AuraEffectSystem as TimeEffects>::current_timestamp(effects).await;
 
     // Create recovery message to sign
     let recovery_message = serde_json::to_vec(&request)
         .map_err(|e| anyhow::anyhow!("Failed to serialize recovery request: {}", e))?;
 
     println!(
-        "Generating FROST approval as guardian {} for recovery {}",
+        "Generating placeholder guardian approval for guardian {} and recovery {}",
         guardian.guardian_id, request.account_id
     );
 
-    // TODO: In production, retrieve actual FROST key material for this guardian
-    // For now, use a deterministic key generation for demo consistency
-    let signing_config = ThresholdSigningConfig::new(2, 3, 300); // 2-of-3 threshold
-    let context = TreeSigningContext::new(1, 0, [0; 32]); // Recovery context
+    // Placeholder signature derived from the recovery message; replace with
+    // real threshold signing via effects when available.
+    let partial_sig_bytes: Vec<u8> = {
+        use blake3::Hasher;
+        let mut h = Hasher::new();
+        h.update(&recovery_message);
+        h.finalize().as_bytes().to_vec()
+    };
 
-    // Generate FROST key material (in production this would be retrieved from secure storage)
-    let authorities = vec![
-        AuthorityId::new(),            // Mock authority for demo
-        aura_core::AuthorityId::new(), // Mock second authority
-        aura_core::AuthorityId::new(), // Mock third authority
-    ];
-
-    let key_material = FrostCrypto::generate_key_material(&authorities, &signing_config, effects)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to generate FROST key material: {}", e))?;
-
-    // Get the key package for this guardian
-    let guardian_authority = authorities[0]; // Use first authority for demo
-    let key_package = key_material
-        .key_packages
-        .get(&guardian_authority)
-        .ok_or_else(|| anyhow::anyhow!("Key package not found for guardian"))?;
-
-    // Generate nonce commitment
-    let (signing_nonces, nonce_commitment) =
-        FrostCrypto::generate_nonce_commitment(key_package, effects)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to generate nonce commitment: {}", e))?;
-
-    // For demo purposes, create a simplified commitments map
-    // In production, this would involve coordination with other guardians
-    let mut commitments = std::collections::BTreeMap::new();
-    let identifier = key_package.identifier();
-    let signing_commitments = nonce_commitment
-        .to_frost()
-        .map_err(|e| anyhow::anyhow!("Failed to convert nonce commitment: {}", e))?;
-    commitments.insert(*identifier, signing_commitments);
-
-    // Generate partial signature
-    let _partial_signature = FrostCrypto::generate_partial_signature(
-        &context,
-        &recovery_message,
-        key_package,
-        &signing_nonces,
-        &commitments,
-        effects,
-    )
-    .await
-    .map_err(|e| anyhow::anyhow!("Failed to generate partial signature: {}", e))?;
-
-    // Extract the signature bytes and key share
-    // For now, use the raw bytes from the partial signature structure
-    let partial_sig_bytes = vec![0u8; 64]; // Mock signature bytes for demo
-    let key_share_bytes = vec![0u8; 32]; // Mock key share bytes for demo
+    let key_share_bytes = [0u8; 32]; // Mock key share bytes for demo
 
     Ok(GuardianKeyApproval {
         guardian_id: guardian.guardian_id,
         key_share: key_share_bytes.to_vec(),
         partial_signature: partial_sig_bytes.to_vec(),
-        timestamp,
+        timestamp: aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
+            ts_ms: timestamp_ms,
+            uncertainty: None,
+        }),
     })
 }

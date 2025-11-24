@@ -4,17 +4,18 @@
 //! This choreography handles proposals, voting, and implementation of membership changes.
 
 use crate::{
+    coordinator::{BaseCoordinator, BaseCoordinatorAccess, RecoveryCoordinator},
     types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
     RecoveryResult,
 };
+use async_trait::async_trait;
 use aura_authenticate::guardian_auth::RecoveryContext;
-use aura_core::effects::TimeEffects;
-use aura_core::frost::ThresholdSignature;
-use aura_core::{identifiers::GuardianId, AccountId, AuraError, ContextId, DeviceId};
+use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::{identifiers::GuardianId, AccountId, AuraError, DeviceId};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_protocol::guards::BiscuitGuardEvaluator;
-use aura_wot::{BiscuitTokenManager, ContextOp, ResourceScope};
+use aura_wot::{BiscuitTokenManager, ContextOp};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -71,7 +72,7 @@ pub struct GuardianVote {
     /// Human-readable rationale for the vote
     pub rationale: String,
     /// Timestamp when the vote was cast
-    pub timestamp: u64,
+    pub timestamp: TimeStamp,
 }
 
 /// Membership change completion notification
@@ -149,13 +150,9 @@ choreography! {
 /// Guardian membership coordinator
 pub struct GuardianMembershipCoordinator<E>
 where
-    E: AuraEffects + ?Sized,
+    E: AuraEffects + ?Sized + 'static,
 {
-    _effect_system: Arc<E>,
-    /// Optional token manager for Biscuit authorization
-    token_manager: Option<BiscuitTokenManager>,
-    /// Optional guard evaluator for Biscuit authorization
-    guard_evaluator: Option<BiscuitGuardEvaluator>,
+    base: BaseCoordinator<E>,
 }
 
 /// Extended request for membership changes
@@ -169,16 +166,52 @@ pub struct MembershipChangeRequest {
     pub new_threshold: Option<usize>,
 }
 
+impl<E> BaseCoordinatorAccess<E> for GuardianMembershipCoordinator<E>
+where
+    E: AuraEffects + ?Sized + 'static,
+{
+    fn base(&self) -> &BaseCoordinator<E> {
+        &self.base
+    }
+}
+
+#[async_trait]
+impl<E> RecoveryCoordinator<E> for GuardianMembershipCoordinator<E>
+where
+    E: AuraEffects + ?Sized + 'static,
+{
+    type Request = MembershipChangeRequest;
+    type Response = RecoveryResponse;
+
+    fn effect_system(&self) -> &Arc<E> {
+        self.base_effect_system()
+    }
+
+    fn token_manager(&self) -> Option<&BiscuitTokenManager> {
+        self.base_token_manager()
+    }
+
+    fn guard_evaluator(&self) -> Option<&BiscuitGuardEvaluator> {
+        self.base_guard_evaluator()
+    }
+
+    fn operation_name(&self) -> &str {
+        "guardian_membership"
+    }
+
+    async fn execute_recovery(&self, request: Self::Request) -> RecoveryResult<Self::Response> {
+        self.execute_membership_change(request).await
+    }
+}
+
 impl<E> GuardianMembershipCoordinator<E>
 where
-    E: AuraEffects + ?Sized,
+    E: AuraEffects + ?Sized + 'static,
 {
     /// Create new coordinator
     pub fn new(effect_system: Arc<E>) -> Self {
         Self {
-            _effect_system: effect_system,
-            token_manager: None,
-            guard_evaluator: None,
+            base: BaseCoordinator::new(effect_system),
         }
     }
 
@@ -189,9 +222,7 @@ where
         guard_evaluator: BiscuitGuardEvaluator,
     ) -> Self {
         Self {
-            _effect_system: effect_system,
-            token_manager: Some(token_manager),
-            guard_evaluator: Some(guard_evaluator),
+            base: BaseCoordinator::new_with_biscuit(effect_system, token_manager, guard_evaluator),
         }
     }
 
@@ -200,19 +231,20 @@ where
         &self,
         request: MembershipChangeRequest,
     ) -> RecoveryResult<RecoveryResponse> {
-        // Check authorization using Biscuit tokens
-        if let Err(auth_error) = self.check_membership_authorization(&request).await {
-            return Ok(RecoveryResponse {
-                success: false,
-                error: Some(format!("Authorization failed: {}", auth_error)),
-                key_material: None,
-                guardian_shares: Vec::new(),
-                evidence: self.create_failed_evidence(&request),
-                signature: self.create_empty_signature(),
-            });
+        // Check authorization using the common helper
+        if let Err(auth_error) = self
+            .check_authorization(&request.base.account_id, ContextOp::UpdateGuardianSet)
+            .await
+        {
+            return Ok(self.base.create_error_response(
+                format!("Authorization failed: {}", auth_error),
+                request.base.account_id,
+                request.base.requesting_device,
+            ));
         }
 
-        let change_id = self.generate_change_id(&request);
+        let change_id =
+            self.generate_operation_id(&request.base.account_id, &request.base.requesting_device);
 
         // Convert generic request to choreography-specific proposal
         let proposal = MembershipProposal {
@@ -234,18 +266,15 @@ where
 
                 // Check if we have enough approvals
                 if approvals.len() < request.base.threshold {
-                    return Ok(RecoveryResponse {
-                        success: false,
-                        error: Some(format!(
+                    return Ok(self.base.create_error_response(
+                        format!(
                             "Insufficient guardian approvals for membership change: got {}, need {}",
                             approvals.len(),
                             request.base.threshold
-                        )),
-                        key_material: None,
-                        guardian_shares: Vec::new(),
-                        evidence: self.create_failed_evidence(&request),
-                        signature: self.create_empty_signature(),
-                    });
+                        ),
+                        request.base.account_id,
+                        request.base.requesting_device,
+                    ));
                 }
 
                 // Apply the membership change
@@ -255,18 +284,15 @@ where
 
                 // Validate the new configuration
                 if new_guardian_set.len() < final_threshold {
-                    return Ok(RecoveryResponse {
-                        success: false,
-                        error: Some(format!(
+                    return Ok(self.base.create_error_response(
+                        format!(
                             "Invalid configuration: {} guardians cannot satisfy threshold of {}",
                             new_guardian_set.len(),
                             final_threshold
-                        )),
-                        key_material: None,
-                        guardian_shares: Vec::new(),
-                        evidence: self.create_failed_evidence(&request),
-                        signature: self.create_empty_signature(),
-                    });
+                        ),
+                        request.base.account_id,
+                        request.base.requesting_device,
+                    ));
                 }
 
                 // Convert votes to shares for compatibility
@@ -283,14 +309,17 @@ where
                             },
                             share: vote.rationale.into_bytes(),
                             partial_signature: vote.vote_signature,
-                            issued_at: vote.timestamp,
+                            issued_at: vote.timestamp.to_index_ms() as u64,
                         }
                     })
                     .collect::<Vec<_>>();
 
-                // Create evidence and signature
-                let evidence = self.create_evidence(&request, &shares);
-                let signature = self.aggregate_signature(&shares);
+                // Create evidence using the common utility
+                let evidence = self.create_success_evidence(
+                    request.base.account_id,
+                    request.base.requesting_device,
+                    &shares,
+                );
 
                 // Create completion message for final phase
                 let completion = ChangeCompletion {
@@ -304,23 +333,17 @@ where
                 // Phase 3 would broadcast completion through choreography
                 self.broadcast_change_completion(completion).await?;
 
-                Ok(RecoveryResponse {
-                    success: true,
-                    error: None,
-                    key_material: None, // Membership changes don't produce key material
-                    guardian_shares: shares,
-                    evidence,
-                    signature,
-                })
+                // Use the common response builder
+                Ok(self.base.create_success_response(
+                    None, // Membership changes don't produce key material
+                    shares, evidence,
+                ))
             }
-            Err(e) => Ok(RecoveryResponse {
-                success: false,
-                error: Some(format!("Membership change choreography failed: {}", e)),
-                key_material: None,
-                guardian_shares: Vec::new(),
-                evidence: self.create_failed_evidence(&request),
-                signature: self.create_empty_signature(),
-            }),
+            Err(e) => Ok(self.base.create_error_response(
+                format!("Membership change choreography failed: {}", e),
+                request.base.account_id,
+                request.base.requesting_device,
+            )),
         }
     }
 
@@ -338,13 +361,22 @@ where
             "Change denied due to security concerns".to_string()
         };
 
+        let ts = self
+            .effect_system()
+            .physical_time()
+            .await
+            .unwrap_or(PhysicalTime {
+                ts_ms: 0,
+                uncertainty: None,
+            });
+
         Ok(GuardianVote {
             guardian_id: GuardianId::new(), // Would be actual guardian ID
             change_id: proposal.change_id,
             approved,
             vote_signature: vec![1; 64], // Placeholder signature
             rationale,
-            timestamp: 0, // Placeholder timestamp
+            timestamp: TimeStamp::PhysicalClock(ts),
         })
     }
 
@@ -358,7 +390,12 @@ where
 
         // Phase 2: Collect guardian votes (choreographic receive operations)
         // For now, simulate the expected responses that would come through choreography
-        let timestamp = self.current_timestamp().await;
+        let physical_time = self
+            .effect_system()
+            .physical_time()
+            .await
+            .map_err(|e| aura_core::AuraError::internal(format!("Time error: {}", e)))?;
+        let timestamp = TimeStamp::PhysicalClock(physical_time);
         let votes = vec![
             GuardianVote {
                 guardian_id: GuardianId::new(),
@@ -366,7 +403,7 @@ where
                 approved: true,
                 vote_signature: vec![1; 64],
                 rationale: "Approved - change looks valid".to_string(),
-                timestamp,
+                timestamp: timestamp.clone(),
             },
             GuardianVote {
                 guardian_id: GuardianId::new(),
@@ -389,42 +426,6 @@ where
         // This would be handled by the choreographic broadcast in the generated code
         // The choreography runtime would send completion messages to all guardians
         Ok(())
-    }
-
-    /// Get current timestamp
-    async fn current_timestamp(&self) -> u64 {
-        TimeEffects::current_timestamp(self._effect_system.as_ref()).await
-    }
-
-    /// Generate unique change ID
-    fn generate_change_id(&self, request: &MembershipChangeRequest) -> String {
-        format!(
-            "membership_{}_{}",
-            request.base.account_id, request.base.requesting_device
-        )
-    }
-
-    fn aggregate_signature(&self, shares: &[RecoveryShare]) -> ThresholdSignature {
-        let mut combined_signature = Vec::new();
-        for share in shares {
-            combined_signature.extend_from_slice(&share.partial_signature);
-        }
-
-        let signature_bytes = if combined_signature.len() >= 64 {
-            combined_signature[..64].to_vec()
-        } else {
-            let mut padded = combined_signature;
-            padded.resize(64, 0);
-            padded
-        };
-
-        let signers: Vec<u16> = shares
-            .iter()
-            .enumerate()
-            .map(|(idx, _)| idx as u16)
-            .collect();
-
-        ThresholdSignature::new(signature_bytes, signers)
     }
 
     fn apply_membership_change(
@@ -465,77 +466,5 @@ where
         }
 
         Ok(GuardianSet::new(guardians))
-    }
-
-    fn create_evidence(
-        &self,
-        _request: &MembershipChangeRequest,
-        _shares: &[RecoveryShare],
-    ) -> crate::types::RecoveryEvidence {
-        // Placeholder implementation
-        crate::types::RecoveryEvidence {
-            account_id: AccountId::new(),
-            recovering_device: DeviceId::new(),
-            guardians: Vec::new(),
-            issued_at: 0,
-            cooldown_expires_at: 0,
-            dispute_window_ends_at: 0,
-            guardian_profiles: Vec::new(),
-            disputes: Vec::new(),
-            threshold_signature: None,
-        }
-    }
-
-    fn create_failed_evidence(
-        &self,
-        _request: &MembershipChangeRequest,
-    ) -> crate::types::RecoveryEvidence {
-        // Placeholder implementation
-        crate::types::RecoveryEvidence {
-            account_id: AccountId::new(),
-            recovering_device: DeviceId::new(),
-            guardians: Vec::new(),
-            issued_at: 0,
-            cooldown_expires_at: 0,
-            dispute_window_ends_at: 0,
-            guardian_profiles: Vec::new(),
-            disputes: Vec::new(),
-            threshold_signature: None,
-        }
-    }
-
-    fn create_empty_signature(&self) -> ThresholdSignature {
-        ThresholdSignature::new(vec![0; 64], vec![])
-    }
-
-    /// Check if the membership change request is authorized using Biscuit tokens
-    async fn check_membership_authorization(
-        &self,
-        request: &MembershipChangeRequest,
-    ) -> Result<(), String> {
-        let (token_manager, guard_evaluator) = match (&self.token_manager, &self.guard_evaluator) {
-            (Some(tm), Some(ge)) => (tm, ge),
-            _ => return Err("Biscuit authorization components not available".to_string()),
-        };
-
-        let token = token_manager.current_token();
-
-        let resource_scope = ResourceScope::Context {
-            context_id: ContextId::from_uuid(request.base.account_id.0),
-            operation: ContextOp::UpdateGuardianSet,
-        };
-
-        // Check authorization for membership change initiation
-        let authorized = guard_evaluator
-            .check_guard(token, "initiate_membership_change", &resource_scope)
-            .map_err(|e| format!("Biscuit authorization error: {}", e))?;
-
-        if !authorized {
-            return Err(
-                "Biscuit token does not grant permission to initiate membership change".to_string(),
-            );
-        }
-
-        Ok(())
     }
 }

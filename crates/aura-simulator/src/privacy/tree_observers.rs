@@ -12,7 +12,7 @@
 use aura_core::tree::{AttestedOp, Epoch, LeafId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 // ============================================================================
 // Privacy Budget Configuration
@@ -58,14 +58,14 @@ impl Default for PrivacyBudget {
 pub enum ObservationEvent {
     /// Network traffic observed (timestamp, size in bytes)
     NetworkTraffic {
-        timestamp: SystemTime,
+        timestamp_ms: u64,
         size: usize,
         encrypted: bool,
     },
 
     /// Message envelope metadata (timing, sender, receiver)
     EnvelopeMetadata {
-        timestamp: SystemTime,
+        timestamp_ms: u64,
         sender: Option<LeafId>,
         receiver: Option<LeafId>,
         message_type: String,
@@ -74,7 +74,7 @@ pub enum ObservationEvent {
 
     /// Operation committed to journal (only content, not participants)
     OperationCommitted {
-        timestamp: SystemTime,
+        timestamp_ms: u64,
         epoch: Epoch,
         op_type: String,
         signer_count: u16,
@@ -82,7 +82,7 @@ pub enum ObservationEvent {
 
     /// Ceremony execution observed
     CeremonyExecution {
-        timestamp: SystemTime,
+        timestamp_ms: u64,
         phase: String,
         participant_count: usize,
     },
@@ -233,22 +233,22 @@ impl ExternalObserver {
     }
 
     /// Observes network traffic.
-    pub fn observe_traffic(&mut self, timestamp: SystemTime, size: usize) {
+    pub fn observe_traffic(&mut self, timestamp_ms: u64, size: usize) {
         let event = ObservationEvent::NetworkTraffic {
-            timestamp,
+            timestamp_ms,
             size,
             encrypted: true,
         };
 
         // Record timing
         if let Some(ObservationEvent::NetworkTraffic {
-            timestamp: last_time,
-            ..
+            timestamp_ms: last, ..
         }) = self.observations.last()
         {
-            if let Ok(duration) = timestamp.duration_since(*last_time) {
-                self.leakage.timing_observations.push(duration);
-            }
+            let delta = timestamp_ms.saturating_sub(*last);
+            self.leakage
+                .timing_observations
+                .push(Duration::from_millis(delta));
         }
 
         // Record size
@@ -314,14 +314,14 @@ impl NeighborObserver {
     /// Observes envelope metadata during message routing.
     pub fn observe_envelope(
         &mut self,
-        timestamp: SystemTime,
+        timestamp_ms: u64,
         sender: Option<LeafId>,
         receiver: Option<LeafId>,
         message_type: String,
         size: usize,
     ) {
         let event = ObservationEvent::EnvelopeMetadata {
-            timestamp,
+            timestamp_ms,
             sender,
             receiver,
             message_type,
@@ -330,13 +330,13 @@ impl NeighborObserver {
 
         // Record timing
         if let Some(ObservationEvent::EnvelopeMetadata {
-            timestamp: last_time,
-            ..
+            timestamp_ms: last, ..
         }) = self.observations.last()
         {
-            if let Ok(duration) = timestamp.duration_since(*last_time) {
-                self.leakage.timing_observations.push(duration);
-            }
+            let delta = timestamp_ms.saturating_sub(*last);
+            self.leakage
+                .timing_observations
+                .push(Duration::from_millis(delta));
         }
 
         // Record size
@@ -430,13 +430,13 @@ impl InGroupObserver {
     /// Observes operation committed to journal.
     pub fn observe_operation(
         &mut self,
-        timestamp: SystemTime,
+        timestamp_ms: u64,
         epoch: Epoch,
         op_type: String,
         signer_count: u16,
     ) {
         let event = ObservationEvent::OperationCommitted {
-            timestamp,
+            timestamp_ms,
             epoch,
             op_type,
             signer_count,
@@ -447,27 +447,22 @@ impl InGroupObserver {
 
         // Record timing
         if let Some(ObservationEvent::OperationCommitted {
-            timestamp: last_time,
-            ..
+            timestamp_ms: last, ..
         }) = self.observations.last()
         {
-            if let Ok(duration) = timestamp.duration_since(*last_time) {
-                self.leakage.timing_observations.push(duration);
-            }
+            let delta = timestamp_ms.saturating_sub(*last);
+            self.leakage
+                .timing_observations
+                .push(Duration::from_millis(delta));
         }
 
         self.observations.push(event);
     }
 
     /// Observes ceremony execution phase.
-    pub fn observe_ceremony(
-        &mut self,
-        timestamp: SystemTime,
-        phase: String,
-        participant_count: usize,
-    ) {
+    pub fn observe_ceremony(&mut self, timestamp_ms: u64, phase: String, participant_count: usize) {
         let event = ObservationEvent::CeremonyExecution {
-            timestamp,
+            timestamp_ms,
             phase: phase.clone(),
             participant_count,
         };

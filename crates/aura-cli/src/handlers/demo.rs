@@ -8,11 +8,14 @@ use aura_core::AuraError;
 
 use crate::{
     commands::demo::DemoCommands,
+    create_cli_handler,
     demo::{
         setup_and_run_human_agent_demo, DemoOrchestratorCli, DemoOrchestratorConfig,
         DemoScenarioBridge, DemoSetupConfig, HumanAgentDemoConfig,
     },
+    ScenarioAction,
 };
+use aura_core::DeviceId;
 
 /// Handler for demo commands
 pub struct DemoHandler;
@@ -69,6 +72,11 @@ impl DemoHandler {
                 )
                 .await
             }
+            DemoCommands::RecoveryWorkflow {
+                directory,
+                seed,
+                detailed_report,
+            } => Self::handle_recovery_workflow(directory, seed, detailed_report).await,
         }
     }
 
@@ -242,5 +250,35 @@ impl DemoHandler {
         }
 
         Ok(())
+    }
+
+    /// Run the Bob-focused recovery demo workflow using the scenario runner
+    async fn handle_recovery_workflow(
+        directory: Option<PathBuf>,
+        seed: u64,
+        detailed_report: bool,
+    ) -> Result<(), AuraError> {
+        let directory = directory.unwrap_or_else(|| PathBuf::from("scenarios"));
+        println!("Running Bob recovery workflow via scenario runner");
+        println!("Scenario root: {}", directory.display());
+        println!("Seed: {}", seed);
+        println!("Detailed report: {}", detailed_report);
+
+        // Build a temporary CLI handler with a fresh device/authority context
+        let handler = create_cli_handler(DeviceId::new())
+            .map_err(|e| AuraError::internal(format!("Failed to create demo handler: {}", e)))?;
+
+        // Execute the cli_recovery_demo scenario via existing scenario machinery
+        handler
+            .handle_scenarios(&ScenarioAction::Run {
+                directory: Some(directory),
+                pattern: Some("cli_recovery_demo".into()),
+                parallel: false,
+                max_parallel: Some(1),
+                output_file: None,
+                detailed_report,
+            })
+            .await
+            .map_err(|e| AuraError::internal(format!("Recovery workflow failed: {}", e)))
     }
 }

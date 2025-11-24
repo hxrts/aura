@@ -111,7 +111,7 @@ impl EffectRegistry {
 
     /// Get the execution mode
     pub fn execution_mode(&self) -> ExecutionMode {
-        self.execution_mode.clone()
+        self.execution_mode
     }
 }
 
@@ -119,7 +119,7 @@ impl Clone for EffectRegistry {
     fn clone(&self) -> Self {
         Self {
             handlers: self.handlers.clone(),
-            execution_mode: self.execution_mode.clone(),
+            execution_mode: self.execution_mode,
         }
     }
 }

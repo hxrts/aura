@@ -177,7 +177,7 @@ mod integration_tests {
     async fn test_no_observable_without_charge_invariant() -> aura_core::AuraResult<()> {
         // Test that all observable events (receipts) come from successful charges
         let device2 = DeviceId::from("device2");
-        let context = ContextId::from("test_context".to_string());
+        let context = ContextId::from(String::from("test_context"));
 
         let fixture = create_test_fixture().await?;
 
@@ -205,7 +205,7 @@ mod integration_tests {
         // Test that distributed FlowBudget updates converge to consistent state
         let _device1 = DeviceId::from("device1");
         let _device2 = DeviceId::from("device2");
-        let _context = ContextId::from("test_context".to_string());
+        let _context = ContextId::from(String::from("test_context"));
 
         // Simulate two replicas with different FlowBudget states
         let budget_replica1 = FlowBudget {
@@ -244,7 +244,7 @@ mod integration_tests {
     async fn test_receipt_nonce_monotonicity() -> aura_core::AuraResult<()> {
         // Test that receipt nonces are strictly increasing per (context, device, epoch)
         let device2 = DeviceId::from("device2");
-        let context = ContextId::from("test_context".to_string());
+        let context = ContextId::from(String::from("test_context"));
 
         let fixture = create_test_fixture().await?;
 
@@ -310,7 +310,7 @@ mod integration_tests {
     async fn test_deterministic_budget_computation() -> aura_core::AuraResult<()> {
         // Test that budget computation is deterministic across different execution orders
         let device2 = DeviceId::from("device2");
-        let context = ContextId::from("test_context".to_string());
+        let context = ContextId::from(String::from("test_context"));
 
         // Create multiple fixtures (simulating different devices)
         let fixture1 = create_test_fixture().await?;

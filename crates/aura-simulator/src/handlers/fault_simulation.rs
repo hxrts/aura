@@ -30,6 +30,8 @@ struct ActiveFault {
     parameters: HashMap<String, String>,
 }
 
+// Mutex::lock().unwrap() is used throughout - simulation code doesn't handle poisoning
+#[allow(clippy::unwrap_used)]
 impl SimulationFaultHandler {
     /// Create a new simulation fault handler
     pub fn new(seed: u64) -> Self {
@@ -121,7 +123,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        if corruption_rate < 0.0 || corruption_rate > 1.0 {
+        if !(0.0..=1.0).contains(&corruption_rate) {
             return Err(ChaosError::InvalidConfiguration {
                 reason: "Corruption rate must be between 0.0 and 1.0".to_string(),
             });
@@ -250,7 +252,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        if constraint_level < 0.0 || constraint_level > 1.0 {
+        if !(0.0..=1.0).contains(&constraint_level) {
             return Err(ChaosError::InvalidConfiguration {
                 reason: "Constraint level must be between 0.0 and 1.0".to_string(),
             });

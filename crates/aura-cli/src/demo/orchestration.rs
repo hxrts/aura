@@ -72,6 +72,7 @@ impl Default for DemoOrchestratorConfig {
 
 /// Events from the demo orchestrator
 #[derive(Debug, Clone)]
+#[allow(missing_docs)]
 pub enum DemoOrchestratorEvent {
     /// Demo session started
     SessionStarted {

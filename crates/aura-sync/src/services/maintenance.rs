@@ -29,7 +29,7 @@
 //! # }
 //! ```
 
-// PROGRESS: Partially migrated to TimeEffects and RandomEffects.
+// PROGRESS: Migrated to PhysicalTimeEffects and RandomEffects.
 // - Added start_with_time_effects() method for proper effect system integration
 // - Updated propose_upgrade() to use RandomEffects for deterministic UUID generation
 // - Original Service trait methods still use direct time calls for compatibility
@@ -47,8 +47,8 @@ use super::{HealthCheck, HealthStatus, Service, ServiceState};
 use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::CacheManager;
 use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
-use aura_core::effects::{RandomEffects, TimeEffects};
-use aura_core::{tree::Snapshot, AccountId, DeviceId, Epoch, Hash32, SemanticVersion};
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
+use aura_core::{tree::Snapshot, AccountId, AuraError, DeviceId, Epoch, Hash32, SemanticVersion};
 
 // =============================================================================
 // Maintenance Event Types
@@ -385,10 +385,10 @@ impl MaintenanceService {
         proposer: DeviceId,
         random_effects: &R,
     ) -> SyncResult<UpgradeProposal> {
-        let mut protocol = self.ota_protocol.write();
-
         // Use RandomEffects for deterministic UUID generation
         let proposal_id = random_effects.random_uuid().await;
+
+        let mut protocol = self.ota_protocol.write();
         let proposal = protocol.propose_upgrade(
             proposal_id,
             package_id,
@@ -401,7 +401,7 @@ impl MaintenanceService {
         // Convert to maintenance event type
         Ok(UpgradeProposal {
             package_id: proposal.package_id,
-            version: version.clone(),
+            version,
             kind,
             artifact_hash: proposal.package_hash,
             artifact_uri: Self::generate_artifact_uri(&proposal, &version), // Add URI support for artifacts
@@ -453,6 +453,7 @@ impl MaintenanceService {
     }
 
     /// Construct message for upgrade proposal signature verification
+    #[allow(clippy::unwrap_used)] // Vec::write_all is infallible
     fn construct_upgrade_message(&self, proposal: &UpgradeProposal) -> Vec<u8> {
         use std::io::Write;
 
@@ -577,25 +578,29 @@ impl MaintenanceService {
             .unwrap_or(Duration::ZERO)
     }
 
-    /// Start the service using TimeEffects (preferred over Service::start)
-    pub async fn start_with_time_effects<T: TimeEffects>(
+    /// Start the service using PhysicalTimeEffects (preferred over Service::start)
+    pub async fn start_with_time_effects<T: PhysicalTimeEffects>(
         &self,
         time_effects: &T,
     ) -> SyncResult<()> {
-        let mut state = self.state.write();
-        if *state == ServiceState::Running {
-            return Err(sync_session_error("Service already running"));
-        }
+        {
+            let mut state = self.state.write();
+            if *state == ServiceState::Running {
+                return Err(sync_session_error("Service already running"));
+            }
+            *state = ServiceState::Starting;
+        } // Lock dropped here
 
-        *state = ServiceState::Starting;
-
-        // Use TimeEffects for deterministic time
-        let now = time_effects.now_instant().await;
-        *self.started_at.write() = Some(now);
+        // Use PhysicalTimeEffects for deterministic wall-clock; store local Instant for uptime
+        let _ts = time_effects
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::internal(format!("time error: {e}")))?;
+        *self.started_at.write() = Some(Instant::now());
 
         // TODO: Start background tasks for auto-snapshot
 
-        *state = ServiceState::Running;
+        *self.state.write() = ServiceState::Running;
         Ok(())
     }
 }
@@ -634,6 +639,31 @@ impl Service for MaintenanceService {
     }
 
     async fn health_check(&self) -> SyncResult<HealthCheck> {
+        // Create a simple PhysicalTimeEffects implementation for backwards compatibility
+        struct SimpleTimeEffects;
+
+        #[async_trait::async_trait]
+        impl PhysicalTimeEffects for SimpleTimeEffects {
+            async fn physical_time(
+                &self,
+            ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::time::TimeError>
+            {
+                Ok(aura_core::time::PhysicalTime {
+                    ts_ms: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis() as u64,
+                    uncertainty: None,
+                })
+            }
+            async fn sleep_ms(&self, ms: u64) -> Result<(), aura_core::effects::time::TimeError> {
+                tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+                Ok(())
+            }
+        }
+
+        // Implement health check logic inline since Service trait doesn't support time_effects parameter
+        let time_effects = SimpleTimeEffects;
         let state = *self.state.read();
         let status = match state {
             ServiceState::Running => HealthStatus::Healthy,
@@ -644,30 +674,36 @@ impl Service for MaintenanceService {
 
         let mut details = std::collections::HashMap::new();
 
-        let snapshot_protocol = self.snapshot_protocol.read();
-        details.insert(
-            "snapshot_pending".to_string(),
-            snapshot_protocol.is_pending().to_string(),
-        );
+        // Read values and drop locks before await
+        let snapshot_pending = {
+            let snapshot_protocol = self.snapshot_protocol.read();
+            snapshot_protocol.is_pending()
+        };
+        details.insert("snapshot_pending".to_string(), snapshot_pending.to_string());
 
-        let ota_protocol = self.ota_protocol.read();
-        details.insert(
-            "ota_pending".to_string(),
-            ota_protocol.get_pending().is_some().to_string(),
-        );
+        let ota_pending = {
+            let ota_protocol = self.ota_protocol.read();
+            ota_protocol.get_pending().is_some()
+        };
+        details.insert("ota_pending".to_string(), ota_pending.to_string());
 
         details.insert(
             "uptime".to_string(),
             format!("{}s", self.uptime().as_secs()),
         );
 
+        // Get timestamp after dropping all locks
+        let checked_at = time_effects
+            .physical_time()
+            .await
+            .map_err(|e| crate::core::errors::sync_validation_error(format!("Time error: {}", e)))?
+            .ts_ms
+            / 1000;
+
         Ok(HealthCheck {
             status,
             message: Some("Maintenance service operational".to_string()),
-            checked_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            checked_at,
             details,
         })
     }
@@ -712,69 +748,30 @@ mod tests {
         assert!(!service.is_running());
     }
 
-    /// Mock TimeEffects implementation for testing
+    /// Mock PhysicalTimeEffects implementation for testing
     struct MockTimeEffects {
-        instant: Instant,
+        ts_ms: u64,
     }
 
     impl MockTimeEffects {
         fn new() -> Self {
-            Self {
-                #[allow(clippy::disallowed_methods)]
-                instant: Instant::now(),
-            }
+            Self { ts_ms: 0 }
         }
     }
 
     #[async_trait::async_trait]
-    impl TimeEffects for MockTimeEffects {
-        async fn current_epoch(&self) -> u64 {
-            0
-        }
-        async fn current_timestamp(&self) -> u64 {
-            0
-        }
-        async fn current_timestamp_millis(&self) -> u64 {
-            0
-        }
-        async fn now_instant(&self) -> Instant {
-            self.instant
-        }
-        async fn sleep_ms(&self, _ms: u64) {}
-        async fn sleep_until(&self, _epoch: u64) {}
-        async fn delay(&self, _duration: Duration) {}
-        async fn sleep(&self, _duration_ms: u64) -> Result<(), aura_core::AuraError> {
-            Ok(())
-        }
-        async fn yield_until(
+    impl PhysicalTimeEffects for MockTimeEffects {
+        async fn physical_time(
             &self,
-            _condition: aura_core::effects::time::WakeCondition,
-        ) -> Result<(), aura_core::effects::time::TimeError> {
+        ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::time::TimeError> {
+            Ok(aura_core::time::PhysicalTime {
+                ts_ms: self.ts_ms,
+                uncertainty: None,
+            })
+        }
+
+        async fn sleep_ms(&self, _ms: u64) -> Result<(), aura_core::effects::time::TimeError> {
             Ok(())
-        }
-        async fn wait_until(
-            &self,
-            _condition: aura_core::effects::time::WakeCondition,
-        ) -> Result<(), aura_core::AuraError> {
-            Ok(())
-        }
-        async fn set_timeout(&self, _timeout_ms: u64) -> aura_core::effects::time::TimeoutHandle {
-            uuid::Uuid::new_v4()
-        }
-        async fn cancel_timeout(
-            &self,
-            _handle: aura_core::effects::time::TimeoutHandle,
-        ) -> Result<(), aura_core::effects::time::TimeError> {
-            Ok(())
-        }
-        fn is_simulated(&self) -> bool {
-            true
-        }
-        fn register_context(&self, _context_id: uuid::Uuid) {}
-        fn unregister_context(&self, _context_id: uuid::Uuid) {}
-        async fn notify_events_available(&self) {}
-        fn resolution_ms(&self) -> u64 {
-            1
         }
     }
 
@@ -783,7 +780,7 @@ mod tests {
         let service = MaintenanceService::new(Default::default()).unwrap();
         let time_effects = MockTimeEffects::new();
 
-        // Test the TimeEffects-based start method
+        // Test the PhysicalTimeEffects-based start method
         service
             .start_with_time_effects(&time_effects)
             .await

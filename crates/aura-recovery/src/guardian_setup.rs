@@ -4,17 +4,18 @@
 //! This choreography handles the initial invitation and acceptance process.
 
 use crate::{
+    coordinator::{BaseCoordinator, BaseCoordinatorAccess, RecoveryCoordinator},
     types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
     RecoveryResult,
 };
+use async_trait::async_trait;
 use aura_authenticate::guardian_auth::RecoveryContext;
-use aura_core::effects::TimeEffects;
-use aura_core::frost::ThresholdSignature;
-use aura_core::{identifiers::GuardianId, AccountId, ContextId, DeviceId};
+use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_protocol::guards::BiscuitGuardEvaluator;
-use aura_wot::{BiscuitTokenManager, ContextOp, ResourceScope};
+use aura_wot::{BiscuitTokenManager, ContextOp};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -51,7 +52,7 @@ pub struct GuardianAcceptance {
     /// Cryptographic attestation from the guardian's device
     pub device_attestation: Vec<u8>,
     /// Timestamp when acceptance was generated
-    pub timestamp: u64,
+    pub timestamp: TimeStamp,
 }
 
 /// Setup completion notification
@@ -127,25 +128,19 @@ choreography! {
 /// Guardian setup coordinator
 pub struct GuardianSetupCoordinator<E>
 where
-    E: AuraEffects + ?Sized,
+    E: AuraEffects + ?Sized + 'static,
 {
-    _effect_system: Arc<E>,
-    /// Optional token manager for Biscuit authorization
-    token_manager: Option<BiscuitTokenManager>,
-    /// Optional guard evaluator for Biscuit authorization
-    guard_evaluator: Option<BiscuitGuardEvaluator>,
+    base: BaseCoordinator<E>,
 }
 
 impl<E> GuardianSetupCoordinator<E>
 where
-    E: AuraEffects + ?Sized,
+    E: AuraEffects + ?Sized + 'static,
 {
     /// Create new coordinator
     pub fn new(effect_system: Arc<E>) -> Self {
         Self {
-            _effect_system: effect_system,
-            token_manager: None,
-            guard_evaluator: None,
+            base: BaseCoordinator::new(effect_system),
         }
     }
 
@@ -156,34 +151,79 @@ where
         guard_evaluator: BiscuitGuardEvaluator,
     ) -> Self {
         Self {
-            _effect_system: effect_system,
-            token_manager: Some(token_manager),
-            guard_evaluator: Some(guard_evaluator),
+            base: BaseCoordinator::new_with_biscuit(effect_system, token_manager, guard_evaluator),
         }
     }
+}
 
+impl<E> BaseCoordinatorAccess<E> for GuardianSetupCoordinator<E>
+where
+    E: AuraEffects + ?Sized + 'static,
+{
+    fn base(&self) -> &BaseCoordinator<E> {
+        &self.base
+    }
+}
+
+#[async_trait]
+impl<E> RecoveryCoordinator<E> for GuardianSetupCoordinator<E>
+where
+    E: AuraEffects + ?Sized + 'static,
+{
+    type Request = RecoveryRequest;
+    type Response = RecoveryResponse;
+
+    fn effect_system(&self) -> &Arc<E> {
+        self.base_effect_system()
+    }
+
+    fn token_manager(&self) -> Option<&BiscuitTokenManager> {
+        self.base_token_manager()
+    }
+
+    fn guard_evaluator(&self) -> Option<&BiscuitGuardEvaluator> {
+        self.base_guard_evaluator()
+    }
+
+    fn operation_name(&self) -> &str {
+        "guardian_setup"
+    }
+
+    async fn execute_recovery(&self, request: Self::Request) -> RecoveryResult<Self::Response> {
+        self.execute_setup(request).await
+    }
+}
+
+impl<E> GuardianSetupCoordinator<E>
+where
+    E: AuraEffects + ?Sized + 'static,
+{
     /// Execute guardian setup ceremony as setup initiator using choreography
     pub async fn execute_setup(
         &self,
         request: RecoveryRequest,
     ) -> RecoveryResult<RecoveryResponse> {
-        // Check authorization using Biscuit tokens
-        if let Err(auth_error) = self.check_setup_authorization(&request).await {
-            return Ok(RecoveryResponse {
-                success: false,
-                error: Some(format!("Authorization failed: {}", auth_error)),
-                key_material: None,
-                guardian_shares: Vec::new(),
-                evidence: self.create_failed_evidence(&request),
-                signature: self.create_empty_signature(),
-            });
+        // Check authorization using the common helper
+        if let Err(auth_error) = self
+            .check_authorization(&request.account_id, ContextOp::UpdateGuardianSet)
+            .await
+        {
+            return Ok(self.base.create_error_response(
+                format!("Authorization failed: {}", auth_error),
+                request.account_id,
+                request.requesting_device,
+            ));
         }
 
-        let setup_id = self.generate_setup_id(&request);
+        let setup_id = self.generate_operation_id(&request.account_id, &request.requesting_device);
 
         // Validate that we have guardians
         if request.guardians.is_empty() {
-            return Err(aura_core::AuraError::invalid("No guardians in request"));
+            return Ok(self.base.create_error_response(
+                "No guardians in request".to_string(),
+                request.account_id,
+                request.requesting_device,
+            ));
         }
 
         // Get first guardian as sample for choreography structure
@@ -211,18 +251,15 @@ where
 
         // Check if we have enough acceptances
         if acceptances.len() < request.threshold {
-            return Ok(RecoveryResponse {
-                success: false,
-                error: Some(format!(
+            return Ok(self.base.create_error_response(
+                format!(
                     "Insufficient guardian acceptances: got {}, need {}",
                     acceptances.len(),
                     request.threshold
-                )),
-                key_material: None,
-                guardian_shares: Vec::new(),
-                evidence: self.create_failed_evidence(&request),
-                signature: self.create_empty_signature(),
-            });
+                ),
+                request.account_id,
+                request.requesting_device,
+            ));
         }
 
         // Create guardian shares from acceptances
@@ -239,14 +276,14 @@ where
                     },
                     share: acceptance.public_key,
                     partial_signature: acceptance.device_attestation,
-                    issued_at: acceptance.timestamp,
+                    issued_at: acceptance.timestamp.to_index_ms() as u64,
                 }
             })
             .collect::<Vec<_>>();
 
-        // Create evidence and signature
-        let evidence = self.create_evidence(&request, &shares);
-        let signature = self.aggregate_signature(&shares);
+        // Create evidence using the common utility
+        let evidence =
+            self.create_success_evidence(request.account_id, request.requesting_device, &shares);
 
         // Create completion message for final phase
         let completion = SetupCompletion {
@@ -262,14 +299,11 @@ where
         // Phase 3 would broadcast completion through choreography
         self.broadcast_completion(completion).await?;
 
-        Ok(RecoveryResponse {
-            success: true,
-            error: None,
-            key_material: None, // Setup doesn't produce key material
-            guardian_shares: shares,
-            evidence,
-            signature,
-        })
+        // Use the common response builder
+        Ok(self.base.create_success_response(
+            None, // Setup doesn't produce key material
+            shares, evidence,
+        ))
     }
 
     /// Execute as guardian (accept setup invitation)
@@ -286,7 +320,15 @@ where
             accepted: true,
             public_key: vec![1; 32],         // Placeholder public key
             device_attestation: vec![2; 64], // Placeholder attestation
-            timestamp: 0,                    // Placeholder timestamp
+            timestamp: TimeStamp::PhysicalClock(
+                self.effect_system()
+                    .physical_time()
+                    .await
+                    .unwrap_or(PhysicalTime {
+                        ts_ms: 0,
+                        uncertainty: None,
+                    }),
+            ),
         })
     }
 
@@ -300,7 +342,12 @@ where
 
         // Phase 2: Collect guardian acceptances (choreographic receive operations)
         // For now, simulate the expected responses that would come through choreography
-        let timestamp = self.current_timestamp().await;
+        let physical_time = self
+            .effect_system()
+            .physical_time()
+            .await
+            .map_err(|e| aura_core::AuraError::internal(format!("Time error: {}", e)))?;
+        let timestamp = TimeStamp::PhysicalClock(physical_time);
         let acceptances = vec![
             GuardianAcceptance {
                 guardian_id: GuardianId::new(),
@@ -308,7 +355,7 @@ where
                 accepted: true,
                 public_key: vec![1; 32],
                 device_attestation: vec![2; 64],
-                timestamp,
+                timestamp: timestamp.clone(),
             },
             GuardianAcceptance {
                 guardian_id: GuardianId::new(),
@@ -327,106 +374,6 @@ where
     async fn broadcast_completion(&self, _completion: SetupCompletion) -> RecoveryResult<()> {
         // This would be handled by the choreographic broadcast in the generated code
         // The choreography runtime would send completion messages to all guardians
-        Ok(())
-    }
-
-    /// Get current timestamp
-    async fn current_timestamp(&self) -> u64 {
-        TimeEffects::current_timestamp(self._effect_system.as_ref()).await
-    }
-
-    /// Generate unique setup ID
-    fn generate_setup_id(&self, request: &RecoveryRequest) -> String {
-        format!("setup_{}_{}", request.account_id, request.requesting_device)
-    }
-
-    fn aggregate_signature(&self, shares: &[RecoveryShare]) -> ThresholdSignature {
-        let mut combined_signature = Vec::new();
-        for share in shares {
-            combined_signature.extend_from_slice(&share.partial_signature);
-        }
-
-        let signature_bytes = if combined_signature.len() >= 64 {
-            combined_signature[..64].to_vec()
-        } else {
-            let mut padded = combined_signature;
-            padded.resize(64, 0);
-            padded
-        };
-
-        let signers: Vec<u16> = shares
-            .iter()
-            .enumerate()
-            .map(|(idx, _)| idx as u16)
-            .collect();
-
-        ThresholdSignature::new(signature_bytes, signers)
-    }
-
-    fn create_evidence(
-        &self,
-        _request: &RecoveryRequest,
-        _shares: &[RecoveryShare],
-    ) -> crate::types::RecoveryEvidence {
-        // Placeholder implementation
-        crate::types::RecoveryEvidence {
-            account_id: AccountId::new(),
-            recovering_device: DeviceId::new(),
-            guardians: Vec::new(),
-            issued_at: 0,
-            cooldown_expires_at: 0,
-            dispute_window_ends_at: 0,
-            guardian_profiles: Vec::new(),
-            disputes: Vec::new(),
-            threshold_signature: None,
-        }
-    }
-
-    fn create_failed_evidence(&self, _request: &RecoveryRequest) -> crate::types::RecoveryEvidence {
-        // Placeholder implementation
-        crate::types::RecoveryEvidence {
-            account_id: AccountId::new(),
-            recovering_device: DeviceId::new(),
-            guardians: Vec::new(),
-            issued_at: 0,
-            cooldown_expires_at: 0,
-            dispute_window_ends_at: 0,
-            guardian_profiles: Vec::new(),
-            disputes: Vec::new(),
-            threshold_signature: None,
-        }
-    }
-
-    fn create_empty_signature(&self) -> ThresholdSignature {
-        ThresholdSignature::new(vec![0; 64], vec![])
-    }
-
-    /// Check if the setup request is authorized using Biscuit tokens
-    async fn check_setup_authorization(&self, request: &RecoveryRequest) -> Result<(), String> {
-        let (token_manager, guard_evaluator) = match (&self.token_manager, &self.guard_evaluator) {
-            (Some(tm), Some(ge)) => (tm, ge),
-            // If biscuit components are not wired (e.g., simulation), allow the setup to proceed.
-            _ => return Ok(()),
-        };
-
-        let token = token_manager.current_token();
-
-        let resource_scope = ResourceScope::Context {
-            context_id: ContextId::from_uuid(request.account_id.0),
-            operation: ContextOp::UpdateGuardianSet,
-        };
-
-        // Check authorization for guardian setup initiation
-        let authorized = guard_evaluator
-            .check_guard(token, "initiate_guardian_setup", &resource_scope)
-            .map_err(|e| format!("Biscuit authorization error: {}", e))?;
-
-        if !authorized {
-            return Err(
-                "Biscuit token does not grant permission to initiate guardian setup".to_string(),
-            );
-        }
-
         Ok(())
     }
 }

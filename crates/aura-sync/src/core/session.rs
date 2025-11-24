@@ -1,8 +1,7 @@
 //! Unified session management for aura-sync protocols
 //!
-//! This module provides a centralized session management system that consolidates
-//! all session lifecycle, state tracking, and coordination patterns scattered
-//! across the aura-sync crate into a choreography-aware abstraction.
+//! This module provides a centralized session management system for
+//! all session lifecycle, state tracking, and coordination patterns.
 
 use crate::core::metrics::ErrorCategory;
 use crate::core::{
@@ -41,12 +40,7 @@ pub enum SessionState<T> {
 
 impl<T> SessionState<T> {
     /// Check if session has timed out
-    pub fn is_timed_out(&self) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
+    pub fn is_timed_out(&self, now: u64) -> bool {
         match self {
             SessionState::Initializing { timeout_at, .. } => now >= *timeout_at,
             SessionState::Active { timeout_at, .. } => now >= *timeout_at,
@@ -55,6 +49,16 @@ impl<T> SessionState<T> {
             } => now >= *cleanup_deadline,
             SessionState::Completed(_) => false,
         }
+    }
+
+    /// Check if session has timed out using current system time (compatibility method)
+    #[allow(clippy::disallowed_methods)]
+    pub fn is_timed_out_now(&self) -> bool {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.is_timed_out(now)
     }
 
     /// Get session participants
@@ -268,7 +272,7 @@ where
 {
     /// Create a new session manager
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
     pub fn new(config: SessionConfig, now: u64) -> Self {
         Self {
             sessions: HashMap::new(),
@@ -280,7 +284,7 @@ where
 
     /// Create session manager with metrics collection
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
     pub fn with_metrics(config: SessionConfig, metrics: MetricsCollector, now: u64) -> Self {
         Self {
             sessions: HashMap::new(),
@@ -292,7 +296,7 @@ where
 
     /// Create a new session with participants
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    /// Note: Callers should obtain `now` via their time provider and pass it to this method
     pub fn create_session(
         &mut self,
         participants: Vec<DeviceId>,
@@ -300,7 +304,7 @@ where
     ) -> SyncResult<SessionId> {
         // Validate participant count
         if participants.len() > self.config.max_participants {
-            return Err(sync_validation_error(&format!(
+            return Err(sync_validation_error(format!(
                 "Too many participants: {} > {}",
                 participants.len(),
                 self.config.max_participants
@@ -318,10 +322,8 @@ where
         }
 
         let session_id = SessionId::new();
-        let now_secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        // Use the provided now parameter instead of SystemTime::now()
+        let now_secs = now;
 
         let session_state = SessionState::Initializing {
             participants,
@@ -344,10 +346,10 @@ where
         let session = self
             .sessions
             .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(&format!("Session {} not found", session_id)))?;
+            .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
-        if session.is_timed_out() {
+        if session.is_timed_out_now() {
             return Err(sync_timeout_error(
                 "session_activation",
                 self.config.timeout,
@@ -356,6 +358,8 @@ where
 
         match session {
             SessionState::Initializing { participants, .. } => {
+                // TODO: Consider updating activate_session to accept time parameter for unified time system
+                #[allow(clippy::disallowed_methods)]
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap_or_default()
@@ -371,7 +375,7 @@ where
 
                 Ok(())
             }
-            _ => Err(sync_session_error(&format!(
+            _ => Err(sync_session_error(format!(
                 "Session {} is not in initializing state",
                 session_id
             ))),
@@ -386,10 +390,10 @@ where
         let session = self
             .sessions
             .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(&format!("Session {} not found", session_id)))?;
+            .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
-        if session.is_timed_out() {
+        if session.is_timed_out_now() {
             self.timeout_session(session_id)?;
             return Err(sync_timeout_error("session_update", self.config.timeout));
         }
@@ -399,7 +403,7 @@ where
                 *protocol_state = new_state;
                 Ok(())
             }
-            _ => Err(sync_session_error(&format!(
+            _ => Err(sync_session_error(format!(
                 "Session {} is not active",
                 session_id
             ))),
@@ -417,7 +421,7 @@ where
         let session = self
             .sessions
             .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(&format!("Session {} not found", session_id)))?;
+            .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
         let duration_ms = session.duration_ms().unwrap_or(0);
         let participants = session.participants().to_vec();
@@ -459,7 +463,7 @@ where
         let session = self
             .sessions
             .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(&format!("Session {} not found", session_id)))?;
+            .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
         let duration_ms = session.duration_ms().unwrap_or(0);
 
@@ -495,7 +499,7 @@ where
         let session = self
             .sessions
             .get_mut(&session_id)
-            .ok_or_else(|| sync_session_error(&format!("Session {} not found", session_id)))?;
+            .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
         let duration_ms = session.duration_ms().unwrap_or(0);
         let last_known_state = format!("{:?}", session);
@@ -559,7 +563,7 @@ where
 
     /// Cleanup stale and completed sessions
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    /// Note: Callers should obtain `now` via their time provider and pass it to this method
     pub fn cleanup_stale_sessions(&mut self, now: u64) -> SyncResult<usize>
     where
         T: std::fmt::Debug,
@@ -575,7 +579,7 @@ where
 
         // Identify sessions to timeout or remove
         for (session_id, session) in &self.sessions {
-            if session.is_timed_out() && !session.is_terminal() {
+            if session.is_timed_out(now) && !session.is_terminal() {
                 to_timeout.push(*session_id);
             } else if session.is_terminal() {
                 // Remove completed sessions after some time
@@ -758,7 +762,7 @@ where
 
     /// Build the session manager
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via TimeEffects and pass it to this method
+    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
     pub fn build(self, now: u64) -> SessionManager<T> {
         if let Some(metrics) = self.metrics {
             SessionManager::with_metrics(self.config, metrics, now)

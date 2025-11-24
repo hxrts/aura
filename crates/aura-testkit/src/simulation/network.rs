@@ -78,10 +78,16 @@ impl NetworkCondition {
         Self {
             latency: Duration::from_millis(200),
             jitter: Duration::from_millis(50),
-            loss_rate: 0.05,                  // 5% loss
-            bandwidth: Some(1 * 1024 * 1024), // 1 MB/s
+            loss_rate: 0.05,              // 5% loss
+            bandwidth: Some(1024 * 1024), // 1 MB/s
             partitioned: false,
         }
+    }
+}
+
+impl Default for NetworkSimulator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -287,6 +293,12 @@ impl NetworkTopology {
 pub struct DeliveryTracker {
     sent: Arc<Mutex<Vec<(DeviceId, DeviceId, String)>>>,
     received: Arc<Mutex<Vec<(DeviceId, DeviceId, String)>>>,
+}
+
+impl Default for DeliveryTracker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DeliveryTracker {

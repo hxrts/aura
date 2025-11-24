@@ -5,7 +5,7 @@
 //! until causal dependencies are satisfied, then applies them idempotently.
 
 use aura_core::semilattice::{CausalOp, CmApply, Dedup, OpWithCtx};
-use aura_journal::{CausalContext, OperationId, VectorClock};
+use aura_journal::{CausalContext, OperationId, VectorClock, VectorClockExt};
 use std::collections::{HashMap, VecDeque};
 
 /// Operation-based CRDT effect handler with proper causal ordering
@@ -71,11 +71,11 @@ where
         self.state.mark_seen(op.id());
 
         // Create operation ID for dependency tracking
-        let op_id = OperationId::new(ctx.actor, ctx.clock.get(&ctx.actor));
+        let op_id = OperationId::new(ctx.actor, ctx.logical_time.vector.get_time(&ctx.actor));
         self.applied_operations.insert(op_id, true);
 
         // Update our vector clock
-        self.current_clock.update(&ctx.clock);
+        self.current_clock.update(&ctx.logical_time.vector);
 
         // Apply the operation to the state
         self.state.apply(op);
@@ -88,7 +88,10 @@ where
     fn is_causal_ready(&self, ctx: &CausalContext) -> bool {
         ctx.is_ready(
             |op_id| self.applied_operations.contains_key(op_id),
-            &self.current_clock,
+            &aura_core::time::LogicalTime {
+                vector: self.current_clock.clone(),
+                lamport: 0,
+            },
         )
     }
 

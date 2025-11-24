@@ -81,6 +81,7 @@ pub type RuntimeSystem = AuraEffectSystem;
 pub type RuntimeBuilder = EffectSystemBuilder;
 pub use registry::{EffectRegistry, EffectRegistryError, EffectRegistryExt};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct EffectSystemConfig {
     pub device_id: aura_core::identifiers::DeviceId,
@@ -90,6 +91,7 @@ pub struct EffectSystemConfig {
     pub default_flow_limit: u64,
 }
 
+#[allow(dead_code)]
 impl EffectSystemConfig {
     /// Create config for production
     pub fn for_production(
@@ -127,11 +129,13 @@ impl EffectSystemConfig {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
     pub storage_path: String,
 }
 
+#[allow(dead_code)]
 impl StorageConfig {
     /// Create config for testing
     pub fn for_testing() -> Self {
@@ -152,4 +156,4 @@ pub use lifecycle::LifecycleManager;
 pub use services::{FlowBudgetManager, ReceiptManager};
 
 #[cfg(any(test, feature = "testing"))]
-pub use services::SyncContextManager;
+pub use services::ContextManager;

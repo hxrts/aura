@@ -178,7 +178,7 @@ The type `Fact` represents facts as join-semilattice elements. Accumulation oper
 
 Journals replicate only facts. Capability evaluations run locally by interpreting Biscuit tokens plus policy. This keeps authorization independent of the replicated CRDT while preserving the same meet monotonicity at runtime.
 
-Contexts (`ContextId`) define privacy partitions. Messages never cross partition boundaries without explicit protocol support. See [Identifiers and Boundaries](105_identifiers_and_boundaries.md) for precise identifier semantics.
+Contexts (`ContextId`) define privacy partitions. Messages never cross partition boundaries without explicit protocol support. See [Identifiers and Boundaries](105_identifiers_and_boundaries.md) for precise identifier semantics and [Relational Contexts](103_relational_contexts.md) for implementation patterns.
 
 ### 2.2 Content Addressing Contract
 
@@ -701,7 +701,7 @@ Under this calculus, we can make the following interpretation:
 
 The join-semilattice (Facts) captures evidence and observations (trust and information flow). Examples: delegations/attestations, quorum proofs, ceremony transcripts, flow receipts, and monotone $`\text{spent}`$ counters.
 
-The meet-semilattice (Capabilities) captures enforcement limits and constraints (trust and information flow). Examples: the sovereign policy lattice, Biscuit token caveats, leak bounds, and consent gates. Flow budget limits are derived from capability evaluation, not stored as facts. This lattice is evaluated locally rather than stored in the journal, but it obeys the same algebra.
+The meet-semilattice (Capabilities) captures enforcement limits and constraints (trust and information flow). Examples: the sovereign policy lattice, Biscuit token caveats, leak bounds, and consent gates. See [Authorization](109_authorization.md) for implementation details. Flow budget limits are derived from capability evaluation, not stored as facts. This lattice is evaluated locally rather than stored in the journal, but it obeys the same algebra.
 
 Effective authority and headroom are computed from both lattices:
 

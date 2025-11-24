@@ -19,12 +19,19 @@ impl IdentityValidator {
         device_public_key: &aura_core::Ed25519VerifyingKey,
     ) -> Result<()> {
         // Verify signature
-        aura_core::ed25519_verify(device_public_key, event_hash, signature).map_err(|e| {
-            AuthenticationError::InvalidDeviceSignature(format!(
-                "Device signature verification failed: {}",
-                e
-            ))
-        })?;
+        let valid =
+            aura_core::ed25519_verify(event_hash, signature, device_public_key).map_err(|e| {
+                AuthenticationError::InvalidDeviceSignature(format!(
+                    "Device signature verification failed: {}",
+                    e
+                ))
+            })?;
+
+        if !valid {
+            return Err(AuthenticationError::InvalidDeviceSignature(
+                "Device signature verification failed".to_string(),
+            ));
+        }
 
         Ok(())
     }
@@ -37,12 +44,20 @@ impl IdentityValidator {
         guardian_public_key: &aura_core::Ed25519VerifyingKey,
     ) -> Result<()> {
         // Verify the actual signature provided with the event
-        aura_core::ed25519_verify(guardian_public_key, message, signature).map_err(|e| {
-            AuthenticationError::InvalidGuardianSignature(format!(
-                "Guardian signature verification failed for {:?}: {}",
-                guardian_id, e
-            ))
-        })?;
+        let valid =
+            aura_core::ed25519_verify(message, signature, guardian_public_key).map_err(|e| {
+                AuthenticationError::InvalidGuardianSignature(format!(
+                    "Guardian signature verification failed for {:?}: {}",
+                    guardian_id, e
+                ))
+            })?;
+
+        if !valid {
+            return Err(AuthenticationError::InvalidGuardianSignature(format!(
+                "Guardian signature invalid for {:?}",
+                guardian_id
+            )));
+        }
 
         Ok(())
     }
@@ -93,14 +108,19 @@ impl IdentityValidator {
         group_public_key: &aura_core::Ed25519VerifyingKey,
     ) -> Result<()> {
         // FROST signatures are compatible with standard Ed25519 verification
-        aura_core::ed25519_verify(group_public_key, message, &threshold_sig.signature).map_err(
-            |e| {
+        let valid = aura_core::ed25519_verify(message, &threshold_sig.signature, group_public_key)
+            .map_err(|e| {
                 AuthenticationError::InvalidThresholdSignature(format!(
                     "FROST threshold signature verification failed: {}",
                     e
                 ))
-            },
-        )?;
+            })?;
+
+        if !valid {
+            return Err(AuthenticationError::InvalidThresholdSignature(
+                "FROST threshold signature invalid".to_string(),
+            ));
+        }
 
         Ok(())
     }

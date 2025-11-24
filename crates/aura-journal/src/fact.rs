@@ -10,12 +10,11 @@
 //! CRDT using set union for convergence.
 
 use aura_core::{
-    effects::RandomEffects,
     identifiers::{AuthorityId, ChannelId, ContextId},
     semilattice::JoinSemilattice,
+    time::{OrderTime, TimeStamp},
     Hash32, Result,
 };
-
 // Import EffectContext for proper context propagation
 // Note: In practice, this would import from wherever EffectContext is defined in aura-core
 use std::collections::HashMap;
@@ -36,6 +35,17 @@ impl Default for EffectContext {
     fn default() -> Self {
         Self {
             authority_id: AuthorityId::new(),
+            session_id: None,
+            metadata: HashMap::new(),
+        }
+    }
+}
+
+impl EffectContext {
+    /// Create a context bound to a specific authority
+    pub fn with_authority(authority_id: AuthorityId) -> Self {
+        Self {
+            authority_id,
             session_id: None,
             metadata: HashMap::new(),
         }
@@ -96,9 +106,9 @@ impl Journal {
         self.facts.len()
     }
 
-    /// Check if the journal contains a specific fact
-    pub fn contains(&self, fact_id: &FactId) -> bool {
-        self.facts.iter().any(|f| &f.fact_id == fact_id)
+    /// Check if the journal contains a specific fact timestamp
+    pub fn contains_timestamp(&self, ts: &TimeStamp) -> bool {
+        self.facts.iter().any(|f| &f.timestamp == ts)
     }
 
     /// Iterate over all facts in the journal
@@ -137,71 +147,13 @@ impl Journal {
     }
 }
 
-/// Unique identifier for facts
-///
-/// # Effect System Integration
-///
-/// FactId should be created using UUIDs from `RandomEffects::random_uuid()` to maintain
-/// the effect system boundaries. Direct construction with `new_v4()` bypasses the effect
-/// system and prevents deterministic testing.
-///
-/// # Example
-/// ```ignore
-/// // Correct: Use RandomEffects
-/// let uuid = random_effects.random_uuid().await;
-/// let fact_id = FactId::from_uuid(uuid);
-///
-/// // Incorrect: Direct random generation (disallowed)
-/// // let fact_id = FactId::new(); // This method has been removed
-/// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct FactId(pub uuid::Uuid);
-
-impl FactId {
-    /// Generate a new random FactId using the effect system
-    ///
-    /// This is the preferred method for creating FactIds in production code.
-    /// It uses RandomEffects to ensure deterministic testing and proper effect boundaries.
-    ///
-    /// # Example
-    /// ```ignore
-    /// use aura_core::effects::RandomEffects;
-    /// use aura_journal::FactId;
-    ///
-    /// async fn create_fact(ctx: &EffectContext, random: &dyn RandomEffects) {
-    ///     let fact_id = FactId::generate(ctx, random).await;
-    ///     // use fact_id...
-    /// }
-    /// ```
-    pub async fn generate(_ctx: &EffectContext, random: &dyn RandomEffects) -> Self {
-        let uuid = random.random_uuid().await;
-        Self(uuid)
-    }
-
-    /// Create a FactId from a UUID
-    ///
-    /// The UUID should be obtained from `RandomEffects::random_uuid()` to maintain
-    /// effect system boundaries and enable deterministic testing.
-    pub fn from_uuid(uuid: uuid::Uuid) -> Self {
-        Self(uuid)
-    }
-
-    /// Create a deterministic FactId from bytes (for testing)
-    ///
-    /// This should only be used in tests or when you have a deterministic UUID source.
-    pub fn from_bytes(bytes: [u8; 16]) -> Self {
-        Self(uuid::Uuid::from_bytes(bytes))
-    }
-}
-
-/// Core fact structure
-///
-/// Facts are immutable entries in the journal that represent
-/// state changes or events in the system.
+/// Core fact structure (timestamp-driven identity)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fact {
-    /// Unique identifier for this fact
-    pub fact_id: FactId,
+    /// Opaque total order for deterministic merges
+    pub order: OrderTime,
+    /// Semantic timestamp for ordering/identity
+    pub timestamp: TimeStamp,
     /// Content of the fact
     pub content: FactContent,
 }
@@ -214,7 +166,7 @@ impl PartialOrd for Fact {
 
 impl Ord for Fact {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.fact_id.cmp(&other.fact_id)
+        self.order.cmp(&other.order)
     }
 }
 
@@ -227,16 +179,14 @@ pub enum FactContent {
     Relational(RelationalFact),
     /// Snapshot marker for garbage collection
     Snapshot(SnapshotFact),
-    /// Flow budget spent counter update
-    FlowBudget(FlowBudgetFact),
     /// Rendezvous receipt for tracking message flow
     RendezvousReceipt {
         /// Unique identifier of the envelope
         envelope_id: [u8; 32],
         /// Authority that issued this receipt
         authority_id: AuthorityId,
-        /// Timestamp when the receipt was created
-        timestamp: u64,
+        /// Time when the receipt was created (using unified time system)
+        timestamp: TimeStamp,
         /// Signature over the receipt data
         signature: Vec<u8>,
     },
@@ -249,7 +199,6 @@ impl FactContent {
             FactContent::AttestedOp(_) => FactType::AttestedOp,
             FactContent::Relational(_) => FactType::Relational,
             FactContent::Snapshot(_) => FactType::Snapshot,
-            FactContent::FlowBudget(_) => FactType::FlowBudget,
             FactContent::RendezvousReceipt { .. } => FactType::RendezvousReceipt,
         }
     }
@@ -264,8 +213,6 @@ pub enum FactType {
     Relational,
     /// Snapshot marker for garbage collection
     Snapshot,
-    /// Flow budget spent counter update
-    FlowBudget,
     /// Rendezvous receipt for tracking message flow
     RendezvousReceipt,
 }
@@ -464,27 +411,9 @@ pub struct SnapshotFact {
     /// Hash of the state at snapshot time
     pub state_hash: Hash32,
     /// Facts that can be garbage collected
-    pub superseded_facts: Vec<FactId>,
+    pub superseded_facts: Vec<OrderTime>,
     /// Snapshot sequence number
     pub sequence: u64,
-}
-
-/// Flow budget fact for tracking spent amounts
-///
-/// Only spent counters are stored as facts. Limits are computed
-/// at runtime from Biscuit token evaluation.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub struct FlowBudgetFact {
-    /// Relational context where budget was spent
-    pub context_id: ContextId,
-    /// Source authority that initiated the spending
-    pub source: AuthorityId,
-    /// Destination authority that received the flow
-    pub destination: AuthorityId,
-    /// Amount spent in this transaction (incremental counter)
-    pub spent_amount: u64,
-    /// Epoch number for this spending (for rotation tracking)
-    pub epoch: u64,
 }
 
 #[cfg(test)]
@@ -511,7 +440,8 @@ mod tests {
 
         // Add different facts to each journal
         let fact1 = Fact {
-            fact_id: FactId::from_bytes([1u8; 16]),
+            order: OrderTime([1u8; 32]),
+            timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
             content: FactContent::Snapshot(SnapshotFact {
                 state_hash: Hash32::default(),
                 superseded_facts: vec![],
@@ -520,7 +450,8 @@ mod tests {
         };
 
         let fact2 = Fact {
-            fact_id: FactId::from_bytes([2u8; 16]),
+            order: OrderTime([2u8; 32]),
+            timestamp: TimeStamp::OrderClock(OrderTime([2u8; 32])),
             content: FactContent::Snapshot(SnapshotFact {
                 state_hash: Hash32::default(),
                 superseded_facts: vec![],
@@ -535,8 +466,8 @@ mod tests {
         let merged = journal1.join(&journal2);
 
         assert_eq!(merged.size(), 2);
-        assert!(merged.contains(&fact1.fact_id));
-        assert!(merged.contains(&fact2.fact_id));
+        assert!(merged.contains_timestamp(&fact1.timestamp));
+        assert!(merged.contains_timestamp(&fact2.timestamp));
     }
 
     #[test]

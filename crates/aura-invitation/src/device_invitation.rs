@@ -4,8 +4,9 @@
 //! patterns with the rumpsteak-aura framework for type-safe protocol execution.
 
 use crate::{transport::deliver_via_rendezvous, InvitationError, InvitationResult};
-use aura_core::effects::{NetworkEffects, TimeEffects};
+use aura_core::effects::NetworkEffects;
 use aura_core::hash;
+use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::{AccountId, DeviceId};
 use aura_journal::semilattice::{InvitationRecord, InvitationRecordRegistry};
 use aura_macros::choreography;
@@ -295,7 +296,12 @@ where
             ));
         }
 
-        let created_at = TimeEffects::current_timestamp(self.effects.as_ref()).await;
+        let created_at = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
         let envelope = InvitationEnvelope::new(&request, created_at, ttl);
 
         // Phase 2: Record invitation through choreographic state management
@@ -329,8 +335,14 @@ where
     async fn record_invitation(&self, envelope: &InvitationEnvelope) -> InvitationResult<()> {
         let record = InvitationRecord::pending(
             envelope.invitation_id.clone(),
-            envelope.expires_at,
-            envelope.created_at,
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: envelope.expires_at,
+                uncertainty: None,
+            }),
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: envelope.created_at,
+                uncertainty: None,
+            }),
         );
         let mut registry = self.registry.lock().await;
         registry.upsert(record);

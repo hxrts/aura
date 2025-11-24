@@ -1,9 +1,8 @@
 use aura_core::identifiers::{ChannelId, ContextId};
+use aura_core::time::{OrderTime, TimeStamp};
 use aura_core::Hash32;
 use aura_journal::fact::{ChannelCheckpoint, CommittedChannelEpochBump, RelationalFact};
-use aura_journal::{
-    reduce_context, Fact, FactContent, FactId, FactJournal as Journal, JournalNamespace,
-};
+use aura_journal::{reduce_context, Fact, FactContent, FactJournal as Journal, JournalNamespace};
 
 #[test]
 fn recovery_from_journal_reconstructs_channel_state() {
@@ -11,7 +10,8 @@ fn recovery_from_journal_reconstructs_channel_state() {
     let channel = ChannelId::from_bytes([5u8; 32]);
 
     let checkpoint = Fact {
-        fact_id: FactId::from_bytes([1u8; 16]),
+        order: OrderTime([1u8; 32]),
+        timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
         content: FactContent::Relational(RelationalFact::AmpChannelCheckpoint(ChannelCheckpoint {
             context: ctx,
             channel,
@@ -24,7 +24,8 @@ fn recovery_from_journal_reconstructs_channel_state() {
     };
 
     let committed = Fact {
-        fact_id: FactId::from_bytes([2u8; 16]),
+        order: OrderTime([2u8; 32]),
+        timestamp: TimeStamp::OrderClock(OrderTime([2u8; 32])),
         content: FactContent::Relational(RelationalFact::AmpCommittedChannelEpochBump(
             CommittedChannelEpochBump {
                 context: ctx,

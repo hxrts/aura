@@ -4,11 +4,10 @@
 //! as specified in the formal model. It provides observer models for external,
 //! neighbor, and in-group adversaries with appropriate privacy guarantees.
 
-// Time calls replaced with TimeEffects integration
-
 use super::effect_system_trait::GuardEffectSystem;
 use super::LeakageBudget;
-use aura_core::{identifiers::AuthorityId, AuraError, AuraResult};
+use aura_core::{effects::PhysicalTimeEffects, identifiers::AuthorityId, AuraError, AuraResult};
+// TimeEffects removed - using PhysicalTimeEffects directly
 use tracing::{debug, info, warn};
 
 /// Privacy budget tracking state for a device
@@ -75,7 +74,7 @@ impl PrivacyBudgetTracker {
     }
 
     /// Consume budget for an operation
-    pub async fn consume_budget<T: aura_core::TimeEffects>(
+    pub async fn consume_budget<T: PhysicalTimeEffects>(
         &mut self,
         operation_id: String,
         consumed: LeakageBudget,
@@ -105,10 +104,16 @@ impl PrivacyBudgetTracker {
         self.state.consumed_budget = self.state.consumed_budget.add(&consumed);
 
         // Record the consumption
+        let timestamp = time_effects
+            .physical_time()
+            .await
+            .map_err(|err| AuraError::internal(format!("time provider unavailable: {err}")))?
+            .ts_ms;
+
         let consumption = BudgetConsumption {
             operation_id: operation_id.clone(),
             consumed: consumed.clone(),
-            timestamp: time_effects.current_timestamp().await,
+            timestamp,
             observable_by,
         };
 
@@ -129,8 +134,15 @@ impl PrivacyBudgetTracker {
     }
 
     /// Clean up old budget consumption records outside the tracking window
-    pub async fn cleanup_old_records<T: aura_core::TimeEffects>(&mut self, time_effects: &T) {
-        let current_time = time_effects.current_timestamp().await;
+    pub async fn cleanup_old_records<T: PhysicalTimeEffects>(
+        &mut self,
+        time_effects: &T,
+    ) -> AuraResult<()> {
+        let current_time = time_effects
+            .physical_time()
+            .await
+            .map_err(|err| AuraError::internal(format!("time provider unavailable: {err}")))?
+            .ts_ms;
 
         let window_start = current_time.saturating_sub(self.state.tracking_window_hours * 3600);
 
@@ -162,6 +174,7 @@ impl PrivacyBudgetTracker {
         }
 
         self.state.consumed_budget = new_consumed;
+        Ok(())
     }
 
     /// Get current budget availability
@@ -192,7 +205,7 @@ impl PrivacyBudgetTracker {
 }
 
 /// Track leakage consumption for an operation with persistent state management
-pub async fn track_leakage_consumption<E: GuardEffectSystem>(
+pub async fn track_leakage_consumption<E: GuardEffectSystem + PhysicalTimeEffects>(
     leakage_budget: &LeakageBudget,
     operation_id: &str,
     effect_system: &E,
@@ -225,7 +238,7 @@ pub async fn track_leakage_consumption<E: GuardEffectSystem>(
         .await?;
 
     // Clean up old records outside the tracking window
-    tracker.cleanup_old_records(effect_system).await;
+    tracker.cleanup_old_records(effect_system).await?;
 
     // Save updated state back to storage
     save_privacy_tracker(&tracker, effect_system).await?;
@@ -365,7 +378,11 @@ pub async fn get_privacy_budget_status<E: GuardEffectSystem>(
         Ok(tracker) => {
             let mut state = tracker.state.clone();
             // Clean up old records before returning status
-            let current_time = effect_system.current_timestamp().await;
+            let current_time = effect_system
+                .physical_time()
+                .await
+                .map_err(|e| AuraError::internal(format!("time provider unavailable: {}", e)))?
+                .ts_ms;
             let window_start = current_time.saturating_sub(state.tracking_window_hours * 3600);
 
             state

@@ -54,6 +54,7 @@
 //! - **EffectSystemBuilder**: Assembly infrastructure for effect combinations
 //! - **AuraAgent**: Public API for agent operations
 //! - **RuntimeSystem**: Internal runtime coordination
+#![allow(unexpected_cfgs)]
 //!
 //! ## Usage
 //!

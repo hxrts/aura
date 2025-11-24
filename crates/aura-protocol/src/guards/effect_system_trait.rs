@@ -1,28 +1,32 @@
 //! Effect System Trait for Guards
 //!
-//! This module defines the minimal trait that guards need from an effect system.
-//! This avoids circular dependencies by not depending on the concrete AuraEffectSystem type.
+//! Minimal interface guards need from an effect system without depending on the
+//! concrete AuraEffectSystem type.
 
+use crate::effects::AuraEffects;
 use crate::effects::JournalEffects;
 use async_trait::async_trait;
-use aura_core::effects::{FlowBudgetEffects, RandomEffects, StorageEffects, TimeEffects};
+use aura_core::effects::ExecutionMode;
+use aura_core::effects::{
+    FlowBudgetEffects, PhysicalTimeEffects, RandomEffects, StorageEffects, TimeError,
+};
 use aura_core::identifiers::AuthorityId;
 
 /// Minimal interface that guards need from an effect system
-///
-/// This trait abstracts over the concrete AuraEffectSystem to avoid circular dependencies.
-/// Guards work with this trait, and the actual runtime implements it.
-///
-/// Note: This trait extends JournalEffects because guards need access to journal operations
-/// for coupling protocol execution with distributed state updates.
 pub trait GuardEffectSystem:
-    JournalEffects + StorageEffects + FlowBudgetEffects + TimeEffects + RandomEffects + Send + Sync
+    JournalEffects
+    + StorageEffects
+    + FlowBudgetEffects
+    + PhysicalTimeEffects
+    + RandomEffects
+    + Send
+    + Sync
 {
     /// Get the authority ID for this effect system
     fn authority_id(&self) -> AuthorityId;
 
     /// Get the execution mode
-    fn execution_mode(&self) -> aura_core::effects::ExecutionMode;
+    fn execution_mode(&self) -> ExecutionMode;
 
     /// Query metadata from the effect system
     fn get_metadata(&self, key: &str) -> Option<String>;
@@ -36,10 +40,8 @@ pub trait GuardEffectSystem:
 pub struct SecurityContext {
     /// Authority performing the operation
     pub authority_id: AuthorityId,
-
     /// Current security level
     pub security_level: SecurityLevel,
-
     /// Whether hardware security is available
     pub hardware_secure: bool,
 }
@@ -65,61 +67,47 @@ impl Default for SecurityContext {
     }
 }
 
-// TEMPORARY: Implementation for type alias until refactoring in Phase 4
-use crate::effects::AuraEffects;
-use aura_core::effects::ExecutionMode;
-
+/// GuardEffectSystem for boxed AuraEffects
 impl GuardEffectSystem for Box<dyn AuraEffects> {
     fn authority_id(&self) -> AuthorityId {
-        // Get the authority ID from system configuration
-        // This should be configured when the effect system is initialized
         match futures::executor::block_on(async { self.get_config("authority_id").await }) {
-            Ok(authority_id_str) => {
-                // Parse the authority ID from configuration
-                authority_id_str.parse().unwrap_or_else(|_| {
-                    tracing::warn!("Invalid authority_id in config, using new ID");
-                    AuthorityId::new()
-                })
-            }
-            Err(_) => {
-                // If no authority ID is configured, generate a new one
-                tracing::debug!("No authority_id configured, generating new ID");
-                AuthorityId::new()
-            }
+            Ok(authority_id_str) => authority_id_str
+                .parse()
+                .unwrap_or_else(|_| AuthorityId::new()),
+            Err(_) => AuthorityId::new(),
         }
     }
 
     fn execution_mode(&self) -> ExecutionMode {
-        // Delegate to the actual effect system's execution mode
         AuraEffects::execution_mode(self.as_ref())
     }
 
     fn get_metadata(&self, key: &str) -> Option<String> {
-        // Delegate to the effect system's configuration system
-        match futures::executor::block_on(async { self.get_config(key).await }) {
-            Ok(value) => Some(value),
-            Err(_) => {
-                tracing::debug!(key = %key, "Metadata not found in configuration");
-                None
-            }
-        }
+        futures::executor::block_on(async { self.get_config(key).await }).ok()
     }
 
     fn can_perform_operation(&self, operation: &str) -> bool {
-        // Check if the operation is permitted based on system capabilities
-        // This could check against a list of allowed operations in configuration
-        let allowed_operations_key = "allowed_operations";
-        if let Some(allowed_ops) = self.get_metadata(allowed_operations_key) {
-            // Parse comma-separated list of allowed operations
+        if let Some(allowed_ops) = self.get_metadata("allowed_operations") {
             allowed_ops.split(',').any(|op| op.trim() == operation)
         } else {
-            // If no specific restrictions are configured, allow all operations
-            tracing::debug!(operation = %operation, "No operation restrictions configured, allowing operation");
             true
         }
     }
 }
 
+// PhysicalTimeEffects is automatically provided by AuraEffects trait bounds
+#[async_trait]
+impl PhysicalTimeEffects for Box<dyn AuraEffects> {
+    async fn physical_time(&self) -> Result<aura_core::time::PhysicalTime, TimeError> {
+        PhysicalTimeEffects::physical_time(&**self).await
+    }
+
+    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
+        PhysicalTimeEffects::sleep_ms(&**self, ms).await
+    }
+}
+
+// FlowBudgetEffects implementation for boxed AuraEffects
 #[async_trait::async_trait]
 impl FlowBudgetEffects for Box<dyn AuraEffects> {
     async fn charge_flow(
@@ -128,17 +116,16 @@ impl FlowBudgetEffects for Box<dyn AuraEffects> {
         peer: &AuthorityId,
         cost: u32,
     ) -> aura_core::AuraResult<aura_core::Receipt> {
-        // Use the journal-backed flow budget charge to honor charge-before-send
+        // Use journal-backed flow budget charge to honor charge-before-send
         let updated_budget =
             crate::effects::JournalEffects::charge_flow_budget(&**self, context, peer, cost)
                 .await?;
 
-        // Build a receipt chained by spent value as a monotone nonce; signatures are left empty here
         let nonce = updated_budget.spent;
         let epoch = updated_budget.epoch;
         Ok(aura_core::Receipt::new(
             *context,
-            AuthorityId::new(), // source is unknown from the boxed trait object
+            AuthorityId::new(),
             *peer,
             epoch,
             cost,
@@ -151,109 +138,30 @@ impl FlowBudgetEffects for Box<dyn AuraEffects> {
 
 // RandomEffects implementation
 #[async_trait]
-impl aura_core::effects::RandomEffects for Box<dyn AuraEffects> {
+impl RandomEffects for Box<dyn AuraEffects> {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        aura_core::effects::RandomEffects::random_bytes(&**self, len).await
+        RandomEffects::random_bytes(&**self, len).await
     }
 
     async fn random_bytes_32(&self) -> [u8; 32] {
-        aura_core::effects::RandomEffects::random_bytes_32(&**self).await
+        RandomEffects::random_bytes_32(&**self).await
     }
 
     async fn random_u64(&self) -> u64 {
-        aura_core::effects::RandomEffects::random_u64(&**self).await
+        RandomEffects::random_u64(&**self).await
     }
 
     async fn random_range(&self, low: u64, high: u64) -> u64 {
-        aura_core::effects::RandomEffects::random_range(&**self, low, high).await
+        RandomEffects::random_range(&**self, low, high).await
     }
 
     async fn random_uuid(&self) -> uuid::Uuid {
-        aura_core::effects::RandomEffects::random_uuid(&**self).await
+        RandomEffects::random_uuid(&**self).await
     }
 }
 
-// Explicit trait implementations to resolve trait bound issues
-#[async_trait]
-impl aura_core::TimeEffects for Box<dyn AuraEffects> {
-    async fn current_epoch(&self) -> u64 {
-        aura_core::TimeEffects::current_epoch(&**self).await
-    }
-
-    async fn current_timestamp(&self) -> u64 {
-        aura_core::TimeEffects::current_timestamp(&**self).await
-    }
-
-    async fn current_timestamp_millis(&self) -> u64 {
-        (**self).current_timestamp_millis().await
-    }
-
-    async fn sleep_ms(&self, ms: u64) {
-        (**self).sleep_ms(ms).await
-    }
-
-    async fn sleep_until(&self, epoch: u64) {
-        (**self).sleep_until(epoch).await
-    }
-
-    async fn delay(&self, duration: std::time::Duration) {
-        (**self).delay(duration).await
-    }
-
-    async fn sleep(&self, duration_ms: u64) -> Result<(), aura_core::AuraError> {
-        (**self).sleep(duration_ms).await
-    }
-
-    async fn yield_until(
-        &self,
-        condition: aura_core::effects::time::WakeCondition,
-    ) -> Result<(), aura_core::effects::time::TimeError> {
-        (**self).yield_until(condition).await
-    }
-
-    async fn wait_until(
-        &self,
-        condition: aura_core::effects::time::WakeCondition,
-    ) -> Result<(), aura_core::AuraError> {
-        (**self).wait_until(condition).await
-    }
-
-    async fn set_timeout(&self, timeout_ms: u64) -> aura_core::effects::time::TimeoutHandle {
-        aura_core::TimeEffects::set_timeout(&**self, timeout_ms).await
-    }
-
-    async fn cancel_timeout(
-        &self,
-        handle: aura_core::effects::time::TimeoutHandle,
-    ) -> Result<(), aura_core::effects::time::TimeError> {
-        (**self).cancel_timeout(handle).await
-    }
-
-    fn is_simulated(&self) -> bool {
-        aura_core::TimeEffects::is_simulated(&**self)
-    }
-
-    fn register_context(&self, context_id: uuid::Uuid) {
-        (**self).register_context(context_id)
-    }
-
-    fn unregister_context(&self, context_id: uuid::Uuid) {
-        (**self).unregister_context(context_id)
-    }
-
-    async fn notify_events_available(&self) {
-        (**self).notify_events_available().await
-    }
-
-    fn resolution_ms(&self) -> u64 {
-        (**self).resolution_ms()
-    }
-
-    async fn now_instant(&self) -> std::time::Instant {
-        (**self).now_instant().await
-    }
-}
-
+// TimeEffects implementation
+// StorageEffects implementation
 #[async_trait]
 impl StorageEffects for Box<dyn AuraEffects> {
     async fn store(
@@ -313,7 +221,7 @@ impl StorageEffects for Box<dyn AuraEffects> {
 
 // JournalEffects implementation
 #[async_trait]
-impl crate::effects::JournalEffects for Box<dyn AuraEffects> {
+impl JournalEffects for Box<dyn AuraEffects> {
     async fn merge_facts(
         &self,
         target: &aura_core::Journal,

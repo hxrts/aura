@@ -197,7 +197,7 @@ impl JoinSemilattice for AccountState {
 
         Self {
             account_id: self.account_id,
-            group_public_key: self.group_public_key,
+            group_public_key: self.group_public_key.clone(),
             guardian_registry: self.guardian_registry.join(&other.guardian_registry),
             epoch_counter: self.epoch_counter.join(&other.epoch_counter),
             lamport_clock: self.lamport_clock.join(&other.lamport_clock),
@@ -223,7 +223,13 @@ impl JoinSemilattice for GuardianRegistry {
         // Merge guardians (later registration timestamp wins)
         for (email, guardian) in &other.guardians {
             if let Some(existing) = result.guardians.get(email) {
-                if guardian.added_at > existing.added_at {
+                use aura_core::time::{OrderingPolicy, TimeOrdering};
+                if matches!(
+                    guardian
+                        .added_at
+                        .compare(&existing.added_at, OrderingPolicy::DeterministicTieBreak),
+                    TimeOrdering::After
+                ) {
                     result.guardians.insert(email.clone(), guardian.clone());
                 }
             } else {
@@ -311,7 +317,7 @@ mod tests {
         let signing_key = aura_core::Ed25519SigningKey::from_bytes(&[1u8; 32]);
         let group_public_key = signing_key.verifying_key();
 
-        let mut state1 = AccountState::new(account_id, group_public_key);
+        let mut state1 = AccountState::new(account_id, group_public_key.clone());
         let mut state2 = AccountState::new(account_id, group_public_key);
 
         state1.set_epoch_if_higher(3);
