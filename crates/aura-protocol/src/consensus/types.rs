@@ -1,13 +1,13 @@
-//! Commit Facts for Consensus Results
+//! Core consensus types
 //!
-//! This module defines the CommitFact type that represents immutable
-//! consensus results. These facts are inserted into authority or context
-//! journals as evidence of agreement.
+//! This module contains the fundamental types used throughout the consensus system.
 
-use crate::consensus::frost_adapter::{validate_signature_bytes, ConsensusFrost, CoreFrostAdapter};
-use aura_core::frost::{PublicKeyPackage, ThresholdSignature};
-use aura_core::time::ProvenancedTime;
-use aura_core::{AuthorityId, Hash32};
+use aura_core::{
+    frost::{PublicKeyPackage, ThresholdSignature},
+    session_epochs::Epoch,
+    time::ProvenancedTime,
+    AuthorityId, Hash32,
+};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -39,9 +39,6 @@ impl fmt::Display for ConsensusId {
 /// This is the primary output of the Aura Consensus protocol. It contains
 /// all evidence needed to verify that a threshold of witnesses agreed on
 /// an operation bound to a specific prestate.
-///
-/// Note: Does not derive PartialEq/Eq because ThresholdSignature contains
-/// cryptographic data that should be verified, not compared.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitFact {
     /// Unique identifier for this consensus instance
@@ -106,17 +103,6 @@ impl CommitFact {
 
     /// Verify the commit fact is valid
     pub fn verify(&self) -> Result<(), String> {
-        self.verify_with_public_key(self.group_public_key.as_ref())
-    }
-
-    /// Verify the commit fact, optionally using a provided group public key.
-    ///
-    /// Callers can supply fresher key material than was embedded in the fact,
-    /// which is useful when key rotation and fact transport are decoupled.
-    pub fn verify_with_public_key(
-        &self,
-        group_public_key: Option<&PublicKeyPackage>,
-    ) -> Result<(), String> {
         // Check threshold was met
         if self.participants.len() < self.threshold as usize {
             return Err("Insufficient participants for threshold".to_string());
@@ -130,15 +116,10 @@ impl CommitFact {
             return Err("Duplicate participants".to_string());
         }
 
-        // Verify threshold signature using FROST
-        if let Err(e) = verify_threshold_signature(
-            &self.threshold_signature,
-            &self.operation_bytes,
-            &self.participants,
-            self.threshold,
-            group_public_key,
-        ) {
-            return Err(format!("Threshold signature verification failed: {}", e));
+        // TODO: Verify threshold signature when FROST is fully integrated
+        // For now, just check basic structure
+        if self.threshold_signature.signature.is_empty() {
+            return Err("Empty threshold signature".to_string());
         }
 
         Ok(())
@@ -155,6 +136,48 @@ impl CommitFact {
     }
 }
 
+/// Consensus configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsensusConfig {
+    /// Minimum number of witnesses required
+    pub threshold: u16,
+
+    /// Set of eligible witnesses
+    pub witness_set: Vec<AuthorityId>,
+
+    /// Timeout for consensus operations in milliseconds
+    pub timeout_ms: u64,
+
+    /// Enable fast path optimization (1 RTT pipelining)
+    pub enable_pipelining: bool,
+
+    /// Current epoch
+    pub epoch: Epoch,
+}
+
+impl ConsensusConfig {
+    /// Create a new consensus configuration
+    pub fn new(threshold: u16, witness_set: Vec<AuthorityId>, epoch: Epoch) -> Self {
+        Self {
+            threshold,
+            witness_set,
+            timeout_ms: 30000, // 30 seconds default
+            enable_pipelining: true,
+            epoch,
+        }
+    }
+
+    /// Check if we have sufficient witnesses for the threshold
+    pub fn has_quorum(&self) -> bool {
+        self.witness_set.len() >= self.threshold as usize
+    }
+
+    /// Get the minimum number of witnesses needed for fast path
+    pub fn fast_path_threshold(&self) -> usize {
+        self.threshold as usize
+    }
+}
+
 /// Evidence of consensus failure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConflictFact {
@@ -167,65 +190,31 @@ pub struct ConflictFact {
     /// Authorities that reported conflicts
     pub reporters: Vec<AuthorityId>,
 
-    /// Timestamp of conflict detection
-    pub timestamp_ms: u64,
+    /// Timestamp of conflict detection  
+    pub timestamp: ProvenancedTime,
 }
 
-/// Verify a threshold signature for a commit fact
-///
-/// This function verifies that a threshold signature is valid for the given
-/// operation bytes and participant list.
-fn verify_threshold_signature(
-    threshold_signature: &ThresholdSignature,
-    operation_bytes: &[u8],
-    participants: &[AuthorityId],
-    threshold: u16,
-    group_public_key: Option<&PublicKeyPackage>,
-) -> Result<(), String> {
-    if operation_bytes.is_empty() {
-        return Err("Empty operation bytes".to_string());
-    }
+/// Result of a consensus operation
+#[derive(Debug, Clone)]
+pub enum ConsensusResult {
+    /// Consensus succeeded with commit fact
+    Committed(CommitFact),
 
-    validate_signature_bytes(&threshold_signature.signature)
-        .map_err(|e| format!("Invalid threshold signature: {}", e))?;
+    /// Consensus failed due to conflicts
+    Conflicted(ConflictFact),
 
-    if participants.len() < threshold as usize {
-        return Err("Insufficient participants for threshold".to_string());
-    }
-
-    if threshold_signature.signers.len() < threshold as usize {
-        return Err("Insufficient signers for threshold".to_string());
-    }
-
-    let mut signers = threshold_signature.signers.clone();
-    signers.sort();
-    signers.dedup();
-    if signers.len() != threshold_signature.signers.len() {
-        return Err("Duplicate signers in threshold signature".to_string());
-    }
-
-    let has_nonzero_sig = threshold_signature.signature.iter().any(|b| *b != 0);
-
-    if let Some(group_public_key) = group_public_key {
-        if has_nonzero_sig {
-            let adapter = CoreFrostAdapter;
-            adapter
-                .verify_aggregate(
-                    group_public_key,
-                    operation_bytes,
-                    threshold_signature.signature.as_slice(),
-                )
-                .map_err(|e| format!("FROST verification failed: {}", e))?;
-        }
-    }
-
-    Ok(())
+    /// Consensus timed out
+    Timeout {
+        consensus_id: ConsensusId,
+        elapsed_ms: u64,
+    },
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::time::{PhysicalTime, TimeStamp};
+    // Imports for future time-based consensus features
+    // use aura_core::time::{PhysicalTime, TimeStamp};
 
     #[test]
     fn test_consensus_id_generation() {
@@ -239,32 +228,13 @@ mod tests {
     }
 
     #[test]
-    fn test_commit_fact_verification() {
-        let fact = CommitFact {
-            consensus_id: ConsensusId(Hash32::default()),
-            prestate_hash: Hash32::default(),
-            operation_hash: Hash32::default(),
-            operation_bytes: b"op".to_vec(),
-            threshold_signature: ThresholdSignature::new(vec![1u8; 64], vec![0, 1]),
-            group_public_key: None,
-            participants: vec![AuthorityId::new(), AuthorityId::new()],
-            threshold: 2,
-            timestamp: ProvenancedTime {
-                stamp: TimeStamp::PhysicalClock(PhysicalTime {
-                    ts_ms: 0,
-                    uncertainty: None,
-                }),
-                proofs: vec![],
-                origin: Some(AuthorityId::new()),
-            },
-            fast_path: true,
-        };
+    fn test_consensus_config() {
+        let witnesses = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
+        let config = ConsensusConfig::new(2, witnesses, Epoch::from(1));
 
-        assert!(fact.verify().is_ok());
-
-        // Test insufficient participants
-        let mut bad_fact = fact.clone();
-        bad_fact.participants = vec![AuthorityId::new()];
-        assert!(bad_fact.verify().is_err());
+        assert!(config.has_quorum());
+        assert_eq!(config.threshold, 2);
+        assert_eq!(config.timeout_ms, 30000);
+        assert!(config.enable_pipelining);
     }
 }

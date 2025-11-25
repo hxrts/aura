@@ -9,6 +9,7 @@ use std::collections::HashMap;
 
 impl SessionOperations {
     /// Update session metadata
+    #[allow(dead_code)] // Part of future session metadata API
     pub async fn update_session_metadata(
         &self,
         _session_id: &str,
@@ -24,6 +25,7 @@ impl SessionOperations {
     }
 
     /// Add participant to session
+    #[allow(dead_code)] // Part of future session metadata API
     pub async fn add_participant(
         &self,
         _session_id: &str,
@@ -39,6 +41,7 @@ impl SessionOperations {
     }
 
     /// Remove participant from session
+    #[allow(dead_code)] // Part of future session metadata API
     pub async fn remove_participant(
         &self,
         _session_id: &str,

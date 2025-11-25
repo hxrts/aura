@@ -9,6 +9,7 @@ use crate::core::config::SyncConfig;
 use crate::core::errors::{sync_network_error, sync_serialization_error, sync_session_error};
 use aura_core::identifiers::ContextId;
 use aura_core::{time::OrderTime, AuraError, AuthorityId, Result};
+use aura_effects::time::monotonic_now;
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
 use parking_lot::RwLock;
@@ -367,7 +368,7 @@ impl NamespacedSync {
         _effects: &E,
         response: SyncResponse,
     ) -> Result<SyncStats> {
-        let start = std::time::Instant::now();
+        let start = monotonic_now();
         let mut stats = SyncStats::default();
 
         // Verify namespace matches

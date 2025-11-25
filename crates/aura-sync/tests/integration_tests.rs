@@ -47,7 +47,7 @@ mod integration_test_examples {
     #[tokio::test]
     async fn example_basic_test_setup() -> AuraResult<()> {
         // Example showing how to set up a basic integration test
-        let mut fixture = test_utils::MultiDeviceTestFixture::trio().await?;
+        let fixture = test_utils::MultiDeviceTestFixture::trio().await?;
 
         // Test should be able to create devices and sessions
         assert_eq!(fixture.devices.len(), 3);

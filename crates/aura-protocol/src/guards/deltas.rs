@@ -776,7 +776,6 @@ impl<E: GuardEffectSystem> JournalOperationExt for E {
                 tracing::info!("Applying intent finalization fact: {}", intent_fact);
                 merge_json_fact(self, &intent_fact).await?;
             }
-            // TODO: Add support for other operation types
             _ => {
                 tracing::warn!("Unsupported journal operation: {:?}", operation);
                 return Err(AuraError::invalid("Unsupported journal operation"));

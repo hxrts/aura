@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Performance benchmarks for individual effect handlers
 //!
 //! These benchmarks measure:
@@ -9,18 +10,15 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use std::sync::Arc;
 use tokio::runtime::Runtime;
 
-use aura_core::{
-    effects::{CryptoEffects, RandomEffects, StorageEffects},
-    identifiers::DeviceId,
-};
-use aura_effects::{FilesystemStorageHandler, RealCryptoHandler, RealRandomHandler};
+use aura_core::effects::{CryptoEffects, RandomEffects, StorageEffects};
+use aura_effects::{RealCryptoHandler, RealRandomHandler};
 use aura_testkit::stateful_effects::{
     crypto::MockCryptoHandler, random::MockRandomHandler, storage::MemoryStorageHandler,
 };
 
 /// Benchmark random handler performance
 fn bench_random_handlers(c: &mut Criterion) {
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::new().unwrap_or_else(|_| panic!("Failed to create runtime"));
 
     c.bench_function("mock_random_handler_uuid", |b| {
         let handler = MockRandomHandler::new_with_seed(42);
@@ -57,13 +55,13 @@ fn bench_random_handlers(c: &mut Criterion) {
 
 /// Benchmark crypto handler performance
 fn bench_crypto_handlers(c: &mut Criterion) {
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::new().unwrap_or_else(|_| panic!("Failed to create runtime"));
 
     c.bench_function("mock_crypto_ed25519_keypair", |b| {
         let handler = MockCryptoHandler::new();
         b.to_async(&runtime).iter(|| async {
             let keypair = handler.ed25519_generate_keypair().await;
-            black_box(keypair);
+            let _ = black_box(keypair);
         });
     });
 
@@ -71,20 +69,20 @@ fn bench_crypto_handlers(c: &mut Criterion) {
         let handler = RealCryptoHandler::new();
         b.to_async(&runtime).iter(|| async {
             let keypair = handler.ed25519_generate_keypair().await;
-            black_box(keypair);
+            let _ = black_box(keypair);
         });
     });
 }
 
 /// Benchmark storage handler performance
 fn bench_storage_handlers(c: &mut Criterion) {
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::new().unwrap_or_else(|_| panic!("Failed to create runtime"));
 
     c.bench_function("memory_storage_store", |b| {
         let handler = MemoryStorageHandler::new();
         b.to_async(&runtime).iter(|| async {
             let result = handler.store("test_key", vec![0u8; 1024]).await;
-            black_box(result);
+            let _ = black_box(result);
         });
     });
 
@@ -96,14 +94,14 @@ fn bench_storage_handlers(c: &mut Criterion) {
 
         b.to_async(&runtime).iter(|| async {
             let result = handler.retrieve("test_key").await;
-            black_box(result);
+            let _ = black_box(result);
         });
     });
 }
 
 /// Benchmark trait object overhead
 fn bench_trait_object_overhead(c: &mut Criterion) {
-    let runtime = Runtime::new().unwrap();
+    let runtime = Runtime::new().unwrap_or_else(|_| panic!("Failed to create runtime"));
 
     c.bench_function("direct_handler_call", |b| {
         let handler = MockRandomHandler::new_with_seed(42);
@@ -161,6 +159,7 @@ fn bench_handler_creation(c: &mut Criterion) {
     });
 }
 
+// Register all handler performance benchmarks for criterion execution
 criterion_group!(
     benches,
     bench_random_handlers,

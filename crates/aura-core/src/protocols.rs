@@ -12,7 +12,9 @@ use std::num::NonZeroU16;
 
 /// Protocol type enumeration
 ///
-/// Identifies the type of protocol being executed in a session.
+/// Identifies the type of protocol being executed in a session. `OperationType`
+/// is a reduced variant used for dispatch; see its `From<ProtocolType>` mapping
+/// for the correspondence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProtocolType {
     /// Deterministic Key Derivation protocol

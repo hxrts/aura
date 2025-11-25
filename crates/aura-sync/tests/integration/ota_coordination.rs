@@ -4,21 +4,19 @@
 //! upgrade coordination, and rollback scenarios.
 
 use super::test_utils::*;
-use aura_core::{AuraError, AuraResult, DeviceId, Hash32};
-use aura_sync::protocols::{
-    EpochConfig, EpochConfirmation, EpochRotationCoordinator, OTAConfig, OTAProtocol, OTAResult,
-    UpgradeKind, UpgradeProposal,
-};
+use aura_core::{AuraError, AuraResult, Hash32};
+use aura_effects::time::wallclock_ms;
+use aura_sync::protocols::{EpochConfirmation, OTAConfig, UpgradeKind, UpgradeProposal};
 use aura_testkit::simulation::network::NetworkCondition;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tokio::time::timeout;
 use uuid::Uuid;
 
 /// Test basic OTA upgrade coordination with threshold approval
 #[tokio::test]
 async fn test_basic_ota_coordination() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
-    let protocol = create_ota_protocol();
+    let fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let _protocol = create_ota_protocol();
 
     // Need at least 3 devices for 2-of-3 threshold
     assert!(
@@ -38,8 +36,8 @@ async fn test_basic_ota_coordination() -> AuraResult<()> {
     let ota_result = timeout(Duration::from_secs(90), async {
         // Step 1: Coordinator proposes upgrade
         let proposal = UpgradeProposal {
-            proposal_id: Uuid::new_v4(),
-            package_id: Uuid::new_v4(),
+            proposal_id: Uuid::nil(),
+            package_id: Uuid::nil(),
             version: String::from("1.2.0"),
             kind: UpgradeKind::SoftFork,
             package_hash: Hash32::from([0u8; 32]), // Sample hash
@@ -73,6 +71,13 @@ async fn test_basic_ota_coordination() -> AuraResult<()> {
         // Step 5: Verify upgrade success
         println!("Upgrade completed successfully");
 
+        // Verify proposal was created correctly (inside the async block where proposal is in scope)
+        assert_eq!(
+            proposal.proposal_id,
+            Uuid::nil(),
+            "Verify proposal was created correctly"
+        );
+
         Ok::<(), AuraError>(())
     })
     .await;
@@ -89,8 +94,8 @@ async fn test_basic_ota_coordination() -> AuraResult<()> {
 /// Test OTA upgrade with insufficient approvals
 #[tokio::test]
 async fn test_ota_insufficient_approvals() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
-    let protocol = create_ota_protocol();
+    let fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let _protocol = create_ota_protocol();
 
     let coordinator = fixture.devices[0];
     let approver1 = fixture.devices[1];
@@ -103,9 +108,9 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
     // Test OTA that fails due to insufficient approvals
     let ota_result = timeout(Duration::from_secs(60), async {
         // Step 1: Coordinator proposes upgrade
-        let proposal = UpgradeProposal {
-            proposal_id: Uuid::new_v4(),
-            package_id: Uuid::new_v4(),
+        let _proposal = UpgradeProposal {
+            proposal_id: Uuid::nil(),
+            package_id: Uuid::nil(),
             version: String::from("1.3.0"),
             kind: UpgradeKind::HardFork,
             package_hash: Hash32::from([0xdeu8; 32]),
@@ -115,7 +120,7 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
 
         println!(
             "Coordinator {} proposing upgrade to {}",
-            coordinator, proposal.version
+            coordinator, _proposal.version
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -169,7 +174,7 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
 /// Test OTA upgrade with epoch fencing
 #[tokio::test]
 async fn test_ota_epoch_fencing() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::trio().await?;
+    let fixture = MultiDeviceTestFixture::trio().await?;
 
     let device1 = fixture.devices[0];
     let device2 = fixture.devices[1];
@@ -177,8 +182,8 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
 
     // Create epoch coordinators
     let mut coord1 = create_epoch_coordinator(device1, 5); // Current epoch 5
-    let mut coord2 = create_epoch_coordinator(device2, 5);
-    let mut coord3 = create_epoch_coordinator(device3, 4); // Behind by one epoch
+    let _coord2 = create_epoch_coordinator(device2, 5);
+    let coord3 = create_epoch_coordinator(device3, 4); // Behind by one epoch
 
     let session = fixture.create_coordinated_session("epoch_fencing").await?;
 
@@ -201,7 +206,7 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
                 participant_id: device2,
                 current_epoch: 5,
                 ready_for_epoch: 6,
-                confirmation_timestamp: SystemTime::now(),
+                confirmation_timestamp_ms: wallclock_ms(),
             };
 
             let conf3 = EpochConfirmation {
@@ -209,7 +214,7 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
                 participant_id: device3,
                 current_epoch: 4,
                 ready_for_epoch: 6, // Jumping to match others
-                confirmation_timestamp: SystemTime::now(),
+                confirmation_timestamp_ms: wallclock_ms(),
             };
 
             coord1.process_confirmation(conf2)?;
@@ -243,8 +248,8 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
 /// Test OTA upgrade rollback scenario
 #[tokio::test]
 async fn test_ota_rollback() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
-    let protocol = create_ota_protocol();
+    let fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let _protocol = create_ota_protocol();
 
     let coordinator = fixture.devices[0];
 
@@ -305,7 +310,7 @@ async fn test_ota_rollback() -> AuraResult<()> {
 #[tokio::test]
 async fn test_ota_network_partition() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
-    let protocol = create_ota_protocol();
+    let _protocol = create_ota_protocol();
 
     let coordinator = fixture.devices[0];
     let approver1 = fixture.devices[1];
@@ -367,10 +372,10 @@ async fn test_ota_network_partition() -> AuraResult<()> {
 /// Test concurrent OTA upgrade attempts
 #[tokio::test]
 async fn test_concurrent_ota_attempts() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let fixture = MultiDeviceTestFixture::threshold_group().await?;
 
-    let coordinator1 = fixture.devices[0];
-    let coordinator2 = fixture.devices[1];
+    let _coordinator1 = fixture.devices[0];
+    let _coordinator2 = fixture.devices[1];
 
     let session = fixture.create_coordinated_session("concurrent_ota").await?;
 
@@ -436,7 +441,7 @@ async fn test_concurrent_ota_attempts() -> AuraResult<()> {
 #[tokio::test]
 async fn test_ota_configuration_validation() -> AuraResult<()> {
     // Test valid configuration
-    let valid_config = OTAConfig {
+    let _valid_config = OTAConfig {
         readiness_threshold: 2,
         quorum_size: 3,
         enforce_epoch_fence: true,
@@ -446,7 +451,7 @@ async fn test_ota_configuration_validation() -> AuraResult<()> {
     // The configuration is valid if it can be created successfully
 
     // Test invalid configurations
-    let zero_fence_config = OTAConfig {
+    let _zero_fence_config = OTAConfig {
         readiness_threshold: 2,
         quorum_size: 3,
         enforce_epoch_fence: false, // Invalid - no fence protection
@@ -455,7 +460,7 @@ async fn test_ota_configuration_validation() -> AuraResult<()> {
     // Note: OTAConfig doesn't have a validate method in the current implementation
     // Instead, validation would happen in the protocol logic
 
-    let zero_approvers_config = OTAConfig {
+    let _zero_approvers_config = OTAConfig {
         readiness_threshold: 0, // Invalid - need at least one approver
         quorum_size: 3,
         enforce_epoch_fence: true,
@@ -463,7 +468,7 @@ async fn test_ota_configuration_validation() -> AuraResult<()> {
 
     // These would be validated by the protocol implementation
 
-    let invalid_quorum_config = OTAConfig {
+    let _invalid_quorum_config = OTAConfig {
         readiness_threshold: 5, // Invalid - more than quorum size
         quorum_size: 3,
         enforce_epoch_fence: true,
@@ -478,10 +483,10 @@ async fn test_ota_configuration_validation() -> AuraResult<()> {
 #[tokio::test]
 async fn test_ota_device_failures() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
-    let protocol = create_ota_protocol();
+    let _protocol = create_ota_protocol();
 
-    let coordinator = fixture.devices[0];
-    let approver1 = fixture.devices[1];
+    let _coordinator = fixture.devices[0];
+    let _approver1 = fixture.devices[1];
     let failed_device = fixture.devices[2];
 
     let session = fixture

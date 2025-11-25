@@ -133,7 +133,7 @@ This document tracks all unfinished work, placeholders, and architectural items 
 - [ ] Fix aura-composition handler implementations (should be composition utilities only)
 **Status**: VIOLATION
 **Description**: Contains individual handler implementations instead of composition patterns
-**Reference**: See [System Architecture](docs/001_system_architecture.md#33-handler-registration-and-interoperability-system) and [Effect System Guide](docs/106_effect_system_and_runtime.md#5-layers-and-crates)
+**Reference**: See [System Architecture](docs/001_system_architecture.md#33-handler-registration-and-interoperability-system) and [Effect System Guide](docs/106_effect_system_and_runtime.md#5-layers-and-crates) & [Aura Crate Structure and Dependency Graph](docs/999_project_structure.md)
 
 - [ ] Implement missing RelationalEffects domain handler in aura-relational crate
 **Status**: MISSING

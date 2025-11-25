@@ -14,6 +14,7 @@ use aura_core::hash::hash;
 use aura_core::time::{
     LogicalTime, OrderTime, OrderingPolicy, TimeOrdering, TimeStamp, VectorClock,
 };
+use rand::SeedableRng;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time;
 use uuid::Uuid;
@@ -72,6 +73,10 @@ impl PhysicalTimeEffects for PhysicalTimeHandler {
         Ok(())
     }
 }
+
+// TimeEffects is automatically implemented via blanket impl for PhysicalTimeEffects
+// The blanket impl provides default implementations for current_timestamp, etc.
+// The now_instant method will panic by default - this needs to be handled at the usage site
 
 /// Simple logical clock handler with optional authority tagging for vector entries.
 #[derive(Debug, Clone)]
@@ -192,4 +197,36 @@ impl TimeComparison for TimeComparisonHandler {
     async fn compare(&self, a: &TimeStamp, b: &TimeStamp) -> Result<TimeOrdering, TimeError> {
         Ok(a.compare(b, OrderingPolicy::Native))
     }
+}
+
+/// Monotonic clock helper for crates that cannot depend on effect traits directly.
+/// This lives in aura-effects (allowed impure surface) to avoid ambient `Instant::now()` elsewhere.
+#[allow(clippy::disallowed_methods)]
+pub fn monotonic_now() -> std::time::Instant {
+    std::time::Instant::now()
+}
+
+/// Wall-clock helper (milliseconds since UNIX epoch) for crates that need a timestamp but
+/// cannot access effect traits directly. Use sparingly—prefer `PhysicalTimeEffects`.
+#[allow(clippy::disallowed_methods)]
+pub fn wallclock_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_millis() as u64
+}
+
+/// Wall-clock helper (seconds since UNIX epoch).
+#[allow(clippy::disallowed_methods)]
+pub fn wallclock_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_secs()
+}
+
+/// Seeded RNG helper for deterministic randomness in non-effect contexts.
+/// Prefer effect traits; this exists to avoid `thread_rng` leaks.
+pub fn seeded_rng(seed: [u8; 32]) -> rand_chacha::ChaCha20Rng {
+    rand_chacha::ChaCha20Rng::from_seed(seed)
 }

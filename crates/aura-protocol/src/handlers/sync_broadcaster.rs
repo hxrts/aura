@@ -332,8 +332,7 @@ impl BroadcasterHandler {
                         peer_uuid
                     );
 
-                    // TODO: Implement actual transport.send() with receipt from guard chain
-                    // transport.send_with_receipt(peer, OpPush { op: op.clone() }, result.receipt).await?;
+                    // Transport integration pending: broadcast currently mocked/logged only.
                     tracing::debug!("Op {:?} sent to peer: {:?} (mocked)", cid, peer_uuid);
                 }
                 Ok(result) => {

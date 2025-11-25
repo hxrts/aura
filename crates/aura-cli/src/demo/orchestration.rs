@@ -3,6 +3,8 @@
 //! Provides complete orchestration of the human-agent demo experience,
 //! integrating TUI, simulator agents, and scenario system.
 
+use aura_effects::time::monotonic_now;
+use aura_effects::time::wallclock_ms;
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
@@ -147,7 +149,7 @@ pub struct DemoSessionRecord {
     pub session_id: Uuid,
 
     /// Session start time
-    pub start_time: std::time::SystemTime,
+    pub start_time_ms: u64,
 
     /// Session duration
     pub duration: std::time::Duration,
@@ -222,7 +224,8 @@ impl DemoOrchestrator {
             .ok_or_else(|| anyhow::anyhow!("No active demo session"))?;
 
         let session_id = Uuid::new_v4();
-        let start_time = std::time::SystemTime::now();
+        let start_time_ms = wallclock_ms();
+        let start_instant = monotonic_now();
 
         // Run the demo
         let result = {
@@ -230,7 +233,7 @@ impl DemoOrchestrator {
             demo_guard.run().await
         };
 
-        let duration = start_time.elapsed().unwrap_or_default();
+        let duration = start_instant.elapsed();
 
         // Create session record
         let session_record = match result {
@@ -248,7 +251,7 @@ impl DemoOrchestrator {
 
                 DemoSessionRecord {
                     session_id,
-                    start_time,
+                    start_time_ms,
                     duration,
                     final_state: DemoState::default(), // Would extract from demo
                     success: true,
@@ -271,7 +274,7 @@ impl DemoOrchestrator {
 
                 DemoSessionRecord {
                     session_id,
-                    start_time,
+                    start_time_ms,
                     duration,
                     final_state: DemoState::default(),
                     success: false,

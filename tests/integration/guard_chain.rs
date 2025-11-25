@@ -7,6 +7,7 @@ use aura_core::{
     semilattice::{Bottom, CvState, JoinSemilattice},
     AuraResult, DeviceId,
 };
+use aura_macros::aura_test;
 use aura_mpst::JournalAnnotation;
 use aura_protocol::guards::{JournalCouplerBuilder, ProtocolGuard};
 use serde::{Deserialize, Serialize};
@@ -60,7 +61,7 @@ impl CvState for TestCounter {}
 // The execute_anti_entropy_with_guard_chain function was moved during refactoring
 // and needs to be reimplemented with the new trait-based approach
 /*
-#[tokio::test]
+#[aura_test]
 async fn test_complete_guard_chain_execution() -> AuraResult<()> {
     let device_a = DeviceId::new();
     let device_b = DeviceId::new();
@@ -99,7 +100,7 @@ async fn test_complete_guard_chain_execution() -> AuraResult<()> {
 }
 */
 
-#[tokio::test]
+#[aura_test]
 async fn test_journal_coupler_standalone() -> AuraResult<()> {
     let device_id = DeviceId::new();
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
@@ -130,7 +131,7 @@ async fn test_journal_coupler_standalone() -> AuraResult<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[aura_test]
 async fn test_protocol_guard_with_journal_coupling() -> AuraResult<()> {
     let device_id = DeviceId::new();
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
@@ -173,7 +174,7 @@ async fn test_protocol_guard_with_journal_coupling() -> AuraResult<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[aura_test]
 async fn test_journal_coupling_with_different_annotation_types() -> AuraResult<()> {
     let device_id = DeviceId::new();
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
@@ -216,7 +217,7 @@ async fn test_journal_coupling_with_different_annotation_types() -> AuraResult<(
     Ok(())
 }
 
-#[tokio::test]
+#[aura_test]
 async fn test_optimistic_vs_pessimistic_journal_coupling() -> AuraResult<()> {
     let device_id = DeviceId::new();
 
@@ -269,7 +270,7 @@ async fn test_optimistic_vs_pessimistic_journal_coupling() -> AuraResult<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[aura_test]
 async fn test_journal_coupling_error_handling() -> AuraResult<()> {
     let device_id = DeviceId::new();
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
@@ -296,7 +297,7 @@ async fn test_journal_coupling_error_handling() -> AuraResult<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[aura_test]
 async fn test_guard_chain_capability_enforcement() -> AuraResult<()> {
     let device_id = DeviceId::new();
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
@@ -339,7 +340,7 @@ async fn test_guard_chain_capability_enforcement() -> AuraResult<()> {
     }
 }
 
-#[tokio::test]
+#[aura_test]
 async fn test_leakage_budget_tracking() -> AuraResult<()> {
     let device_id = DeviceId::new();
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
@@ -376,7 +377,7 @@ async fn test_leakage_budget_tracking() -> AuraResult<()> {
     Ok(())
 }
 
-#[tokio::test]
+#[aura_test]
 async fn test_guard_chain_with_multiple_delta_facts() -> AuraResult<()> {
     let device_id = DeviceId::new();
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;

@@ -16,7 +16,9 @@ use tokio::time::timeout;
 fn test_device_id(seed: &[u8]) -> DeviceId {
     use aura_core::hash::hash;
     let hash_bytes = hash(seed);
-    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    let uuid_bytes: [u8; 16] = hash_bytes[..16]
+        .try_into()
+        .unwrap_or_else(|_| panic!("Failed to convert hash bytes to UUID bytes"));
     DeviceId(uuid::Uuid::from_bytes(uuid_bytes))
 }
 
@@ -50,7 +52,7 @@ mod integration_examples {
         println!("=== Example 2: Network Simulation ===");
 
         let harness = test_device_trio();
-        let mut network = NetworkSimulator::new();
+        let network = NetworkSimulator::new();
         let devices = harness.device_ids();
 
         if devices.len() >= 2 {
@@ -99,9 +101,7 @@ mod integration_examples {
     async fn example_protocol_execution() -> AuraResult<()> {
         println!("=== Example 3: Protocol Execution Simulation ===");
 
-        let harness = test_device_trio();
-        let network = NetworkSimulator::new();
-        let devices = harness.device_ids();
+        let _harness = test_device_trio();
 
         // Simulate anti-entropy protocol
         println!("Simulating anti-entropy protocol:");
@@ -161,7 +161,7 @@ mod integration_examples {
         println!("=== Example 4: Network Partition Scenario ===");
 
         let harness = test_device_trio();
-        let mut network = NetworkSimulator::new();
+        let network = NetworkSimulator::new();
         let devices = harness.device_ids();
 
         let partition_scenario = timeout(Duration::from_secs(15), async {
@@ -231,7 +231,7 @@ mod integration_examples {
         println!("=== Example 5: Complex Multi-Protocol Workflow ===");
 
         let harness = test_device_trio();
-        let mut network = NetworkSimulator::new();
+        let network = NetworkSimulator::new();
         let devices = harness.device_ids();
 
         let complex_workflow = timeout(Duration::from_secs(30), async {
@@ -339,7 +339,7 @@ mod integration_examples {
         println!("  ✓ Configuration system working correctly");
 
         // Test network simulator
-        let mut network = NetworkSimulator::new();
+        let network = NetworkSimulator::new();
         let good_condition = NetworkCondition::default();
         let poor_condition = NetworkCondition::poor();
 
@@ -474,7 +474,7 @@ mod usage_examples {
 
         // Best Practice 4: Use realistic network conditions
         println!("4. REALISTIC NETWORK CONDITIONS:");
-        let mut network = NetworkSimulator::new();
+        let network = NetworkSimulator::new();
 
         // WAN conditions
         let wan = NetworkCondition::wan();

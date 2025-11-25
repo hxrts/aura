@@ -128,14 +128,14 @@ choreography! {
 /// Guardian setup coordinator
 pub struct GuardianSetupCoordinator<E>
 where
-    E: AuraEffects + ?Sized + 'static,
+    E: AuraEffects + 'static,
 {
     base: BaseCoordinator<E>,
 }
 
 impl<E> GuardianSetupCoordinator<E>
 where
-    E: AuraEffects + ?Sized + 'static,
+    E: AuraEffects + 'static,
 {
     /// Create new coordinator
     pub fn new(effect_system: Arc<E>) -> Self {
@@ -158,7 +158,7 @@ where
 
 impl<E> BaseCoordinatorAccess<E> for GuardianSetupCoordinator<E>
 where
-    E: AuraEffects + ?Sized + 'static,
+    E: AuraEffects + 'static,
 {
     fn base(&self) -> &BaseCoordinator<E> {
         &self.base
@@ -168,7 +168,7 @@ where
 #[async_trait]
 impl<E> RecoveryCoordinator<E> for GuardianSetupCoordinator<E>
 where
-    E: AuraEffects + ?Sized + 'static,
+    E: AuraEffects + 'static,
 {
     type Request = RecoveryRequest;
     type Response = RecoveryResponse;
@@ -196,7 +196,7 @@ where
 
 impl<E> GuardianSetupCoordinator<E>
 where
-    E: AuraEffects + ?Sized + 'static,
+    E: AuraEffects + 'static,
 {
     /// Execute guardian setup ceremony as setup initiator using choreography
     pub async fn execute_setup(

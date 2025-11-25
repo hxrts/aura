@@ -8,7 +8,8 @@ use crate::effects::JournalEffects;
 use async_trait::async_trait;
 use aura_core::effects::ExecutionMode;
 use aura_core::effects::{
-    FlowBudgetEffects, PhysicalTimeEffects, RandomEffects, StorageEffects, TimeError,
+    AuthorizationEffects, FlowBudgetEffects, LeakageEffects, PhysicalTimeEffects, RandomEffects,
+    StorageEffects, TimeError,
 };
 use aura_core::identifiers::AuthorityId;
 
@@ -19,6 +20,8 @@ pub trait GuardEffectSystem:
     + FlowBudgetEffects
     + PhysicalTimeEffects
     + RandomEffects
+    + AuthorizationEffects
+    + LeakageEffects
     + Send
     + Sync
 {
@@ -273,5 +276,72 @@ impl JournalEffects for Box<dyn AuraEffects> {
         cost: u32,
     ) -> Result<aura_core::FlowBudget, aura_core::AuraError> {
         (**self).charge_flow_budget(context, peer, cost).await
+    }
+}
+
+// AuthorizationEffects implementation
+#[async_trait]
+impl AuthorizationEffects for Box<dyn AuraEffects> {
+    async fn verify_capability(
+        &self,
+        capabilities: &aura_core::Cap,
+        operation: &str,
+        resource: &str,
+    ) -> Result<bool, aura_core::effects::AuthorizationError> {
+        AuthorizationEffects::verify_capability(&**self, capabilities, operation, resource).await
+    }
+
+    async fn delegate_capabilities(
+        &self,
+        source_capabilities: &aura_core::Cap,
+        requested_capabilities: &aura_core::Cap,
+        target_authority: &AuthorityId,
+    ) -> Result<aura_core::Cap, aura_core::effects::AuthorizationError> {
+        AuthorizationEffects::delegate_capabilities(
+            &**self,
+            source_capabilities,
+            requested_capabilities,
+            target_authority,
+        )
+        .await
+    }
+}
+
+// LeakageEffects implementation
+#[async_trait]
+impl LeakageEffects for Box<dyn AuraEffects> {
+    async fn record_leakage(
+        &self,
+        event: aura_core::effects::LeakageEvent,
+    ) -> aura_core::Result<()> {
+        (**self).record_leakage(event).await
+    }
+
+    async fn get_leakage_budget(
+        &self,
+        context_id: aura_core::identifiers::ContextId,
+    ) -> aura_core::Result<aura_core::effects::LeakageBudget> {
+        (**self).get_leakage_budget(context_id).await
+    }
+
+    async fn check_leakage_budget(
+        &self,
+        context_id: aura_core::identifiers::ContextId,
+        observer: aura_core::effects::ObserverClass,
+        amount: u64,
+    ) -> aura_core::Result<bool> {
+        (**self)
+            .check_leakage_budget(context_id, observer, amount)
+            .await
+    }
+
+    async fn get_leakage_history(
+        &self,
+        context_id: aura_core::identifiers::ContextId,
+        since_timestamp: Option<u64>,
+    ) -> aura_core::Result<Vec<aura_core::effects::LeakageEvent>> {
+        (**self)
+            .get_leakage_history(context_id, since_timestamp)
+            .await
     }
 }

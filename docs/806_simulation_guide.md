@@ -42,6 +42,24 @@ async fn broken_protocol_step() -> Result<ProtocolMessage> {
 
 When protocol code follows effect system guidelines, simulation handlers can control all impure operations for deterministic execution.
 
+### Simulation-Controlled Surfaces (must be injected)
+
+To keep the simulator in control, code must avoid direct use of:
+
+- Time: `SystemTime::now()`, `Instant::now()`, `tokio::time::sleep`, `std::thread::sleep`
+- Randomness: `rand::random`, `thread_rng()`, `OsRng`
+- IO/user input: `stdin().read_line`, direct blocking reads
+- Thread/process spawn: `std::thread::spawn` in protocol/domain layers
+
+Use the effect traits instead:
+
+- `PhysicalTimeEffects::sleep_ms/current_time` (simulated by `SimulationTimeHandler`)
+- `RandomEffects` (seeded in simulation)
+- `ConsoleEffects`/test harnesses for input/output
+- `TestingEffects`/scenario hooks for concurrency control
+
+When adding retries/backoff, pass the simulator’s `SimulationTimeHandler` into retry helpers so delays advance simulated time rather than wall-clock.
+
 ## Simulation Infrastructure
 
 Aura's simulation system is built on handler composition and middleware interception.

@@ -22,19 +22,12 @@ pub mod ota_coordination;
 // Test utilities and helpers shared across integration tests
 pub mod test_utils;
 
-use aura_core::{AuraResult, DeviceId, SessionId};
-use aura_sync::{
-    core::{SessionManager, SyncConfig},
-    protocols::*,
-};
+use aura_core::DeviceId;
+use aura_sync::core::{SessionManager, SyncConfig};
 use aura_testkit::simulation::{
     choreography::{test_device_trio, ChoreographyTestHarness},
     network::NetworkSimulator,
 };
-use std::time::Duration;
-
-// Import futures for async operations in tests
-use futures;
 
 /// Common configuration for integration tests
 pub fn test_sync_config() -> SyncConfig {
@@ -51,10 +44,7 @@ pub async fn setup_test_trio() -> (ChoreographyTestHarness, NetworkSimulator) {
 /// Create session manager for testing
 pub fn test_session_manager() -> SessionManager<()> {
     let config = aura_sync::core::session::SessionConfig::default();
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    let now = aura_effects::time::wallclock_secs();
     SessionManager::new(config, now)
 }
 

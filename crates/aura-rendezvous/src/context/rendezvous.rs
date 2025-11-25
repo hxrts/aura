@@ -1460,7 +1460,9 @@ mod tests {
         use aura_agent::{AgentConfig, AuraEffectSystem};
 
         let authority = AuthorityId::new();
-        let effects = Arc::new(AuraEffectSystem::testing(&AgentConfig::default()));
+        let effects = Arc::new(
+            AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
+        );
 
         let coordinator =
             ContextRendezvousCoordinator::new(authority, effects as Arc<dyn AuraEffects>);

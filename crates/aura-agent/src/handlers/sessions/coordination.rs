@@ -88,6 +88,7 @@ choreography! {
 
 /// Session creation request message
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session coordination API
 pub struct SessionRequest {
     pub session_type: SessionType,
     pub participants: Vec<DeviceId>,
@@ -98,6 +99,7 @@ pub struct SessionRequest {
 
 /// Participant invitation message
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session coordination API
 pub struct ParticipantInvitation {
     pub session_id: String,
     pub session_type: SessionType,
@@ -107,6 +109,7 @@ pub struct ParticipantInvitation {
 
 /// Session acceptance message
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session coordination API
 pub struct SessionAccepted {
     pub session_id: String,
     pub participant_id: DeviceId,
@@ -115,6 +118,7 @@ pub struct SessionAccepted {
 
 /// Session rejection message
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session coordination API
 pub struct SessionRejected {
     pub session_id: String,
     pub participant_id: DeviceId,
@@ -124,6 +128,7 @@ pub struct SessionRejected {
 
 /// Session creation success message
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session coordination API
 pub struct SessionCreated {
     pub session_id: String,
     pub session_handle: SessionHandle,
@@ -132,6 +137,7 @@ pub struct SessionCreated {
 
 /// Session creation failure message
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session coordination API
 pub struct SessionCreationFailed {
     pub session_id: String,
     pub reason: String,
@@ -139,6 +145,7 @@ pub struct SessionCreationFailed {
 }
 
 /// Session operations handler with authority-first design and choreographic patterns
+#[allow(dead_code)] // Part of future session coordination API
 pub struct SessionOperations {
     /// Effect system for session operations
     effects: Arc<RwLock<AuraEffectSystem>>,
@@ -150,6 +157,7 @@ pub struct SessionOperations {
 
 impl SessionOperations {
     /// Create new session operations handler
+    #[allow(dead_code)] // Part of future session coordination API
     pub fn new(
         effects: Arc<RwLock<AuraEffectSystem>>,
         authority_context: AuthorityContext,
@@ -163,11 +171,13 @@ impl SessionOperations {
     }
 
     /// Get the device ID derived from authority
+    #[allow(dead_code)] // Part of future session coordination API
     pub(super) fn device_id(&self) -> DeviceId {
         self.authority_context.device_id()
     }
 
     /// Access to effects system for submodules
+    #[allow(dead_code)] // Part of future session coordination API
     pub(super) fn effects(&self) -> &Arc<RwLock<AuraEffectSystem>> {
         &self.effects
     }
@@ -228,6 +238,7 @@ impl SessionOperations {
     }
 
     /// Execute the session creation choreography protocol
+    #[allow(dead_code)] // Part of future session coordination API
     async fn execute_session_creation_choreography(
         &self,
         request: &SessionRequest,
@@ -267,6 +278,7 @@ impl SessionOperations {
     }
 
     /// Validate session request (choreographic pattern)
+    #[allow(dead_code)] // Part of future session coordination API
     async fn validate_session_request(
         &self,
         request: &SessionRequest,
@@ -293,6 +305,7 @@ impl SessionOperations {
     }
 
     /// Simulate participant invitation and response collection (choreographic pattern)
+    #[allow(dead_code)] // Part of future session coordination API
     async fn invite_participants_choreographically(
         &self,
         request: &SessionRequest,
@@ -326,6 +339,7 @@ impl SessionOperations {
     }
 
     /// Create final session handle (choreographic pattern)
+    #[allow(dead_code)] // Part of future session coordination API
     async fn create_session_handle_choreographically(
         &self,
         request: &SessionRequest,
@@ -352,6 +366,7 @@ impl SessionOperations {
     }
 
     /// Simulate participant decision (placeholder for real network communication)
+    #[allow(dead_code)] // Part of future session coordination API
     async fn simulate_participant_decision(&self, _participant_id: &DeviceId) -> bool {
         // In real implementation, this would:
         // 1. Send invitation via NetworkEffects
@@ -366,6 +381,7 @@ impl SessionOperations {
 
 /// Internal type for tracking participant responses
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Part of future session coordination API
 struct ParticipantResponse {
     participant_id: DeviceId,
     accepted: bool,

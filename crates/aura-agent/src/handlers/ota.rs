@@ -4,6 +4,7 @@ use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentResult, AuthorityContext};
 
 pub struct OtaHandler {
+    #[allow(dead_code)] // Will be used for OTA operations
     context: HandlerContext,
 }
 

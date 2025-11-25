@@ -261,32 +261,15 @@ fn format_field(value: &str, max_width: usize) -> String {
 
 /// Format unix timestamp as human-readable string
 fn format_timestamp(ts: u64) -> String {
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-    let datetime = UNIX_EPOCH + Duration::from_secs(ts);
-    let now = SystemTime::now();
-
-    if let Ok(duration_since) = now.duration_since(datetime) {
-        let secs = duration_since.as_secs();
-        if secs < 60 {
-            return format!("{} seconds ago", secs);
-        } else if secs < 3600 {
-            return format!("{} minutes ago", secs / 60);
-        } else if secs < 86400 {
-            return format!("{} hours ago", secs / 3600);
-        } else {
-            return format!("{} days ago", secs / 86400);
-        }
+    match chrono::DateTime::<chrono::Utc>::from_timestamp(ts as i64, 0) {
+        Some(dt) => dt.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+        None => format!("timestamp: {}", ts),
     }
-
-    // Future timestamp or formatting fallback
-    format!("timestamp: {}", ts)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::SystemTime;
 
     #[test]
     fn test_format_field() {
@@ -296,15 +279,8 @@ mod tests {
 
     #[test]
     fn test_format_timestamp() {
-        let now = match SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-            Ok(duration) => duration.as_secs(),
-            Err(_) => return, // Skip test if system time is invalid
-        };
-
-        let recent = format_timestamp(now - 30);
-        assert!(recent.contains("seconds ago"));
-
-        let hours_ago = format_timestamp(now - 7200);
-        assert!(hours_ago.contains("hours ago"));
+        let ts = 1_700_000_000; // fixed timestamp
+        let formatted = format_timestamp(ts);
+        assert!(formatted.contains("UTC"));
     }
 }

@@ -605,8 +605,8 @@ mod tests {
         assert!(ctx.should_inject_network_fault(0.2)); // 0.2 < 0.3
     }
 
-    #[test]
-    fn test_agent_context() {
+    #[tokio::test]
+    async fn test_agent_context() {
         let device_id = DeviceId::from(Uuid::new_v4());
         let mut ctx = AgentContext::new(device_id);
 
@@ -615,8 +615,11 @@ mod tests {
         assert_eq!(ctx.get_config("key"), Some("value"));
         assert_eq!(ctx.get_config("missing"), None);
 
-        // Test sessions
-        let session_id = ctx.create_session("test_session");
+        // Test sessions - need mock time effects for create_session
+        use aura_testkit::stateful_effects::time::SimulatedTimeHandler;
+        let time_effects = SimulatedTimeHandler::new();
+
+        let session_id = ctx.create_session("test_session", &time_effects).await;
         assert!(ctx.get_session(&session_id).is_some());
         assert_eq!(
             ctx.get_session(&session_id).unwrap().session_type,

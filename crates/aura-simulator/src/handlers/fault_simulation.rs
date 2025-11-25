@@ -6,6 +6,7 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
+use aura_effects::time::monotonic_now;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -72,7 +73,7 @@ impl SimulationFaultHandler {
     fn track_fault(&self, fault_id: String, fault_type: String, duration: Option<Duration>) {
         let fault = ActiveFault {
             fault_type,
-            start_time: Instant::now(),
+            start_time: monotonic_now(),
             duration,
             parameters: HashMap::new(),
         };
@@ -84,7 +85,7 @@ impl SimulationFaultHandler {
     /// Remove expired faults
     fn cleanup_expired_faults(&self) {
         let mut active_faults = self.active_faults.lock().unwrap();
-        let now = Instant::now();
+        let now = monotonic_now();
 
         active_faults.retain(|_, fault| {
             match fault.duration {
@@ -96,6 +97,8 @@ impl SimulationFaultHandler {
 
     /// Check if we can inject more faults
     fn can_inject_more_faults(&self) -> bool {
+        #[allow(clippy::unwrap_used)]
+        // Simulation code - lock poisoning is not expected in test scenarios
         let active_faults = self.active_faults.lock().unwrap();
         active_faults.len() < self.max_concurrent_faults
     }
@@ -129,7 +132,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("corruption_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = format!("corruption_{}", monotonic_now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
             format!("MessageCorruption({:?})", corruption_type),
@@ -159,7 +162,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("delay_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = format!("delay_{}", monotonic_now().elapsed().as_nanos());
         let peers_desc = match affected_peers {
             Some(ref peers) => format!("peers: {:?}", peers),
             None => "all peers".to_string(),
@@ -194,7 +197,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("partition_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = format!("partition_{}", monotonic_now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
             format!("NetworkPartition({} groups)", partition_groups.len()),
@@ -224,7 +227,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("byzantine_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = format!("byzantine_{}", monotonic_now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
             format!(
@@ -258,7 +261,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("resource_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = format!("resource_{}", monotonic_now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
             format!(
@@ -291,7 +294,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("timing_{}", Instant::now().elapsed().as_nanos());
+        let fault_id = format!("timing_{}", monotonic_now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
             format!(
@@ -305,6 +308,8 @@ impl ChaosEffects for SimulationFaultHandler {
     }
 
     async fn stop_all_injections(&self) -> Result<(), ChaosError> {
+        #[allow(clippy::unwrap_used)]
+        // Simulation code - lock poisoning is not expected in test scenarios
         let mut active_faults = self.active_faults.lock().unwrap();
         active_faults.clear();
         Ok(())
@@ -315,6 +320,8 @@ impl SimulationFaultHandler {
     /// Get information about currently active faults
     pub fn get_active_faults(&self) -> Vec<String> {
         self.cleanup_expired_faults();
+        #[allow(clippy::unwrap_used)]
+        // Simulation code - lock poisoning is not expected in test scenarios
         let active_faults = self.active_faults.lock().unwrap();
         active_faults
             .values()
@@ -325,6 +332,8 @@ impl SimulationFaultHandler {
     /// Get count of active faults
     pub fn active_fault_count(&self) -> usize {
         self.cleanup_expired_faults();
+        #[allow(clippy::unwrap_used)]
+        // Simulation code - lock poisoning is not expected in test scenarios
         let active_faults = self.active_faults.lock().unwrap();
         active_faults.len()
     }

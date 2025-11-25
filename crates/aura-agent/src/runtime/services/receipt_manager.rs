@@ -6,6 +6,7 @@ use crate::core::AgentConfig;
 
 /// Receipt manager service
 pub struct ReceiptManager {
+    #[allow(dead_code)] // Will be used for receipt configuration
     config: AgentConfig,
 }
 

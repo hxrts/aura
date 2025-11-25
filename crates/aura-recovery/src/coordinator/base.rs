@@ -3,7 +3,7 @@
 use crate::utils::{AuthorizationHelper, EvidenceBuilder, SignatureUtils};
 use crate::RecoveryResult;
 use async_trait::async_trait;
-use aura_core::{AccountId, DeviceId};
+use aura_core::{effects::PhysicalTimeEffects, AccountId, DeviceId};
 use aura_protocol::effects::AuraEffects;
 use aura_protocol::guards::BiscuitGuardEvaluator;
 use aura_wot::{BiscuitTokenManager, ContextOp};
@@ -14,7 +14,7 @@ use std::sync::Arc;
 /// This trait provides common functionality that all recovery coordinators need,
 /// while allowing each coordinator to implement its specific recovery logic.
 #[async_trait]
-pub trait RecoveryCoordinator<E: AuraEffects + ?Sized> {
+pub trait RecoveryCoordinator<E: AuraEffects> {
     /// The request type for this coordinator
     type Request;
     /// The response type for this coordinator  
@@ -44,6 +44,7 @@ pub trait RecoveryCoordinator<E: AuraEffects + ?Sized> {
             self.operation_name(),
             account_id,
             operation_type,
+            self.effect_system().as_ref() as &dyn PhysicalTimeEffects,
         )
         .await
     }

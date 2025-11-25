@@ -4,23 +4,19 @@
 //! system maintains its soundness properties throughout protocol execution.
 //!
 
-#![allow(clippy::disallowed_methods)] // TODO: Replace direct time calls with effect system
 //! Key properties verified:
 //! - **Non-interference**: Operations cannot exceed their authorized capabilities
 //! - **Monotonicity**: Capabilities can only be restricted, never expanded
 //! - **Temporal Consistency**: Time-based capabilities respect validity periods
 //! - **Context Isolation**: Capability contexts remain properly isolated
 //! - **Authorization Soundness**: All operations are properly authorized
-//!
-//! TODO: Refactor to use TimeEffects from the effect system instead of direct calls to SystemTime::now().
-
-#![allow(clippy::disallowed_methods)]
 
 use aura_core::{AuraResult, Cap, DeviceId, Fact};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    sync::Arc,
+    time::{Duration, Instant},
 };
 
 /// Soundness property that can be verified
@@ -162,6 +158,10 @@ pub struct CapabilitySoundnessVerifier {
     verification_history: Vec<SoundnessVerificationResult>,
     /// Current verification state
     current_state: Option<VerificationState>,
+    /// Provider for wall-clock timestamps (seconds)
+    time_provider: Arc<dyn Fn() -> u64 + Send + Sync>,
+    /// Provider for monotonic instants (for durations)
+    instant_provider: Arc<dyn Fn() -> Instant + Send + Sync>,
 }
 
 /// Configuration for soundness verification
@@ -187,7 +187,7 @@ struct VerificationState {
     /// Operations executed
     _executed_operations: Vec<CapabilityOperation>,
     /// Start time of verification
-    start_time: SystemTime,
+    start_time: Instant,
     /// Current coverage metrics
     coverage: CoverageMetrics,
 }
@@ -211,6 +211,8 @@ impl CapabilitySoundnessVerifier {
             config,
             verification_history: Vec::new(),
             current_state: None,
+            time_provider: Arc::new(|| 0),
+            instant_provider: Arc::new(Instant::now),
         }
     }
 
@@ -219,13 +221,24 @@ impl CapabilitySoundnessVerifier {
         Self::new(VerificationConfig::default())
     }
 
+    /// Provide deterministic time sources for verification.
+    pub fn with_time_providers(
+        mut self,
+        timestamp_provider: Arc<dyn Fn() -> u64 + Send + Sync>,
+        instant_provider: Arc<dyn Fn() -> Instant + Send + Sync>,
+    ) -> Self {
+        self.time_provider = timestamp_provider;
+        self.instant_provider = instant_provider;
+        self
+    }
+
     /// Verify a specific soundness property
     pub async fn verify_property(
         &mut self,
         property: SoundnessProperty,
         initial_state: CapabilityState,
     ) -> AuraResult<SoundnessVerificationResult> {
-        let start_time = SystemTime::now();
+        let start_time = (self.instant_provider)();
 
         // Initialize verification state
         let verification_state = VerificationState {
@@ -812,10 +825,7 @@ impl CapabilitySoundnessVerifier {
 
     /// Get current timestamp
     fn current_timestamp(&self) -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
+        (self.time_provider)()
     }
 
     /// Compute verification statistics

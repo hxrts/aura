@@ -262,8 +262,7 @@ async fn classify_operation_observability<E: GuardEffectSystem>(
     operation_id: &str,
     effect_system: &E,
 ) -> Vec<AdversaryClass> {
-    // This is a TODO fix - Simplified classification - in practice, this would analyze
-    // the operation type, network patterns, and protocol specifics
+    // Simplified classification; in practice this should analyze operation type, network patterns, and protocol specifics
 
     let mut observable_by = Vec::new();
 

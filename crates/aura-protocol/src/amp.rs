@@ -3,7 +3,7 @@
 //! These glue Layer 4 orchestration to Layer 2 facts without leaking domain types
 //! outward. Backed by core `JournalEffects` and `GuardEffectSystem`.
 
-use crate::consensus::{commit_fact::ConsensusId as CommitConsensusId, ConsensusId};
+use crate::consensus::ConsensusId;
 use crate::effects::JournalEffects;
 use crate::guards::effect_system_trait::GuardEffectSystem;
 use aura_core::effects::StorageEffects;
@@ -38,7 +38,7 @@ pub trait AmpJournalEffects: JournalEffects + StorageEffects + Sized {
     async fn insert_evidence_delta(
         &self,
         witness: AuthorityId,
-        consensus_id: CommitConsensusId,
+        consensus_id: ConsensusId,
         context: ContextId,
     ) -> Result<()>;
 
@@ -106,7 +106,7 @@ impl<E: GuardEffectSystem> AmpJournalEffects for E {
     async fn insert_evidence_delta(
         &self,
         witness: AuthorityId,
-        consensus_id: CommitConsensusId,
+        consensus_id: ConsensusId,
         context: ContextId,
     ) -> Result<()> {
         // Create evidence delta recording witness participation
@@ -116,9 +116,7 @@ impl<E: GuardEffectSystem> AmpJournalEffects for E {
             .entries
             .insert(hex::encode(consensus_id.0 .0), evidence_entry.into_bytes());
 
-        // Convert CommitConsensusId to ConsensusId for storage
-        let storage_cid = ConsensusId(consensus_id.0);
-        self.merge_evidence_delta(storage_cid, delta).await
+        self.merge_evidence_delta(consensus_id, delta).await
     }
 }
 

@@ -600,7 +600,8 @@ mod tests {
         let authority_id = AuthorityId::new();
         let context = AuthorityContext::new(authority_id);
 
-        let registry = EffectRegistry::custom().unwrap()
+        let registry = EffectRegistry::custom()
+            .unwrap()
             .with_authority_context(context)
             .with_logging()
             .with_metrics()

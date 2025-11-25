@@ -225,10 +225,8 @@ where
                         "CmRDT handler not registered".to_string(),
                     )
                 })?;
-                // For CmRDT, we need to provide buffered operations
-                // This is a simplified implementation - in practice, we'd track
-                // operations since the peer's vector clock
-                let operations = Vec::new(); // TODO: Implement operation history tracking
+                // For CmRDT, we need to provide buffered operations; currently emits empty set.
+                let operations = Vec::new();
                 CrdtSyncData::Operations(operations)
             }
             CrdtType::Delta => {
@@ -237,8 +235,8 @@ where
                         "Delta CRDT handler not registered".to_string(),
                     )
                 })?;
-                // Provide available deltas
-                let delta_bytes = Vec::new(); // TODO: Serialize buffered deltas
+                // Provide available deltas; currently emits empty placeholder.
+                let delta_bytes = Vec::new();
                 CrdtSyncData::Deltas(vec![delta_bytes])
             }
             CrdtType::Meet => {
@@ -686,14 +684,14 @@ mod tests {
     #[test]
     fn test_builder_with_cv() {
         let authority_id = AuthorityId::new();
-        let mut coordinator: CrdtCoordinator<
+        let coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
             DummyDeltaState,
             DummyMvState,
             DummyOp,
             DummyId,
-        > = CrdtCoordinator::with_cv(authority_id);
+        > = CrdtCoordinator::with_cv_state(authority_id, TestCounter::bottom());
 
         assert_eq!(coordinator.authority_id(), authority_id);
         assert!(coordinator.has_handler(CrdtType::Convergent));
@@ -730,7 +728,7 @@ mod tests {
             DummyOp,
             DummyId,
         >::new(authority_id)
-        .with_cv_handler(CvHandler::with_state(CvS::bottom()));
+        .with_cv_handler(CvHandler::with_state(TestCounter::bottom()));
 
         assert_eq!(coordinator.authority_id(), authority_id);
         assert!(coordinator.has_handler(CrdtType::Convergent));
@@ -741,14 +739,14 @@ mod tests {
         let fixture = TestFixture::new().await?;
         let device_uuid: uuid::Uuid = fixture.device_id().into();
         let authority_id = AuthorityId::from_uuid(device_uuid);
-        let coordinator: CrdtCoordinator<
+        let mut coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
             DummyDeltaState,
             DummyMvState,
             DummyOp,
             DummyId,
-        > = CrdtCoordinator::with_cv(authority_id);
+        > = CrdtCoordinator::with_cv_state(authority_id, TestCounter::bottom());
         let session_id = SessionId::new();
 
         let request = coordinator.create_sync_request(session_id, CrdtType::Convergent)?;
@@ -831,7 +829,7 @@ mod tests {
             DummyMvState,
             DummyOp,
             DummyId,
-        > = CrdtCoordinator::with_cv(authority_id);
+        > = CrdtCoordinator::with_cv_state(authority_id, TestCounter::bottom());
 
         assert!(coordinator.has_handler(CrdtType::Convergent));
         assert!(!coordinator.has_handler(CrdtType::Commutative));

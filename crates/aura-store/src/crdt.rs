@@ -184,13 +184,11 @@ pub struct StorageOperation {
 
 impl StorageOperation {
     /// Create a new storage operation
-    pub fn new(op_type: StorageOpType, counter: u64, actor: String) -> Self {
+    pub fn new(op_type: StorageOpType, counter: u64, actor: String, timestamp: u64) -> Self {
         Self {
             op_type,
             counter,
-            // TODO: Replace with PhysicalTimeEffects from context
-            // Using placeholder to avoid violating effect system architecture
-            timestamp: 0, // Will be replaced with proper time from effect context
+            timestamp,
             actor,
         }
     }
@@ -271,7 +269,13 @@ impl StorageState {
     }
 
     /// Add content with capabilities
-    pub fn add_content(&mut self, content_id: ContentId, entry: SearchIndexEntry, actor: String) {
+    pub fn add_content(
+        &mut self,
+        content_id: ContentId,
+        entry: SearchIndexEntry,
+        actor: String,
+        timestamp: u64,
+    ) {
         let op = StorageOperation::new(
             StorageOpType::AddContent {
                 content_id: content_id.clone(),
@@ -279,6 +283,7 @@ impl StorageState {
             },
             self.op_log.counter + 1,
             actor,
+            timestamp,
         );
 
         self.op_log.add_operation(op);
@@ -286,13 +291,14 @@ impl StorageState {
     }
 
     /// Remove content
-    pub fn remove_content(&mut self, content_id: ContentId, actor: String) {
+    pub fn remove_content(&mut self, content_id: ContentId, actor: String, timestamp: u64) {
         let op = StorageOperation::new(
             StorageOpType::RemoveContent {
                 content_id: content_id.clone(),
             },
             self.op_log.counter + 1,
             actor,
+            timestamp,
         );
 
         self.op_log.add_operation(op);
@@ -337,15 +343,13 @@ impl ChunkAvailability {
     }
 
     /// Mark chunk as available on a node
-    pub fn add_chunk(&mut self, chunk_id: ChunkId, node_id: String) {
+    pub fn add_chunk(&mut self, chunk_id: ChunkId, node_id: String, timestamp: u64) {
         self.chunk_locations
             .entry(chunk_id)
             .or_default()
             .insert(node_id.clone());
 
-        // TODO: Replace with PhysicalTimeEffects from context
-        // Using placeholder to avoid violating effect system architecture
-        self.node_timestamps.insert(node_id, 0); // Will be replaced with proper time from effect context
+        self.node_timestamps.insert(node_id, timestamp);
     }
 
     /// Remove chunk from a node
@@ -423,12 +427,14 @@ mod tests {
             "content1".to_string(),
             ["term1"].iter().map(|&s| s.to_string()).collect(),
             vec![],
+            1000, // timestamp
         );
 
         let entry2 = SearchIndexEntry::new(
             "content2".to_string(),
             ["term2"].iter().map(|&s| s.to_string()).collect(),
             vec![],
+            2000, // timestamp
         );
 
         index1.add_entry(content_id1.clone(), entry1);
@@ -449,19 +455,21 @@ mod tests {
         let op1 = StorageOperation::new(
             StorageOpType::AddContent {
                 content_id: ContentId::from_bytes(b"content1"),
-                entry: SearchIndexEntry::new("content1".to_string(), BTreeSet::new(), vec![]),
+                entry: SearchIndexEntry::new("content1".to_string(), BTreeSet::new(), vec![], 1000),
             },
             1,
             "node1".to_string(),
+            1000, // timestamp
         );
 
         let op2 = StorageOperation::new(
             StorageOpType::AddContent {
                 content_id: ContentId::from_bytes(b"content2"),
-                entry: SearchIndexEntry::new("content2".to_string(), BTreeSet::new(), vec![]),
+                entry: SearchIndexEntry::new("content2".to_string(), BTreeSet::new(), vec![], 2000),
             },
             2,
             "node2".to_string(),
+            2000, // timestamp
         );
 
         log1.add_operation(op1);
@@ -480,8 +488,8 @@ mod tests {
 
         let chunk_id = ChunkId::from_bytes(b"chunk1");
 
-        avail1.add_chunk(chunk_id.clone(), "node1".to_string());
-        avail2.add_chunk(chunk_id.clone(), "node2".to_string());
+        avail1.add_chunk(chunk_id.clone(), "node1".to_string(), 10);
+        avail2.add_chunk(chunk_id.clone(), "node2".to_string(), 20);
 
         let merged = avail1.join(&avail2);
 

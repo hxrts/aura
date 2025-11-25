@@ -1150,7 +1150,7 @@ where
         operation: &str,
         resource: &ResourceScope,
     ) -> Result<(), String> {
-        match guard_evaluator.check_guard(token, operation, resource) {
+        match guard_evaluator.check_guard_default_time(token, operation, resource) {
             Ok(true) => {
                 tracing::debug!(
                     "Biscuit authorization granted: operation={}, resource={:?}",
@@ -1632,7 +1632,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::test_utils::test_device_id;
     use aura_core::DeviceId;
     use aura_macros::aura_test;
 

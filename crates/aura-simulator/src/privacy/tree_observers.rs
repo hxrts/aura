@@ -13,6 +13,8 @@ use aura_core::tree::{AttestedOp, Epoch, LeafId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
+#[cfg(test)]
+use std::time::SystemTime;
 
 // ============================================================================
 // Privacy Budget Configuration
@@ -626,8 +628,12 @@ mod tests {
         let mut cumulative_time = 0;
         for interval in intervals {
             cumulative_time += interval;
-            let timestamp = now + Duration::from_millis(cumulative_time);
-            observer.observe_traffic(timestamp, 1024);
+            let timestamp_ms = now
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64
+                + cumulative_time;
+            observer.observe_traffic(timestamp_ms, 1024);
         }
 
         let leakage = observer.analyze();
@@ -648,9 +654,13 @@ mod tests {
         let receivers = vec![LeafId(2), LeafId(3), LeafId(4)];
 
         // Observe broadcast pattern
+        let now_ms = now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
         for receiver in receivers {
             observer.observe_envelope(
-                now,
+                now_ms,
                 Some(sender),
                 Some(receiver),
                 "OpBroadcast".to_string(),
@@ -670,8 +680,12 @@ mod tests {
         let mut observer = InGroupObserver::new();
         let now = SystemTime::UNIX_EPOCH;
 
-        observer.observe_operation(now, 1, "AddLeaf".to_string(), 5);
-        observer.observe_operation(now + Duration::from_secs(1), 1, "RemoveLeaf".to_string(), 3);
+        let now_ms = now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        observer.observe_operation(now_ms, 1, "AddLeaf".to_string(), 5);
+        observer.observe_operation(now_ms + 1000, 1, "RemoveLeaf".to_string(), 3);
 
         let distribution = observer.signer_count_distribution();
         assert_eq!(distribution, &[5, 3]);

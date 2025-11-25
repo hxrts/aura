@@ -16,6 +16,7 @@ use aura_core::AuraResult;
 use std::path::{Path, PathBuf};
 
 pub mod config;
+/// CLI-specific effect handlers for command-line operations
 pub mod handler;
 pub mod output;
 

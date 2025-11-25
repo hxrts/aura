@@ -4,6 +4,7 @@ use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentResult, AuthorityContext};
 
 pub struct RecoveryHandler {
+    #[allow(dead_code)] // Will be used for recovery operations
     context: HandlerContext,
 }
 

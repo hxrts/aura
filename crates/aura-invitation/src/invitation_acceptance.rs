@@ -210,7 +210,8 @@ where
 
         // Step 4: Wait for transport confirmation if required
         if self.config.require_transport_confirmation {
-            self.wait_for_transport_confirmation(envelope).await?;
+            self.wait_for_transport_confirmation(envelope, &self.effects)
+                .await?;
         }
 
         Ok(())
@@ -308,13 +309,16 @@ where
     async fn wait_for_transport_confirmation(
         &self,
         envelope: &InvitationEnvelope,
+        effects: &E,
     ) -> InvitationResult<()> {
         // In a full implementation, this would wait for a confirmation message
         // from the transport layer indicating successful delivery and processing
-        // For now, we simulate this with a small delay
-        // TODO: Replace with PhysicalTimeEffects::sleep_ms() when this is properly implemented
-        #[allow(clippy::disallowed_methods)]
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // For now, we simulate this with a small delay using PhysicalTimeEffects
+        // TODO: Replace with actual transport confirmation mechanism
+        effects
+            .sleep_ms(100)
+            .await
+            .map_err(|e| InvitationError::internal(format!("time provider unavailable: {e}")))?;
 
         // Log confirmation for observability
         tracing::info!(

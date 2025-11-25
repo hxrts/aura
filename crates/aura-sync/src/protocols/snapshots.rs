@@ -231,6 +231,7 @@ impl SnapshotProtocol {
         proposer: DeviceId,
         target_epoch: TreeEpoch,
         state_digest: Hash32,
+        proposal_id: Uuid,
     ) -> SyncResult<(Option<WriterFenceGuard>, SnapshotProposal)> {
         let mut pending = self.pending.lock();
         if pending.is_some() {
@@ -240,9 +241,7 @@ impl SnapshotProtocol {
             ));
         }
 
-        // TODO: Should obtain UUID via RandomEffects
-        let proposal_uuid = Uuid::new_v4();
-        let proposal = SnapshotProposal::new(proposer, target_epoch, state_digest, proposal_uuid);
+        let proposal = SnapshotProposal::new(proposer, target_epoch, state_digest, proposal_id);
 
         let guard = if self.config.use_writer_fence {
             Some(
@@ -361,7 +360,9 @@ mod tests {
 
         assert!(!protocol.is_pending());
 
-        let (_guard, proposal) = protocol.propose(device, 10, Hash32([0; 32])).unwrap();
+        let (_guard, proposal) = protocol
+            .propose(device, 10, Hash32([0; 32]), Uuid::new_v4())
+            .unwrap();
 
         assert!(protocol.is_pending());
         assert_eq!(
@@ -370,7 +371,9 @@ mod tests {
         );
 
         // Second proposal should fail
-        assert!(protocol.propose(device, 11, Hash32([0; 32])).is_err());
+        assert!(protocol
+            .propose(device, 11, Hash32([0; 32]), uuid::Uuid::new_v4())
+            .is_err());
     }
 
     #[test]
@@ -383,7 +386,9 @@ mod tests {
         let protocol = SnapshotProtocol::new(config);
         let device = DeviceId::from_bytes([1; 32]);
 
-        let (_guard, proposal) = protocol.propose(device, 10, Hash32([0; 32])).unwrap();
+        let (_guard, proposal) = protocol
+            .propose(device, 10, Hash32([0; 32]), Uuid::new_v4())
+            .unwrap();
 
         let approvals = vec![
             SnapshotApproval {

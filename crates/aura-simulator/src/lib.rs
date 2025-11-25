@@ -127,6 +127,8 @@ pub mod context;
 
 // Scenario definitions
 pub mod scenario;
+#[cfg(test)]
+mod scenarios;
 
 // Testkit integration bridge
 pub mod testkit_bridge;

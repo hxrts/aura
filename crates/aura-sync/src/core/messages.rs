@@ -4,6 +4,7 @@
 //! all sync protocols. It eliminates duplication and provides consistent interfaces.
 
 use aura_core::{DeviceId, SessionId};
+use aura_effects::time::wallclock_secs;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 use uuid::Uuid;
@@ -69,14 +70,19 @@ pub struct TimestampedMessage<T> {
 
 impl<T> TimestampedMessage<T> {
     /// Create a new timestamped message with current time
+    /// DEPRECATED: Use new_with_timestamp instead for proper time abstraction
+    #[deprecated(note = "Use new_with_timestamp instead for proper time abstraction")]
     pub fn new(payload: T) -> Self {
-        Self {
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            payload,
-        }
+        Self::new_with_timestamp(None, payload)
+    }
+
+    /// Create a new timestamped message with provided timestamp
+    pub fn new_with_timestamp(timestamp_secs: Option<u64>, payload: T) -> Self {
+        let timestamp = timestamp_secs.unwrap_or_else(|| {
+            // Fallback for compatibility when time is not provided
+            wallclock_secs()
+        });
+        Self { timestamp, payload }
     }
 
     /// Create a timestamped message with specific time
@@ -90,12 +96,16 @@ impl<T> TimestampedMessage<T> {
     }
 
     /// Get age of this message in seconds
-    pub fn age_seconds(&self) -> u64 {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        now.saturating_sub(self.timestamp)
+    pub fn age_seconds(&self, current_timestamp_secs: u64) -> u64 {
+        current_timestamp_secs.saturating_sub(self.timestamp)
+    }
+
+    /// Get age of this message in seconds using current time
+    /// DEPRECATED: Use age_seconds with timestamp parameter for proper time abstraction
+    #[deprecated(note = "Use age_seconds with timestamp parameter for proper time abstraction")]
+    pub fn age_seconds_now(&self) -> u64 {
+        let now = wallclock_secs();
+        self.age_seconds(now)
     }
 }
 
@@ -413,11 +423,12 @@ mod tests {
 
     #[test]
     fn test_timestamped_message() {
-        let msg = TimestampedMessage::new("test".to_string());
-        assert!(msg.age_seconds() < 1); // Should be very recent
+        let msg = TimestampedMessage::new_with_timestamp(Some(0), "test".to_string());
+        assert_eq!(msg.age_seconds(msg.timestamp + 1), 1); // Age should be exactly 1 second
 
         let old_msg = TimestampedMessage::with_timestamp(0, "old".to_string());
-        assert!(old_msg.age_seconds() > 1000); // Very old
+        let current_time = wallclock_secs();
+        assert!(old_msg.age_seconds(current_time) > 1000); // Very old
     }
 
     #[test]

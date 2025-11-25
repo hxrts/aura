@@ -17,6 +17,7 @@ aura-effects = { path = "../aura-effects" }
 aura-journal = { path = "../aura-journal" }
 aura-protocol = { path = "../aura-protocol" }
 aura-testkit = { path = "../aura-testkit" }
+aura-sync = { path = "../aura-sync" }
 # app-console-types = { path = "../app-console-types" }
 aura-quint = { path = "../aura-quint" }
 

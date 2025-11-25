@@ -124,7 +124,7 @@ fn verify_biscuit_token(
     let flow_cost = 1; // Default minimal flow cost for verification
     let mut budget = FlowBudget::new(100, Epoch(1)); // Default budget for verification
 
-    evaluator.evaluate_guard(
+    evaluator.evaluate_guard_default_time(
         token,
         default_capability,
         &default_resource,
@@ -177,7 +177,7 @@ fn parse_and_verify_biscuit_token(
     // Use the evaluator to check the token against the requirement
     let mut mock_budget = aura_core::FlowBudget::new(1000, aura_core::session_epochs::Epoch(0)); // High limit for testing
 
-    match evaluator.evaluate_guard(
+    match evaluator.evaluate_guard_default_time(
         &token,
         capability,
         &resource_scope,

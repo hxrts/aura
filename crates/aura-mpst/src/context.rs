@@ -409,7 +409,7 @@ mod tests {
         isolation.add_barrier(barrier);
 
         // Flow should be blocked
-        let now = chrono::Utc::now();
+        let now = chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap();
         assert!(isolation
             .record_flow(rid1, rid2, "test_info", 100, now)
             .is_err());
@@ -421,7 +421,7 @@ mod tests {
         let rid1 = ContextType::new_relationship(Uuid::new_v4());
         let rid2 = ContextType::new_relationship(Uuid::new_v4());
 
-        let now = chrono::Utc::now();
+        let now = chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap();
         let flow = InformationFlow::new(rid1, rid2, "metadata", 50, now);
         assert!(flow.is_cross_context());
         assert_eq!(flow.info_type, "metadata");

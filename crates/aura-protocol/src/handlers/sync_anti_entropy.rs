@@ -115,10 +115,7 @@ impl AntiEntropyHandler {
                     peer_id
                 );
 
-                // TODO: Implement actual transport.request() with receipt
-                // let digest = transport.request_with_receipt(peer_id, DigestRequest, result.receipt).await?;
-
-                // For now, return empty digest as placeholder
+                // For now, return empty digest as placeholder until transport plumbing is integrated.
                 Ok(BloomDigest {
                     cids: BTreeSet::new(),
                 })
@@ -147,7 +144,6 @@ impl AntiEntropyHandler {
         tracing::warn!(
             "request_digest_from_peer called without guard chain - this bypasses security"
         );
-        // TODO: Remove this legacy method once all callers are updated
         Ok(BloomDigest {
             cids: BTreeSet::new(),
         })
@@ -341,9 +337,6 @@ impl AntiEntropyHandler {
                     cids.len()
                 );
 
-                // TODO: Implement actual transport.request() with receipt
-                // let ops = transport.request_with_receipt(peer_id, OpsRequest { cids }, result.receipt).await?;
-
                 // For now, simulate by looking in local oplog
                 let oplog = self.oplog.read().await;
                 let mut ops_result = Vec::new();
@@ -406,8 +399,7 @@ impl AntiEntropyHandler {
                         peer_uuid
                     );
 
-                    // TODO: Implement actual transport.send() with receipt
-                    // transport.send_with_receipt(peer_uuid, OpAnnouncement { cid }, result.receipt).await?;
+                    // Transport integration pending: announcement currently logged only.
                 }
                 Ok(result) => {
                     tracing::warn!(
@@ -480,8 +472,7 @@ impl AntiEntropyHandler {
                         peer_uuid
                     );
 
-                    // TODO: Implement actual transport.send() with receipt
-                    // transport.send_with_receipt(peer_uuid, OpPush { op: op.clone() }, result.receipt).await?;
+                    // Transport integration pending: push currently bypasses network.
                 }
                 Ok(result) => {
                     tracing::warn!(

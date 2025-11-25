@@ -76,7 +76,7 @@ pub enum AmpError {
 }
 
 /// Compute the valid generation window union (2W span) for a checkpoint.
-fn window_bounds(last_checkpoint_gen: u64, skip_window: u32) -> (u64, u64) {
+pub fn window_bounds(last_checkpoint_gen: u64, skip_window: u32) -> (u64, u64) {
     let w = skip_window as u64;
     let start = last_checkpoint_gen;
     let end = start + 2 * w;
@@ -441,7 +441,7 @@ mod tests {
             chan_epoch: 0,
             ratchet_gen: 50,
         };
-        derive_for_recv(&state, header_min).expect("min bound should succeed");
+        derive_for_recv(&state, header_min).unwrap();
 
         // max bound (2W span)
         let header_max = AmpHeader {
@@ -450,7 +450,7 @@ mod tests {
             chan_epoch: 0,
             ratchet_gen: 70,
         };
-        derive_for_recv(&state, header_max).expect("max bound should succeed");
+        derive_for_recv(&state, header_max).unwrap();
     }
 
     #[test]

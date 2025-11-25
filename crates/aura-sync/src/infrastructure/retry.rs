@@ -42,29 +42,42 @@ use crate::core::SyncResult;
 // =============================================================================
 
 /// Execute an operation with exponential backoff retry (convenience function)
-pub async fn with_exponential_backoff<F, Fut, T>(operation: F, max_attempts: u32) -> SyncResult<T>
+pub async fn with_exponential_backoff<E, F, Fut, T>(
+    effects: &E,
+    operation: F,
+    max_attempts: u32,
+) -> SyncResult<T>
 where
+    E: aura_core::effects::PhysicalTimeEffects + Send + Sync,
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = SyncResult<T>>,
 {
-    RetryPolicy::exponential()
-        .with_max_attempts(max_attempts)
-        .execute(operation)
+    let policy = RetryPolicy::exponential().with_max_attempts(max_attempts);
+
+    policy
+        .execute_with_sleep(operation, |delay| async move {
+            let _ = effects.sleep_ms(delay.as_millis() as u64).await;
+        })
         .await
 }
 
 /// Execute an operation with fixed retry delay (convenience function)
-pub async fn with_fixed_retry<F, Fut, T>(
+pub async fn with_fixed_retry<E, F, Fut, T>(
+    effects: &E,
     operation: F,
     max_attempts: u32,
     delay: Duration,
 ) -> SyncResult<T>
 where
+    E: aura_core::effects::PhysicalTimeEffects + Send + Sync,
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = SyncResult<T>>,
 {
-    RetryPolicy::fixed(delay)
-        .with_max_attempts(max_attempts)
-        .execute(operation)
+    let policy = RetryPolicy::fixed(delay).with_max_attempts(max_attempts);
+
+    policy
+        .execute_with_sleep(operation, |d| async move {
+            let _ = effects.sleep_ms(d.as_millis() as u64).await;
+        })
         .await
 }

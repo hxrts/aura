@@ -13,7 +13,9 @@ pub struct SecureEntry {
 /// Mock secure storage handler for testing
 #[derive(Debug)]
 pub struct MockSecureStorageHandler {
+    #[allow(dead_code)]
     storage: Arc<Mutex<HashMap<String, SecureEntry>>>,
+    #[allow(dead_code)]
     current_time: Arc<Mutex<u64>>,
 }
 

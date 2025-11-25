@@ -6,6 +6,7 @@ use crate::core::AgentConfig;
 
 /// Context manager service
 pub struct ContextManager {
+    #[allow(dead_code)] // Will be used for context configuration
     config: AgentConfig,
 }
 

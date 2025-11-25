@@ -39,7 +39,7 @@
 //! # }
 //! ```
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // Re-export unified rate limiting types from aura-core
 pub use aura_core::{
@@ -55,27 +55,21 @@ use aura_core::DeviceId;
 
 /// Check rate limit and convert to SyncResult (convenience function)
 ///
-/// Note: Callers should obtain `now` as Unix timestamp via their time provider
+/// Callers must supply a monotonic `Instant` from their time provider (e.g., TimeEffects).
 pub fn check_rate_limit_sync(
     limiter: &mut RateLimiter,
     peer_id: DeviceId,
     cost: u32,
-    now_timestamp: u64,
+    now: Instant,
 ) -> SyncResult<()> {
-    use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
-    // Convert u64 timestamp to Instant for aura-core compatibility
-    let _now = UNIX_EPOCH + StdDuration::from_secs(now_timestamp);
-    let _now_instant = SystemTime::now(); // TODO: Should use actual conversion
-    #[allow(clippy::disallowed_methods)]
-    let now_instant = std::time::Instant::now(); // Temporary - need proper time abstraction
     limiter
-        .check_rate_limit(peer_id, cost, now_instant)
+        .check_rate_limit(peer_id, cost, now)
         .into_result()
         .map_err(|e| sync_resource_exhausted("rate_limit", e.to_string()))
 }
 
 /// Create a default rate limiter for sync operations (convenience function)
-pub fn default_sync_rate_limiter() -> RateLimiter {
+pub fn default_sync_rate_limiter(now: Instant) -> RateLimiter {
     let config = RateLimitConfig {
         global_ops_per_second: 1000,
         peer_ops_per_second: 100,
@@ -84,7 +78,5 @@ pub fn default_sync_rate_limiter() -> RateLimiter {
         window_size: Duration::from_secs(60),
         adaptive: true,
     };
-    #[allow(clippy::disallowed_methods)]
-    let now = std::time::Instant::now(); // TODO: Need proper time abstraction
     RateLimiter::new(config, now)
 }

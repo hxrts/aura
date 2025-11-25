@@ -5,8 +5,8 @@
 use aura_chat::{ChatGroupId, ChatMessage};
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_effects::time::wallclock_ms;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Application state for the TUI demo interface
 #[derive(Debug, Clone)]
@@ -267,10 +267,7 @@ impl AppState {
     }
 
     fn now_ts() -> TimeStamp {
-        let ts_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let ts_ms = wallclock_ms();
         TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms,
             uncertainty: None,

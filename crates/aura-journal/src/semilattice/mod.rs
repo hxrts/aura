@@ -12,8 +12,8 @@
 //! - **Capability Constraints (Meet-Lattice)**: Meet-semilattice (⊓) policies for resource access
 //!
 //! **Convergence Invariant** (per docs/110_state_reduction.md):
-//! All synchronization operations are idempotent and commutative; applying same update twice
-//! produces identical state. Enables deterministic reduction across all replicas.
+//! All synchronization operations are idempotent and commutative,
+//! enabling deterministic reduction across all replicas.
 
 pub use account_state::{AccountState, GuardianRegistry, MaxCounter};
 pub use concrete_types::{EpochLog, IntentPool};

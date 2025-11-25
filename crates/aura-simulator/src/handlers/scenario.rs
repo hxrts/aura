@@ -8,12 +8,14 @@ use async_trait::async_trait;
 use aura_core::effects::{TestingEffects, TestingError};
 use aura_core::frost::ThresholdSignature;
 use aura_core::{AuraError, AuthorityId};
+use aura_effects::time::monotonic_now;
 use aura_testkit::simulation::choreography::{test_threshold_group, ChoreographyTestHarness};
 use futures::executor::block_on;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 // Minimal placeholder FROST-like types to avoid aura-frost dependency.
 #[derive(Debug, Clone)]
@@ -133,7 +135,7 @@ impl FrostCrypto {
             // pad with placeholder signer IDs to satisfy threshold for demo purposes
             let missing = config.threshold - signers.len();
             let start = signers.last().copied().unwrap_or(0) + 1;
-            signers.extend((start..start + missing as u16).map(|s| s as u16));
+            signers.extend(start..start + missing as u16);
         }
         Ok(ThresholdSignature::new(vec![0u8; 64], signers))
     }
@@ -397,7 +399,7 @@ impl SimulationScenarioHandler {
 
         let injection = ActiveInjection {
             scenario_id: scenario_id.to_string(),
-            start_time: Instant::now(),
+            start_time: monotonic_now(),
             duration: scenario.duration,
             actions_applied: Vec::new(),
         };
@@ -418,7 +420,7 @@ impl SimulationScenarioHandler {
         let current_tick = state.current_tick;
         state.events.push(SimulationEvent {
             event_type: "wait_ticks".to_string(),
-            timestamp: Instant::now(),
+            timestamp: monotonic_now(),
             data: HashMap::from([
                 ("ticks".to_string(), ticks.to_string()),
                 ("current_tick".to_string(), current_tick.to_string()),
@@ -453,7 +455,7 @@ impl SimulationScenarioHandler {
 
         state.events.push(SimulationEvent {
             event_type: "network_condition".to_string(),
-            timestamp: Instant::now(),
+            timestamp: monotonic_now(),
             data: HashMap::from([
                 ("condition".to_string(), condition.to_string()),
                 ("participants".to_string(), format!("{:?}", participants)),
@@ -485,7 +487,7 @@ impl SimulationScenarioHandler {
         let checkpoint = ScenarioCheckpoint {
             id: checkpoint_id.clone(),
             label: label.to_string(),
-            timestamp: Instant::now(),
+            timestamp: monotonic_now(),
             state_snapshot: HashMap::new(),
         };
         state.checkpoints.insert(checkpoint_id.clone(), checkpoint);
@@ -1288,7 +1290,7 @@ impl SimulationScenarioHandler {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
-        let now = Instant::now();
+        let now = monotonic_now();
         state.active_injections.retain(|injection| {
             match injection.duration {
                 Some(duration) => now.duration_since(injection.start_time) < duration,
@@ -1357,7 +1359,7 @@ impl SimulationScenarioHandler {
             name: group_name.to_string(),
             creator: creator.to_string(),
             members,
-            created_at: Instant::now(),
+            created_at: monotonic_now(),
         };
 
         state.chat_groups.insert(group_id.clone(), chat_group);
@@ -1403,9 +1405,11 @@ impl SimulationScenarioHandler {
             group_id: group_id.to_string(),
             sender: sender.to_string(),
             content: message.to_string(),
-            timestamp: Instant::now(),
+            timestamp: monotonic_now(),
         };
 
+        #[allow(clippy::unwrap_used)]
+        // Simulation code - group_id is guaranteed to exist in test scenarios
         let messages = state.message_history.get_mut(group_id).unwrap();
         messages.push(chat_message);
 
@@ -1444,7 +1448,7 @@ impl SimulationScenarioHandler {
         let data_loss_info = DataLossInfo {
             participant: target_participant.to_string(),
             loss_type: loss_type.to_string(),
-            occurred_at: Instant::now(),
+            occurred_at: monotonic_now(),
             recovery_required,
             pre_loss_message_count: pre_loss_count,
         };
@@ -1523,7 +1527,7 @@ impl SimulationScenarioHandler {
             target: target.to_string(),
             guardians,
             threshold,
-            initiated_at: Instant::now(),
+            initiated_at: monotonic_now(),
             completed: false,
             validation_steps: Vec::new(),
         };
@@ -1619,8 +1623,27 @@ impl TestingEffects for SimulationScenarioHandler {
         let checkpoint = ScenarioCheckpoint {
             id: checkpoint_id.to_string(),
             label: label.to_string(),
-            timestamp: Instant::now(),
-            state_snapshot: HashMap::new(), // TODO: Capture actual state
+            timestamp: monotonic_now(),
+            state_snapshot: {
+                let mut snapshot = HashMap::new();
+                snapshot.insert("current_tick".to_string(), state.current_tick.to_string());
+                snapshot.insert(
+                    "scenario_count".to_string(),
+                    state.scenarios.len().to_string(),
+                );
+                snapshot.insert(
+                    "active_injections".to_string(),
+                    state.active_injections.len().to_string(),
+                );
+                let total_messages: usize =
+                    state.message_history.values().map(|msgs| msgs.len()).sum();
+                snapshot.insert(
+                    "message_groups".to_string(),
+                    state.message_history.len().to_string(),
+                );
+                snapshot.insert("total_messages".to_string(), total_messages.to_string());
+                snapshot
+            },
         };
 
         state
@@ -1634,16 +1657,30 @@ impl TestingEffects for SimulationScenarioHandler {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
-        let _checkpoint =
-            state
-                .checkpoints
-                .get(checkpoint_id)
-                .ok_or_else(|| TestingError::CheckpointError {
-                    checkpoint_id: checkpoint_id.to_string(),
-                    reason: "Checkpoint not found".to_string(),
-                })?;
+        let checkpoint = state
+            .checkpoints
+            .get(checkpoint_id)
+            .ok_or_else(|| TestingError::CheckpointError {
+                checkpoint_id: checkpoint_id.to_string(),
+                reason: "Checkpoint not found".to_string(),
+            })?
+            .clone();
 
-        // TODO: Implement actual state restoration
+        drop(state);
+
+        // Restore limited state values captured in snapshot
+        if let Some(tick_str) = checkpoint.state_snapshot.get("current_tick") {
+            if let Ok(tick) = tick_str.parse::<u64>() {
+                let mut state_mut = self.state.lock().map_err(|e| {
+                    TestingError::SystemError(aura_core::AuraError::internal(format!(
+                        "Lock error: {}",
+                        e
+                    )))
+                })?;
+                state_mut.current_tick = tick;
+            }
+        }
+
         Ok(())
     }
 
@@ -1760,7 +1797,7 @@ impl TestingEffects for SimulationScenarioHandler {
         let metric = MetricValue {
             value,
             unit: unit.to_string(),
-            timestamp: Instant::now(),
+            timestamp: monotonic_now(),
         };
 
         state.metrics.insert(metric_name.to_string(), metric);
@@ -1851,7 +1888,7 @@ mod tests {
     async fn test_checkpoint_creation() {
         let handler = SimulationScenarioHandler::new(123);
 
-        let result = handler.create_checkpoint("test_checkpoint").await;
+        let result = handler.create_checkpoint("test_checkpoint");
         assert!(result.is_ok());
     }
 
@@ -2012,12 +2049,12 @@ mod tests {
             ],
         );
         assert!(validation_result.is_ok());
-        assert_eq!(validation_result.unwrap(), true);
+        assert!(validation_result.unwrap());
 
         // Check that recovery is now complete
         let recovery_complete = handler.inspect_state("recovery", "bob").await.unwrap();
         let is_complete = recovery_complete.downcast::<bool>().unwrap();
-        assert_eq!(*is_complete, true);
+        assert!(*is_complete);
     }
 
     #[tokio::test]
@@ -2047,12 +2084,12 @@ mod tests {
         // Test message history validation
         let validation_result = handler.validate_message_history("bob", 2, true);
         assert!(validation_result.is_ok());
-        assert_eq!(validation_result.unwrap(), true);
+        assert!(validation_result.unwrap());
 
         // Test validation failure case
         let validation_fail = handler.validate_message_history("bob", 10, true);
         assert!(validation_fail.is_ok());
-        assert_eq!(validation_fail.unwrap(), false);
+        assert!(!validation_fail.unwrap());
     }
 
     #[tokio::test]

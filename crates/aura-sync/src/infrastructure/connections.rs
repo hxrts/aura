@@ -17,7 +17,6 @@
 //! ```rust,no_run
 //! use aura_sync::infrastructure::{ConnectionPool, PoolConfig};
 //! use aura_core::DeviceId;
-//! use std::time::Instant;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let config = PoolConfig::default();
@@ -26,7 +25,7 @@
 //! let peer_id = DeviceId::from_bytes([1; 32]);
 //!
 //! // Obtain current time from a clock provider (not shown here for brevity)
-//! # let now = Instant::now();
+//! # let now_ms = 0; // provided timestamp
 //!
 //! // Acquire connection from pool
 //! let conn = pool.acquire(peer_id, now).await?;
@@ -547,10 +546,7 @@ impl ConnectionPool {
         let connection_id = format!(
             "transport_{}_{}",
             peer_id,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis()
+            aura_effects::time::wallclock_ms()
         );
 
         // Simulate connection establishment
@@ -567,10 +563,7 @@ impl ConnectionPool {
             protocol: "quic".to_string(), // Default to QUIC
             remote_address: format!("peer_{}.local:8080", peer_id), // Placeholder address
             public_key: vec![0u8; 32],    // Placeholder public key
-            established_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
+            established_at: aura_effects::time::wallclock_secs(),
         })
     }
 
@@ -642,7 +635,6 @@ pub struct PoolStatistics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
 
     #[tokio::test]
     async fn test_connection_acquisition_and_release() {
@@ -709,7 +701,7 @@ mod tests {
 
         // Evict expired connections - needs future timestamp
         let later = now + 100;
-        let evicted = pool.evict_expired(later);
+        let evicted = pool.evict_expired(later).await;
         assert_eq!(evicted, 1);
         assert_eq!(pool.total_connections(), 0);
     }

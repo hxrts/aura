@@ -1,5 +1,3 @@
-#![cfg(feature = "fixture_effects")]
-
 //! Chaos engineering tests for tree protocols.
 //!
 //! These tests verify system correctness and resilience under adverse conditions:
@@ -8,6 +6,7 @@
 //! - Mixed-version compatibility
 //! - Concurrent conflicting operations
 //! - State corruption detection
+#![cfg(feature = "fixture_effects")]
 
 use aura_core::identifiers::DeviceId;
 use aura_core::tree::{

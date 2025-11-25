@@ -1,6 +1,6 @@
 //! Common authorization logic for recovery operations
 
-use aura_core::{AccountId, ContextId, DeviceId};
+use aura_core::{effects::PhysicalTimeEffects, AccountId, ContextId, DeviceId};
 use aura_protocol::guards::BiscuitGuardEvaluator;
 use aura_wot::{BiscuitTokenManager, ContextOp, ResourceScope};
 
@@ -16,6 +16,7 @@ impl AuthorizationHelper {
     /// - `operation`: The operation name to check (e.g., "initiate_guardian_setup")
     /// - `account_id`: Account being operated on
     /// - `operation_type`: Type of context operation
+    /// - `time_effects`: Time effects for retrieving the current timestamp
     ///
     /// # Returns
     /// - `Ok(())` if authorized or components not available (test mode)
@@ -26,6 +27,7 @@ impl AuthorizationHelper {
         operation: &str,
         account_id: &AccountId,
         operation_type: ContextOp,
+        time_effects: &dyn PhysicalTimeEffects,
     ) -> Result<(), String> {
         let (tm, ge) = match (token_manager, guard_evaluator) {
             (Some(tm), Some(ge)) => (tm, ge),
@@ -40,9 +42,14 @@ impl AuthorizationHelper {
             operation: operation_type,
         };
 
-        // Check authorization
+        // Check authorization using injected time effects
+        let current_time = time_effects
+            .physical_time()
+            .await
+            .map(|pt| pt.ts_ms / 1000) // Convert milliseconds to seconds
+            .map_err(|e| format!("Unable to read physical time: {e}"))?;
         let authorized = ge
-            .check_guard(token, operation, &resource_scope)
+            .check_guard(token, operation, &resource_scope, current_time)
             .map_err(|e| format!("Biscuit authorization error: {}", e))?;
 
         if !authorized {
@@ -60,6 +67,7 @@ impl AuthorizationHelper {
         token_manager: Option<&BiscuitTokenManager>,
         guard_evaluator: Option<&BiscuitGuardEvaluator>,
         account_id: &AccountId,
+        time_effects: &dyn PhysicalTimeEffects,
     ) -> Result<(), String> {
         Self::check_recovery_authorization(
             token_manager,
@@ -67,6 +75,7 @@ impl AuthorizationHelper {
             "initiate_guardian_setup",
             account_id,
             ContextOp::UpdateGuardianSet,
+            time_effects,
         )
         .await
     }
@@ -76,6 +85,7 @@ impl AuthorizationHelper {
         token_manager: Option<&BiscuitTokenManager>,
         guard_evaluator: Option<&BiscuitGuardEvaluator>,
         account_id: &AccountId,
+        time_effects: &dyn PhysicalTimeEffects,
     ) -> Result<(), String> {
         Self::check_recovery_authorization(
             token_manager,
@@ -83,6 +93,7 @@ impl AuthorizationHelper {
             "initiate_membership_change",
             account_id,
             ContextOp::UpdateGuardianSet,
+            time_effects,
         )
         .await
     }
@@ -93,6 +104,7 @@ impl AuthorizationHelper {
         guard_evaluator: Option<&BiscuitGuardEvaluator>,
         account_id: &AccountId,
         operation_type: ContextOp,
+        time_effects: &dyn PhysicalTimeEffects,
     ) -> Result<(), String> {
         Self::check_recovery_authorization(
             token_manager,
@@ -100,6 +112,7 @@ impl AuthorizationHelper {
             "initiate_emergency_recovery",
             account_id,
             operation_type,
+            time_effects,
         )
         .await
     }
@@ -117,16 +130,19 @@ impl AuthorizationHelper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::time::controllable_time::ControllableTimeSource;
 
     #[tokio::test]
     async fn test_authorization_without_components() {
         // When components are not provided, should allow operation (test mode)
+        let time = ControllableTimeSource::new(0);
         let result = AuthorizationHelper::check_recovery_authorization(
             None,
             None,
             "test_operation",
             &AccountId::new(),
             ContextOp::RecoverDeviceKey,
+            &time,
         )
         .await;
 

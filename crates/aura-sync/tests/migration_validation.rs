@@ -6,30 +6,45 @@
 //! and behavioral equivalence during the refactoring process.
 
 use aura_core::{AuraError, DeviceId, SessionId};
-use aura_effects::random::RealRandomHandler;
+use aura_effects::time::monotonic_now;
 use aura_sync::core::{
-    config::{BatchConfig, NetworkConfig, RetryConfig, SyncConfig},
+    config::{RetryConfig, SyncConfig},
     errors::{
-        sync_authorization_error, sync_biscuit_authorization_error, sync_biscuit_guard_error,
-        sync_consistency_error, sync_network_error, sync_protocol_error, sync_protocol_with_peer,
-        sync_resource_with_limit, sync_serialization_error, sync_session_error, sync_timeout_error,
-        sync_timeout_with_peer, sync_validation_field_error, SyncError,
-        SyncResult as ErrorSyncResult,
+        sync_authorization_error, sync_biscuit_authorization_error, sync_consistency_error,
+        sync_network_error, sync_protocol_error, sync_protocol_with_peer, sync_resource_with_limit,
+        sync_serialization_error, sync_session_error, sync_timeout_error, sync_timeout_with_peer,
+        sync_validation_field_error,
     },
     messages::{
         BatchMessage, ProgressMessage, RequestMessage, ResponseMessage, SessionMessage,
         SyncResult as MessageSyncResult,
     },
-    metrics::{ErrorCategory, MetricsCollector, SyncMetricsSnapshot},
-    session::{
-        SessionConfig, SessionError, SessionManager, SessionManagerStatistics, SessionResult,
-        SessionState,
-    },
+    metrics::{ErrorCategory, MetricsCollector},
+    session::{SessionConfig, SessionError, SessionManager, SessionResult, SessionState},
 };
+use aura_testkit::stateful_effects::random::MockRandomHandler;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use uuid::Uuid;
+
+/// Generate a UUID from random bytes for testing
+fn generate_test_uuid() -> Uuid {
+    // Use a deterministic approach for testing
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNTER: Cell<u64> = const { Cell::new(1) };
+    }
+
+    COUNTER.with(|counter| {
+        let val = counter.get();
+        counter.set(val + 1);
+        let mut bytes = [0u8; 16];
+        bytes[0..8].copy_from_slice(&val.to_le_bytes());
+        Uuid::from_bytes(bytes)
+    })
+}
 
 /// Test protocol state for session management tests
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -143,7 +158,7 @@ fn test_request_response_correlation() {
     let to = DeviceId::new();
     let payload = String::from("ping");
 
-    let request = RequestMessage::new(from, to, payload, Uuid::new_v4());
+    let request = RequestMessage::new(from, to, payload, generate_test_uuid());
     let response = ResponseMessage::success(&request, String::from("pong"));
 
     // Verify correlation
@@ -187,7 +202,7 @@ fn test_sync_result_pattern() {
 fn test_batch_message_functionality() {
     // Test batching for large sync operations
     let items = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    let batches = BatchMessage::create_batches(items, 3, Uuid::new_v4());
+    let batches = BatchMessage::create_batches(items, 3, generate_test_uuid());
 
     assert_eq!(batches.len(), 4); // 3 + 3 + 3 + 1
     assert_eq!(batches[0].items, vec![1, 2, 3]);
@@ -207,7 +222,7 @@ fn test_batch_message_functionality() {
 #[test]
 fn test_progress_message_tracking() {
     // Test progress tracking for long-running sync operations
-    let operation_id = Uuid::new_v4();
+    let operation_id = generate_test_uuid();
     let progress = ProgressMessage::new(operation_id, 0.5, String::from("Processing"))
         .with_eta(300)
         .with_metadata("items", "100");
@@ -296,7 +311,7 @@ fn test_config_validation() {
 async fn test_retry_config_functionality() {
     // Test retry configuration behavior
     let retry_config = RetryConfig::default();
-    let random = RealRandomHandler::default();
+    let random = MockRandomHandler::default();
 
     // Test exponential backoff
     let delay1 = retry_config.delay_for_attempt(0, &random).await;
@@ -401,7 +416,7 @@ fn test_prometheus_export_format() {
 fn test_unified_session_management() {
     // Test session manager handles all sync session patterns
     #[allow(clippy::disallowed_methods)]
-    let _now = Instant::now();
+    let _now = monotonic_now();
     let config = SessionConfig::default();
     let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
@@ -418,7 +433,7 @@ fn test_unified_session_management() {
     };
 
     manager
-        .activate_session(session_id, initial_state.clone())
+        .activate_session(session_id, initial_state.clone(), None)
         .unwrap();
     assert_eq!(manager.count_active_sessions(), 1);
 
@@ -435,7 +450,7 @@ fn test_unified_session_management() {
     metadata.insert(String::from("sync_type"), String::from("journal"));
 
     manager
-        .complete_session(session_id, 100, 2048, metadata)
+        .complete_session(session_id, 100, 2048, metadata, None)
         .unwrap();
 
     // Verify final state
@@ -457,7 +472,7 @@ fn test_unified_session_management() {
 fn test_session_failure_handling() {
     // Test session failure scenarios
     #[allow(clippy::disallowed_methods)]
-    let _now = Instant::now();
+    let _now = monotonic_now();
     let config = SessionConfig::default();
     let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
@@ -469,7 +484,7 @@ fn test_session_failure_handling() {
         operations_pending: 50,
         bytes_transferred: 0,
     };
-    manager.activate_session(session_id, state).unwrap();
+    manager.activate_session(session_id, state, None).unwrap();
 
     // Test failure with partial results
     let partial_results = aura_sync::core::session::PartialResults {
@@ -505,7 +520,7 @@ fn test_session_failure_handling() {
 fn test_session_resource_limits() {
     // Test session resource management
     #[allow(clippy::disallowed_methods)]
-    let _now = Instant::now();
+    let _now = monotonic_now();
     let config = SessionConfig {
         max_concurrent_sessions: 2,
         max_participants: 3,
@@ -532,8 +547,10 @@ fn test_session_resource_limits() {
     let session2 = manager
         .create_session(vec![DeviceId::new()], 1000002)
         .unwrap();
-    manager.activate_session(session1, state.clone()).unwrap();
-    manager.activate_session(session2, state).unwrap();
+    manager
+        .activate_session(session1, state.clone(), None)
+        .unwrap();
+    manager.activate_session(session2, state, None).unwrap();
 
     // Third session should exceed limit
     let result = manager.create_session(vec![DeviceId::new()], 1000003);
@@ -545,7 +562,7 @@ fn test_session_resource_limits() {
 fn test_session_statistics() {
     // Test session statistics collection
     #[allow(clippy::disallowed_methods)]
-    let _now = Instant::now();
+    let _now = monotonic_now();
     let config = SessionConfig::default();
     let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
@@ -560,16 +577,20 @@ fn test_session_statistics() {
     let session1 = manager
         .create_session(vec![DeviceId::new()], 1000001)
         .unwrap();
-    manager.activate_session(session1, state.clone()).unwrap();
     manager
-        .complete_session(session1, 50, 1000, HashMap::new())
+        .activate_session(session1, state.clone(), None)
+        .unwrap();
+    manager
+        .complete_session(session1, 50, 1000, HashMap::new(), None)
         .unwrap();
 
     // Failed session
     let session2 = manager
         .create_session(vec![DeviceId::new()], 1000002)
         .unwrap();
-    manager.activate_session(session2, state.clone()).unwrap();
+    manager
+        .activate_session(session2, state.clone(), None)
+        .unwrap();
     let error = SessionError::Timeout { duration_ms: 5000 };
     manager.fail_session(session2, error, None).unwrap();
 
@@ -610,7 +631,9 @@ fn test_cross_module_integration() {
         bytes_transferred: 0,
     };
 
-    session_manager.activate_session(session_id, state).unwrap();
+    session_manager
+        .activate_session(session_id, state, None)
+        .unwrap();
 
     // Simulate session progress
     let updated_state = TestSyncProtocolState {
@@ -625,7 +648,7 @@ fn test_cross_module_integration() {
 
     // Complete session
     session_manager
-        .complete_session(session_id, 100, 2048, HashMap::new())
+        .complete_session(session_id, 100, 2048, HashMap::new(), None)
         .unwrap();
 
     // Verify metrics integration
@@ -651,7 +674,7 @@ fn test_error_propagation_consistency() {
     };
 
     // Verify error can be converted/wrapped appropriately
-    let sync_error = sync_session_error(&session_error.to_string());
+    let sync_error = sync_session_error(session_error.to_string());
     assert_eq!(sync_error.category(), "session");
     assert!(sync_error.is_retryable());
 }
@@ -672,14 +695,18 @@ fn test_backwards_compatibility_surface() {
 
     // Basic session management
     #[allow(clippy::disallowed_methods)]
-    let _now = Instant::now();
+    let _now = monotonic_now();
     let _session_manager =
         SessionManager::<TestSyncProtocolState>::new(SessionConfig::default(), 1000000);
 
     // Basic message patterns
     let _session_msg = SessionMessage::new(SessionId::new(), "test");
-    let _request_msg =
-        RequestMessage::new(DeviceId::new(), DeviceId::new(), "ping", Uuid::new_v4());
+    let _request_msg = RequestMessage::new(
+        DeviceId::new(),
+        DeviceId::new(),
+        "ping",
+        generate_test_uuid(),
+    );
 
     // If this test compiles and runs, basic API compatibility is maintained
 }

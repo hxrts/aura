@@ -150,7 +150,7 @@ choreography! {
 /// Guardian membership coordinator
 pub struct GuardianMembershipCoordinator<E>
 where
-    E: AuraEffects + ?Sized + 'static,
+    E: AuraEffects + 'static,
 {
     base: BaseCoordinator<E>,
 }
@@ -168,7 +168,7 @@ pub struct MembershipChangeRequest {
 
 impl<E> BaseCoordinatorAccess<E> for GuardianMembershipCoordinator<E>
 where
-    E: AuraEffects + ?Sized + 'static,
+    E: AuraEffects + 'static,
 {
     fn base(&self) -> &BaseCoordinator<E> {
         &self.base
@@ -178,7 +178,7 @@ where
 #[async_trait]
 impl<E> RecoveryCoordinator<E> for GuardianMembershipCoordinator<E>
 where
-    E: AuraEffects + ?Sized + 'static,
+    E: AuraEffects + 'static,
 {
     type Request = MembershipChangeRequest;
     type Response = RecoveryResponse;
@@ -206,7 +206,7 @@ where
 
 impl<E> GuardianMembershipCoordinator<E>
 where
-    E: AuraEffects + ?Sized + 'static,
+    E: AuraEffects + 'static,
 {
     /// Create new coordinator
     pub fn new(effect_system: Arc<E>) -> Self {

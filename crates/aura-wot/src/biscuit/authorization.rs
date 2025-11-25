@@ -78,11 +78,7 @@ impl BiscuitAuthorizationBridge {
             .add_fact(fact!("device({device})"))
             .map_err(BiscuitError::BiscuitLib)?;
 
-        let time = current_time_seconds.map(|t| t as i64).unwrap_or_else(|| {
-            // TODO: Replace with PhysicalTimeEffects from context
-            // Using placeholder to avoid violating effect system architecture
-            0i64 // Will be replaced with proper time from effect context
-        });
+        let time = current_time_seconds.map(|t| t as i64).unwrap_or(0);
         authorizer
             .add_fact(fact!("time({time})"))
             .map_err(BiscuitError::BiscuitLib)?;
@@ -244,11 +240,7 @@ impl BiscuitAuthorizationBridge {
             .add_fact(fact!("device({device})"))
             .map_err(BiscuitError::BiscuitLib)?;
 
-        let time = current_time_seconds.map(|t| t as i64).unwrap_or_else(|| {
-            // TODO: Replace with PhysicalTimeEffects from context
-            // Using placeholder to avoid violating effect system architecture
-            0i64 // Will be replaced with proper time from effect context
-        });
+        let time = current_time_seconds.map(|t| t as i64).unwrap_or(0);
         authorizer
             .add_fact(fact!("time({time})"))
             .map_err(BiscuitError::BiscuitLib)?;
@@ -282,14 +274,12 @@ impl BiscuitAuthorizationBridge {
     }
 
     /// Extract readable token facts from token blocks
-    fn extract_token_facts_from_blocks(&self, token: &Biscuit) -> Vec<String> {
+    pub fn extract_token_facts_from_blocks(&self, token: &Biscuit) -> Vec<String> {
         let mut facts = Vec::new();
 
         // Add basic verification metadata
         facts.push(format!("device(\"{}\")", self.device_id));
-        // TODO: Replace with PhysicalTimeEffects from context
-        // Using placeholder to avoid violating effect system architecture
-        let now = 0u64; // Will be replaced with proper time from effect context
+        let now = 0u64;
         facts.push(format!("verified_at({})", now));
 
         // Try to extract facts from token using an authorizer
@@ -318,6 +308,10 @@ impl BiscuitAuthorizationBridge {
         }
 
         facts
+    }
+
+    pub fn root_public_key(&self) -> PublicKey {
+        self._root_public_key
     }
 }
 

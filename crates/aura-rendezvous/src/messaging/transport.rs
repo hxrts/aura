@@ -461,9 +461,6 @@ impl SbbTransportBridge {
         let now = coordinator.current_time_secs().await;
         let _result = coordinator.flood_envelope(envelope, from_peer, now).await?;
 
-        // TODO: If this device is interested in the offer, process it
-        // For now, just propagate it
-
         Ok(())
     }
 
@@ -479,17 +476,34 @@ impl SbbTransportBridge {
         );
         println!("Available methods: {:?}", offer.transport_methods);
 
-        // TODO: If we want to connect, create transport answer and establish connection
-        // For now, just log the offer
+        let coordinator = self.flooding_coordinator.read().await;
+        if self.should_respond_to_offer(&offer, &coordinator).await {
+            drop(coordinator);
+            let coordinator = self.flooding_coordinator.read().await;
+            self.create_and_send_transport_answer(&offer, &*coordinator)
+                .await?;
+        }
 
         Ok(())
     }
 
     /// Handle transport answer (Bob receives Alice's answer)
     async fn handle_transport_answer(&self, answer_data: Vec<u8>) -> AuraResult<()> {
-        println!("Received transport answer: {} bytes", answer_data.len());
+        let answer: TransportAnswerPayload = bincode::deserialize(&answer_data).map_err(|e| {
+            AuraError::serialization(format!("Failed to deserialize answer: {}", e))
+        })?;
 
-        // TODO: Process answer and establish connection via selected transport method
+        println!(
+            "Received transport answer from device {:?} using {:?}",
+            answer.device_id, answer.selected_method
+        );
+
+        // Process answer and establish connection via selected transport method (stub)
+        tracing::info!(
+            "Establishing connection using {:?} (params {} bytes)",
+            answer.selected_method,
+            answer.connection_params.len()
+        );
 
         Ok(())
     }
@@ -659,6 +673,76 @@ impl GuardEffectArc {
     }
 }
 
+// Delegate all required traits to the inner Arc<dyn AuraEffects>
+use aura_protocol::effects::{AuthorizationEffects, LeakageEffects};
+
+#[async_trait::async_trait]
+impl AuthorizationEffects for GuardEffectArc {
+    async fn verify_capability(
+        &self,
+        capabilities: &aura_core::Cap,
+        operation: &str,
+        resource: &str,
+    ) -> Result<bool, aura_core::effects::AuthorizationError> {
+        self.inner
+            .verify_capability(capabilities, operation, resource)
+            .await
+    }
+
+    async fn delegate_capabilities(
+        &self,
+        source_capabilities: &aura_core::Cap,
+        requested_capabilities: &aura_core::Cap,
+        target_authority: &AuthorityId,
+    ) -> Result<aura_core::Cap, aura_core::effects::AuthorizationError> {
+        self.inner
+            .delegate_capabilities(
+                source_capabilities,
+                requested_capabilities,
+                target_authority,
+            )
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl LeakageEffects for GuardEffectArc {
+    async fn record_leakage(
+        &self,
+        event: aura_core::effects::LeakageEvent,
+    ) -> aura_core::Result<()> {
+        self.inner.record_leakage(event).await
+    }
+
+    async fn get_leakage_budget(
+        &self,
+        context_id: aura_core::identifiers::ContextId,
+    ) -> aura_core::Result<aura_core::effects::LeakageBudget> {
+        self.inner.get_leakage_budget(context_id).await
+    }
+
+    async fn check_leakage_budget(
+        &self,
+        context_id: aura_core::identifiers::ContextId,
+        observer: aura_core::effects::ObserverClass,
+        amount: u64,
+    ) -> aura_core::Result<bool> {
+        self.inner
+            .check_leakage_budget(context_id, observer, amount)
+            .await
+    }
+
+    async fn get_leakage_history(
+        &self,
+        context_id: aura_core::identifiers::ContextId,
+        since_timestamp: Option<u64>,
+    ) -> aura_core::Result<Vec<aura_core::effects::LeakageEvent>> {
+        self.inner
+            .get_leakage_history(context_id, since_timestamp)
+            .await
+    }
+}
+
 impl aura_protocol::guards::effect_system_trait::GuardEffectSystem for GuardEffectArc {
     fn authority_id(&self) -> AuthorityId {
         match executor::block_on(async { self.inner.get_config("authority_id").await }) {
@@ -745,7 +829,6 @@ impl aura_core::effects::RandomEffects for GuardEffectArc {
     }
 }
 
-#[async_trait::async_trait]
 #[async_trait::async_trait]
 impl aura_core::effects::StorageEffects for GuardEffectArc {
     async fn store(
@@ -968,7 +1051,7 @@ impl crate::sbb::SbbFlooding for SbbTransportBridge {
         if let Some(sender) = &self.transport_sender {
             let message = SbbMessageType::RendezvousFlood {
                 envelope,
-                from_peer: Some(peer), // TODO: Get actual sender ID
+                from_peer: Some(self.flooding_coordinator.read().await.device_id()),
             };
             sender.0.send_to_peer(peer, message).await
         } else {
@@ -979,14 +1062,22 @@ impl crate::sbb::SbbFlooding for SbbTransportBridge {
     }
 }
 
+impl SbbTransportBridge {
+    /// Get relationship counts for testing/monitoring
+    pub async fn relationship_counts(&self) -> (usize, usize) {
+        let coordinator = self.flooding_coordinator.read().await;
+        (coordinator.friends().len(), coordinator.guardians().len())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_testkit::{DeviceTestFixture, TestEffectsBuilder};
+    use aura_testkit::DeviceTestFixture;
 
     fn test_effects(_device_id: DeviceId) -> Arc<dyn AuraEffects> {
         let config = aura_agent::AgentConfig::default();
-        let system = aura_agent::AuraEffectSystem::testing(&config);
+        let system = aura_agent::AuraEffectSystem::testing(&config).expect("test effect system");
         Arc::new(system)
     }
 
@@ -1017,10 +1108,9 @@ mod tests {
         bridge.add_guardian(guardian_id).await;
 
         // Should add relationships to coordinator
-        // TODO: Add public accessor methods for friends and guardians count
-        // let coordinator = bridge.flooding_coordinator.read().await;
-        // assert_eq!(coordinator.friends.len(), 1);
-        // assert_eq!(coordinator.guardians.len(), 1);
+        let (friends, guardians) = bridge.relationship_counts().await;
+        assert_eq!(friends, 1);
+        assert_eq!(guardians, 1);
     }
 
     #[tokio::test]
@@ -1100,8 +1190,9 @@ mod tests {
 
         let fixture = DeviceTestFixture::new(0);
         let device_id = fixture.device_id();
-        let builder = TestEffectsBuilder::for_unit_tests(device_id);
-        let system = Arc::new(builder.build().expect("Failed to build test effect system"));
+        let config = aura_agent::AgentConfig::default();
+        let system =
+            Arc::new(aura_agent::AuraEffectSystem::testing(&config).expect("test effect system"));
         let effects = system.clone() as Arc<dyn NetworkEffects>;
         let guard_effects = system.clone() as Arc<dyn AuraEffects>;
         let context_id = ContextId::new();
@@ -1123,9 +1214,10 @@ mod tests {
         let effects = test_effects(device_id);
         let mut bridge = SbbTransportBridge::new(device_id, effects);
 
-        // Set up real transport sender using testkit
-        let builder = TestEffectsBuilder::for_unit_tests(device_id);
-        let system = Arc::new(builder.build().expect("Failed to build test effect system"));
+        // Set up real transport sender using effect system
+        let config = aura_agent::AgentConfig::default();
+        let system =
+            Arc::new(aura_agent::AuraEffectSystem::testing(&config).expect("test effect system"));
         let network_effects = system.clone() as Arc<dyn NetworkEffects>;
         let guard_effects = system.clone() as Arc<dyn AuraEffects>;
         let context_id = ContextId::new();

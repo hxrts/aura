@@ -834,11 +834,21 @@ impl ByzantineMapper {
 
     // Additional strategy creation methods (TODO fix - Simplified for brevity)
     fn create_signature_forgery_strategy(&self) -> EnhancedByzantineStrategy {
-        self.create_key_corruption_strategy() // TODO fix - Simplified
+        let mut strategy = self.create_key_corruption_strategy();
+        strategy.enhanced_name = "signature_forgery_attack".to_string();
+        strategy.base_strategy = ByzantineStrategy::InvalidSignatures;
+        strategy.attack_parameters.intensity.base_level = 8;
+        strategy.property_impact.safety_impact = ImpactLevel::Critical;
+        strategy
     }
 
     fn create_key_substitution_strategy(&self) -> EnhancedByzantineStrategy {
-        self.create_key_corruption_strategy() // TODO fix - Simplified
+        let mut strategy = self.create_key_corruption_strategy();
+        strategy.enhanced_name = "key_substitution_attack".to_string();
+        strategy.base_strategy = ByzantineStrategy::SendInvalid;
+        strategy.attack_parameters.target_selection.target_phases =
+            vec!["leader".to_string(), "aggregator".to_string()];
+        strategy
     }
 
     fn create_threshold_denial_strategy(&self) -> EnhancedByzantineStrategy {
@@ -850,7 +860,10 @@ impl ByzantineMapper {
     }
 
     fn create_threshold_manipulation_strategy(&self) -> EnhancedByzantineStrategy {
-        self.create_threshold_denial_strategy() // TODO fix - Simplified
+        let mut strategy = self.create_threshold_denial_strategy();
+        strategy.enhanced_name = "threshold_manipulation".to_string();
+        strategy.attack_parameters.intensity.base_level = 9;
+        strategy
     }
 
     fn create_coalition_attack_strategy(&self) -> EnhancedByzantineStrategy {
@@ -874,11 +887,23 @@ impl ByzantineMapper {
     }
 
     fn create_epoch_confusion_strategy(&self) -> EnhancedByzantineStrategy {
-        self.create_session_hijacking_strategy() // TODO fix - Simplified
+        let mut strategy = self.create_session_hijacking_strategy();
+        strategy.enhanced_name = "epoch_confusion_attack".to_string();
+        strategy
+            .attack_parameters
+            .target_selection
+            .target_phases
+            .push("epoch_transition".to_string());
+        strategy.attack_parameters.timing.attack_pattern = AttackPattern::Adaptive;
+        strategy
     }
 
     fn create_state_forking_strategy(&self) -> EnhancedByzantineStrategy {
-        self.create_session_hijacking_strategy() // TODO fix - Simplified
+        let mut strategy = self.create_session_hijacking_strategy();
+        strategy.enhanced_name = "state_forking_attack".to_string();
+        strategy.base_strategy = ByzantineStrategy::SendInvalid;
+        strategy.attack_parameters.intensity.base_level = 7;
+        strategy
     }
 
     fn create_coordinated_attack_strategy(&self) -> EnhancedByzantineStrategy {

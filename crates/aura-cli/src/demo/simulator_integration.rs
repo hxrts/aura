@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use aura_core::{AuthorityId, DeviceId};
+use aura_effects::time::monotonic_now;
 use aura_simulator::{ComposedSimulationEnvironment, SimulationEffectComposer};
 
 use super::human_agent::{DemoPhase, DemoState};
@@ -408,7 +409,7 @@ impl SimulatedGuardianAgent {
         }
 
         // Process any pending scenarios or actions
-        self.state.last_action_time = Some(std::time::Instant::now());
+        self.state.last_action_time = Some(monotonic_now());
 
         Ok(())
     }

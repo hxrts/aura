@@ -18,9 +18,13 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct SimulatedTimeHandler {
     current_time: Arc<Mutex<u64>>,
+    #[allow(dead_code)]
     base_instant: Arc<Mutex<Instant>>,
+    #[allow(dead_code)]
     timeout_counter: Arc<Mutex<u64>>,
+    #[allow(dead_code)]
     active_timeouts: Arc<Mutex<HashMap<Uuid, u64>>>,
+    #[allow(dead_code)]
     registered_contexts: Arc<Mutex<Vec<Uuid>>>,
     time_scale: f64,
 }

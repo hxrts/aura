@@ -1,11 +1,12 @@
 //! Journal Effects Implementation (minimal stub for simulator wiring)
 use async_trait::async_trait;
+use aura_core::effects::FlowBudgetEffects;
 use aura_core::effects::{CryptoEffects, JournalEffects, StorageEffects};
-use aura_core::FlowBudgetEffects;
+use aura_core::flow::FlowBudget;
 use aura_core::{
     identifiers::{AuthorityId, ContextId},
     semilattice::JoinSemilattice,
-    AuraError, FactValue, FlowBudget, Journal,
+    AuraError, FactValue, Journal,
 };
 use aura_wot::BiscuitAuthorizationBridge;
 use aura_wot::{AuthorityOp, ContextOp, FlowBudgetHandler, ResourceScope};

@@ -29,6 +29,34 @@ The legacy monolithic `TimeEffects` trait is replaced by domain-specific traits:
 
 Callers select the domain appropriate to their semantics (guards/transport use physical, CRDT uses logical, privacy-preserving ordering uses order tokens). Cross-domain comparisons are explicit via `TimeStamp::compare(policy)`. Direct `SystemTime::now()` or chrono usage is forbidden outside effect implementations; testkit and simulator provide deterministic handlers for all four traits.
 
+### 1.2 When to Create Effect Traits
+
+Create new effect traits when:
+- Abstracting OS or external system integration (files, network, time)
+- Defining domain-specific operations that multiple implementations might provide
+- Isolating side effects for testing and simulation
+- Enabling deterministic simulation of complex behaviors
+
+### 1.3 When NOT to Create Effect Traits
+
+Follow YAGNI (You Aren't Gonna Need It) principles:
+
+**Defer abstraction when:**
+- Only one implementation exists and will likely remain single
+- The abstraction adds complexity without clear benefit
+- You're abstracting "just in case" without concrete need
+- Testing can be achieved through higher-level mocking
+
+**Example: Threshold Signatures**
+
+Aura uses FROST directly without a `ThresholdSigEffects` trait because:
+- Only FROST is needed currently
+- No plans for alternative threshold signature schemes
+- Direct usage is simpler and clearer
+- Testing happens at the consensus level, not crypto level
+
+See `crates/aura-core/src/crypto/README.md` for the detailed threshold signature deferral decision. We maintain a clear YAGNI gate: introduce the trait only when a second scheme is required or FROST needs replacement.
+
 ## 2. Handler Design
 
 Effect handlers implement effect traits. Stateless handlers execute operations without internal state. Stateful handlers coordinate multiple effects or maintain internal caches.

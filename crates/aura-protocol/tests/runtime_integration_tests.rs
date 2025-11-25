@@ -1,11 +1,22 @@
+#![allow(missing_docs)]
 #![cfg(feature = "fixture_effects")]
 
 //! Runtime Integration Tests for Phase 3.2
+
+/*!
+ * Runtime Integration Tests for Phase 3.2
+ */
+
+//! Runtime Integration Tests for Phase 3.2
+//!
+//! This module contains comprehensive integration tests for the Aura runtime system,
+//! validating the interoperability of effects, handlers, and protocol components.
 //!
 //! Tests validating choreographic execution following unified effect system architecture
 
 use aura_composition::CompositeHandler;
-use aura_core::identifiers::DeviceId;
+use aura_core::{identifiers::DeviceId, AuraResult};
+use aura_macros::aura_test;
 use aura_protocol::effects::*;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -23,17 +34,18 @@ fn test_device_id(seed: &[u8]) -> DeviceId {
 mod adapter_tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_create_testing_adapter() {
+    #[aura_test]
+    async fn test_create_testing_adapter() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let _handler = CompositeHandler::for_testing(device_id.into());
 
         // Verify handler creation for testing (handler should be created successfully)
         // Test passes if handler creation doesn't panic
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_handler_factory_consistency() {
+    #[aura_test]
+    async fn test_handler_factory_consistency() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
 
         let _testing_handler = CompositeHandler::for_testing(device_id.into());
@@ -42,10 +54,11 @@ mod adapter_tests {
 
         // All factories should create handlers successfully
         // Test passes if handler creation doesn't panic
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_multiple_adapters() {
+    #[aura_test]
+    async fn test_multiple_adapters() -> AuraResult<()> {
         let participant_count = 5;
         let threshold = 3;
 
@@ -62,6 +75,7 @@ mod adapter_tests {
         // Verify threshold constraints
         assert!(threshold <= participant_count);
         assert!(threshold > 0);
+        Ok(())
     }
 }
 
@@ -69,8 +83,8 @@ mod adapter_tests {
 mod middleware_tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_effect_composition() {
+    #[aura_test]
+    async fn test_effect_composition() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -79,10 +93,11 @@ mod middleware_tests {
 
         // Should handle gracefully even with mock effects
         assert!(peers.is_empty()); // Mock handler starts with no peers
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_storage_effect_integration() {
+    #[aura_test]
+    async fn test_storage_effect_integration() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -100,10 +115,11 @@ mod middleware_tests {
         if let Ok(Some(retrieved_data)) = retrieve_result {
             assert_eq!(retrieved_data, test_data);
         }
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_crypto_effect_integration() {
+    #[aura_test]
+    async fn test_crypto_effect_integration() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -119,6 +135,7 @@ mod middleware_tests {
 
         let random_32 = handler.random_bytes_32().await;
         assert_eq!(random_32.len(), 32);
+        Ok(())
     }
 }
 
@@ -126,8 +143,8 @@ mod middleware_tests {
 mod session_safety_tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_deadlock_freedom() {
+    #[aura_test]
+    async fn test_deadlock_freedom() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -139,10 +156,11 @@ mod session_safety_tests {
 
         // Should not timeout (deadlock freedom)
         assert!(result.is_ok());
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_type_safety_at_compile_time() {
+    #[aura_test]
+    async fn test_type_safety_at_compile_time() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -152,10 +170,11 @@ mod session_safety_tests {
         let _hash: [u8; 32] = aura_core::hash::hash(b"test");
 
         // Type safety verified by compilation
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_communication_safety() {
+    #[aura_test]
+    async fn test_communication_safety() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -168,6 +187,7 @@ mod session_safety_tests {
 
         // Should handle gracefully in mock environment
         // Type safety verified by compilation
+        Ok(())
     }
 }
 
@@ -175,8 +195,8 @@ mod session_safety_tests {
 mod performance_tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_zero_cost_abstractions() {
+    #[aura_test]
+    async fn test_zero_cost_abstractions() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -192,10 +212,11 @@ mod performance_tests {
 
         // Should be fast (operations should complete quickly)
         assert!(duration_epochs < 1000); // Less than 1000 epochs
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_message_serialization_efficiency() {
+    #[aura_test]
+    async fn test_message_serialization_efficiency() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -213,10 +234,11 @@ mod performance_tests {
 
         // Should be efficient (operations should complete quickly)
         assert!(duration_epochs < 100); // Less than 100 epochs
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_parallel_composition_performance() {
+    #[aura_test]
+    async fn test_parallel_composition_performance() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -234,6 +256,7 @@ mod performance_tests {
         // Parallel execution should be faster than sequential
         assert!(results.len() == 10);
         assert!(duration_epochs < 50); // Should be much faster than sequential
+        Ok(())
     }
 }
 
@@ -241,8 +264,8 @@ mod performance_tests {
 mod basic_functionality_tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_handler_creation_deterministic() {
+    #[aura_test]
+    async fn test_handler_creation_deterministic() -> AuraResult<()> {
         let device_id1 = DeviceId::from_bytes([42u8; 32]);
         let device_id2 = DeviceId::from_bytes([42u8; 32]);
         let handler1 = CompositeHandler::for_testing(device_id1.into());
@@ -255,10 +278,11 @@ mod basic_functionality_tests {
         // Both should return valid epochs
         assert!(epoch1 > 0);
         assert!(epoch2 > 0);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_effect_operations_termination() {
+    #[aura_test]
+    async fn test_effect_operations_termination() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -271,10 +295,11 @@ mod basic_functionality_tests {
         .await;
 
         assert!(result.is_ok());
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_concurrent_handler_safety() {
+    #[aura_test]
+    async fn test_concurrent_handler_safety() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -290,6 +315,7 @@ mod basic_functionality_tests {
         for epoch in results {
             assert!(epoch > 0);
         }
+        Ok(())
     }
 }
 
@@ -297,8 +323,8 @@ mod basic_functionality_tests {
 mod choreographic_integration_tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_choreographic_role_integration() {
+    #[aura_test]
+    async fn test_choreographic_role_integration() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -306,10 +332,11 @@ mod choreographic_integration_tests {
         let role = handler.current_role();
         assert_eq!(role.device_id, Uuid::from(device_id));
         assert_eq!(role.role_index, 0);
+        Ok(())
     }
 
-    #[tokio::test]
-    async fn test_choreographic_broadcast() {
+    #[aura_test]
+    async fn test_choreographic_broadcast() -> AuraResult<()> {
         let device_id = test_device_id(b"test");
         let handler = CompositeHandler::for_testing(device_id.into());
 
@@ -319,5 +346,6 @@ mod choreographic_integration_tests {
 
         // Should handle gracefully with mock network
         assert!(broadcast_result.is_ok() || broadcast_result.is_err());
+        Ok(())
     }
 }

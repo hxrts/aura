@@ -4,8 +4,7 @@
 //! and realistic end-to-end synchronization workflows.
 
 use super::test_utils::*;
-use aura_core::{AuraError, AuraResult, DeviceId};
-use aura_sync::protocols::*;
+use aura_core::{AuraError, AuraResult};
 use aura_testkit::simulation::network::NetworkCondition;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -102,7 +101,7 @@ async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
 /// Test coordinated multi-protocol sync workflow
 #[tokio::test]
 async fn test_multi_protocol_coordination() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let fixture = MultiDeviceTestFixture::threshold_group().await?;
 
     let session = fixture
         .create_coordinated_session("multi_protocol_coordination")
@@ -194,7 +193,7 @@ async fn test_multi_protocol_coordination() -> AuraResult<()> {
 #[tokio::test]
 async fn test_large_scale_device_coordination() -> AuraResult<()> {
     // Create larger device set for stress testing
-    let mut fixture = MultiDeviceTestFixture::new(8).await?; // 8 devices
+    let fixture = MultiDeviceTestFixture::new(8).await?; // 8 devices
 
     let session = fixture
         .create_coordinated_session("large_scale_coordination")

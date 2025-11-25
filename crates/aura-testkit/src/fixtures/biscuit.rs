@@ -109,7 +109,7 @@ impl BiscuitTestFixture {
         for (index, scope) in resource_scopes.iter().enumerate() {
             let index_i64 = index as i64;
             let attenuated_token = match scope {
-                ResourceScope::Storage { category, path } => {
+                ResourceScope::Storage { category, path: _ } => {
                     let resource_pattern = scope.resource_pattern();
                     let category_str = category.as_str();
                     current_token.append(block!(
@@ -336,7 +336,6 @@ impl Default for BiscuitTestFixture {
 }
 
 /// Convenience functions for creating common test scenarios
-
 /// Create a basic multi-device scenario with owner and guardian
 pub fn create_multi_device_scenario() -> Result<BiscuitTestFixture, BiscuitError> {
     let mut fixture = BiscuitTestFixture::new();

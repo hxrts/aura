@@ -451,16 +451,19 @@ mod tests {
     #[tokio::test]
     async fn test_retry_config_delay_calculation() {
         let retry_config = RetryConfig::default();
-        let random = aura_effects::random::RealRandomHandler::default();
+        let fixture = aura_testkit::create_test_fixture()
+            .await
+            .unwrap_or_else(|_| panic!("Failed to create test fixture"));
+        let effects = fixture.effect_system();
 
-        let delay1 = retry_config.delay_for_attempt(0, &random).await;
-        let delay2 = retry_config.delay_for_attempt(1, &random).await;
+        let delay1 = retry_config.delay_for_attempt(0, effects.as_ref()).await;
+        let delay2 = retry_config.delay_for_attempt(1, effects.as_ref()).await;
 
         // Second attempt should have longer delay (exponential backoff)
         assert!(delay2 > delay1);
 
         // Should not exceed max delay
-        let delay_long = retry_config.delay_for_attempt(10, &random).await;
+        let delay_long = retry_config.delay_for_attempt(10, effects.as_ref()).await;
         assert!(delay_long <= retry_config.max_delay);
     }
 

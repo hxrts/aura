@@ -109,8 +109,7 @@ impl AgentEffects for AgentEffectSystemHandler {
     }
 
     async fn sync_distributed_state(&self) -> Result<()> {
-        // TODO fix - In a real implementation, this would sync with the distributed journal
-        // TODO fix - For now, we'll just log the operation
+        // In production this would sync with the distributed journal; here we log for visibility.
         let effects = self.core_effects.read().await;
         effects.log_info("Syncing distributed state").await?;
         Ok(())
@@ -128,8 +127,8 @@ impl AgentEffects for AgentEffectSystemHandler {
             },
         };
 
-        // Check network health (TODO fix - Simplified)
-        let network_health = HealthStatus::Healthy; // Assume healthy TODO fix - For now
+        // Simplified health check placeholder
+        let network_health = HealthStatus::Healthy; // Assume healthy for now
 
         // Check session health
         let session_count = self.session_handler.session_count();
@@ -215,7 +214,7 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
             .await
             .map_err(|e| aura_core::AuraError::internal(format!("Failed to get stats: {}", e)))?;
 
-        // TODO fix - For now, return empty list since StorageStats doesn't contain key listing
+        // StorageStats does not expose key listing yet; return empty set.
         // This would need to be implemented via list_keys() in real usage
         Ok(Vec::new())
     }
@@ -275,7 +274,7 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
             ));
         }
 
-        // TODO fix - In a real implementation, would decrypt and restore credentials
+        // In production, this would decrypt and restore credentials.
         effects.log_info("Credentials restored from backup").await?;
         Ok(())
     }
@@ -501,7 +500,7 @@ impl ConfigurationEffects for AgentEffectSystemHandler {
     }
 
     async fn get_all_config(&self) -> Result<std::collections::HashMap<String, serde_json::Value>> {
-        // TODO: Implement retrieving all configuration keys
+        // Configuration key retrieval not yet implemented.
         // For now, return an empty map since we don't have a list_keys operation
         Ok(std::collections::HashMap::new())
     }

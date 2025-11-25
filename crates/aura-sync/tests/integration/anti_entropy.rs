@@ -4,7 +4,7 @@
 //! including normal operation, network delays, packet loss, and recovery scenarios.
 
 use super::test_utils::*;
-use aura_core::{AuraError, AuraResult, DeviceId};
+use aura_core::{AuraError, AuraResult};
 use aura_sync::protocols::{AntiEntropyConfig, AntiEntropyProtocol, DigestStatus};
 use aura_testkit::simulation::network::NetworkCondition;
 use std::time::Duration;
@@ -13,12 +13,12 @@ use tokio::time::timeout;
 /// Test basic anti-entropy synchronization between two devices
 #[tokio::test]
 async fn test_basic_anti_entropy_sync() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::trio().await?;
-    let protocol = create_anti_entropy_protocol();
+    let fixture = MultiDeviceTestFixture::trio().await?;
+    let _protocol = create_anti_entropy_protocol();
 
     // Get two devices for the test
-    let device1 = fixture.devices[0];
-    let device2 = fixture.devices[1];
+    let _device1 = fixture.devices[0];
+    let _device2 = fixture.devices[1];
 
     // Create a coordinated session for anti-entropy sync
     let session = fixture.create_coordinated_session("anti_entropy").await?;
@@ -60,8 +60,8 @@ async fn test_basic_anti_entropy_sync() -> AuraResult<()> {
 /// Test anti-entropy sync with multiple devices in a mesh network
 #[tokio::test]
 async fn test_multi_device_anti_entropy_sync() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
-    let protocol = create_anti_entropy_protocol();
+    let fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let _protocol = create_anti_entropy_protocol();
 
     // Create session involving all devices
     let session = fixture
@@ -74,8 +74,8 @@ async fn test_multi_device_anti_entropy_sync() -> AuraResult<()> {
 
     for i in 0..device_count {
         for j in (i + 1)..device_count {
-            let device_i = fixture.devices[i];
-            let device_j = fixture.devices[j];
+            let _device_i = fixture.devices[i];
+            let _device_j = fixture.devices[j];
 
             // Simulate pairwise sync
             let sync_result = timeout(Duration::from_secs(15), async {
@@ -112,7 +112,7 @@ async fn test_multi_device_anti_entropy_sync() -> AuraResult<()> {
 #[tokio::test]
 async fn test_anti_entropy_with_network_conditions() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::trio().await?;
-    let protocol = create_anti_entropy_protocol();
+    let _protocol = create_anti_entropy_protocol();
 
     let device1 = fixture.devices[0];
     let device2 = fixture.devices[1];
@@ -161,7 +161,7 @@ async fn test_anti_entropy_with_network_conditions() -> AuraResult<()> {
 #[tokio::test]
 async fn test_anti_entropy_with_packet_loss() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::trio().await?;
-    let protocol = create_anti_entropy_protocol();
+    let _protocol = create_anti_entropy_protocol();
 
     let device1 = fixture.devices[0];
     let device2 = fixture.devices[1];
@@ -217,11 +217,11 @@ async fn test_anti_entropy_with_packet_loss() -> AuraResult<()> {
 /// Test anti-entropy digest comparison logic
 #[tokio::test]
 async fn test_digest_comparison() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::trio().await?;
-    let protocol = create_anti_entropy_protocol();
+    let fixture = MultiDeviceTestFixture::trio().await?;
+    let _protocol = create_anti_entropy_protocol();
 
-    let device1 = fixture.devices[0];
-    let device2 = fixture.devices[1];
+    let _device1 = fixture.devices[0];
+    let _device2 = fixture.devices[1];
 
     // Create scenario with known digest differences
     let session = fixture.create_coordinated_session("digest_test").await?;
@@ -266,7 +266,7 @@ async fn test_digest_comparison() -> AuraResult<()> {
 #[tokio::test]
 async fn test_gradual_divergence_recovery() -> AuraResult<()> {
     let mut fixture = MultiDeviceTestFixture::trio().await?;
-    let protocol = create_anti_entropy_protocol();
+    let _protocol = create_anti_entropy_protocol();
 
     // Create initial divergence
     create_divergent_journal_states(&mut fixture).await?;
@@ -330,7 +330,7 @@ async fn test_protocol_configuration() -> AuraResult<()> {
     };
 
     // Test protocol creation with valid configuration
-    let protocol_valid = AntiEntropyProtocol::new(valid_config.clone());
+    let _protocol_valid = AntiEntropyProtocol::new(valid_config.clone());
     assert!(valid_config.digest_timeout > Duration::ZERO);
 
     // Invalid configuration - zero timeout
@@ -343,7 +343,7 @@ async fn test_protocol_configuration() -> AuraResult<()> {
     };
 
     // Test that zero timeout config is created but has invalid values
-    let protocol_invalid = AntiEntropyProtocol::new(invalid_config.clone());
+    let _protocol_invalid = AntiEntropyProtocol::new(invalid_config.clone());
     assert_eq!(invalid_config.digest_timeout, Duration::ZERO);
 
     Ok(())
@@ -352,7 +352,7 @@ async fn test_protocol_configuration() -> AuraResult<()> {
 /// Test concurrent anti-entropy sessions
 #[tokio::test]
 async fn test_concurrent_anti_entropy_sessions() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let fixture = MultiDeviceTestFixture::threshold_group().await?;
 
     // Create multiple concurrent sessions
     let session1 = fixture.create_coordinated_session("concurrent_1").await?;

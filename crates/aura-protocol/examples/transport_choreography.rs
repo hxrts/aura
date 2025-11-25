@@ -8,6 +8,8 @@
 //! - Multi-party coordination using choreographic protocols
 //! - Session type safety for complex interaction patterns
 //! - Guard capabilities, flow costs, and journal facts
+
+#![allow(missing_docs)]
 //! - Extension effects through aura-macros and AuraRuntime
 
 use aura_core::{identifiers::DeviceId, ContextId};
@@ -64,11 +66,19 @@ async fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>>
     let mut initiator_coordinator =
         WebSocketHandshakeCoordinator::new(initiator_id, choreo_config.clone());
 
-    let mut responder_coordinator = WebSocketHandshakeCoordinator::new(responder_id, choreo_config);
+    let _responder_coordinator = WebSocketHandshakeCoordinator::new(responder_id, choreo_config);
 
     println!("Created choreographic coordinators:");
-    println!("  Initiator: {:?}", &initiator_id.to_bytes().unwrap()[..4]);
-    println!("  Responder: {:?}", &responder_id.to_bytes().unwrap()[..4]);
+    if let Ok(bytes) = initiator_id.to_bytes() {
+        println!("  Initiator: {:?}", &bytes[..4]);
+    } else {
+        println!("  Initiator: [invalid]");
+    }
+    if let Ok(bytes) = responder_id.to_bytes() {
+        println!("  Responder: {:?}", &bytes[..4]);
+    } else {
+        println!("  Responder: [invalid]");
+    }
 
     // Initiate handshake (choreographic coordination)
     let session_id = initiator_coordinator.initiate_handshake(
@@ -136,10 +146,11 @@ async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error
     let mut coordinator = ChannelEstablishmentCoordinator::new(coordinator_id, choreo_config);
 
     println!("Channel establishment coordinator created");
-    println!(
-        "  Coordinator: {:?}",
-        &coordinator_id.to_bytes().unwrap()[..4]
-    );
+    if let Ok(bytes) = coordinator_id.to_bytes() {
+        println!("  Coordinator: {:?}", &bytes[..4]);
+    } else {
+        println!("  Coordinator: [invalid]");
+    }
     println!("  Participants: {} peers", 2);
 
     // Initiate choreographic channel establishment
@@ -254,7 +265,10 @@ async fn custom_protocol_example() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 // Example choreographic protocol definition using aura-macros
-// This shows the actual choreography! macro usage for custom protocols
+//
+// This shows the actual choreography! macro usage for custom protocols.
+// Demonstrates a three-party (Client, Server, Witness) secure transport protocol
+// with capability guards, flow costs, and journal facts tracking.
 choreography! {
     #[namespace = "example_secure_transport"]
     protocol ExampleSecureTransport {
@@ -287,34 +301,55 @@ choreography! {
 }
 
 // Message types for the choreographic protocol
+
+/// Request to establish a secure connection between client and server
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SecureConnectionRequest {
+    /// ID of the client requesting connection
     pub client_id: DeviceId,
+    /// Type of connection requested
     pub connection_type: String,
+    /// Security requirements for the connection
     pub security_requirements: Vec<String>,
+    /// Context ID for the connection
     pub context_id: ContextId,
 }
 
+/// Authentication request sent from server to witness
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AuthenticationRequest {
+    /// ID of the server requesting authentication
     pub server_id: DeviceId,
+    /// ID of the client being authenticated
     pub client_id: DeviceId,
+    /// Authentication challenge
     pub challenge: Vec<u8>,
+    /// Timestamp of the request
     pub timestamp: SystemTime,
 }
 
+/// Response from witness confirming authentication status
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AuthenticationResponse {
+    /// ID of the witness verifying authentication
     pub witness_id: DeviceId,
+    /// Whether authentication was successful
     pub authentication_result: bool,
+    /// Trust score (0-255) assigned by witness
     pub trust_score: u8,
+    /// Time when authentication was performed
     pub timestamp: SystemTime,
 }
 
+/// Server response indicating whether secure connection was established
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SecureConnectionResponse {
+    /// ID of the server responding to connection request
     pub server_id: DeviceId,
+    /// Whether the connection request was accepted
     pub connection_accepted: bool,
+    /// Ephemeral session key for secure communication
     pub session_key: Vec<u8>,
+    /// Additional connection metadata (e.g., protocol version, capabilities)
     pub connection_metadata: HashMap<String, String>,
 }

@@ -4,9 +4,9 @@
 //! Target: <120 lines (minimal implementation).
 
 use aura_core::identifiers::DeviceId;
+use aura_core::time::TimeStamp;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
-use std::time::SystemTime;
 use uuid::Uuid;
 
 /// Core hole punching messages for choreographic protocols
@@ -35,7 +35,7 @@ pub enum HolePunchMessage {
         /// Sequence number for this punch attempt
         sequence: u32,
         /// Timestamp when packet was sent
-        timestamp: SystemTime,
+        timestamp: TimeStamp,
     },
 
     /// Acknowledgment of successful hole punch
@@ -155,7 +155,13 @@ impl HolePunchMessage {
         target: DeviceId,
         sequence: u32,
     ) -> Self {
-        Self::punch_packet_at_time(session_id, source, target, sequence, SystemTime::UNIX_EPOCH)
+        Self::punch_packet_at_time(
+            session_id,
+            source,
+            target,
+            sequence,
+            TimeStamp::OrderClock(aura_core::time::OrderTime([0u8; 32])),
+        )
     }
 
     /// Create punch packet with specific timestamp
@@ -164,7 +170,7 @@ impl HolePunchMessage {
         source: DeviceId,
         target: DeviceId,
         sequence: u32,
-        timestamp: SystemTime,
+        timestamp: TimeStamp,
     ) -> Self {
         Self::PunchPacket {
             session_id,

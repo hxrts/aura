@@ -422,7 +422,7 @@ Both testing and simulation maintain the same architectural patterns as producti
 
 ## See Also
 
-Core documentation covers foundational concepts and formal models. [Theoretical Model](002_theoretical_model.md) provides mathematical foundations. [Privacy and Information Flow](003_information_flow_contract.md) documents the privacy framework. [Distributed Systems Contract](004_distributed_systems_contract.md) specifies safety and liveness guarantees.
+Core documentation covers foundational concepts and formal models. [Theoretical Model](002_theoretical_model.md) provides mathematical foundations. [Privacy and Information Flow](003_information_flow_contract.md) documents the privacy framework. [Distributed Systems Contract](004_distributed_systems_contract.md) specifies safety and liveness guarantees. [System Invariants](005_system_invariants.md) indexes critical properties that must always hold.
 
 System documentation covers major components. [Authority and Identity](100_authority_and_identity.md) describes the authority model. [Journal System](102_journal.md) documents fact storage and reduction. [Relational Contexts](103_relational_contexts.md) covers cross-authority relationships. [Consensus](104_consensus.md) describes the agreement protocol.
 

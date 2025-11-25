@@ -144,6 +144,8 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [Maintenance](111_maintenance.md) covers the distributed maintenance stack including snapshots and garbage collection.
 
+[FROST Pipelining Optimization](114_frost_pipelining_optimization.md) describes the single-RTT consensus optimization that reduces latency by 50%.
+
 **Developer Guides**
 
 [Hello World Guide](801_hello_world_guide.md) provides a starting point for developers new to Aura.

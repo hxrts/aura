@@ -1,13 +1,20 @@
-//! AMP channel epoch bump consensus scaffolding
+//! AMP channel epoch bump consensus adapter
 //!
 //! This module provides a thin wrapper that binds AMP channel-epoch bump
 //! proposals to Aura Consensus and produces the corresponding committed bump
 //! fact for insertion into the relational journal.
+//!
+//! Uses the new consensus protocol for executing channel epoch bumps.
 
+use super::protocol::run_consensus;
+use super::types::CommitFact;
 use crate::amp::AmpJournalEffects;
-use crate::consensus::{run_consensus, CommitFact};
+// use aura_core::effects::{PhysicalTimeEffects, RandomEffects}; // Available if needed
 use aura_core::frost::{PublicKeyPackage, Share};
+use aura_core::session_epochs::Epoch;
 use aura_core::{AuthorityId, Prestate, Result};
+use aura_effects::random::RealRandomHandler;
+use aura_effects::time::PhysicalTimeHandler;
 use aura_journal::fact::{CommittedChannelEpochBump, ProposedChannelEpochBump};
 use std::collections::HashMap;
 
@@ -36,17 +43,20 @@ pub async fn run_amp_channel_epoch_bump(
     threshold: u16,
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
+    epoch: Epoch,
 ) -> Result<(CommittedChannelEpochBump, CommitFact)> {
+    let random = RealRandomHandler;
+    let time = PhysicalTimeHandler;
+
     // Consensus over the proposal itself; serialization is handled by `run_consensus`.
-    let commit = run_consensus(
-        prestate,
-        proposal,
+    let params = super::protocol::ConsensusParams {
         witnesses,
         threshold,
         key_packages,
         group_public_key,
-    )
-    .await?;
+        epoch,
+    };
+    let commit = run_consensus(prestate, proposal, params, &random, &time).await?;
 
     let committed = CommittedChannelEpochBump {
         context: proposal.context,
@@ -66,6 +76,7 @@ pub async fn run_amp_channel_epoch_bump_default(
     proposal: &ProposedChannelEpochBump,
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
+    epoch: Epoch,
 ) -> Result<(CommittedChannelEpochBump, CommitFact)> {
     let (witnesses, threshold) = default_witness_policy(prestate);
     run_amp_channel_epoch_bump(
@@ -75,6 +86,7 @@ pub async fn run_amp_channel_epoch_bump_default(
         threshold,
         key_packages,
         group_public_key,
+        epoch,
     )
     .await
 }
@@ -91,6 +103,7 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects>(
     threshold: u16,
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
+    epoch: Epoch,
 ) -> Result<CommittedChannelEpochBump> {
     let (committed, commit) = run_amp_channel_epoch_bump(
         prestate,
@@ -99,6 +112,7 @@ pub async fn finalize_amp_bump_with_journal<J: AmpJournalEffects>(
         threshold,
         key_packages,
         group_public_key,
+        epoch,
     )
     .await?;
 
@@ -132,6 +146,7 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects>(
     proposal: &ProposedChannelEpochBump,
     key_packages: HashMap<AuthorityId, Share>,
     group_public_key: PublicKeyPackage,
+    epoch: Epoch,
 ) -> Result<CommittedChannelEpochBump> {
     let (witnesses, threshold) = default_witness_policy(prestate);
     finalize_amp_bump_with_journal(
@@ -142,6 +157,7 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects>(
         threshold,
         key_packages,
         group_public_key,
+        epoch,
     )
     .await
 }
@@ -149,7 +165,7 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::frost::{PublicKeyPackage, Share};
+    use aura_core::frost::Share;
     use aura_core::AuthorityId;
     use std::collections::HashMap;
 
@@ -181,7 +197,8 @@ mod tests {
             witnesses,
             2,
             key_packages,
-            group_public_key,
+            group_public_key.into(),
+            Epoch::from(1),
         )
         .await;
 

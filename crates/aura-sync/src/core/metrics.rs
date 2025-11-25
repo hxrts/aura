@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 /// Unified metrics collector following observability best practices
 #[derive(Debug, Clone)]
@@ -618,12 +618,7 @@ impl MetricsCollector {
     pub fn get_last_sync_timestamp(&self) -> Option<u64> {
         // For now, use the system time as a placeholder
         // In a real implementation, this would track the actual last sync time
-        Some(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or(Duration::ZERO)
-                .as_millis() as u64,
-        )
+        Some(aura_effects::time::wallclock_ms())
     }
 
     /// Get total number of requests processed
@@ -664,12 +659,7 @@ impl MetricsCollector {
     pub fn get_last_operation_timestamp(&self) -> Option<u64> {
         // For now, use the system time as a placeholder
         // In a real implementation, this would track the actual last operation time
-        Some(
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or(Duration::ZERO)
-                .as_millis() as u64,
-        )
+        Some(aura_effects::time::wallclock_ms())
     }
 
     /// Export comprehensive metrics snapshot
@@ -820,10 +810,7 @@ impl MetricsCollector {
             performance: performance_snapshot,
             resources: resources_snapshot,
             errors: errors_snapshot,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            timestamp: aura_effects::time::wallclock_secs(),
         }
     }
 

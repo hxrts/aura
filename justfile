@@ -96,6 +96,11 @@ test-crate-isolated crate:
 check:
     cargo check --workspace --verbose
 
+# Run the exact same lint command that Zed editor runs (rust-analyzer checkOnSave)
+# This is exactly what Zed runs automatically on file save via rust-analyzer
+check-zed:
+    cargo check --workspace --all-targets
+
 # Run clippy linter with effects system enforcement
 clippy:
     cargo clippy --workspace --all-targets --verbose -- -D warnings

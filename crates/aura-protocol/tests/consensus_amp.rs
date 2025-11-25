@@ -1,6 +1,7 @@
 //! Consensus integration smoke test for AMP bumps.
 
-use aura_core::frost::{PublicKeyPackage, Share};
+use aura_core::frost::Share;
+use aura_core::session_epochs::Epoch;
 use aura_core::AuthorityId;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_protocol::consensus::run_amp_channel_epoch_bump;
@@ -26,8 +27,8 @@ async fn amp_consensus_smoke() {
 
     // Create test FROST keys using testkit
     let (_, group_public_key) = aura_testkit::builders::keys::helpers::test_frost_key_shares(
-        1,     // threshold
-        1,     // total
+        2,     // threshold
+        3,     // total
         12345, // deterministic seed
     );
 
@@ -38,7 +39,8 @@ async fn amp_consensus_smoke() {
         witnesses,
         1,
         key_packages,
-        group_public_key,
+        group_public_key.into(),
+        Epoch::from(1),
     )
     .await;
 
@@ -64,17 +66,25 @@ async fn amp_consensus_success_path() {
 
     // Create test FROST keys using testkit
     let (frost_key_packages, gp) = aura_testkit::builders::keys::helpers::test_frost_key_shares(
-        1,     // threshold
-        1,     // total
+        2,     // threshold
+        3,     // total
         54321, // different deterministic seed
     );
 
     // Insert the first key package for the witness
     if let Some((_, key_pkg)) = frost_key_packages.into_iter().next() {
-        key_packages.insert(witnesses[0], key_pkg);
+        key_packages.insert(witnesses[0], key_pkg.into());
     }
 
-    let result =
-        run_amp_channel_epoch_bump(&prestate, &proposal, witnesses, 1, key_packages, gp).await;
+    let result = run_amp_channel_epoch_bump(
+        &prestate,
+        &proposal,
+        witnesses,
+        1,
+        key_packages,
+        gp.into(),
+        Epoch::from(1),
+    )
+    .await;
     assert!(result.is_ok(), "consensus should succeed with key material");
 }

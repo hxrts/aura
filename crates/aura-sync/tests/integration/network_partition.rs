@@ -4,8 +4,7 @@
 //! including split-brain prevention, partition detection, and recovery mechanisms.
 
 use super::test_utils::*;
-use aura_core::{AuraError, AuraResult, DeviceId};
-use aura_sync::protocols::*;
+use aura_core::{AuraError, AuraResult};
 use aura_testkit::simulation::network::NetworkCondition;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -299,7 +298,7 @@ async fn test_partition_during_active_sync() -> AuraResult<()> {
 /// Test cascading partition failures
 #[tokio::test]
 async fn test_cascading_partition_failures() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let fixture = MultiDeviceTestFixture::threshold_group().await?;
 
     let session = fixture
         .create_coordinated_session("cascading_failures")
@@ -410,7 +409,7 @@ async fn test_cascading_partition_failures() -> AuraResult<()> {
 /// Test partition with flapping network conditions
 #[tokio::test]
 async fn test_flapping_network_partition() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::trio().await?;
+    let fixture = MultiDeviceTestFixture::trio().await?;
 
     let device1 = fixture.devices[0];
     let device2 = fixture.devices[1];
@@ -486,7 +485,7 @@ async fn test_flapping_network_partition() -> AuraResult<()> {
 /// Test partition with partial connectivity (complex network topology)
 #[tokio::test]
 async fn test_partial_connectivity_partition() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::threshold_group().await?;
+    let fixture = MultiDeviceTestFixture::threshold_group().await?;
 
     let session = fixture
         .create_coordinated_session("partial_connectivity")
@@ -569,7 +568,7 @@ async fn test_partial_connectivity_partition() -> AuraResult<()> {
 /// Test partition detection timeouts and false positives
 #[tokio::test]
 async fn test_partition_detection_accuracy() -> AuraResult<()> {
-    let mut fixture = MultiDeviceTestFixture::trio().await?;
+    let fixture = MultiDeviceTestFixture::trio().await?;
 
     let device1 = fixture.devices[0];
     let device2 = fixture.devices[1];

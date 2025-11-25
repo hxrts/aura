@@ -128,14 +128,13 @@ impl ChunkManifest {
         chunk_id: ChunkId,
         size: u32,
         required_capabilities: Vec<StorageCapability>,
+        created_at: u64,
     ) -> Self {
         Self {
             chunk_id,
             size,
             required_capabilities,
-            // TODO: Replace with PhysicalTimeEffects from context
-            // Using placeholder to avoid violating effect system architecture
-            created_at: 0, // Will be replaced with proper time from effect context
+            created_at,
             metadata: BTreeMap::new(),
         }
     }
@@ -175,6 +174,7 @@ impl ContentManifest {
         content_id: ContentId,
         layout: ChunkLayout,
         chunk_manifests: Vec<ChunkManifest>,
+        created_at: u64,
     ) -> Result<Self, AuraError> {
         // Verify chunk manifests match layout
         if layout.chunk_count() != chunk_manifests.len() {
@@ -197,9 +197,7 @@ impl ContentManifest {
             layout,
             chunk_manifests,
             metadata: BTreeMap::new(),
-            // TODO: Replace with PhysicalTimeEffects from context
-            // Using placeholder to avoid violating effect system architecture
-            created_at: 0, // Will be replaced with proper time from effect context
+            created_at,
         })
     }
 
@@ -309,5 +307,28 @@ mod tests {
         // Should have data chunks + parity chunks
         assert!(layout.chunk_count() > 2); // At least data chunks
         assert_eq!(layout.total_size.0, content.len() as u64);
+    }
+
+    #[test]
+    fn test_manifests_require_created_at() {
+        let chunk_id = ChunkId::from_bytes(b"chunk1");
+        let manifest = ChunkManifest::new(chunk_id, 10, vec![], 123);
+        assert_eq!(manifest.created_at, 123);
+
+        let layout = ChunkLayout::new(
+            vec![manifest.chunk_id.clone()],
+            vec![10],
+            ContentSize(10),
+            ErasureConfig::default(),
+        )
+        .unwrap();
+        let content_manifest = ContentManifest::new(
+            ContentId::from_bytes(b"content1"),
+            layout,
+            vec![manifest],
+            456,
+        )
+        .unwrap();
+        assert_eq!(content_manifest.created_at, 456);
     }
 }

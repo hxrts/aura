@@ -7,10 +7,11 @@
 use aura_core::DeviceId;
 use aura_sync::protocols::{
     AntiEntropyConfig, AntiEntropyProtocol, EpochConfig, EpochRotationCoordinator,
-    EpochRotationProposal, JournalSyncConfig, JournalSyncProtocol, OTAConfig, OTAProtocol,
-    ReceiptVerificationConfig, ReceiptVerificationProtocol, SnapshotConfig, SnapshotProtocol,
+    JournalSyncConfig, JournalSyncProtocol, OTAConfig, OTAProtocol, ReceiptVerificationConfig,
+    ReceiptVerificationProtocol, SnapshotConfig, SnapshotProtocol,
 };
-use std::time::SystemTime;
+// SystemTime not used in this file
+use aura_effects::time::wallclock_ms;
 
 // =============================================================================
 // Anti-Entropy Protocol Tests
@@ -20,7 +21,7 @@ use std::time::SystemTime;
 fn test_anti_entropy_protocol_creation() {
     // Test basic anti-entropy protocol instantiation
     let config = AntiEntropyConfig::default();
-    let protocol = AntiEntropyProtocol::new(config.clone());
+    let _protocol = AntiEntropyProtocol::new(config.clone());
 
     // Verify protocol is properly initialized by creating it successfully
     // Note: config is private, so we can't directly access it
@@ -57,7 +58,7 @@ fn test_anti_entropy_configuration_validation() {
 fn test_anti_entropy_with_multiple_peers() {
     // Test anti-entropy protocol with multiple peer scenarios
     let config = AntiEntropyConfig::default();
-    let protocol = AntiEntropyProtocol::new(config);
+    let _protocol = AntiEntropyProtocol::new(config);
 
     let peer1 = DeviceId::new();
     let peer2 = DeviceId::new();
@@ -69,7 +70,7 @@ fn test_anti_entropy_with_multiple_peers() {
     assert_ne!(peer1, peer3);
 
     // Each peer should be distinct
-    let peers = vec![peer1, peer2, peer3];
+    let peers = [peer1, peer2, peer3];
     let unique_peers: std::collections::HashSet<_> = peers.iter().cloned().collect();
     assert_eq!(unique_peers.len(), 3);
 }
@@ -82,7 +83,7 @@ fn test_anti_entropy_with_multiple_peers() {
 fn test_journal_sync_protocol_creation() {
     // Test journal sync protocol instantiation
     let config = JournalSyncConfig::default();
-    let protocol = JournalSyncProtocol::new(config.clone());
+    let _protocol = JournalSyncProtocol::new(config.clone());
 
     // Verify protocol is created successfully by checking the config values
     // Note: config is private, so we verify by checking the original config
@@ -97,7 +98,8 @@ fn test_journal_sync_configuration() {
 
     assert!(config.batch_size > 0);
     assert!(config.sync_timeout > std::time::Duration::ZERO);
-    assert!(config.retry_enabled || !config.retry_enabled); // Always true, just check field exists
+    // Field exists - retry_enabled is accessible
+    let _ = config.retry_enabled;
     assert!(config.max_concurrent_syncs > 0);
 }
 
@@ -122,13 +124,14 @@ fn test_journal_sync_with_peers() {
 fn test_snapshot_protocol_creation() {
     // Test snapshot protocol instantiation
     let config = SnapshotConfig::default();
-    let protocol = SnapshotProtocol::new(config.clone());
+    let _protocol = SnapshotProtocol::new(config.clone());
 
     // Verify protocol is created successfully by checking the original config
     // Note: config is private, so we verify using the original config values
     assert_eq!(config.approval_threshold, 2);
     assert_eq!(config.quorum_size, 3);
-    assert!(config.use_writer_fence || !config.use_writer_fence); // Field exists
+    // Field exists - use_writer_fence is accessible
+    let _ = config.use_writer_fence;
 }
 
 #[test]
@@ -173,7 +176,7 @@ fn test_snapshot_with_multiple_writers() {
 fn test_ota_protocol_creation() {
     // Test OTA protocol instantiation
     let config = OTAConfig::default();
-    let protocol = OTAProtocol::new(config.clone());
+    let _protocol = OTAProtocol::new(config.clone());
 
     // Verify protocol is created successfully by checking the original config
     // Note: config is private, so we verify using the original config values
@@ -224,12 +227,13 @@ fn test_ota_with_coordinators() {
 fn test_receipt_verification_protocol_creation() {
     // Test receipt verification protocol instantiation
     let config = ReceiptVerificationConfig::default();
-    let protocol = ReceiptVerificationProtocol::new(config.clone());
+    let _protocol = ReceiptVerificationProtocol::new(config.clone());
 
     // Verify protocol is created successfully by checking the original config
     // Note: config is private, so we verify using the original config values
     assert!(config.max_chain_depth > 0);
-    assert!(config.verify_signatures || !config.verify_signatures); // Field exists
+    // Field exists - verify_signatures is accessible
+    let _ = config.verify_signatures;
 }
 
 #[test]
@@ -262,7 +266,7 @@ fn test_receipt_verification_chain() {
     let receiver = DeviceId::new();
 
     // All should be distinct for proper chain tracking
-    let chain = vec![sender, intermediate1, intermediate2, receiver];
+    let chain = [sender, intermediate1, intermediate2, receiver];
     let unique: std::collections::HashSet<_> = chain.iter().cloned().collect();
     assert_eq!(unique.len(), 4);
 }
@@ -303,8 +307,10 @@ fn test_epoch_rotation_initiation() {
 fn test_epoch_rotation_with_insufficient_participants() {
     // Test epoch rotation fails with too few participants
     let device_id = DeviceId::new();
-    let mut config = EpochConfig::default();
-    config.rotation_threshold = 3;
+    let config = EpochConfig {
+        rotation_threshold: 3,
+        ..Default::default()
+    };
 
     let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
 
@@ -341,7 +347,7 @@ fn test_epoch_confirmation_processing() {
         participant_id: participant1,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp: SystemTime::now(),
+        confirmation_timestamp_ms: wallclock_ms(),
     };
 
     let result = coordinator.process_confirmation(confirmation1);
@@ -353,7 +359,7 @@ fn test_epoch_confirmation_processing() {
         participant_id: participant2,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp: SystemTime::now(),
+        confirmation_timestamp_ms: wallclock_ms(),
     };
 
     let result = coordinator.process_confirmation(confirmation2);
@@ -382,7 +388,7 @@ fn test_epoch_commit() {
             participant_id: participant,
             current_epoch: 0,
             ready_for_epoch: 1,
-            confirmation_timestamp: SystemTime::now(),
+            confirmation_timestamp_ms: wallclock_ms(),
         };
         let _ = coordinator.process_confirmation(confirmation);
     }
@@ -417,7 +423,7 @@ fn test_epoch_rotation_cleanup() {
                 participant_id: participant,
                 current_epoch: i,
                 ready_for_epoch: i + 1,
-                confirmation_timestamp: SystemTime::now(),
+                confirmation_timestamp_ms: wallclock_ms(),
             };
             let _ = coordinator.process_confirmation(confirmation);
         }
@@ -462,9 +468,9 @@ fn test_protocol_configuration_consistency() {
     // Test that all protocol configurations follow consistent patterns
     let ae_config = AntiEntropyConfig::default();
     let js_config = JournalSyncConfig::default();
-    let snap_config = SnapshotConfig::default();
-    let ota_config = OTAConfig::default();
-    let recv_config = ReceiptVerificationConfig::default();
+    let _snap_config = SnapshotConfig::default();
+    let _ota_config = OTAConfig::default();
+    let _recv_config = ReceiptVerificationConfig::default();
 
     // All should have timeout configurations
     assert!(ae_config.digest_timeout > std::time::Duration::ZERO);
@@ -482,8 +488,8 @@ fn test_multi_device_protocol_scenarios() {
 
     // Create coordinators on each device
     let mut coord1 = EpochRotationCoordinator::new(device1, 0, EpochConfig::default());
-    let mut coord2 = EpochRotationCoordinator::new(device2, 0, EpochConfig::default());
-    let mut coord3 = EpochRotationCoordinator::new(device3, 0, EpochConfig::default());
+    let _coord2 = EpochRotationCoordinator::new(device2, 0, EpochConfig::default());
+    let _coord3 = EpochRotationCoordinator::new(device3, 0, EpochConfig::default());
 
     // Device 1 initiates rotation
     let context = aura_core::ContextId::new();
@@ -497,7 +503,7 @@ fn test_multi_device_protocol_scenarios() {
         participant_id: device2,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp: SystemTime::now(),
+        confirmation_timestamp_ms: wallclock_ms(),
     };
 
     let conf3 = aura_sync::protocols::EpochConfirmation {
@@ -505,7 +511,7 @@ fn test_multi_device_protocol_scenarios() {
         participant_id: device3,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp: SystemTime::now(),
+        confirmation_timestamp_ms: wallclock_ms(),
     };
 
     // Coordinator processes confirmations

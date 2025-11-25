@@ -3,10 +3,8 @@
 //! This module implements choreographic protocols for guardian relationship
 //! establishment and invitation acceptance.
 
-#![allow(clippy::disallowed_methods)] // TODOs use Utc::now() and new_v4() temporarily
-
 use crate::{Guardian, GuardianId, InvitationError, InvitationResult, TrustLevel};
-use aura_core::{effects::PhysicalTimeEffects, AccountId, DeviceId};
+use aura_core::{effects::PhysicalTimeEffects, hash, AccountId, DeviceId};
 use serde::{Deserialize, Serialize};
 
 /// Guardian invitation request
@@ -86,7 +84,7 @@ impl GuardianInvitationCoordinator {
 
         // Wait for invitee's decision via effects
         let accepted = self
-            .receive_invitation_decision_via_effects(&request)
+            .receive_invitation_decision_via_effects(&request, effects)
             .await?;
 
         if accepted {
@@ -141,18 +139,21 @@ impl GuardianInvitationCoordinator {
     }
 
     /// Wait for and receive invitee's decision via NetworkEffects
-    async fn receive_invitation_decision_via_effects(
+    async fn receive_invitation_decision_via_effects<E: PhysicalTimeEffects>(
         &self,
         request: &GuardianInvitationRequest,
+        effects: &E,
     ) -> InvitationResult<bool> {
         // TODO: Use actual NetworkEffects to receive response
         // For now, simulate receiving decision based on evaluation
         let decision = self.evaluate_invitation(request);
 
-        // Simulate network delay
-        // TODO: Replace with PhysicalTimeEffects::sleep_ms() when proper network response is implemented
-        #[allow(clippy::disallowed_methods)]
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        // Simulate network delay using PhysicalTimeEffects
+        // TODO: Replace with actual NetworkEffects when proper network response is implemented
+        effects
+            .sleep_ms(100)
+            .await
+            .map_err(|e| InvitationError::internal(format!("time provider unavailable: {e}")))?;
 
         Ok(decision)
     }
@@ -188,8 +189,25 @@ impl GuardianInvitationCoordinator {
         request: &GuardianInvitationRequest,
         effects: &E,
     ) -> InvitationResult<GuardianId> {
-        // Create guardian relationship record
-        let guardian_id = GuardianId(uuid::Uuid::new_v4());
+        let physical_time = effects
+            .physical_time()
+            .await
+            .map_err(|e| InvitationError::internal(format!("Time error: {}", e)))?;
+
+        // Create deterministic guardian identifier derived from participants + time
+        let mut hasher = hash::hasher();
+        hasher.update(&request.inviter.to_bytes().map_err(|e| {
+            InvitationError::internal(format!("Failed to convert inviter to bytes: {}", e))
+        })?);
+        hasher.update(&request.invitee.to_bytes().map_err(|e| {
+            InvitationError::internal(format!("Failed to convert invitee to bytes: {}", e))
+        })?);
+        hasher.update(request.account_id.0.as_bytes());
+        hasher.update(&physical_time.ts_ms.to_be_bytes());
+        let digest = hasher.finalize();
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&digest[..16]);
+        let guardian_id = GuardianId(uuid::Uuid::from_bytes(uuid_bytes));
 
         let relationship_data = serde_json::json!({
             "type": "guardian_relationship_established",
@@ -200,7 +218,7 @@ impl GuardianInvitationCoordinator {
             "role_description": request.role_description,
             "trust_level": request.required_trust_level,
             "recovery_responsibilities": request.recovery_responsibilities,
-            "established_at": effects.physical_time().await.map_err(|e| InvitationError::internal(format!("Time error: {}", e)))?.ts_ms / 1000,
+            "established_at": physical_time.ts_ms / 1000,
         });
 
         // TODO: Use actual JournalEffects to record relationship

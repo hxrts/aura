@@ -1,28 +1,32 @@
-//! Witness Management for Consensus
+//! Witness management for consensus
 //!
-//! This module handles witness selection, shares, and threshold verification
-//! for the Aura Consensus protocol.
+//! This module handles witness state, nonce management, and quorum tracking
+//! for consensus operations. It unifies the previous witness.rs and witness_state.rs
+//! modules into a cohesive design.
 
-use super::ConsensusId;
-use aura_core::frost::{NonceCommitment, PartialSignature};
-use aura_core::{AuthorityId, Hash32};
-use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use super::types::ConsensusId;
+use aura_core::{
+    crypto::tree_signing::NonceToken,
+    frost::{NonceCommitment, PartialSignature},
+    session_epochs::Epoch,
+    AuthorityId, Hash32, Result,
+};
+// use rand_chacha::rand_core::SeedableRng; // Used in tests
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-/// A set of witnesses for a consensus instance
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Set of witnesses participating in consensus
+#[derive(Debug, Clone)]
 pub struct WitnessSet {
     /// Required threshold for consensus
     pub threshold: u16,
 
-    /// Selected witnesses by authority ID
+    /// List of witness authorities
     pub witnesses: Vec<AuthorityId>,
 
-    /// Nonce commitments from witnesses
-    pub nonce_commitments: BTreeMap<AuthorityId, NonceCommitment>,
-
-    /// Collected shares from witnesses
-    pub shares: BTreeMap<AuthorityId, WitnessShare>,
+    /// Cached witness states for pipelining optimization
+    states: Arc<RwLock<HashMap<AuthorityId, WitnessState>>>,
 }
 
 impl WitnessSet {
@@ -31,277 +35,379 @@ impl WitnessSet {
         Self {
             threshold,
             witnesses,
-            nonce_commitments: BTreeMap::new(),
-            shares: BTreeMap::new(),
+            states: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// Check if witness is part of this set
-    pub fn contains(&self, authority: &AuthorityId) -> bool {
-        self.witnesses.contains(authority)
+    /// Check if we have sufficient witnesses for consensus
+    pub fn has_quorum(&self) -> bool {
+        self.witnesses.len() >= self.threshold as usize
     }
 
-    /// Add a nonce commitment from a witness
-    pub fn add_nonce_commitment(
-        &mut self,
-        authority: AuthorityId,
+    /// Get or create witness state for a given authority
+    pub async fn get_or_create_state(&self, witness_id: AuthorityId, epoch: Epoch) -> WitnessState {
+        let mut states = self.states.write().await;
+
+        states
+            .entry(witness_id)
+            .or_insert_with(|| WitnessState::new(witness_id, epoch))
+            .clone()
+    }
+
+    /// Update witness state with a new cached nonce
+    pub async fn update_witness_nonce(
+        &self,
+        witness_id: AuthorityId,
         commitment: NonceCommitment,
-    ) -> Result<(), String> {
-        if !self.contains(&authority) {
-            return Err("Authority not in witness set".to_string());
-        }
+        token: NonceToken,
+        epoch: Epoch,
+    ) -> Result<()> {
+        let mut states = self.states.write().await;
 
-        self.nonce_commitments.insert(authority, commitment);
+        let state = states
+            .entry(witness_id)
+            .or_insert_with(|| WitnessState::new(witness_id, epoch));
+
+        state.set_next_nonce(commitment, token, epoch);
         Ok(())
     }
 
-    /// Add a witness share
-    pub fn add_share(&mut self, authority: AuthorityId, share: WitnessShare) -> Result<(), String> {
-        if !self.contains(&authority) {
-            return Err("Authority not in witness set".to_string());
+    /// Collect available next-round commitments for fast path
+    pub async fn collect_cached_commitments(
+        &self,
+        epoch: Epoch,
+    ) -> HashMap<AuthorityId, NonceCommitment> {
+        let states = self.states.read().await;
+        let mut commitments = HashMap::new();
+
+        for (witness_id, state) in states.iter() {
+            if let Some(commitment) = state.get_next_commitment(epoch) {
+                commitments.insert(*witness_id, commitment.clone());
+            }
         }
 
-        // Verify share matches nonce commitment
-        if !self.nonce_commitments.contains_key(&authority) {
-            return Err("Missing nonce commitment from authority".to_string());
+        commitments
+    }
+
+    /// Check if we have enough cached commitments for fast path (1 RTT)
+    pub async fn has_fast_path_quorum(&self, epoch: Epoch) -> bool {
+        let cached_count = self.collect_cached_commitments(epoch).await.len();
+        cached_count >= self.threshold as usize
+    }
+
+    /// Invalidate all cached nonces (e.g., on epoch change)
+    pub async fn invalidate_all_caches(&self) {
+        let mut states = self.states.write().await;
+
+        for state in states.values_mut() {
+            state.invalidate();
         }
-
-        self.shares.insert(authority, share);
-        Ok(())
-    }
-
-    /// Check if we have enough shares for threshold
-    pub fn has_threshold(&self) -> bool {
-        self.shares.len() >= self.threshold as usize
-    }
-
-    /// Get participating authorities
-    pub fn participants(&self) -> Vec<AuthorityId> {
-        self.shares.keys().cloned().collect()
     }
 }
 
-/// A witness share for consensus
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WitnessShare {
-    /// The consensus instance this share is for
+/// State for a single witness across consensus rounds
+#[derive(Debug, Clone)]
+pub struct WitnessState {
+    /// Witness identifier
+    witness_id: AuthorityId,
+
+    /// Current epoch
+    epoch: Epoch,
+
+    /// Cached nonce for next round (pipelining optimization)
+    next_nonce: Option<(NonceCommitment, NonceToken)>,
+
+    /// Active consensus instances this witness is participating in
+    active_instances: HashMap<ConsensusId, WitnessInstance>,
+}
+
+impl WitnessState {
+    /// Create a new witness state
+    pub fn new(witness_id: AuthorityId, epoch: Epoch) -> Self {
+        Self {
+            witness_id,
+            epoch,
+            next_nonce: None,
+            active_instances: HashMap::new(),
+        }
+    }
+
+    /// Get the cached commitment for the next round if available
+    pub fn get_next_commitment(&self, current_epoch: Epoch) -> Option<&NonceCommitment> {
+        if self.epoch != current_epoch {
+            // Epoch changed, cached commitment is stale
+            return None;
+        }
+
+        self.next_nonce.as_ref().map(|(commitment, _)| commitment)
+    }
+
+    /// Take the cached nonce for use in the current round
+    pub fn take_nonce(&mut self, current_epoch: Epoch) -> Option<(NonceCommitment, NonceToken)> {
+        if self.epoch != current_epoch {
+            // Epoch changed, invalidate cached nonce
+            self.next_nonce = None;
+            self.epoch = current_epoch;
+            return None;
+        }
+
+        self.next_nonce.take()
+    }
+
+    /// Cache a new nonce for the next round
+    pub fn set_next_nonce(&mut self, commitment: NonceCommitment, token: NonceToken, epoch: Epoch) {
+        self.epoch = epoch;
+        self.next_nonce = Some((commitment, token));
+    }
+
+    /// Check if we have a cached nonce ready
+    pub fn has_cached_nonce(&self, current_epoch: Epoch) -> bool {
+        self.epoch == current_epoch && self.next_nonce.is_some()
+    }
+
+    /// Invalidate cached nonce
+    pub fn invalidate(&mut self) {
+        self.next_nonce = None;
+    }
+
+    /// Start participating in a consensus instance
+    pub fn start_instance(&mut self, instance: WitnessInstance) {
+        self.active_instances
+            .insert(instance.consensus_id, instance);
+    }
+
+    /// Get an active instance
+    pub fn get_instance(&self, consensus_id: &ConsensusId) -> Option<&WitnessInstance> {
+        self.active_instances.get(consensus_id)
+    }
+
+    /// Get a mutable reference to an active instance
+    pub fn get_instance_mut(&mut self, consensus_id: &ConsensusId) -> Option<&mut WitnessInstance> {
+        self.active_instances.get_mut(consensus_id)
+    }
+
+    /// Complete an instance and remove it
+    pub fn complete_instance(&mut self, consensus_id: &ConsensusId) -> Option<WitnessInstance> {
+        self.active_instances.remove(consensus_id)
+    }
+
+    /// Check if witness is participating in any active instances
+    pub fn has_active_instances(&self) -> bool {
+        !self.active_instances.is_empty()
+    }
+}
+
+/// State for a witness within a single consensus instance
+#[derive(Debug, Clone)]
+pub struct WitnessInstance {
+    /// Consensus instance ID
     pub consensus_id: ConsensusId,
 
-    /// The authority providing this share
-    pub authority: AuthorityId,
+    /// Prestate hash
+    pub prestate_hash: Hash32,
 
-    /// Partial signature from FROST
-    pub partial_signature: PartialSignature,
-
-    /// Hash of the operation being signed
+    /// Operation being agreed upon
     pub operation_hash: Hash32,
+    pub operation_bytes: Vec<u8>,
 
-    /// Timestamp when share was created
-    pub timestamp_ms: u64,
+    /// This witness's nonce commitment (if generated)
+    pub nonce_commitment: Option<NonceCommitment>,
+
+    /// This witness's partial signature (if generated)
+    pub partial_signature: Option<PartialSignature>,
+
+    /// Aggregated nonces from all witnesses (for signing)
+    pub aggregated_nonces: Vec<NonceCommitment>,
+
+    /// Whether this instance used fast path
+    pub fast_path: bool,
 }
 
-impl WitnessShare {
-    /// Create a new witness share
+impl WitnessInstance {
+    /// Create a new witness instance
     pub fn new(
-        consensus_id: super::ConsensusId,
-        authority: AuthorityId,
-        partial_signature: PartialSignature,
+        consensus_id: ConsensusId,
+        prestate_hash: Hash32,
         operation_hash: Hash32,
-        timestamp_ms: u64,
+        operation_bytes: Vec<u8>,
+        fast_path: bool,
     ) -> Self {
         Self {
             consensus_id,
-            authority,
-            partial_signature,
-            operation_hash,
-            timestamp_ms,
-        }
-    }
-}
-
-/// Message types for witness communication
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum WitnessMessage {
-    /// Request to participate as witness
-    ExecuteRequest {
-        consensus_id: super::ConsensusId,
-        prestate_hash: Hash32,
-        operation_hash: Hash32,
-        operation_bytes: Vec<u8>,
-    },
-
-    /// Nonce commitment from witness
-    NonceCommitment {
-        consensus_id: super::ConsensusId,
-        authority: AuthorityId,
-        commitment: NonceCommitment,
-    },
-
-    /// Partial signature share
-    ShareResponse { share: WitnessShare },
-
-    /// Gossip request for epidemic fallback
-    GossipRequest {
-        consensus_id: super::ConsensusId,
-        prestate_hash: Hash32,
-        operation_hash: Hash32,
-        operation_bytes: Vec<u8>,
-        requester: AuthorityId,
-    },
-
-    /// Conflict detected
-    ConflictReport {
-        consensus_id: super::ConsensusId,
-        reporter: AuthorityId,
-        conflicting_operations: Vec<Hash32>,
-    },
-}
-
-/// Witness role in consensus protocol
-pub struct WitnessRole {
-    /// Our authority ID
-    pub authority_id: AuthorityId,
-
-    /// Active consensus instances we're witnessing
-    pub active_instances: BTreeMap<super::ConsensusId, WitnessInstance>,
-}
-
-/// State for a single consensus instance as a witness
-pub struct WitnessInstance {
-    pub consensus_id: super::ConsensusId,
-    pub prestate_hash: Hash32,
-    pub operation_hash: Hash32,
-    pub nonce_commitment: Option<NonceCommitment>,
-    pub partial_signature: Option<PartialSignature>,
-}
-
-impl WitnessRole {
-    /// Create a new witness role
-    pub fn new(authority_id: AuthorityId) -> Self {
-        Self {
-            authority_id,
-            active_instances: BTreeMap::new(),
-        }
-    }
-
-    /// Handle an execute request
-    pub async fn handle_execute_request(
-        &mut self,
-        consensus_id: super::ConsensusId,
-        prestate_hash: Hash32,
-        operation_hash: Hash32,
-        operation_bytes: Vec<u8>,
-    ) -> Result<WitnessMessage, String> {
-        // Verify prestate matches our view
-        self.verify_prestate_consistency(prestate_hash)?;
-
-        // Generate nonce commitment using FROST
-        let nonce_commitment = self.generate_frost_nonce_commitment(consensus_id).await?;
-
-        let instance = WitnessInstance {
-            consensus_id,
             prestate_hash,
             operation_hash,
-            nonce_commitment: Some(nonce_commitment.clone()),
+            operation_bytes,
+            nonce_commitment: None,
             partial_signature: None,
-        };
-
-        self.active_instances.insert(consensus_id, instance);
-
-        // Return the generated nonce commitment
-        Ok(WitnessMessage::NonceCommitment {
-            consensus_id,
-            authority: self.authority_id,
-            commitment: nonce_commitment,
-        })
-    }
-
-    /// Verify prestate consistency with our current view
-    fn verify_prestate_consistency(&self, prestate_hash: Hash32) -> Result<(), String> {
-        // TODO: Implement prestate verification:
-        // 1. Get our current state hash from journal
-        // 2. Compare with provided prestate_hash
-        // 3. Reject if there's a mismatch (state divergence)
-        // 4. Handle state synchronization if needed
-
-        // Basic validation for now
-        if prestate_hash == Hash32::default() {
-            return Err("Invalid prestate hash".to_string());
+            aggregated_nonces: Vec::new(),
+            fast_path,
         }
-
-        // Placeholder - in production would verify against local state
-        Ok(())
     }
 
-    /// Generate FROST nonce commitment for consensus
-    async fn generate_frost_nonce_commitment(
-        &self,
-        consensus_id: ConsensusId,
-    ) -> Result<NonceCommitment, String> {
-        // TODO: Implement actual FROST nonce generation:
-        // 1. Generate fresh random nonce using FROST protocol
-        // 2. Create cryptographic commitment to the nonce
-        // 3. Store nonce securely for later use in signing
-        // 4. Return commitment for coordinator aggregation
+    /// Set the nonce commitment for this witness
+    pub fn set_nonce_commitment(&mut self, commitment: NonceCommitment) {
+        self.nonce_commitment = Some(commitment);
+    }
 
-        use aura_core::frost::NonceCommitment;
+    /// Set the aggregated nonces for signing
+    pub fn set_aggregated_nonces(&mut self, nonces: Vec<NonceCommitment>) {
+        self.aggregated_nonces = nonces;
+    }
 
-        // For now, create a placeholder commitment
-        // In production, this would use real FROST key shares
-        let commitment = NonceCommitment::from_bytes(vec![0u8; 32])
-            .map_err(|e| format!("Failed to create nonce commitment: {}", e))?;
+    /// Set the partial signature for this witness
+    pub fn set_partial_signature(&mut self, signature: PartialSignature) {
+        self.partial_signature = Some(signature);
+    }
 
-        // TODO: Store the nonce securely for later signing operations
-        // This would involve SecureStorageEffects to store the nonce
-        // indexed by consensus_id for retrieval during signing phase
+    /// Check if witness has completed all required steps
+    pub fn is_complete(&self) -> bool {
+        // Fast path doesn't need separate nonce commitment
+        let nonce_ok = self.fast_path || self.nonce_commitment.is_some();
+        nonce_ok && self.partial_signature.is_some()
+    }
+}
 
-        Ok(commitment)
+/// Tracks collected witness data during consensus
+#[derive(Debug, Default, Clone)]
+pub struct WitnessTracker {
+    /// Collected nonce commitments by witness
+    pub nonce_commitments: HashMap<AuthorityId, NonceCommitment>,
+
+    /// Collected partial signatures by witness
+    pub partial_signatures: HashMap<AuthorityId, PartialSignature>,
+
+    /// Witnesses that reported conflicts
+    pub conflict_reporters: HashMap<AuthorityId, Vec<Hash32>>,
+}
+
+impl WitnessTracker {
+    /// Create a new witness tracker
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a nonce commitment
+    pub fn add_nonce(&mut self, witness: AuthorityId, commitment: NonceCommitment) {
+        self.nonce_commitments.insert(witness, commitment);
+    }
+
+    /// Add a partial signature
+    pub fn add_signature(&mut self, witness: AuthorityId, signature: PartialSignature) {
+        self.partial_signatures.insert(witness, signature);
+    }
+
+    /// Add a conflict report
+    pub fn add_conflict(&mut self, witness: AuthorityId, conflicts: Vec<Hash32>) {
+        self.conflict_reporters.insert(witness, conflicts);
+    }
+
+    /// Check if we have enough nonces for threshold
+    pub fn has_nonce_threshold(&self, threshold: u16) -> bool {
+        self.nonce_commitments.len() >= threshold as usize
+    }
+
+    /// Check if we have enough signatures for threshold
+    pub fn has_signature_threshold(&self, threshold: u16) -> bool {
+        self.partial_signatures.len() >= threshold as usize
+    }
+
+    /// Check if we have conflicts
+    pub fn has_conflicts(&self) -> bool {
+        !self.conflict_reporters.is_empty()
+    }
+
+    /// Get all collected nonces as a vector
+    pub fn get_nonces(&self) -> Vec<NonceCommitment> {
+        self.nonce_commitments.values().cloned().collect()
+    }
+
+    /// Get all collected signatures as a vector
+    pub fn get_signatures(&self) -> Vec<PartialSignature> {
+        self.partial_signatures.values().cloned().collect()
+    }
+
+    /// Get participating witnesses
+    pub fn get_participants(&self) -> Vec<AuthorityId> {
+        self.partial_signatures.keys().cloned().collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::SeedableRng;
+
+    #[tokio::test]
+    async fn test_witness_set_fast_path() {
+        let witnesses = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
+        let witness_set = WitnessSet::new(2, witnesses.clone());
+
+        // Initially no cached commitments
+        assert!(!witness_set.has_fast_path_quorum(Epoch::from(1)).await);
+
+        // Add cached commitment for one witness (not enough for quorum)
+        witness_set
+            .update_witness_nonce(
+                witnesses[0],
+                NonceCommitment {
+                    signer: 1,
+                    commitment: vec![1u8; 32],
+                },
+                // Note: In real usage, this would be a proper NonceToken
+                NonceToken::from(frost_ed25519::round1::SigningNonces::new(
+                    &frost_ed25519::keys::SigningShare::deserialize([1u8; 32]).unwrap(),
+                    &mut rand_chacha::ChaCha20Rng::from_seed([7u8; 32]),
+                )),
+                Epoch::from(1),
+            )
+            .await
+            .unwrap();
+
+        assert!(!witness_set.has_fast_path_quorum(Epoch::from(1)).await);
+    }
 
     #[test]
-    fn test_witness_set() {
-        let authorities = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
+    fn test_witness_tracker() {
+        let mut tracker = WitnessTracker::new();
+        let witness1 = AuthorityId::new();
+        let witness2 = AuthorityId::new();
 
-        let mut witness_set = WitnessSet::new(2, authorities.clone());
-        assert!(!witness_set.has_threshold());
+        // Add nonces
+        tracker.add_nonce(
+            witness1,
+            NonceCommitment {
+                signer: 1,
+                commitment: vec![1u8; 32],
+            },
+        );
+        tracker.add_nonce(
+            witness2,
+            NonceCommitment {
+                signer: 2,
+                commitment: vec![2u8; 32],
+            },
+        );
 
-        // Add shares
-        for auth in &authorities[..2] {
-            let share = WitnessShare::new(
-                ConsensusId(Hash32::new([0; 32])),
-                *auth,
-                PartialSignature {
-                    signer: 0,
-                    signature: vec![],
-                },
-                Hash32::new([0; 32]),
-                0,
-            );
+        assert!(tracker.has_nonce_threshold(2));
+        assert!(!tracker.has_signature_threshold(2));
 
-            // Should fail without nonce commitment
-            assert!(witness_set.add_share(*auth, share.clone()).is_err());
+        // Add signatures
+        tracker.add_signature(
+            witness1,
+            PartialSignature {
+                signer: 1,
+                signature: vec![1u8; 64],
+            },
+        );
+        tracker.add_signature(
+            witness2,
+            PartialSignature {
+                signer: 2,
+                signature: vec![2u8; 64],
+            },
+        );
 
-            // Add nonce commitment first
-            witness_set
-                .add_nonce_commitment(
-                    *auth,
-                    NonceCommitment {
-                        signer: 0,
-                        commitment: vec![],
-                    },
-                )
-                .unwrap();
-
-            // Now share should succeed
-            witness_set.add_share(*auth, share).unwrap();
-        }
-
-        assert!(witness_set.has_threshold());
-        assert_eq!(witness_set.participants().len(), 2);
+        assert!(tracker.has_signature_threshold(2));
+        assert_eq!(tracker.get_participants().len(), 2);
     }
 }

@@ -22,7 +22,9 @@ pub struct LeakageEvent {
 /// Production leakage handler for testing
 #[derive(Debug)]
 pub struct ProductionLeakageHandler {
+    #[allow(dead_code)]
     budgets: Arc<RwLock<HashMap<ContextId, LeakageBudget>>>,
+    #[allow(dead_code)]
     history: Arc<RwLock<Vec<LeakageEvent>>>,
 }
 

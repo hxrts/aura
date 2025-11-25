@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 /// Simple in-memory flow budget handler with authority-scoped accounting.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct FlowBudgetHandler {
     authority: AuthorityId,
     default_limit: u64,
@@ -23,6 +23,21 @@ pub struct FlowBudgetHandler {
     scope_overrides: Arc<Mutex<BTreeMap<ContextId, ResourceScope>>>,
     policy_token: Option<Biscuit>,
     policy_bridge: Option<BiscuitAuthorizationBridge>,
+    time_provider: Arc<dyn Fn() -> u64 + Send + Sync>,
+}
+
+impl std::fmt::Debug for FlowBudgetHandler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FlowBudgetHandler")
+            .field("authority", &self.authority)
+            .field("default_limit", &self.default_limit)
+            .field("budgets", &self.budgets)
+            .field("scope_overrides", &self.scope_overrides)
+            .field("policy_token", &self.policy_token)
+            .field("policy_bridge", &self.policy_bridge)
+            .field("time_provider", &"<function>")
+            .finish()
+    }
 }
 
 impl FlowBudgetHandler {
@@ -40,6 +55,7 @@ impl FlowBudgetHandler {
             scope_overrides: Arc::new(Mutex::new(BTreeMap::new())),
             policy_token: None,
             policy_bridge: None,
+            time_provider: Arc::new(|| 0),
         }
     }
 
@@ -47,6 +63,12 @@ impl FlowBudgetHandler {
     pub fn with_policy(mut self, token: Biscuit, bridge: BiscuitAuthorizationBridge) -> Self {
         self.policy_token = Some(token);
         self.policy_bridge = Some(bridge);
+        self
+    }
+
+    /// Provide a time source for Biscuit authorization checks.
+    pub fn with_time_provider(mut self, provider: Arc<dyn Fn() -> u64 + Send + Sync>) -> Self {
+        self.time_provider = provider;
         self
     }
 
@@ -73,9 +95,12 @@ impl FlowBudgetHandler {
     fn authorize_scope(&self, scope: &ResourceScope) -> AuraResult<()> {
         match (&self.policy_token, &self.policy_bridge) {
             (Some(token), Some(bridge)) => {
-                let result = bridge.authorize(token, "flow_charge", scope).map_err(|e| {
-                    AuraError::permission_denied(format!("flow budget policy failed: {e}"))
-                })?;
+                let now = (self.time_provider)();
+                let result = bridge
+                    .authorize_with_time(token, "flow_charge", scope, Some(now))
+                    .map_err(|e| {
+                        AuraError::permission_denied(format!("flow budget policy failed: {e}"))
+                    })?;
                 if result.authorized {
                     Ok(())
                 } else {

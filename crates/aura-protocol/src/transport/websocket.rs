@@ -55,20 +55,30 @@ impl std::fmt::Debug for WebSocketSessionCoordinator {
 /// Handshake state tracking
 #[derive(Debug, Clone)]
 struct HandshakeState {
+    /// Unique session identifier for this handshake
     session_id: String,
+    /// ID of the peer device participating in handshake
     peer_id: DeviceId,
+    /// Current phase of the handshake process
     phase: HandshakePhase,
+    /// Time when handshake was initiated
     started_at: SystemTime,
+    /// Negotiated capabilities for this connection
     capabilities: Vec<String>,
 }
 
 /// Session state tracking
 #[derive(Debug, Clone)]
 pub struct SessionState {
+    /// Unique identifier for this active session
     session_id: String,
+    /// ID of the connected peer device
     peer_id: DeviceId,
+    /// Time when session was successfully established
     established_at: SystemTime,
+    /// Time of most recent activity on this session
     last_activity: SystemTime,
+    /// Total number of messages exchanged in this session
     message_count: u64,
 }
 
@@ -86,41 +96,62 @@ pub enum HandshakePhase {
 /// WebSocket handshake initiation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketHandshakeInit {
+    /// Unique session identifier for this handshake
     pub session_id: String,
+    /// Device ID initiating the handshake
     pub initiator_id: DeviceId,
+    /// WebSocket URL for connection establishment
     pub websocket_url: String,
+    /// List of supported protocol versions
     pub supported_protocols: Vec<String>,
+    /// Requested capabilities for this connection
     pub capabilities: Vec<String>,
+    /// Context ID for authorization
     pub context_id: ContextId,
 }
 
 /// WebSocket handshake response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketHandshakeResponse {
+    /// Session identifier matching the handshake request
     pub session_id: String,
+    /// Device ID responding to the handshake
     pub responder_id: DeviceId,
+    /// Protocol versions accepted by responder
     pub accepted_protocols: Vec<String>,
+    /// Capabilities granted by responder
     pub granted_capabilities: Vec<String>,
+    /// Result of the handshake attempt
     pub handshake_result: WebSocketHandshakeResult,
 }
 
 /// WebSocket session data message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketSessionData {
+    /// Active session identifier
     pub session_id: String,
+    /// Device ID of the message sender
     pub sender_id: DeviceId,
+    /// Type of message being sent
     pub message_type: MessageType,
+    /// Message payload bytes
     pub payload: Vec<u8>,
+    /// Sequence number for ordering
     pub sequence_number: u64,
+    /// Time message was sent
     pub timestamp: SystemTime,
 }
 
 /// WebSocket session teardown request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebSocketTeardown {
+    /// Session to be terminated
     pub session_id: String,
+    /// Device requesting teardown
     pub initiator_id: DeviceId,
+    /// Reason for session termination
     pub reason: String,
+    /// Whether to perform graceful shutdown
     pub graceful: bool,
 }
 
@@ -146,7 +177,7 @@ pub enum WebSocketHandshakeResult {
 impl WebSocketHandshakeCoordinator {
     /// Create new WebSocket handshake coordinator
     pub fn new(device_id: DeviceId, config: ChoreographicConfig) -> Self {
-        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler::new()))
+        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler))
     }
 
     /// Create coordinator with explicit time provider
@@ -272,7 +303,7 @@ impl WebSocketHandshakeCoordinator {
 impl WebSocketSessionCoordinator {
     /// Create new WebSocket session coordinator
     pub fn new(device_id: DeviceId, config: ChoreographicConfig) -> Self {
-        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler::new()))
+        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler))
     }
 
     pub fn with_time(

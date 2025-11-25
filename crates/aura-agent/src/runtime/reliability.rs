@@ -5,6 +5,7 @@
 use std::time::Duration;
 
 /// Reliability configuration and utilities
+#[allow(dead_code)] // Part of future reliability API
 pub struct ReliabilityManager {
     max_retries: usize,
     base_backoff: Duration,
@@ -13,6 +14,7 @@ pub struct ReliabilityManager {
 
 impl ReliabilityManager {
     /// Create a new reliability manager
+    #[allow(dead_code)] // Part of future reliability API
     pub fn new(max_retries: usize, base_backoff: Duration, max_backoff: Duration) -> Self {
         Self {
             max_retries,
@@ -22,12 +24,14 @@ impl ReliabilityManager {
     }
 
     /// Calculate backoff delay for attempt number
+    #[allow(dead_code)] // Part of future reliability API
     pub fn backoff_delay(&self, attempt: usize) -> Duration {
         let exponential = self.base_backoff * (2_u32.pow(attempt.min(20) as u32));
         exponential.min(self.max_backoff)
     }
 
     /// Execute operation with retry and backoff
+    #[allow(dead_code)] // Part of future reliability API
     pub async fn with_retry<T, E, F>(&self, mut operation: F) -> Result<T, E>
     where
         F: FnMut() -> Result<T, E>,

@@ -212,7 +212,7 @@ async fn start_recovery(
 
     // Initiate recovery using the proper protocol
     protocol_handler
-        .handle_recovery_initiation(recovery_request_new)
+        .handle_recovery_initiation(recovery_request_new, effects)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to initiate recovery protocol: {}", e))?;
 
@@ -679,8 +679,7 @@ async fn get_current_device_id(
             _ => None,
         };
         if let Some(device_str) = device_str {
-            return DeviceId::try_from(device_str.as_str())
-                .map_err(|e| anyhow::anyhow!("Invalid device ID in journal: {}", e));
+            return Ok(DeviceId::from(device_str.as_str()));
         }
     }
 

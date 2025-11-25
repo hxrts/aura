@@ -11,12 +11,11 @@ use aura_core::effects::time::{
     LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeError,
 };
 use aura_core::time::{
-    LogicalTime, OrderingPolicy, PhysicalTime, TimeDomain, TimeOrdering, TimeStamp,
+    LogicalTime, OrderingPolicy, PhysicalTime, TimeDomain, TimeOrdering, TimeStamp, VectorClock,
 };
 use aura_core::{AuthorityId, DeviceId};
 use aura_testkit::time::{ControllableTimeSource, TimeScenarioBuilder};
 use std::collections::BTreeMap;
-use tokio;
 
 /// Mock fact content for testing
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -61,7 +60,7 @@ async fn test_logical_clock_effects_causal_ordering() {
     observed_vector.insert(device_b, 3);
 
     let logical_time2 = time_source
-        .logical_advance(Some(&observed_vector))
+        .logical_advance(Some(&VectorClock::Multiple(observed_vector)))
         .await
         .unwrap();
     assert!(logical_time2.lamport > logical_time1.lamport);
@@ -115,7 +114,7 @@ async fn test_cross_domain_time_comparisons() {
         uncertainty: None,
     });
     let logical = TimeStamp::LogicalClock(LogicalTime {
-        vector: BTreeMap::new(),
+        vector: VectorClock::Multiple(BTreeMap::new()),
         lamport: 500,
     });
     let order = TimeStamp::OrderClock(time_source.order_time().await.unwrap());
@@ -223,7 +222,7 @@ async fn test_fact_ordering_across_time_domains() {
             .unwrap();
 
     // Test ordering with sort_compare
-    let mut facts = vec![fact2.clone(), fact1.clone()]; // Reverse chronological order
+    let mut facts = [fact2.clone(), fact1.clone()].to_vec(); // Reverse chronological order
     facts.sort_by(|a, b| {
         a.timestamp
             .sort_compare(&b.timestamp, OrderingPolicy::Native)
@@ -392,7 +391,9 @@ where
 /// Mock fact structure for testing
 #[derive(Debug, Clone)]
 struct TestFact {
+    #[allow(dead_code)]
     content: TestFactContent,
+    #[allow(dead_code)]
     authority: AuthorityId,
     timestamp: TimeStamp,
 }

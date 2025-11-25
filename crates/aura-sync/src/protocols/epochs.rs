@@ -4,11 +4,16 @@
 
 use crate::core::{sync_protocol_error, SyncError};
 use aura_core::{ContextId, DeviceId};
+use aura_effects::time::wallclock_ms;
 // Note: aura-sync intentionally avoids aura-macros for semantic independence
 // use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::SystemTime;
+
+fn now_ms() -> u64 {
+    wallclock_ms()
+}
 
 /// Epoch rotation coordinator using choreographic protocols
 #[derive(Debug, Clone)]
@@ -35,7 +40,7 @@ pub struct EpochRotation {
     pub target_epoch: u64,
     pub participants: Vec<DeviceId>,
     pub confirmations: HashMap<DeviceId, EpochConfirmation>,
-    pub initiated_at: SystemTime,
+    pub initiated_at_ms: u64,
     pub status: RotationStatus,
 }
 
@@ -57,7 +62,7 @@ pub struct EpochRotationProposal {
     pub proposer_id: DeviceId,
     pub participants: Vec<DeviceId>,
     pub context_id: ContextId,
-    pub timestamp: SystemTime,
+    pub timestamp_ms: u64,
 }
 
 /// Epoch confirmation from participant
@@ -67,7 +72,7 @@ pub struct EpochConfirmation {
     pub participant_id: DeviceId,
     pub current_epoch: u64,
     pub ready_for_epoch: u64,
-    pub confirmation_timestamp: SystemTime,
+    pub confirmation_timestamp_ms: u64,
 }
 
 /// Synchronized epoch commit
@@ -75,7 +80,7 @@ pub struct EpochConfirmation {
 pub struct EpochCommit {
     pub rotation_id: String,
     pub committed_epoch: u64,
-    pub commit_timestamp: SystemTime,
+    pub commit_timestamp_ms: u64,
     pub participants: Vec<DeviceId>,
 }
 
@@ -127,21 +132,14 @@ impl EpochRotationCoordinator {
             ));
         }
 
-        let rotation_id = format!(
-            "epoch-rotation-{}-{}",
-            self.current_epoch + 1,
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-        );
+        let rotation_id = format!("epoch-rotation-{}-{}", self.current_epoch + 1, now_ms());
 
         let rotation = EpochRotation {
             rotation_id: rotation_id.clone(),
             target_epoch: self.current_epoch + 1,
             participants: participants.clone(),
             confirmations: HashMap::new(),
-            initiated_at: SystemTime::now(),
+            initiated_at_ms: now_ms(),
             status: RotationStatus::Initiated,
         };
 

@@ -1113,87 +1113,13 @@ impl PlatformDetector {
     }
 }
 
-/// Path-based storage adapter to allow platform detection to use StorageEffects
-#[derive(Debug, Clone, Default)]
-struct PathStorageAdapter;
+// Use the proper FilesystemStorageHandler from aura-effects instead of reimplementing
+// This maintains the architectural boundary and avoids direct tokio::fs usage outside effects layer
+use aura_effects::storage::FilesystemStorageHandler;
 
-#[async_trait]
-impl StorageEffects for PathStorageAdapter {
-    async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-        let path = PathBuf::from(key);
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
-        }
-
-        tokio::fs::write(&path, value)
-            .await
-            .map_err(|e| StorageError::WriteFailed(e.to_string()))
-    }
-
-    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        let path = PathBuf::from(key);
-        if !path.exists() {
-            return Ok(None);
-        }
-
-        tokio::fs::read(&path)
-            .await
-            .map(Some)
-            .map_err(|e| StorageError::ReadFailed(e.to_string()))
-    }
-
-    async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-        let path = PathBuf::from(key);
-        if !path.exists() {
-            return Ok(false);
-        }
-
-        tokio::fs::remove_file(&path)
-            .await
-            .map(|_| true)
-            .map_err(|e| StorageError::DeleteFailed(e.to_string()))
-    }
-
-    async fn list_keys(&self, _prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-        Ok(Vec::new())
-    }
-
-    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-        Ok(PathBuf::from(key).exists())
-    }
-
-    async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
-        for (key, value) in pairs {
-            self.store(&key, value).await?;
-        }
-        Ok(())
-    }
-
-    async fn retrieve_batch(
-        &self,
-        keys: &[String],
-    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
-        let mut map = HashMap::new();
-        for key in keys {
-            if let Some(value) = self.retrieve(key).await? {
-                map.insert(key.clone(), value);
-            }
-        }
-        Ok(map)
-    }
-
-    async fn clear_all(&self) -> Result<(), StorageError> {
-        Ok(())
-    }
-
-    async fn stats(&self) -> Result<StorageStats, StorageError> {
-        Ok(StorageStats {
-            backend_type: "path".to_string(),
-            ..Default::default()
-        })
-    }
+/// Create a path-based storage handler for platform detection
+fn create_path_storage_adapter() -> FilesystemStorageHandler {
+    FilesystemStorageHandler::with_default_path()
 }
 
 /// Platform information

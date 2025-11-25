@@ -193,6 +193,17 @@ cargo test test_hello_world_protocol
 
 The test validates protocol correctness without requiring network infrastructure. Mock handlers provide deterministic behavior for testing.
 
+## Understanding System Invariants
+
+As you develop protocols, be aware of Aura's system invariants - properties that must always hold true:
+
+- **Charge-Before-Send**: All messages pass through the guard chain before network transmission
+- **CRDT Convergence**: Identical facts always produce identical state
+- **Context Isolation**: Information stays within relational context boundaries
+- **Secure Channel Lifecycle**: Channels are epoch-bound and follow strict state transitions
+
+See [System Invariants](005_system_invariants.md) for details. When developing, ensure your protocols respect these invariants to maintain system integrity.
+
 ## Next Steps
 
 You now have a working Aura development environment. The hello world protocol demonstrates basic choreographic programming concepts.

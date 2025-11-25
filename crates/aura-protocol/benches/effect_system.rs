@@ -5,21 +5,21 @@
 //! - Handler creation and composition
 //! - Basic effect execution overhead
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use tokio::runtime::Runtime;
+#![allow(clippy::expect_used, missing_docs, unused_attributes)]
 
-use aura_core::identifiers::DeviceId;
-use aura_testkit::effect_system::TestEffectRegistry;
+use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+use aura_core::DeviceId;
+use aura_testkit::infrastructure::effects::TestEffectsBuilder;
 
 /// Benchmark effect system initialization for testing mode
 fn bench_initialization(c: &mut Criterion) {
     c.bench_function("effect_system_testing", |b| {
         b.iter(|| {
             let device_id = DeviceId::from_bytes([1u8; 32]);
-            let system = TestEffectRegistry::new()
-                .with_device_id(device_id)
+            let system = TestEffectsBuilder::for_unit_tests(device_id)
                 .build()
-                .unwrap();
+                .expect("Failed to build test effect system");
             black_box(system);
         });
     });
@@ -27,10 +27,10 @@ fn bench_initialization(c: &mut Criterion) {
     c.bench_function("effect_system_simulation", |b| {
         b.iter(|| {
             let device_id = DeviceId::from_bytes([3u8; 32]);
-            let system = TestEffectRegistry::new_simulation(42)
-                .with_device_id(device_id)
+            let system = TestEffectsBuilder::for_simulation(device_id)
+                .with_seed(42)
                 .build()
-                .unwrap();
+                .expect("Failed to build simulation effect system");
             black_box(system);
         });
     });
@@ -41,10 +41,9 @@ fn bench_registry_configuration(c: &mut Criterion) {
     c.bench_function("registry_basic_config", |b| {
         b.iter(|| {
             let device_id = DeviceId::from_bytes([4u8; 32]);
-            let system = TestEffectRegistry::new()
-                .with_device_id(device_id)
+            let system = TestEffectsBuilder::for_unit_tests(device_id)
                 .build()
-                .unwrap();
+                .expect("Failed to build test effect system");
             black_box(system);
         });
     });
@@ -52,11 +51,9 @@ fn bench_registry_configuration(c: &mut Criterion) {
     c.bench_function("registry_with_features", |b| {
         b.iter(|| {
             let device_id = DeviceId::from_bytes([5u8; 32]);
-            let system = TestEffectRegistry::new()
-                .with_device_id(device_id)
-                .with_deterministic_time()
+            let system = TestEffectsBuilder::for_unit_tests(device_id)
                 .build()
-                .unwrap();
+                .expect("Failed to build test effect system");
             black_box(system);
         });
     });
@@ -67,21 +64,19 @@ fn bench_effect_execution(c: &mut Criterion) {
     c.bench_function("testing_config_full_build", |b| {
         b.iter(|| {
             let device_id = DeviceId::from_bytes([7u8; 32]);
-            let effect_system = TestEffectRegistry::new()
-                .with_device_id(device_id)
+            let effect_system = TestEffectsBuilder::for_unit_tests(device_id)
                 .build()
-                .unwrap();
+                .expect("Failed to build test effect system");
             black_box(effect_system);
         });
     });
 
-    c.bench_function("mock_config_full_build", |b| {
+    c.bench_function("simulation_config_full_build", |b| {
         b.iter(|| {
             let device_id = DeviceId::from_bytes([8u8; 32]);
-            let effect_system = TestEffectRegistry::new_mock()
-                .with_device_id(device_id)
+            let effect_system = TestEffectsBuilder::for_simulation(device_id)
                 .build()
-                .unwrap();
+                .expect("Failed to build simulation effect system");
             black_box(effect_system);
         });
     });

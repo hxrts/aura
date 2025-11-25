@@ -554,11 +554,23 @@ impl SimulationEffectSystem {
     }
 }
 
+#[async_trait]
+impl PhysicalTimeEffects for SimulationEffectSystem {
+    async fn physical_time(
+        &self,
+    ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+        self.time.physical_time().await
+    }
+
+    async fn sleep_ms(&self, ms: u64) -> Result<(), aura_core::effects::TimeError> {
+        self.time.sleep_ms(ms).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use aura_core::effects::CryptoEffects;
-    use aura_core::identifiers::DeviceId;
 
     #[tokio::test]
     async fn test_simulation_system_creation() {
@@ -612,9 +624,9 @@ mod tests {
         let mut system = SimulationEffectSystem::new(device_id, 42);
 
         // Test time advancement
-        let initial_time = system.current_timestamp().await;
+        let initial_time = system.physical_time().await.unwrap();
         system.advance_time(1000);
-        let new_time = system.current_timestamp().await;
+        let new_time = system.physical_time().await.unwrap();
 
         assert!(new_time > initial_time);
     }

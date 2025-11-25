@@ -55,20 +55,30 @@ impl std::fmt::Debug for ChannelTeardownCoordinator {
 /// Channel establishment state tracking
 #[derive(Debug, Clone)]
 struct ChannelEstablishmentState {
+    /// Unique identifier for the channel being established
     channel_id: String,
+    /// List of devices participating in the channel
     participants: Vec<DeviceId>,
+    /// Current phase of the establishment process
     phase: EstablishmentPhase,
+    /// Time when establishment was initiated
     started_at: SystemTime,
+    /// Confirmations received from participants
     confirmations: HashMap<DeviceId, ChannelConfirmation>,
 }
 
 /// Channel teardown state tracking
 #[derive(Debug, Clone)]
 struct ChannelTeardownState {
+    /// Channel being torn down
     channel_id: String,
+    /// Participants in the channel
     participants: Vec<DeviceId>,
+    /// Current phase of teardown
     phase: TeardownPhase,
+    /// Time when teardown started
     started_at: SystemTime,
+    /// Acknowledgments from participants
     acknowledgments: HashMap<DeviceId, TeardownAcknowledgment>,
 }
 
@@ -97,50 +107,75 @@ enum TeardownPhase {
 /// Channel establishment request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelEstablishmentRequest {
+    /// Unique channel identifier
     pub channel_id: String,
+    /// Device coordinating establishment
     pub coordinator_id: DeviceId,
+    /// Devices to participate in channel
     pub participants: Vec<DeviceId>,
+    /// Type of channel to establish
     pub channel_type: ChannelType,
+    /// Context for authorization
     pub context_id: ContextId,
+    /// Resources needed for channel
     pub resource_requirements: ResourceRequirements,
 }
 
 /// Channel confirmation response
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelConfirmation {
+    /// Channel being confirmed
     pub channel_id: String,
+    /// Participant confirming
     pub participant_id: DeviceId,
+    /// Result of confirmation
     pub confirmation_result: ConfirmationResult,
+    /// Resources participant allocated
     pub allocated_resources: AllocatedResources,
+    /// Time of confirmation
     pub timestamp: SystemTime,
 }
 
 /// Channel finalization message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelFinalization {
+    /// Channel being finalized
     pub channel_id: String,
+    /// Coordinator finalizing channel
     pub coordinator_id: DeviceId,
+    /// Result of finalization
     pub finalization_result: FinalizationResult,
+    /// Metadata for established channel
     pub channel_metadata: ChannelMetadata,
 }
 
 /// Channel teardown request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelTeardownRequest {
+    /// Channel to tear down
     pub channel_id: String,
+    /// Device initiating teardown
     pub initiator_id: DeviceId,
+    /// Reason for teardown
     pub teardown_reason: TeardownReason,
+    /// Whether to attempt graceful shutdown
     pub graceful: bool,
+    /// Optional deadline for cleanup completion
     pub cleanup_deadline: Option<SystemTime>,
 }
 
 /// Teardown acknowledgment
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeardownAcknowledgment {
+    /// Channel being torn down
     pub channel_id: String,
+    /// Participant acknowledging
     pub participant_id: DeviceId,
+    /// Result of acknowledgment
     pub acknowledgment_result: AcknowledgmentResult,
+    /// Status of resource cleanup
     pub cleanup_status: CleanupStatus,
+    /// Time of acknowledgment
     pub timestamp: SystemTime,
 }
 
@@ -156,27 +191,39 @@ pub enum ChannelType {
 /// Resource requirements
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceRequirements {
+    /// Required bandwidth in Mbps
     pub bandwidth_mbps: u32,
+    /// Required storage in MB
     pub storage_mb: u32,
+    /// Required CPU cores
     pub cpu_cores: u8,
+    /// Required memory in MB
     pub memory_mb: u32,
 }
 
 /// Allocated resources
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AllocatedResources {
+    /// Bandwidth allocated in Mbps
     pub bandwidth_allocated: u32,
+    /// Storage allocated in MB
     pub storage_allocated: u32,
+    /// CPU cores allocated
     pub cpu_allocated: u8,
+    /// Memory allocated in MB
     pub memory_allocated: u32,
 }
 
 /// Channel metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChannelMetadata {
+    /// Time channel was established
     pub established_at: SystemTime,
+    /// Active participants in channel
     pub participants: Vec<DeviceId>,
+    /// Type of channel
     pub channel_type: ChannelType,
+    /// Whether encryption is enabled
     pub encryption_enabled: bool,
 }
 
@@ -226,7 +273,7 @@ pub enum CleanupStatus {
 impl ChannelEstablishmentCoordinator {
     /// Create new channel establishment coordinator
     pub fn new(device_id: DeviceId, config: ChoreographicConfig) -> Self {
-        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler::new()))
+        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler))
     }
 
     /// Create coordinator with explicit time provider
@@ -327,7 +374,7 @@ impl ChannelEstablishmentCoordinator {
 impl ChannelTeardownCoordinator {
     /// Create new channel teardown coordinator
     pub fn new(device_id: DeviceId, config: ChoreographicConfig) -> Self {
-        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler::new()))
+        Self::with_time(device_id, config, Arc::new(PhysicalTimeHandler))
     }
 
     /// Create coordinator with explicit time provider

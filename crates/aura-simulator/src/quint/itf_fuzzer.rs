@@ -15,6 +15,7 @@ use crate::quint::simulation_evaluator::SimulationPropertyEvaluator;
 use async_trait::async_trait;
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::AuraError;
+use aura_effects::storage::FilesystemStorageHandler;
 
 /// ITF trace with Model-Based Testing metadata
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -476,7 +477,7 @@ impl ITFBasedFuzzer {
         spec_file: &Path,
         properties: &[String],
     ) -> Result<ModelCheckingResult, ITFFuzzError> {
-        let start_time = std::time::Instant::now();
+        let start_time = aura_effects::time::monotonic_now();
         let deepening = &self.config.iterative_deepening;
 
         let mut all_counterexamples = Vec::new();
@@ -546,7 +547,9 @@ impl ITFBasedFuzzer {
                 "--max-steps",
                 &bound.to_string(),
                 "--out-itf",
+                #[allow(clippy::unwrap_used)] // Test file paths are guaranteed to be valid UTF-8
                 counterexample_file.to_str().unwrap(),
+                #[allow(clippy::unwrap_used)] // Test file paths are guaranteed to be valid UTF-8
                 spec_file.to_str().unwrap(),
             ])
             .output()
@@ -660,7 +663,7 @@ impl ITFBasedFuzzer {
         spec_file: &Path,
         properties: &[String],
     ) -> Result<ModelCheckingReport, ITFFuzzError> {
-        let start_time = std::time::Instant::now();
+        let start_time = aura_effects::time::monotonic_now();
 
         // Run bounded model checking
         let model_check_result = self
@@ -719,7 +722,7 @@ impl ITFBasedFuzzer {
         &self,
         spec_file: &Path,
     ) -> Result<SimulationResult, ITFFuzzError> {
-        let start_time = std::time::Instant::now();
+        let start_time = aura_effects::time::monotonic_now();
         let sim_config = &self.config.simulation;
 
         let mut traces = Vec::new();
@@ -778,7 +781,11 @@ impl ITFBasedFuzzer {
                     "--max-steps",
                     &config.max_steps.to_string(),
                     "--out-itf",
+                    #[allow(clippy::unwrap_used)]
+                    // Test file paths are guaranteed to be valid UTF-8
                     output_file.to_str().unwrap(),
+                    #[allow(clippy::unwrap_used)]
+                    // Test file paths are guaranteed to be valid UTF-8
                     spec_file.to_str().unwrap(),
                 ]);
 
@@ -858,7 +865,7 @@ impl ITFBasedFuzzer {
             },
             source_spec: spec_file.to_string_lossy().to_string(),
             exercised_properties: self.extract_exercised_properties(trace),
-            generated_at: std::time::SystemTime::now(),
+            generated_at: std::time::SystemTime::UNIX_EPOCH,
             expected_duration_ms: Some(trace.states.len() as u64 * 10), // Estimate 10ms per step
         };
 
@@ -866,7 +873,7 @@ impl ITFBasedFuzzer {
             id: format!(
                 "sim_test_{}_{}",
                 index,
-                std::time::SystemTime::now()
+                std::time::SystemTime::UNIX_EPOCH
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_nanos()
@@ -990,7 +997,7 @@ impl ITFBasedFuzzer {
         &self,
         spec_file: &Path,
     ) -> Result<TestSuite, ITFFuzzError> {
-        let start_time = std::time::Instant::now();
+        let start_time = aura_effects::time::monotonic_now();
 
         // Phase 1: Run simulations
         let simulation_result = self.run_simulation_based_testing(spec_file).await?;
@@ -1061,7 +1068,7 @@ impl ITFBasedFuzzer {
         spec_file: &Path,
         campaign_config: FuzzingCampaignConfig,
     ) -> Result<FuzzingCampaignResult, ITFFuzzError> {
-        let start_time = std::time::Instant::now();
+        let start_time = aura_effects::time::monotonic_now();
         let mut performance_monitor = PerformanceMonitor::new();
 
         println!(
@@ -1606,7 +1613,7 @@ impl PerformanceMonitor {
 
     pub fn start_phase(&mut self, phase_name: &str) {
         self.phase_start_times
-            .insert(phase_name.to_string(), std::time::Instant::now());
+            .insert(phase_name.to_string(), aura_effects::time::monotonic_now());
     }
 
     pub fn end_phase(&mut self, phase_name: &str) {
@@ -1918,88 +1925,61 @@ pub struct ResourceUtilization {
 }
 
 fn default_storage_provider() -> Arc<dyn StorageEffects> {
-    Arc::new(PathStorageAdapter)
+    Arc::new(PathStorageAdapter::new())
 }
 
-#[derive(Debug, Clone, Default)]
-struct PathStorageAdapter;
+#[derive(Debug, Clone)]
+struct PathStorageAdapter {
+    handler: FilesystemStorageHandler,
+}
+
+impl PathStorageAdapter {
+    pub fn new() -> Self {
+        Self {
+            handler: FilesystemStorageHandler::with_default_path(),
+        }
+    }
+}
 
 #[async_trait]
 impl StorageEffects for PathStorageAdapter {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-        let path = PathBuf::from(key);
-        if let Some(parent) = path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
-        }
-
-        tokio::fs::write(&path, value)
-            .await
-            .map_err(|e| StorageError::WriteFailed(e.to_string()))
+        self.handler.store(key, value).await
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        let path = PathBuf::from(key);
-        if !path.exists() {
-            return Ok(None);
-        }
-
-        tokio::fs::read(&path)
-            .await
-            .map(Some)
-            .map_err(|e| StorageError::ReadFailed(e.to_string()))
+        self.handler.retrieve(key).await
     }
 
     async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-        let path = PathBuf::from(key);
-        if !path.exists() {
-            return Ok(false);
-        }
-
-        tokio::fs::remove_file(&path)
-            .await
-            .map(|_| true)
-            .map_err(|e| StorageError::DeleteFailed(e.to_string()))
+        self.handler.remove(key).await
     }
 
-    async fn list_keys(&self, _prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-        Ok(Vec::new())
+    async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+        self.handler.list_keys(prefix).await
     }
 
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-        Ok(PathBuf::from(key).exists())
+        self.handler.exists(key).await
     }
 
     async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
-        for (key, value) in pairs {
-            self.store(&key, value).await?;
-        }
-        Ok(())
+        self.handler.store_batch(pairs).await
     }
 
     async fn retrieve_batch(
         &self,
         keys: &[String],
     ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
-        let mut out = HashMap::new();
-        for key in keys {
-            if let Some(value) = self.retrieve(key).await? {
-                out.insert(key.clone(), value);
-            }
-        }
-        Ok(out)
+        self.handler.retrieve_batch(keys).await
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {
-        Ok(())
+        self.handler.clear_all().await
     }
 
     async fn stats(&self) -> Result<StorageStats, StorageError> {
-        Ok(StorageStats {
-            backend_type: "path".to_string(),
-            ..Default::default()
-        })
+        self.handler.stats().await
     }
 }
 
@@ -2175,8 +2155,11 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config).expect("Failed to create fuzzer");
-        let trace = fuzzer.parse_itf_trace(json).expect("Failed to parse trace");
+        let fuzzer = ITFBasedFuzzer::with_config(config)
+            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
+        let trace = fuzzer
+            .parse_itf_trace(json)
+            .unwrap_or_else(|_| panic!("Failed to parse trace"));
 
         assert_eq!(trace.meta.format, "ITF");
         assert_eq!(trace.vars, vec!["x"]);
@@ -2203,7 +2186,8 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config).expect("Failed to create fuzzer");
+        let fuzzer = ITFBasedFuzzer::with_config(config)
+            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
 
         // Create a test ITF trace
         let itf_trace = ITFTrace {
@@ -2249,11 +2233,11 @@ mod tests {
                 // If conversion succeeds, test validation and export
                 fuzzer
                     .validate_converted_itf(&itf_trace)
-                    .expect("Failed to validate ITF trace");
+                    .unwrap_or_else(|_| panic!("Failed to validate ITF trace"));
 
                 let json_output = fuzzer
                     .export_itf_to_json(&itf_trace, true)
-                    .expect("Failed to export ITF trace");
+                    .unwrap_or_else(|_| panic!("Failed to export ITF trace"));
 
                 assert!(json_output.contains("vars"));
                 assert!(json_output.contains("states"));
@@ -2283,7 +2267,8 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config.clone()).expect("Failed to create fuzzer");
+        let fuzzer = ITFBasedFuzzer::with_config(config.clone())
+            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
 
         // Test configuration
         assert_eq!(fuzzer.config.iterative_deepening.initial_bound, 2);
@@ -2299,7 +2284,8 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config).expect("Failed to create fuzzer");
+        let fuzzer = ITFBasedFuzzer::with_config(config)
+            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
 
         // Create a mock model checking result with counterexample
         let counterexample_trace = ITFTrace {
@@ -2377,7 +2363,8 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config.clone()).expect("Failed to create fuzzer");
+        let fuzzer = ITFBasedFuzzer::with_config(config.clone())
+            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
 
         // Test simulation configuration
         assert_eq!(fuzzer.config.simulation.num_runs, 5);
@@ -2394,7 +2381,8 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config).expect("Failed to create fuzzer");
+        let fuzzer = ITFBasedFuzzer::with_config(config)
+            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
 
         // Create a state with MBT metadata
         let state = ITFState {
@@ -2443,7 +2431,8 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config).expect("Failed to create fuzzer");
+        let fuzzer = ITFBasedFuzzer::with_config(config)
+            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
 
         // Create a trace with MBT metadata
         let trace = ITFTrace {
@@ -2495,7 +2484,7 @@ mod tests {
         // Test trace conversion
         let test_cases = fuzzer
             .convert_traces_to_test_cases(&traces, spec_path)
-            .expect("Failed to convert traces to test cases");
+            .unwrap_or_else(|_| panic!("Failed to convert traces to test cases"));
 
         assert_eq!(test_cases.len(), 1);
 
@@ -2538,7 +2527,8 @@ mod tests {
             ..ITFFuzzConfig::default()
         };
 
-        let fuzzer = ITFBasedFuzzer::with_config(config).expect("Failed to create fuzzer");
+        let fuzzer = ITFBasedFuzzer::with_config(config)
+            .unwrap_or_else(|_| panic!("Failed to create fuzzer"));
 
         // Create test cases for coverage analysis
         let test_cases = vec![GeneratedTestCase {
@@ -2596,7 +2586,7 @@ mod tests {
                 },
                 source_spec: "test.qnt".to_string(),
                 exercised_properties: vec!["prop1".to_string(), "prop2".to_string()],
-                generated_at: std::time::SystemTime::now(),
+                generated_at: std::time::SystemTime::UNIX_EPOCH,
                 expected_duration_ms: Some(100),
             },
         }];

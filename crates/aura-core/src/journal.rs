@@ -14,8 +14,6 @@
 
 use crate::semilattice::{Bottom, JoinSemilattice, MeetSemiLattice, Top};
 use serde::{Deserialize, Serialize};
-use serde_json;
-use std::cmp::Ordering;
 use std::fmt;
 
 /// Fact type for the journal - represents "what we know" (⊔-monotone)
@@ -24,14 +22,14 @@ use std::fmt;
 /// They represent knowledge that has been observed and cannot be "unlearned".
 ///
 /// Uses a proper CRDT (OR-Set with LWW-Map) for distributed consistency.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Ord)]
 pub struct Fact {
     /// CRDT-based fact storage with operation timestamps
     entries: FactCrdt,
 }
 
 /// CRDT implementation for facts using Observed-Remove Set semantics
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 struct FactCrdt {
     /// Last-Writer-Wins map for fact values with vector clocks
     lww_map: std::collections::BTreeMap<String, VersionedFactValue>,
@@ -40,7 +38,7 @@ struct FactCrdt {
 }
 
 /// Versioned fact value with causal ordering
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord)]
 struct VersionedFactValue {
     value: FactValue,
     timestamp: u64,
@@ -111,7 +109,7 @@ impl Ord for FactOperation {
 }
 
 /// Individual fact values that can be accumulated
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Ord)]
 pub enum FactValue {
     /// Simple string facts
     String(String),
@@ -143,12 +141,18 @@ impl Fact {
         fact
     }
 
-    /// Insert or update a fact value using CRDT semantics
-    pub fn insert(&mut self, key: impl Into<String>, value: FactValue) {
+    /// Insert or update a fact value using CRDT semantics with explicit context.
+    pub fn insert_with_context(
+        &mut self,
+        key: impl Into<String>,
+        value: FactValue,
+        actor_id: impl Into<String>,
+        timestamp: u64,
+        op_id: Option<String>,
+    ) {
         let key = key.into();
-        let timestamp = 0;
-        let actor_id = std::env::var("AURA_DEVICE_ID").unwrap_or_else(|_| "localhost".to_string()); // Device ID from environment or localhost default
-        let op_id = format!("{}:{}:{}", actor_id, timestamp, key);
+        let actor_id = actor_id.into();
+        let op_id = op_id.unwrap_or_else(|| format!("{}:{}:{}", actor_id, timestamp, key));
 
         // Create add operation for OR-Set
         let add_op = FactOperation::Add {
@@ -189,12 +193,22 @@ impl Fact {
         }
     }
 
-    /// Remove a fact value (creates remove operation)
-    pub fn remove(&mut self, key: impl Into<String>) {
+    /// Convenience wrapper that uses deterministic defaults.
+    pub fn insert(&mut self, key: impl Into<String>, value: FactValue) {
+        self.insert_with_context(key, value, "local", 0, None);
+    }
+
+    /// Remove a fact value (creates remove operation) with explicit context.
+    pub fn remove_with_context(
+        &mut self,
+        key: impl Into<String>,
+        actor_id: impl Into<String>,
+        timestamp: u64,
+        op_id: Option<String>,
+    ) {
         let key = key.into();
-        let timestamp = 0;
-        let actor_id = "local".to_string();
-        let op_id = format!("{}:{}:remove:{}", actor_id, timestamp, key);
+        let actor_id = actor_id.into();
+        let op_id = op_id.unwrap_or_else(|| format!("{}:{}:remove:{}", actor_id, timestamp, key));
 
         // Find all add operations for this key to remove them
         let add_ops_to_remove: Vec<_> = self
@@ -223,6 +237,11 @@ impl Fact {
 
         // Remove from LWW map
         self.entries.lww_map.remove(&key);
+    }
+
+    /// Convenience wrapper that uses deterministic defaults.
+    pub fn remove(&mut self, key: impl Into<String>) {
+        self.remove_with_context(key, "local", 0, None);
     }
 
     /// Get a fact value by key
@@ -417,14 +436,6 @@ impl PartialOrd for Fact {
     }
 }
 
-impl Ord for Fact {
-    fn cmp(&self, other: &Self) -> Ordering {
-        serde_json::to_string(self)
-            .unwrap_or_default()
-            .cmp(&serde_json::to_string(other).unwrap_or_default())
-    }
-}
-
 impl JoinSemilattice for FactValue {
     fn join(&self, other: &Self) -> Self {
         match (self, other) {
@@ -498,10 +509,11 @@ impl Default for Fact {
 
 /// Capability type for the journal - represents "what we may do" (⊓-monotone)
 ///
-/// Capabilities are meet-semilattice elements that can only shrink through refinement.
-/// They represent authority that can be attenuated but never amplified.
+/// Capabilities are serialized Biscuit tokens.
 ///
-/// Uses a proper capability lattice with hierarchical permissions and delegation chains.
+/// The semantic evaluation lives in higher layers (`AuthorizationEffects`). The helper
+/// methods here provide conservative stubs for legacy callers and should not be used
+/// for authorization decisions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cap {
     /// Serialized Biscuit token (empty if no capabilities)
@@ -568,15 +580,15 @@ impl Cap {
 
     // Legacy compatibility stubs
     pub fn allows(&self, _permission: &str) -> bool {
-        true
+        !self.is_empty()
     }
 
     pub fn applies_to(&self, _resource: &str) -> bool {
-        true
+        !self.is_empty()
     }
 
     pub fn is_valid_at(&self, _timestamp: u64) -> bool {
-        true
+        !self.is_empty()
     }
 
     pub fn permissions(&self) -> Vec<String> {
@@ -838,31 +850,38 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Old Cap API removed during authority refactor"]
-    fn test_hierarchical_capabilities() {
-        // Old test for Cap::with_permissions(), with_resources(), set_usage_limit(), add_delegation()
-        // which use the old API that no longer exists
-    }
+    fn test_journal_merge_and_caps_refinement() {
+        let mut journal_a =
+            Journal::with_facts(Fact::with_value("k1", FactValue::String("v1".to_string())));
+        let mut journal_b =
+            Journal::with_facts(Fact::with_value("k2", FactValue::String("v2".to_string())));
 
-    // TODO: These tests use the old Journal API that was removed during authority-centric refactoring
-    // Journal is now a simple type with namespace and facts. Authorization is handled externally via Biscuit.
-    // Tests need to be rewritten for the new fact-based architecture.
+        // Refine capabilities on B to simulate attenuation
+        journal_b.refine_caps(Cap::new());
 
-    #[test]
-    #[ignore = "Old Journal API removed during authority refactor"]
-    fn test_journal_operations() {
-        // Old test for Journal::new(), merge_facts(), refine_caps(), is_authorized() which no longer exist
-    }
+        journal_a.merge(&journal_b);
 
-    #[test]
-    #[ignore = "Old Journal API removed during authority refactor"]
-    fn test_journal_merge() {
-        // Old test for Journal merge with facts and caps fields which no longer exist
+        let merged_keys: Vec<_> = journal_a.facts.entries.lww_map.keys().cloned().collect();
+        assert!(merged_keys.contains(&"k1".to_string()));
+        assert!(merged_keys.contains(&"k2".to_string()));
+        // Cap meet should not panic; current stub yields an empty token_bytes
+        assert!(journal_a.caps.is_empty());
     }
 
     #[test]
-    #[ignore = "Old Journal API removed during authority refactor"]
-    fn test_capability_restriction() {
-        // Old test for Journal::restrict_view() which no longer exists
+    fn test_journal_restrict_view() {
+        let journal = Journal::with_facts(Fact::with_value("k", FactValue::Number(1)));
+        let restricted = journal.restrict_view(Cap::new());
+
+        // Facts are preserved, caps are attenuated
+        assert!(restricted.facts.contains_key("k"));
+        assert!(restricted.caps.is_empty());
+    }
+
+    #[test]
+    fn test_journal_authorization_stub() {
+        let journal = Journal::new();
+        // Current Cap stub always authorizes; ensure the method is wired
+        assert!(journal.is_authorized("read", "resource", 0));
     }
 }

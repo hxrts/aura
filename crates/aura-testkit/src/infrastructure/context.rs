@@ -146,7 +146,7 @@ pub struct CompositeTestHandler {
 
 impl CompositeTestHandler {
     /// Create a new composite handler using mock implementations
-    pub fn new_mock(execution_mode: ExecutionMode, device_id: DeviceId) -> AuraResult<Self> {
+    pub fn new_mock(execution_mode: ExecutionMode, _device_id: DeviceId) -> AuraResult<Self> {
         let seed = match execution_mode {
             ExecutionMode::Simulation { seed } => seed,
             _ => 42, // Default seed for deterministic testing
@@ -165,7 +165,7 @@ impl CompositeTestHandler {
     }
 
     /// Create a new composite handler using real implementations for integration tests
-    pub fn new_real(execution_mode: ExecutionMode, device_id: DeviceId) -> AuraResult<Self> {
+    pub fn new_real(execution_mode: ExecutionMode, _device_id: DeviceId) -> AuraResult<Self> {
         // For integration tests, use mock handlers configured for more realistic behavior
         // This provides better determinism while still testing realistic patterns
         let seed = match execution_mode {
@@ -542,7 +542,6 @@ impl NetworkEffects for CompositeTestHandler {
     }
 
     async fn receive(&self) -> Result<(uuid::Uuid, Vec<u8>), aura_core::effects::NetworkError> {
-        use aura_core::effects::NetworkEffects;
         self.network.receive().await
     }
 
@@ -550,30 +549,25 @@ impl NetworkEffects for CompositeTestHandler {
         &self,
         peer_id: uuid::Uuid,
     ) -> Result<Vec<u8>, aura_core::effects::NetworkError> {
-        use aura_core::effects::NetworkEffects;
         self.network.receive_from(peer_id).await
     }
 
     async fn connected_peers(&self) -> Vec<uuid::Uuid> {
-        use aura_core::effects::NetworkEffects;
         self.network.connected_peers().await
     }
 
     async fn is_peer_connected(&self, peer_id: uuid::Uuid) -> bool {
-        use aura_core::effects::NetworkEffects;
         self.network.is_peer_connected(peer_id).await
     }
 
     async fn subscribe_to_peer_events(
         &self,
     ) -> Result<aura_core::effects::PeerEventStream, aura_core::effects::NetworkError> {
-        use aura_core::effects::NetworkEffects;
         self.network.subscribe_to_peer_events().await
     }
 }
 
 /// Convenience functions for common test scenarios
-
 /// Create a simple mock effect context for unit tests
 pub fn create_mock_test_context() -> AuraResult<SimpleTestContext> {
     Ok(SimpleTestContext::new(ExecutionMode::Testing))

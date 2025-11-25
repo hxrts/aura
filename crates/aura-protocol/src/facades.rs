@@ -122,9 +122,9 @@ pub trait StandardPatterns {
     fn device_id(&self) -> DeviceId;
 }
 
-// NOTE: Concrete implementations (DefaultProtocolOrchestrator, etc.) have been
-// moved to aura-agent where they belong architecturally. This file now contains
-// only trait definitions that are appropriate for Layer 4 (aura-protocol).
+// NOTE: Concrete implementations (DefaultProtocolOrchestrator, etc.) live
+// in aura-agent. This file contains only trait definitions that are
+// appropriate for Layer 4 (aura-protocol).
 //
 // To use these traits:
 // 1. Import the traits from aura-protocol::facades

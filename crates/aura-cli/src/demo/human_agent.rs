@@ -5,6 +5,7 @@
 //! a complete demo where Bob has the full interactive experience while
 //! Alice and Charlie are automated for reliable demo presentation.
 
+use aura_effects::time::monotonic_now;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use uuid::Uuid;
@@ -191,7 +192,7 @@ impl HumanAgentDemo {
         tracing::info!("Starting human-agent demo");
 
         // Initialize demo metrics
-        self.demo_state.metrics.start_time = Some(std::time::Instant::now());
+        self.demo_state.metrics.start_time = Some(monotonic_now());
 
         // Start Bob's TUI in background
         let bob_handle = {
@@ -249,22 +250,20 @@ impl HumanAgentDemo {
         let max_duration =
             std::time::Duration::from_secs(self.config.max_demo_duration_minutes * 60);
 
-        let start_time = std::time::Instant::now();
+        let start_time = monotonic_now();
 
         while start_time.elapsed() < max_duration {
             // Handle demo events from Bob's TUI
-            if let Ok(event) = tokio::time::timeout(
+            if let Ok(Some(event)) = tokio::time::timeout(
                 std::time::Duration::from_millis(100),
                 self.demo_events.recv(),
             )
             .await
             {
-                if let Some(event) = event {
-                    self.handle_demo_event(event).await?;
+                self.handle_demo_event(event).await?;
 
-                    if self.demo_state.phase == DemoPhase::Completed {
-                        break;
-                    }
+                if self.demo_state.phase == DemoPhase::Completed {
+                    break;
                 }
             }
 
@@ -411,6 +410,8 @@ impl HumanAgentDemo {
             std::time::Duration::from_millis(self.config.guardian_response_time_ms);
 
         // Alice approves after delay
+        #[allow(clippy::unwrap_used)]
+        // Demo code - alice_authority is guaranteed to be set at this point
         let _alice_authority = self.demo_state.alice_authority.unwrap();
         tokio::spawn(async move {
             tokio::time::sleep(response_delay).await;
@@ -419,6 +420,8 @@ impl HumanAgentDemo {
         });
 
         // Charlie approves after different delay
+        #[allow(clippy::unwrap_used)]
+        // Demo code - charlie_authority is guaranteed to be set at this point
         let _charlie_authority = self.demo_state.charlie_authority.unwrap();
         let charlie_delay = response_delay + std::time::Duration::from_millis(1000);
         tokio::spawn(async move {

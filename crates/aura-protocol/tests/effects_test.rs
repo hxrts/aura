@@ -1,6 +1,6 @@
-#![cfg(feature = "fixture_effects")]
-
 //! Tests for individual effect traits and their implementations
+#![cfg(feature = "fixture_effects")]
+#![doc = include_str!("../../README.md")]
 //!
 //! Uses aura-testkit for deterministic, reproducible testing
 

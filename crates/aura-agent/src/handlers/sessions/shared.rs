@@ -10,6 +10,7 @@ use std::collections::HashMap;
 
 /// Session handle for managing active sessions
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct SessionHandle {
     /// Session ID
     pub session_id: String,
@@ -29,6 +30,7 @@ pub struct SessionHandle {
 
 /// Session statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct SessionStats {
     /// Total active sessions
     pub active_sessions: usize,
@@ -44,6 +46,7 @@ pub struct SessionStats {
 
 /// Device information (authority-centric)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct DeviceInfo {
     /// Authority identifier (public identity)
     pub authority_id: aura_core::identifiers::AuthorityId,
@@ -65,6 +68,7 @@ pub struct DeviceInfo {
 
 /// Roles in session management choreography
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[allow(dead_code)] // Part of future session management API
 pub enum SessionManagementRole {
     /// Device initiating session management operation
     Initiator(DeviceId),
@@ -78,6 +82,7 @@ pub enum SessionManagementRole {
 
 impl SessionManagementRole {
     /// Get the device ID for this role
+    #[allow(dead_code)] // Part of future session management API
     pub fn device_id(&self) -> DeviceId {
         match self {
             SessionManagementRole::Initiator(id) => *id,
@@ -88,6 +93,7 @@ impl SessionManagementRole {
     }
 
     /// Get role name for choreography framework
+    #[allow(dead_code)] // Part of future session management API
     pub fn name(&self) -> String {
         match self {
             SessionManagementRole::Initiator(id) => format!("Initiator_{}", id.0.simple()),
@@ -100,6 +106,7 @@ impl SessionManagementRole {
     }
 
     /// Get participant index if this is a participant role
+    #[allow(dead_code)] // Part of future session management API
     pub fn participant_index(&self) -> Option<u32> {
         match self {
             SessionManagementRole::Participant(_, idx) => Some(*idx),
@@ -111,6 +118,7 @@ impl SessionManagementRole {
 /// Session management message types
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct SessionCreateRequest {
     pub session_type: SessionType,
     pub participants: Vec<DeviceId>,
@@ -121,6 +129,7 @@ pub struct SessionCreateRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct SessionInvitation {
     pub session_id: String,
     pub session_type: SessionType,
@@ -130,6 +139,7 @@ pub struct SessionInvitation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct SessionResponse {
     pub session_id: String,
     pub participant: DeviceId,
@@ -138,6 +148,7 @@ pub struct SessionResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct SessionEstablished {
     pub session_id: String,
     pub participants: Vec<DeviceId>,
@@ -146,6 +157,7 @@ pub struct SessionEstablished {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct SessionFailed {
     pub session_id: String,
     pub reason: String,
@@ -153,18 +165,21 @@ pub struct SessionFailed {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct MetadataUpdate {
     pub session_id: String,
     pub metadata_changes: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct MetadataSync {
     pub session_id: String,
     pub updated_metadata: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct ParticipantChange {
     pub session_id: String,
     pub operation: String, // "add" or "remove"
@@ -172,6 +187,7 @@ pub struct ParticipantChange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct ParticipantUpdate {
     pub session_id: String,
     pub updated_participants: Vec<DeviceId>,
@@ -179,12 +195,14 @@ pub struct ParticipantUpdate {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct SessionEnd {
     pub session_id: String,
     pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Part of future session management API
 pub struct SessionTerminated {
     pub session_id: String,
     pub end_time: u64,
@@ -194,6 +212,7 @@ pub struct SessionTerminated {
 /// Helper functions
 ///
 /// Get session type suffix for session IDs
+#[allow(dead_code)] // Part of future session management API
 pub fn session_type_suffix(session_type: &SessionType) -> &'static str {
     match session_type {
         SessionType::ThresholdOperation => "threshold",

@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Performance benchmarks for the unified time system
 //!
 //! These benchmarks measure:
@@ -83,6 +84,7 @@ impl OrderClockEffects for BenchmarkTimeSource {
 
 /// Benchmark time access latency for different domains
 fn bench_time_access_latency(c: &mut Criterion) {
+    #[allow(clippy::unwrap_used)]
     let rt = Runtime::new().unwrap();
     let time_source = BenchmarkTimeSource::new(1000000);
 
@@ -90,6 +92,7 @@ fn bench_time_access_latency(c: &mut Criterion) {
 
     group.bench_function("physical_time", |b| {
         b.to_async(&rt).iter(|| async {
+            #[allow(clippy::unwrap_used)]
             let time = time_source.physical_time().await.unwrap();
             black_box(time);
         });
@@ -97,6 +100,7 @@ fn bench_time_access_latency(c: &mut Criterion) {
 
     group.bench_function("logical_time", |b| {
         b.to_async(&rt).iter(|| async {
+            #[allow(clippy::unwrap_used)]
             let time = time_source.logical_now().await.unwrap();
             black_box(time);
         });
@@ -104,6 +108,7 @@ fn bench_time_access_latency(c: &mut Criterion) {
 
     group.bench_function("order_time", |b| {
         b.to_async(&rt).iter(|| async {
+            #[allow(clippy::unwrap_used)]
             let time = time_source.order_time().await.unwrap();
             black_box(time);
         });
@@ -114,6 +119,7 @@ fn bench_time_access_latency(c: &mut Criterion) {
 
 /// Benchmark TimeStamp creation from different domains
 fn bench_timestamp_creation(c: &mut Criterion) {
+    #[allow(clippy::unwrap_used)]
     let rt = Runtime::new().unwrap();
     let time_source = BenchmarkTimeSource::new(1000000);
 
@@ -121,6 +127,7 @@ fn bench_timestamp_creation(c: &mut Criterion) {
 
     group.bench_function("physical_timestamp", |b| {
         b.to_async(&rt).iter(|| async {
+            #[allow(clippy::unwrap_used)]
             let physical_time = time_source.physical_time().await.unwrap();
             let timestamp = TimeStamp::PhysicalClock(physical_time);
             black_box(timestamp);
@@ -129,6 +136,7 @@ fn bench_timestamp_creation(c: &mut Criterion) {
 
     group.bench_function("logical_timestamp", |b| {
         b.to_async(&rt).iter(|| async {
+            #[allow(clippy::unwrap_used)]
             let logical_time = time_source.logical_now().await.unwrap();
             let timestamp = TimeStamp::LogicalClock(logical_time);
             black_box(timestamp);
@@ -137,6 +145,7 @@ fn bench_timestamp_creation(c: &mut Criterion) {
 
     group.bench_function("order_timestamp", |b| {
         b.to_async(&rt).iter(|| async {
+            #[allow(clippy::unwrap_used)]
             let order_time = time_source.order_time().await.unwrap();
             let timestamp = TimeStamp::OrderClock(order_time);
             black_box(timestamp);
@@ -147,7 +156,9 @@ fn bench_timestamp_creation(c: &mut Criterion) {
 }
 
 /// Benchmark TimeStamp comparison operations
+/// Benchmark TimeStamp comparison operations
 fn bench_timestamp_comparison(c: &mut Criterion) {
+    #[allow(clippy::unwrap_used)]
     let rt = Runtime::new().unwrap();
 
     // Pre-generate timestamps for comparison
@@ -212,6 +223,7 @@ fn bench_timestamp_comparison(c: &mut Criterion) {
 
 /// Benchmark TimeStamp sorting operations (critical for fact ordering)
 fn bench_timestamp_sorting(c: &mut Criterion) {
+    #[allow(clippy::unwrap_used)]
     let _rt = Runtime::new().unwrap();
 
     // Pre-generate different sized collections of timestamps
@@ -486,5 +498,4 @@ criterion_group!(
     bench_vectorclock_optimization
 );
 
-/// Main entry point for benchmark execution
 criterion_main!(benches);

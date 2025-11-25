@@ -13,7 +13,9 @@ pub struct ControllableTimeSource {
     current_time: Arc<Mutex<u64>>,
     time_scale: Arc<Mutex<f64>>,
     frozen: Arc<Mutex<bool>>,
+    #[allow(dead_code)]
     timeouts: Arc<Mutex<HashMap<Uuid, u64>>>, // timeout_id -> expiry_time
+    #[allow(dead_code)]
     contexts: Arc<Mutex<HashMap<Uuid, bool>>>, // context_id -> active
     logical_clock: Arc<Mutex<VectorClock>>,
     order_counter: Arc<Mutex<u64>>, // for deterministic order generation
@@ -159,8 +161,8 @@ impl OrderClockEffects for ControllableTimeSource {
         token[8..16].copy_from_slice(&time_bytes);
 
         // Fill remaining bytes with deterministic pattern
-        for i in 16..32 {
-            token[i] = ((i as u64 + *counter + *self.current_time.lock().unwrap()) % 256) as u8;
+        for (i, item) in token.iter_mut().enumerate().skip(16) {
+            *item = ((i as u64 + *counter + *self.current_time.lock().unwrap()) % 256) as u8;
         }
 
         Ok(OrderTime(token))
@@ -185,7 +187,14 @@ enum TimeAction {
     SetTime(u64),
     Freeze,
     Unfreeze,
+    #[allow(dead_code)]
     SetScale(f64),
+}
+
+impl Default for TimeScenarioBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TimeScenarioBuilder {
@@ -313,12 +322,12 @@ mod tests {
         let time_source = ControllableTimeSource::new(1000);
 
         // Normal sleep should advance time
-        time_source.sleep_ms(5000).await;
+        let _ = time_source.sleep_ms(5000).await;
         assert_eq!(time_source.current_timestamp(), 6000);
 
         // Frozen sleep should not advance time
         time_source.freeze();
-        time_source.sleep_ms(5000).await;
+        let _ = time_source.sleep_ms(5000).await;
         assert_eq!(time_source.current_timestamp(), 6000);
     }
 

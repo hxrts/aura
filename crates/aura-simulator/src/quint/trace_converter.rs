@@ -8,6 +8,7 @@ use crate::quint::types::{
     PropertyEvaluationResult, QuintInvariant, QuintSpec, QuintTemporalProperty, QuintValue,
     ValidationResult,
 };
+use serde_json;
 // Note: Testing module to be imported when module structure is finalized
 // use crate::testing::{ExecutionTrace, PropertyViolation, ViolationDetectionReport};
 
@@ -37,44 +38,39 @@ impl ExecutionTrace {
     }
 
     pub fn get_all_states(&self) -> Vec<Box<dyn SimulationState>> {
-        // TODO: Implement proper state deserialization
-        // This is currently a placeholder that will be implemented when the testing module is finalized
-
-        // TODO fix - For now, return a mock state for each step when in testing context
-        if !self.steps.is_empty() {
-            // Create simple test state
-            let state = TestSimulationStateImpl {
-                time: 1000,
-                tick: 1,
-            };
-            vec![Box::new(state)]
-        } else {
-            vec![]
-        }
+        self.steps
+            .iter()
+            .filter_map(|raw| {
+                serde_json::from_str::<std::collections::HashMap<String, QuintValue>>(raw)
+                    .ok()
+                    .map(|vars| {
+                        let time = vars
+                            .get("time")
+                            .and_then(|v| match v {
+                                QuintValue::Int(i) => Some(*i as u64),
+                                _ => None,
+                            })
+                            .unwrap_or(0);
+                        Box::new(JsonSimulationState { vars, time }) as Box<dyn SimulationState>
+                    })
+            })
+            .collect()
     }
 }
 
-// Simple implementation for testing purposes
 #[derive(Debug, Clone)]
-struct TestSimulationStateImpl {
+struct JsonSimulationState {
+    vars: std::collections::HashMap<String, QuintValue>,
     time: u64,
-    tick: u64,
 }
 
-impl SimulationState for TestSimulationStateImpl {
+impl SimulationState for JsonSimulationState {
     fn get_variable(&self, name: &str) -> Option<QuintValue> {
-        match name {
-            "time" => Some(QuintValue::Int(self.time as i64)),
-            "tick" => Some(QuintValue::Int(self.tick as i64)),
-            _ => None,
-        }
+        self.vars.get(name).cloned()
     }
 
     fn get_all_variables(&self) -> std::collections::HashMap<String, QuintValue> {
-        let mut vars = std::collections::HashMap::new();
-        vars.insert("time".to_string(), QuintValue::Int(self.time as i64));
-        vars.insert("tick".to_string(), QuintValue::Int(self.tick as i64));
-        vars
+        self.vars.clone()
     }
 
     fn get_current_time(&self) -> u64 {
@@ -82,7 +78,20 @@ impl SimulationState for TestSimulationStateImpl {
     }
 
     fn get_metadata(&self) -> std::collections::HashMap<String, QuintValue> {
-        std::collections::HashMap::new()
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert(
+            "participants".to_string(),
+            QuintValue::Int(
+                self.vars
+                    .get("participants")
+                    .and_then(|v| match v {
+                        QuintValue::Int(i) => Some(*i),
+                        _ => None,
+                    })
+                    .unwrap_or(0),
+            ),
+        );
+        metadata
     }
 }
 
@@ -907,7 +916,6 @@ impl TraceConverter {
     ) -> Result<PropertyEvaluationResult> {
         let start_time = crate::utils::time::current_unix_timestamp_millis();
 
-        // TODO fix - Simplified temporal property evaluation
         let holds = self.evaluate_temporal_property_on_trace(property, trace)?;
 
         let end_time = crate::utils::time::current_unix_timestamp_millis();
@@ -927,22 +935,51 @@ impl TraceConverter {
         })
     }
 
-    // TODO fix - Simplified evaluation methods (placeholders for actual Quint integration)
     fn evaluate_invariant_at_state(
         &self,
-        _invariant: &QuintInvariant,
-        _state: &QuintTraceState,
+        invariant: &QuintInvariant,
+        state: &QuintTraceState,
     ) -> Result<bool> {
-        // Placeholder - would integrate with actual Quint evaluator
-        Ok(true)
+        if !invariant.enabled {
+            return Ok(true);
+        }
+
+        if let Some(val) = state.variables.get(&invariant.expression) {
+            return Ok(match val {
+                QuintValue::Bool(b) => *b,
+                QuintValue::Int(i) => *i != 0,
+                QuintValue::String(s) => !s.is_empty(),
+                QuintValue::List(list) => !list.is_empty(),
+                QuintValue::Set(set) => !set.is_empty(),
+                QuintValue::Map(map) => !map.is_empty(),
+                QuintValue::Record(record) => !record.is_empty(),
+            });
+        }
+
+        Ok(false)
     }
 
     fn evaluate_temporal_property_on_trace(
         &self,
-        _property: &QuintTemporalProperty,
-        _trace: &QuintTrace,
+        property: &QuintTemporalProperty,
+        trace: &QuintTrace,
     ) -> Result<bool> {
-        // Placeholder - would implement temporal logic evaluation
+        if !property.enabled {
+            return Ok(true);
+        }
+
+        for state in &trace.states {
+            let satisfied = if let Some(val) = state.variables.get(&property.expression) {
+                matches!(val, QuintValue::Bool(true))
+            } else {
+                false
+            };
+
+            if !satisfied {
+                return Ok(false);
+            }
+        }
+
         Ok(true)
     }
 }
@@ -970,7 +1007,7 @@ impl ConversionStatistics {
         total_bytes += std::mem::size_of::<QuintTrace>() as u64;
 
         // Calculate trace ID string size
-        // total_bytes += quint_trace.id.len() as u64; // TODO: Fix when QuintTrace has id field
+        total_bytes += quint_trace.trace_id.len() as u64;
 
         // Calculate metadata size
         total_bytes += std::mem::size_of_val(&quint_trace.metadata) as u64;

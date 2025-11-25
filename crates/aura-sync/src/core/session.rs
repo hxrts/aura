@@ -9,9 +9,14 @@ use crate::core::{
     MetricsCollector, SyncConfig, SyncResult,
 };
 use aura_core::{DeviceId, SessionId};
+use aura_effects::time::wallclock_secs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+
+fn now_secs() -> u64 {
+    wallclock_secs()
+}
 
 /// Unified session state machine following choreographic patterns
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -54,10 +59,7 @@ impl<T> SessionState<T> {
     /// Check if session has timed out using current system time (compatibility method)
     #[allow(clippy::disallowed_methods)]
     pub fn is_timed_out_now(&self) -> bool {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = now_secs();
         self.is_timed_out(now)
     }
 
@@ -72,11 +74,8 @@ impl<T> SessionState<T> {
     }
 
     /// Get session duration in milliseconds (if active or completed)
-    pub fn duration_ms(&self) -> Option<u64> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+    pub fn duration_ms(&self, current_timestamp_secs: u64) -> Option<u64> {
+        let now = current_timestamp_secs;
 
         match self {
             SessionState::Active { started_at, .. } => Some((now - started_at) * 1000),
@@ -322,7 +321,7 @@ where
         }
 
         let session_id = SessionId::new();
-        // Use the provided now parameter instead of SystemTime::now()
+        // Use the provided now parameter instead of an implicit clock
         let now_secs = now;
 
         let session_state = SessionState::Initializing {
@@ -342,14 +341,24 @@ where
     }
 
     /// Activate a session with initial protocol state
-    pub fn activate_session(&mut self, session_id: SessionId, protocol_state: T) -> SyncResult<()> {
+    pub fn activate_session(
+        &mut self,
+        session_id: SessionId,
+        protocol_state: T,
+        current_timestamp_secs: Option<u64>,
+    ) -> SyncResult<()> {
         let session = self
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
+        let now = current_timestamp_secs.unwrap_or_else(|| {
+            // Fallback for compatibility when time is not provided
+            now_secs()
+        });
+
         // Check timeout before pattern matching to avoid borrow conflicts
-        if session.is_timed_out_now() {
+        if session.is_timed_out(now) {
             return Err(sync_timeout_error(
                 "session_activation",
                 self.config.timeout,
@@ -358,13 +367,6 @@ where
 
         match session {
             SessionState::Initializing { participants, .. } => {
-                // TODO: Consider updating activate_session to accept time parameter for unified time system
-                #[allow(clippy::disallowed_methods)]
-                let now = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs();
-
                 let participants = participants.clone();
                 *session = SessionState::Active {
                     protocol_state,
@@ -417,13 +419,15 @@ where
         operations_count: usize,
         bytes_transferred: usize,
         metadata: HashMap<String, String>,
+        current_timestamp_secs: Option<u64>,
     ) -> SyncResult<()> {
         let session = self
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
-        let duration_ms = session.duration_ms().unwrap_or(0);
+        let current_ts = current_timestamp_secs.unwrap_or_else(now_secs);
+        let duration_ms = session.duration_ms(current_ts).unwrap_or(0);
         let participants = session.participants().to_vec();
 
         let result = SessionResult::Success {
@@ -438,10 +442,7 @@ where
 
         // Record metrics
         if let Some(ref metrics) = self.metrics {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            let now = current_timestamp_secs.unwrap_or_else(now_secs);
             metrics.record_sync_completion(
                 &session_id.to_string(),
                 operations_count,
@@ -465,7 +466,8 @@ where
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
-        let duration_ms = session.duration_ms().unwrap_or(0);
+        let current_ts = now_secs();
+        let duration_ms = session.duration_ms(current_ts).unwrap_or(0);
 
         let result = SessionResult::Failure {
             error: error.clone(),
@@ -501,7 +503,8 @@ where
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
-        let duration_ms = session.duration_ms().unwrap_or(0);
+        let current_ts = now_secs();
+        let duration_ms = session.duration_ms(current_ts).unwrap_or(0);
         let last_known_state = format!("{:?}", session);
 
         let result = SessionResult::Timeout {
@@ -583,7 +586,7 @@ where
                 to_timeout.push(*session_id);
             } else if session.is_terminal() {
                 // Remove completed sessions after some time
-                if let Some(duration_ms) = session.duration_ms() {
+                if let Some(duration_ms) = session.duration_ms(now) {
                     if duration_ms > self.config.cleanup_interval.as_millis() as u64 {
                         to_remove.push(*session_id);
                     }
@@ -811,7 +814,7 @@ mod tests {
             data: vec![1, 2, 3],
         };
         manager
-            .activate_session(session_id, initial_state.clone())
+            .activate_session(session_id, initial_state.clone(), Some(now))
             .unwrap();
         assert_eq!(manager.count_active_sessions(), 1);
 
@@ -842,14 +845,16 @@ mod tests {
             phase: "test".to_string(),
             data: vec![],
         };
-        manager.activate_session(session_id, initial_state).unwrap();
+        manager
+            .activate_session(session_id, initial_state, Some(now))
+            .unwrap();
 
         // Complete session
         let mut metadata = HashMap::new();
         metadata.insert("test_key".to_string(), "test_value".to_string());
 
         manager
-            .complete_session(session_id, 100, 1024, metadata)
+            .complete_session(session_id, 100, 1024, metadata, None)
             .unwrap();
         assert_eq!(manager.count_active_sessions(), 0);
         assert_eq!(manager.count_completed_sessions(), 1);
@@ -881,7 +886,9 @@ mod tests {
             phase: "test".to_string(),
             data: vec![],
         };
-        manager.activate_session(session_id, initial_state).unwrap();
+        manager
+            .activate_session(session_id, initial_state, Some(now))
+            .unwrap();
 
         // Fail session
         let error = SessionError::ProtocolViolation {
@@ -928,8 +935,12 @@ mod tests {
             phase: "test".to_string(),
             data: vec![],
         };
-        manager.activate_session(session1, state.clone()).unwrap();
-        manager.activate_session(session2, state).unwrap();
+        manager
+            .activate_session(session1, state.clone(), Some(now))
+            .unwrap();
+        manager
+            .activate_session(session2, state, Some(now))
+            .unwrap();
 
         // Try to exceed limit
         let result = manager.create_session(vec![test_device_id(1)], now);
@@ -959,7 +970,7 @@ mod tests {
             phase: "test".to_string(),
             data: vec![],
         };
-        let result = manager.activate_session(session_id, state);
+        let result = manager.activate_session(session_id, state, None);
         assert!(result.is_err());
         // Timeout errors now map to Internal
         assert!(matches!(result.unwrap_err(), SyncError::Internal { .. }));
@@ -983,9 +994,9 @@ mod tests {
             phase: "test".to_string(),
             data: vec![],
         };
-        manager.activate_session(session_id, state).unwrap();
+        manager.activate_session(session_id, state, None).unwrap();
         manager
-            .complete_session(session_id, 0, 0, HashMap::new())
+            .complete_session(session_id, 0, 0, HashMap::new(), None)
             .unwrap();
 
         assert_eq!(manager.sessions.len(), 1);
@@ -1013,11 +1024,19 @@ mod tests {
                 phase: "test".to_string(),
                 data: vec![],
             };
-            manager.activate_session(session_id, state).unwrap();
+            manager
+                .activate_session(session_id, state, Some(now))
+                .unwrap();
 
             if i < 2 {
                 manager
-                    .complete_session(session_id, 10 * (i + 1), 100 * (i + 1), HashMap::new())
+                    .complete_session(
+                        session_id,
+                        10 * (i + 1),
+                        100 * (i + 1),
+                        HashMap::new(),
+                        None,
+                    )
                     .unwrap();
             } else {
                 let error = SessionError::ProtocolViolation {

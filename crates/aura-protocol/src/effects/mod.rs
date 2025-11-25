@@ -63,10 +63,10 @@ pub use choreographic::{
 };
 // Import core effects from aura-core
 pub use aura_core::effects::{
-    ConsoleEffects, CryptoEffects, CryptoError, JournalEffects, NetworkAddress, NetworkEffects,
-    NetworkError, PeerEvent, PeerEventStream, RandomEffects, StorageEffects, StorageError,
-    StorageLocation, StorageStats, SystemEffects, SystemError, TimeError, TimeoutHandle,
-    WakeCondition,
+    AuthorizationEffects, ConsoleEffects, CryptoEffects, CryptoError, JournalEffects,
+    LeakageEffects, NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream,
+    RandomEffects, StorageEffects, StorageError, StorageLocation, StorageStats, SystemEffects,
+    SystemError, TimeError, TimeoutHandle, WakeCondition,
 };
 // Domain-specific time traits (unified time system)
 pub use aura_core::effects::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects};
@@ -117,6 +117,8 @@ pub trait AuraEffects:
     + TreeEffects
     + ChoreographicEffects
     + SystemEffects
+    + AuthorizationEffects
+    + LeakageEffects
     + Send
     + Sync
 {

@@ -61,18 +61,13 @@ impl RelationshipId {
         }
     }
 
-    /// Generate a random relationship ID
-    #[allow(clippy::disallowed_methods)]
-    pub fn random() -> Self {
-        let id = hash::hash(uuid::Uuid::from_bytes([0u8; 16]).as_bytes());
-        Self(id)
-    }
-
     /// Create deterministic relationship ID from two entity IDs
     pub fn from_entities(entity1: &[u8], entity2: &[u8]) -> Self {
+        let mut inputs = [entity1, entity2];
+        inputs.sort();
         let mut h = hash::hasher();
-        h.update(entity1);
-        h.update(entity2);
+        h.update(inputs[0]);
+        h.update(inputs[1]);
         Self(h.finalize())
     }
 }

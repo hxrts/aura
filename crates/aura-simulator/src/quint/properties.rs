@@ -9,7 +9,6 @@ use crate::quint::types::{
     ValidationResult,
 };
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
 use thiserror::Error;
 
 /// Errors that can occur during property operations
@@ -449,11 +448,11 @@ impl PropertyMonitor {
     // SAFETY: timing measurement for property validation
     #[allow(clippy::disallowed_methods)]
     pub fn evaluate_properties(&mut self, _state: &dyn SimulationState) -> ValidationResult {
-        let start_time = Instant::now();
+        let start_time = aura_effects::time::monotonic_now();
         let mut validation_result = ValidationResult::new();
 
         for property in &self.monitored_properties {
-            let eval_start = Instant::now();
+            let eval_start = aura_effects::time::monotonic_now();
 
             // Placeholder evaluation - in production would use actual Quint evaluator
             let holds = self.evaluate_single_property(property, _state);

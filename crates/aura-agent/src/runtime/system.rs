@@ -13,6 +13,7 @@ use std::sync::Arc;
 /// Main runtime system for the agent
 pub struct RuntimeSystem {
     /// Effect executor
+    #[allow(dead_code)] // Will be used for effect dispatch
     effect_executor: EffectExecutor,
 
     /// Effect system
@@ -34,6 +35,7 @@ pub struct RuntimeSystem {
     lifecycle_manager: LifecycleManager,
 
     /// Configuration
+    #[allow(dead_code)] // Will be used for runtime configuration
     config: AgentConfig,
 
     /// Authority ID
@@ -42,6 +44,7 @@ pub struct RuntimeSystem {
 
 impl RuntimeSystem {
     /// Create a new runtime system
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         effect_executor: EffectExecutor,
         effect_system: std::sync::Arc<AuraEffectSystem>,

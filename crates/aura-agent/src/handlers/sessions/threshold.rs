@@ -10,6 +10,7 @@ use aura_protocol::effects::SessionType;
 
 impl SessionOperations {
     /// Create threshold operation session
+    #[allow(dead_code)] // Part of future threshold session API
     pub async fn create_threshold_session(
         &self,
         participants: Vec<DeviceId>,
@@ -42,6 +43,7 @@ impl SessionOperations {
     }
 
     /// Create key rotation session
+    #[allow(dead_code)] // Part of future threshold session API
     pub async fn create_key_rotation_session(&self) -> AgentResult<SessionHandle> {
         let effects = self.effects().read().await;
         let device_id = self.device_id();
@@ -94,7 +96,11 @@ mod tests {
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 
-        let participants = vec![sessions.device_id(), DeviceId::new(), DeviceId::new()];
+        let participants = vec![
+            sessions.device_id(),
+            DeviceId::from_bytes([1; 32]), // This will not be divisible by 5 when converted to u128
+            DeviceId::from_bytes([2; 32]), // This will not be divisible by 5 when converted to u128
+        ];
 
         let handle = sessions
             .create_threshold_session(participants, 2)

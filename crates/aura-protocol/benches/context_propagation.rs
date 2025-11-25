@@ -1,3 +1,4 @@
+#![allow(missing_docs)]
 //! Performance benchmarks for device and context operations
 //!
 //! These benchmarks measure:
@@ -22,14 +23,14 @@ fn bench_device_id_operations(c: &mut Criterion) {
         let id = DeviceId::from_bytes([1u8; 32]);
         b.iter(|| {
             let bytes = id.to_bytes();
-            black_box(bytes);
+            let _ = black_box(bytes);
         });
     });
 
     c.bench_function("device_id_clone", |b| {
         let id = DeviceId::from_bytes([1u8; 32]);
         b.iter(|| {
-            let cloned = id.clone();
+            let cloned = id;
             black_box(cloned);
         });
     });
@@ -48,7 +49,7 @@ fn bench_context_id_operations(c: &mut Criterion) {
         let id = ContextId::new();
         b.iter(|| {
             let bytes = id.to_bytes();
-            black_box(bytes);
+            let _ = black_box(bytes);
         });
     });
 
@@ -63,7 +64,7 @@ fn bench_context_id_operations(c: &mut Criterion) {
     c.bench_function("context_id_clone", |b| {
         let id = ContextId::new();
         b.iter(|| {
-            let cloned = id.clone();
+            let cloned = id;
             black_box(cloned);
         });
     });
@@ -86,7 +87,7 @@ fn bench_authority_id_operations(c: &mut Criterion) {
         let id = AuthorityId::from_uuid(uuid);
         b.iter(|| {
             let bytes = id.to_bytes();
-            black_box(bytes);
+            let _ = black_box(bytes);
         });
     });
 
@@ -94,7 +95,7 @@ fn bench_authority_id_operations(c: &mut Criterion) {
         let uuid = Uuid::from_bytes([2u8; 16]);
         let id = AuthorityId::from_uuid(uuid);
         b.iter(|| {
-            let cloned = id.clone();
+            let cloned = id;
             black_box(cloned);
         });
     });
@@ -121,7 +122,7 @@ fn bench_identifier_equality(c: &mut Criterion) {
     });
 
     let context1 = ContextId::new();
-    let context2 = context1.clone();
+    let context2 = context1;
 
     c.bench_function("context_id_equality", |b| {
         b.iter(|| {
@@ -169,6 +170,7 @@ fn bench_identifier_hashing(c: &mut Criterion) {
     });
 }
 
+// Register all context propagation benchmarks with criterion
 criterion_group!(
     benches,
     bench_device_id_operations,

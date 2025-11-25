@@ -116,7 +116,7 @@ async fn create_directory_through_effects(
 
 /// Create placeholder effect API data
 async fn create_placeholder_effect_api(
-    ctx: &EffectContext,
+    _ctx: &EffectContext,
     effects: &AuraEffectSystem,
     threshold: u32,
     num_devices: u32,

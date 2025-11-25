@@ -5,13 +5,17 @@
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::EffectContext;
 use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
+use std::time::Duration;
+use tokio::time::sleep;
 
 /// Handler context combining authority context with runtime utilities
 pub struct HandlerContext {
     /// Authority context
+    #[allow(dead_code)] // Will be used for authority operations
     pub authority: AuthorityContext,
 
     /// Effect context for operations
+    #[allow(dead_code)] // Will be used for effect operations
     pub effect_context: EffectContext,
 }
 
@@ -33,22 +37,38 @@ impl HandlerContext {
     }
 
     /// Get storage key for this authority
+    #[allow(dead_code)] // Part of future handler utilities API
     pub fn authority_storage_key(&self) -> String {
         format!("authority_{}", self.authority.authority_id)
     }
 
     /// Get storage key for a context
+    #[allow(dead_code)] // Part of future handler utilities API
     pub fn context_storage_key(&self, context_id: &ContextId) -> String {
         format!("context_{}", context_id)
     }
 
     /// Execute operation with reliability (retry + backoff)
+    #[allow(dead_code)] // Part of future handler utilities API
     pub async fn with_retry<T, E, F>(&self, mut operation: F) -> Result<T, E>
     where
         F: FnMut() -> Result<T, E>,
     {
-        // TODO: Implement actual retry logic when reliability module is available
-        // For now, just execute once
+        let max_attempts = 3;
+        for attempt in 0..max_attempts {
+            match operation() {
+                Ok(result) => return Ok(result),
+                Err(err) => {
+                    if attempt + 1 == max_attempts {
+                        return Err(err);
+                    }
+                    // Exponential-ish backoff for subsequent attempts
+                    let delay_ms = 10u64 * (1 << attempt);
+                    sleep(Duration::from_millis(delay_ms)).await;
+                }
+            }
+        }
+        // Should never reach here
         operation()
     }
 }
@@ -58,6 +78,7 @@ pub struct HandlerUtilities;
 
 impl HandlerUtilities {
     /// Create effect context from authority
+    #[allow(dead_code)] // Part of future handler utilities API
     pub fn create_effect_context(
         authority_id: AuthorityId,
         _session_id: Option<SessionId>,
@@ -85,11 +106,13 @@ impl HandlerUtilities {
     }
 
     /// Create storage key for authority data
+    #[allow(dead_code)] // Part of future handler utilities API
     pub fn authority_storage_key(authority_id: &AuthorityId) -> String {
         format!("authority_{}", authority_id)
     }
 
     /// Create storage key for context data
+    #[allow(dead_code)] // Part of future handler utilities API
     pub fn context_storage_key(context_id: &ContextId) -> String {
         format!("context_{}", context_id)
     }

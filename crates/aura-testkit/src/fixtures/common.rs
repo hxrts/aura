@@ -471,8 +471,6 @@ async fn create_test_account_with_stateless_effects<E>(
 where
     E: aura_core::effects::CryptoEffects + aura_core::effects::RandomEffects,
 {
-    use aura_core::effects::{CryptoEffects, RandomEffects};
-
     // Generate device IDs using the effect system
     let mut device_ids = Vec::new();
     for _ in 0..total_devices {
@@ -492,7 +490,7 @@ where
     // Create account journal using the first device ID to generate a unique AccountId
     let device_uuid: uuid::Uuid = device_ids[0].into();
     let account_id = AccountId::from_uuid(device_uuid);
-    let account_state = Journal::new(account_id);
+    let account_state = Journal::new(account_id, effects).await?;
 
     // TODO: Implement proper fact-based device addition using AttestedOps
     // The DeviceMetadata and add_device APIs have been removed in favor of

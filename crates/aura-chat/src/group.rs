@@ -87,7 +87,7 @@ mod tests {
     use uuid::Uuid;
 
     fn create_test_group() -> ChatGroup {
-        let group_id = ChatGroupId::from_uuid(Uuid::new_v4());
+        let group_id = ChatGroupId::from_uuid(Uuid::from_bytes([1u8; 16]));
         let creator_id = AuthorityId::new();
         // Use deterministic time for tests instead of system time
         let now = TimeStamp::PhysicalClock(PhysicalTime {
@@ -100,7 +100,7 @@ mod tests {
             name: "Test Group".to_string(),
             description: "A test group".to_string(),
             created_at: now.clone(),
-            created_by: creator_id.clone(),
+            created_by: creator_id,
             members: vec![ChatMember {
                 authority_id: creator_id,
                 display_name: "Creator".to_string(),

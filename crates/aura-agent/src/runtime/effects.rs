@@ -22,8 +22,9 @@ use aura_effects::{
 use aura_journal::commitment_tree::state::TreeState;
 use aura_protocol::effects::tree::{Cut, Partial, ProposalId, Snapshot};
 use aura_protocol::effects::{
-    AuraEffects, ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
-    ChoreographyMetrics, EffectApiEffects, EffectApiError, EffectApiEventStream, TreeEffects,
+    AuraEffects, AuthorizationEffects, ChoreographicEffects, ChoreographicRole, ChoreographyError,
+    ChoreographyEvent, ChoreographyMetrics, EffectApiEffects, EffectApiError, EffectApiEventStream,
+    LeakageEffects, TreeEffects,
 };
 use aura_protocol::guards::effect_system_trait::GuardEffectSystem;
 use aura_wot::{BiscuitAuthorizationBridge, FlowBudgetHandler};
@@ -33,6 +34,7 @@ use std::collections::HashMap;
 /// Effect executor for dispatching effect calls
 ///
 /// Note: This wraps aura-composition infrastructure for Layer 6 runtime concerns.
+#[allow(dead_code)] // Part of future effect system API
 pub struct EffectExecutor {
     config: AgentConfig,
     composite: CompositeHandlerAdapter,
@@ -40,6 +42,7 @@ pub struct EffectExecutor {
 
 impl EffectExecutor {
     /// Create new effect executor
+    #[allow(dead_code)] // Part of future effect system API
     pub fn new(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
         let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_testing(device_id);
@@ -47,6 +50,7 @@ impl EffectExecutor {
     }
 
     /// Create production effect executor
+    #[allow(dead_code)] // Part of future effect system API
     pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
         let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_production(device_id);
@@ -54,6 +58,7 @@ impl EffectExecutor {
     }
 
     /// Create testing effect executor
+    #[allow(dead_code)] // Part of future effect system API
     pub fn testing(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
         let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_testing(device_id);
@@ -61,6 +66,7 @@ impl EffectExecutor {
     }
 
     /// Create simulation effect executor
+    #[allow(dead_code)] // Part of future effect system API
     pub fn simulation(config: AgentConfig, seed: u64) -> Result<Self, crate::core::AgentError> {
         let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_simulation(device_id, seed);
@@ -68,6 +74,7 @@ impl EffectExecutor {
     }
 
     /// Dispatch effect call
+    #[allow(dead_code)] // Part of future effect system API
     pub async fn execute<T>(&self, effect_call: T) -> AgentResult<T::Output>
     where
         T: EffectCall,
@@ -78,6 +85,7 @@ impl EffectExecutor {
 
 /// Trait for effect calls that can be executed
 #[async_trait]
+#[allow(dead_code)] // Part of future effect system API
 pub trait EffectCall: Send + Sync {
     type Output;
 
@@ -96,6 +104,9 @@ pub struct AuraEffectSystem {
     time_handler: PhysicalTimeHandler,
     logical_clock: LogicalClockHandler,
     order_clock: OrderClockHandler,
+    authorization_handler:
+        aura_wot::effects::WotAuthorizationHandler<aura_effects::crypto::RealCryptoHandler>,
+    leakage_handler: aura_effects::leakage_handler::ProductionLeakageHandler,
     journal_policy: Option<(biscuit_auth::Biscuit, aura_wot::BiscuitAuthorizationBridge)>,
     journal_verifying_key: Option<Vec<u8>>,
     authority_id: AuthorityId,
@@ -109,15 +120,22 @@ impl AuraEffectSystem {
         let authority = AuthorityId::from_uuid(config.device_id().0);
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
         let storage_base = config.storage.base_path.clone();
+        let crypto_handler = RealCryptoHandler::new();
+        let authorization_handler =
+            aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
+        let leakage_handler =
+            aura_effects::leakage_handler::ProductionLeakageHandler::with_defaults();
         Ok(Self {
             config,
             composite,
             flow_budget: FlowBudgetHandler::new(authority),
-            crypto_handler: RealCryptoHandler::new(),
+            crypto_handler,
             storage_handler: FilesystemStorageHandler::new(storage_base),
             time_handler: PhysicalTimeHandler::new(),
             logical_clock: LogicalClockHandler::new(Some(device_id)),
-            order_clock: OrderClockHandler::default(),
+            order_clock: OrderClockHandler,
+            authorization_handler,
+            leakage_handler,
             journal_policy,
             journal_verifying_key,
             authority_id: authority,
@@ -131,15 +149,22 @@ impl AuraEffectSystem {
         let authority = AuthorityId::from_uuid(config.device_id().0);
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
         let storage_base = config.storage.base_path.clone();
+        let crypto_handler = RealCryptoHandler::new();
+        let authorization_handler =
+            aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
+        let leakage_handler =
+            aura_effects::leakage_handler::ProductionLeakageHandler::with_defaults();
         Ok(Self {
             config,
             composite,
             flow_budget: FlowBudgetHandler::new(authority),
-            crypto_handler: RealCryptoHandler::new(),
+            crypto_handler,
             storage_handler: FilesystemStorageHandler::new(storage_base),
             time_handler: PhysicalTimeHandler::new(),
             logical_clock: LogicalClockHandler::new(Some(device_id)),
-            order_clock: OrderClockHandler::default(),
+            order_clock: OrderClockHandler,
+            authorization_handler,
+            leakage_handler,
             journal_policy,
             journal_verifying_key,
             authority_id: authority,
@@ -151,15 +176,22 @@ impl AuraEffectSystem {
         let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_testing(device_id);
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
+        let crypto_handler = RealCryptoHandler::new();
+        let authorization_handler =
+            aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
+        let leakage_handler =
+            aura_effects::leakage_handler::ProductionLeakageHandler::with_defaults();
         Ok(Self {
             config: config.clone(),
             composite,
             flow_budget: FlowBudgetHandler::new(AuthorityId::from_uuid(config.device_id().0)),
-            crypto_handler: RealCryptoHandler::new(),
+            crypto_handler,
             storage_handler: FilesystemStorageHandler::new(config.storage.base_path.clone()),
             time_handler: PhysicalTimeHandler::new(),
             logical_clock: LogicalClockHandler::new(Some(device_id)),
-            order_clock: OrderClockHandler::default(),
+            order_clock: OrderClockHandler,
+            authorization_handler,
+            leakage_handler,
             journal_policy,
             journal_verifying_key,
             authority_id: AuthorityId::from_uuid(config.device_id().0),
@@ -171,15 +203,22 @@ impl AuraEffectSystem {
         let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_simulation(device_id, seed);
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
+        let crypto_handler = RealCryptoHandler::new();
+        let authorization_handler =
+            aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
+        let leakage_handler =
+            aura_effects::leakage_handler::ProductionLeakageHandler::with_defaults();
         Ok(Self {
             config: config.clone(),
             composite,
             flow_budget: FlowBudgetHandler::new(AuthorityId::from_uuid(config.device_id().0)),
-            crypto_handler: RealCryptoHandler::new(),
+            crypto_handler,
             storage_handler: FilesystemStorageHandler::new(config.storage.base_path.clone()),
             time_handler: PhysicalTimeHandler::new(),
             logical_clock: LogicalClockHandler::new(Some(device_id)),
-            order_clock: OrderClockHandler::default(),
+            order_clock: OrderClockHandler,
+            authorization_handler,
+            leakage_handler,
             journal_policy,
             journal_verifying_key,
             authority_id: AuthorityId::from_uuid(config.device_id().0),
@@ -267,7 +306,7 @@ impl RandomEffects for AuraEffectSystem {
     #[allow(clippy::disallowed_methods)]
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         use rand::RngCore;
-        let mut rng = rand::thread_rng();
+        let mut rng = aura_effects::time::seeded_rng([7u8; 32]);
         let mut bytes = vec![0u8; len];
         rng.fill_bytes(&mut bytes);
         bytes
@@ -276,7 +315,7 @@ impl RandomEffects for AuraEffectSystem {
     #[allow(clippy::disallowed_methods)]
     async fn random_bytes_32(&self) -> [u8; 32] {
         use rand::RngCore;
-        let mut rng = rand::thread_rng();
+        let mut rng = aura_effects::time::seeded_rng([11u8; 32]);
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);
         bytes
@@ -285,14 +324,14 @@ impl RandomEffects for AuraEffectSystem {
     #[allow(clippy::disallowed_methods)]
     async fn random_u64(&self) -> u64 {
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = aura_effects::time::seeded_rng([19u8; 32]);
         rng.gen()
     }
 
     #[allow(clippy::disallowed_methods)]
     async fn random_range(&self, min: u64, max: u64) -> u64 {
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = aura_effects::time::seeded_rng([23u8; 32]);
         rng.gen_range(min..=max)
     }
 
@@ -1048,6 +1087,75 @@ impl GuardEffectSystem for AuraEffectSystem {
     }
 }
 
+// AuthorizationEffects implementation delegating to the handler
+#[async_trait]
+impl AuthorizationEffects for AuraEffectSystem {
+    async fn verify_capability(
+        &self,
+        capabilities: &aura_core::Cap,
+        operation: &str,
+        resource: &str,
+    ) -> Result<bool, aura_core::effects::AuthorizationError> {
+        self.authorization_handler
+            .verify_capability(capabilities, operation, resource)
+            .await
+    }
+
+    async fn delegate_capabilities(
+        &self,
+        source_capabilities: &aura_core::Cap,
+        requested_capabilities: &aura_core::Cap,
+        target_authority: &AuthorityId,
+    ) -> Result<aura_core::Cap, aura_core::effects::AuthorizationError> {
+        self.authorization_handler
+            .delegate_capabilities(
+                source_capabilities,
+                requested_capabilities,
+                target_authority,
+            )
+            .await
+    }
+}
+
+// LeakageEffects implementation delegating to the handler
+#[async_trait]
+impl LeakageEffects for AuraEffectSystem {
+    async fn record_leakage(
+        &self,
+        event: aura_core::effects::LeakageEvent,
+    ) -> aura_core::Result<()> {
+        self.leakage_handler.record_leakage(event).await
+    }
+
+    async fn get_leakage_budget(
+        &self,
+        context_id: aura_core::identifiers::ContextId,
+    ) -> aura_core::Result<aura_core::effects::LeakageBudget> {
+        self.leakage_handler.get_leakage_budget(context_id).await
+    }
+
+    async fn check_leakage_budget(
+        &self,
+        context_id: aura_core::identifiers::ContextId,
+        observer: aura_core::effects::ObserverClass,
+        amount: u64,
+    ) -> aura_core::Result<bool> {
+        self.leakage_handler
+            .check_leakage_budget(context_id, observer, amount)
+            .await
+    }
+
+    async fn get_leakage_history(
+        &self,
+        context_id: aura_core::identifiers::ContextId,
+        since_timestamp: Option<u64>,
+    ) -> aura_core::Result<Vec<aura_core::effects::LeakageEvent>> {
+        self.leakage_handler
+            .get_leakage_history(context_id, since_timestamp)
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1106,7 +1214,10 @@ impl std::fmt::Debug for AuraEffectSystem {
             .field("config", &self.config)
             .field("authority_id", &self.authority_id)
             .field("journal_policy", &self.journal_policy.is_some())
-            .field("journal_verifying_key", &self.journal_verifying_key.is_some())
+            .field(
+                "journal_verifying_key",
+                &self.journal_verifying_key.is_some(),
+            )
             .finish_non_exhaustive()
     }
 }

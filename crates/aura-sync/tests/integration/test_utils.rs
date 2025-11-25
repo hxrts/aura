@@ -12,28 +12,29 @@ use aura_sync::{
         JournalSyncConfig, JournalSyncProtocol, OTAConfig, OTAProtocol, SnapshotConfig,
         SnapshotProtocol,
     },
-    services::{MaintenanceService, SyncService},
 };
 use aura_testkit::{
-    builders::{account::*, device::*},
-    foundation::{create_mock_test_context, TestEffectComposer},
+    foundation::TestEffectComposer,
     simulation::{
-        choreography::{
-            ChoreographyTestHarness, CoordinatedSession, MockSessionState, SessionStatus, TestError,
-        },
+        choreography::{ChoreographyTestHarness, CoordinatedSession, SessionStatus},
         network::{NetworkCondition, NetworkSimulator},
     },
 };
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tokio::time::timeout;
 
 /// Test fixture for multi-device sync scenarios
 pub struct MultiDeviceTestFixture {
+    /// Choreography test harness for coordinating devices
     pub harness: ChoreographyTestHarness,
+    /// Network simulator for controlling message delivery
     pub network: NetworkSimulator,
+    /// List of device IDs in the test scenario
     pub devices: Vec<DeviceId>,
+    /// Session managers for each device
     pub session_managers: HashMap<DeviceId, SessionManager<()>>,
+    /// Sync configuration for the test
     pub config: SyncConfig,
 }
 
@@ -102,10 +103,7 @@ impl MultiDeviceTestFixture {
 
     /// Get current time for session management
     fn current_time() -> u64 {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
+        aura_effects::time::wallclock_secs()
     }
 
     /// Create coordinated session across all devices

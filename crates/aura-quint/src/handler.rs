@@ -9,8 +9,8 @@ use aura_core::effects::{
     QuintEvaluationEffects, QuintVerificationEffects, VerificationId, VerificationResult,
 };
 use aura_core::Result;
+use aura_effects::time::monotonic_now;
 use serde_json::Value;
-use std::time::Instant;
 
 /// Stateless Quint evaluator handler implementing core evaluation effects
 #[derive(Debug, Clone)]
@@ -65,7 +65,7 @@ impl Default for QuintEvaluator {
 impl QuintEvaluationEffects for QuintEvaluator {
     async fn load_property_spec(&self, _spec_source: &str) -> Result<PropertySpec> {
         #[allow(clippy::disallowed_methods)]
-        let start = Instant::now();
+        let start = monotonic_now();
 
         if self.config.verbose {
             tracing::debug!("Loading property spec from source");
@@ -91,7 +91,7 @@ impl QuintEvaluationEffects for QuintEvaluator {
         _state: &Value,
     ) -> Result<EvaluationResult> {
         #[allow(clippy::disallowed_methods)]
-        let start = Instant::now();
+        let start = monotonic_now();
 
         if self.config.verbose {
             tracing::debug!("Evaluating property: {}", property.name);
@@ -123,7 +123,7 @@ impl QuintEvaluationEffects for QuintEvaluator {
 
     async fn run_verification(&self, spec: &PropertySpec) -> Result<VerificationResult> {
         #[allow(clippy::disallowed_methods)]
-        let start = Instant::now();
+        let start = monotonic_now();
 
         if self.config.verbose {
             tracing::debug!("Running verification for spec: {}", spec.name);
@@ -205,7 +205,7 @@ impl QuintVerificationEffects for QuintEvaluator {
         }
 
         #[allow(clippy::disallowed_methods)]
-        let start = Instant::now();
+        let start = monotonic_now();
         let verification_id = VerificationId::generate();
 
         // Use the core evaluation to check the property

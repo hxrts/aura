@@ -33,10 +33,6 @@
 //! }
 //! ```
 
-// TODO: Refactor to use PhysicalTimeEffects/Logical clocks. Uses Instant::now() for sync timing
-// which should be replaced with effect system integration.
-#![allow(clippy::disallowed_methods)]
-
 use std::collections::HashMap;
 use std::time::Duration;
 

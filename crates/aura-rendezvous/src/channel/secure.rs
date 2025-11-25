@@ -4,11 +4,12 @@
 //! Feature crate: Complete end-to-end secure channel establishment using choreography.
 //! Target: <300 lines, focused on domain-specific transport security.
 
+use aura_core::effects::PhysicalTimeEffects;
+use aura_core::time::PhysicalTime;
 use aura_core::{AuraError, ContextId, DeviceId};
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::SystemTime;
 
 /// Secure channel coordinator using choreographic protocols
 #[derive(Debug, Clone)]
@@ -32,8 +33,8 @@ pub struct ChannelState {
     pub channel_id: String,
     pub peer_id: DeviceId,
     pub state: ChannelLifecycleState,
-    pub established_at: Option<SystemTime>,
-    pub last_rotation: Option<SystemTime>,
+    pub established_at: Option<PhysicalTime>,
+    pub last_rotation: Option<PhysicalTime>,
 }
 
 /// Channel lifecycle states
@@ -75,8 +76,8 @@ pub struct HandshakeResponse {
 pub struct HandshakeComplete {
     pub channel_id: String,
     pub shared_secret_hash: Vec<u8>,
-    pub established_at: SystemTime,
-    pub rotation_schedule: Option<SystemTime>,
+    pub established_at: PhysicalTime,
+    pub rotation_schedule: Option<PhysicalTime>,
 }
 
 /// Handshake result enumeration
@@ -93,7 +94,7 @@ pub struct KeyRotationRequest {
     pub channel_id: String,
     pub new_public_key: Vec<u8>,
     pub rotation_nonce: Vec<u8>,
-    pub timestamp: SystemTime,
+    pub timestamp: PhysicalTime,
 }
 
 impl Default for ChannelConfig {
@@ -122,22 +123,23 @@ impl SecureChannelCoordinator {
     }
 
     /// Initialize new channel
-    pub fn init_channel(
+    pub async fn init_channel(
         &mut self,
         peer_id: DeviceId,
         _context_id: ContextId,
+        time_effects: &dyn PhysicalTimeEffects,
     ) -> Result<String, AuraError> {
         if self.active_channels.len() >= self.channel_config.max_concurrent_channels {
             return Err(AuraError::invalid("Maximum concurrent channels exceeded"));
         }
 
+        let physical_time = time_effects.physical_time().await?;
+        let timestamp = physical_time.ts_ms;
+
         let channel_id = format!(
             "channel-{}-{}",
             &format!("{:?}", self.device_id)[..8],
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
+            timestamp
         );
 
         let channel_state = ChannelState {
@@ -154,9 +156,10 @@ impl SecureChannelCoordinator {
     }
 
     /// Process handshake response
-    pub fn process_handshake_response(
+    pub async fn process_handshake_response(
         &mut self,
         response: &HandshakeResponse,
+        time_effects: &dyn PhysicalTimeEffects,
     ) -> Result<bool, AuraError> {
         let channel = self
             .active_channels
@@ -168,7 +171,8 @@ impl SecureChannelCoordinator {
         match &response.handshake_result {
             HandshakeResult::Accept => {
                 channel.state = ChannelLifecycleState::Established;
-                channel.established_at = Some(SystemTime::now());
+                let physical_time = time_effects.physical_time().await?;
+                channel.established_at = Some(physical_time.clone());
                 Ok(true)
             }
             HandshakeResult::Reject { reason } => {
@@ -183,15 +187,19 @@ impl SecureChannelCoordinator {
     }
 
     /// Check if key rotation is needed
-    pub fn needs_key_rotation(&self, channel_id: &str) -> bool {
+    pub fn needs_key_rotation(&self, channel_id: &str, current_time: PhysicalTime) -> bool {
         if let Some(channel) = self.active_channels.get(channel_id) {
-            if let Some(last_rotation) = channel.last_rotation {
-                return last_rotation.elapsed().unwrap_or_default()
-                    >= self.channel_config.key_rotation_interval;
+            if let Some(last_rotation) = &channel.last_rotation {
+                if let Some(duration_ms) = current_time.ts_ms.checked_sub(last_rotation.ts_ms) {
+                    return std::time::Duration::from_millis(duration_ms)
+                        >= self.channel_config.key_rotation_interval;
+                }
             }
-            if let Some(established_at) = channel.established_at {
-                return established_at.elapsed().unwrap_or_default()
-                    >= self.channel_config.key_rotation_interval;
+            if let Some(established_at) = &channel.established_at {
+                if let Some(duration_ms) = current_time.ts_ms.checked_sub(established_at.ts_ms) {
+                    return std::time::Duration::from_millis(duration_ms)
+                        >= self.channel_config.key_rotation_interval;
+                }
             }
         }
         false
@@ -294,16 +302,22 @@ mod key_rotation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_testkit::time::controllable_time::ControllableTimeSource;
 
-    #[test]
-    fn test_channel_initialization() {
+    fn time_source() -> ControllableTimeSource {
+        ControllableTimeSource::new(0)
+    }
+
+    #[tokio::test]
+    async fn test_channel_initialization() {
         let mut coordinator =
             SecureChannelCoordinator::new(DeviceId::from([1u8; 32]), ChannelConfig::default());
 
         let peer_id = DeviceId::from([2u8; 32]);
         let context_id = ContextId::new();
+        let time = time_source();
 
-        let result = coordinator.init_channel(peer_id, context_id);
+        let result = coordinator.init_channel(peer_id, context_id, &time).await;
         assert!(result.is_ok());
 
         let channel_id = result.unwrap();
@@ -312,14 +326,18 @@ mod tests {
         assert_eq!(channel_state.unwrap().peer_id, peer_id);
     }
 
-    #[test]
-    fn test_handshake_acceptance() {
+    #[tokio::test]
+    async fn test_handshake_acceptance() {
         let mut coordinator =
             SecureChannelCoordinator::new(DeviceId::from([1u8; 32]), ChannelConfig::default());
 
         let peer_id = DeviceId::from([2u8; 32]);
         let context_id = ContextId::new();
-        let channel_id = coordinator.init_channel(peer_id, context_id).unwrap();
+        let time = time_source();
+        let channel_id = coordinator
+            .init_channel(peer_id, context_id, &time)
+            .await
+            .unwrap();
 
         let response = HandshakeResponse {
             channel_id: channel_id.clone(),
@@ -330,7 +348,9 @@ mod tests {
             handshake_result: HandshakeResult::Accept,
         };
 
-        let result = coordinator.process_handshake_response(&response);
+        let result = coordinator
+            .process_handshake_response(&response, &time)
+            .await;
         assert!(result.is_ok());
         assert!(result.unwrap()); // Should be true for accept
 

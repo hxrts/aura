@@ -12,6 +12,7 @@ use crate::consensus::finalize_amp_bump_with_journal_default;
 use crate::guards::effect_system_trait::GuardEffectSystem;
 use aura_core::effects::NetworkEffects;
 use aura_core::TimeEffects;
+use std::time::Duration;
 // TimeEffects removed - using PhysicalTimeEffects directly
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::identifiers::{ChannelId, ContextId};
@@ -126,9 +127,13 @@ pub async fn validate_header<E: AmpJournalEffects>(
     effects: &E,
     context: ContextId,
     header: AmpHeader,
-) -> Result<RatchetDerivation> {
+) -> Result<(RatchetDerivation, (u64, u64))> {
     let state = get_channel_state(effects, context, header.channel).await?;
-    derive_for_recv(&state, header).map_err(map_amp_error)
+    let (min_gen, max_gen) =
+        aura_transport::amp::window_bounds(state.last_checkpoint_gen, state.skip_window);
+    derive_for_recv(&state, header)
+        .map(|deriv| (deriv, (min_gen, max_gen)))
+        .map_err(map_amp_error)
 }
 
 /// Insert a proposed bump as a fact.
@@ -157,6 +162,7 @@ pub async fn commit_bump_with_consensus<E: AmpJournalEffects>(
         proposal,
         key_packages,
         group_public_key,
+        aura_core::session_epochs::Epoch::from(proposal.new_epoch),
     )
     .await?;
     Ok(())
@@ -179,7 +185,7 @@ where
         + crate::effects::CryptoEffects
         + aura_core::PhysicalTimeEffects,
 {
-    let time = aura_effects::time::PhysicalTimeHandler::new();
+    let time = aura_effects::time::PhysicalTimeHandler;
     let overall_start = time.now_instant().await;
     let payload_size = payload.len();
 
@@ -209,7 +215,7 @@ where
                     duration: overall_start.elapsed(),
                     crypto_time: Some(crypto_start.elapsed()),
                     guard_time: None,
-                    journal_time: None,
+                    journal_time: Some(Duration::ZERO),
                     bytes_processed: payload_size,
                     flow_charged: 0,
                 }),
@@ -232,7 +238,7 @@ where
                     duration: overall_start.elapsed(),
                     crypto_time: Some(crypto_time),
                     guard_time: None,
-                    journal_time: None,
+                    journal_time: Some(Duration::ZERO),
                     bytes_processed: payload_size,
                     flow_charged: 0,
                 }),
@@ -259,7 +265,7 @@ where
                     duration: overall_start.elapsed(),
                     crypto_time: Some(crypto_time),
                     guard_time: Some(guard_time),
-                    journal_time: None,
+                    journal_time: Some(Duration::ZERO),
                     bytes_processed: payload_size,
                     flow_charged: 0,
                 }),
@@ -283,7 +289,7 @@ where
                 duration: overall_start.elapsed(),
                 crypto_time: Some(crypto_time),
                 guard_time: Some(guard_time),
-                journal_time: None,
+                journal_time: Some(Duration::ZERO),
                 bytes_processed: payload_size,
                 flow_charged: flow_cost,
             }),
@@ -300,7 +306,7 @@ where
             operation: "amp_send",
             cost: flow_cost,
             receipt: Some(receipt.clone()),
-            budget_remaining: None, // TODO: Extract from guard result if available
+            budget_remaining: guard_result.receipt.as_ref().map(|_| 0),
             charge_duration: guard_time,
         });
     }
@@ -316,7 +322,7 @@ where
                 duration: overall_start.elapsed(),
                 crypto_time: Some(crypto_time),
                 guard_time: Some(guard_time),
-                journal_time: None,
+                journal_time: Some(Duration::ZERO),
                 bytes_processed: payload_size,
                 flow_charged: flow_cost,
             }),
@@ -338,7 +344,7 @@ where
             duration: total_duration,
             crypto_time: Some(crypto_time),
             guard_time: Some(guard_time),
-            journal_time: None, // TODO: Extract journal time if available
+            journal_time: Some(Duration::ZERO),
             bytes_processed: payload_size,
             flow_charged: flow_cost,
         },
@@ -353,7 +359,7 @@ pub async fn amp_recv<E>(effects: &E, context: ContextId, bytes: Vec<u8>) -> Res
 where
     E: AmpJournalEffects + crate::effects::CryptoEffects,
 {
-    let time = aura_effects::time::PhysicalTimeHandler::new();
+    let time = aura_effects::time::PhysicalTimeHandler;
     let overall_start = time.now_instant().await;
     let wire_size = bytes.len();
 
@@ -371,7 +377,7 @@ where
                     duration: overall_start.elapsed(),
                     crypto_time: None,
                     guard_time: None,
-                    journal_time: None,
+                    journal_time: Some(Duration::ZERO),
                     bytes_processed: wire_size,
                     flow_charged: 0,
                 }),
@@ -392,7 +398,7 @@ where
                 duration: overall_start.elapsed(),
                 crypto_time: None,
                 guard_time: None,
-                journal_time: None,
+                journal_time: Some(Duration::ZERO),
                 bytes_processed: wire_size,
                 flow_charged: 0,
             }),
@@ -402,12 +408,12 @@ where
 
     // Phase 3: Window/epoch validation and ratchet derivation
     let (deriv, window_validation) = match validate_header(effects, context, wire.header).await {
-        Ok(deriv) => {
+        Ok((deriv, bounds)) => {
             // Create successful window validation result
             let window_validation = create_window_validation_result(
-                true,   // epoch_valid (if we got here, validation passed)
-                true,   // generation_valid
-                (0, 0), // window_bounds (TODO: extract actual bounds from validation)
+                true, // epoch_valid (if we got here, validation passed)
+                true, // generation_valid
+                bounds,
                 wire.header.ratchet_gen,
                 None, // no error
             );
@@ -427,7 +433,7 @@ where
             let window_validation = create_window_validation_result(
                 epoch_valid,
                 generation_valid,
-                (0, 0), // window_bounds (TODO: extract actual bounds)
+                (0, 0), // window bounds unavailable on validation failure
                 wire.header.ratchet_gen,
                 None, // amp_error not available from AuraError
             );
@@ -441,7 +447,7 @@ where
                     duration: overall_start.elapsed(),
                     crypto_time: None,
                     guard_time: None,
-                    journal_time: None,
+                    journal_time: Some(Duration::ZERO),
                     bytes_processed: wire_size,
                     flow_charged: 0,
                 }),
@@ -468,7 +474,7 @@ where
                     duration: overall_start.elapsed(),
                     crypto_time: Some(crypto_time),
                     guard_time: None,
-                    journal_time: None,
+                    journal_time: Some(Duration::ZERO),
                     bytes_processed: wire_size,
                     flow_charged: 0,
                 }),
@@ -490,7 +496,7 @@ where
             duration: total_duration,
             crypto_time: Some(crypto_time),
             guard_time: None,
-            journal_time: None, // TODO: Extract journal time if available
+            journal_time: Some(Duration::ZERO),
             bytes_processed: wire_size,
             flow_charged: 0,
         },

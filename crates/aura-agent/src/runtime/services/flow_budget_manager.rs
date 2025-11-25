@@ -6,6 +6,7 @@ use crate::core::AgentConfig;
 
 /// Flow budget manager service
 pub struct FlowBudgetManager {
+    #[allow(dead_code)] // Will be used for flow budget configuration
     config: AgentConfig,
 }
 

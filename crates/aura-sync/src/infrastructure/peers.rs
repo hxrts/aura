@@ -31,13 +31,18 @@
 //! }
 //! ```
 
+use aura_effects::time::wallclock_secs;
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{sync_config_error, sync_peer_error, SyncResult};
+
+fn now_secs() -> u64 {
+    wallclock_secs()
+}
 use aura_core::{hash, DeviceId};
 use aura_protocol::guards::BiscuitGuardEvaluator;
 
@@ -442,10 +447,7 @@ impl PeerManager {
                 required_relationship_types: vec!["peer".to_string(), "guardian".to_string()],
             },
             privacy_requirements: DiscoveryPrivacyLevel::FullAnonymity,
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            timestamp: now_secs(),
         }
     }
 
@@ -663,7 +665,7 @@ impl PeerManager {
         };
 
         // Check if the token grants sync capability using the guard evaluator
-        match evaluator.check_guard(&biscuit_token, "sync:read", &sync_resource) {
+        match evaluator.check_guard_default_time(&biscuit_token, "sync:read", &sync_resource) {
             Ok(has_permission) => {
                 tracing::debug!(
                     has_sync_capability = has_permission,
@@ -887,10 +889,7 @@ impl PeerManager {
     /// Update last contact timestamp for a peer
     pub fn update_last_contact(&mut self, peer: DeviceId) {
         if let Some(peer_info) = self.peers.get_mut(&peer) {
-            peer_info.metadata.last_seen = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            peer_info.metadata.last_seen = now_secs();
         }
     }
 
@@ -904,36 +903,25 @@ impl PeerManager {
     /// Mark peer as degraded
     pub fn mark_peer_degraded(&mut self, peer: &DeviceId) {
         if let Some(peer_info) = self.peers.get_mut(peer) {
-            peer_info.metadata.set_status(
-                PeerStatus::Degraded,
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            );
+            peer_info
+                .metadata
+                .set_status(PeerStatus::Degraded, now_secs());
         }
     }
 
     /// Mark peer as healthy
     pub fn mark_peer_healthy(&mut self, peer: &DeviceId) {
         if let Some(peer_info) = self.peers.get_mut(peer) {
-            peer_info.metadata.set_status(
-                PeerStatus::Connected,
-                SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs(),
-            );
+            peer_info
+                .metadata
+                .set_status(PeerStatus::Connected, now_secs());
         }
     }
 
     /// Get time since last sync with a peer
     pub fn get_time_since_last_sync(&self, peer: &DeviceId) -> Duration {
         if let Some(peer_info) = self.peers.get(peer) {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            let now = now_secs();
             Duration::from_secs(now.saturating_sub(peer_info.metadata.last_successful_sync))
         } else {
             Duration::from_secs(u64::MAX) // Very long time for unknown peers
@@ -949,20 +937,14 @@ impl PeerManager {
     pub fn increment_sync_success(&mut self, peer: &DeviceId) {
         if let Some(peer_info) = self.peers.get_mut(peer) {
             peer_info.metadata.successful_syncs += 1;
-            peer_info.metadata.last_successful_sync = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            peer_info.metadata.last_successful_sync = now_secs();
         }
     }
 
     /// Update last successful sync timestamp
     pub fn update_last_successful_sync(&mut self, peer: &DeviceId) {
         if let Some(peer_info) = self.peers.get_mut(peer) {
-            peer_info.metadata.last_successful_sync = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            peer_info.metadata.last_successful_sync = now_secs();
         }
     }
 

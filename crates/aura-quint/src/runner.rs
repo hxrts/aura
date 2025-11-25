@@ -11,6 +11,7 @@
 use crate::evaluator::QuintEvaluator;
 use crate::{AuraResult, PropertySpec, VerificationResult};
 use aura_core::AuraError;
+use aura_effects::time::monotonic_now;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
@@ -269,9 +270,7 @@ impl PropertyCache {
 
         let cached_result = CachedResult {
             result,
-            // Note: For verification caching, using Instant::now() is acceptable for cache metadata
-            #[allow(clippy::disallowed_methods)]
-            cached_at: Instant::now(),
+            cached_at: monotonic_now(),
             access_count: 1,
         };
 
@@ -441,7 +440,7 @@ impl QuintRunner {
     pub async fn verify_property(&mut self, spec: &PropertySpec) -> AuraResult<VerificationResult> {
         #[allow(clippy::disallowed_methods)]
         // Required for performance measurement, deterministic in test context
-        let start_time = Instant::now(); // Start timestamp for performance measurement
+        let start_time = monotonic_now(); // Start timestamp for performance measurement
         self.stats.total_properties += 1;
 
         if self.config.verbose {

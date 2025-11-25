@@ -43,6 +43,7 @@ hmac = { workspace = true }
 hkdf = { workspace = true }
 aes-gcm = { workspace = true }
 getrandom = { workspace = true }
+rand_chacha = { workspace = true }
 
 # Serialization
 serde = { workspace = true }

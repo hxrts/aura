@@ -9,12 +9,11 @@
 
 #![allow(clippy::disallowed_methods)]
 
-use aura_agent::{AgentConfig, AuraEffectSystem};
 use aura_core::effects::NetworkEffects;
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
-use aura_protocol::effects::AuraEffects;
 use aura_rendezvous::messaging::{NetworkConfig, NetworkTransport};
 // Use testkit for proper test infrastructure
+use aura_effects::time::monotonic_now;
 use aura_rendezvous::{
     crypto::encryption::PaddingStrategy,
     integration::capability_aware::SbbForwardingPolicy,
@@ -112,9 +111,9 @@ impl TestDevice {
         name: String,
         _config: &E2eTestConfig,
     ) -> AuraResult<Self> {
-        // Create shared effect system using aura-agent
-        let config = aura_agent::AgentConfig::default();
-        let effects = Arc::new(aura_agent::AuraEffectSystem::testing(&config));
+        // Create shared effect system using testkit
+        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+        let effects = fixture.effect_system_wrapped();
         let network_effects = Arc::clone(&effects) as Arc<dyn NetworkEffects>;
 
         // Create network transport
@@ -167,22 +166,7 @@ impl TestDevice {
                 .await;
         }
 
-        // Add peer to transport (simulate network connectivity)
-        // Note: NetworkTransport API changed - add_peer method removed
-        // TODO: Update to use add_peer_for_context with proper ContextId
-        // Config API no longer exposed - NetworkTransport uses network_effects directly
-        // let _peer_config = peer_device.transport.read().await.config().clone();
-        // let peer_addr = format!("{}:{}", peer_config.bind_addr, peer_config.port)
-        //     .parse()
-        //     .map_err(|e| {
-        //         aura_core::AuraError::coordination_failed(format!("Invalid address: {}", e))
-        //     })?;
-        //
-        // self.transport
-        //     .write()
-        //     .await
-        //     .add_peer(peer_device.device_id, peer_addr)
-        //     .await?;
+        // Transport connectivity is handled by the shared NetworkEffects harness in tests.
 
         tracing::info!(
             "{} added {} as {} (trust: {:?})",
@@ -215,23 +199,7 @@ impl TestDevice {
                 .await;
         }
 
-        // Add peer to transport (simulate network connectivity)
-        // Note: NetworkTransport API changed - add_peer method removed
-        // TODO: Update to use add_peer_for_context with proper ContextId
-        // let peer_addr = format!(
-        //     "{}:{}",
-        //     peer_info.transport_config.bind_addr, peer_info.transport_config.port
-        // )
-        // .parse()
-        // .map_err(|e| {
-        //     aura_core::AuraError::coordination_failed(format!("Invalid address: {}", e))
-        // })?;
-        //
-        // self.transport
-        //     .write()
-        //     .await
-        //     .add_peer(peer_info.device_id, peer_addr)
-        //     .await?;
+        // Transport connectivity is handled by the shared NetworkEffects harness in tests.
 
         tracing::info!(
             "{} added {} as {} (trust: {:?})",
@@ -254,12 +222,8 @@ impl TestDevice {
         let offer = TransportOfferPayload {
             device_id: self.device_id,
             transport_methods: offer_methods,
-            expires_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs()
-                + 3600, // 1 hour expiration
-            nonce: rand::random(),
+            expires_at: 3600, // deterministic expiration for tests
+            nonce: [1u8; 16], // Fixed nonce for deterministic tests
         };
 
         let discovery_request = SbbDiscoveryRequest {
@@ -490,7 +454,7 @@ impl SbbTestNetwork {
         }
 
         let (alice_id, _bob_id) = (device_ids[0], device_ids[1]);
-        let start_time = std::time::Instant::now();
+        let start_time = monotonic_now();
 
         // Alice creates transport offer
         let offer_methods = vec![
@@ -561,10 +525,7 @@ impl SbbTestNetwork {
             let (alice_id, bob_id) = (device_ids[0], device_ids[1]);
 
             // Upgrade Alice's trust in Bob
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
+            let now = 0;
             self.devices
                 .get_mut(&alice_id)
                 .unwrap()

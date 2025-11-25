@@ -16,7 +16,7 @@ async fn test_simulator_effect_composition_basic() -> aura_core::AuraResult<()> 
     // Test basic time effect
     let timestamp = effects.current_timestamp().await;
 
-    assert!(timestamp >= 0);
+    assert!(timestamp > 0);
 
     println!("[OK] Simulator effect composition test completed");
 
@@ -32,7 +32,7 @@ async fn test_simulator_full_effect_composition() -> aura_core::AuraResult<()> {
 
     // Test time effects
     let timestamp = effects.current_timestamp().await;
-    assert!(timestamp >= 0);
+    assert!(timestamp > 0);
 
     // Test crypto effects
     use aura_core::effects::CryptoEffects;

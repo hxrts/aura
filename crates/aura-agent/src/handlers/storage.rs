@@ -4,6 +4,7 @@ use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentResult, AuthorityContext};
 
 pub struct StorageHandler {
+    #[allow(dead_code)] // Will be used for storage operations
     context: HandlerContext,
 }
 

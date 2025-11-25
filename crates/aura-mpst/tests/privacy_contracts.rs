@@ -16,11 +16,14 @@ use aura_mpst::{
 };
 use chrono::Duration;
 use uuid::Uuid;
+fn fixed_now() -> chrono::DateTime<chrono::Utc> {
+    chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap()
+}
 
 #[test]
 fn test_privacy_contract_creation() {
     #[allow(clippy::disallowed_methods)]
-    let now = chrono::Utc::now();
+    let now = fixed_now();
     let observer = DeviceId::new();
     let budget = LeakageBudget::new(observer, LeakageType::Metadata, 1000, now);
 
@@ -37,7 +40,7 @@ fn test_privacy_contract_creation() {
 #[test]
 fn test_privacy_contract_validation() {
     #[allow(clippy::disallowed_methods)]
-    let now = chrono::Utc::now();
+    let now = fixed_now();
     let observer = DeviceId::new();
 
     // Create duplicate budgets (should fail validation)
@@ -54,7 +57,7 @@ fn test_privacy_contract_validation() {
 #[test]
 fn test_leakage_budget_enforcement() {
     #[allow(clippy::disallowed_methods)]
-    let now = chrono::Utc::now();
+    let now = fixed_now();
     let observer = DeviceId::new();
     let mut tracker = LeakageTracker::new();
 
@@ -80,7 +83,7 @@ fn test_leakage_budget_enforcement() {
 #[test]
 fn test_leakage_budget_refresh() {
     #[allow(clippy::disallowed_methods)]
-    let now = chrono::Utc::now();
+    let now = fixed_now();
     let observer = DeviceId::new();
     let mut budget = LeakageBudget::with_refresh(
         observer,
@@ -97,7 +100,8 @@ fn test_leakage_budget_refresh() {
     // Wait and refresh (in real implementation, this would be time-based)
     std::thread::sleep(std::time::Duration::from_millis(2));
     #[allow(clippy::disallowed_methods)]
-    let now_after = chrono::Utc::now();
+    let now_after = chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap()
+        + chrono::Duration::milliseconds(2);
     budget.maybe_refresh(now_after);
 
     // Budget should be refreshed
@@ -154,7 +158,7 @@ fn test_leakage_budget_refresh() {
 #[test]
 fn test_unlinkability_property() {
     #[allow(clippy::disallowed_methods)]
-    let now = chrono::Utc::now();
+    let now = fixed_now();
     // Test that different contexts cannot be linked through information flow
     let mut tracker = LeakageTracker::new();
 
@@ -200,7 +204,7 @@ fn test_unlinkability_property() {
 #[test]
 fn test_multi_type_leakage_budgets() {
     #[allow(clippy::disallowed_methods)]
-    let now = chrono::Utc::now();
+    let now = fixed_now();
     let observer = DeviceId::new();
     let mut tracker = LeakageTracker::new();
 
@@ -247,7 +251,7 @@ fn test_multi_type_leakage_budgets() {
 #[test]
 fn test_privacy_contract_application() {
     #[allow(clippy::disallowed_methods)]
-    let now = chrono::Utc::now();
+    let now = fixed_now();
     let observer1 = DeviceId::new();
     let observer2 = DeviceId::new();
 
@@ -306,7 +310,7 @@ fn test_context_type_differentiation() {
 #[test]
 #[allow(clippy::disallowed_methods)]
 fn test_complex_privacy_scenario() {
-    let now = chrono::Utc::now();
+    let now = fixed_now();
     // Simulate a complex privacy scenario with multiple contexts and observers
     let _isolation = ContextIsolation::new();
     let mut tracker = LeakageTracker::new();

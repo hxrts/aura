@@ -1,6 +1,8 @@
-use aura_core::identifiers::{ChannelId, ContextId};
+//! Recovery AMP tests for journal state reconstruction.
+
 use aura_core::time::{OrderTime, TimeStamp};
 use aura_core::Hash32;
+use aura_core::{ChannelId, ContextId};
 use aura_journal::fact::{ChannelCheckpoint, CommittedChannelEpochBump, RelationalFact};
 use aura_journal::{reduce_context, Fact, FactContent, FactJournal as Journal, JournalNamespace};
 
@@ -43,7 +45,7 @@ fn recovery_from_journal_reconstructs_channel_state() {
     journal.add_fact(committed).unwrap();
 
     let state = reduce_context(&journal);
-    let ch_state = state.channel_epochs.get(&channel).expect("state");
+    let ch_state = state.channel_epochs.get(&channel).unwrap(); // Test expectation
     assert_eq!(ch_state.chan_epoch, 1);
     assert_eq!(ch_state.last_checkpoint_gen, 42);
     assert_eq!(ch_state.skip_window, 32);

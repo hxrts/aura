@@ -867,7 +867,7 @@ mod tests {
 
             let effects = TestEffectsBuilder::for_unit_tests(DeviceId::new())
                 .build()
-                .expect("effects");
+                .unwrap_or_else(|_| panic!("Failed to build test effects"));
             let session_id = protocol
                 .initiate_session(&effects, participants, None)
                 .await

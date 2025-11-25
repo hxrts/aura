@@ -90,7 +90,7 @@ pub fn choreography(input: TokenStream) -> TokenStream {
 ///         methods: {
 ///             random_bytes(len: usize) -> Vec<u8> => {
 ///                 let mut bytes = vec![0u8; len];
-///                 rand::thread_rng().fill_bytes(&mut bytes);
+///                 seeded_rng.fill_bytes(&mut bytes);
 ///                 bytes
 ///             },
 ///         },

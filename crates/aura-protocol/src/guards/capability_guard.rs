@@ -78,7 +78,7 @@ impl CapabilityGuard {
         // Authorize with Biscuit
         let auth_result = self
             .biscuit_bridge
-            .authorize(token, operation.as_str(), &scope)
+            .authorize(token, operation.as_str(), &scope, 0)
             .map_err(|e| AuraError::permission_denied(format!("Biscuit error: {:?}", e)))?;
 
         if !auth_result.authorized {
@@ -135,7 +135,7 @@ impl CapabilityGuard {
         // Authorize with Biscuit
         let auth_result = self
             .biscuit_bridge
-            .authorize(token, operation.as_str(), &scope)
+            .authorize(token, operation.as_str(), &scope, 0)
             .map_err(|e| AuraError::permission_denied(format!("Biscuit error: {:?}", e)))?;
 
         if !auth_result.authorized {
@@ -191,7 +191,7 @@ impl CapabilityGuard {
         // Authorize with Biscuit
         let auth_result = self
             .biscuit_bridge
-            .authorize(token, operation.as_str(), &scope)
+            .authorize(token, operation.as_str(), &scope, 0)
             .map_err(|e| AuraError::permission_denied(format!("Biscuit error: {:?}", e)))?;
 
         if !auth_result.authorized {

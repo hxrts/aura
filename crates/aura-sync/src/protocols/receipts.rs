@@ -332,217 +332,7 @@ impl Default for ReceiptVerificationProtocol {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
-    use aura_core::effects::crypto::{
-        FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext,
-    };
-    use aura_core::effects::CryptoError;
-
-    // Mock crypto effects for testing
-    #[derive(Debug)]
-    struct MockCryptoEffects;
-
-    #[async_trait]
-    impl CryptoEffects for MockCryptoEffects {
-        // HKDF key derivation
-        async fn hkdf_derive(
-            &self,
-            _ikm: &[u8],
-            _salt: &[u8],
-            _info: &[u8],
-            output_len: usize,
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![0; output_len])
-        }
-
-        async fn derive_key(
-            &self,
-            _master_key: &[u8],
-            _context: &KeyDerivationContext,
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![0; 32])
-        }
-
-        // Ed25519 signatures
-        async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
-            Ok((vec![1; 32], vec![2; 64]))
-        }
-
-        async fn ed25519_sign(
-            &self,
-            _message: &[u8],
-            _private_key: &[u8],
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![1, 2, 3, 4])
-        }
-
-        async fn ed25519_verify(
-            &self,
-            _message: &[u8],
-            _signature: &[u8],
-            _public_key: &[u8],
-        ) -> Result<bool, CryptoError> {
-            // Always return true for test signatures
-            Ok(true)
-        }
-
-        // FROST threshold signatures (simplified mocks)
-        async fn frost_generate_keys(
-            &self,
-            _threshold: u16,
-            _max_signers: u16,
-        ) -> Result<FrostKeyGenResult, CryptoError> {
-            Ok(FrostKeyGenResult {
-                key_packages: vec![vec![1; 32], vec![2; 32]],
-                public_key_package: vec![3; 32],
-            })
-        }
-
-        async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![4; 32])
-        }
-
-        async fn frost_create_signing_package(
-            &self,
-            _message: &[u8],
-            _nonces: &[Vec<u8>],
-            _participants: &[u16],
-            _public_key_package: &[u8],
-        ) -> Result<FrostSigningPackage, CryptoError> {
-            Ok(FrostSigningPackage {
-                message: vec![5; 32],
-                package: vec![6; 32],
-                participants: vec![1, 2],
-                public_key_package: vec![7; 32],
-            })
-        }
-
-        async fn frost_sign_share(
-            &self,
-            _signing_package: &FrostSigningPackage,
-            _key_share: &[u8],
-            _nonces: &[u8],
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![8; 32])
-        }
-
-        async fn frost_aggregate_signatures(
-            &self,
-            _signing_package: &FrostSigningPackage,
-            _signature_shares: &[Vec<u8>],
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![9; 64])
-        }
-
-        async fn frost_verify(
-            &self,
-            _message: &[u8],
-            _signature: &[u8],
-            _public_key_package: &[u8],
-        ) -> Result<bool, CryptoError> {
-            Ok(true)
-        }
-
-        async fn ed25519_public_key(&self, _private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![1; 32]) // Mock public key derived from private key
-        }
-
-        // Symmetric encryption
-        async fn chacha20_encrypt(
-            &self,
-            _plaintext: &[u8],
-            _key: &[u8; 32],
-            _nonce: &[u8; 12],
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![12; 32])
-        }
-
-        async fn chacha20_decrypt(
-            &self,
-            _ciphertext: &[u8],
-            _key: &[u8; 32],
-            _nonce: &[u8; 12],
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![13; 32])
-        }
-
-        async fn aes_gcm_encrypt(
-            &self,
-            _plaintext: &[u8],
-            _key: &[u8; 32],
-            _nonce: &[u8; 12],
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![10; 48]) // Mock encrypted data with nonce
-        }
-
-        async fn aes_gcm_decrypt(
-            &self,
-            _ciphertext: &[u8],
-            _key: &[u8; 32],
-            _nonce: &[u8; 12],
-        ) -> Result<Vec<u8>, CryptoError> {
-            Ok(vec![11; 32]) // Mock decrypted data
-        }
-
-        // Key rotation & resharing
-        async fn frost_rotate_keys(
-            &self,
-            _old_shares: &[Vec<u8>],
-            _old_threshold: u16,
-            _new_threshold: u16,
-            _new_max_signers: u16,
-        ) -> Result<FrostKeyGenResult, CryptoError> {
-            Ok(FrostKeyGenResult {
-                key_packages: vec![vec![1; 32], vec![2; 32]],
-                public_key_package: vec![3; 32],
-            })
-        }
-
-        // Utility methods
-        fn is_simulated(&self) -> bool {
-            true
-        }
-
-        fn crypto_capabilities(&self) -> Vec<String> {
-            vec!["ed25519".to_string(), "frost".to_string()]
-        }
-
-        fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-            if a.len() != b.len() {
-                return false;
-            }
-            a.iter().zip(b.iter()).all(|(x, y)| x == y)
-        }
-
-        fn secure_zero(&self, data: &mut [u8]) {
-            for byte in data {
-                *byte = 0;
-            }
-        }
-    }
-
-    #[async_trait]
-    impl aura_core::effects::RandomEffects for MockCryptoEffects {
-        async fn random_bytes(&self, len: usize) -> Vec<u8> {
-            vec![1; len]
-        }
-
-        async fn random_bytes_32(&self) -> [u8; 32] {
-            [1; 32]
-        }
-
-        async fn random_u64(&self) -> u64 {
-            12345u64
-        }
-
-        async fn random_range(&self, min: u64, max: u64) -> u64 {
-            (min + max) / 2 // Simple deterministic value
-        }
-
-        async fn random_uuid(&self) -> uuid::Uuid {
-            uuid::Uuid::from_u128(12345)
-        }
-    }
+    use aura_testkit::stateful_effects::{MockCryptoHandler, SimulatedTimeHandler};
 
     fn sample_receipt(signer: u8, timestamp: u64) -> Receipt {
         Receipt {
@@ -557,22 +347,30 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_receipt_verification() {
-        let protocol = ReceiptVerificationProtocol::default();
+        let config = ReceiptVerificationConfig {
+            verify_signatures: false, // Disable signature verification for mock tests
+            ..Default::default()
+        };
+        let protocol = ReceiptVerificationProtocol::new(config);
         let receipt = sample_receipt(1, 100);
-        let crypto = MockCryptoEffects;
+        let crypto = MockCryptoHandler::new();
 
         assert!(protocol.verify_receipt(&receipt, &crypto).await.unwrap());
     }
 
     #[tokio::test]
     async fn test_receipt_chain_verification() {
-        let protocol = ReceiptVerificationProtocol::default();
+        let config = ReceiptVerificationConfig {
+            verify_signatures: false, // Disable signature verification for mock tests
+            ..Default::default()
+        };
+        let protocol = ReceiptVerificationProtocol::new(config);
         let chain = vec![
             sample_receipt(1, 100),
             sample_receipt(2, 200),
             sample_receipt(3, 300),
         ];
-        let crypto = MockCryptoEffects;
+        let crypto = MockCryptoHandler::new();
 
         let result = protocol
             .verify_receipt_chain(&chain, &crypto)
@@ -585,12 +383,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_chronological_ordering() {
-        let protocol = ReceiptVerificationProtocol::default();
+        let config = ReceiptVerificationConfig {
+            verify_signatures: false, // Disable signature verification for mock tests
+            ..Default::default()
+        };
+        let protocol = ReceiptVerificationProtocol::new(config);
         let chain = vec![
             sample_receipt(1, 100),
             sample_receipt(2, 50), // Out of order
         ];
-        let crypto = MockCryptoEffects;
+        let crypto = MockCryptoHandler::new();
 
         let result = protocol
             .verify_receipt_chain(&chain, &crypto)
@@ -607,7 +409,7 @@ mod tests {
             ..Default::default()
         };
         let protocol = ReceiptVerificationProtocol::new(config);
-        let crypto = MockCryptoEffects;
+        let crypto = MockCryptoHandler::new();
 
         let chain = vec![
             sample_receipt(1, 100),
@@ -625,25 +427,9 @@ mod tests {
     #[tokio::test]
     async fn test_create_receipt() {
         let protocol = ReceiptVerificationProtocol::default();
-        let crypto = MockCryptoEffects;
-        struct MockTime;
-        #[async_trait::async_trait]
-        impl aura_core::effects::PhysicalTimeEffects for MockTime {
-            async fn physical_time(
-                &self,
-            ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::time::TimeError>
-            {
-                Ok(aura_core::time::PhysicalTime {
-                    ts_ms: 1_000,
-                    uncertainty: None,
-                })
-            }
-
-            async fn sleep_ms(&self, _ms: u64) -> Result<(), aura_core::effects::time::TimeError> {
-                Ok(())
-            }
-        }
-        let time = MockTime;
+        let crypto = MockCryptoHandler::new();
+        let time = SimulatedTimeHandler::new();
+        time.set_time(1_000);
         let message_hash = Hash32([42; 32]);
         let signer = DeviceId::from_bytes([1; 32]);
 

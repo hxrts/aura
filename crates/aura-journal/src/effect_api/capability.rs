@@ -276,11 +276,15 @@ impl Default for Attenuation {
 mod tests {
     use super::*;
 
+    // Helper function to create deterministic test UUIDs
+    fn test_uuid(seed: u8) -> uuid::Uuid {
+        uuid::Uuid::from_bytes([seed; 16])
+    }
+
     #[test]
-    #[allow(clippy::disallowed_methods)]
     fn test_capability_id_creation() {
-        let id1 = CapabilityId::new(uuid::Uuid::new_v4());
-        let id2 = CapabilityId::new(uuid::Uuid::new_v4());
+        let id1 = CapabilityId::new(test_uuid(1));
+        let id2 = CapabilityId::new(test_uuid(2));
         assert_ne!(id1, id2);
     }
 
@@ -309,7 +313,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods)]
     fn test_capability_ref_expiration() {
         use aura_core::time::{PhysicalTime, TimeStamp};
 
@@ -319,7 +322,7 @@ mod tests {
         });
 
         let cap = CapabilityRef::new(
-            CapabilityId::new(uuid::Uuid::new_v4()),
+            CapabilityId::new(test_uuid(3)),
             ResourceRef::recovery(0, 1),
             expires_at.clone(),
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
@@ -344,7 +347,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods)]
     fn test_capability_ref_time_until_expiration() {
         use aura_core::time::{PhysicalTime, TimeStamp};
 
@@ -354,7 +356,7 @@ mod tests {
         });
 
         let cap = CapabilityRef::new(
-            CapabilityId::new(uuid::Uuid::new_v4()),
+            CapabilityId::new(test_uuid(4)),
             ResourceRef::recovery(0, 1),
             expires_at,
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([1u8; 16]))),
@@ -387,7 +389,7 @@ mod tests {
             .with_operations(vec!["read".to_string()]);
 
         let cap = CapabilityRef::new(
-            CapabilityId::new(uuid::Uuid::new_v4()),
+            CapabilityId::new(test_uuid(5)),
             ResourceRef::storage("/data"),
             TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
                 ts_ms: 1000,
@@ -551,7 +553,7 @@ mod recovery_tests {
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
 
         let recovery_cap = RecoveryCapability::new(
-            CapabilityId::new(uuid::Uuid::new_v4()),
+            CapabilityId::new(uuid::Uuid::from_bytes([6u8; 16])),
             target,
             guardians.clone(),
             2,
@@ -576,7 +578,7 @@ mod recovery_tests {
         let sig =
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
         let recovery_cap = RecoveryCapability::new(
-            CapabilityId::new(uuid::Uuid::new_v4()),
+            CapabilityId::new(uuid::Uuid::from_bytes([7u8; 16])),
             DeviceId(uuid::Uuid::from_bytes([5u8; 16])),
             vec![
                 DeviceId(uuid::Uuid::from_bytes([6u8; 16])),
@@ -611,7 +613,7 @@ mod recovery_tests {
         let sig =
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
         let recovery_cap = RecoveryCapability::new(
-            CapabilityId::new(uuid::Uuid::new_v4()),
+            CapabilityId::new(uuid::Uuid::from_bytes([8u8; 16])),
             DeviceId(uuid::Uuid::from_bytes([8u8; 16])),
             vec![DeviceId(uuid::Uuid::from_bytes([9u8; 16]))], // Only 1 guardian
             2,                                                 // But need 2
@@ -638,7 +640,7 @@ mod recovery_tests {
         let sig =
             CapabilitySignature::new(vec![0u8; 64], DeviceId(uuid::Uuid::from_bytes([0u8; 16])));
         let recovery_cap = RecoveryCapability::new(
-            CapabilityId::new(uuid::Uuid::new_v4()),
+            CapabilityId::new(uuid::Uuid::from_bytes([9u8; 16])),
             DeviceId(uuid::Uuid::from_bytes([10u8; 16])),
             vec![
                 DeviceId(uuid::Uuid::from_bytes([11u8; 16])),

@@ -21,7 +21,7 @@ async fn test_successful_relationship_formation() -> aura_core::AuraResult<()> {
 
     let initiator_fixture = aura_testkit::create_test_fixture_with_device_id(initiator_id).await?;
     let _responder_fixture = aura_testkit::create_test_fixture_with_device_id(responder_id).await?;
-    let initiator_effects = initiator_fixture.effect_system();
+    let initiator_effects = initiator_fixture.effect_system_wrapped();
 
     let config = RelationshipFormationConfig {
         initiator_id,
@@ -38,7 +38,7 @@ async fn test_successful_relationship_formation() -> aura_core::AuraResult<()> {
         initiator_id,
         config.clone(),
         true, // is_initiator
-        &**initiator_effects,
+        initiator_effects.as_ref(),
     )
     .await;
 
@@ -73,7 +73,7 @@ async fn test_successful_relationship_formation() -> aura_core::AuraResult<()> {
 async fn test_invalid_configuration() -> aura_core::AuraResult<()> {
     let device_id = DeviceId(Uuid::new_v4());
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-    let effect_system = fixture.effect_system();
+    let effect_system = fixture.effect_system_wrapped();
 
     let config = RelationshipFormationConfig {
         initiator_id: device_id,
@@ -127,7 +127,7 @@ async fn test_bidirectional_relationship_formation() -> aura_core::AuraResult<()
 async fn test_relationship_key_properties() -> aura_core::AuraResult<()> {
     let device_id = DeviceId(Uuid::new_v4());
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-    let effect_system = fixture.effect_system();
+    let effect_system = fixture.effect_system_wrapped();
 
     // Test that identical inputs produce identical keys
     let private_key = [42u8; 32];
@@ -176,27 +176,31 @@ async fn test_relationship_key_properties() -> aura_core::AuraResult<()> {
 async fn test_bidirectional_key_symmetry() -> aura_core::AuraResult<()> {
     let device_id = DeviceId(Uuid::new_v4());
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-    let effect_system = fixture.effect_system();
+    let effect_system = fixture.effect_system_wrapped();
 
     let alice_private = [1u8; 32];
     let bob_private = [2u8; 32];
     let context_id = ContextId(Uuid::new_v4());
 
     // Derive public keys (simplified)
-    let alice_public =
-        aura_invitation::relationship_formation::derive_public_key(&alice_private, &effect_system)
-            .await?;
+    let alice_public = aura_invitation::relationship_formation::derive_public_key(
+        &alice_private,
+        effect_system.as_ref(),
+    )
+    .await?;
 
-    let bob_public =
-        aura_invitation::relationship_formation::derive_public_key(&bob_private, &effect_system)
-            .await?;
+    let bob_public = aura_invitation::relationship_formation::derive_public_key(
+        &bob_private,
+        effect_system.as_ref(),
+    )
+    .await?;
 
     // Alice derives keys using her private key and Bob's public key
     let alice_keys = aura_invitation::relationship_formation::derive_relationship_keys(
         &alice_private,
         &bob_public,
         &context_id,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await?;
 
@@ -205,7 +209,7 @@ async fn test_bidirectional_key_symmetry() -> aura_core::AuraResult<()> {
         &bob_private,
         &alice_public,
         &context_id,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await?;
 
@@ -234,7 +238,7 @@ async fn test_validation_proof_system() -> aura_core::AuraResult<()> {
     let alice_proof = aura_invitation::relationship_formation::create_validation_proof(
         &relationship_keys,
         &alice_device,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await?;
 
@@ -242,7 +246,7 @@ async fn test_validation_proof_system() -> aura_core::AuraResult<()> {
     let bob_proof = aura_invitation::relationship_formation::create_validation_proof(
         &relationship_keys,
         &bob_device,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await?;
 
@@ -252,7 +256,7 @@ async fn test_validation_proof_system() -> aura_core::AuraResult<()> {
     // Test key hash creation
     let key_hash = aura_invitation::relationship_formation::hash_relationship_keys(
         &relationship_keys,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await?;
 
@@ -274,7 +278,7 @@ async fn test_validation_proof_system() -> aura_core::AuraResult<()> {
         &alice_validation,
         &relationship_keys,
         &alice_device,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await;
     assert!(result.is_ok());
@@ -284,7 +288,7 @@ async fn test_validation_proof_system() -> aura_core::AuraResult<()> {
         &bob_validation,
         &relationship_keys,
         &bob_device,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await;
     assert!(result.is_ok());
@@ -294,7 +298,7 @@ async fn test_validation_proof_system() -> aura_core::AuraResult<()> {
         &alice_validation,
         &relationship_keys,
         &bob_device,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await;
     assert!(result.is_err());
@@ -325,7 +329,7 @@ async fn test_trust_record_system() -> aura_core::AuraResult<()> {
         &context_id,
         &bob_device,
         &relationship_keys,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await?;
 
@@ -333,7 +337,7 @@ async fn test_trust_record_system() -> aura_core::AuraResult<()> {
     let alice_signature = aura_invitation::relationship_formation::sign_trust_record(
         &trust_record_hash,
         &alice_device,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await?;
 
@@ -348,7 +352,7 @@ async fn test_trust_record_system() -> aura_core::AuraResult<()> {
     let result = aura_invitation::relationship_formation::verify_trust_record_signature(
         &alice_confirmation,
         &alice_device,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await;
     assert!(result.is_ok());
@@ -357,7 +361,7 @@ async fn test_trust_record_system() -> aura_core::AuraResult<()> {
     let result = aura_invitation::relationship_formation::verify_trust_record_signature(
         &alice_confirmation,
         &bob_device,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await;
     assert!(result.is_err());
@@ -373,7 +377,7 @@ async fn test_trust_record_system() -> aura_core::AuraResult<()> {
 async fn test_context_id_derivation() -> aura_core::AuraResult<()> {
     let device_id = DeviceId(Uuid::new_v4());
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-    let effect_system = fixture.effect_system();
+    let effect_system = fixture.effect_system_wrapped();
 
     let init_request = aura_invitation::relationship_formation::RelationshipInitRequest {
         initiator_id: DeviceId(Uuid::new_v4()),
@@ -384,13 +388,17 @@ async fn test_context_id_derivation() -> aura_core::AuraResult<()> {
     };
 
     // Same request should produce same context ID
-    let context1 =
-        aura_invitation::relationship_formation::derive_context_id(&init_request, &effect_system)
-            .await?;
+    let context1 = aura_invitation::relationship_formation::derive_context_id(
+        &init_request,
+        effect_system.as_ref(),
+    )
+    .await?;
 
-    let context2 =
-        aura_invitation::relationship_formation::derive_context_id(&init_request, &effect_system)
-            .await?;
+    let context2 = aura_invitation::relationship_formation::derive_context_id(
+        &init_request,
+        effect_system.as_ref(),
+    )
+    .await?;
 
     assert_eq!(context1, context2);
 
@@ -400,7 +408,7 @@ async fn test_context_id_derivation() -> aura_core::AuraResult<()> {
 
     let context3 = aura_invitation::relationship_formation::derive_context_id(
         &different_request,
-        &effect_system,
+        effect_system.as_ref(),
     )
     .await?;
 

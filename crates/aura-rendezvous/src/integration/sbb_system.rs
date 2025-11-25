@@ -459,7 +459,7 @@ mod tests {
 
     fn test_effects(_device_id: DeviceId) -> Arc<dyn AuraEffects> {
         let config = AgentConfig::default();
-        let system = AuraEffectSystem::testing(&config);
+        let system = AuraEffectSystem::testing(&config).expect("test effect system");
         Arc::new(system)
     }
 

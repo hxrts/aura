@@ -35,6 +35,7 @@
 // - Original Service trait methods still use direct time calls for compatibility
 #![allow(clippy::disallowed_methods)]
 
+use aura_effects::time::monotonic_now;
 use parking_lot::RwLock;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -334,7 +335,8 @@ impl MaintenanceService {
     ) -> SyncResult<SnapshotProposed> {
         let protocol = self.snapshot_protocol.write();
 
-        let (_guard, proposal) = protocol.propose(proposer, target_epoch, state_digest)?;
+        let (_guard, proposal) =
+            protocol.propose(proposer, target_epoch, state_digest, Uuid::nil())?;
 
         // Convert to maintenance event type
         Ok(SnapshotProposed {
@@ -596,7 +598,7 @@ impl MaintenanceService {
             .physical_time()
             .await
             .map_err(|e| AuraError::internal(format!("time error: {e}")))?;
-        *self.started_at.write() = Some(Instant::now());
+        *self.started_at.write() = Some(monotonic_now());
 
         // TODO: Start background tasks for auto-snapshot
 
@@ -639,31 +641,8 @@ impl Service for MaintenanceService {
     }
 
     async fn health_check(&self) -> SyncResult<HealthCheck> {
-        // Create a simple PhysicalTimeEffects implementation for backwards compatibility
-        struct SimpleTimeEffects;
-
-        #[async_trait::async_trait]
-        impl PhysicalTimeEffects for SimpleTimeEffects {
-            async fn physical_time(
-                &self,
-            ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::time::TimeError>
-            {
-                Ok(aura_core::time::PhysicalTime {
-                    ts_ms: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_millis() as u64,
-                    uncertainty: None,
-                })
-            }
-            async fn sleep_ms(&self, ms: u64) -> Result<(), aura_core::effects::time::TimeError> {
-                tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
-                Ok(())
-            }
-        }
-
         // Implement health check logic inline since Service trait doesn't support time_effects parameter
-        let time_effects = SimpleTimeEffects;
+        let time_effects = aura_effects::time::PhysicalTimeHandler;
         let state = *self.state.read();
         let status = match state {
             ServiceState::Running => HealthStatus::Healthy,
@@ -724,7 +703,6 @@ impl Service for MaintenanceService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
 
     #[test]
     fn test_maintenance_service_creation() {
@@ -740,7 +718,7 @@ mod tests {
         let service = MaintenanceService::new(Default::default()).unwrap();
 
         #[allow(clippy::disallowed_methods)]
-        let now = std::time::Instant::now();
+        let now = monotonic_now();
         service.start(now).await.unwrap();
         assert!(service.is_running());
 
@@ -748,37 +726,10 @@ mod tests {
         assert!(!service.is_running());
     }
 
-    /// Mock PhysicalTimeEffects implementation for testing
-    struct MockTimeEffects {
-        ts_ms: u64,
-    }
-
-    impl MockTimeEffects {
-        fn new() -> Self {
-            Self { ts_ms: 0 }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl PhysicalTimeEffects for MockTimeEffects {
-        async fn physical_time(
-            &self,
-        ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::time::TimeError> {
-            Ok(aura_core::time::PhysicalTime {
-                ts_ms: self.ts_ms,
-                uncertainty: None,
-            })
-        }
-
-        async fn sleep_ms(&self, _ms: u64) -> Result<(), aura_core::effects::time::TimeError> {
-            Ok(())
-        }
-    }
-
     #[tokio::test]
     async fn test_maintenance_service_with_time_effects() {
         let service = MaintenanceService::new(Default::default()).unwrap();
-        let time_effects = MockTimeEffects::new();
+        let time_effects = aura_testkit::stateful_effects::SimulatedTimeHandler::new();
 
         // Test the PhysicalTimeEffects-based start method
         service
@@ -791,33 +742,10 @@ mod tests {
         assert!(!service.is_running());
     }
 
-    /// Mock RandomEffects implementation for testing
-    struct MockRandomEffects;
-
-    #[async_trait]
-    impl RandomEffects for MockRandomEffects {
-        async fn random_bytes(&self, len: usize) -> Vec<u8> {
-            vec![0u8; len]
-        }
-        async fn random_bytes_32(&self) -> [u8; 32] {
-            [0u8; 32]
-        }
-        async fn random_u64(&self) -> u64 {
-            12345
-        }
-        async fn random_range(&self, _min: u64, _max: u64) -> u64 {
-            42
-        }
-        async fn random_uuid(&self) -> Uuid {
-            // Use a deterministic UUID for testing
-            Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap()
-        }
-    }
-
     #[tokio::test]
     async fn test_propose_upgrade_with_random_effects() {
         let service = MaintenanceService::new(Default::default()).unwrap();
-        let random_effects = MockRandomEffects;
+        let random_effects = aura_testkit::stateful_effects::MockCryptoHandler::new();
 
         let package_id = Uuid::new_v4();
         let version = SemanticVersion::new(1, 2, 3);

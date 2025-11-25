@@ -253,8 +253,13 @@ impl AntiEntropyProtocol {
 
             let mut flow_budget = FlowBudget::new(1000, aura_core::session_epochs::Epoch::new(0)); // Standard sync budget
 
-            match evaluator.evaluate_guard(token, "sync_journal", &resource, 100, &mut flow_budget)
-            {
+            match evaluator.evaluate_guard_default_time(
+                token,
+                "sync_journal",
+                &resource,
+                100,
+                &mut flow_budget,
+            ) {
                 Ok(guard_result) if guard_result.authorized => {
                     tracing::debug!("Sync authorization granted for peer {}", peer);
                     Ok(())

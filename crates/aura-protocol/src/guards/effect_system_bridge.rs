@@ -41,7 +41,7 @@ impl<E: GuardEffectSystem> BiscuitGuardIntegration<E> {
         // Use the authorization bridge to verify the token
         let auth_result = self
             .auth_bridge
-            .authorize(token, operation, resource_scope)?;
+            .authorize(token, operation, resource_scope, 0)?;
 
         // Check if the effect system can perform this operation
         if !self.effect_system.can_perform_operation(operation) {

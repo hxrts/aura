@@ -310,11 +310,15 @@ mod tests {
     // Note: Tests commented out - need migration to new TreeOpKind from aura_core
     // Legacy TreeOp types have been replaced by fact-based AttestedOp
 
+    // Helper function to create deterministic test UUIDs
+    fn test_uuid(seed: u8) -> uuid::Uuid {
+        uuid::Uuid::from_bytes([seed; 16])
+    }
+
     #[test]
-    #[allow(clippy::disallowed_methods)]
     fn test_intent_id_creation() {
-        let id1 = IntentId::new(uuid::Uuid::new_v4());
-        let id2 = IntentId::new(uuid::Uuid::new_v4());
+        let id1 = IntentId::new(test_uuid(1));
+        let id2 = IntentId::new(test_uuid(2));
         assert_ne!(id1, id2);
     }
 
@@ -339,7 +343,7 @@ mod tests {
         };
 
         let intent = Intent::new(
-            IntentId::new(uuid::Uuid::new_v4()),
+            IntentId::new(test_uuid(6)),
             op,
             vec![NodeIndex(0)],
             Hash32([0u8; 32]),
@@ -363,7 +367,7 @@ mod tests {
         };
 
         let intent1 = Intent::new(
-            IntentId::new(uuid::Uuid::new_v4()),
+            IntentId::new(test_uuid(4)),
             op.clone(),
             vec![NodeIndex(0), NodeIndex(1)],
             Hash32([1u8; 32]),
@@ -376,7 +380,7 @@ mod tests {
         );
 
         let intent2 = Intent::new(
-            IntentId::new(uuid::Uuid::new_v4()),
+            IntentId::new(test_uuid(5)),
             op,
             vec![NodeIndex(1), NodeIndex(2)],
             Hash32([2u8; 32]), // Different snapshot
@@ -402,7 +406,7 @@ mod tests {
         let snapshot = [1u8; 32];
 
         let intent1 = Intent::new(
-            IntentId::new(uuid::Uuid::new_v4()),
+            IntentId::new(test_uuid(7)),
             op.clone(),
             vec![NodeIndex(0), NodeIndex(1)],
             Hash32(snapshot),
@@ -415,7 +419,7 @@ mod tests {
         );
 
         let intent2 = Intent::new(
-            IntentId::new(uuid::Uuid::new_v4()),
+            IntentId::new(test_uuid(7)),
             op,
             vec![NodeIndex(1), NodeIndex(2)],
             Hash32(snapshot), // Same snapshot
@@ -435,7 +439,7 @@ mod tests {
     #[allow(clippy::disallowed_methods)]
     fn test_intent_is_stale() {
         let intent = Intent::new(
-            IntentId::new(uuid::Uuid::new_v4()),
+            IntentId::new(test_uuid(7)),
             TreeOperation::RotateEpoch {
                 affected: vec![NodeIndex(0)],
             },
@@ -464,7 +468,7 @@ mod tests {
         });
 
         let intent = Intent::new(
-            IntentId::new(uuid::Uuid::new_v4()),
+            IntentId::new(test_uuid(7)),
             TreeOperation::RemoveLeaf {
                 leaf: aura_core::tree::LeafId(0),
                 reason: 0,
@@ -499,7 +503,7 @@ mod tests {
         let mut batch = IntentBatch::new(Hash32(snapshot));
 
         let intent1 = Intent::new(
-            IntentId::new(uuid::Uuid::new_v4()),
+            IntentId::new(test_uuid(7)),
             TreeOperation::ChangePolicy {
                 node: NodeIndex(0),
                 new_policy: Policy::All,
@@ -527,7 +531,7 @@ mod tests {
         let mut batch = IntentBatch::new(Hash32(snapshot1));
 
         let intent = Intent::new(
-            IntentId::new(uuid::Uuid::new_v4()),
+            IntentId::new(test_uuid(7)),
             TreeOperation::RotateEpoch {
                 affected: vec![NodeIndex(0)],
             },
@@ -552,7 +556,7 @@ mod tests {
         let mut batch = IntentBatch::new(Hash32(snapshot));
 
         let intent1 = Intent::new(
-            IntentId::new(uuid::Uuid::new_v4()),
+            IntentId::new(test_uuid(7)),
             TreeOperation::RotateEpoch {
                 affected: vec![NodeIndex(0)],
             },

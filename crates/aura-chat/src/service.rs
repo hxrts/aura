@@ -674,10 +674,177 @@ where
 
 #[cfg(test)]
 mod tests {
-    // TODO: Add comprehensive tests with mock effects
+    use super::*;
+    use async_trait::async_trait;
+    use aura_core::effects::storage::{StorageError, StorageStats};
+    use aura_core::time::PhysicalTime;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use tokio::sync::Mutex;
+    use uuid::Uuid;
+
+    #[derive(Debug, Default)]
+    struct MockEffects {
+        data: Mutex<HashMap<String, Vec<u8>>>,
+        uuid_counter: AtomicU64,
+        time_ms: AtomicU64,
+    }
+
+    #[async_trait]
+    impl StorageEffects for MockEffects {
+        async fn store(&self, key: &str, value: Vec<u8>) -> std::result::Result<(), StorageError> {
+            self.data.lock().await.insert(key.to_string(), value);
+            Ok(())
+        }
+
+        async fn retrieve(&self, key: &str) -> std::result::Result<Option<Vec<u8>>, StorageError> {
+            Ok(self.data.lock().await.get(key).cloned())
+        }
+
+        async fn remove(&self, key: &str) -> std::result::Result<bool, StorageError> {
+            Ok(self.data.lock().await.remove(key).is_some())
+        }
+
+        async fn list_keys(
+            &self,
+            prefix: Option<&str>,
+        ) -> std::result::Result<Vec<String>, StorageError> {
+            let guard = self.data.lock().await;
+            Ok(guard
+                .keys()
+                .filter(|k| prefix.map(|p| k.starts_with(p)).unwrap_or(true))
+                .cloned()
+                .collect())
+        }
+
+        async fn exists(&self, key: &str) -> std::result::Result<bool, StorageError> {
+            Ok(self.data.lock().await.contains_key(key))
+        }
+
+        async fn store_batch(
+            &self,
+            pairs: HashMap<String, Vec<u8>>,
+        ) -> std::result::Result<(), StorageError> {
+            let mut guard = self.data.lock().await;
+            for (k, v) in pairs {
+                guard.insert(k, v);
+            }
+            Ok(())
+        }
+
+        async fn retrieve_batch(
+            &self,
+            keys: &[String],
+        ) -> std::result::Result<HashMap<String, Vec<u8>>, StorageError> {
+            let guard = self.data.lock().await;
+            Ok(keys
+                .iter()
+                .filter_map(|k| guard.get(k).map(|v| (k.clone(), v.clone())))
+                .collect())
+        }
+
+        async fn clear_all(&self) -> std::result::Result<(), StorageError> {
+            self.data.lock().await.clear();
+            Ok(())
+        }
+
+        async fn stats(&self) -> std::result::Result<StorageStats, StorageError> {
+            let guard = self.data.lock().await;
+            Ok(StorageStats {
+                key_count: guard.len() as u64,
+                total_size: guard.values().map(|v| v.len() as u64).sum(),
+                available_space: None,
+                backend_type: "mock".to_string(),
+            })
+        }
+    }
+
+    #[async_trait]
+    impl RandomEffects for MockEffects {
+        async fn random_bytes(&self, len: usize) -> Vec<u8> {
+            vec![0u8; len]
+        }
+
+        async fn random_bytes_32(&self) -> [u8; 32] {
+            [0u8; 32]
+        }
+
+        async fn random_u64(&self) -> u64 {
+            self.uuid_counter.fetch_add(1, Ordering::SeqCst)
+        }
+
+        async fn random_range(&self, min: u64, _max: u64) -> u64 {
+            min
+        }
+
+        async fn random_uuid(&self) -> Uuid {
+            let counter = self.uuid_counter.fetch_add(1, Ordering::SeqCst);
+            Uuid::from_u128(counter as u128)
+        }
+    }
+
+    #[async_trait]
+    impl PhysicalTimeEffects for MockEffects {
+        async fn physical_time(
+            &self,
+        ) -> std::result::Result<PhysicalTime, aura_core::effects::time::TimeError> {
+            let now = self.time_ms.fetch_add(1, Ordering::SeqCst);
+            Ok(PhysicalTime {
+                ts_ms: now,
+                uncertainty: None,
+            })
+        }
+
+        async fn sleep_ms(
+            &self,
+            _ms: u64,
+        ) -> std::result::Result<(), aura_core::effects::time::TimeError> {
+            Ok(())
+        }
+    }
+
     #[tokio::test]
-    async fn test_chat_service_creation() {
-        // This test requires mock effect implementations
-        // Will be implemented when mock effects are available
+    async fn create_group_persists_and_lists_membership() {
+        let effects = Arc::new(MockEffects::default());
+        let service = ChatService::new(effects.clone());
+        let creator = AuthorityId::from_uuid(Uuid::from_u128(1));
+        let member = AuthorityId::from_uuid(Uuid::from_u128(2));
+
+        let group = service
+            .create_group("test", creator, vec![member])
+            .await
+            .unwrap();
+
+        let fetched = service.get_group(&group.id).await.unwrap();
+        assert!(fetched.is_some());
+
+        let creator_groups = service.list_user_groups(&creator).await.unwrap();
+        assert_eq!(creator_groups.len(), 1);
+        let member_groups = service.list_user_groups(&member).await.unwrap();
+        assert_eq!(member_groups.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn send_message_stores_history_and_inboxes() {
+        let effects = Arc::new(MockEffects::default());
+        let service = ChatService::new(effects.clone());
+        let creator = AuthorityId::from_uuid(Uuid::from_u128(10));
+        let other = AuthorityId::from_uuid(Uuid::from_u128(11));
+        let group = service
+            .create_group("chat", creator, vec![other])
+            .await
+            .unwrap();
+
+        let sent = service
+            .send_message(&group.id, creator, "hello world".into())
+            .await
+            .unwrap();
+
+        let history = service.get_history(&group.id, None, None).await.unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].content, sent.content);
+
+        let inbox_keys = effects.list_keys(Some("chat_inbox:")).await.unwrap();
+        assert_eq!(inbox_keys.len(), group.members.len());
     }
 }

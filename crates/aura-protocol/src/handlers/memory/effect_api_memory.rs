@@ -3,6 +3,7 @@
 use crate::effects::{EffectApiEffects, EffectApiError, EffectApiEventStream};
 use async_trait::async_trait;
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
+use rand::{Rng, RngCore};
 use std::sync::Arc;
 
 /// Memory-based effect_api handler for testing
@@ -34,11 +35,56 @@ impl MemoryLedgerHandler {
 impl Default for MemoryLedgerHandler {
     fn default() -> Self {
         // Default uses mock handlers for testing
-        use aura_effects::{random::RealRandomHandler, time::PhysicalTimeHandler};
+        use aura_effects::time::PhysicalTimeHandler;
         Self::new(
-            Arc::new(RealRandomHandler::new()),
-            Arc::new(PhysicalTimeHandler::new()),
+            Arc::new(DeterministicRandom::new([1u8; 32])),
+            Arc::new(PhysicalTimeHandler),
         )
+    }
+}
+
+/// Deterministic random handler for memory tests
+struct DeterministicRandom {
+    seed: [u8; 32],
+}
+
+impl DeterministicRandom {
+    fn new(seed: [u8; 32]) -> Self {
+        Self { seed }
+    }
+}
+
+#[async_trait]
+impl RandomEffects for DeterministicRandom {
+    async fn random_bytes(&self, len: usize) -> Vec<u8> {
+        let mut rng = aura_effects::time::seeded_rng(self.seed);
+        let mut bytes = vec![0u8; len];
+        rng.fill_bytes(&mut bytes);
+        bytes
+    }
+
+    async fn random_bytes_32(&self) -> [u8; 32] {
+        let mut rng = aura_effects::time::seeded_rng(self.seed);
+        let mut bytes = [0u8; 32];
+        rng.fill_bytes(&mut bytes);
+        bytes
+    }
+
+    async fn random_u64(&self) -> u64 {
+        let mut rng = aura_effects::time::seeded_rng(self.seed);
+        rng.next_u64()
+    }
+
+    async fn random_range(&self, min: u64, max: u64) -> u64 {
+        let mut rng = aura_effects::time::seeded_rng(self.seed);
+        rng.gen_range(min..=max)
+    }
+
+    async fn random_uuid(&self) -> uuid::Uuid {
+        let mut rng = aura_effects::time::seeded_rng(self.seed);
+        let mut bytes = [0u8; 16];
+        rng.fill_bytes(&mut bytes);
+        uuid::Uuid::from_bytes(bytes)
     }
 }
 

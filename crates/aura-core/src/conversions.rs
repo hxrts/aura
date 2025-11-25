@@ -126,36 +126,15 @@ pub fn cap_to_journal(cap: &Cap) -> (String, String) {
 
 #[cfg(test)]
 mod cap_conversion_tests {
-    // TODO: These tests use the old Cap API that was removed during authority-centric refactoring
-    // They need to be rewritten to test the new Biscuit-based authorization system
+    use super::*;
+    use crate::Cap;
 
     #[test]
-    #[ignore = "Old Cap API removed during authority refactor"]
-    fn test_cap_authorization_action_conversion() {
-        // Old test for Cap::from_authorization_action() which no longer exists
-    }
-
-    #[test]
-    #[ignore = "Old Cap API removed during authority refactor"]
-    fn test_cap_journal_operation_conversion() {
-        // Old test for Cap::from_journal_operation() which no longer exists
-    }
-
-    #[test]
-    #[ignore = "Old Cap API removed during authority refactor"]
-    fn test_cap_to_action() {
-        // Old test for cap_to_action() which uses removed Cap methods
-    }
-
-    #[test]
-    #[ignore = "Old Cap API removed during authority refactor"]
-    fn test_cap_to_journal() {
-        // Old test for cap_to_journal() which uses removed Cap methods
-    }
-
-    #[test]
-    #[ignore = "Old Cap API removed during authority refactor"]
-    fn test_cap_roundtrip_conversion() {
-        // Old test for Cap roundtrip conversion which uses removed Cap methods
+    fn cap_to_journal_defaults_to_admin_all() {
+        // Current Cap implementation treats empty tokens as permissive; verify mapping is stable.
+        let cap = Cap::new();
+        let (category, op) = cap_to_journal(&cap);
+        assert_eq!(category, "admin");
+        assert_eq!(op, "all");
     }
 }

@@ -1,6 +1,5 @@
-#![cfg(feature = "fixture_effects")]
-
 //! Property tests for FlowBudget and Receipt system
+#![cfg(feature = "fixture_effects")]
 //!
 //! Tests the core invariants required by work/007.md Section 3:
 //! - No-Observable-Without-Charge: All observable events must have valid receipts

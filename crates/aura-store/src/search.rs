@@ -209,14 +209,13 @@ impl SearchIndexEntry {
         content_id: String,
         terms: BTreeSet<String>,
         required_capabilities: Vec<StorageCapability>,
+        timestamp: u64,
     ) -> Self {
         Self {
             content_id,
             terms,
             required_capabilities,
-            // TODO: Replace with PhysicalTimeEffects from context
-            // Using placeholder to avoid violating effect system architecture
-            timestamp: 0, // Will be replaced with proper time from effect context
+            timestamp,
         }
     }
 
@@ -255,11 +254,11 @@ impl SearchIndexEntry {
 
 /// Pure function to build search index from content
 pub fn build_search_index(
-    content_entries: &[(String, String, Vec<StorageCapability>)],
+    content_entries: &[(String, String, Vec<StorageCapability>, u64)],
 ) -> Result<Vec<SearchIndexEntry>, AuraError> {
     let mut index_entries = Vec::new();
 
-    for (content_id, content, capabilities) in content_entries {
+    for (content_id, content, capabilities, timestamp) in content_entries {
         // Simple tokenization (split on whitespace and punctuation)
         let terms: BTreeSet<String> = content
             .to_lowercase()
@@ -268,7 +267,8 @@ pub fn build_search_index(
             .map(|s| s.to_string())
             .collect();
 
-        let entry = SearchIndexEntry::new(content_id.clone(), terms, capabilities.clone());
+        let entry =
+            SearchIndexEntry::new(content_id.clone(), terms, capabilities.clone(), *timestamp);
 
         index_entries.push(entry);
     }
@@ -299,7 +299,7 @@ mod tests {
             .collect();
         let caps = vec![StorageCapability::read(StorageResource::Global)];
 
-        let entry = SearchIndexEntry::new("test_content".to_string(), terms, caps);
+        let entry = SearchIndexEntry::new("test_content".to_string(), terms, caps, 42);
 
         assert!(entry.matches_terms("hello world"));
         assert!(entry.matches_terms("test"));
@@ -313,7 +313,7 @@ mod tests {
             .map(|&s| s.to_string())
             .collect();
         let caps = vec![];
-        let entry = SearchIndexEntry::new("test".to_string(), terms, caps);
+        let entry = SearchIndexEntry::new("test".to_string(), terms, caps, 100);
 
         let score1 = entry.calculate_score("hello world");
         let score2 = entry.calculate_score("hello");
@@ -333,11 +333,13 @@ mod tests {
                 "doc1".to_string(),
                 "Hello world! This is a test document.".to_string(),
                 vec![StorageCapability::read(StorageResource::Global)],
+                1,
             ),
             (
                 "doc2".to_string(),
                 "Another document with different content.".to_string(),
                 vec![],
+                2,
             ),
         ];
 

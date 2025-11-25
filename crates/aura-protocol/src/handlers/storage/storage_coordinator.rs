@@ -114,7 +114,7 @@ impl StorageCoordinatorBuilder {
 impl StorageCoordinator {
     /// Create a simple coordinator with memory storage
     pub fn with_memory(device_id: DeviceId) -> Self {
-        let primary = StorageBackend::Memory(Arc::new(FilesystemStorageHandler::new(
+        let primary = StorageBackend::Memory(Arc::new(FilesystemStorageHandler::from_path(
             std::env::temp_dir().join("aura_memory_storage"),
         )));
         Self {
@@ -127,7 +127,7 @@ impl StorageCoordinator {
 
     /// Create coordinator with encrypted storage
     pub fn with_encrypted(device_id: DeviceId, encryption_key: Option<Vec<u8>>) -> Self {
-        let primary = StorageBackend::Encrypted(Arc::new(EncryptedStorageHandler::new(
+        let primary = StorageBackend::Encrypted(Arc::new(EncryptedStorageHandler::from_path(
             "/tmp/storage".to_string().into(),
             encryption_key,
         )));
@@ -374,10 +374,10 @@ mod tests {
         let device_id = DeviceId::new();
         let coordinator = StorageCoordinatorBuilder::new(device_id)
             .with_primary(StorageBackend::Memory(Arc::new(
-                FilesystemStorageHandler::new(std::env::temp_dir().join("aura_test_storage")),
+                FilesystemStorageHandler::from_path(std::env::temp_dir().join("aura_test_storage")),
             )))
             .add_replica(StorageBackend::Encrypted(Arc::new(
-                EncryptedStorageHandler::new("/tmp/test".to_string().into(), None),
+                EncryptedStorageHandler::from_path("/tmp/test".to_string().into(), None),
             )))
             .build()
             .unwrap();
@@ -401,10 +401,10 @@ mod tests {
         let device_id = DeviceId::new();
         let coordinator = StorageCoordinatorBuilder::new(device_id)
             .with_primary(StorageBackend::Memory(Arc::new(
-                FilesystemStorageHandler::new(std::env::temp_dir().join("aura_test_storage")),
+                FilesystemStorageHandler::from_path(std::env::temp_dir().join("aura_test_storage")),
             )))
             .add_replica(StorageBackend::Encrypted(Arc::new(
-                EncryptedStorageHandler::new("/tmp/test".to_string().into(), None),
+                EncryptedStorageHandler::from_path("/tmp/test".to_string().into(), None),
             )))
             .with_routing_rule("secret_".to_string(), "encrypted".to_string())
             .build()

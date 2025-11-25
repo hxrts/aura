@@ -374,7 +374,7 @@ mod tests {
 
     fn create_test_effects(_device_id: DeviceId) -> SharedEffects {
         let config = AgentConfig::default();
-        let system = AuraEffectSystem::testing(&config);
+        let system = AuraEffectSystem::testing(&config).expect("test effect system");
         Arc::new(system)
     }
 

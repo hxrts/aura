@@ -124,7 +124,11 @@ pub use fixtures::*;
 pub use foundation::*;
 pub use infrastructure::*;
 pub use mocks::*;
-pub use simulation::*;
+// Re-export simulation components (excluding ambiguous transport)
+pub use simulation::transport as simulation_transport;
+pub use simulation::{choreography::*, network::*};
+
+// Re-export stateful effects (all items)
 pub use stateful_effects::*;
 pub use time::*;
 pub use verification::*;

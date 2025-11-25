@@ -458,7 +458,6 @@ pub mod factory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::DeviceId;
 
     #[test]
     fn test_composer_builder_pattern() {

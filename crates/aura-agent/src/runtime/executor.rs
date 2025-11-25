@@ -102,6 +102,7 @@ impl EffectExecutor {
 
 /// Builder for effect executors
 #[derive(Debug)]
+#[allow(dead_code)] // Part of future effect system API
 pub struct EffectExecutorBuilder {
     authority_id: Option<AuthorityId>,
     execution_mode: Option<ExecutionMode>,
@@ -110,6 +111,7 @@ pub struct EffectExecutorBuilder {
 
 impl EffectExecutorBuilder {
     /// Create a new executor builder
+    #[allow(dead_code)] // Part of future effect system API
     pub fn new() -> Self {
         Self {
             authority_id: None,
@@ -119,24 +121,28 @@ impl EffectExecutorBuilder {
     }
 
     /// Set the authority ID
+    #[allow(dead_code)] // Part of future effect system API
     pub fn with_authority(mut self, authority_id: AuthorityId) -> Self {
         self.authority_id = Some(authority_id);
         self
     }
 
     /// Set the execution mode
+    #[allow(dead_code)] // Part of future effect system API
     pub fn with_execution_mode(mut self, mode: ExecutionMode) -> Self {
         self.execution_mode = Some(mode);
         self
     }
 
     /// Set the effect registry
+    #[allow(dead_code)] // Part of future effect system API
     pub fn with_registry(mut self, registry: Arc<super::EffectRegistry>) -> Self {
         self.registry = Some(registry);
         self
     }
 
     /// Build the executor
+    #[allow(dead_code)] // Part of future effect system API
     pub fn build(self) -> Result<EffectExecutor, AuraError> {
         let authority_id = self
             .authority_id

@@ -15,6 +15,7 @@
 
 use aura_core::effects::{NetworkEffects, PhysicalTimeEffects, StorageEffects};
 use aura_core::{identifiers::DeviceId, ContextId};
+use aura_effects::time::monotonic_now;
 use aura_effects::transport::{TransportConfig, TransportError};
 use std::collections::HashMap;
 
@@ -202,7 +203,7 @@ where
         let connection = self.transport_manager.connect_with_retry(address).await?;
 
         // Store connection state
-        let now = std::time::Instant::now();
+        let now = monotonic_now();
         let connection_state = ConnectionState {
             device_id: peer_id,
             context_id,
@@ -221,7 +222,7 @@ where
 
     /// Send data to connected peer - NO choreography
     pub async fn send_data(&self, connection_id: &str, data: Vec<u8>) -> CoordinationResult<()> {
-        let now = std::time::Instant::now();
+        let now = monotonic_now();
         {
             let mut connections = self.active_connections.write().await;
             if let Some(connection_state) = connections.get_mut(connection_id) {
@@ -283,7 +284,7 @@ where
         &self,
         max_idle: std::time::Duration,
     ) -> CoordinationResult<usize> {
-        let now = std::time::Instant::now();
+        let now = monotonic_now();
         let mut to_remove = Vec::new();
 
         // Find stale connections

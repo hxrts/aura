@@ -53,6 +53,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 rand = { workspace = true }
+rand_chacha = { workspace = true }
 hex = { workspace = true }
 
 # KeyJournal external dependencies

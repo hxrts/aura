@@ -474,6 +474,74 @@ impl<C: CryptoEffects, S: StorageEffects> JournalEffects for JournalHandler<C, S
 }
 ```
 
+### Common Effect Placement Mistakes
+
+Here are examples of incorrect effect placement and how to fix them:
+
+```rust
+// ❌ WRONG: Domain handler using OS operations directly
+// File: aura-journal/src/effects.rs
+impl JournalEffects for BadJournalHandler {
+    async fn read_facts(&self, namespace: Namespace) -> Vec<Fact> {
+        // VIOLATION: Direct file system access in domain handler
+        let data = std::fs::read("journal.dat")?;
+        serde_json::from_slice(&data)?
+    }
+}
+
+// ✅ CORRECT: Inject StorageEffects for OS operations
+impl<S: StorageEffects> JournalEffects for GoodJournalHandler<S> {
+    async fn read_facts(&self, namespace: Namespace) -> Vec<Fact> {
+        // Use injected storage effects
+        let data = self.storage.read_chunk(&namespace.to_path()).await?;
+        self.deserialize_facts(data)
+    }
+}
+```
+
+```rust
+// ❌ WRONG: Application effect implementation in aura-effects
+// File: aura-effects/src/journal_handler.rs
+pub struct JournalHandler { }
+
+impl JournalEffects for JournalHandler {
+    // VIOLATION: Domain logic in infrastructure crate
+    async fn validate_fact(&self, fact: &Fact) -> bool {
+        match fact {
+            Fact::TreeOp(op) => self.validate_tree_semantics(op),
+            Fact::Commit(c) => self.validate_commit_rules(c),
+        }
+    }
+}
+
+// ✅ CORRECT: Application effects belong in domain crates
+// File: aura-journal/src/effects.rs
+impl<C, S> JournalEffects for JournalHandler<C, S> {
+    // Domain validation logic belongs here
+}
+```
+
+```rust
+// ❌ WRONG: Infrastructure effect in domain crate
+// File: aura-journal/src/network_handler.rs
+pub struct CustomNetworkHandler { }
+
+impl NetworkEffects for CustomNetworkHandler {
+    // VIOLATION: OS-level networking in domain crate
+    async fn connect(&self, addr: &str) -> TcpStream {
+        TcpStream::connect(addr).await?
+    }
+}
+
+// ✅ CORRECT: Use existing NetworkEffects from aura-effects
+impl<N: NetworkEffects> MyDomainHandler<N> {
+    async fn send_fact(&self, fact: Fact) -> Result<()> {
+        // Compose with injected network effects
+        self.network.send(fact.encode()).await
+    }
+}
+```
+
 **Key principles for domain effect implementations**:
 - **Domain logic first**: Encode business rules and validation specific to the domain
 - **Infrastructure composition**: Use infrastructure effects for OS operations, never direct syscalls
@@ -504,6 +572,26 @@ When deciding which category an effect trait belongs to:
 1. **Does it require OS integration?** → Infrastructure Effect (aura-effects)
 2. **Does it encode Aura-specific domain knowledge?** → Application Effect (domain crate)
 3. **Is it a convenience wrapper?** → Composite Effect (extension trait)
+
+### Effect Placement Decision Matrix
+
+Use this matrix to determine where to implement an effect:
+
+| Question | Infrastructure Effect | Application Effect |
+|----------|----------------------|-------------------|
+| **OS integration needed?** | ✓ Yes (implement in aura-effects) | ✗ No (inject infrastructure effects) |
+| **Contains domain semantics?** | ✗ No (too generic) | ✓ Yes (implement in domain crate) |
+| **Aura-specific logic?** | ✗ No (universal capability) | ✓ Yes (Aura concepts) |
+| **Multiple implementations likely?** | Maybe (OS variations) | Usually (different strategies) |
+| **Reusable outside Aura?** | ✓ Yes (generic operations) | ✗ No (Aura-specific) |
+| **Example operations** | read(), write(), connect() | validate_fact(), reduce_state() |
+
+**Examples applying the matrix:**
+
+- **CryptoEffects** → Infrastructure (OS crypto, no Aura semantics, reusable)
+- **JournalEffects** → Application (Aura facts, domain validation, not reusable)
+- **NetworkEffects** → Infrastructure (TCP/UDP, no domain logic, reusable)
+- **FlowBudgetEffects** → Application (Aura privacy model, domain rules)
 
 This classification ensures that:
 - Infrastructure effects have reliable, stateless implementations available in `aura-effects`

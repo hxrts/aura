@@ -1,6 +1,6 @@
-#![cfg(feature = "fixture_effects")]
-
 //! Scalability tests for commitment tree implementation.
+#![cfg(feature = "fixture_effects")]
+#![doc = include_str!("../../README.md")]
 //!
 //! These tests verify that the system handles large-scale scenarios:
 //! - Tree with 100+ devices

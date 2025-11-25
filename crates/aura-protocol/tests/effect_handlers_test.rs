@@ -1,6 +1,5 @@
-#![cfg(feature = "fixture_effects")]
-
 //! Tests for effect handlers
+#![cfg(feature = "fixture_effects")]
 //!
 //! This module tests the different handler implementations (real, mock, simulation)
 //! and their conformance to the effect trait contracts.
@@ -8,6 +7,8 @@
 mod common;
 
 use aura_composition::CompositeHandler;
+use aura_core::AuraResult;
+use aura_macros::aura_test;
 use aura_protocol::{effects::*, handlers::choreographic::MemoryChoreographicHandler};
 // Import handlers from aura-effects and aura-testkit
 use aura_effects::{
@@ -23,8 +24,8 @@ use aura_testkit::{DeviceTestFixture, TestEffectsBuilder};
 use std::collections::HashMap;
 
 /// Test that composite handlers implement all required effect traits
-#[tokio::test]
-async fn test_composite_handler_implements_all_effects() {
+#[aura_test]
+async fn test_composite_handler_implements_all_effects() -> AuraResult<()> {
     // Use testkit instead of legacy helper
     let fixture = DeviceTestFixture::new(0);
     let handler = CompositeHandler::for_testing(fixture.device_id().into());
@@ -47,11 +48,12 @@ async fn test_composite_handler_implements_all_effects() {
 
     let current_time = time_effect.physical_time().await.unwrap().ts_ms;
     assert!(current_time > 0);
+    Ok(())
 }
 
 /// Test network effects with different handler types
-#[tokio::test]
-async fn test_network_effects() {
+#[aura_test]
+async fn test_network_effects() -> AuraResult<()> {
     // Test with memory handler - use testkit
     let fixture = DeviceTestFixture::new(0);
     let device_id = fixture.device_id();
@@ -79,11 +81,12 @@ async fn test_network_effects() {
     // Test real handler (basic instantiation)
     let _real_handler = RealNetworkHandler::new();
     // Note: is_peer_connected method might not be available - skip this check for now
+    Ok(())
 }
 
 /// Test storage effects with different handler types
-#[tokio::test]
-async fn test_storage_effects() {
+#[aura_test]
+async fn test_storage_effects() -> AuraResult<()> {
     // Test with memory handler
     let memory_handler = MemoryStorageHandler::new();
     let test_key = "test_key";
@@ -134,6 +137,7 @@ async fn test_storage_effects() {
     let fs_handler = FilesystemStorageHandler::new("/tmp/test_storage".into()).unwrap();
     let list_result = fs_handler.list_keys(None).await;
     assert!(list_result.is_ok());
+    Ok(())
 }
 
 /// Test crypto effects with different handler types
@@ -202,19 +206,21 @@ async fn test_crypto_effects() {
     let mut sensitive_data = vec![0x42u8; 10];
     real_handler.secure_zero(&mut sensitive_data);
     assert!(sensitive_data.iter().all(|&b| b == 0));
+    Ok(())
 }
 
 /// Test time effects (disabled - RealTimeHandler not yet available)
-#[tokio::test]
-async fn test_time_effects() {
+#[aura_test]
+async fn test_time_effects() -> AuraResult<()> {
     // Skip test since RealTimeHandler implementation is not yet complete
     println!("Time effects test skipped - handler not yet implemented");
     // TODO: Re-enable when RealTimeHandler is fully implemented
+    Ok(())
 }
 
 /// Test console effects
-#[tokio::test]
-async fn test_console_effects() {
+#[aura_test]
+async fn test_console_effects() -> AuraResult<()> {
     let real_handler = StdoutConsoleHandler::new();
 
     // Test log methods (should not panic)
@@ -235,19 +241,21 @@ async fn test_console_effects() {
         protocol_type: String::from("DKD"),
     };
     // Note: emit_event method not available on RealConsoleHandler - skip for now
+    Ok(())
 }
 
 /// Test effect_api effects (disabled - MemoryLedgerHandler not yet available)
-#[tokio::test]
-async fn test_effect_api_effects() {
+#[aura_test]
+async fn test_effect_api_effects() -> AuraResult<()> {
     // Skip test since MemoryLedgerHandler implementation is not yet complete
     println!("Effect API effects test skipped - handler not yet implemented");
+    Ok(())
     // TODO: Re-enable when MemoryLedgerHandler is fully implemented
 }
 
 /// Test choreographic effects
-#[tokio::test]
-async fn test_choreographic_effects() {
+#[aura_test]
+async fn test_choreographic_effects() -> AuraResult<()> {
     use aura_protocol::effects::{ChoreographicRole, ChoreographyEvent};
     use uuid::Uuid;
 
@@ -308,11 +316,12 @@ async fn test_choreographic_effects() {
 
     // End session
     memory_handler.end_session().await.unwrap();
+    Ok(())
 }
 
 /// Test handler error conditions
-#[tokio::test]
-async fn test_handler_error_conditions() {
+#[aura_test]
+async fn test_handler_error_conditions() -> AuraResult<()> {
     let memory_storage = MemoryStorageHandler::new();
 
     // Test retrieving non-existent key
@@ -334,11 +343,12 @@ async fn test_handler_error_conditions() {
     // Memory handler may validate peer connectivity
     // The behavior depends on implementation - we just verify it can be called
     let _ = result;
+    Ok(())
 }
 
 /// Test handler composition and polymorphism
-#[tokio::test]
-async fn test_handler_polymorphism() {
+#[aura_test]
+async fn test_handler_polymorphism() -> AuraResult<()> {
     // Test that we can use handlers polymorphically
     let handlers: Vec<Box<dyn StorageEffects + Send + Sync>> = vec![
         Box::new(MemoryStorageHandler::new()),
@@ -359,11 +369,12 @@ async fn test_handler_polymorphism() {
         assert!(exists_result.is_ok());
         assert!(stats_result.is_ok());
     }
+    Ok(())
 }
 
 /// Test that composite handlers properly delegate to sub-handlers
-#[tokio::test]
-async fn test_composite_handler_delegation() {
+#[aura_test]
+async fn test_composite_handler_delegation() -> AuraResult<()> {
     let fixture = DeviceTestFixture::new(0);
     let composite = CompositeHandler::for_testing(fixture.device_id().into());
 
@@ -388,6 +399,7 @@ async fn test_composite_handler_delegation() {
     assert_eq!(hash.len(), 32);
 
     // Test time delegation
-    let timestamp = TimeEffects::current_epoch(&composite).await;
-    assert!(timestamp > 0);
+    let time = composite.physical_time().await.unwrap();
+    assert!(time.ts_ms > 0);
+    Ok(())
 }

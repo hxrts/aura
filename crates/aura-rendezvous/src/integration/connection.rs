@@ -437,8 +437,57 @@ impl<N: NetworkEffects> StunClient<N> {
                 | StunAttribute::Nonce(_)
                 | StunAttribute::Software(_)
                 | StunAttribute::AlternateServer(_) => {
-                    // TODO: Implement encoding for these STUN attributes
-                    tracing::debug!("Skipping unsupported STUN attribute: {:?}", attribute);
+                    let (attr_type, payload): (u16, Vec<u8>) = match attribute {
+                        StunAttribute::Username(name) => (0x0006, name.clone().into_bytes()),
+                        StunAttribute::MessageIntegrity(hmac) => (0x0008, hmac.clone()),
+                        StunAttribute::UnknownAttributes(attrs) => {
+                            let mut buf = Vec::with_capacity(attrs.len() * 2);
+                            for a in attrs {
+                                buf.extend_from_slice(&a.to_be_bytes());
+                            }
+                            (0x000A, buf)
+                        }
+                        StunAttribute::Realm(realm) => (0x0014, realm.clone().into_bytes()),
+                        StunAttribute::Nonce(nonce) => (0x0015, nonce.clone().into_bytes()),
+                        StunAttribute::Software(soft) => (0x8022, soft.clone().into_bytes()),
+                        StunAttribute::AlternateServer(addr) => {
+                            let mut buf = Vec::new();
+                            // Same encoding as MAPPED-ADDRESS but with different type
+                            buf.push(0); // reserved
+                            if addr.is_ipv4() {
+                                buf.push(0x01);
+                                buf.extend_from_slice(&addr.port().to_be_bytes());
+                                if let std::net::IpAddr::V4(ipv4) = addr.ip() {
+                                    buf.extend_from_slice(&ipv4.octets());
+                                }
+                            } else {
+                                buf.push(0x02);
+                                buf.extend_from_slice(&addr.port().to_be_bytes());
+                                if let std::net::IpAddr::V6(ipv6) = addr.ip() {
+                                    buf.extend_from_slice(&ipv6.octets());
+                                }
+                            }
+                            (0x8023, buf)
+                        }
+                        _ => (0, Vec::new()),
+                    };
+
+                    // Skip if we hit the impossible default
+                    if attr_type == 0 {
+                        continue;
+                    }
+
+                    data.extend_from_slice(&attr_type.to_be_bytes());
+                    let mut length = payload.len();
+                    // Add padding to 4-byte boundary
+                    while length % 4 != 0 {
+                        length += 1;
+                    }
+                    data.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+                    data.extend_from_slice(&payload);
+                    while (data.len() - attr_start - 4) % 4 != 0 {
+                        data.push(0);
+                    }
                 }
                 StunAttribute::Unknown {
                     attribute_type,
@@ -1486,6 +1535,7 @@ impl<N: NetworkEffects> ConnectionManager<N> {
     /// # Parameters
     /// - `stream`: TCP stream for the WebSocket connection
     /// - `addr`: Socket address of the peer
+    #[allow(dead_code)] // WebSocket implementation for future use
     async fn perform_websocket_handshake(
         &self,
         mut stream: TcpStream,
@@ -1538,6 +1588,7 @@ impl<N: NetworkEffects> ConnectionManager<N> {
     /// # Note
     /// Uses RandomEffects to generate cryptographically secure random bytes as required
     /// by the WebSocket protocol (RFC 6455).
+    #[allow(dead_code)] // WebSocket implementation for future use
     async fn generate_websocket_key(&self) -> String {
         // Generate 16 cryptographically secure random bytes for WebSocket key
         let bytes = self.random.random_bytes(16).await;
@@ -1571,6 +1622,7 @@ impl<N: NetworkEffects> ConnectionManager<N> {
     }
 
     /// Validate WebSocket upgrade response
+    #[allow(dead_code)] // WebSocket implementation for future use
     fn validate_websocket_response(
         &self,
         response: &str,
@@ -1634,6 +1686,7 @@ impl<N: NetworkEffects> ConnectionManager<N> {
     /// The server takes the value of the Sec-WebSocket-Key header, appends the
     /// GUID "258EAFA5-E914-47DA-95CA-C5AB0DC85B11", applies SHA-1 hashing,
     /// and base64 encodes the result.
+    #[allow(dead_code)] // WebSocket implementation for future use
     fn compute_websocket_accept(&self, websocket_key: &str) -> Result<String, AuraError> {
         // WebSocket GUID as defined in RFC 6455
         const WEBSOCKET_GUID: &str = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -1753,15 +1806,18 @@ impl<N: NetworkEffects> ConnectionManager<N> {
 mod tests {
     use super::*;
     use aura_agent::{AgentConfig, AuraEffectSystem};
+    use aura_core::PhysicalTimeEffects;
 
     #[tokio::test]
     async fn test_connection_manager_creation() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let effects = std::sync::Arc::new(AuraEffectSystem::testing(&AgentConfig::default()));
+        let effects = std::sync::Arc::new(
+            AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
+        );
         let random =
             std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
-        let manager = ConnectionManager::new(device_id, stun_config, effects, random);
+        let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
 
         assert_eq!(manager.device_id, device_id);
     }
@@ -1770,10 +1826,12 @@ mod tests {
     async fn test_connection_priority_logic() {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let effects = std::sync::Arc::new(AuraEffectSystem::testing(&AgentConfig::default()));
+        let effects = std::sync::Arc::new(
+            AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
+        );
         let random =
             std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
-        let manager = ConnectionManager::new(device_id, stun_config, effects, random);
+        let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
 
         let offers = vec![
             TransportDescriptor::quic("192.168.1.100:8080".to_string(), "aura".to_string()),
@@ -1790,11 +1848,8 @@ mod tests {
         };
 
         // Get current timestamp for test
-        #[allow(clippy::disallowed_methods)]
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let physical_time = effects.physical_time().await.unwrap();
+        let timestamp = physical_time.ts_ms / 1000; // Convert to seconds
 
         let peer_id = DeviceId::from("peer_device");
         let result = manager
@@ -1859,10 +1914,12 @@ mod tests {
 
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let effects = std::sync::Arc::new(AuraEffectSystem::testing(&AgentConfig::default()));
+        let effects = std::sync::Arc::new(
+            AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
+        );
         let random =
             std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
-        let manager = ConnectionManager::new(device_id, stun_config, effects, random);
+        let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
 
         // Create transport with reflexive address
         let transport = TransportDescriptor {
@@ -1900,13 +1957,9 @@ mod tests {
         };
 
         // Get current time values for test
-        #[allow(clippy::disallowed_methods)]
-        let start_time = std::time::Instant::now();
-        #[allow(clippy::disallowed_methods)]
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let physical_time = effects.physical_time().await.unwrap();
+        let start_time = aura_effects::time::monotonic_now(); // Monotonic timing for test measurements
+        let timestamp = physical_time.ts_ms / 1000; // Convert to seconds
 
         let peer_id = DeviceId::from("peer_device");
         let result = manager

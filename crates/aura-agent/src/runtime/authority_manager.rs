@@ -9,12 +9,14 @@ use std::sync::{Arc, RwLock};
 
 /// Manager for authority lifecycle and coordination
 #[derive(Debug)]
+#[allow(dead_code)] // Part of future authority management API
 pub struct AuthorityManager {
     authorities: Arc<RwLock<HashMap<AuthorityId, AuthorityState>>>,
 }
 
 impl AuthorityManager {
     /// Create a new authority manager
+    #[allow(dead_code)] // Part of future authority management API
     pub fn new() -> Self {
         Self {
             authorities: Arc::new(RwLock::new(HashMap::new())),
@@ -22,6 +24,7 @@ impl AuthorityManager {
     }
 
     /// Register an authority
+    #[allow(dead_code)] // Part of future authority management API
     pub fn register_authority(&self, authority_id: AuthorityId) -> Result<(), AuthorityError> {
         let mut authorities = self
             .authorities
@@ -33,6 +36,7 @@ impl AuthorityManager {
     }
 
     /// Get authority state
+    #[allow(dead_code)] // Part of future authority management API
     pub fn get_authority(
         &self,
         authority_id: AuthorityId,
@@ -46,6 +50,7 @@ impl AuthorityManager {
     }
 
     /// List all registered authorities
+    #[allow(dead_code)] // Part of future authority management API
     pub fn list_authorities(&self) -> Result<Vec<AuthorityId>, AuthorityError> {
         let authorities = self
             .authorities
@@ -56,6 +61,7 @@ impl AuthorityManager {
     }
 
     /// Remove an authority
+    #[allow(dead_code)] // Part of future authority management API
     pub fn remove_authority(
         &self,
         authority_id: AuthorityId,
@@ -69,6 +75,7 @@ impl AuthorityManager {
     }
 
     /// Check if authority is registered
+    #[allow(dead_code)] // Part of future authority management API
     pub fn has_authority(&self, authority_id: AuthorityId) -> bool {
         self.authorities
             .read()
@@ -85,6 +92,7 @@ impl Default for AuthorityManager {
 
 /// State tracking for an individual authority
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Part of future authority management API
 pub struct AuthorityState {
     authority_id: AuthorityId,
     active_contexts: HashMap<ContextId, super::EffectContext>,
@@ -93,6 +101,7 @@ pub struct AuthorityState {
 
 impl AuthorityState {
     /// Create new authority state
+    #[allow(dead_code)] // Part of future authority management API
     pub fn new(authority_id: AuthorityId) -> Self {
         Self {
             authority_id,
@@ -102,37 +111,44 @@ impl AuthorityState {
     }
 
     /// Get the authority ID
+    #[allow(dead_code)] // Part of future authority management API
     pub fn authority_id(&self) -> AuthorityId {
         self.authority_id
     }
 
     /// Get the current status
+    #[allow(dead_code)] // Part of future authority management API
     pub fn status(&self) -> AuthorityStatus {
         self.status
     }
 
     /// Set the status
+    #[allow(dead_code)] // Part of future authority management API
     pub fn set_status(&mut self, status: AuthorityStatus) {
         self.status = status;
     }
 
     /// Add an active context
+    #[allow(dead_code)] // Part of future authority management API
     pub fn add_context(&mut self, context: super::EffectContext) {
         let context_id = context.context_id();
         self.active_contexts.insert(context_id, context);
     }
 
     /// Remove an active context
+    #[allow(dead_code)] // Part of future authority management API
     pub fn remove_context(&mut self, context_id: ContextId) -> Option<super::EffectContext> {
         self.active_contexts.remove(&context_id)
     }
 
     /// Get active contexts
+    #[allow(dead_code)] // Part of future authority management API
     pub fn active_contexts(&self) -> &HashMap<ContextId, super::EffectContext> {
         &self.active_contexts
     }
 
     /// Get count of active contexts
+    #[allow(dead_code)] // Part of future authority management API
     pub fn context_count(&self) -> usize {
         self.active_contexts.len()
     }
@@ -140,6 +156,7 @@ impl AuthorityState {
 
 /// Status of an authority
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Part of future authority management API
 pub enum AuthorityStatus {
     Initializing,
     Active,
@@ -149,10 +166,12 @@ pub enum AuthorityStatus {
 }
 
 /// Shared reference to AuthorityManager
+#[allow(dead_code)] // Part of future authority management API
 pub type SharedAuthorityManager = Arc<AuthorityManager>;
 
 /// Authority management errors
 #[derive(Debug, thiserror::Error)]
+#[allow(dead_code)] // Part of future authority management API
 pub enum AuthorityError {
     #[error("Lock error")]
     LockError,

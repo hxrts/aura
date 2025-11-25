@@ -22,7 +22,6 @@ use super::ProtocolGuard;
 use aura_core::{AuraResult, Journal, TimeEffects};
 use aura_mpst::journal::{JournalAnnotation, JournalOpType};
 use serde_json::Value as JsonValue;
-use std::time::Duration;
 use std::{collections::HashMap, future::Future};
 use tracing::{debug, error, info, warn};
 
@@ -341,7 +340,13 @@ impl JournalCoupler {
                             "Journal annotation application failed, retrying"
                         );
                         // Small delay before retry
-                        tokio::time::sleep(Duration::from_millis(10 * (attempt + 1) as u64)).await;
+                        let delay_ms = 10 * (attempt + 1) as u64;
+                        effect_system.sleep_ms(delay_ms).await.map_err(|e| {
+                            aura_core::AuraError::internal(format!(
+                                "Failed to sleep during journal operation retry: {}",
+                                e
+                            ))
+                        })?;
                     }
                 }
             }

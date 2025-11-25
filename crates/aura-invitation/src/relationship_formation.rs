@@ -360,7 +360,17 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
         // Phase 1: Send relationship initiation
         let context_id = self.generate_context_id(config).await?;
         let nonce = self.effects.random_bytes(32).await;
-        let timestamp = self.effects.physical_time().await.unwrap().ts_ms;
+        let timestamp = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| {
+                RelationshipFormationError::Core(aura_core::AuraError::internal(format!(
+                    "Time error: {}",
+                    e
+                )))
+            })?
+            .ts_ms;
 
         let initiation = RelationshipInitiation {
             context_id,
@@ -384,7 +394,17 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
         let key_exchange = KeyExchange {
             context_id,
             initiator_public_key,
-            timestamp: self.effects.physical_time().await.unwrap().ts_ms,
+            timestamp: self
+                .effects
+                .physical_time()
+                .await
+                .map_err(|e| {
+                    RelationshipFormationError::Core(aura_core::AuraError::internal(format!(
+                        "Time error: {}",
+                        e
+                    )))
+                })?
+                .ts_ms,
         };
 
         self.send_choreographic_message(&key_exchange, config.responder_id)
@@ -440,7 +460,17 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
         let key_offer = KeyOffer {
             context_id: initiation.context_id,
             responder_public_key: responder_public_key.clone(),
-            timestamp: self.effects.physical_time().await.unwrap().ts_ms,
+            timestamp: self
+                .effects
+                .physical_time()
+                .await
+                .map_err(|e| {
+                    RelationshipFormationError::Core(aura_core::AuraError::internal(format!(
+                        "Time error: {}",
+                        e
+                    )))
+                })?
+                .ts_ms,
         };
 
         self.send_choreographic_message(&key_offer, config.initiator_id)
@@ -562,7 +592,16 @@ async fn initiator_session<E: RelationshipFormationEffects>(
 ) -> Result<RelationshipFormationResult, RelationshipFormationError> {
     // Phase 1: Send initialization request
     let nonce = effects.random_bytes(32).await;
-    let timestamp = effects.physical_time().await.unwrap().ts_ms;
+    let timestamp = effects
+        .physical_time()
+        .await
+        .map_err(|e| {
+            RelationshipFormationError::Core(aura_core::AuraError::internal(format!(
+                "Time error: {}",
+                e
+            )))
+        })?
+        .ts_ms;
 
     let init_request = RelationshipInitRequest {
         initiator_id: config.initiator_id,
@@ -602,7 +641,16 @@ async fn initiator_session<E: RelationshipFormationEffects>(
     let key_exchange = RelationshipKeyExchange {
         context_id: key_offer.context_id,
         initiator_public_key,
-        timestamp: effects.physical_time().await.unwrap().ts_ms,
+        timestamp: effects
+            .physical_time()
+            .await
+            .map_err(|e| {
+                RelationshipFormationError::Core(aura_core::AuraError::internal(format!(
+                    "Time error: {}",
+                    e
+                )))
+            })?
+            .ts_ms,
     };
 
     let exchange_bytes = serde_json::to_vec(&key_exchange).map_err(|e| {
@@ -765,7 +813,16 @@ async fn responder_session<E: RelationshipFormationEffects>(
     let key_offer = RelationshipKeyOffer {
         context_id,
         responder_public_key: responder_public_key.clone(),
-        timestamp: effects.physical_time().await.unwrap().ts_ms,
+        timestamp: effects
+            .physical_time()
+            .await
+            .map_err(|e| {
+                RelationshipFormationError::Core(aura_core::AuraError::internal(format!(
+                    "Time error: {}",
+                    e
+                )))
+            })?
+            .ts_ms,
     };
 
     let offer_bytes = serde_json::to_vec(&key_offer).map_err(|e| {
@@ -926,6 +983,7 @@ pub async fn derive_context_id<E: RelationshipFormationEffects>(
     let hash = aura_core::hash::hash(&input);
     // Create a deterministic ContextId from the hash
     // SAFETY: hash is 32 bytes, taking first 16 never fails
+    #[allow(clippy::unwrap_used)] // Array slice of known size never fails
     let uuid_bytes: [u8; 16] = hash[..16].try_into().unwrap();
     Ok(ContextId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes)))
 }
@@ -1066,7 +1124,13 @@ pub async fn create_trust_record<E: RelationshipFormationEffects>(
     record.extend_from_slice(context_id.as_bytes());
     record.extend_from_slice(peer_id.0.as_bytes());
     record.extend_from_slice(&relationship_keys.derivation_context);
-    record.extend_from_slice(&effects.physical_time().await.unwrap().ts_ms.to_le_bytes());
+    let timestamp = effects.physical_time().await.map_err(|e| {
+        RelationshipFormationError::Core(aura_core::AuraError::internal(format!(
+            "Time error: {}",
+            e
+        )))
+    })?;
+    record.extend_from_slice(&timestamp.ts_ms.to_le_bytes());
 
     let record_hash = aura_core::hash::hash(&record);
 
@@ -1205,10 +1269,24 @@ impl<E: RelationshipFormationEffects> LegacyRelationshipFormationCoordinator<E> 
                     trust_level: request.initial_trust_level,
                     relationship_type: aura_core::RelationshipType::Trust,
                     metadata: request.metadata,
-                    created_at: self.effects.physical_time().await.unwrap().ts_ms,
+                    created_at: self
+                        .effects
+                        .physical_time()
+                        .await
+                        .map_err(|e| aura_core::AuraError::internal(format!("Time error: {}", e)))?
+                        .ts_ms,
                 };
 
-                let timestamp = self.effects.physical_time().await.unwrap().ts_ms;
+                let timestamp =
+                    self.effects
+                        .physical_time()
+                        .await
+                        .map_err(|e| {
+                            RelationshipFormationError::Core(aura_core::AuraError::internal(
+                                format!("Time error: {}", e),
+                            ))
+                        })?
+                        .ts_ms;
 
                 Ok(RelationshipFormationResponse {
                     relationship: Some(relationship),
@@ -1219,7 +1297,16 @@ impl<E: RelationshipFormationEffects> LegacyRelationshipFormationCoordinator<E> 
                 })
             }
             Err(e) => {
-                let timestamp = self.effects.physical_time().await.unwrap().ts_ms;
+                let timestamp =
+                    self.effects
+                        .physical_time()
+                        .await
+                        .map_err(|e| {
+                            RelationshipFormationError::Core(aura_core::AuraError::internal(
+                                format!("Time error: {}", e),
+                            ))
+                        })?
+                        .ts_ms;
                 Ok(RelationshipFormationResponse {
                     relationship: None,
                     established: false,
@@ -1247,7 +1334,17 @@ impl<E: RelationshipFormationEffects> LegacyRelationshipFormationCoordinator<E> 
         }
         // Create a mock initialization request
         let nonce = self.effects.random_bytes(32).await;
-        let timestamp = self.effects.physical_time().await.unwrap().ts_ms;
+        let timestamp = self
+            .effects
+            .physical_time()
+            .await
+            .map_err(|e| {
+                RelationshipFormationError::Core(aura_core::AuraError::internal(format!(
+                    "Time error: {}",
+                    e
+                )))
+            })?
+            .ts_ms;
 
         let init_request = RelationshipInitRequest {
             initiator_id: config.initiator_id,
@@ -1606,7 +1703,6 @@ mod tests {
         }
     }
 
-
     #[async_trait::async_trait]
     impl JournalEffects for MockEffects {
         async fn merge_facts(
@@ -1677,7 +1773,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mock_effects_basic_operations() {
+    async fn test_mock_effects_basic_operations() -> Result<(), RelationshipFormationError> {
         let effects = MockEffects;
 
         // Test RandomEffects
@@ -1691,11 +1787,22 @@ mod tests {
         let hash = aura_core::hash::hash(b"test data");
         assert_eq!(hash.len(), 32);
 
-        // Test TimeEffects  
-        let timestamp = effects.physical_time().await.unwrap().ts_ms;
+        // Test TimeEffects
+        let timestamp = effects
+            .physical_time()
+            .await
+            .map_err(|e| {
+                RelationshipFormationError::Core(aura_core::AuraError::internal(format!(
+                    "Time error: {}",
+                    e
+                )))
+            })?
+            .ts_ms;
         assert_eq!(timestamp, 1234567890000);
 
         // Test ConsoleEffects
         assert!(effects.log_info("test").await.is_ok());
+
+        Ok(())
     }
 }

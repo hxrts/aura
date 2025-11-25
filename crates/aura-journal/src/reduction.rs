@@ -897,10 +897,7 @@ mod tests {
             .unwrap();
 
         let state = reduce_context(&journal);
-        let ch_state = state
-            .channel_epochs
-            .get(&channel)
-            .expect("channel state should exist");
+        let ch_state = state.channel_epochs.get(&channel).unwrap(); // Test expectation - intentional panic on test failure
         assert!(ch_state.pending_bump.is_none());
         assert_eq!(ch_state.chan_epoch, 0);
         assert_eq!(ch_state.skip_window, 1024);
@@ -949,14 +946,8 @@ mod tests {
             .unwrap();
 
         let state = reduce_context(&journal);
-        let ch_state = state
-            .channel_epochs
-            .get(&channel)
-            .expect("channel state should exist");
-        let pending = ch_state
-            .pending_bump
-            .as_ref()
-            .expect("pending bump should exist");
+        let ch_state = state.channel_epochs.get(&channel).unwrap(); // Test expectation - intentional panic on test failure
+        let pending = ch_state.pending_bump.as_ref().unwrap(); // Test expectation - intentional panic on test failure
         assert_eq!(pending.new_epoch, 1);
         assert_eq!(pending.reason, ChannelBumpReason::SuspiciousActivity);
     }

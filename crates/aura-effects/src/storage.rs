@@ -28,6 +28,11 @@ impl FilesystemStorageHandler {
         Self { base_path }
     }
 
+    /// Alias for clarity; avoids relying on `new` naming in higher layers.
+    pub fn from_path(base_path: PathBuf) -> Self {
+        Self { base_path }
+    }
+
     /// Create a new filesystem storage handler with default path
     pub fn with_default_path() -> Self {
         Self::new(PathBuf::from("./storage"))
@@ -183,6 +188,11 @@ impl EncryptedStorageHandler {
             filesystem_handler: FilesystemStorageHandler::new(storage_path),
             _encryption_config: "placeholder".to_string(),
         }
+    }
+
+    /// Alias for clarity; avoids relying on `new` naming in higher layers.
+    pub fn from_path(storage_path: PathBuf, encryption_key: Option<Vec<u8>>) -> Self {
+        Self::new(storage_path, encryption_key)
     }
 
     /// Create with default configuration

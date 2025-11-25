@@ -8,6 +8,7 @@
 //! and provides a unified implementation for all crates. Includes BackoffStrategy, RetryPolicy,
 //! and helper types for comprehensive retry patterns.
 
+use crate::effects::time::PhysicalTimeEffects;
 use crate::AuraError;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -188,7 +189,7 @@ impl BackoffStrategy {
             }
             BackoffStrategy::ExponentialWithJitter => {
                 let base_delay = initial_delay * 2u32.saturating_pow(attempt);
-                // Use a deterministic jitter based on attempt count to avoid rand::thread_rng
+                // Use a deterministic jitter based on attempt count to avoid ambient RNG
                 let jitter =
                     (base_delay.as_millis() as f64 * 0.1 * (attempt as f64 * 0.1 % 1.0)) as u64;
                 base_delay + Duration::from_millis(jitter)
@@ -300,11 +301,17 @@ impl RetryPolicy {
         strategy.calculate_delay(attempt, self.initial_delay, self.max_delay)
     }
 
-    /// Execute an async operation with retry logic
-    pub async fn execute<F, Fut, T, E>(&self, mut operation: F) -> Result<T, E>
+    /// Execute an async operation with retry logic using a caller-provided sleep function.
+    pub async fn execute_with_sleep<F, Fut, T, E, S, SFut>(
+        &self,
+        mut operation: F,
+        mut sleep: S,
+    ) -> Result<T, E>
     where
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<T, E>>,
+        S: FnMut(Duration) -> SFut,
+        SFut: Future<Output = ()>,
     {
         let mut attempt = 0;
 
@@ -317,12 +324,29 @@ impl RetryPolicy {
                     }
 
                     let delay = self.calculate_delay(attempt);
-                    tokio::time::sleep(delay).await;
+                    sleep(delay).await;
 
                     attempt += 1;
                 }
             }
         }
+    }
+
+    /// Execute with retry logic using an injected time provider.
+    pub async fn execute_with_effects<F, Fut, T, E, Eff>(
+        &self,
+        effects: &Eff,
+        operation: F,
+    ) -> Result<T, E>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<T, E>>,
+        Eff: PhysicalTimeEffects + Send + Sync,
+    {
+        self.execute_with_sleep(operation, |delay| async move {
+            let _ = effects.sleep_ms(delay.as_millis() as u64).await;
+        })
+        .await
     }
 
     /// Execute an async operation with retry logic and detailed context
@@ -333,11 +357,30 @@ impl RetryPolicy {
     pub async fn execute_with_context<F, Fut, T, E>(
         &self,
         now: std::time::Instant,
-        mut operation: F,
+        operation: F,
     ) -> RetryResult<T, E>
     where
         F: FnMut() -> Fut,
         Fut: Future<Output = Result<T, E>>,
+    {
+        self.execute_with_sleep_and_context(now, operation, |delay| async move {
+            std::thread::sleep(delay);
+        })
+        .await
+    }
+
+    /// Execute with caller-provided sleep and timing context for deterministic metrics.
+    pub async fn execute_with_sleep_and_context<F, Fut, T, E, S, SFut>(
+        &self,
+        now: std::time::Instant,
+        mut operation: F,
+        mut sleep: S,
+    ) -> RetryResult<T, E>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<T, E>>,
+        S: FnMut(Duration) -> SFut,
+        SFut: Future<Output = ()>,
     {
         let start = now;
         let mut attempt = 0;
@@ -365,7 +408,7 @@ impl RetryPolicy {
 
                     let delay = self.calculate_delay(attempt);
                     total_delay += delay;
-                    tokio::time::sleep(delay).await;
+                    sleep(delay).await;
 
                     attempt += 1;
                 }

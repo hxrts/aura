@@ -1,6 +1,16 @@
+#![allow(missing_docs)]
 #![cfg(feature = "fixture_effects")]
 
 //! Comprehensive Handler Coverage and Validation Tests
+
+/*!
+ * Comprehensive Handler Coverage and Validation Tests
+ */
+
+//! Comprehensive Handler Coverage and Validation Tests
+//!
+//! This module provides extensive coverage testing for Aura protocol handlers,
+//! ensuring all handler combinations work correctly with the effect system.
 //!
 //! This test suite validates that the Aura protocol has complete handler
 //! coverage for all defined effect traits and that the effect system

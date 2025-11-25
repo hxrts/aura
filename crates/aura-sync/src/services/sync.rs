@@ -27,9 +27,10 @@
 //! # }
 //! ```
 
+use aura_effects::time::{monotonic_now, wallclock_ms};
 use parking_lot::RwLock;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
@@ -40,40 +41,8 @@ use crate::core::{sync_session_error, MetricsCollector, SessionManager, SyncResu
 use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
 use crate::protocols::{JournalSyncConfig, JournalSyncProtocol};
 use aura_core::effects::{PhysicalTimeEffects, TimeError};
-use aura_core::time::PhysicalTime;
 use aura_core::{AuraError, DeviceId};
-
-/// Simple time effects implementation for aura-sync
-/// This is kept minimal since aura-sync intentionally avoids depending on aura-effects
-struct SimpleSyncTimeEffects;
-
-impl SimpleSyncTimeEffects {
-    fn now_instant() -> Instant {
-        Instant::now()
-    }
-
-    async fn current_timestamp_ms() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
-    }
-}
-
-#[async_trait::async_trait]
-impl PhysicalTimeEffects for SimpleSyncTimeEffects {
-    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
-        Ok(PhysicalTime {
-            ts_ms: Self::current_timestamp_ms().await,
-            uncertainty: None,
-        })
-    }
-
-    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
-        tokio::time::sleep(Duration::from_millis(ms)).await;
-        Ok(())
-    }
-}
+use aura_effects::time::PhysicalTimeHandler;
 
 fn time_error_to_aura(err: TimeError) -> AuraError {
     AuraError::internal(format!("time error: {err}"))
@@ -182,25 +151,21 @@ pub struct SyncService {
     task_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
 
     /// Time effects for unified time operations
-    time_effects: SimpleSyncTimeEffects,
+    time_effects: PhysicalTimeHandler,
 }
 
 impl SyncService {
     /// Create a new sync service
     pub fn new(config: SyncServiceConfig) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
-        let now_instant = SimpleSyncTimeEffects::now_instant();
+        let now_instant = monotonic_now();
         let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
         // Use current system time for initialization (replaced by PhysicalTimeEffects later)
-        #[allow(clippy::disallowed_methods)]
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64;
+        let now = wallclock_ms();
         let session_manager = SessionManager::new(Default::default(), now);
         let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
         let metrics = MetricsCollector::new();
-        let time_effects = SimpleSyncTimeEffects;
+        let time_effects = PhysicalTimeHandler;
 
         Ok(Self {
             config,
@@ -224,7 +189,7 @@ impl SyncService {
     ) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
         // Use PhysicalTimeEffects for deterministic time access
-        let now_instant = SimpleSyncTimeEffects::now_instant();
+        let now_instant = monotonic_now();
         let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
         // Use PhysicalTimeEffects for current timestamp
         let now = time_effects
@@ -247,7 +212,7 @@ impl SyncService {
             started_at: Arc::new(RwLock::new(None)),
             shutdown_tx: Arc::new(RwLock::new(None)),
             task_handles: Arc::new(RwLock::new(Vec::new())),
-            time_effects: SimpleSyncTimeEffects,
+            time_effects: PhysicalTimeHandler,
         })
     }
 
@@ -382,6 +347,7 @@ impl SyncService {
         let journal_sync = Arc::clone(&self.journal_sync);
         let rate_limiter = Arc::clone(&self.rate_limiter);
         let max_concurrent = self.config.max_concurrent_syncs;
+        let time_effects = Arc::new(PhysicalTimeHandler);
 
         // Spawn the background auto-sync task
         let handle = tokio::spawn(async move {
@@ -399,12 +365,13 @@ impl SyncService {
 
                     // Handle interval tick for auto-sync
                     _ = interval_timer.tick() => {
-                        if let Err(e) = Self::perform_auto_sync(
+                        if let Err(e) = Self::perform_auto_sync_with_time_effects(
                             &peer_manager,
                             &session_manager,
                             &journal_sync,
                             &rate_limiter,
                             max_concurrent,
+                            &*time_effects,
                         ).await {
                             eprintln!("Auto-sync failed: {}", e);
                         }
@@ -417,25 +384,6 @@ impl SyncService {
         self.task_handles.write().push(handle);
 
         Ok(())
-    }
-
-    /// Perform one round of automatic synchronization
-    async fn perform_auto_sync(
-        peer_manager: &Arc<RwLock<PeerManager>>,
-        session_manager: &Arc<RwLock<SessionManager<serde_json::Value>>>,
-        journal_sync: &Arc<RwLock<JournalSyncProtocol>>,
-        rate_limiter: &Arc<RwLock<RateLimiter>>,
-        max_concurrent: usize,
-    ) -> SyncResult<()> {
-        Self::perform_auto_sync_with_time_effects(
-            peer_manager,
-            session_manager,
-            journal_sync,
-            rate_limiter,
-            max_concurrent,
-            &SimpleSyncTimeEffects,
-        )
-        .await
     }
 
     /// Perform one round of automatic synchronization with PhysicalTimeEffects
@@ -464,7 +412,7 @@ impl SyncService {
 
         // Check rate limits before proceeding
         tracing::debug!("Auto-sync tick at {}", tick_ts.ts_ms);
-        let now = SimpleSyncTimeEffects::now_instant();
+        let now = monotonic_now();
         {
             let mut limiter = rate_limiter.write();
             for peer in &peers {
@@ -536,7 +484,7 @@ impl SyncService {
         let mut rate_limiter = self.rate_limiter.write();
 
         for &peer in peers {
-            let result = rate_limiter.check_rate_limit(peer, 1, std::time::Instant::now());
+            let result = rate_limiter.check_rate_limit(peer, 1, monotonic_now());
             if result.is_allowed() {
                 allowed_peers.push(peer);
             } else if let Some(retry_after) = result.retry_after() {
@@ -552,6 +500,7 @@ impl SyncService {
     }
 
     /// Execute journal sync protocol with peers
+    #[allow(clippy::await_holding_lock)]
     async fn execute_journal_sync_protocol<E>(
         &self,
         effects: &E,
@@ -703,7 +652,7 @@ impl SyncService {
 
     /// Wait for active sessions to complete with timeout
     async fn wait_for_sessions_to_complete(&self) -> SyncResult<()> {
-        self.wait_for_sessions_to_complete_with_time_effects(&SimpleSyncTimeEffects)
+        self.wait_for_sessions_to_complete_with_time_effects(&self.time_effects)
             .await
     }
 
@@ -714,7 +663,7 @@ impl SyncService {
     ) -> SyncResult<()> {
         let timeout = Duration::from_secs(30); // 30 second timeout
         let check_interval = Duration::from_millis(100);
-        let start = SimpleSyncTimeEffects::now_instant();
+        let start = monotonic_now();
 
         while start.elapsed() < timeout {
             let active_sessions = {
@@ -927,8 +876,13 @@ impl Service for SyncService {
             status: health.status,
             message: Some("Sync service operational".to_string()),
             checked_at: {
-                let time_effects = SimpleSyncTimeEffects;
-                time_effects.physical_time().await.unwrap().ts_ms / 1000
+                let time_effects = PhysicalTimeHandler;
+                time_effects
+                    .physical_time()
+                    .await
+                    .map_err(|e| aura_core::AuraError::internal(format!("Time error: {}", e)))?
+                    .ts_ms
+                    / 1000
             },
             details,
         })
@@ -1018,7 +972,7 @@ mod tests {
 
         assert!(!service.is_running());
 
-        let now = SimpleSyncTimeEffects::now_instant();
+        let now = monotonic_now();
         service.start(now).await.unwrap();
         assert!(service.is_running());
 
@@ -1029,7 +983,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_service_health_check() {
         let service = SyncService::builder().build().unwrap();
-        let now = SimpleSyncTimeEffects::now_instant();
+        let now = monotonic_now();
         service.start(now).await.unwrap();
 
         let health = service.health_check().await.unwrap();

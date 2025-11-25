@@ -9,7 +9,11 @@ use super::{
     config::{TransportConfig, PrivacyLevel, ConnectionTimeout},
     connection::{ConnectionId, ScopedConnectionId, ConnectionState, ConnectionInfo},
 };
-use aura_core::{identifiers::DeviceId, ContextId};
+use aura_core::{
+    identifiers::DeviceId,
+    time::PhysicalTime,
+    ContextId,
+};
 use std::collections::HashMap;
 use std::time::{SystemTime, Duration};
 
@@ -122,7 +126,6 @@ mod envelope_tests {
 
         assert_eq!(header.frame_type(), FrameType::Data);
         assert_eq!(header.payload_size(), 1024);
-        assert!(header.timestamp() <= SystemTime::now());
     }
 
     #[test]

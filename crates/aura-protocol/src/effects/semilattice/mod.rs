@@ -277,20 +277,23 @@ mod tests {
         impl<S: CvState + Send + Sync + 'static> RegistrableHandler for CvShim<S> {
             async fn execute_operation_bytes(
                 &self,
-                _effect_type: aura_core::EffectType,
+                effect_type: aura_core::EffectType,
                 _operation: &str,
                 _parameters: &[u8],
                 _ctx: &aura_composition::HandlerContext,
             ) -> Result<Vec<u8>, aura_composition::HandlerError> {
-                Err(aura_composition::HandlerError::UnsupportedEffect {
-                    effect_type: aura_core::EffectType::Choreographic,
-                })
+                if effect_type == aura_core::EffectType::Choreographic {
+                    // Return empty response for test handler
+                    Ok(Vec::new())
+                } else {
+                    Err(aura_composition::HandlerError::UnsupportedEffect { effect_type })
+                }
             }
             fn supported_operations(&self, _effect_type: aura_core::EffectType) -> Vec<String> {
                 vec![]
             }
-            fn supports_effect(&self, _effect_type: aura_core::EffectType) -> bool {
-                false
+            fn supports_effect(&self, effect_type: aura_core::EffectType) -> bool {
+                matches!(effect_type, aura_core::EffectType::Choreographic)
             }
             fn execution_mode(&self) -> aura_core::ExecutionMode {
                 aura_core::ExecutionMode::Testing

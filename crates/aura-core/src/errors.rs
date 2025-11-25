@@ -239,6 +239,12 @@ impl From<crate::effects::StorageError> for AuraError {
     }
 }
 
+impl From<crate::effects::TimeError> for AuraError {
+    fn from(err: crate::effects::TimeError) -> Self {
+        Self::internal(format!("Time error: {}", err))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

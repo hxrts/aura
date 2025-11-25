@@ -7,7 +7,7 @@ use crate::{ChatGroupId, ChatMessage, ChatMessageId};
 use aura_core::{
     effects::StorageEffects,
     time::{OrderingPolicy, TimeStamp},
-    AuraError, Result,
+    AuraError,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -31,7 +31,7 @@ where
     }
 
     /// Store a message in the history
-    pub async fn store_message(&self, message: &ChatMessage) -> Result<()> {
+    pub async fn store_message(&self, message: &ChatMessage) -> std::result::Result<(), AuraError> {
         // Store the individual message
         let message_key = format!("chat_message:{}", message.id);
         let message_data = serde_json::to_vec(message)
@@ -51,7 +51,10 @@ where
     }
 
     /// Retrieve a specific message by ID
-    pub async fn get_message(&self, message_id: &ChatMessageId) -> Result<Option<ChatMessage>> {
+    pub async fn get_message(
+        &self,
+        message_id: &ChatMessageId,
+    ) -> std::result::Result<Option<ChatMessage>, AuraError> {
         let message_key = format!("chat_message:{}", message_id);
 
         match self.storage.retrieve(&message_key).await {
@@ -72,7 +75,7 @@ where
         group_id: &ChatGroupId,
         limit: usize,
         before: Option<TimeStamp>,
-    ) -> Result<Vec<ChatMessage>> {
+    ) -> std::result::Result<Vec<ChatMessage>, AuraError> {
         let key_prefix = format!("chat_group_message:{}:", group_id);
         let mut entries: Vec<(i64, String)> = Vec::new();
 
@@ -128,7 +131,7 @@ where
         group_id: &ChatGroupId,
         query: &str,
         limit: usize,
-    ) -> Result<Vec<ChatMessage>> {
+    ) -> std::result::Result<Vec<ChatMessage>, AuraError> {
         let history = self
             .get_group_history(group_id, limit.saturating_mul(2), None)
             .await?;
@@ -147,14 +150,20 @@ where
     }
 
     /// Get message count for a group
-    pub async fn get_message_count(&self, group_id: &ChatGroupId) -> Result<usize> {
+    pub async fn get_message_count(
+        &self,
+        group_id: &ChatGroupId,
+    ) -> std::result::Result<usize, AuraError> {
         let key_prefix = format!("chat_group_message:{}:", group_id);
         let keys = self.storage.list_keys(Some(&key_prefix)).await?;
         Ok(keys.len())
     }
 
     /// Delete a message (soft delete with tombstone)
-    pub async fn delete_message(&self, message_id: &ChatMessageId) -> Result<()> {
+    pub async fn delete_message(
+        &self,
+        message_id: &ChatMessageId,
+    ) -> std::result::Result<(), AuraError> {
         // Mark a tombstone entry; leave index to preserve ordering
         let tombstone_key = format!("chat_message_tombstone:{}", message_id);
         self.storage
@@ -170,7 +179,7 @@ where
         index_key: &str,
         message_id: &ChatMessageId,
         timestamp: TimeStamp,
-    ) -> Result<()> {
+    ) -> std::result::Result<(), AuraError> {
         let index_entry_key = format!("{}{}:{}", index_key, timestamp.to_index_ms(), message_id);
         self.storage
             .store(&index_entry_key, b"1".to_vec())
@@ -201,6 +210,159 @@ pub struct HistoryCursor {
     pub message_id: ChatMessageId,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use aura_core::effects::storage::{StorageError, StorageStats};
+    use aura_core::time::PhysicalTime;
+    use std::collections::HashMap;
+    use tokio::sync::Mutex;
+    use uuid::Uuid;
+
+    #[derive(Debug, Default)]
+    struct MemoryStorage {
+        inner: Mutex<HashMap<String, Vec<u8>>>,
+    }
+
+    #[async_trait]
+    impl StorageEffects for MemoryStorage {
+        async fn store(&self, key: &str, value: Vec<u8>) -> std::result::Result<(), StorageError> {
+            self.inner.lock().await.insert(key.to_string(), value);
+            Ok(())
+        }
+
+        async fn retrieve(&self, key: &str) -> std::result::Result<Option<Vec<u8>>, StorageError> {
+            Ok(self.inner.lock().await.get(key).cloned())
+        }
+
+        async fn remove(&self, key: &str) -> std::result::Result<bool, StorageError> {
+            Ok(self.inner.lock().await.remove(key).is_some())
+        }
+
+        async fn list_keys(
+            &self,
+            prefix: Option<&str>,
+        ) -> std::result::Result<Vec<String>, StorageError> {
+            let guard = self.inner.lock().await;
+            let keys = guard
+                .keys()
+                .filter(|k| prefix.map(|p| k.starts_with(p)).unwrap_or(true))
+                .cloned()
+                .collect();
+            Ok(keys)
+        }
+
+        async fn exists(&self, key: &str) -> std::result::Result<bool, StorageError> {
+            Ok(self.inner.lock().await.contains_key(key))
+        }
+
+        async fn store_batch(
+            &self,
+            pairs: HashMap<String, Vec<u8>>,
+        ) -> std::result::Result<(), StorageError> {
+            let mut guard = self.inner.lock().await;
+            for (k, v) in pairs {
+                guard.insert(k, v);
+            }
+            Ok(())
+        }
+
+        async fn retrieve_batch(
+            &self,
+            keys: &[String],
+        ) -> std::result::Result<HashMap<String, Vec<u8>>, StorageError> {
+            let guard = self.inner.lock().await;
+            Ok(keys
+                .iter()
+                .filter_map(|k| guard.get(k).map(|v| (k.clone(), v.clone())))
+                .collect())
+        }
+
+        async fn clear_all(&self) -> std::result::Result<(), StorageError> {
+            self.inner.lock().await.clear();
+            Ok(())
+        }
+
+        async fn stats(&self) -> std::result::Result<StorageStats, StorageError> {
+            let guard = self.inner.lock().await;
+            Ok(StorageStats {
+                key_count: guard.len() as u64,
+                total_size: guard.values().map(|v| v.len() as u64).sum(),
+                available_space: None,
+                backend_type: "memory".to_string(),
+            })
+        }
+    }
+
+    fn sample_message(ts_ms: u64) -> ChatMessage {
+        let timestamp = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        });
+        ChatMessage::new_text(
+            ChatMessageId(Uuid::nil()),
+            ChatGroupId::from_uuid(Uuid::nil()),
+            aura_core::identifiers::AuthorityId::from_uuid(Uuid::nil()),
+            format!("hello-{ts_ms}"),
+            timestamp,
+        )
+    }
+
+    #[tokio::test]
+    async fn stores_and_retrieves_messages() {
+        let storage = Arc::new(MemoryStorage::default());
+        let history = ChatHistory::new(storage.clone());
+        let msg = sample_message(1);
+
+        history.store_message(&msg).await.unwrap();
+
+        let fetched = history.get_message(&msg.id).await.unwrap();
+        assert_eq!(fetched, Some(msg.clone()));
+
+        let count = history
+            .get_message_count(&msg.group_id)
+            .await
+            .expect("count");
+        assert_eq!(count, 1);
+
+        let group_history = history
+            .get_group_history(&msg.group_id, 10, None)
+            .await
+            .unwrap();
+        assert_eq!(group_history.len(), 1);
+        assert_eq!(group_history[0].content, msg.content);
+    }
+
+    #[tokio::test]
+    async fn filters_history_by_before_timestamp() {
+        let storage = Arc::new(MemoryStorage::default());
+        let history = ChatHistory::new(storage.clone());
+        let early = sample_message(1);
+        let late = sample_message(10);
+        history.store_message(&early).await.unwrap();
+        history.store_message(&late).await.unwrap();
+
+        let cutoff = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 5,
+            uncertainty: None,
+        });
+        let results = history
+            .get_group_history(&early.group_id, 10, Some(cutoff))
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].content, early.content);
+    }
+
+    // TODO: Add tests with mock storage
+    #[tokio::test]
+    async fn test_chat_history_creation() {
+        // This test requires mock storage implementation
+        // Will be implemented when mock effects are available
+    }
+}
+
 /// History query parameters
 #[derive(Debug, Clone)]
 pub struct HistoryQuery {
@@ -225,15 +387,5 @@ impl Default for HistoryQuery {
             message_type: None,
             sender_id: None,
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    // TODO: Add tests with mock storage
-    #[tokio::test]
-    async fn test_chat_history_creation() {
-        // This test requires mock storage implementation
-        // Will be implemented when mock effects are available
     }
 }

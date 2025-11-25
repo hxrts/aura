@@ -8,6 +8,7 @@ use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::{ConsoleEffects, StorageEffects};
 use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
+use aura_effects::time::monotonic_now;
 use aura_recovery::guardian_setup::GuardianSetupCoordinator;
 use aura_recovery::types::{GuardianProfile, GuardianSet, RecoveryRequest};
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
@@ -16,7 +17,6 @@ use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Instant;
 
 /// Handle scenario operations through effects
 pub async fn handle_scenarios(
@@ -377,7 +377,7 @@ async fn execute_scenarios_through_effects(
 
     for scenario in scenario_files {
         println!("Executing: {}", scenario.display());
-        let start = Instant::now();
+        let start = monotonic_now();
         let run_result = run_scenario_file(ctx, effects.clone(), &scenario).await;
 
         let duration_ms = start.elapsed().as_millis() as u64;
@@ -828,7 +828,7 @@ async fn simulate_cli_recovery_demo(
 ) -> Result<CliRecoverySimResult, anyhow::Error> {
     let handler = SimulationScenarioHandler::new(seed);
     let mut steps = Vec::new();
-    let start = Instant::now();
+    let start = monotonic_now();
 
     // Run guardian setup choreography via recovery coordinator using simulation effects
     run_guardian_setup_choreography(effects.clone(), &mut steps).await?;

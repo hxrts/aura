@@ -38,22 +38,24 @@ impl BiscuitAuthorizationBridge {
     }
 
     /// Production Biscuit authorization with cryptographic verification and Datalog policy evaluation
+    /// Requires current time for deterministic behavior - use PhysicalTimeEffects in callers
     pub fn authorize(
         &self,
         token: &Biscuit,
         operation: &str,
         resource: &ResourceScope,
+        current_time_seconds: u64,
     ) -> Result<AuthorizationResult, BiscuitError> {
-        self.authorize_with_time(token, operation, resource, None)
+        self.authorize_with_time(token, operation, resource, current_time_seconds)
     }
 
-    /// Production Biscuit authorization with explicit time for deterministic testing
-    pub fn authorize_with_time(
+    /// Internal implementation of Biscuit authorization with explicit time
+    fn authorize_with_time(
         &self,
         token: &Biscuit,
         operation: &str,
         resource: &ResourceScope,
-        current_time_seconds: Option<u64>,
+        current_time_seconds: u64,
     ) -> Result<AuthorizationResult, BiscuitError> {
         // Phase 1: Verify token signature with root public key
         let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
@@ -71,14 +73,7 @@ impl BiscuitAuthorizationBridge {
             .add_fact(fact!("device({device})"))
             .map_err(BiscuitError::BiscuitLib)?;
 
-        let time = current_time_seconds.map(|t| t as i64).unwrap_or_else(|| {
-            // Fallback to current time if not provided
-            // Note: This should eventually be replaced with PhysicalTimeEffects
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64
-        });
+        let time = current_time_seconds as i64;
         authorizer
             .add_fact(fact!("time({time})"))
             .map_err(BiscuitError::BiscuitLib)?;
@@ -220,16 +215,22 @@ impl BiscuitAuthorizationBridge {
     }
 
     /// Check if token has specific capability through Datalog evaluation
-    pub fn has_capability(&self, token: &Biscuit, capability: &str) -> Result<bool, BiscuitError> {
-        self.has_capability_with_time(token, capability, None)
-    }
-
-    /// Check if token has specific capability through Datalog evaluation with explicit time
-    pub fn has_capability_with_time(
+    /// Requires current time for deterministic behavior - use PhysicalTimeEffects in callers
+    pub fn has_capability(
         &self,
         token: &Biscuit,
         capability: &str,
-        current_time_seconds: Option<u64>,
+        current_time_seconds: u64,
+    ) -> Result<bool, BiscuitError> {
+        self.has_capability_with_time(token, capability, current_time_seconds)
+    }
+
+    /// Internal implementation of capability check with explicit time
+    fn has_capability_with_time(
+        &self,
+        token: &Biscuit,
+        capability: &str,
+        current_time_seconds: u64,
     ) -> Result<bool, BiscuitError> {
         // Create authorizer and verify token signature
         let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
@@ -240,14 +241,7 @@ impl BiscuitAuthorizationBridge {
             .add_fact(fact!("device({device})"))
             .map_err(BiscuitError::BiscuitLib)?;
 
-        let time = current_time_seconds.map(|t| t as i64).unwrap_or_else(|| {
-            // Fallback to current time if not provided
-            // Note: This should eventually be replaced with PhysicalTimeEffects
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64
-        });
+        let time = current_time_seconds as i64;
         authorizer
             .add_fact(fact!("time({time})"))
             .map_err(BiscuitError::BiscuitLib)?;
@@ -286,11 +280,9 @@ impl BiscuitAuthorizationBridge {
 
         // Add basic verification metadata
         facts.push(format!("device(\"{}\")", self.device_id));
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        facts.push(format!("verified_at({})", now));
+        // Note: This method should accept time parameter to avoid direct time access
+        // For now, facts are extracted without timestamps to maintain determinism
+        facts.push("extracted_from_token".to_string());
 
         // Try to extract facts from token using an authorizer
         if let Ok(authorizer) = token.authorizer() {

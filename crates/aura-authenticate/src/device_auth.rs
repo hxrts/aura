@@ -516,9 +516,7 @@ where
 mod tests {
     use super::*;
     use aura_core::test_utils::test_device_id;
-    use aura_core::{AccountId, DeviceId};
     use aura_macros::aura_test;
-    use aura_protocol::EffectApiEffects;
     use aura_verify::session::SessionScope;
 
     #[test]

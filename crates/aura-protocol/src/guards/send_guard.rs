@@ -296,7 +296,7 @@ impl SendGuardChain {
             .await?;
 
         // Check authorization using the Biscuit evaluator
-        match evaluator.check_guard(&token, capability, &resource_scope) {
+        match evaluator.check_guard_default_time(&token, capability, &resource_scope) {
             Ok(authorized) => {
                 if authorized {
                     debug!(
@@ -339,14 +339,7 @@ impl SendGuardChain {
         // First try to get a stored token for this capability and context
         if let Some(token_data) = effect_system.get_metadata(&token_key) {
             // Try to deserialize the token from storage (assume it's hex-encoded bytes for now)
-            if let Ok(token_bytes) = hex::decode(&token_data) {
-                // TODO: In production, use proper root public key from authorization bridge
-                // For now, we skip token reuse since we don't have consistent key management
-                tracing::debug!(
-                    capability = %capability,
-                    "Skipping stored token due to key management limitations, creating fresh token"
-                );
-            } else {
+            if hex::decode(&token_data).is_err() {
                 tracing::warn!(
                     capability = %capability,
                     "Failed to decode hex token data, creating new one"
@@ -575,7 +568,7 @@ pub fn create_send_guard(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::AccountId;
+    // use aura_core::AccountId;
 
     #[tokio::test]
     async fn test_send_guard_chain_creation() {
@@ -584,7 +577,7 @@ mod tests {
         let peer = AuthorityId::new();
         let cost = 100;
 
-        let guard = SendGuardChain::new(authorization.clone(), context.clone(), peer, cost)
+        let guard = SendGuardChain::new(authorization.clone(), context, peer, cost)
             .with_operation_id("test_send");
 
         assert_eq!(guard.message_authorization, authorization);
@@ -601,7 +594,7 @@ mod tests {
         let peer = AuthorityId::new();
         let cost = 50;
 
-        let guard = create_send_guard(authorization.clone(), context.clone(), peer, cost);
+        let guard = create_send_guard(authorization.clone(), context, peer, cost);
 
         assert_eq!(guard.message_authorization, authorization);
         assert_eq!(guard.context, context);

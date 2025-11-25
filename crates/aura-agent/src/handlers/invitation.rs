@@ -6,12 +6,14 @@ use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentResult, AuthorityContext};
 
 /// Invitation handler
+#[allow(dead_code)] // Part of future invitation API
 pub struct InvitationHandler {
     context: HandlerContext,
 }
 
 impl InvitationHandler {
     /// Create a new invitation handler
+    #[allow(dead_code)] // Part of future invitation API
     pub fn new(authority: AuthorityContext) -> AgentResult<Self> {
         HandlerUtilities::validate_authority_context(&authority)?;
 
@@ -21,12 +23,14 @@ impl InvitationHandler {
     }
 
     /// Handle invitation creation
+    #[allow(dead_code)] // Part of future invitation API
     pub async fn create_invitation(&self) -> AgentResult<()> {
         // Implementation placeholder
         Ok(())
     }
 
     /// Handle invitation acceptance
+    #[allow(dead_code)] // Part of future invitation API
     pub async fn accept_invitation(&self) -> AgentResult<()> {
         // Implementation placeholder
         Ok(())

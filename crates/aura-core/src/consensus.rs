@@ -105,6 +105,15 @@ pub struct PrestateBuilder {
     context_commitment: Option<Hash32>,
 }
 
+/// Errors that can occur when building a Prestate.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum PrestateBuilderError {
+    #[error("Context commitment required")]
+    MissingContext,
+    #[error("At least one authority commitment required")]
+    MissingAuthorities,
+}
+
 impl PrestateBuilder {
     /// Create a new builder
     pub fn new() -> Self {
@@ -127,13 +136,13 @@ impl PrestateBuilder {
     }
 
     /// Build the prestate
-    pub fn build(self) -> Result<Prestate, &'static str> {
+    pub fn build(self) -> Result<Prestate, PrestateBuilderError> {
         let context_commitment = self
             .context_commitment
-            .ok_or("Context commitment required")?;
+            .ok_or(PrestateBuilderError::MissingContext)?;
 
         if self.authority_commitments.is_empty() {
-            return Err("At least one authority commitment required");
+            return Err(PrestateBuilderError::MissingAuthorities);
         }
 
         Ok(Prestate::new(

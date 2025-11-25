@@ -92,6 +92,36 @@ pub struct Nonce {
     pub value: Vec<u8>,
 }
 
+/// Token representing a cached nonce for pipelined commitment optimization
+///
+/// This wraps the actual FROST signing nonces in an opaque type that can be
+/// stored across consensus rounds. The token is tied to a specific epoch and
+/// becomes invalid when the epoch changes.
+#[derive(Debug, Clone)]
+pub struct NonceToken {
+    /// The actual FROST signing nonces (kept in memory, not serialized)
+    nonces: frost::round1::SigningNonces,
+}
+
+impl NonceToken {
+    /// Create from FROST signing nonces
+    pub fn from(nonces: frost::round1::SigningNonces) -> Self {
+        Self { nonces }
+    }
+
+    /// Get the FROST signing nonces
+    pub fn into_frost(self) -> frost::round1::SigningNonces {
+        self.nonces
+    }
+}
+
+impl Default for NonceToken {
+    fn default() -> Self {
+        // This is only for testing - real tokens must come from FROST generation
+        panic!("NonceToken::default() should not be used in production")
+    }
+}
+
 impl Nonce {
     /// Create from FROST signing nonces
     ///

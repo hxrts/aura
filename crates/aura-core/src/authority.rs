@@ -4,7 +4,14 @@
 //! authority-centric architecture. Authorities are opaque cryptographic actors
 //! that can sign operations and hold state without exposing internal device structure.
 
-use crate::{identifiers::AuthorityId, journal::Fact, session_epochs::Epoch, Hash32, Result};
+use crate::{
+    hash,
+    identifiers::AuthorityId,
+    journal::Fact,
+    session_epochs::Epoch,
+    tree::{policy::Policy, types::AttestedOp, types::TreeOpKind},
+    Hash32, Result,
+};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, LazyLock};
@@ -12,6 +19,7 @@ use std::sync::{Arc, LazyLock};
 // Type aliases for authority operations
 type PublicKey = ed25519_dalek::VerifyingKey;
 type Signature = ed25519_dalek::Signature;
+type SigningKey = ed25519_dalek::SigningKey;
 
 /// Fallback public key for placeholder tree state
 ///
@@ -20,6 +28,7 @@ type Signature = ed25519_dalek::Signature;
 /// until proper tree-based key derivation is implemented.
 #[allow(clippy::incompatible_msrv)] // LazyLock is fine for this temporary fallback code
 #[allow(clippy::expect_used)] // Hard-coded valid key - expect is safe here
+#[allow(dead_code)] // Reserved for future use in authority validation
 static FALLBACK_PUBLIC_KEY: LazyLock<PublicKey> = LazyLock::new(|| {
     // Using Ed25519 basepoint as a valid public key
     const VALID_PUBKEY_BYTES: [u8; 32] = [
@@ -149,13 +158,9 @@ impl TreeState {
 
     /// Get the root public key for the current tree state
     pub fn root_key(&self) -> PublicKey {
-        // TODO: Implement actual derivation from tree
-        // For now, derive a deterministic key from commitment
-        let bytes = self.commitment.as_bytes();
-        let mut key_bytes = [0u8; 32];
-        key_bytes[..std::cmp::min(32, bytes.len())]
-            .copy_from_slice(&bytes[..std::cmp::min(32, bytes.len())]);
-        PublicKey::from_bytes(&key_bytes).unwrap_or(*FALLBACK_PUBLIC_KEY)
+        // Derive deterministic key material from the commitment to avoid ambient randomness.
+        let seed = hash::hash(self.commitment.as_bytes());
+        SigningKey::from_bytes(&seed).verifying_key()
     }
 
     /// Get the root commitment hash for the current tree state
@@ -164,9 +169,37 @@ impl TreeState {
     }
 
     /// Apply an attested operation to the tree state
-    pub fn apply(&self, _op: &[u8]) -> Self {
-        // TODO: Implement actual tree update logic with AttestedOp
-        self.clone()
+    pub fn apply(&self, op: &AttestedOp) -> Self {
+        let mut next = self.clone();
+
+        // Advance epoch relative to parent binding
+        next.epoch = Epoch::from(op.op.parent_epoch).next();
+
+        // Update commitment deterministically from the operation payload
+        if let Ok(bytes) = crate::serialization::to_vec(&op.op) {
+            next.commitment = Hash32::from_bytes(&hash::hash(&bytes));
+        }
+
+        match &op.op.op {
+            TreeOpKind::AddLeaf { .. } => {
+                next.device_count = next.device_count.saturating_add(1);
+            }
+            TreeOpKind::RemoveLeaf { .. } => {
+                next.device_count = next.device_count.saturating_sub(1);
+            }
+            TreeOpKind::ChangePolicy { new_policy, .. } => {
+                next.threshold = match new_policy {
+                    Policy::Any => 1,
+                    Policy::Threshold { m, .. } => *m,
+                    Policy::All => next.device_count.max(1).min(u16::MAX as u32) as u16,
+                };
+            }
+            TreeOpKind::RotateEpoch { .. } => {
+                // Epoch already advanced above; nothing else to do here.
+            }
+        }
+
+        next
     }
 
     /// Update the commitment (internal method for reduction pipeline)

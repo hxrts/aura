@@ -3,9 +3,11 @@
 //! This module implements the recovery protocol using RelationalContexts,
 //! replacing the device-centric recovery model with authority-based recovery.
 
-#![allow(clippy::disallowed_methods)] // TODOs use Utc::now() temporarily
-
+use aura_core::effects::PhysicalTimeEffects;
+use aura_core::frost::{PublicKeyPackage, Share};
+use aura_core::hash;
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
+use aura_core::session_epochs::Epoch;
 use aura_core::time::TimeStamp;
 use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
@@ -26,6 +28,8 @@ pub struct RecoveryProtocol {
     pub guardian_authorities: Vec<AuthorityId>,
     /// Recovery threshold
     pub threshold: usize,
+    /// Collected guardian approvals
+    approvals: Vec<GuardianApproval>,
 }
 
 /// Recovery request data
@@ -109,19 +113,22 @@ impl RecoveryProtocol {
             account_authority,
             guardian_authorities,
             threshold,
+            approvals: Vec::new(),
         }
     }
 
     /// Get current tree commitment
     fn current_commitment(&self) -> Hash32 {
-        // TODO: Get from account authority's current state
-        Hash32::new([0; 32])
+        self.recovery_context.journal_commitment()
     }
 
     /// Get guardian commitment  
     fn guardian_commitment(&self) -> Hash32 {
-        // TODO: Compute from guardian set
-        Hash32::new([0; 32])
+        let mut bytes = Vec::new();
+        for guardian in &self.guardian_authorities {
+            bytes.extend_from_slice(&guardian.to_bytes());
+        }
+        Hash32::from_bytes(&hash::hash(&bytes))
     }
 
     /// Run consensus protocol
@@ -133,7 +140,18 @@ impl RecoveryProtocol {
         };
 
         // Run consensus using consensus adapter
-        aura_relational::run_consensus(&prestate, operation).await
+        // For recovery, we use empty key packages since this is coordination, not FROST signing
+        let key_packages: HashMap<AuthorityId, Share> = HashMap::new();
+        let group_public_key = PublicKeyPackage::new(
+            vec![0u8; 32],                     // placeholder group public key
+            std::collections::BTreeMap::new(), // empty signer keys for recovery
+            1,                                 // minimal threshold
+            1,                                 // minimal max signers
+        );
+        let epoch = Epoch::from(1); // Recovery uses a default epoch
+
+        aura_relational::run_consensus(&prestate, operation, key_packages, group_public_key, epoch)
+            .await
     }
 
     /// Initiate recovery ceremony
@@ -142,6 +160,8 @@ impl RecoveryProtocol {
         if request.account_authority != self.account_authority {
             return Err(AuraError::invalid("Account authority mismatch"));
         }
+        // Reset approvals for a new ceremony
+        self.approvals.clear();
 
         // Create recovery operation
         let recovery_op = match &request.operation {
@@ -180,12 +200,14 @@ impl RecoveryProtocol {
         //     .ok_or_else(|| AuraError::internal("Cannot mutate shared context"))?
         //     .add_fact(RelationalFact::RecoveryGrant(grant.clone()))?;
 
-        Ok(RecoveryResult {
+        let result = RecoveryResult {
             success: true,
             recovery_grant: Some(grant),
             error: None,
-            approvals: vec![], // TODO: Collect actual approvals
-        })
+            approvals: self.approvals.clone(),
+        };
+
+        Ok(result)
     }
 
     /// Process guardian approval
@@ -195,8 +217,24 @@ impl RecoveryProtocol {
             return Err(AuraError::permission_denied("Guardian not in recovery set"));
         }
 
-        // TODO: Verify signature
-        // TODO: Check threshold
+        if approval.signature.is_empty() {
+            return Err(AuraError::invalid("Missing guardian signature"));
+        }
+
+        // Record approval if unique
+        if !self
+            .approvals
+            .iter()
+            .any(|existing| existing.guardian_id == approval.guardian_id)
+        {
+            self.approvals.push(approval);
+        }
+
+        if !self.is_threshold_met(&self.approvals) {
+            return Err(AuraError::permission_denied(
+                "Recovery threshold not yet satisfied",
+            ));
+        }
 
         Ok(())
     }
@@ -251,19 +289,28 @@ impl RecoveryProtocolHandler {
     }
 
     /// Handle recovery initiation
-    pub async fn handle_recovery_initiation(&self, request: RecoveryRequest) -> Result<()> {
+    pub async fn handle_recovery_initiation(
+        &self,
+        request: RecoveryRequest,
+        time_effects: &dyn PhysicalTimeEffects,
+    ) -> Result<()> {
         // Initialize approval tracking
         let mut approvals = self.approvals.lock().await;
         approvals.insert(request.recovery_id.clone(), Vec::new());
 
         // Notify guardians via effects
-        self.notify_guardians_via_effects(&request).await?;
+        self.notify_guardians_via_effects(&request, time_effects)
+            .await?;
 
         Ok(())
     }
 
     /// Handle guardian approval
-    pub async fn handle_guardian_approval(&self, approval: GuardianApproval) -> Result<bool> {
+    pub async fn handle_guardian_approval(
+        &self,
+        approval: GuardianApproval,
+        time_effects: &dyn PhysicalTimeEffects,
+    ) -> Result<bool> {
         // Add approval
         let mut approvals = self.approvals.lock().await;
         let ceremony_approvals = approvals
@@ -277,15 +324,23 @@ impl RecoveryProtocolHandler {
 
         if threshold_met {
             // Finalize recovery via effects
-            self.finalize_recovery_via_effects(&approval.recovery_id, ceremony_approvals)
-                .await?;
+            self.finalize_recovery_via_effects(
+                &approval.recovery_id,
+                ceremony_approvals,
+                time_effects,
+            )
+            .await?;
         }
 
         Ok(threshold_met)
     }
 
     /// Notify guardians about recovery request via NetworkEffects
-    async fn notify_guardians_via_effects(&self, request: &RecoveryRequest) -> Result<()> {
+    async fn notify_guardians_via_effects(
+        &self,
+        request: &RecoveryRequest,
+        time_effects: &dyn PhysicalTimeEffects,
+    ) -> Result<()> {
         // Serialize the recovery request
         let message_data =
             serde_json::to_vec(request).map_err(|e| AuraError::serialization(e.to_string()))?;
@@ -299,8 +354,13 @@ impl RecoveryProtocolHandler {
         }
 
         // Update journal state with recovery initiation
-        self.update_journal_recovery_state_via_effects(&request.recovery_id, "initiated", &[])
-            .await?;
+        self.update_journal_recovery_state_via_effects(
+            &request.recovery_id,
+            "initiated",
+            &[],
+            time_effects,
+        )
+        .await?;
 
         Ok(())
     }
@@ -310,6 +370,7 @@ impl RecoveryProtocolHandler {
         &self,
         recovery_id: &str,
         approvals: &[GuardianApproval],
+        time_effects: &dyn PhysicalTimeEffects,
     ) -> Result<()> {
         // Create recovery result
         let result = RecoveryResult {
@@ -328,8 +389,13 @@ impl RecoveryProtocolHandler {
         let _result_sent = self.simulate_account_notification(&result_data);
 
         // Update journal state with recovery completion
-        self.update_journal_recovery_state_via_effects(recovery_id, "completed", approvals)
-            .await?;
+        self.update_journal_recovery_state_via_effects(
+            recovery_id,
+            "completed",
+            approvals,
+            time_effects,
+        )
+        .await?;
 
         Ok(())
     }
@@ -340,16 +406,16 @@ impl RecoveryProtocolHandler {
         recovery_id: &str,
         state: &str,
         approvals: &[GuardianApproval],
+        time_effects: &dyn PhysicalTimeEffects,
     ) -> Result<()> {
         // Create a fact representing the recovery state change
+        let timestamp = time_effects.physical_time().await?.ts_ms / 1000; // Convert milliseconds to seconds
+
         let state_data = serde_json::json!({
             "recovery_id": recovery_id,
             "state": state,
             "approvals_count": approvals.len(),
-            "timestamp": std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            "timestamp": timestamp,
         });
 
         // TODO: Use actual JournalEffects to record recovery state

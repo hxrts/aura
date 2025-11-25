@@ -29,20 +29,26 @@ pub struct Journal {
 
 impl Journal {
     /// Create a new journal for an account
-    pub fn new(account_id: AccountId) -> Self {
+    pub async fn new(account_id: AccountId, random: &dyn RandomEffects) -> Result<Self, AuraError> {
         use ed25519_dalek::SigningKey;
-        let ed25519_key = SigningKey::generate(&mut rand::rngs::OsRng).verifying_key();
+        use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
+
+        // Generate deterministic seed from RandomEffects
+        let seed = random.random_bytes_32().await;
+        let mut rng = ChaCha20Rng::from_seed(seed);
+
+        let ed25519_key = SigningKey::generate(&mut rng).verifying_key();
         let group_key = Ed25519VerifyingKey(ed25519_key.to_bytes().to_vec());
 
         // Create authority ID from account ID for namespace
         let authority_id = AuthorityId::from_uuid(account_id.0);
         let namespace = JournalNamespace::Authority(authority_id);
 
-        Self {
+        Ok(Self {
             account_state: AccountState::new(account_id, group_key),
             op_log: OpLog::default(),
             fact_journal: FactJournal::new(namespace),
-        }
+        })
     }
 
     /// Create a new journal for an account with specific group key

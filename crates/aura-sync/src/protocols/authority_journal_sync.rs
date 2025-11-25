@@ -3,6 +3,7 @@
 //! This module provides journal synchronization for the authority-centric model,
 //! removing all device ID references and using authority IDs instead.
 
+use aura_effects::time::monotonic_now;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -96,7 +97,7 @@ impl AuthorityJournalSyncProtocol {
         local_authority: &dyn Authority,
         peers: Vec<AuthorityId>,
     ) -> SyncResult<AuthoritySyncResult> {
-        let start = std::time::Instant::now();
+        let start = monotonic_now();
         let mut result = AuthoritySyncResult {
             facts_sent: 0,
             facts_received: 0,
@@ -148,7 +149,8 @@ impl AuthorityJournalSyncProtocol {
         };
 
         // Exchange digests
-        let local_digest = self.compute_digest(local_authority.authority_id(), local_journal);
+        let now = effects.physical_time().await?.ts_ms;
+        let local_digest = self.compute_digest(local_authority.authority_id(), local_journal, now);
         let remote_digest = self.request_digest(effects, peer_id).await?;
 
         // Compute delta
@@ -183,6 +185,7 @@ impl AuthorityJournalSyncProtocol {
         &self,
         authority_id: AuthorityId,
         journal: &Journal,
+        timestamp: u64,
     ) -> AuthorityJournalDigest {
         let facts: Vec<&Fact> = journal.iter_facts().collect();
         let fact_count = facts.len();
@@ -194,7 +197,7 @@ impl AuthorityJournalSyncProtocol {
             authority_id,
             fact_count,
             fact_root,
-            timestamp: 0, // TODO: Get from effects
+            timestamp,
         }
     }
 

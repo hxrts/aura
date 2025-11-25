@@ -154,6 +154,3 @@ impl StorageConfig {
 pub use executor::EffectExecutor;
 pub use lifecycle::LifecycleManager;
 pub use services::{FlowBudgetManager, ReceiptManager};
-
-#[cfg(any(test, feature = "testing"))]
-pub use services::ContextManager;

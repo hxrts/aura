@@ -17,7 +17,9 @@ use tokio::time::timeout;
 fn test_device_id(seed: &[u8]) -> DeviceId {
     use aura_core::hash::hash;
     let hash_bytes = hash(seed);
-    let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().unwrap();
+    let uuid_bytes: [u8; 16] = hash_bytes[..16]
+        .try_into()
+        .unwrap_or_else(|_| panic!("Failed to convert hash bytes to UUID bytes"));
     DeviceId(uuid::Uuid::from_bytes(uuid_bytes))
 }
 
@@ -31,7 +33,6 @@ mod integration_tests {
     async fn test_anti_entropy_normal_conditions() -> AuraResult<()> {
         // Set up three-device test harness
         let harness = test_device_trio();
-        let mut network = NetworkSimulator::new();
 
         println!("Testing anti-entropy sync under normal network conditions");
 
@@ -86,13 +87,13 @@ mod integration_tests {
     #[tokio::test]
     async fn test_journal_sync_divergent_states() -> AuraResult<()> {
         let harness = test_device_trio();
-        let mut network = NetworkSimulator::new();
+        let network = NetworkSimulator::new();
 
         println!("Testing journal sync with divergent states");
 
         let devices = harness.device_ids();
         let device1 = devices[0];
-        let device2 = devices[1];
+        let _device2 = devices[1];
         let device3 = devices[2];
 
         // Step 1: Create network partition to cause divergence
@@ -157,7 +158,7 @@ mod integration_tests {
         // Use a larger device set for threshold testing
         let device_labels = vec!["device_0", "device_1", "device_2", "device_3", "device_4"];
         let harness = ChoreographyTestHarness::with_labeled_devices(device_labels);
-        let network = NetworkSimulator::new();
+        let _network = NetworkSimulator::new();
 
         println!("Testing OTA coordination with threshold approval");
 
@@ -167,7 +168,7 @@ mod integration_tests {
             "Need at least 5 devices for threshold test"
         );
 
-        let coordinator = devices[0];
+        let _coordinator = devices[0];
         let required_approvers = 3; // 3-of-5 threshold
 
         let session_result = harness.create_coordinated_session("ota_threshold").await;
@@ -181,15 +182,17 @@ mod integration_tests {
 
         let ota_result = timeout(Duration::from_secs(60), async {
             // Phase 1: Upgrade proposal
-            println!("  Phase 1: Coordinator {} proposing upgrade", coordinator);
+            println!("  Phase 1: Coordinator {} proposing upgrade", _coordinator);
             tokio::time::sleep(Duration::from_millis(200)).await;
 
             // Phase 2: Collect approvals
             println!("  Phase 2: Collecting threshold approvals");
-            for i in 1..=required_approvers {
+            for (i, device) in devices.iter().enumerate().take(required_approvers) {
                 println!(
                     "    Approval {}/{} from device {}",
-                    i, required_approvers, devices[i]
+                    i + 1,
+                    required_approvers,
+                    device
                 );
                 tokio::time::sleep(Duration::from_millis(300)).await;
             }
@@ -221,7 +224,7 @@ mod integration_tests {
         // Use 5 devices to test quorum behavior
         let device_labels = vec!["device_0", "device_1", "device_2", "device_3", "device_4"];
         let harness = ChoreographyTestHarness::with_labeled_devices(device_labels);
-        let mut network = NetworkSimulator::new();
+        let network = NetworkSimulator::new();
 
         println!("Testing protocol behavior under network partition");
 
@@ -299,7 +302,7 @@ mod integration_tests {
     #[tokio::test]
     async fn test_partition_healing_recovery() -> AuraResult<()> {
         let harness = test_device_trio();
-        let mut network = NetworkSimulator::new();
+        let network = NetworkSimulator::new();
 
         println!("Testing partition healing and recovery mechanisms");
 
@@ -425,7 +428,7 @@ mod integration_tests {
     async fn test_multi_protocol_coordination() -> AuraResult<()> {
         let device_labels = vec!["device_0", "device_1", "device_2", "device_3"];
         let harness = ChoreographyTestHarness::with_labeled_devices(device_labels);
-        let mut network = NetworkSimulator::new();
+        let network = NetworkSimulator::new();
 
         println!("Testing complex multi-protocol coordination scenario");
 
@@ -583,10 +586,10 @@ mod framework_documentation {
 
         // For custom scenarios, create specific device sets
         let device_labels = vec!["coordinator", "participant1", "participant2"];
-        let custom_harness = ChoreographyTestHarness::with_labeled_devices(device_labels);
+        let _custom_harness = ChoreographyTestHarness::with_labeled_devices(device_labels);
 
         // === STEP 2: Set up network simulation ===
-        let mut network = NetworkSimulator::new();
+        let network = NetworkSimulator::new();
 
         // Configure network conditions between specific devices
         let devices = harness.device_ids();
@@ -635,37 +638,37 @@ mod framework_documentation {
     #[tokio::test]
     async fn test_available_patterns_documentation() -> AuraResult<()> {
         println!("=== Available Integration Test Patterns ===");
-        println!("");
+        println!();
         println!("1. ANTI-ENTROPY TESTS:");
         println!("   - Normal conditions sync");
         println!("   - High latency scenarios");
         println!("   - Packet loss recovery");
         println!("   - Multiple device coordination");
-        println!("");
+        println!();
         println!("2. JOURNAL SYNC TESTS:");
         println!("   - Divergent state resolution");
         println!("   - Conflict resolution via CRDT");
         println!("   - Batch processing scenarios");
         println!("   - Concurrent writer handling");
-        println!("");
+        println!();
         println!("3. OTA COORDINATION TESTS:");
         println!("   - Threshold approval patterns");
         println!("   - Epoch fencing verification");
         println!("   - Rollback scenarios");
         println!("   - Network partition during upgrade");
-        println!("");
+        println!();
         println!("4. NETWORK PARTITION TESTS:");
         println!("   - Split-brain prevention");
         println!("   - Quorum behavior verification");
         println!("   - Partition detection accuracy");
         println!("   - Cascading failure handling");
-        println!("");
+        println!();
         println!("5. RECOVERY TESTS:");
         println!("   - Partition healing workflows");
         println!("   - State reconciliation");
         println!("   - Multi-failure recovery");
         println!("   - System restoration");
-        println!("");
+        println!();
         println!("6. MULTI-PROTOCOL SCENARIOS:");
         println!("   - Protocol coordination");
         println!("   - Resource contention handling");

@@ -1,6 +1,6 @@
-#![cfg(feature = "fixture_effects")]
-
 //! Integration Tests for Tree Operations
+#![cfg(feature = "fixture_effects")]
+#![doc = include_str!("../../README.md")]
 //!
 //! This module tests end-to-end tree operation execution including:
 //! - AddLeaf, RemoveLeaf, ChangePolicy, RotateEpoch
