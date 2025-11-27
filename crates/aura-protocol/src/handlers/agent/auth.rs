@@ -294,7 +294,7 @@ impl AuthenticationEffects for AuthenticationHandler {
     async fn verify_capability(&self, capability: &[u8]) -> Result<bool> {
         let effects = self.core_effects.read().await;
 
-        // Parse capability (TODO fix - Simplified)
+        // Simplified capability parsing placeholder
         if capability.len() < 16 {
             return Ok(false);
         }

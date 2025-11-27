@@ -10,6 +10,7 @@ use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_protocol::effects::AuraEffects;
 use aura_protocol::guards::send_guard::create_send_guard;
 use aura_protocol::guards::GuardEffectSystem;
+use aura_protocol::guards::effect_system_trait::GuardContextProvider;
 use async_lock::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -52,6 +53,7 @@ impl NetworkTransport {
     pub async fn send_with_guard_chain<
         E: aura_protocol::guards::GuardEffects
             + aura_protocol::guards::GuardEffectSystem
+            + GuardContextProvider
             + aura_core::PhysicalTimeEffects,
     >(
         &self,
@@ -185,6 +187,7 @@ impl NetworkTransport {
     pub async fn broadcast_with_guard_chain<
         E: aura_protocol::guards::GuardEffects
             + aura_protocol::guards::GuardEffectSystem
+            + GuardContextProvider
             + aura_core::PhysicalTimeEffects,
     >(
         &self,
@@ -770,6 +773,16 @@ impl GuardEffectSystem for GuardEffectArc {
     }
 }
 
+impl GuardContextProvider for GuardEffectArc {
+    fn authority_id(&self) -> AuthorityId {
+        self.authority_id
+    }
+
+    fn get_metadata(&self, _key: &str) -> Option<String> {
+        None
+    }
+}
+
 #[async_trait::async_trait]
 impl aura_core::effects::PhysicalTimeEffects for GuardEffectArc {
     async fn physical_time(
@@ -961,6 +974,7 @@ impl NetworkTransportSender {
     pub async fn send_to_peer_with_guard_chain<
         E: aura_protocol::guards::GuardEffects
             + aura_protocol::guards::GuardEffectSystem
+            + GuardContextProvider
             + aura_core::PhysicalTimeEffects,
     >(
         &self,

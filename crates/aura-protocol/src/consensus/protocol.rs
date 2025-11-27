@@ -11,14 +11,18 @@ use super::{
     witness::{WitnessSet, WitnessTracker},
 };
 use aura_core::{
+    crypto::tree_signing::frost_aggregate,
     effects::{PhysicalTimeEffects, RandomEffects},
-    frost::{NonceCommitment, PartialSignature, PublicKeyPackage, Share},
+    frost::{NonceCommitment, PublicKeyPackage, Share},
+    crypto::tree_signing::NonceToken,
     session_epochs::Epoch,
     time::{PhysicalTime, ProvenancedTime, TimeStamp},
     AuraError, AuthorityId, Hash32, Prestate, Result,
 };
+use frost_ed25519;
+use rand::SeedableRng;
 use aura_macros::choreography;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use async_lock::RwLock;
 // Timeout support should be implemented via injected timer effects rather than runtime-specific APIs
@@ -64,6 +68,9 @@ pub struct ConsensusProtocol {
     /// FROST orchestrator for crypto operations
     frost_orchestrator: FrostConsensusOrchestrator,
 
+    /// Group public key package for verification/aggregation
+    group_public_key: PublicKeyPackage,
+
     /// Active protocol instances
     instances: Arc<RwLock<HashMap<ConsensusId, ProtocolInstance>>>,
 }
@@ -78,6 +85,8 @@ struct ProtocolInstance {
     tracker: WitnessTracker,
     phase: ConsensusPhase,
     start_time_ms: u64,
+    /// Cached nonce token for signing (slow path)
+    nonce_token: Option<NonceToken>,
 }
 
 /// Role in the protocol (coordinator or witness)
@@ -100,12 +109,13 @@ impl ConsensusProtocol {
         group_public_key: PublicKeyPackage,
     ) -> Self {
         let frost_orchestrator =
-            FrostConsensusOrchestrator::new(config.clone(), key_packages, group_public_key);
+            FrostConsensusOrchestrator::new(config.clone(), key_packages, group_public_key.clone());
 
         Self {
             authority_id,
             config,
             frost_orchestrator,
+            group_public_key,
             instances: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -169,28 +179,12 @@ impl ConsensusProtocol {
                     tracker: WitnessTracker::new(),
                     phase: ConsensusPhase::Execute,
                     start_time_ms: time.physical_time().await.map(|t| t.ts_ms).unwrap_or(0),
+                    nonce_token: None,
                 };
 
                 self.instances.write().await.insert(consensus_id, instance);
 
-                // Fast path: If cached commitments provided, skip to signing
-                if let Some(commitments) = cached_commitments {
-                    if commitments.len() >= self.config.threshold as usize {
-                        debug!(consensus_id = %consensus_id, "Fast path: using cached commitments");
-                        // Generate signature directly
-                        return self
-                            .generate_signature_response(
-                                consensus_id,
-                                &operation_bytes,
-                                commitments,
-                                &my_share,
-                                random,
-                            )
-                            .await;
-                    }
-                }
-
-                // Slow path: Generate nonce commitment
+                // Generate nonce commitment (always slow path for correctness)
                 self.generate_nonce_commitment(consensus_id, &my_share, random)
                     .await
             }
@@ -239,11 +233,29 @@ impl ConsensusProtocol {
         share: &Share,
         random: &(impl RandomEffects + ?Sized),
     ) -> Result<Option<ConsensusMessage>> {
-        // TODO: Implement actual FROST nonce generation
+        // Generate FROST nonces and commitment for this witness
+        let seed = random.random_bytes_32().await;
+        let mut rng = rand::rngs::StdRng::from_seed(seed);
+
+        let signing_share = frost_ed25519::keys::SigningShare::deserialize(
+            share
+                .value
+                .clone()
+                .try_into()
+                .map_err(|_| AuraError::crypto("Invalid signing share length"))?,
+        )
+        .map_err(|e| AuraError::crypto(format!("Invalid signing share: {}", e)))?;
+
+        let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
         let commitment = NonceCommitment {
             signer: share.identifier,
-            commitment: vec![0u8; 32], // Placeholder
+            commitment: nonces.commitments().hiding().serialize().to_vec(),
         };
+
+        // Cache nonce token for signing when SignRequest arrives
+        if let Some(instance) = self.instances.write().await.get_mut(&consensus_id) {
+            instance.nonce_token = Some(NonceToken::from(nonces));
+        }
 
         Ok(Some(ConsensusMessage::NonceCommit {
             consensus_id,
@@ -260,21 +272,42 @@ impl ConsensusProtocol {
         share: &Share,
         random: &(impl RandomEffects + ?Sized),
     ) -> Result<Option<ConsensusMessage>> {
-        // TODO: Implement actual FROST signing
-        let signature = PartialSignature {
-            signer: share.identifier,
-            signature: vec![0u8; 32], // Placeholder
+        // Retrieve cached nonce token (slow path) or generate a fresh one if missing
+        let mut instances = self.instances.write().await;
+        let instance = instances
+            .get_mut(&consensus_id)
+            .ok_or_else(|| AuraError::invalid("Unknown consensus instance"))?;
+
+        let nonce_token = if let Some(token) = instance.nonce_token.take() {
+            token
+        } else {
+            // Fallback: generate a fresh nonce and append its commitment
+            let seed = random.random_bytes_32().await;
+            let mut rng = rand::rngs::StdRng::from_seed(seed);
+            let signing_share = frost_ed25519::keys::SigningShare::deserialize(
+                share
+                    .value
+                    .clone()
+                    .try_into()
+                    .map_err(|_| AuraError::crypto("Invalid signing share length"))?,
+            )
+            .map_err(|e| AuraError::crypto(format!("Invalid signing share: {}", e)))?;
+            let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
+            let commitment = NonceCommitment {
+                signer: share.identifier,
+                commitment: nonces.commitments().hiding().serialize().to_vec(),
+            };
+            instance.tracker.add_nonce(self.authority_id, commitment);
+            NonceToken::from(nonces)
         };
 
-        // For pipelining: generate next round commitment
-        let next_commitment = if self.config.enable_pipelining {
-            Some(NonceCommitment {
-                signer: share.identifier,
-                commitment: vec![0u8; 32], // Placeholder
-            })
-        } else {
-            None
-        };
+        // Sign using FROST with provided aggregated nonces
+        let signature = self
+            .frost_orchestrator
+            .sign_with_nonce(message, share, &nonce_token, &aggregated_nonces)?;
+
+        // No pipelined commitment until interpreter path supports token handoff
+        let next_commitment = None;
 
         Ok(Some(ConsensusMessage::SignShare {
             consensus_id,
@@ -360,9 +393,28 @@ impl ConsensusProtocol {
         let signatures = instance.tracker.get_signatures();
         let participants = instance.tracker.get_participants();
 
-        // TODO: Implement actual FROST aggregation
+        // Aggregate using FROST
+        let frost_group_pkg: frost_ed25519::keys::PublicKeyPackage =
+            self.group_public_key.clone().try_into().map_err(|e: String| {
+                AuraError::crypto(format!("Invalid group public key package: {}", e))
+            })?;
+
+        let mut commitments = BTreeMap::new();
+        for (witness, commitment) in &instance.tracker.nonce_commitments {
+            commitments.insert(commitment.signer, commitment.clone());
+            debug!(witness = %witness, signer = %commitment.signer, "Using nonce commitment for aggregation");
+        }
+
+        let aggregated_sig = frost_aggregate(
+            &signatures,
+            &instance.operation_bytes,
+            &commitments,
+            &frost_group_pkg,
+        )
+        .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {}", e)))?;
+
         let threshold_signature = aura_core::frost::ThresholdSignature {
-            signature: vec![0u8; 64], // Placeholder
+            signature: aggregated_sig,
             signers: signatures.iter().map(|s| s.signer).collect(),
         };
 

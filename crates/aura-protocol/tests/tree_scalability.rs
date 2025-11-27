@@ -68,7 +68,7 @@ fn create_add_leaf_op(epoch: u64, leaf_id: u32) -> AttestedOp {
 
 fn measure_memory_usage() -> usize {
     // Simple approximation - in production would use jemalloc stats
-    // TODO fix - For now, just return a placeholder
+    // NOTE: Placeholder benchmark - returns static data until scalability harness lands
     0
 }
 

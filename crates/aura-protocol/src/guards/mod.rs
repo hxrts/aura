@@ -53,7 +53,6 @@
 
 // pub mod capability; // Removed - replaced by biscuit_evaluator
 pub mod deltas;
-pub mod effect_system_bridge;
 pub mod effect_system_trait;
 // pub mod evaluation; // Legacy capability evaluation removed - use BiscuitAuthorizationBridge instead
 pub mod execution;
@@ -277,7 +276,6 @@ macro_rules! guard {
 
 // Re-export submodules
 pub use deltas::*;
-pub use effect_system_bridge::*;
 pub use execution::*;
 pub use privacy::*;
 

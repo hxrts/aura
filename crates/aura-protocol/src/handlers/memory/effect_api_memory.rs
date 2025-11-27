@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 /// Memory-based effect_api handler for testing
 pub struct MemoryLedgerHandler {
-    // TODO fix - For now, use placeholder data structures
+    // Placeholder event buffer for in-memory testing
     _events: Vec<Vec<u8>>,
     random: Arc<dyn RandomEffects>,
     time: Arc<dyn PhysicalTimeEffects>,

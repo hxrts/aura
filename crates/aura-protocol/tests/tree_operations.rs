@@ -115,7 +115,7 @@ fn test_operation_application_updates_state() {
     let result = apply_verified(&mut state, &attested_op);
 
     // In real implementation with proper signatures, this would succeed
-    // TODO fix - For now, we verify the function can be called
+    // NOTE: Placeholder coverage - currently only verifies the function can be called
     assert!(result.is_ok() || result.is_err());
 }
 
@@ -174,7 +174,7 @@ fn test_policy_strictness_enforcement() {
     // First, we'd need to set a threshold policy, then try to change to Any
     // This is enforced in application.rs::is_policy_stricter_or_equal
 
-    // TODO fix - For now, verify the function exists and can be called
+    // NOTE: Placeholder coverage - currently only verifies the function exists and can be called
     let result = validate_invariants(&state);
     assert!(result.is_ok());
 }

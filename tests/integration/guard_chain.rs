@@ -5,7 +5,7 @@
 
 use aura_core::{
     semilattice::{Bottom, CvState, JoinSemilattice},
-    AuraResult, DeviceId,
+    AuraResult, ContextId, DeviceId,
 };
 use aura_macros::aura_test;
 use aura_mpst::JournalAnnotation;
@@ -57,48 +57,38 @@ impl Bottom for TestCounter {
 
 impl CvState for TestCounter {}
 
-// TODO: Update this test to work with the new choreography architecture
-// The execute_anti_entropy_with_guard_chain function was moved during refactoring
-// and needs to be reimplemented with the new trait-based approach
-/*
 #[aura_test]
-async fn test_complete_guard_chain_execution() -> AuraResult<()> {
-    let device_a = DeviceId::new();
-    let device_b = DeviceId::new();
+async fn test_guard_chain_executor_happy_path() -> AuraResult<()> {
+    let device_id = DeviceId::new();
+    let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
 
-    // Create effect systems for both devices
-    let effect_system_a = (*aura_testkit::create_test_fixture_with_device_id(device_a).await?.effects()).clone();
-    let effect_system_b = (*aura_testkit::create_test_fixture_with_device_id(device_b).await?.effects()).clone();
+    // Build effect system and interpreter
+    let effects = fixture.effect_system();
+    let interpreter = aura_protocol::guards::pure_executor::EffectSystemInterpreter::new(
+        effects.clone(),
+    );
+    let executor = aura_protocol::guards::pure_executor::GuardChainExecutor::new(
+        aura_protocol::guards::pure::GuardChain::standard(),
+        std::sync::Arc::new(interpreter),
+    );
 
-    // Create CRDT coordinators using builder pattern
-    let coordinator_a = CrdtCoordinator::with_cv_state(device_a, TestCounter::new(device_a));
-    let coordinator_b = CrdtCoordinator::with_cv_state(device_b, TestCounter::new(device_b));
+    // Prepare guard request with budgeted peer = authority
+    let context = ContextId::default();
+    let request = aura_protocol::guards::pure::GuardRequest::new(device_id, "test_op", 10)
+        .with_context_id(context)
+        .with_peer(device_id);
 
-    // Configure anti-entropy
-    let config = AntiEntropyConfig {
-        participants: vec![device_a, device_b],
-        max_ops_per_sync: 100,
-    };
+    let result = executor.execute(effects.as_ref(), &request).await?;
 
-    // Test execution with complete guard chain
-    let result_a = execute_anti_entropy_with_guard_chain(
-        device_a,
-        config.clone(),
-        true, // is_requester
-        &effect_system_a,
-        coordinator_a,
-    )
-    .await;
-
-    // Verify successful execution
-    assert!(result_a.is_ok(), "Guard chain execution should succeed");
-    let (sync_result_a, final_coordinator_a) = result_a.unwrap();
-    assert!(sync_result_a.success, "Anti-entropy sync should succeed");
-    assert_eq!(final_coordinator_a.device_id(), device_a);
+    assert!(result.authorized, "guard chain should authorize request");
+    assert!(result.effects_executed >= 2, "should execute budget + journal effects");
+    assert!(
+        result.receipt.is_some(),
+        "budget charge should produce a receipt"
+    );
 
     Ok(())
 }
-*/
 
 #[aura_test]
 async fn test_journal_coupler_standalone() -> AuraResult<()> {

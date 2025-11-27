@@ -193,6 +193,7 @@ where
     E: AmpJournalEffects
         + NetworkEffects
         + GuardEffectSystem
+        + crate::guards::effect_system_trait::GuardContextProvider
         + crate::effects::CryptoEffects
         + aura_core::PhysicalTimeEffects,
 {
@@ -260,7 +261,7 @@ where
 
     // Phase 3: Guard chain execution (authorization and flow budget)
     let guard_start = time.now_instant().await;
-    let peer = effects.authority_id();
+    let peer = crate::guards::effect_system_trait::GuardContextProvider::authority_id(effects);
     let flow_cost = 1u32; // Minimal cost for AMP message
     let guard_chain = build_amp_send_guard(context, peer, Some(flow_cost));
 

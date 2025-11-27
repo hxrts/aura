@@ -1,8 +1,7 @@
-use crate::guards::send_guard::create_send_guard;
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::{BloomDigest, SyncEffects, SyncError};
-use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::identifiers::ContextId;
 use aura_core::{tree::AttestedOp, Hash32};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -45,7 +44,6 @@ pub struct BroadcasterHandler {
     config: BroadcastConfig,
     /// Local operation store
     oplog: Arc<RwLock<BTreeMap<Hash32, AttestedOp>>>,
-    /// Set of known peers (mapped to AuthorityId for guard chain)
     peers: Arc<RwLock<BTreeSet<Uuid>>>,
     /// Pending announcements (CID -> set of peers that need it)
     pending_announcements: Arc<RwLock<BTreeMap<Hash32, BTreeSet<Uuid>>>>,
@@ -313,72 +311,6 @@ impl BroadcasterHandler {
 
     async fn request_op(&self, peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
         self.lazy_pull_response(peer_id, cid).await
-    }
-
-    async fn push_op_to_peers_with_guard_chain_impl<
-        E: crate::guards::GuardEffects + aura_core::PhysicalTimeEffects,
-    >(
-        &self,
-        op: AttestedOp,
-        peers: Vec<Uuid>,
-        effect_system: &E,
-    ) -> Result<(), SyncError>
-    where
-        E: crate::guards::effect_system_trait::GuardEffectSystem,
-    {
-        let cid = Hash32::from(op.op.parent_commitment);
-
-        for peer_uuid in peers {
-            // Convert UUID to AuthorityId for guard chain
-            let peer_authority = AuthorityId::from(peer_uuid);
-
-            // Create guard chain for sync operation
-            let guard_chain = create_send_guard(
-                "sync:broadcast_op".to_string(), // authorization requirement
-                self.context_id,
-                peer_authority,
-                50, // flow cost for broadcast operation
-            )
-            .with_operation_id(format!("broadcast_op_{}", cid));
-
-            // Evaluate guard chain before sending
-            match guard_chain.evaluate(effect_system).await {
-                Ok(result) if result.authorized => {
-                    tracing::debug!(
-                        "Guard chain authorized broadcast of op {:?} to peer: {:?}",
-                        cid,
-                        peer_uuid
-                    );
-
-                    // Transport integration pending: broadcast currently mocked/logged only.
-                    tracing::debug!("Op {:?} sent to peer: {:?} (mocked)", cid, peer_uuid);
-                }
-                Ok(result) => {
-                    tracing::warn!(
-                        "Guard chain denied broadcast of op {:?} to peer {:?}: {:?}",
-                        cid,
-                        peer_uuid,
-                        result.denial_reason
-                    );
-                    return Err(SyncError::AuthorizationFailed);
-                }
-                Err(err) => {
-                    tracing::error!(
-                        "Guard chain evaluation failed for op {:?} to peer {:?}: {}",
-                        cid,
-                        peer_uuid,
-                        err
-                    );
-                    return Err(SyncError::AuthorizationFailed);
-                }
-            }
-        }
-
-        // Remove from pending announcements after successful sends
-        let mut pending = self.pending_announcements.write().await;
-        pending.remove(&cid);
-
-        Ok(())
     }
 
     async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {

@@ -8,7 +8,7 @@ use std::fmt;
 
 /// Coordinated storage access control manager
 ///
-/// TODO: Refactor to use Biscuit tokens and effect system for authorization
+/// Note: authorization here still uses simplified capability strings; Biscuit token integration should replace it when available.
 #[derive(Debug, Clone)]
 pub struct StorageAccessCoordinator {
     // Placeholder - legacy capability system removed

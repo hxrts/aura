@@ -5,6 +5,7 @@
 //! depending on concrete runtime implementations.
 
 use crate::guards::LeakageBudget;
+use biscuit_auth::Biscuit;
 use aura_core::identifiers::ContextId;
 use aura_core::identifiers::DeviceId;
 // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
@@ -23,7 +24,7 @@ type ChoreoResult<T> = Result<T, ChoreographyError>;
 /// Guard profile for message sending operations
 #[derive(Debug, Clone)]
 pub struct SendGuardProfile {
-    pub authorization_tokens: Vec<String>, // TODO: Use proper Biscuit token type
+    pub authorization_tokens: Vec<Biscuit>,
     pub leakage_budget: LeakageBudget,
     pub delta_facts: Vec<Value>,
     pub flow_cost: u32,
@@ -32,7 +33,7 @@ pub struct SendGuardProfile {
 impl Default for SendGuardProfile {
     fn default() -> Self {
         Self {
-            authorization_tokens: vec!["choreography_send".to_string()],
+            authorization_tokens: vec![],
             leakage_budget: LeakageBudget::zero(),
             delta_facts: vec![],
             flow_cost: 1,

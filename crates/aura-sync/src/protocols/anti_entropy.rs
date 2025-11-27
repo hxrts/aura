@@ -992,13 +992,10 @@ mod tests {
     use super::*;
     use aura_core::{journal::FactValue, TreeOp, TreeOpKind};
 
-    // TODO: Fix Journal type - appears to be missing from current codebase
-    // fn sample_journal() -> Journal {
-    //     let mut journal = Journal::new();
-    //     journal.facts.insert("counter", FactValue::Number(1));
-    //     journal.caps.add_permission("sync");
-    //     journal
-    // }
+    fn sample_journal() -> Journal {
+        // Minimal journal for digest tests; facts/caps remain default
+        Journal::default()
+    }
 
     fn sample_op(epoch: u64) -> AttestedOp {
         AttestedOp {

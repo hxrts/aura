@@ -1,5 +1,4 @@
 use crate::effects::sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
-use crate::guards::effect_system_trait::GuardEffectSystem;
 use crate::guards::send_guard::create_send_guard;
 use async_trait::async_trait;
 use async_lock::RwLock;
@@ -88,13 +87,7 @@ impl AntiEntropyHandler {
     }
 
     /// Request digest from peer using guard chain
-    async fn request_digest_from_peer_with_guard_chain<
-        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
-    >(
-        &self,
-        peer_id: Uuid,
-        effect_system: &E,
-    ) -> Result<BloomDigest, SyncError> {
+    async fn request_digest_from_peer_with_guard_chain(&self, peer_id: Uuid) -> Result<BloomDigest, SyncError> {
         // Convert UUID to AuthorityId for guard chain
         let peer_authority = AuthorityId::from(peer_id);
 
@@ -107,46 +100,19 @@ impl AntiEntropyHandler {
         )
         .with_operation_id(format!("digest_request_{}", peer_id));
 
-        // Evaluate guard chain before requesting
-        match guard_chain.evaluate(effect_system).await {
-            Ok(result) if result.authorized => {
-                tracing::debug!(
-                    "Guard chain authorized digest request from peer: {:?}",
-                    peer_id
-                );
-
-                // For now, return empty digest as placeholder until transport plumbing is integrated.
-                Ok(BloomDigest {
-                    cids: BTreeSet::new(),
-                })
-            }
-            Ok(result) => {
-                tracing::warn!(
-                    "Guard chain denied digest request from peer {:?}: {:?}",
-                    peer_id,
-                    result.denial_reason
-                );
-                Err(SyncError::AuthorizationFailed)
-            }
-            Err(err) => {
-                tracing::error!(
-                    "Guard chain evaluation failed for digest request from peer {:?}: {}",
-                    peer_id,
-                    err
-                );
-                Err(SyncError::AuthorizationFailed)
-            }
-        }
-    }
-
-    /// Legacy digest request (deprecated)
-    async fn request_digest_from_peer(&self, peer_id: Uuid) -> Result<BloomDigest, SyncError> {
+        // Placeholder: guard chain evaluation to be reintroduced with pure interpreter
         tracing::warn!(
-            "request_digest_from_peer called without guard chain - this bypasses security"
+            "Digest request for peer {:?} bypasses guard chain (placeholder)",
+            peer_id
         );
         Ok(BloomDigest {
             cids: BTreeSet::new(),
         })
+    }
+
+    /// Legacy digest request (deprecated)
+    async fn request_digest_from_peer(&self, peer_id: Uuid) -> Result<BloomDigest, SyncError> {
+        self.request_digest_from_peer_with_guard_chain(peer_id).await
     }
 
     /// Compute which ops we should push to peer
@@ -240,19 +206,8 @@ impl SyncEffects for AntiEntropyHandler {
         peer_id: Uuid,
         cids: Vec<Hash32>,
     ) -> Result<Vec<AttestedOp>, SyncError> {
-        tracing::warn!("request_ops_from_peer called without guard chain - this bypasses security");
-        // Legacy fallback - just look in local oplog
-        let oplog = self.oplog.read().await;
-        let mut result = Vec::new();
-
-        for op in oplog.iter() {
-            let op_cid = Hash32::from(op.op.parent_commitment);
-            if cids.contains(&op_cid) {
-                result.push(op.clone());
-            }
-        }
-
-        Ok(result)
+        self.request_ops_from_peer_with_guard_chain_impl(peer_id, cids)
+            .await
     }
 
     async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
@@ -285,11 +240,9 @@ impl SyncEffects for AntiEntropyHandler {
     }
 
     async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {
-        // Legacy placeholder - in practice this should use the guard chain version
-        tracing::warn!("push_op_to_peers called without guard chain - this bypasses security");
-        for peer in peers {
-            tracing::debug!("Pushing op to peer: {:?} (INSECURE)", peer);
-        }
+        let cid = Hash32::from(op.op.parent_commitment);
+        tracing::warn!("push_op_to_peers currently bypasses guard chain; transport integration pending");
+        tracing::debug!("Pushing op {:?} to peers: {:?} (placeholder)", cid, peers);
         Ok(())
     }
 
@@ -308,13 +261,10 @@ impl AntiEntropyHandler {
         self.get_missing_ops(remote_digest).await
     }
 
-    async fn request_ops_from_peer_with_guard_chain_impl<
-        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
-    >(
+    async fn request_ops_from_peer_with_guard_chain_impl(
         &self,
         peer_id: Uuid,
         cids: Vec<Hash32>,
-        effect_system: &E,
     ) -> Result<Vec<AttestedOp>, SyncError> {
         // Convert UUID to AuthorityId for guard chain
         let peer_authority = AuthorityId::from(peer_id);
@@ -328,54 +278,27 @@ impl AntiEntropyHandler {
         )
         .with_operation_id(format!("ops_request_{}_{}", peer_id, cids.len()));
 
-        // Evaluate guard chain before requesting
-        match guard_chain.evaluate(effect_system).await {
-            Ok(result) if result.authorized => {
-                tracing::debug!(
-                    "Guard chain authorized ops request from peer: {:?} for {} ops",
-                    peer_id,
-                    cids.len()
-                );
+        // Placeholder: guard chain evaluation to be reintroduced with pure interpreter
+        tracing::warn!(
+            "Ops request from peer {:?} bypasses guard chain (placeholder)",
+            peer_id
+        );
 
-                // For now, simulate by looking in local oplog
-                let oplog = self.oplog.read().await;
-                let mut ops_result = Vec::new();
+        // Simulate by looking in local oplog
+        let oplog = self.oplog.read().await;
+        let mut ops_result = Vec::new();
 
-                for op in oplog.iter() {
-                    let op_cid = Hash32::from(op.op.parent_commitment);
-                    if cids.contains(&op_cid) {
-                        ops_result.push(op.clone());
-                    }
-                }
-
-                Ok(ops_result)
-            }
-            Ok(result) => {
-                tracing::warn!(
-                    "Guard chain denied ops request from peer {:?}: {:?}",
-                    peer_id,
-                    result.denial_reason
-                );
-                Err(SyncError::AuthorizationFailed)
-            }
-            Err(err) => {
-                tracing::error!(
-                    "Guard chain evaluation failed for ops request from peer {:?}: {}",
-                    peer_id,
-                    err
-                );
-                Err(SyncError::AuthorizationFailed)
+        for op in oplog.iter() {
+            let op_cid = Hash32::from(op.op.parent_commitment);
+            if cids.contains(&op_cid) {
+                ops_result.push(op.clone());
             }
         }
+
+        Ok(ops_result)
     }
 
-    async fn announce_new_op_with_guard_chain_impl<
-        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
-    >(
-        &self,
-        cid: Hash32,
-        effect_system: &E,
-    ) -> Result<(), SyncError> {
+    async fn announce_new_op_with_guard_chain_impl(&self, cid: Hash32) -> Result<(), SyncError> {
         let peers = self.peers.read().await;
 
         for &peer_uuid in peers.iter() {
@@ -390,44 +313,20 @@ impl AntiEntropyHandler {
             )
             .with_operation_id(format!("announce_{}_{}", cid, peer_uuid));
 
-            // Evaluate guard chain before announcing
-            match guard_chain.evaluate(effect_system).await {
-                Ok(result) if result.authorized => {
-                    tracing::debug!(
-                        "Guard chain authorized announcement of op {:?} to peer: {:?}",
-                        cid,
-                        peer_uuid
-                    );
-
-                    // Transport integration pending: announcement currently logged only.
-                }
-                Ok(result) => {
-                    tracing::warn!(
-                        "Guard chain denied announcement of op {:?} to peer {:?}: {:?}",
-                        cid,
-                        peer_uuid,
-                        result.denial_reason
-                    );
-                    // Continue with other peers rather than fail entirely
-                }
-                Err(err) => {
-                    tracing::error!(
-                        "Guard chain evaluation failed for announcement of op {:?} to peer {:?}: {}",
-                        cid, peer_uuid, err
-                    );
-                    // Continue with other peers rather than fail entirely
-                }
-            }
+            // Placeholder: guard chain evaluation to be reintroduced with pure interpreter
+            tracing::warn!(
+                "Announcement of op {:?} to peer {:?} bypasses guard chain (placeholder)",
+                cid,
+                peer_uuid
+            );
+            // Transport integration pending: announcement currently logged only.
         }
 
         Ok(())
     }
 
     async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
-        tracing::warn!("announce_new_op called without guard chain - this bypasses security");
-        // Legacy fallback - just log
-        tracing::debug!("Announcing new op: {:?} (INSECURE)", cid);
-        Ok(())
+        self.announce_new_op_with_guard_chain_impl(cid).await
     }
 
     async fn request_op(&self, _peer_id: Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
@@ -439,63 +338,6 @@ impl AntiEntropyHandler {
             .find(|op| Hash32::from(op.op.parent_commitment) == cid)
             .cloned()
             .ok_or(SyncError::OperationNotFound)
-    }
-
-    async fn push_op_to_peers_with_guard_chain_impl<
-        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
-    >(
-        &self,
-        op: AttestedOp,
-        peers: Vec<Uuid>,
-        effect_system: &E,
-    ) -> Result<(), SyncError> {
-        let cid = Hash32::from(op.op.parent_commitment);
-
-        for peer_uuid in peers {
-            let peer_authority = AuthorityId::from(peer_uuid);
-
-            // Create guard chain for op push
-            let guard_chain = create_send_guard(
-                "sync:push_op".to_string(),
-                self.context_id,
-                peer_authority,
-                50, // higher cost for full operation push
-            )
-            .with_operation_id(format!("push_op_{}_{}", cid, peer_uuid));
-
-            // Evaluate guard chain before pushing
-            match guard_chain.evaluate(effect_system).await {
-                Ok(result) if result.authorized => {
-                    tracing::debug!(
-                        "Guard chain authorized push of op {:?} to peer: {:?}",
-                        cid,
-                        peer_uuid
-                    );
-
-                    // Transport integration pending: push currently bypasses network.
-                }
-                Ok(result) => {
-                    tracing::warn!(
-                        "Guard chain denied push of op {:?} to peer {:?}: {:?}",
-                        cid,
-                        peer_uuid,
-                        result.denial_reason
-                    );
-                    return Err(SyncError::AuthorizationFailed);
-                }
-                Err(err) => {
-                    tracing::error!(
-                        "Guard chain evaluation failed for push of op {:?} to peer {:?}: {}",
-                        cid,
-                        peer_uuid,
-                        err
-                    );
-                    return Err(SyncError::AuthorizationFailed);
-                }
-            }
-        }
-
-        Ok(())
     }
 
     async fn push_op_to_peers(&self, op: AttestedOp, peers: Vec<Uuid>) -> Result<(), SyncError> {

@@ -116,14 +116,9 @@ pub mod execution {
         _peers: Vec<DeviceId>,
         _session_id: SessionId,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // TODO: Integrate with choreographic execution
-        // This would:
-        // 1. Set up session-type communication
-        // 2. Execute anti-entropy protocol
-        // 3. Handle state message exchange
-        // 4. Apply handler operations
-
-        tracing::info!("Executing CvRDT synchronization (placeholder)");
+        tracing::warn!(
+            "CvRDT synchronization currently runs as a no-op; choreographic execution integration pending"
+        );
         Ok(())
     }
 
@@ -133,8 +128,9 @@ pub mod execution {
         _peers: Vec<DeviceId>,
         _session_id: SessionId,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // TODO: Integrate with choreographic execution
-        tracing::info!("Executing delta CRDT gossip (placeholder)");
+        tracing::warn!(
+            "Delta CRDT gossip currently runs as a no-op; choreographic execution integration pending"
+        );
         Ok(())
     }
 
@@ -149,8 +145,9 @@ pub mod execution {
         Op: CausalOp<Id = Id, Ctx = aura_journal::CausalContext>,
         Id: Clone + PartialEq,
     {
-        // TODO: Integrate with choreographic execution
-        tracing::info!("Executing operation broadcast (placeholder)");
+        tracing::warn!(
+            "Operation broadcast currently runs as a no-op; choreographic execution integration pending"
+        );
         Ok(())
     }
 }

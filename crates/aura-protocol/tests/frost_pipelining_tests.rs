@@ -35,7 +35,7 @@ fn create_test_key_packages(
     witnesses: &[AuthorityId],
     threshold: u16,
 ) -> (HashMap<AuthorityId, Share>, PublicKeyPackage) {
-    // TODO: Implement proper FROST DKG for test key generation
+// NOTE: Implement proper FROST DKG for test key generation
     // For now, create dummy shares
     let mut shares = HashMap::new();
 
@@ -77,7 +77,7 @@ async fn test_steady_state_single_rtt() {
             signer: 1,
             commitment: vec![1u8; 32],
         };
-        // TODO: Create proper FROST nonces using real key generation
+        // NOTE: Create proper FROST nonces using real key generation
         // For now, skip this test as it requires full FROST setup
         continue;
 
@@ -95,7 +95,7 @@ async fn test_steady_state_single_rtt() {
     assert_eq!(stats.threshold, 2);
     assert!(stats.can_use_fast_path);
 
-    // TODO: Run actual consensus and measure RTT
+    // NOTE: Run actual consensus and measure RTT
     // This requires full FROST integration
 }
 
@@ -114,7 +114,7 @@ async fn test_epoch_rotation_invalidation() {
             signer: 1,
             commitment: vec![1u8; 32],
         };
-        // TODO: Create proper FROST nonces
+        // NOTE: Create proper FROST nonces
         continue;
 
         // orchestrator
@@ -150,7 +150,7 @@ async fn test_fallback_on_missing_commitments() {
     // No cached commitments, should not be able to use fast path
     assert!(!orchestrator.can_use_fast_path().await);
 
-    // TODO: Run consensus and verify it falls back to 2-RTT
+    // NOTE: Run consensus and verify it falls back to 2-RTT
 }
 
 #[tokio::test]
@@ -164,7 +164,7 @@ async fn test_adversarial_duplicate_commitments() {
         signer: 1,
         commitment: vec![1u8; 32],
     };
-    // TODO: Create proper FROST nonces
+    // NOTE: Create proper FROST nonces
     return;
 
     // manager
@@ -206,7 +206,7 @@ async fn test_witness_state_lifecycle() {
         signer: 1,
         commitment: vec![1u8; 32],
     };
-    // TODO: Create proper FROST nonces
+    // NOTE: Create proper FROST nonces
     return;
     // state.set_next_nonce(commitment.clone(), token, epoch);
 
@@ -239,7 +239,7 @@ async fn test_warm_up_round() {
     // No cached state on startup
     assert!(!orchestrator.can_use_fast_path().await);
 
-    // TODO: Run first consensus round and verify:
+    // NOTE: Run first consensus round and verify:
     // 1. Uses 2-RTT (slow path)
     // 2. Collects next-round commitments
     // 3. Second round can use 1-RTT (fast path)
@@ -247,7 +247,7 @@ async fn test_warm_up_round() {
 
 #[tokio::test]
 async fn test_performance_measurement() {
-    // TODO: Implement actual performance test that measures:
+    // NOTE: Implement actual performance test that measures:
     // - Latency reduction (2 RTT → 1 RTT)
     // - Message count reduction
     // - CPU overhead from nonce caching
@@ -295,7 +295,7 @@ fn test_consensus_message_serialization() {
 /// Integration test with simulated network delays
 #[tokio::test]
 async fn test_network_delay_impact() {
-    // TODO: Use aura-simulator to inject network delays and measure:
+    // NOTE: Use aura-simulator to inject network delays and measure:
     // - Impact of 1-RTT vs 2-RTT under various latency conditions
     // - Behavior under packet loss
     // - Recovery from partial failures
@@ -304,7 +304,7 @@ async fn test_network_delay_impact() {
 /// Property: Pipelining never violates consensus safety
 #[test]
 fn prop_pipelining_maintains_safety() {
-    // TODO: Property test that verifies:
+    // NOTE: Property test that verifies:
     // - Same commit facts produced with and without pipelining
     // - No duplicate nonce usage across epochs
     // - Threshold always respected

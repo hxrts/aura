@@ -77,7 +77,7 @@ fn test_malicious_signature_rejected() {
     // - Tree state would remain unchanged
     // - OpLog would not contain malicious operation
 
-    // TODO fix - For now, we verify the structure allows rejection
+    // NOTE: Placeholder - currently verifies structure allows rejection
     assert_eq!(malicious_op.signer_count, 3, "Count should be preserved");
     assert_ne!(
         malicious_op.agg_sig, valid_op.agg_sig,

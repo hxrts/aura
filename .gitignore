@@ -53,6 +53,9 @@ result-*
 *.tmp
 *.temp
 
+# Search
+.ck/
+
 # Working
 work/
 ext/

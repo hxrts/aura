@@ -214,7 +214,7 @@ async fn test_crypto_effects() {
 async fn test_time_effects() -> AuraResult<()> {
     // Skip test since RealTimeHandler implementation is not yet complete
     println!("Time effects test skipped - handler not yet implemented");
-    // TODO: Re-enable when RealTimeHandler is fully implemented
+    // NOTE: Re-enable when RealTimeHandler is fully implemented
     Ok(())
 }
 
@@ -250,7 +250,7 @@ async fn test_effect_api_effects() -> AuraResult<()> {
     // Skip test since MemoryLedgerHandler implementation is not yet complete
     println!("Effect API effects test skipped - handler not yet implemented");
     Ok(())
-    // TODO: Re-enable when MemoryLedgerHandler is fully implemented
+    // NOTE: Re-enable when MemoryLedgerHandler is fully implemented
 }
 
 /// Test choreographic effects

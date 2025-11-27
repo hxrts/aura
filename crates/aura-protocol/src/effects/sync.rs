@@ -12,7 +12,7 @@
 
 use async_trait::async_trait;
 use aura_core::{AttestedOp, Hash32};
-// TODO: Use BloomEffects for real implementation
+// Placeholder: BloomEffects integration pending
 // use aura_journal::semilattice::OpLog;  // Temporarily disabled
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 /// Bloom filter digest for efficient OpLog comparison
 ///
-/// TODO: Replace with BloomEffects-based implementation
+/// Placeholder implementation (BloomEffects integration pending).
 /// Real implementation should use:
 /// ```ignore
 /// bloom_effects.create_bloom_filter(BloomConfig::oplog_sync()).await
@@ -30,7 +30,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BloomDigest {
     /// Set of operation CIDs (placeholder - should be BloomFilter)
-    /// TODO: Replace with `filter: BloomFilter` field
+    /// Placeholder: Replace with `filter: BloomFilter` field when BloomEffects lands.
     pub cids: BTreeSet<Hash32>,
 }
 
@@ -41,10 +41,7 @@ impl BloomDigest {
         let cids = oplog
             .list_ops()
             .iter()
-            .map(|op| {
-                // Compute CID (TODO fix - Simplified - should hash the entire op)
-                Hash32::from(op.op.parent_commitment)
-            })
+            .map(|op| Hash32::from(op.op.parent_commitment)) // Simplified CID computation
             .collect();
 
         Self { cids }

@@ -35,7 +35,6 @@ pub mod flow; // Flow budget management
 pub mod guard_effects; // Pure guard evaluation with effect commands
 pub mod journal;
 pub mod leakage; // Privacy leakage tracking
-pub mod migration; // Empty module - migration complete
 pub mod network;
 pub mod quint;
 pub mod random;

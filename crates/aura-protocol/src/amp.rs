@@ -1,11 +1,10 @@
 //! AMP protocol-layer adapters (journal + reduction helpers).
 //!
 //! These glue Layer 4 orchestration to Layer 2 facts without leaking domain types
-//! outward. Backed by core `JournalEffects` and `GuardEffectSystem`.
+//! outward. Backed by core `JournalEffects` and storage effects.
 
 use crate::consensus::ConsensusId;
 use crate::effects::JournalEffects;
-use crate::guards::effect_system_trait::GuardEffectSystem;
 use aura_core::effects::StorageEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::AuthorityId;
@@ -60,7 +59,7 @@ pub trait AmpJournalEffects: JournalEffects + StorageEffects + Sized {
 }
 
 #[async_trait::async_trait]
-impl<E: GuardEffectSystem> AmpJournalEffects for E {
+impl<E: JournalEffects + StorageEffects> AmpJournalEffects for E {
     async fn fetch_context_journal(&self, context: ContextId) -> Result<FactJournal> {
         match self.retrieve(&context_journal_key(context)).await {
             Ok(Some(bytes)) => serde_json::from_slice(&bytes)

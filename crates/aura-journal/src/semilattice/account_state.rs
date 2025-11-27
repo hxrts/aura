@@ -1,6 +1,6 @@
 //! Unified account state using semilattice architecture
 //!
-//! This module provides a modern replacement for the legacy Automerge-based
+//! This module provides a modern replacement for the previous Automerge-based
 //! AccountState using the harmonized semilattice system. It combines multiple
 //! CRDT types to provide equivalent functionality with better composability.
 
@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 /// Modern account state using semilattice architecture
 ///
-/// This replaces the legacy Automerge-based AccountState with a composition
+/// This replaces the previous Automerge-based AccountState with a composition
 /// of multiple semilattice CRDTs, providing the same functionality with
 /// better performance and composability.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

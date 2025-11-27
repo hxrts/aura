@@ -43,10 +43,10 @@ fn apply_attested_op(tree_state: &TreeState, op: &AttestedOp) -> TreeState {
     }
 }
 
-/// Apply add leaf operation to tree state (legacy function)
+/// Apply add leaf operation to tree state (deprecated - use fact-based approach)
 #[allow(dead_code)]
 fn apply_add_leaf(tree_state: &TreeState, public_key: &[u8]) -> TreeState {
-    // Legacy implementation that assumes device role
+    // Old implementation that assumes device role
     // This is kept for backward compatibility but new code should use apply_add_leaf_with_role
     apply_add_leaf_with_role(tree_state, public_key, aura_core::tree::LeafRole::Device)
 }

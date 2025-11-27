@@ -17,8 +17,8 @@
 //! where protocol operations atomically update both local state and distributed
 //! journal facts using join-semilattice operations.
 
-use super::effect_system_trait::GuardEffectSystem;
 use super::ProtocolGuard;
+use crate::guards::GuardEffectSystem;
 use aura_core::{AuraResult, Journal, TimeEffects};
 use aura_mpst::journal::{JournalAnnotation, JournalOpType};
 use serde_json::Value as JsonValue;
@@ -291,10 +291,10 @@ impl JournalCoupler {
     }
 
     /// Apply journal annotations for an operation
-    async fn apply_annotations<E: GuardEffectSystem>(
+    async fn apply_annotations<E: aura_core::effects::JournalEffects + TimeEffects>(
         &self,
         operation_id: &str,
-        effect_system: &mut E,
+        effect_system: &E,
         initial_journal: &Journal,
     ) -> AuraResult<(Journal, Vec<JournalOperation>)> {
         // Check if there are annotations for this operation
@@ -359,9 +359,9 @@ impl JournalCoupler {
     ///
     /// This method is called by the send guard chain after successful authorization
     /// and flow budget charging to atomically apply any journal changes.
-    pub async fn couple_with_send<E: GuardEffectSystem>(
+    pub async fn couple_with_send<E: aura_core::effects::JournalEffects + TimeEffects>(
         &self,
-        effect_system: &mut E,
+        effect_system: &E,
         receipt: &Option<aura_core::Receipt>,
     ) -> AuraResult<CouplingMetrics> {
         let coupling_start = effect_system.now_instant().await;
@@ -404,10 +404,10 @@ impl JournalCoupler {
     }
 
     /// Apply a single journal annotation
-    async fn apply_single_annotation<E: GuardEffectSystem>(
+    async fn apply_single_annotation<E: aura_core::effects::JournalEffects + TimeEffects>(
         &self,
         annotation: &JournalAnnotation,
-        effect_system: &mut E,
+        effect_system: &E,
         current_journal: &Journal,
     ) -> AuraResult<(Journal, JournalOperation)> {
         match &annotation.op_type {

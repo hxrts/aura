@@ -8,15 +8,18 @@ use super::{
     pure::{Guard, GuardChain, GuardRequest},
     send_guard::{SendGuardChain, SendGuardMetrics, SendGuardResult},
 };
+use crate::guards::effect_system_trait::GuardContextProvider;
 use aura_core::{
     effects::{
         guard_effects::{
             Decision, EffectCommand, EffectInterpreter, EffectResult, FlowBudgetView,
             GuardSnapshot, MetadataView,
         },
-        FlowBudgetEffects, PhysicalTimeEffects, RandomEffects, StorageEffects,
+        FlowBudgetEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects, RandomEffects,
+        StorageEffects,
     },
     identifiers::{AuthorityId, ContextId},
+    journal::Journal,
     time::TimeStamp,
     AuraError, AuraResult as Result, Cap, Receipt,
 };
@@ -259,7 +262,9 @@ where
         + FlowBudgetEffects
         + PhysicalTimeEffects
         + RandomEffects
-        + StorageEffects,
+        + StorageEffects
+        + JournalEffects
+        + LeakageEffects,
 {
     async fn execute(&self, cmd: EffectCommand) -> Result<EffectResult> {
         match cmd {
@@ -272,12 +277,37 @@ where
                 let receipt = self.effects.charge_flow(&context, &peer, amount).await?;
                 Ok(EffectResult::Receipt(receipt))
             }
-            EffectCommand::AppendJournal { .. } => {
-                // TODO: wire to JournalEffects append once available
+            EffectCommand::AppendJournal { entry } => {
+                let current = self.effects.get_journal().await.map_err(|e| {
+                    AuraError::invalid(format!("Failed to get journal: {}", e))
+                })?;
+                // Build a delta journal containing the new fact
+                let delta = Journal::with_facts(entry.fact.clone());
+                let merged = self
+                    .effects
+                    .merge_facts(&current, &delta)
+                    .await
+                    .map_err(|e| AuraError::invalid(format!("Failed to merge journal: {}", e)))?;
+                self.effects
+                    .persist_journal(&merged)
+                    .await
+                    .map_err(|e| AuraError::invalid(format!("Failed to persist journal: {}", e)))?;
                 Ok(EffectResult::Success)
             }
-            EffectCommand::RecordLeakage { bits: _ } => {
-                // TODO: pass through to LeakageEffects with full context when command carries it
+            EffectCommand::RecordLeakage { bits } => {
+                let event = aura_core::effects::LeakageEvent {
+                    source: AuthorityId::default(),
+                    destination: AuthorityId::default(),
+                    context_id: ContextId::default(),
+                    leakage_amount: bits as u64,
+                    observer_class: aura_core::effects::ObserverClass::External,
+                    operation: "guard_chain".to_string(),
+                    timestamp_ms: self.effects.physical_time().await?.ts_ms,
+                };
+                self.effects
+                    .record_leakage(event)
+                    .await
+                    .map_err(|e| AuraError::invalid(format!("Failed to record leakage: {}", e)))?;
                 Ok(EffectResult::Success)
             }
             EffectCommand::StoreMetadata { key, value } => {
@@ -310,7 +340,9 @@ where
         + FlowBudgetEffects
         + PhysicalTimeEffects
         + RandomEffects
-        + StorageEffects,
+        + StorageEffects
+        + JournalEffects
+        + LeakageEffects,
 {
     async fn execute(&self, cmd: EffectCommand) -> Result<EffectResult> {
         match cmd {
@@ -323,8 +355,38 @@ where
                 let receipt = self.effects.charge_flow(&context, &peer, amount).await?;
                 Ok(EffectResult::Receipt(receipt))
             }
-            EffectCommand::AppendJournal { .. } => Ok(EffectResult::Success),
-            EffectCommand::RecordLeakage { .. } => Ok(EffectResult::Success),
+            EffectCommand::AppendJournal { entry } => {
+                let current = self.effects.get_journal().await.map_err(|e| {
+                    AuraError::invalid(format!("Failed to get journal: {}", e))
+                })?;
+                let delta = Journal::with_facts(entry.fact.clone());
+                let merged = self
+                    .effects
+                    .merge_facts(&current, &delta)
+                    .await
+                    .map_err(|e| AuraError::invalid(format!("Failed to merge journal: {}", e)))?;
+                self.effects
+                    .persist_journal(&merged)
+                    .await
+                    .map_err(|e| AuraError::invalid(format!("Failed to persist journal: {}", e)))?;
+                Ok(EffectResult::Success)
+            }
+            EffectCommand::RecordLeakage { bits } => {
+                let event = aura_core::effects::LeakageEvent {
+                    source: AuthorityId::default(),
+                    destination: AuthorityId::default(),
+                    context_id: ContextId::default(),
+                    leakage_amount: bits as u64,
+                    observer_class: aura_core::effects::ObserverClass::External,
+                    operation: "guard_chain".to_string(),
+                    timestamp_ms: self.effects.physical_time().await?.ts_ms,
+                };
+                self.effects
+                    .record_leakage(event)
+                    .await
+                    .map_err(|e| AuraError::invalid(format!("Failed to record leakage: {}", e)))?;
+                Ok(EffectResult::Success)
+            }
             EffectCommand::StoreMetadata { key, value } => {
                 self.effects
                     .store(&key, value.into_bytes())
@@ -404,7 +466,13 @@ impl SendGuardChain {
         authority: AuthorityId,
     ) -> Result<SendGuardResult>
     where
-        E: crate::guards::GuardEffects + PhysicalTimeEffects + FlowBudgetEffects + StorageEffects,
+        E: crate::guards::GuardEffects
+            + PhysicalTimeEffects
+            + FlowBudgetEffects
+            + StorageEffects
+            + JournalEffects
+            + LeakageEffects
+            + GuardContextProvider,
         I: EffectInterpreter,
     {
         let start_ms = GuardChainExecutor::<I>::current_time_ms(effect_system).await?;

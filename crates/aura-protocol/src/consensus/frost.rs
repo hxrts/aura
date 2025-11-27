@@ -11,7 +11,7 @@ use super::{
     witness::{WitnessSet, WitnessTracker},
 };
 use aura_core::{
-    crypto::tree_signing::{frost_verify_aggregate, NonceToken},
+    crypto::tree_signing::{frost_aggregate, frost_verify_aggregate, NonceToken},
     effects::{PhysicalTimeEffects, RandomEffects},
     frost::{NonceCommitment, PartialSignature, PublicKeyPackage, Share, ThresholdSignature},
     session_epochs::Epoch,
@@ -19,7 +19,7 @@ use aura_core::{
     AuraError, AuthorityId, Hash32, Result,
 };
 use rand::SeedableRng;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use async_lock::RwLock;
 use tracing::{debug, info, warn};
@@ -296,10 +296,10 @@ impl FrostConsensusOrchestrator {
         };
 
         // Aggregate signatures
-        let signatures = tracker.get_signatures();
         let participants = tracker.get_participants();
 
-        let threshold_signature = self.aggregate_signatures(signatures)?;
+        let threshold_signature =
+            self.aggregate_signatures(&tracker, &instance.operation_bytes)?;
 
         // Create commit fact
         let timestamp = ProvenancedTime {
@@ -368,33 +368,96 @@ impl FrostConsensusOrchestrator {
     }
 
     /// Sign with a pre-generated nonce
-    fn sign_with_nonce(
+    pub(crate) fn sign_with_nonce(
         &self,
         message: &[u8],
         share: &Share,
         token: &NonceToken,
         aggregated_nonces: &[NonceCommitment],
     ) -> Result<PartialSignature> {
-        // TODO: Implement actual FROST signing
-        // For now, return a placeholder
-        Ok(PartialSignature {
-            signer: share.identifier,
-            signature: vec![0u8; 32],
-        })
+        // Reconstruct FROST signing share and identifier
+        let signing_share = share
+            .to_frost()
+            .map_err(|e| AuraError::crypto(format!("Invalid signing share: {}", e)))?;
+        let identifier = frost_ed25519::Identifier::try_from(share.identifier).map_err(|e| {
+            AuraError::crypto(format!("Invalid signer identifier {}: {}", share.identifier, e))
+        })?;
+
+        // Convert group public key package
+        let frost_group_pkg: frost_ed25519::keys::PublicKeyPackage =
+            self.group_public_key.clone().try_into().map_err(|e: String| {
+                AuraError::crypto(format!("Invalid group public key package: {}", e))
+            })?;
+
+        // Get verifying share for this signer
+        let verifying_share = frost_group_pkg
+            .verifying_shares()
+            .get(&identifier)
+            .cloned()
+            .ok_or_else(|| {
+                AuraError::crypto(format!(
+                    "Missing verifying share for signer {}",
+                    share.identifier
+                ))
+            })?;
+
+        // Build key package for signing using the real identifier and threshold metadata
+        let key_package = frost_ed25519::keys::KeyPackage::new(
+            identifier,
+            signing_share,
+            verifying_share,
+            frost_group_pkg.verifying_key().clone(),
+            1, // placeholder min_signers until full FROST integration is wired
+        );
+
+        // Convert commitments to FROST format
+        let mut frost_commitments = BTreeMap::new();
+        for commitment in aggregated_nonces {
+            let frost_id = frost_ed25519::Identifier::try_from(commitment.signer).map_err(|e| {
+                AuraError::crypto(format!("Invalid signer id {}: {}", commitment.signer, e))
+            })?;
+            let frost_commit = commitment
+                .to_frost()
+                .map_err(|e| AuraError::crypto(format!("Invalid commitment: {}", e)))?;
+            frost_commitments.insert(frost_id, frost_commit);
+        }
+
+        // Build signing package
+        let signing_package = frost_ed25519::SigningPackage::new(frost_commitments, message);
+
+        // Perform FROST signing with the provided nonces
+        let nonces = token.clone().into_frost();
+        let sig_share = frost_ed25519::round2::sign(&signing_package, &nonces, &key_package)
+            .map_err(|e| AuraError::crypto(format!("FROST signing failed: {}", e)))?;
+
+        Ok(PartialSignature::from_frost(identifier, sig_share))
     }
 
     /// Aggregate partial signatures into threshold signature
     fn aggregate_signatures(
         &self,
-        signatures: Vec<PartialSignature>,
+        tracker: &WitnessTracker,
+        message: &[u8],
     ) -> Result<ThresholdSignature> {
-        // TODO: Implement actual FROST aggregation
-        // For now, return a placeholder
-        let signers = signatures.iter().map(|s| s.signer).collect();
-        Ok(ThresholdSignature {
-            signature: vec![0u8; 64],
-            signers,
-        })
+        // Convert group public key package
+        let frost_group_pkg: frost_ed25519::keys::PublicKeyPackage =
+            self.group_public_key.clone().try_into().map_err(|e: String| {
+                AuraError::crypto(format!("Invalid group public key package: {}", e))
+            })?;
+
+        // Build commitment map for aggregation
+        let mut commitments = BTreeMap::new();
+        for commitment in tracker.nonce_commitments.values() {
+            commitments.insert(commitment.signer, commitment.clone());
+        }
+
+        let partials = tracker.get_signatures();
+        let signers = partials.iter().map(|s| s.signer).collect();
+
+        let signature = frost_aggregate(&partials, message, &commitments, &frost_group_pkg)
+            .map_err(|e| AuraError::crypto(format!("FROST aggregation failed: {}", e)))?;
+
+        Ok(ThresholdSignature { signature, signers })
     }
 
     /// Handle epoch change
@@ -425,12 +488,10 @@ impl FrostConsensusOrchestrator {
         {
             // Cache next commitment for pipelining
             if epoch == self.config.epoch {
-                // TODO: We'd need the actual NonceToken here, which would be sent separately
-                // For now, we just track that we received a commitment
                 debug!(
                     witness = %sender,
                     consensus_id = %consensus_id,
-                    "Received pipelined commitment for next round"
+                    "Received pipelined commitment for next round (commitment cached; witness retains nonces)"
                 );
             }
         }

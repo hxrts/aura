@@ -38,6 +38,13 @@ pub trait GuardEffectSystem:
     fn can_perform_operation(&self, operation: &str) -> bool;
 }
 
+/// Compatibility shim for migrating to pure guard execution.
+/// Remove once all guard callers use GuardChainExecutor with GuardSnapshot/EffectCommand.
+pub trait GuardContextProvider {
+    fn authority_id(&self) -> AuthorityId;
+    fn get_metadata(&self, key: &str) -> Option<String>;
+}
+
 /// Security context for guard operations
 #[derive(Debug, Clone)]
 pub struct SecurityContext {
@@ -86,11 +93,21 @@ impl GuardEffectSystem for Box<dyn AuraEffects> {
     }
 
     fn can_perform_operation(&self, operation: &str) -> bool {
-        if let Some(allowed_ops) = self.get_metadata("allowed_operations") {
+        if let Some(allowed_ops) = GuardContextProvider::get_metadata(self, "allowed_operations") {
             allowed_ops.split(',').any(|op| op.trim() == operation)
         } else {
             true
         }
+    }
+}
+
+impl GuardContextProvider for Box<dyn AuraEffects> {
+    fn authority_id(&self) -> AuthorityId {
+        GuardEffectSystem::authority_id(self)
+    }
+
+    fn get_metadata(&self, key: &str) -> Option<String> {
+        GuardEffectSystem::get_metadata(self, key)
     }
 }
 

@@ -3,11 +3,13 @@
 //! This module contains the fundamental types used throughout the consensus system.
 
 use aura_core::{
+    crypto::tree_signing::frost_verify_aggregate,
     frost::{PublicKeyPackage, ThresholdSignature},
     session_epochs::Epoch,
     time::ProvenancedTime,
     AuthorityId, Hash32,
 };
+use frost_ed25519;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -116,11 +118,23 @@ impl CommitFact {
             return Err("Duplicate participants".to_string());
         }
 
-        // TODO: Verify threshold signature when FROST is fully integrated
-        // For now, just check basic structure
-        if self.threshold_signature.signature.is_empty() {
-            return Err("Empty threshold signature".to_string());
-        }
+        // Verify threshold signature against provided group public key
+        let group_pkg = self
+            .group_public_key
+            .clone()
+            .ok_or_else(|| "Missing group public key for verification".to_string())?;
+
+        let frost_pkg: frost_ed25519::keys::PublicKeyPackage =
+            group_pkg.try_into().map_err(|e: String| {
+                format!("Invalid group public key package: {}", e)
+            })?;
+
+        frost_verify_aggregate(
+            frost_pkg.verifying_key(),
+            &self.operation_bytes,
+            &self.threshold_signature.signature,
+        )
+        .map_err(|e| format!("Threshold signature verification failed: {}", e))?;
 
         Ok(())
     }

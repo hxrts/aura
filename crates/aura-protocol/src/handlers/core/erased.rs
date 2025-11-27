@@ -199,7 +199,7 @@ mod tests {
         assert_eq!(handler.execution_mode(), ExecutionMode::Testing);
 
         // Test session execution - may fail if session type system is not fully implemented
-        // This is acceptable TODO fix - For now as we're testing the handler infrastructure, not sessions
+        // This is acceptable for now as we're testing the handler infrastructure, not sessions
         let session = LocalSessionType::new("test".to_string(), vec![]);
         let _result = handler.execute_session(session, &ctx).await;
         // Note: We don't assert result.is_ok() because session execution depends on
