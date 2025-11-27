@@ -3,11 +3,12 @@
 //! Stateful in-memory transport for testing and simulation.
 //! Target: Transport handlers with shared state using Arc<RwLock<>>.
 
+use async_channel::unbounded as async_unbounded;
+use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
 
 /// Transport handler configuration
@@ -73,7 +74,7 @@ type TransportResult<T> = Result<T, TransportError>;
 #[derive(Debug, Default)]
 pub struct TransportRegistry {
     /// Message channels by peer ID
-    pub channels: HashMap<String, mpsc::UnboundedSender<Vec<u8>>>,
+    pub channels: HashMap<String, async_channel::Sender<Vec<u8>>>,
     /// Connection metadata
     pub connections: HashMap<String, TransportConnection>,
 }
@@ -116,8 +117,8 @@ impl InMemoryTransportHandler {
         &self,
         peer_id: &str,
         connection_uuid: Uuid,
-    ) -> TransportResult<mpsc::UnboundedReceiver<Vec<u8>>> {
-        let (tx, rx) = mpsc::unbounded_channel();
+    ) -> TransportResult<async_channel::Receiver<Vec<u8>>> {
+        let (tx, rx) = async_unbounded();
 
         let connection_id = format!("mem-{}", connection_uuid);
         let local_addr = "memory://local".to_string();
@@ -166,7 +167,7 @@ impl InMemoryTransportHandler {
         let registry = self.registry.read().await;
 
         if let Some(tx) = registry.channels.get(peer_id) {
-            tx.send(data).map_err(|_| {
+            tx.send(data).await.map_err(|_| {
                 TransportError::ConnectionFailed(format!("Failed to send to peer: {}", peer_id))
             })?;
             Ok(())
@@ -184,7 +185,7 @@ impl InMemoryTransportHandler {
         let mut failed_peers = Vec::new();
 
         for (peer_id, tx) in &registry.channels {
-            if tx.send(data.clone()).is_err() {
+            if tx.send(data.clone()).await.is_err() {
                 failed_peers.push(peer_id.clone());
             }
         }

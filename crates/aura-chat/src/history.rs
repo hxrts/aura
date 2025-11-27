@@ -11,6 +11,7 @@ use aura_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Chat history manager for efficient message storage and retrieval
 pub struct ChatHistory<S>
@@ -43,7 +44,7 @@ where
             .map_err(AuraError::from)?;
 
         // Update group message index for efficient queries
-        let index_key = format!("chat_group_messages:{}", message.group_id);
+        let index_key = format!("chat_group_message:{}", message.group_id);
         self.add_to_message_index(&index_key, &message.id, message.timestamp.clone())
             .await?;
 
@@ -109,9 +110,14 @@ where
         // Fetch messages in chronological order
         let mut messages = Vec::new();
         for (_, key) in entries.into_iter().rev() {
-            if let Ok(Some(raw)) = self.storage.retrieve(&key).await {
-                if let Ok(msg) = serde_json::from_slice::<ChatMessage>(&raw) {
-                    messages.push(msg);
+            // Extract message ID from the index key
+            // Key format: chat_group_message:{group_id}:{timestamp}:{message_id}
+            if let Some(message_id_str) = key.split(':').last() {
+                if let Ok(message_id_uuid) = Uuid::parse_str(message_id_str) {
+                    let message_id = ChatMessageId(message_id_uuid);
+                    if let Ok(Some(msg)) = self.get_message(&message_id).await {
+                        messages.push(msg);
+                    }
                 }
             }
         }
@@ -180,7 +186,7 @@ where
         message_id: &ChatMessageId,
         timestamp: TimeStamp,
     ) -> std::result::Result<(), AuraError> {
-        let index_entry_key = format!("{}{}:{}", index_key, timestamp.to_index_ms(), message_id);
+        let index_entry_key = format!("{}:{}:{}", index_key, timestamp.to_index_ms(), message_id);
         self.storage
             .store(&index_entry_key, b"1".to_vec())
             .await
@@ -216,8 +222,8 @@ mod tests {
     use async_trait::async_trait;
     use aura_core::effects::storage::{StorageError, StorageStats};
     use aura_core::time::PhysicalTime;
+    use futures::lock::Mutex;
     use std::collections::HashMap;
-    use tokio::sync::Mutex;
     use uuid::Uuid;
 
     #[derive(Debug, Default)]
@@ -296,12 +302,19 @@ mod tests {
     }
 
     fn sample_message(ts_ms: u64) -> ChatMessage {
+        use aura_core::time::PhysicalTime;
+
         let timestamp = TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms,
             uncertainty: None,
         });
+        // Use timestamp to generate a unique but deterministic UUID for testing
+        let mut bytes = [0u8; 16];
+        bytes[..8].copy_from_slice(&ts_ms.to_le_bytes());
+        let message_id = Uuid::from_bytes(bytes);
+
         ChatMessage::new_text(
-            ChatMessageId(Uuid::nil()),
+            ChatMessageId(message_id),
             ChatGroupId::from_uuid(Uuid::nil()),
             aura_core::identifiers::AuthorityId::from_uuid(Uuid::nil()),
             format!("hello-{ts_ms}"),
@@ -355,11 +368,26 @@ mod tests {
         assert_eq!(results[0].content, early.content);
     }
 
-    // TODO: Add tests with mock storage
     #[tokio::test]
     async fn test_chat_history_creation() {
-        // This test requires mock storage implementation
-        // Will be implemented when mock effects are available
+        let storage = Arc::new(MemoryStorage::default());
+        let history = ChatHistory::new(storage.clone());
+
+        // Should start empty
+        assert_eq!(
+            history
+                .get_group_history(&sample_group_id(), 10, None)
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+
+        // Store and fetch a message
+        let msg = sample_message(42);
+        history.store_message(&msg).await.unwrap();
+        let fetched = history.get_message(&msg.id).await.unwrap();
+        assert_eq!(fetched, Some(msg));
     }
 }
 

@@ -212,7 +212,7 @@ async fn start_recovery(
 
     // Initiate recovery using the proper protocol
     protocol_handler
-        .handle_recovery_initiation(recovery_request_new, effects)
+        .handle_recovery_initiation(recovery_request_new, effects, effects, effects)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to initiate recovery protocol: {}", e))?;
 

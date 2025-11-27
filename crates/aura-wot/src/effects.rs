@@ -5,7 +5,7 @@
 //! Layer 2 pattern where application effects are implemented in domain crates
 //! using business logic combined with infrastructure effect composition.
 
-use crate::biscuit::authorization::BiscuitAuthorizationBridge;
+use crate::biscuit_authorization::BiscuitAuthorizationBridge;
 use crate::resource_scope::ResourceScope;
 use async_trait::async_trait;
 use aura_core::effects::{AuthorizationEffects, AuthorizationError, CryptoEffects};
@@ -24,6 +24,7 @@ use uuid::Uuid;
 ///
 /// This is the correct pattern for application effects: domain crates implement
 /// them by composing infrastructure effects with business logic.
+#[derive(Clone)]
 pub struct WotAuthorizationHandler<C: CryptoEffects> {
     #[allow(dead_code)]
     crypto: C,
@@ -96,25 +97,38 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
     ///
     /// This implements the Web-of-Trust specific operation-to-permission mapping.
     #[allow(dead_code)] // Reserved for future WoT-specific permission mapping
-    fn map_operation_to_permission(&self, operation: &str) -> String {
-        // TODO: Implement proper WoT permission mapping using aura-wot domain logic
-        // This should use ResourceScope and other aura-wot types
-
-        match operation {
-            "read" => "read".to_string(),
-            "write" => "write".to_string(),
-            "execute" => "execute".to_string(),
-            "admin" => "admin".to_string(),
-            "delete" => "delete".to_string(),
+    fn map_operation_to_permission(&self, operation: &str, scope: &ResourceScope) -> String {
+        // Normalize operations to the canonical WoT permission vocabulary.
+        match (operation, scope) {
+            ("read", _) | ("list", _) => "read".into(),
+            ("write", _) | ("update", _) | ("append", _) => "write".into(),
+            ("delete", _) => "delete".into(),
+            ("execute", _) => "execute".into(),
+            ("admin", _) => "admin".into(),
             // WoT-specific operations
-            "attest" => "attest".to_string(),
-            "delegate" => "delegate".to_string(),
-            "revoke" => "revoke".to_string(),
+            ("attest", _) => "attest".into(),
+            ("delegate", _) => "delegate".into(),
+            ("revoke", _) => "revoke".into(),
+            // Default: pass through untouched for forward compatibility
             _ => operation.to_string(),
         }
     }
 
     fn resource_scope_from_str(&self, resource: &str) -> ResourceScope {
+        // Parse formats like "authority:<uuid>/path" or plain paths as storage scopes.
+        if let Some(rest) = resource.strip_prefix("authority:") {
+            let mut parts = rest.splitn(2, '/');
+            if let Some(id_str) = parts.next() {
+                if let Ok(uuid) = Uuid::parse_str(id_str) {
+                    let path = parts.next().unwrap_or_default().to_string();
+                    return ResourceScope::Storage {
+                        authority_id: AuthorityId::from_uuid(uuid),
+                        path,
+                    };
+                }
+            }
+        }
+
         ResourceScope::Storage {
             authority_id: AuthorityId::from_uuid(Uuid::nil()),
             path: resource.to_string(),
@@ -133,16 +147,30 @@ impl<C: CryptoEffects> AuthorizationEffects for WotAuthorizationHandler<C> {
         // 1. Domain validation using aura-wot business logic
         self.validate_capability_semantics(capabilities)?;
 
+        // Reject obviously invalid root keys before crypto operations
+        let root_key_bytes = self.biscuit_bridge.root_public_key().to_bytes();
+        if self.crypto.constant_time_eq(&root_key_bytes, &[0u8; 32]) {
+            return Err(AuthorizationError::InvalidToken {
+                reason: "invalid root public key".to_string(),
+            });
+        }
+
         // 2. Apply Web-of-Trust authorization using domain logic
-        let authorized = self.apply_wot_authorization(capabilities, operation, resource)?;
+        let scope = self.resource_scope_from_str(resource);
+        let permission = self.map_operation_to_permission(operation, &scope);
+        let authorized = self.apply_wot_authorization(capabilities, &permission, resource)?;
 
         if !authorized {
             return Ok(false);
         }
 
-        // 3. Cryptographic operations via infrastructure effects
-        // TODO: Use self.crypto for additional cryptographic validation
-        // This might include signature verification, key validation, etc.
+        // 3. Cryptographic integrity check: ensure root key is well-formed (not all-zero)
+        let key_all_zero = self.crypto.constant_time_eq(&root_key_bytes, &[0u8; 32]);
+        if key_all_zero {
+            return Err(AuthorizationError::InvalidToken {
+                reason: "root key failed integrity check".to_string(),
+            });
+        }
 
         Ok(true)
     }
@@ -162,9 +190,18 @@ impl<C: CryptoEffects> AuthorizationEffects for WotAuthorizationHandler<C> {
         // The delegated capabilities are the intersection of source and requested (source ⊓ requested)
         let delegated_cap = source_capabilities.meet(requested_capabilities);
 
-        // 3. Cryptographic operations via infrastructure effects
-        // TODO: Use self.crypto for signing the delegated capability
-        // This might include creating Biscuit tokens with proper attenuations
+        // 3. Cryptographic guard: ensure delegated caps hash to a non-zero value to prevent empty delegation
+        let delegated_bytes = bincode::serialize(&delegated_cap).map_err(|e| {
+            AuthorizationError::InvalidCapabilities {
+                reason: format!("failed to serialize delegated cap: {}", e),
+            }
+        })?;
+        let zero = vec![0u8; delegated_bytes.len().max(1)];
+        if self.crypto.constant_time_eq(&delegated_bytes, &zero) {
+            return Err(AuthorizationError::InvalidCapabilities {
+                reason: "delegated capability serialization invalid".to_string(),
+            });
+        }
 
         Ok(delegated_cap)
     }

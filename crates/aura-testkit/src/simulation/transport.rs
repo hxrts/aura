@@ -6,16 +6,17 @@
 use async_trait::async_trait;
 use aura_core::{AuraResult, DeviceId};
 // Note: Transport middleware patterns removed - use effect system instead
+use async_lock::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Type alias for complex message queue structure
 type MessageQueue = Arc<RwLock<HashMap<DeviceId, Vec<(DeviceId, Vec<u8>)>>>>;
 
 /// Simple transport interface for testing
 ///
-/// This provides a TODO fix - Simplified transport interface that test code can use
+/// Provides a simplified transport interface that test code can use without
+/// pulling in the full effect system.
 #[async_trait]
 pub trait Transport: Send + Sync {
     /// Send a message to another device
@@ -107,53 +108,8 @@ pub fn test_memory_transport() -> MemoryTransport {
     MemoryTransport::new(DeviceId::new())
 }
 
-// Transport middleware patterns removed - use effect system for transport testing
-// Modern approach: Create transport handlers through effect system composition
-/*
-pub fn test_transport_stack(_device_id: DeviceId) -> TransportMiddlewareStack {
-    use aura_core::AuraResult;
-    use aura_transport::{NetworkAddress, TransportHandler, TransportOperation, TransportResult};
-
-    /// Simple test transport handler
-    struct TestTransportHandler;
-
-    impl TransportHandler for TestTransportHandler {
-        fn execute(&mut self, operation: TransportOperation) -> AuraResult<TransportResult> {
-            // Simple test implementation - just echo back some data
-            match operation {
-                TransportOperation::Send {
-                    destination, data, ..
-                } => {
-                    // For testing, just return success
-                    Ok(TransportResult::Sent {
-                        destination,
-                        bytes_sent: data.len(),
-                    })
-                }
-                TransportOperation::Receive { source, .. } => {
-                    // For testing, return no data available
-                    let source = source.unwrap_or(NetworkAddress::Memory("test".to_string()));
-                    Ok(TransportResult::Received {
-                        source,
-                        data: vec![],
-                        metadata: std::collections::HashMap::new(),
-                    })
-                }
-                _ => {
-                    // For other operations, return status
-                    Ok(TransportResult::Status {
-                        connections: vec![],
-                    })
-                }
-            }
-        }
-    }
-
-    TransportStackBuilder::new()
-        // Add minimal middleware for testing
-        .build(Box::new(TestTransportHandler))
-}
-*/
+// Transport patterns removed; use effect system for transport testing.
+// Modern approach: Create transport handlers through effect system composition.
 
 #[cfg(test)]
 mod tests {
@@ -166,50 +122,45 @@ mod tests {
         assert!(!transport.device_id().0.is_nil());
     }
 
-    #[tokio::test]
-    async fn test_memory_transport_communication() {
-        let (transport1, transport2) = MemoryTransport::create_pair();
-
-        // Send message from transport1 to transport2
-        let message = b"hello world";
-        transport1
-            .send_message(transport2.device_id(), message)
-            .await
-            .unwrap();
-
-        // Receive message at transport2
-        let received = transport2.receive_message().await.unwrap();
-        assert!(received.is_some());
-
-        let (sender, msg) = received.unwrap();
-        assert_eq!(sender, transport1.device_id());
-        assert_eq!(msg, message);
-    }
-
-    #[tokio::test]
-    async fn test_message_queue() {
-        let transport = test_memory_transport();
-
-        assert_eq!(transport.pending_message_count().await, 0);
-
-        // Send message to self
-        transport
-            .send_message(transport.device_id(), b"test")
-            .await
-            .unwrap();
-        assert_eq!(transport.pending_message_count().await, 1);
-
-        // Clear messages
-        transport.clear_messages().await;
-        assert_eq!(transport.pending_message_count().await, 0);
-    }
-
-    /* TODO fix - Re-enable when transport middleware is re-implemented
     #[test]
-    fn test_transport_stack_creation() {
-        let device_id = DeviceId::new();
-        let _stack = test_transport_stack(device_id);
-        // Basic smoke test - just verify we can create it
+    fn test_memory_transport_communication() {
+        block_on(async {
+            let (transport1, transport2) = MemoryTransport::create_pair();
+
+            // Send message from transport1 to transport2
+            let message = b"hello world";
+            transport1
+                .send_message(transport2.device_id(), message)
+                .await
+                .unwrap();
+
+            // Receive message at transport2
+            let received = transport2.receive_message().await.unwrap();
+            assert!(received.is_some());
+
+            let (sender, msg) = received.unwrap();
+            assert_eq!(sender, transport1.device_id());
+            assert_eq!(msg, message);
+        });
     }
-    */
+
+    #[test]
+    fn test_message_queue() {
+        block_on(async {
+            let transport = test_memory_transport();
+
+            assert_eq!(transport.pending_message_count().await, 0);
+
+            // Send message to self
+            transport
+                .send_message(transport.device_id(), b"test")
+                .await
+                .unwrap();
+            assert_eq!(transport.pending_message_count().await, 1);
+
+            // Clear messages
+            transport.clear_messages().await;
+            assert_eq!(transport.pending_message_count().await, 0);
+        });
+    }
 }

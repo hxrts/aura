@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Scenarios Command Handler
 //!
 //! Effect-based implementation of scenario management commands.

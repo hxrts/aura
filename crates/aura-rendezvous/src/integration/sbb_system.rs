@@ -18,11 +18,11 @@ use crate::{
     messaging::{SbbMessageType, SbbTransportBridge, TransportOfferPayload},
     sbb::{FloodResult, RendezvousEnvelope, SbbEnvelope, SbbFlooding, SBB_MESSAGE_SIZE},
 };
+use async_lock::RwLock;
 use aura_core::{AuraError, AuraResult, DeviceId, RelationshipId, TrustLevel};
 use aura_protocol::effects::AuraEffects;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Complete SBB system integrating all components
 #[derive(Debug)]

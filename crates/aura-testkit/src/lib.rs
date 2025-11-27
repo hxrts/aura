@@ -104,7 +104,9 @@ pub mod configuration;
 pub mod effect_api;
 pub mod fixtures;
 pub mod foundation;
+pub mod handlers; // Test and mock handlers moved from aura-protocol
 pub mod infrastructure;
+pub mod mock_effects;
 pub mod mocks;
 pub mod simulation;
 pub mod stateful_effects;
@@ -123,6 +125,7 @@ pub use effect_api::*;
 pub use fixtures::*;
 pub use foundation::*;
 pub use infrastructure::*;
+pub use mock_effects::MockEffects;
 pub use mocks::*;
 // Re-export simulation components (excluding ambiguous transport)
 pub use simulation::transport as simulation_transport;
@@ -178,7 +181,7 @@ pub async fn create_test_fixture_with_device_id(
         timeout: Some(std::time::Duration::from_secs(30)),
     };
 
-    // We'll need to create the context manually to specify the device ID
-    // For now, create normal fixture and document this as a TODO for enhancement
+    // We currently ignore the requested device ID; callers that need a specific
+    // ID should construct a custom TestFixture via the harness builder directly.
     infrastructure::harness::TestFixture::with_config(config).await
 }

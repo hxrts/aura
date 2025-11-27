@@ -68,6 +68,8 @@ Each send action in a session type is evaluated through a [guard chain](109_auth
 
 `CapGuard` checks that the active capabilities satisfy the message requirements. `FlowGuard` checks that flow budget is available for the context and peer. `JournalCoupler` synchronizes journal updates with protocol execution.
 
+Guard evaluation is synchronous over a prepared `GuardSnapshot` and yields `EffectCommand` items. An async interpreter executes those commands, keeping guard logic pure while preserving charge-before-send.
+
 ```mermaid
 graph TD
     S[Send] --> C[CapGuard];

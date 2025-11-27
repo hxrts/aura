@@ -3,9 +3,10 @@
 //! This module implements the recovery protocol using RelationalContexts,
 //! replacing the device-centric recovery model with authority-based recovery.
 
-use aura_core::effects::PhysicalTimeEffects;
+use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash;
+use aura_core::relational::fact::RelationalFact;
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
 use aura_core::session_epochs::Epoch;
 use aura_core::time::TimeStamp;
@@ -13,6 +14,7 @@ use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
 use aura_relational::RelationalContext;
+use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -122,7 +124,7 @@ impl RecoveryProtocol {
         self.recovery_context.journal_commitment()
     }
 
-    /// Get guardian commitment  
+    /// Get guardian commitment
     fn guardian_commitment(&self) -> Hash32 {
         let mut bytes = Vec::new();
         for guardian in &self.guardian_authorities {
@@ -194,11 +196,9 @@ impl RecoveryProtocol {
             consensus_proof,
         };
 
-        // Add to context journal
-        // TODO: Implement proper Arc<RelationalContext> mutation strategy (interior mutability)
-        // Arc::get_mut(&mut self.recovery_context)
-        //     .ok_or_else(|| AuraError::internal("Cannot mutate shared context"))?
-        //     .add_fact(RelationalFact::RecoveryGrant(grant.clone()))?;
+        // Add to context journal using interior mutex
+        self.recovery_context
+            .add_fact(RelationalFact::RecoveryGrant(grant.clone()))?;
 
         let result = RecoveryResult {
             success: true,
@@ -276,7 +276,7 @@ choreography! {
 /// Recovery protocol handler
 pub struct RecoveryProtocolHandler {
     protocol: Arc<RecoveryProtocol>,
-    approvals: Arc<tokio::sync::Mutex<HashMap<String, Vec<GuardianApproval>>>>,
+    approvals: Arc<Mutex<HashMap<String, Vec<GuardianApproval>>>>,
 }
 
 impl RecoveryProtocolHandler {
@@ -284,7 +284,7 @@ impl RecoveryProtocolHandler {
     pub fn new(protocol: Arc<RecoveryProtocol>) -> Self {
         Self {
             protocol,
-            approvals: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            approvals: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -293,13 +293,15 @@ impl RecoveryProtocolHandler {
         &self,
         request: RecoveryRequest,
         time_effects: &dyn PhysicalTimeEffects,
+        network: &dyn NetworkEffects,
+        journal: &dyn JournalEffects,
     ) -> Result<()> {
         // Initialize approval tracking
         let mut approvals = self.approvals.lock().await;
         approvals.insert(request.recovery_id.clone(), Vec::new());
 
         // Notify guardians via effects
-        self.notify_guardians_via_effects(&request, time_effects)
+        self.notify_guardians_via_effects(&request, time_effects, network, journal)
             .await?;
 
         Ok(())
@@ -310,6 +312,8 @@ impl RecoveryProtocolHandler {
         &self,
         approval: GuardianApproval,
         time_effects: &dyn PhysicalTimeEffects,
+        network: &dyn NetworkEffects,
+        journal: &dyn JournalEffects,
     ) -> Result<bool> {
         // Add approval
         let mut approvals = self.approvals.lock().await;
@@ -328,6 +332,8 @@ impl RecoveryProtocolHandler {
                 &approval.recovery_id,
                 ceremony_approvals,
                 time_effects,
+                network,
+                journal,
             )
             .await?;
         }
@@ -340,6 +346,8 @@ impl RecoveryProtocolHandler {
         &self,
         request: &RecoveryRequest,
         time_effects: &dyn PhysicalTimeEffects,
+        network: &dyn NetworkEffects,
+        journal: &dyn JournalEffects,
     ) -> Result<()> {
         // Serialize the recovery request
         let message_data =
@@ -347,10 +355,10 @@ impl RecoveryProtocolHandler {
 
         // Send recovery request to each guardian via network effects
         for guardian_id in &self.protocol.guardian_authorities {
-            // TODO: Use actual NetworkEffects to send messages
-            // For now, simulate sending recovery notification
-            let _notification_sent =
-                self.simulate_guardian_notification(*guardian_id, &message_data);
+            network
+                .send_to_peer(guardian_id.0, message_data.clone())
+                .await
+                .map_err(|e| AuraError::network(format!("Failed to notify guardian: {}", e)))?;
         }
 
         // Update journal state with recovery initiation
@@ -359,6 +367,7 @@ impl RecoveryProtocolHandler {
             "initiated",
             &[],
             time_effects,
+            journal,
         )
         .await?;
 
@@ -371,6 +380,8 @@ impl RecoveryProtocolHandler {
         recovery_id: &str,
         approvals: &[GuardianApproval],
         time_effects: &dyn PhysicalTimeEffects,
+        network: &dyn NetworkEffects,
+        journal: &dyn JournalEffects,
     ) -> Result<()> {
         // Create recovery result
         let result = RecoveryResult {
@@ -385,8 +396,10 @@ impl RecoveryProtocolHandler {
             serde_json::to_vec(&result).map_err(|e| AuraError::serialization(e.to_string()))?;
 
         // Notify account of recovery completion via network effects
-        // TODO: Use actual NetworkEffects to send result back to requesting account
-        let _result_sent = self.simulate_account_notification(&result_data);
+        network
+            .send_to_peer(self.protocol.account_authority.0, result_data)
+            .await
+            .map_err(|e| AuraError::network(format!("Failed to notify account: {}", e)))?;
 
         // Update journal state with recovery completion
         self.update_journal_recovery_state_via_effects(
@@ -394,6 +407,7 @@ impl RecoveryProtocolHandler {
             "completed",
             approvals,
             time_effects,
+            journal,
         )
         .await?;
 
@@ -407,6 +421,7 @@ impl RecoveryProtocolHandler {
         state: &str,
         approvals: &[GuardianApproval],
         time_effects: &dyn PhysicalTimeEffects,
+        journal_effects: &dyn JournalEffects,
     ) -> Result<()> {
         // Create a fact representing the recovery state change
         let timestamp = time_effects.physical_time().await?.ts_ms / 1000; // Convert milliseconds to seconds
@@ -418,45 +433,16 @@ impl RecoveryProtocolHandler {
             "timestamp": timestamp,
         });
 
-        // TODO: Use actual JournalEffects to record recovery state
-        // For now, simulate journal update
-        let _journal_updated = self.simulate_journal_update(&state_data);
+        let mut journal = journal_effects.get_journal().await?;
+        journal.facts.insert_with_context(
+            format!("recovery_state:{}", recovery_id),
+            aura_core::journal::FactValue::String(state_data.to_string()),
+            self.protocol.account_authority.to_string(),
+            timestamp,
+            None,
+        );
+        journal_effects.persist_journal(&journal).await?;
 
         Ok(())
-    }
-
-    /// Simulate guardian notification (placeholder for NetworkEffects)
-    fn simulate_guardian_notification(
-        &self,
-        guardian_id: AuthorityId,
-        message_data: &[u8],
-    ) -> bool {
-        // TODO: Replace with actual effect system call
-        // effect_handler.send_to_authority(guardian_id, message_data).await
-        println!(
-            "Simulated recovery notification to guardian {:?}: {} bytes",
-            guardian_id,
-            message_data.len()
-        );
-        true
-    }
-
-    /// Simulate account notification (placeholder for NetworkEffects)
-    fn simulate_account_notification(&self, result_data: &[u8]) -> bool {
-        // TODO: Replace with actual effect system call
-        // effect_handler.send_to_authority(account_authority, result_data).await
-        println!(
-            "Simulated recovery result to account: {} bytes",
-            result_data.len()
-        );
-        true
-    }
-
-    /// Simulate journal update (placeholder for JournalEffects)
-    fn simulate_journal_update(&self, state_data: &serde_json::Value) -> bool {
-        // TODO: Replace with actual effect system call
-        // effect_handler.record_recovery_state(state_data).await
-        println!("Simulated journal recovery state update: {}", state_data);
-        true
     }
 }

@@ -75,6 +75,8 @@ Each guard must succeed before the next guard executes. Any failure returns loca
 
 The `CapGuard` evaluates Biscuit capabilities and sovereign policy to derive the capability frontier for the context and peer pair. The `FlowGuard` charges the replicated spent counter and produces a signed receipt if headroom exists. The `JournalCoupler` merges protocol facts together with budget charges to preserve charge-before-send invariants. See [Transport and Information Flow](108_transport_and_information_flow.md) for detailed implementation.
 
+Guard evaluation is pure and synchronous over a prepared `GuardSnapshot`. The evaluation returns `EffectCommand` data that an async interpreter executes (production or simulation). No guard performs I/O directly.
+
 ### 2.2 Flow Budget System
 
 Flow budgets limit the rate and volume of messages an authority may send within a context. The system unifies spam resistance and privacy leakage control through the same monotone mechanism.
@@ -224,7 +226,7 @@ pub struct EffectContext {
 
 Context flows through all effect calls to enable authority identification and session tracking. The guard chain uses context values to enforce authorization and flow constraints before network operations.
 
-The effect runtime enforces guard chain sequencing for all transport operations. Each choreography message expands to authorization evaluation, flow budget charging, leakage recording, journal fact merging, and transport sending. This ensures no observable behavior occurs without proper authorization and accounting.
+The effect runtime prepares a `GuardSnapshot` asynchronously, evaluates the guard chain synchronously to produce `EffectCommand` items, then interprets those commands asynchronously. Each choreography message expands to snapshot preparation, pure guard evaluation, command interpretation (charge, leak, journal), and transport sending. This ensures no observable behavior occurs without proper authorization and accounting.
 
 ### 3.5 Impure Function Control
 

@@ -1,8 +1,8 @@
-//! Protocol types and operation enums
+//! Protocol types and session metadata
 //!
-//! This module provides enumerations and types for different protocols
-//! and operations supported by the Aura platform, including threshold
-//! cryptography configuration and protocol session coordination.
+//! This module provides enumerations and types for different protocols supported
+//! by the Aura platform, including threshold cryptography configuration and
+//! protocol session coordination.
 
 use crate::AuraError;
 use frost_ed25519 as frost;
@@ -12,9 +12,8 @@ use std::num::NonZeroU16;
 
 /// Protocol type enumeration
 ///
-/// Identifies the type of protocol being executed in a session. `OperationType`
-/// is a reduced variant used for dispatch; see its `From<ProtocolType>` mapping
-/// for the correspondence.
+/// Identifies the type of protocol being executed in a session and is used for
+/// dispatch/analytics across the platform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ProtocolType {
     /// Deterministic Key Derivation protocol
@@ -85,48 +84,6 @@ impl ProtocolType {
             ProtocolType::Locking => ProtocolDuration::Short,
             ProtocolType::LockAcquisition => ProtocolDuration::Short,
             ProtocolType::Compaction => ProtocolDuration::Medium,
-        }
-    }
-}
-
-/// Operation type enumeration
-///
-/// Represents different types of operations that can be performed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum OperationType {
-    /// Deterministic Key Derivation operation
-    Dkd,
-    /// Key resharing operation
-    Resharing,
-    /// Resource locking operation
-    Locking,
-    /// Counter reservation operation
-    Counter,
-    /// Effect API compaction operation
-    Compaction,
-}
-
-impl fmt::Display for OperationType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            OperationType::Dkd => write!(f, "dkd"),
-            OperationType::Counter => write!(f, "counter"),
-            OperationType::Resharing => write!(f, "resharing"),
-            OperationType::Locking => write!(f, "locking"),
-            OperationType::Compaction => write!(f, "compaction"),
-        }
-    }
-}
-
-impl From<ProtocolType> for OperationType {
-    fn from(protocol: ProtocolType) -> Self {
-        match protocol {
-            ProtocolType::Dkd => OperationType::Dkd,
-            ProtocolType::Counter => OperationType::Counter,
-            ProtocolType::Resharing => OperationType::Resharing,
-            ProtocolType::Locking => OperationType::Locking,
-            ProtocolType::LockAcquisition => OperationType::Locking, // Maps to locking
-            ProtocolType::Compaction => OperationType::Compaction,
         }
     }
 }

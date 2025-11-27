@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use aura_core::hash::hash;
 use aura_core::{identifiers::DeviceId, AuraError, AuraResult as Result};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 /// Authentication handler that composes core effects into device authentication workflows
 pub struct AuthenticationHandler {
@@ -350,8 +350,8 @@ mod tests {
     use super::*;
     use aura_macros::aura_test;
     use aura_testkit::*;
+    use async_lock::RwLock;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
 
     #[aura_test]
     async fn test_authentication_handler_creation() -> aura_core::AuraResult<()> {

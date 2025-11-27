@@ -128,10 +128,12 @@ pub fn derive_key_material(
     Ok(output)
 }
 
-/// Real crypto handler using actual cryptographic operations
+/// Real crypto handler using actual cryptographic operations.
+/// Can be seeded for deterministic testing or use OS entropy in production.
 #[derive(Debug, Clone)]
 pub struct RealCryptoHandler {
-    _phantom: std::marker::PhantomData<()>,
+    /// Optional seed for deterministic randomness in testing
+    seed: Option<[u8; 32]>,
 }
 
 impl Default for RealCryptoHandler {
@@ -141,11 +143,37 @@ impl Default for RealCryptoHandler {
 }
 
 impl RealCryptoHandler {
-    /// Create a new real crypto handler
+    /// Create a new real crypto handler using OS entropy
     pub fn new() -> Self {
-        Self {
-            _phantom: std::marker::PhantomData,
+        Self { seed: None }
+    }
+
+    /// Create a seeded crypto handler for deterministic testing
+    ///
+    /// When seeded, all randomness will be deterministic based on the provided seed.
+    /// This is useful for reproducible tests and simulations.
+    pub fn seeded(seed: [u8; 32]) -> Self {
+        Self { seed: Some(seed) }
+    }
+
+    /// Get random bytes using the handler's RNG strategy
+    fn get_random_bytes(&self, len: usize) -> Result<Vec<u8>, CryptoError> {
+        let mut bytes = vec![0u8; len];
+        match self.seed {
+            Some(_) => {
+                // Use seeded randomness
+                use rand::{RngCore, SeedableRng};
+                let mut rng = rand_chacha::ChaCha20Rng::from_seed(self.seed.unwrap());
+                rng.fill_bytes(&mut bytes);
+            }
+            None => {
+                // Use OS entropy
+                getrandom::getrandom(&mut bytes).map_err(|e| {
+                    CryptoError::invalid(format!("Failed to generate random bytes: {}", e))
+                })?;
+            }
         }
+        Ok(bytes)
     }
 }
 
@@ -153,21 +181,26 @@ impl RealCryptoHandler {
 #[async_trait]
 impl RandomEffects for RealCryptoHandler {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        let mut bytes = vec![0u8; len];
-        getrandom::getrandom(&mut bytes).expect("Failed to generate random bytes");
-        bytes
+        self.get_random_bytes(len)
+            .expect("Failed to generate random bytes")
     }
 
     async fn random_bytes_32(&self) -> [u8; 32] {
-        let mut bytes = [0u8; 32];
-        getrandom::getrandom(&mut bytes).expect("Failed to generate random bytes");
-        bytes
+        let bytes = self
+            .get_random_bytes(32)
+            .expect("Failed to generate random bytes");
+        let mut result = [0u8; 32];
+        result.copy_from_slice(&bytes);
+        result
     }
 
     async fn random_u64(&self) -> u64 {
-        let mut bytes = [0u8; 8];
-        getrandom::getrandom(&mut bytes).expect("Failed to generate random bytes");
-        u64::from_le_bytes(bytes)
+        let bytes = self
+            .get_random_bytes(8)
+            .expect("Failed to generate random bytes");
+        u64::from_le_bytes([
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        ])
     }
 
     async fn random_range(&self, min: u64, max: u64) -> u64 {
@@ -232,10 +265,23 @@ impl CryptoEffects for RealCryptoHandler {
 
     async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
         use ed25519_dalek::{SigningKey, VerifyingKey};
-        use rand::rngs::OsRng;
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha20Rng;
 
-        let signing_key = SigningKey::generate(&mut OsRng);
-        let verifying_key = VerifyingKey::from(&signing_key);
+        let (signing_key, verifying_key) = match self.seed {
+            Some(seed) => {
+                let mut rng = ChaCha20Rng::from_seed(seed);
+                let signing_key = SigningKey::generate(&mut rng);
+                let verifying_key = VerifyingKey::from(&signing_key);
+                (signing_key, verifying_key)
+            }
+            None => {
+                let mut rng = rand::rngs::OsRng;
+                let signing_key = SigningKey::generate(&mut rng);
+                let verifying_key = VerifyingKey::from(&signing_key);
+                (signing_key, verifying_key)
+            }
+        };
 
         Ok((
             signing_key.to_bytes().to_vec(),
@@ -293,20 +339,28 @@ impl CryptoEffects for RealCryptoHandler {
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
 
-        // Generate seed through the effect system
-        let seed = self.random_bytes_32().await;
-
-        // Create a deterministic RNG from the seed
-        let mut rng = ChaCha20Rng::from_seed(seed);
-
-        // Now we can use FROST's standard API with our seeded RNG
-        let (shares, public_key_package) = frost::keys::generate_with_dealer(
-            max_signers,
-            threshold,
-            frost::keys::IdentifierList::Default,
-            &mut rng,
-        )
-        .map_err(|e| CryptoError::invalid(format!("FROST key generation failed: {}", e)))?;
+        let (shares, public_key_package) = match self.seed {
+            Some(seed) => {
+                let rng = ChaCha20Rng::from_seed(seed);
+                frost::keys::generate_with_dealer(
+                    max_signers,
+                    threshold,
+                    frost::keys::IdentifierList::Default,
+                    rng,
+                )
+                .map_err(|e| CryptoError::invalid(format!("FROST key generation failed: {}", e)))?
+            }
+            None => {
+                let rng = rand::rngs::OsRng;
+                frost::keys::generate_with_dealer(
+                    max_signers,
+                    threshold,
+                    frost::keys::IdentifierList::Default,
+                    rng,
+                )
+                .map_err(|e| CryptoError::invalid(format!("FROST key generation failed: {}", e)))?
+            }
+        };
 
         // Convert key shares to byte vectors
         let key_packages: Vec<Vec<u8>> = shares
@@ -334,16 +388,20 @@ impl CryptoEffects for RealCryptoHandler {
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
 
-        // Generate seed through the effect system
-        let seed = self.random_bytes_32().await;
-
-        // Create a deterministic RNG from the seed
-        let mut rng = ChaCha20Rng::from_seed(seed);
-
         // Generate actual FROST nonces using a placeholder signing share
         let signing_share = frost::keys::SigningShare::deserialize([0u8; 32])
             .unwrap_or_else(|_| frost::keys::SigningShare::default());
-        let (nonces, commitments) = frost::round1::commit(&signing_share, &mut rng);
+
+        let (nonces, commitments) = match self.seed {
+            Some(seed) => {
+                let mut rng = ChaCha20Rng::from_seed(seed);
+                frost::round1::commit(&signing_share, &mut rng)
+            }
+            None => {
+                let mut rng = rand::rngs::OsRng;
+                frost::round1::commit(&signing_share, &mut rng)
+            }
+        };
 
         // Serialize both nonces and commitments
         let nonces_bytes = bincode::serialize(&nonces)

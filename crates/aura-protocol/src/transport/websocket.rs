@@ -11,8 +11,13 @@ use aura_effects::time::PhysicalTimeHandler;
 use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
+use std::task::{Context, Poll};
+use std::thread;
 use std::time::{Duration, SystemTime};
+use futures::pin_mut;
+use futures::task::noop_waker;
 
 /// WebSocket handshake coordinator using choreographic protocols
 #[derive(Clone)]
@@ -194,8 +199,20 @@ impl WebSocketHandshakeCoordinator {
         }
     }
 
+    fn run_sync<F: Future>(&self, fut: F) -> F::Output {
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        futures::pin_mut!(fut);
+        loop {
+            match fut.as_mut().poll(&mut cx) {
+                Poll::Ready(val) => return val,
+                Poll::Pending => thread::yield_now(),
+            }
+        }
+    }
+
     fn now(&self) -> SystemTime {
-        let ms = futures::executor::block_on(async {
+        let ms = self.run_sync(async {
             self.time
                 .physical_time()
                 .await
@@ -319,8 +336,20 @@ impl WebSocketSessionCoordinator {
         }
     }
 
+    fn run_sync<F: Future>(&self, fut: F) -> F::Output {
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        pin_mut!(fut);
+        loop {
+            match fut.as_mut().poll(&mut cx) {
+                Poll::Ready(val) => return val,
+                Poll::Pending => thread::yield_now(),
+            }
+        }
+    }
+
     fn now(&self) -> SystemTime {
-        let ms = futures::executor::block_on(async {
+        let ms = self.run_sync(async {
             self.time
                 .physical_time()
                 .await

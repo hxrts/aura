@@ -20,8 +20,8 @@ use aura_core::{
 use aura_macros::choreography;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-// use tokio::time::{timeout, Duration}; // TODO: Add timeout support
+use async_lock::RwLock;
+// Timeout support should be implemented via injected timer effects rather than runtime-specific APIs
 use tracing::{debug, info, warn};
 
 // Define the consensus choreography protocol

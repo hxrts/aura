@@ -29,6 +29,7 @@ aura-mpst = { path = "../aura-mpst" }
 aura-macros = { path = "../aura-macros" }
 aura-store = { path = "../aura-store" }
 frost-ed25519 = { workspace = true }
+async-lock = "3.0"
 
 # Curve operations
 curve25519-dalek = { workspace = true }

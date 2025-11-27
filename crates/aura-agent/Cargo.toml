@@ -58,6 +58,10 @@ chrono = { workspace = true }
 once_cell = { workspace = true }
 parking_lot = { workspace = true }
 
+# Optional dependencies for features
+tokio-tungstenite = { workspace = true, optional = true }
+# Note: axum, tower, tower-http, qrcode not in workspace - would need to be added if dev-console feature is needed
+
 # Platform-specific secure storage
 [target.'cfg(target_os = "macos")'.dependencies]
 # security-framework = { workspace = true } # removed - unused
@@ -79,9 +83,13 @@ parking_lot = { workspace = true }
 
 [features]
 default = []
-# TODO: Re-enable when dependencies are available
-# qrcode = ["dep:qrcode"]
-# dev-console = ["dep:axum", "dep:tokio-tungstenite", "dep:tower", "dep:tower-http"]
+# qrcode = ["dep:qrcode"]  # commented out - qrcode not in workspace
+dev-console = [
+    "dep:tokio-tungstenite",
+    # "dep:axum",     # commented out - not in workspace
+    # "dep:tower",    # commented out - not in workspace  
+    # "dep:tower-http", # commented out - not in workspace
+]
 real-android-keystore = []  # Enable real Android Keystore implementation
 
 [dev-dependencies]

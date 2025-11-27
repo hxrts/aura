@@ -7,14 +7,15 @@ use crate::{
     InvitationError, InvitationResult,
 };
 use aura_core::effects::NetworkEffects;
-use aura_core::{AccountId, DeviceId, RelationshipId, TrustLevel};
+use aura_protocol::EffectApiEvent;
+use aura_core::{AccountId, DeviceId, ExecutionMode, RelationshipId, TrustLevel};
 use aura_journal::semilattice::InvitationRecordRegistry;
 use aura_protocol::effect_traits::EffectApiEffects;
 use aura_protocol::effects::AuraEffects;
 use aura_wot::SerializableBiscuit;
+use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 /// Result of accepting an invitation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -303,30 +304,53 @@ where
         Ok(())
     }
 
-    /// Wait for transport layer confirmation of acceptance
-    /// TODO: Replace with actual transport confirmation mechanism
-    #[allow(dead_code)]
+    /// Wait for transport layer confirmation of acceptance via transport receipt
     async fn wait_for_transport_confirmation(
         &self,
         envelope: &InvitationEnvelope,
         effects: &E,
     ) -> InvitationResult<()> {
-        // In a full implementation, this would wait for a confirmation message
-        // from the transport layer indicating successful delivery and processing
-        // For now, we simulate this with a small delay using PhysicalTimeEffects
-        // TODO: Replace with actual transport confirmation mechanism
-        effects
-            .sleep_ms(100)
+        // Poll the effect API event stream for a receipt matching the invitation.
+        // In production, the transport layer would emit a receipt event when delivery is confirmed.
+        let mut stream = EffectApiEffects::subscribe_to_events(effects)
             .await
-            .map_err(|e| InvitationError::internal(format!("time provider unavailable: {e}")))?;
+            .map_err(|e| InvitationError::internal(e.to_string()))?;
 
-        // Log confirmation for observability
-        tracing::info!(
-            "Transport confirmation received for invitation {}",
-            envelope.invitation_id
-        );
+        use futures::StreamExt;
+        let deadline = effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms + 5_000)
+            .unwrap_or(5_000);
 
-        Ok(())
+        while let Some(event) = stream.next().await {
+            match event {
+                EffectApiEvent::EventAppended { event, .. } => {
+                    if event
+                        .windows(envelope.invitation_id.as_bytes().len())
+                        .any(|w| w == envelope.invitation_id.as_bytes())
+                    {
+                        tracing::info!(
+                            "Transport receipt observed for invitation {}",
+                            envelope.invitation_id
+                        );
+                        return Ok(());
+                    }
+                }
+                _ => {}
+            }
+
+            let now = effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0);
+            if now > deadline {
+                return Err(InvitationError::internal(
+                    "Timed out waiting for transport confirmation".to_string(),
+                ));
+            }
+        }
+
+        Err(InvitationError::internal(
+            "Transport confirmation stream ended unexpectedly".to_string(),
+        ))
     }
 
     /// Send enhanced acceptance acknowledgment with full protocol details
@@ -372,7 +396,6 @@ where
 
         // Direct network delivery as fallback
         // Skip network sending in testing mode to avoid MockNetworkHandler connectivity issues
-        use aura_protocol::handlers::ExecutionMode;
         if self.effects.execution_mode() != ExecutionMode::Testing {
             NetworkEffects::send_to_peer(self.effects.as_ref(), envelope.inviter.0, payload)
                 .await

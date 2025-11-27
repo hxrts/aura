@@ -32,7 +32,7 @@ flowchart LR
     D --> E[Transport send];
 ```
 
-CapGuard invokes `AuthorizationEffects` with the cached frontier and any inline Biscuit token on the message. FlowGuard charges the `FlowBudget` fact for `(ContextId, peer)` and produces a signed receipt. JournalCoupler merges any journal deltas atomically with the send.
+Guard evaluation is pure and synchronous over a prepared `GuardSnapshot`. CapGuard reads the cached frontier and any inline Biscuit token already present in the snapshot. FlowGuard and JournalCoupler emit `EffectCommand` items (charges, receipts, fact commits, transport intents) rather than executing I/O directly. An async interpreter executes those commands in production or simulation.
 
 Only after all guards pass does transport emit a packet. Any failure returns locally and leaves no observable side effect.
 
@@ -111,9 +111,8 @@ Biscuit authorization integrates seamlessly with the guard chain:
 ```rust
 async fn authorize_and_send(
     bridge: &BiscuitAuthorizationBridge,
-    flow: &dyn FlowEffects,
-    journal: &dyn JournalEffects,
-    transport: &dyn TransportEffects,
+    interpreter: &dyn EffectInterpreter,
+    guards: &GuardChain,
     ctx: ContextId,
     peer: AuthorityId,
     token: &Biscuit, // Required Biscuit token
@@ -122,15 +121,21 @@ async fn authorize_and_send(
 ) -> Result<()> {
     // Phase 1: Cryptographic token verification and Datalog evaluation
     let auth_result = bridge.authorize(token, operation.name(), resource_scope)?;
-    
     if !auth_result.authorized {
         return Err(AuraError::permission_denied("Token authorization failed"));
     }
 
-    // Phase 2: Guard chain execution
-    let receipt = flow.charge(ctx, peer, operation.flow_cost)?;
-    journal.merge_facts(operation.delta_with_receipt(receipt));
-    transport.send(peer, operation.message())?;
+    // Phase 2: Prepare snapshot (async) and evaluate guards (sync)
+    let snapshot = prepare_guard_snapshot(ctx, peer, &auth_result.cap_frontier).await?;
+    let outcome = guards.evaluate(&snapshot, &operation.request());
+    if outcome.decision.is_denied() {
+        return Err(AuraError::permission_denied("Guard evaluation denied"));
+    }
+
+    // Phase 3: Execute effect commands (async)
+    for cmd in outcome.effects {
+        interpreter.exec(cmd).await?;
+    }
 
     Ok(())
 }

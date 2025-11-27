@@ -19,6 +19,7 @@ blake3 = { workspace = true }
 hex = { workspace = true }
 uuid = { workspace = true }
 biscuit-auth = { workspace = true }
+bincode = { workspace = true }
 
 # For property-based testing of semilattice laws
 [dev-dependencies]

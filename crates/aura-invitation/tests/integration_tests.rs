@@ -11,13 +11,15 @@ use aura_core::{AccountId, DeviceId, TrustLevel};
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest},
     invitation_acceptance::{AcceptanceProtocolConfig, InvitationAcceptanceCoordinator},
-    relationship_formation::{RelationshipFormationRequest, RelationshipType},
+    relationship_formation::{
+        LegacyRelationshipFormationCoordinator, RelationshipFormationRequest, RelationshipType,
+    },
 };
 use aura_journal::semilattice::{InvitationRecordRegistry, InvitationStatus};
 use aura_macros::aura_test;
 use aura_wot::{AccountAuthority, SerializableBiscuit};
+use futures::lock::Mutex;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// Test helper to create test environment (network issues need further investigation)
@@ -185,7 +187,6 @@ async fn test_invitation_acceptance_coordinator_integration() -> aura_core::Aura
 }
 
 #[aura_test]
-#[ignore] // TODO: Fix LegacyRelationshipFormationCoordinator Arc compatibility
 async fn test_relationship_formation_coordinator_integration() -> aura_core::AuraResult<()> {
     println!("Testing relationship formation coordinator integration...");
 
@@ -207,21 +208,20 @@ async fn test_relationship_formation_coordinator_integration() -> aura_core::Aur
         ],
     };
 
-    // Temporarily return a mock response due to Arc compatibility issue
-    let response = aura_invitation::relationship_formation::RelationshipFormationResponse {
-        relationship: None,
-        established: false,
-        formed_at: 0,
-        success: false,
-        error: Some("Arc compatibility issue - test skipped".to_string()),
-    };
+    let coordinator = LegacyRelationshipFormationCoordinator::new(test.inviter_effects.clone());
+    let response = coordinator.form_relationship(formation_request).await?;
 
-    // Skip assertions for now due to Arc compatibility issue
-    if !response.success {
-        if let Some(error) = &response.error {
-            println!("Relationship formation skipped: {}", error);
-        }
-    }
+    assert!(response.success);
+    let relationship = response
+        .relationship
+        .as_ref()
+        .expect("relationship should be returned");
+    assert_eq!(
+        relationship.parties,
+        vec![test.inviter_device, test.invitee_device]
+    );
+    assert_eq!(relationship.account_id, test.account_id);
+    assert_eq!(relationship.trust_level, TrustLevel::High);
 
     println!("✓ Relationship formation coordinator integration successful");
     Ok(())
@@ -285,8 +285,22 @@ async fn test_full_invitation_to_relationship_flow() -> aura_core::AuraResult<()
         aura_journal::semilattice::InvitationStatus::Accepted
     ));
 
-    // Step 4: Test that relationship formation is also available - TODO: fix Arc compatibility
-    println!("✓ Relationship formation integration test skipped (Arc compatibility issue)");
+    // Step 4: Verify relationship formation remains available via legacy coordinator
+    let formation_request = RelationshipFormationRequest {
+        party_a: test.inviter_device,
+        party_b: test.invitee_device,
+        account_id: test.account_id,
+        relationship_type: RelationshipType::DeviceCoOwnership,
+        initial_trust_level: TrustLevel::Full,
+        metadata: vec![(String::from("flow"), String::from("full-path"))],
+    };
+    let formation_coordinator =
+        LegacyRelationshipFormationCoordinator::new(test.inviter_effects.clone());
+    let formation = formation_coordinator
+        .form_relationship(formation_request)
+        .await?;
+    assert!(formation.success);
+    assert!(formation.relationship.is_some());
 
     println!("✓ Full invitation to relationship flow integration successful");
     println!("  - Invitation created and accepted");
@@ -417,8 +431,23 @@ async fn test_error_handling_integration() -> aura_core::AuraResult<()> {
     assert!(expired_acceptance.error_message.is_some());
     println!("✓ Expired invitation acceptance properly handled");
 
-    // Test relationship formation error handling - TODO: fix Arc compatibility
-    println!("✓ Invalid relationship formation test skipped (Arc compatibility issue)");
+    // Test relationship formation error handling
+    let invalid_formation_request = RelationshipFormationRequest {
+        party_a: test.inviter_device,
+        party_b: test.inviter_device, // invalid: same device for both parties
+        account_id: test.account_id,
+        relationship_type: RelationshipType::DeviceCoOwnership,
+        initial_trust_level: TrustLevel::Low,
+        metadata: vec![],
+    };
+    let formation_coordinator =
+        LegacyRelationshipFormationCoordinator::new(test.inviter_effects.clone());
+    let formation = formation_coordinator
+        .form_relationship(invalid_formation_request)
+        .await?;
+    assert!(!formation.success);
+    assert!(formation.error.is_some());
+    println!("✓ Invalid relationship formation properly handled");
 
     println!("✓ Error handling integration across all components successful");
     Ok(())

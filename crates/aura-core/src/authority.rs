@@ -16,10 +16,15 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, LazyLock};
 
-// Type aliases for authority operations
-type PublicKey = ed25519_dalek::VerifyingKey;
-type Signature = ed25519_dalek::Signature;
-type SigningKey = ed25519_dalek::SigningKey;
+// Public type aliases for authority operations
+pub type Ed25519VerifyingKey = ed25519_dalek::VerifyingKey;
+pub type Ed25519Signature = ed25519_dalek::Signature;
+pub type Ed25519SigningKey = ed25519_dalek::SigningKey;
+
+// Internal aliases for trait implementation
+type PublicKey = Ed25519VerifyingKey;
+type Signature = Ed25519Signature;
+type SigningKey = Ed25519SigningKey;
 
 /// Fallback public key for placeholder tree state
 ///

@@ -195,8 +195,7 @@ impl SbbRelationship {
             return false;
         }
 
-        // Check if budget allows this message
-        // TODO: Authorization check now handled by Biscuit tokens (legacy capability check removed)
+        // Budget gate; capability/authorization should be enforced by Biscuit guards upstream.
         self.flow_budget.can_spend(message_size, now)
     }
 }

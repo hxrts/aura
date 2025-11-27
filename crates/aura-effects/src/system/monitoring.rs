@@ -4,13 +4,16 @@ use async_trait::async_trait;
 use aura_core::effects::{SystemEffects, SystemError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tracing::{error, info, warn};
-use uuid::Uuid;
 
 /// In-memory monitoring handler state
 #[derive(Debug, Clone)]
 pub struct MonitoringSystemHandler {
-    config: MonitoringConfig,
+    config: std::sync::Arc<std::sync::Mutex<MonitoringConfig>>,
+    alerts: std::sync::Arc<std::sync::Mutex<Vec<Alert>>>,
+    stats: std::sync::Arc<std::sync::Mutex<MonitoringStats>>,
+    alert_counter: std::sync::Arc<AtomicU64>,
 }
 
 /// Health status levels
@@ -51,8 +54,8 @@ pub struct HealthCheckResult {
 /// Alert notification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Alert {
-    /// Unique alert identifier
-    pub id: Uuid,
+    /// Unique alert identifier (deterministic counter-based for Layer 3 handlers)
+    pub id: u64,
     /// Component that triggered the alert
     pub component: String,
     /// Alert severity level
@@ -96,7 +99,12 @@ pub struct MonitoringStats {
 impl MonitoringSystemHandler {
     /// Create a new monitoring system handler
     pub fn new(config: MonitoringConfig) -> Self {
-        Self { config }
+        Self {
+            config: std::sync::Arc::new(std::sync::Mutex::new(config)),
+            alerts: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            stats: std::sync::Arc::new(std::sync::Mutex::new(MonitoringStats::default())),
+            alert_counter: std::sync::Arc::new(AtomicU64::new(1)),
+        }
     }
 
     /// Create a monitoring system handler with default configuration
@@ -109,6 +117,9 @@ impl MonitoringSystemHandler {
         &self,
         component: &str,
     ) -> Result<HealthCheckResult, SystemError> {
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.total_health_checks = stats.total_health_checks.saturating_add(1);
+        }
         Ok(HealthCheckResult {
             component: component.to_string(),
             status: HealthStatus::Healthy,
@@ -125,37 +136,75 @@ impl MonitoringSystemHandler {
         message: &str,
         metadata: HashMap<String, String>,
     ) -> Result<(), SystemError> {
-        tracing::warn!(
+        let alert = Alert {
+            id: self.alert_counter.fetch_add(1, Ordering::SeqCst),
+            component: component.to_string(),
+            severity,
+            title: title.to_string(),
+            message: message.to_string(),
+            resolved: false,
+            metadata,
+        };
+        if let Ok(mut alerts) = self.alerts.lock() {
+            alerts.push(alert.clone());
+            let target = self
+                .config
+                .lock()
+                .map(|c| c.max_alerts)
+                .unwrap_or(MonitoringConfig::default().max_alerts);
+            if alerts.len() > target {
+                let overflow = alerts.len() - target;
+                alerts.drain(0..overflow);
+            }
+        }
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.total_alerts = stats.total_alerts.saturating_add(1);
+            stats.active_alerts = self
+                .alerts
+                .lock()
+                .map(|a| a.iter().filter(|a| !a.resolved).count() as u64)
+                .unwrap_or(stats.active_alerts);
+        }
+        warn!(
             component,
             ?severity,
             title,
             message,
-            metadata = ?metadata,
-            "Monitoring alert emitted (stateless placeholder)"
+            "Monitoring alert emitted"
         );
         Ok(())
     }
 
     /// Get the most recent alerts up to the specified count
     pub async fn get_recent_alerts(&self, count: usize) -> Vec<Alert> {
-        tracing::debug!(
-            count,
-            "Monitoring alert retrieval is stateless; returning empty set"
-        );
-        Vec::new()
+        let alerts = self.alerts.lock().map(|a| a.clone()).unwrap_or_default();
+        let len = alerts.len();
+        let start = len.saturating_sub(count);
+        alerts[start..].to_vec()
     }
 
     /// Resolve an alert by its ID
-    pub async fn resolve_alert(&self, alert_id: Uuid) -> Result<(), SystemError> {
-        tracing::debug!(%alert_id, "Monitoring resolve is stateless; no-op");
+    pub async fn resolve_alert(&self, alert_id: u64) -> Result<(), SystemError> {
+        if let Ok(mut alerts) = self.alerts.lock() {
+            for alert in alerts.iter_mut() {
+                if alert.id == alert_id {
+                    alert.resolved = true;
+                }
+            }
+        }
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.active_alerts = self
+                .alerts
+                .lock()
+                .map(|a| a.iter().filter(|a| !a.resolved).count() as u64)
+                .unwrap_or(stats.active_alerts);
+        }
         Ok(())
     }
 
     /// Get monitoring statistics (stateless - delegates to external service)
     pub async fn get_statistics(&self) -> MonitoringStats {
-        // TODO: In production, this would query external monitoring service
-        tracing::debug!("Getting monitoring stats via monitoring handler (placeholder)");
-        MonitoringStats::default()
+        self.stats.lock().map(|s| s.clone()).unwrap_or_default()
     }
 }
 
@@ -193,31 +242,41 @@ impl SystemEffects for MonitoringSystemHandler {
     }
 
     async fn get_system_info(&self) -> Result<HashMap<String, String>, SystemError> {
-        // TODO: In production, this would query external monitoring service
+        let stats = self.stats.lock().map(|s| s.clone()).unwrap_or_default();
+        let config = self
+            .config
+            .lock()
+            .map(|c| c.clone())
+            .unwrap_or_else(|_| MonitoringConfig::default());
         let mut info = HashMap::new();
         info.insert("component".to_string(), "monitoring".to_string());
-        info.insert("max_alerts".to_string(), self.config.max_alerts.to_string());
+        info.insert("max_alerts".to_string(), config.max_alerts.to_string());
         info.insert("status".to_string(), "operational".to_string());
+        info.insert(
+            "total_health_checks".to_string(),
+            stats.total_health_checks.to_string(),
+        );
+        info.insert(
+            "failed_health_checks".to_string(),
+            stats.failed_health_checks.to_string(),
+        );
+        info.insert("active_alerts".to_string(), stats.active_alerts.to_string());
         Ok(info)
     }
 
     async fn set_config(&self, key: &str, value: &str) -> Result<(), SystemError> {
-        // TODO: In production, this would update external configuration service
-        tracing::debug!(
-            key = key,
-            value = value,
-            "Config update requested via monitoring handler (placeholder)"
-        );
-
         match key {
             "max_alerts" => {
-                // Validate the value but don't store it (stateless handler)
-                value
-                    .parse::<usize>()
-                    .map_err(|_| SystemError::InvalidConfiguration {
-                        key: key.to_string(),
-                        value: value.to_string(),
-                    })?;
+                let parsed =
+                    value
+                        .parse::<usize>()
+                        .map_err(|_| SystemError::InvalidConfiguration {
+                            key: key.to_string(),
+                            value: value.to_string(),
+                        })?;
+                if let Ok(mut config) = self.config.lock() {
+                    config.max_alerts = parsed;
+                }
                 Ok(())
             }
             _ => Err(SystemError::InvalidConfiguration {
@@ -228,8 +287,13 @@ impl SystemEffects for MonitoringSystemHandler {
     }
 
     async fn get_config(&self, key: &str) -> Result<String, SystemError> {
+        let config = self
+            .config
+            .lock()
+            .map(|c| c.clone())
+            .unwrap_or_else(|_| MonitoringConfig::default());
         match key {
-            "max_alerts" => Ok(self.config.max_alerts.to_string()),
+            "max_alerts" => Ok(config.max_alerts.to_string()),
             _ => Err(SystemError::InvalidConfiguration {
                 key: key.to_string(),
                 value: "unknown".to_string(),
@@ -242,21 +306,42 @@ impl SystemEffects for MonitoringSystemHandler {
     }
 
     async fn get_metrics(&self) -> Result<HashMap<String, f64>, SystemError> {
-        // TODO: In production, this would query external metrics service
+        let stats = self.stats.lock().map(|s| s.clone()).unwrap_or_default();
+        let config = self
+            .config
+            .lock()
+            .map(|c| c.clone())
+            .unwrap_or_else(|_| MonitoringConfig::default());
         let mut metrics = HashMap::new();
-        metrics.insert("uptime".to_string(), 1.0);
+        metrics.insert("active_alerts".to_string(), stats.active_alerts as f64);
         metrics.insert(
             "max_alerts_configured".to_string(),
-            self.config.max_alerts as f64,
+            config.max_alerts as f64,
         );
+        metrics.insert(
+            "total_health_checks".to_string(),
+            stats.total_health_checks as f64,
+        );
+        metrics.insert(
+            "failed_health_checks".to_string(),
+            stats.failed_health_checks as f64,
+        );
+        metrics.insert("total_alerts".to_string(), stats.total_alerts as f64);
         Ok(metrics)
     }
 
     async fn restart_component(&self, component: &str) -> Result<(), SystemError> {
-        // TODO: In production, this would integrate with external component management
+        // In production this would delegate to the component supervisor; here we just log and
+        // track a restart attempt so the simulator can assert the behavior.
+        self.stats
+            .lock()
+            .map(|mut s| {
+                s.total_alerts = s.total_alerts.saturating_add(1);
+            })
+            .ok();
         tracing::warn!(
             component = component,
-            "Component restart requested via monitoring handler (placeholder)"
+            "Restart requested via monitoring handler"
         );
         Ok(())
     }
@@ -274,7 +359,8 @@ mod tests {
     async fn test_monitoring_handler_creation() {
         let handler = MonitoringSystemHandler::default();
         // MonitoringSystemHandler should be created successfully
-        assert_eq!(handler.config.max_alerts, 256);
+        let max_alerts = handler.get_config("max_alerts").await.unwrap();
+        assert_eq!(max_alerts, "256");
     }
 
     #[tokio::test]
@@ -306,12 +392,22 @@ mod tests {
     async fn test_system_effects() {
         let handler = MonitoringSystemHandler::default();
 
+        // Perform a health check first to increment the counter
+        let _health = handler
+            .check_component_health("test_component")
+            .await
+            .unwrap();
+
         // Test system info
         let info = handler.get_system_info().await.unwrap();
         assert_eq!(info.get("component"), Some(&"monitoring".to_string()));
+        assert_eq!(info.get("total_health_checks"), Some(&"1".to_string()));
 
         // Test config operations
         let config_value = handler.get_config("max_alerts").await.unwrap();
         assert_eq!(config_value, "256");
+
+        let metrics = handler.get_metrics().await.unwrap();
+        assert_eq!(metrics.get("active_alerts"), Some(&0.0)); // Should be 0 since no alerts generated
     }
 }

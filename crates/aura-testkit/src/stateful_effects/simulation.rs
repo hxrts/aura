@@ -1,11 +1,11 @@
 //! Mock simulation effect handlers for testing
 
+use async_lock::RwLock;
 use aura_core::effects::simulation::*;
 use aura_core::Result;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio::sync::RwLock;
 
 /// Mock simulation storage
 #[derive(Debug)]

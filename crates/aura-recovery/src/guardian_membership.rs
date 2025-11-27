@@ -10,12 +10,13 @@ use crate::{
 };
 use async_trait::async_trait;
 use aura_authenticate::guardian_auth::RecoveryContext;
+use aura_core::scope::ContextOp;
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::{identifiers::GuardianId, AccountId, AuraError, DeviceId};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_protocol::guards::BiscuitGuardEvaluator;
-use aura_wot::{BiscuitTokenManager, ContextOp};
+use aura_wot::BiscuitTokenManager;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 

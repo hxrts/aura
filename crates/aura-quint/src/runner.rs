@@ -10,13 +10,14 @@
 
 use crate::evaluator::QuintEvaluator;
 use crate::{AuraResult, PropertySpec, VerificationResult};
+use async_io::Timer;
 use aura_core::AuraError;
-use aura_effects::time::monotonic_now;
+use futures::pin_mut;
+use futures::{future, Future};
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
-use std::time::{Duration, Instant};
-use tokio::time::timeout;
+use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
 /// Enhanced Quint runner for executing verification tasks with advanced features
@@ -57,7 +58,7 @@ struct CachedResult {
     access_count: u64,
     /// Cache timestamp
     #[allow(dead_code)]
-    cached_at: Instant,
+    cached_at_ms: u64,
 }
 
 /// Verification statistics tracking
@@ -237,7 +238,28 @@ impl Default for RunnerConfig {
     }
 }
 
+/// Runtime-agnostic timeout helper for async operations
+async fn with_timeout<F, T>(duration: Duration, fut: F, context: &str) -> AuraResult<T>
+where
+    F: Future<Output = AuraResult<T>>,
+{
+    let timer = Timer::after(duration);
+    pin_mut!(timer);
+    pin_mut!(fut);
+
+    match future::select(fut, timer).await {
+        future::Either::Left((result, _)) => result,
+        future::Either::Right((_, _)) => Err(AuraError::coordination_failed(format!(
+            "{} timed out after {:?}",
+            context, duration
+        ))),
+    }
+}
+
 impl PropertyCache {
+    fn current_time_ms() -> u64 {
+        0 // placeholder; hook up effect-based time if needed
+    }
     fn new(max_size: usize) -> Self {
         Self {
             cache: HashMap::new(),
@@ -270,7 +292,7 @@ impl PropertyCache {
 
         let cached_result = CachedResult {
             result,
-            cached_at: monotonic_now(),
+            cached_at_ms: PropertyCache::current_time_ms(),
             access_count: 1,
         };
 
@@ -438,9 +460,7 @@ impl QuintRunner {
 
     /// Verify a property specification with enhanced verification pipeline
     pub async fn verify_property(&mut self, spec: &PropertySpec) -> AuraResult<VerificationResult> {
-        #[allow(clippy::disallowed_methods)]
-        // Required for performance measurement, deterministic in test context
-        let start_time = monotonic_now(); // Start timestamp for performance measurement
+        let start_time_ms = PropertyCache::current_time_ms(); // Placeholder timing until effect injection
         self.stats.total_properties += 1;
 
         if self.config.verbose {
@@ -462,7 +482,7 @@ impl QuintRunner {
         }
 
         // Enhanced verification pipeline
-        let verification_result = self.run_verification_pipeline(spec, start_time).await?;
+        let verification_result = self.run_verification_pipeline(spec, start_time_ms).await?;
 
         // Cache the result if caching is enabled
         if self.config.enable_caching {
@@ -487,16 +507,16 @@ impl QuintRunner {
     async fn run_verification_pipeline(
         &mut self,
         spec: &PropertySpec,
-        start_time: Instant,
+        start_time_ms: u64,
     ) -> AuraResult<VerificationResult> {
         // Step 1: Parse the Quint specification
         debug!("Parsing Quint specification: {}", spec.spec_file);
-        let json_ir = timeout(
+        let json_ir = with_timeout(
             self.config.default_timeout,
             self.evaluator.parse_file(&spec.spec_file),
+            "Verification parse",
         )
         .await
-        .map_err(|_| AuraError::internal("Verification timeout".to_string()))?
         .map_err(|e| {
             error!("Failed to parse Quint file: {}", e);
             e
@@ -504,12 +524,12 @@ impl QuintRunner {
 
         // Step 2: Run property verification with enhanced analysis
         debug!("Running property verification");
-        let simulation_result = timeout(
+        let simulation_result = with_timeout(
             self.config.default_timeout,
             self.run_enhanced_simulation(&json_ir, spec),
+            "Simulation",
         )
         .await
-        .map_err(|_| AuraError::internal("Simulation timeout".to_string()))?
         .map_err(|e| {
             error!("Simulation failed: {}", e);
             e
@@ -517,7 +537,7 @@ impl QuintRunner {
 
         // Step 3: Analyze results and generate verification report
         let verification_result = self
-            .analyze_simulation_result(&simulation_result, spec, start_time)
+            .analyze_simulation_result(&simulation_result, spec, start_time_ms)
             .await?;
 
         // Step 4: Generate counterexamples if verification failed
@@ -606,9 +626,10 @@ impl QuintRunner {
         &self,
         simulation_result: &Value,
         spec: &PropertySpec,
-        start_time: Instant,
+        start_time_ms: u64,
     ) -> AuraResult<VerificationResult> {
-        let duration = start_time.elapsed();
+        let duration_ms = PropertyCache::current_time_ms().saturating_sub(start_time_ms);
+        let duration = Duration::from_millis(duration_ms);
 
         // Extract verification results from simulation output
         let success = simulation_result
@@ -794,12 +815,13 @@ impl QuintRunner {
         }
 
         // Parse using the native evaluator with timeout
-        let json_ir = timeout(
+        let json_ir = with_timeout(
             self.config.default_timeout,
             self.evaluator.parse_file(file_path),
+            "Parse",
         )
         .await
-        .map_err(|_| AuraError::invalid("Parse timeout".to_string()))??;
+        .map_err(|e| AuraError::invalid(format!("Parse timeout or failure: {}", e)))?;
 
         // Parse the JSON IR to extract specification info
         let parsed_ir: Value = serde_json::from_str(&json_ir)
@@ -856,23 +878,25 @@ impl QuintRunner {
         let traces = n_traces.unwrap_or(self.config.n_traces);
 
         // Parse the specification first
-        let json_ir = timeout(
+        let json_ir = with_timeout(
             self.config.default_timeout,
             self.evaluator.parse_file(file_path),
+            "Simulation parse",
         )
         .await
-        .map_err(|_| AuraError::internal("Parse timeout".to_string()))??;
+        .map_err(|e| AuraError::internal(format!("Parse timeout or failure: {}", e)))?;
 
         // Enhance JSON IR with simulation parameters
         let enhanced_ir = self.prepare_simulation_parameters(&json_ir, steps, samples, traces)?;
 
         // Run simulation with timeout
-        let simulation_result = timeout(
+        let simulation_result = with_timeout(
             self.config.default_timeout,
             self.evaluator.simulate_via_evaluator(&enhanced_ir),
+            "Simulation run",
         )
         .await
-        .map_err(|_| AuraError::internal("Simulation timeout".to_string()))??;
+        .map_err(|e| AuraError::internal(format!("Simulation timeout or failure: {}", e)))?;
 
         let duration = Duration::from_millis(0); // Fixed duration for deterministic testing
 
@@ -992,7 +1016,7 @@ impl QuintRunner {
         debug!("Enhancing verification with capability soundness checks");
 
         // Check if the specification involves capability operations
-        if self.involves_capability_operations(spec)? {
+        if self.involves_capability_operations(spec).await? {
             // Extract capability-related properties for verification
             let capability_properties = self.extract_capability_properties(spec)?;
 
@@ -1025,7 +1049,7 @@ impl QuintRunner {
         debug!("Enhancing verification with privacy contract checks");
 
         // Check if the specification involves privacy-sensitive operations
-        if self.involves_privacy_operations(spec)? {
+        if self.involves_privacy_operations(spec).await? {
             // Extract privacy-related properties for verification
             let privacy_properties = self.extract_privacy_properties(spec)?;
 
@@ -1050,19 +1074,19 @@ impl QuintRunner {
     }
 
     /// Check if specification involves capability operations
-    fn involves_capability_operations(&self, spec: &PropertySpec) -> AuraResult<bool> {
+    async fn involves_capability_operations(&self, spec: &PropertySpec) -> AuraResult<bool> {
         // Read the spec file via storage (macOS/Linux backed by filesystem)
-        let spec_content = futures::executor::block_on(async {
-            match self.storage.retrieve(&spec.spec_file).await {
-                Ok(Some(bytes)) => String::from_utf8(bytes)
-                    .map_err(|e| AuraError::invalid(format!("Spec not UTF-8: {}", e))),
-                Ok(None) => Ok(String::new()),
-                Err(e) => Err(AuraError::invalid(format!(
+        let spec_content = match self.storage.retrieve(&spec.spec_file).await {
+            Ok(Some(bytes)) => String::from_utf8(bytes)
+                .map_err(|e| AuraError::invalid(format!("Spec not UTF-8: {}", e)))?,
+            Ok(None) => String::new(),
+            Err(e) => {
+                return Err(AuraError::invalid(format!(
                     "Failed to read spec file: {}",
                     e
-                ))),
+                )))
             }
-        })?;
+        };
 
         let capability_patterns = [
             "Cap",
@@ -1083,19 +1107,19 @@ impl QuintRunner {
     }
 
     /// Check if specification involves privacy operations
-    fn involves_privacy_operations(&self, spec: &PropertySpec) -> AuraResult<bool> {
+    async fn involves_privacy_operations(&self, spec: &PropertySpec) -> AuraResult<bool> {
         // Read the spec file via storage (macOS/Linux backed by filesystem)
-        let spec_content = futures::executor::block_on(async {
-            match self.storage.retrieve(&spec.spec_file).await {
-                Ok(Some(bytes)) => String::from_utf8(bytes)
-                    .map_err(|e| AuraError::invalid(format!("Spec not UTF-8: {}", e))),
-                Ok(None) => Ok(String::new()),
-                Err(e) => Err(AuraError::invalid(format!(
+        let spec_content = match self.storage.retrieve(&spec.spec_file).await {
+            Ok(Some(bytes)) => String::from_utf8(bytes)
+                .map_err(|e| AuraError::invalid(format!("Spec not UTF-8: {}", e)))?,
+            Ok(None) => String::new(),
+            Err(e) => {
+                return Err(AuraError::invalid(format!(
                     "Failed to read spec file: {}",
                     e
-                ))),
+                )))
             }
-        })?;
+        };
 
         let privacy_patterns = [
             "privacy",
@@ -1126,7 +1150,7 @@ impl QuintRunner {
                 capability_properties.push(CapabilityProperty {
                     name: property_name.clone(),
                     property_type: self.determine_capability_property_type(property_name),
-                });
+                })
             }
         }
 
@@ -1143,7 +1167,7 @@ impl QuintRunner {
                 privacy_properties.push(PrivacyProperty {
                     name: property_name.clone(),
                     property_type: self.determine_privacy_property_type(property_name),
-                });
+                })
             }
         }
 
@@ -1438,7 +1462,7 @@ enum PrivacyPropertyType {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-    use std::io::Write;
+        use std::io::Write;
     use std::time::Duration;
     use tempfile::NamedTempFile;
 

@@ -20,7 +20,7 @@ This structure identifies a single secure channel. One channel exists per `(Cont
 
 ## 2. Guard Chain
 
-All transport sends pass through the guard chain defined in [Authorization](109_authorization.md). CapGuard evaluates Biscuit capabilities and sovereign policy. FlowGuard charges the per-context flow budget and produces a receipt. JournalCoupler records the accompanying facts atomically. Each stage must succeed before the next stage executes.
+All transport sends pass through the guard chain defined in [Authorization](109_authorization.md). CapGuard evaluates Biscuit capabilities and sovereign policy. FlowGuard charges the per-context flow budget and produces a receipt. JournalCoupler records the accompanying facts atomically. Each stage must succeed before the next stage executes. Guard evaluation runs synchronously over a prepared `GuardSnapshot` and returns `EffectCommand` data; an async interpreter executes those commands so guards never perform I/O directly.
 
 ## 3. Flow Budget and Receipts
 

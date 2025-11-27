@@ -4,12 +4,12 @@
 //! to fix architectural violations. These handlers use Arc<RwLock<>> for shared
 //! storage state in testing scenarios.
 
+use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::ChunkId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Memory storage handler for testing
 #[derive(Debug, Clone)]
@@ -40,9 +40,7 @@ impl MemoryStorageHandler {
 
     /// Get the number of stored keys (for testing)
     pub fn len(&self) -> usize {
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async { self.data.read().await.len() })
-        })
+        self.data.try_read().map(|g| g.len()).unwrap_or(0)
     }
 
     /// Check if storage is empty (for testing)
@@ -160,16 +158,15 @@ impl EncryptedStorageHandler {
 
     /// Get information about the storage configuration
     pub fn stack_info(&self) -> HashMap<String, String> {
-        let runtime = tokio::runtime::Handle::current();
-        let chunk_count = runtime.block_on(async { self.storage.read().await.len() as u64 });
-        let total_bytes = runtime.block_on(async {
-            self.storage
-                .read()
-                .await
-                .values()
-                .map(|v| v.len() as u64)
-                .sum::<u64>()
-        });
+        let storage_guard = self.storage.try_read();
+        let (chunk_count, total_bytes) = storage_guard
+            .map(|g| {
+                (
+                    g.len() as u64,
+                    g.values().map(|v| v.len() as u64).sum::<u64>(),
+                )
+            })
+            .unwrap_or((0, 0));
 
         let mut info = HashMap::new();
         info.insert("backend_type".to_string(), "encrypted_memory".to_string());

@@ -24,6 +24,9 @@ aura-wot = { path = "../aura-wot" }
 async-trait = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 futures = { workspace = true }
+async-io = "1"
+async-lock = "3"
+async-channel = "1"
 
 # Cryptography provided through aura-core
 ed25519-dalek = { workspace = true }
@@ -33,6 +36,7 @@ sha2 = { workspace = true }
 
 # Randomness
 rand = { workspace = true }
+rand_chacha = { workspace = true }
 
 # Logging
 tracing = { workspace = true }
@@ -44,6 +48,8 @@ once_cell = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+subtle = { workspace = true }
+zeroize = { workspace = true }
 
 # Property testing
 proptest = { workspace = true }

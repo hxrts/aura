@@ -13,7 +13,8 @@
     clippy::get_first,
     clippy::single_range_in_vec_init,
     clippy::disallowed_methods,  // Orchestration layer coordinates time/random effects
-    clippy::disallowed_types
+    clippy::disallowed_types,
+    deprecated  // Deprecated time/random functions used intentionally for effect coordination
 )]
 //! # Aura Protocol - Layer 4: Orchestration (Multi-Party Coordination)
 //!
@@ -128,6 +129,7 @@ pub mod effects;
 pub mod facades; // High-level facade traits (Layer 4 appropriate - traits only, implementations in Layer 6)
 pub mod guards;
 pub mod handlers;
+pub mod coordinators;
 pub mod messages;
 pub mod state;
 pub mod transport;

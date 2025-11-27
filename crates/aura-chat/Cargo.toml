@@ -43,6 +43,7 @@ chrono = { workspace = true }
 
 [dev-dependencies]
 # For testing
+tokio = { workspace = true }
 tokio-test = { workspace = true }
 tempfile = { workspace = true }
 

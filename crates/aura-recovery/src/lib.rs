@@ -103,8 +103,9 @@ pub use guardian_setup::GuardianSetupCoordinator;
 pub use recovery_protocol::{RecoveryProtocol, RecoveryProtocolHandler};
 
 // Re-export Biscuit types for convenience
+pub use aura_core::scope::ResourceScope;
 pub use aura_protocol::guards::BiscuitGuardEvaluator;
-pub use aura_wot::{BiscuitTokenManager, ResourceScope};
+pub use aura_wot::BiscuitTokenManager;
 
 // Re-export membership change types
 pub use guardian_membership::{MembershipChange, MembershipChangeRequest};

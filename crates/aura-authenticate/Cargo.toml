@@ -26,7 +26,6 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 uuid = { workspace = true }
 futures = { workspace = true }
-tokio = { workspace = true }
 rand = { workspace = true }
 serde_json = { workspace = true }
 biscuit-auth = { workspace = true }
@@ -36,7 +35,6 @@ bincode = { workspace = true }
 # Testing infrastructure (Layer 5 can use testkit)
 aura-agent = { path = "../aura-agent" }
 aura-testkit = { path = "../aura-testkit" }
-tokio = { workspace = true }
 
 [lints]
 workspace = true

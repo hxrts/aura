@@ -1,4 +1,4 @@
-// TODO fix - Simplified DKD Protocol for E2E Testing
+// Simplified DKD Protocol for E2E Testing
 module DKDSimple {
     // Basic types
     type DeviceId = str

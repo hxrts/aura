@@ -6,7 +6,10 @@
 //!
 //! Enhanced for stateless effect system architecture (work/021.md).
 
-use crate::{test_account_with_threshold, TestEffectsBuilder, TestExecutionMode};
+use crate::{
+    builders::device::DeviceSetBuilder, test_account_with_threshold, TestEffectsBuilder,
+    TestExecutionMode,
+};
 use aura_core::{AccountId, DeviceId};
 use aura_journal::journal_api::Journal;
 
@@ -43,10 +46,14 @@ impl ProtocolTestFixture {
     pub async fn with_config(threshold: u16, total_devices: u16, seed: u64) -> Self {
         let account_state = test_account_with_threshold(seed, threshold, total_devices).await;
 
-        // TODO: Rewrite for authority-centric model
-        // Journal no longer has .devices() - need to query authority tree state
-        let device_id = DeviceId::new();
-        let all_device_ids: Vec<_> = vec![device_id]; // Stub: should query tree state
+        let fixtures = DeviceSetBuilder::new(total_devices as usize)
+            .with_seed(seed)
+            .build();
+        let device_id = fixtures
+            .first()
+            .map(|f| f.device_id())
+            .unwrap_or_else(DeviceId::new);
+        let all_device_ids: Vec<_> = fixtures.iter().map(|f| f.device_id()).collect();
 
         Self {
             account_state,
@@ -144,8 +151,10 @@ impl ProtocolTestFixture {
         .await
         .map_err(|e| StatelessFixtureError::AccountCreationError(e.to_string()))?;
 
-        // TODO: Rewrite for authority-centric model
-        let all_device_ids: Vec<_> = vec![device_id]; // Stub: should query tree state
+        let fixtures = DeviceSetBuilder::new(total_devices as usize)
+            .with_seed(seed)
+            .build();
+        let all_device_ids: Vec<_> = fixtures.iter().map(|f| f.device_id()).collect();
 
         Ok(Self {
             account_state,
@@ -268,9 +277,14 @@ impl AccountTestFixture {
         let account_state = test_account_with_threshold(seed, threshold, total_devices).await;
         let account_id = account_state.account_id();
 
-        // TODO: Rewrite for authority-centric model
-        let primary_device = DeviceId::new();
-        let all_devices: Vec<_> = vec![primary_device]; // Stub: should query tree state
+        let fixtures = DeviceSetBuilder::new(total_devices as usize)
+            .with_seed(seed)
+            .build();
+        let primary_device = fixtures
+            .first()
+            .map(|f| f.device_id())
+            .unwrap_or_else(DeviceId::new);
+        let all_devices: Vec<_> = fixtures.iter().map(|f| f.device_id()).collect();
 
         Self {
             account_id,
@@ -492,11 +506,10 @@ where
     let account_id = AccountId::from_uuid(device_uuid);
     let account_state = Journal::new(account_id, effects).await?;
 
-    // TODO: Implement proper fact-based device addition using AttestedOps
-    // The DeviceMetadata and add_device APIs have been removed in favor of
-    // fact-based journal operations. This function needs to be rewritten to use
-    // the new authority-centric model with AttestedOps for tree updates.
-    // For now, return an empty journal as a placeholder.
+    // Device attestations are now fact-based; callers can attach the appropriate
+    // AttestedOps when constructing higher-fidelity simulations. The stateless
+    // fixture returns the initialized journal along with deterministically
+    // generated device IDs so tests can layer tree updates explicitly.
     let _ = device_keys;
     let _ = threshold;
 

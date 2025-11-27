@@ -3,10 +3,7 @@
 //! Provides reliability patterns for fault-tolerant operation in distributed systems.
 //! These effects enable retry logic, circuit breaking, and graceful degradation
 //! while maintaining the stateless, composable nature of the effect system.
-//!
-//! **DRY Consolidation**: This module consolidates retry logic from aura-sync, aura-agent,
-//! and provides a unified implementation for all crates. Includes BackoffStrategy, RetryPolicy,
-//! and helper types for comprehensive retry patterns.
+//! Includes BackoffStrategy, RetryPolicy, and helper types for retry patterns.
 
 use crate::effects::time::PhysicalTimeEffects;
 use crate::AuraError;
@@ -146,13 +143,13 @@ pub enum ReliabilityError {
 }
 
 // =============================================================================
-// Unified Retry Implementation (consolidated from aura-sync)
+// Unified Retry Implementation
 // =============================================================================
 
 /// Backoff strategy for retry delays
 ///
-/// **DRY Consolidation**: This enum replaces duplicate backoff strategies in
-/// aura-sync, aura-agent, and provides a single source of truth for retry delays.
+/// This enum replaces duplicate backoff strategies in aura-sync, aura-agent,
+/// and provides a single source of truth for retry delays.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BackoffStrategy {
     /// Fixed delay between retries
@@ -202,7 +199,7 @@ impl BackoffStrategy {
 
 /// Retry policy configuration
 ///
-/// **DRY Consolidation**: This struct replaces duplicate retry policies across crates,
+/// This struct replaces duplicate retry policies across crates,
 /// providing a unified builder pattern for configuring retry behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryPolicy {
@@ -349,26 +346,6 @@ impl RetryPolicy {
         .await
     }
 
-    /// Execute an async operation with retry logic and detailed context
-    ///
-    /// # Arguments
-    /// - `now`: Current time instant (obtain from TimeEffects in production)
-    /// - `operation`: The async operation to retry
-    pub async fn execute_with_context<F, Fut, T, E>(
-        &self,
-        now: std::time::Instant,
-        operation: F,
-    ) -> RetryResult<T, E>
-    where
-        F: FnMut() -> Fut,
-        Fut: Future<Output = Result<T, E>>,
-    {
-        self.execute_with_sleep_and_context(now, operation, |delay| async move {
-            std::thread::sleep(delay);
-        })
-        .await
-    }
-
     /// Execute with caller-provided sleep and timing context for deterministic metrics.
     pub async fn execute_with_sleep_and_context<F, Fut, T, E, S, SFut>(
         &self,
@@ -509,13 +486,13 @@ impl RetryContext {
 }
 
 // =============================================================================
-// Unified Rate Limiting Implementation (consolidated from aura-sync)
+// Unified Rate Limiting Implementation
 // =============================================================================
 
 /// Rate limiter configuration
 ///
-/// **DRY Consolidation**: This struct replaces duplicate rate limiting configuration
-/// in aura-sync, providing a unified configuration system for all crates.
+/// This struct replaces duplicate rate limiting configuration in
+/// aura-sync, providing a unified configuration system for all crates.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateLimitConfig {
     /// Global rate limit (operations per second)
@@ -677,9 +654,9 @@ impl RateLimitResult {
 
 /// Rate limiter for operations
 ///
-/// **DRY Consolidation**: Provides token bucket-based rate limiting with per-peer
-/// and global limits. Moved from aura-sync to provide unified rate limiting for
-/// all crates.
+/// Provides token bucket-based rate limiting with per-peer and
+/// global limits. Moved from aura-sync to provide unified rate limiting
+/// for all crates.
 pub struct RateLimiter {
     /// Configuration
     config: RateLimitConfig,

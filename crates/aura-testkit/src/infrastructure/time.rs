@@ -118,18 +118,30 @@ impl Drop for TimeGuard {
 pub mod assertions {
     use super::*;
     use aura_core::{AuraError, AuraResult};
+    use futures::{future::Fuse, FutureExt};
 
     /// Assert that an operation completes within a duration
     pub async fn assert_completes_within<F, T>(duration: Duration, future: F) -> AuraResult<T>
     where
         F: std::future::Future<Output = AuraResult<T>>,
     {
-        match tokio::time::timeout(duration, future).await {
-            Ok(result) => result,
-            Err(_) => Err(AuraError::invalid(format!(
-                "Operation did not complete within {:?}",
-                duration
-            ))),
+        let deadline = std::time::Instant::now() + duration;
+        futures::pin_mut!(future);
+        let mut fut: Fuse<_> = future.fuse();
+
+        loop {
+            if let Some(res) = futures::future::poll_immediate(&mut fut).await {
+                return res;
+            }
+
+            if std::time::Instant::now() >= deadline {
+                return Err(AuraError::invalid(format!(
+                    "Operation did not complete within {:?}",
+                    duration
+                )));
+            }
+
+            std::thread::yield_now();
         }
     }
 
@@ -138,7 +150,7 @@ pub mod assertions {
     where
         F: std::future::Future<Output = AuraResult<T>>,
     {
-        let start = tokio::time::Instant::now();
+        let start = std::time::Instant::now();
         let result = future.await?;
         let elapsed = start.elapsed();
 
@@ -163,18 +175,17 @@ pub mod assertions {
     {
         freeze_time_at_epoch();
 
-        // Start the test
-        let result = tokio::spawn(async move { test_fn() });
+        // Execute the test synchronously to keep runtime-agnostic
+        let handle = std::thread::spawn(test_fn);
 
         // Progress through time steps
         for (advance_by, wait_for) in steps {
-            tokio::time::sleep(wait_for).await;
+            std::thread::sleep(wait_for);
             advance_time_by(advance_by);
         }
 
-        // Get the result
-        let output = result
-            .await
+        let output = handle
+            .join()
             .map_err(|e| AuraError::invalid(format!("Test panicked: {:?}", e)))?;
 
         reset_time();

@@ -15,6 +15,7 @@ use aura_core::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Core chat service that manages groups, messages, and integrates with AMP
 pub struct ChatService<E> {
@@ -236,9 +237,14 @@ where
 
         let mut messages = Vec::new();
         for (_, key) in entries.into_iter().rev() {
-            if let Ok(Some(raw)) = self.effects.retrieve(&key).await {
-                if let Ok(msg) = serde_json::from_slice::<ChatMessage>(&raw) {
-                    messages.push(msg);
+            // Extract message ID from the index key
+            // Key format: chat_group_message:{group_id}:{timestamp}:{message_id}
+            if let Some(message_id_str) = key.split(':').last() {
+                if let Ok(message_id_uuid) = Uuid::parse_str(message_id_str) {
+                    let message_id = ChatMessageId(message_id_uuid);
+                    if let Ok(Some(msg)) = self.get_message(&message_id).await {
+                        messages.push(msg);
+                    }
                 }
             }
         }
@@ -678,9 +684,9 @@ mod tests {
     use async_trait::async_trait;
     use aura_core::effects::storage::{StorageError, StorageStats};
     use aura_core::time::PhysicalTime;
+    use futures::lock::Mutex;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU64, Ordering};
-    use tokio::sync::Mutex;
     use uuid::Uuid;
 
     #[derive(Debug, Default)]
@@ -841,8 +847,13 @@ mod tests {
             .unwrap();
 
         let history = service.get_history(&group.id, None, None).await.unwrap();
-        assert_eq!(history.len(), 1);
-        assert_eq!(history[0].content, sent.content);
+        // Should have 2 messages: system message for group creation + our sent message
+        assert_eq!(history.len(), 2);
+        assert_eq!(
+            history[0].content,
+            format!("Chat group '{}' created", "chat")
+        );
+        assert_eq!(history[1].content, sent.content);
 
         let inbox_keys = effects.list_keys(Some("chat_inbox:")).await.unwrap();
         assert_eq!(inbox_keys.len(), group.members.len());

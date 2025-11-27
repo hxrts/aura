@@ -154,15 +154,38 @@ impl StorageEffects for FilesystemStorageHandler {
     }
 
     async fn stats(&self) -> Result<StorageStats, StorageError> {
-        // TODO: In production, this would calculate real statistics
-        // For now, return default stats
+        let mut key_count: u64 = 0;
+        let mut total_size: u64 = 0;
+
+        if let Ok(mut entries) = fs::read_dir(&self.base_path).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let path = entry.path();
+                if path.is_file() {
+                    key_count += 1;
+                    if let Ok(metadata) = entry.metadata().await {
+                        total_size = total_size.saturating_add(metadata.len());
+                    }
+                }
+            }
+        }
+
         Ok(StorageStats {
-            key_count: 0,
-            total_size: 0,
+            key_count,
+            total_size,
             available_space: None,
             backend_type: "filesystem".to_string(),
         })
     }
+}
+
+fn apply_keystream(data: &[u8], key: &[u8]) -> Vec<u8> {
+    if key.is_empty() {
+        return data.to_vec();
+    }
+    data.iter()
+        .enumerate()
+        .map(|(i, b)| b ^ key[i % key.len()])
+        .collect()
 }
 
 /// Encrypted storage handler for production use
@@ -174,8 +197,8 @@ impl StorageEffects for FilesystemStorageHandler {
 pub struct EncryptedStorageHandler {
     /// Base filesystem handler for actual storage
     filesystem_handler: FilesystemStorageHandler,
-    /// Encryption configuration (placeholder for future implementation)
-    _encryption_config: String,
+    /// Optional symmetric key used for simple stream-style encryption
+    encryption_key: Option<Vec<u8>>,
 }
 
 impl EncryptedStorageHandler {
@@ -183,10 +206,10 @@ impl EncryptedStorageHandler {
     ///
     /// Note: The `encryption_key` parameter is currently for future implementation.
     /// In production, this would handle proper key management and encryption.
-    pub fn new(storage_path: PathBuf, _encryption_key: Option<Vec<u8>>) -> Self {
+    pub fn new(storage_path: PathBuf, encryption_key: Option<Vec<u8>>) -> Self {
         Self {
             filesystem_handler: FilesystemStorageHandler::new(storage_path),
-            _encryption_config: "placeholder".to_string(),
+            encryption_key,
         }
     }
 
@@ -204,7 +227,14 @@ impl EncryptedStorageHandler {
     pub fn stack_info(&self) -> HashMap<String, String> {
         let mut info = HashMap::new();
         info.insert("type".to_string(), "encrypted_filesystem".to_string());
-        info.insert("encryption".to_string(), "placeholder".to_string());
+        info.insert(
+            "encryption".to_string(),
+            if self.encryption_key.is_some() {
+                "xor-keystream".to_string()
+            } else {
+                "plaintext".to_string()
+            },
+        );
         info.insert(
             "base_path".to_string(),
             self.filesystem_handler.base_path.display().to_string(),
@@ -216,15 +246,22 @@ impl EncryptedStorageHandler {
 #[async_trait]
 impl StorageEffects for EncryptedStorageHandler {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-        // TODO: Encrypt data before storing
-        // For now, delegate directly to filesystem handler
-        self.filesystem_handler.store(key, value).await
+        let payload = if let Some(k) = &self.encryption_key {
+            apply_keystream(&value, k)
+        } else {
+            value
+        };
+        self.filesystem_handler.store(key, payload).await
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-        // TODO: Decrypt data after retrieving
-        // For now, delegate directly to filesystem handler
-        self.filesystem_handler.retrieve(key).await
+        let data = self.filesystem_handler.retrieve(key).await?;
+        let decrypted = if let (Some(ciphertext), Some(k)) = (&data, &self.encryption_key) {
+            Some(apply_keystream(ciphertext, k))
+        } else {
+            data
+        };
+        Ok(decrypted)
     }
 
     async fn remove(&self, key: &str) -> Result<bool, StorageError> {

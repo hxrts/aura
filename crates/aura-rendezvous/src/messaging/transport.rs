@@ -8,14 +8,12 @@ use aura_core::effects::{NetworkEffects, NetworkError};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_protocol::effects::AuraEffects;
-use aura_protocol::guards::effect_system_trait::GuardEffectSystem;
 use aura_protocol::guards::send_guard::create_send_guard;
-use futures::executor;
+use aura_protocol::guards::GuardEffectSystem;
+use async_lock::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::RwLock;
 
 /// Real NetworkTransport implementation using aura-effects transport handlers
 /// All sends go through guard chain to enforce authorization → flow → leakage → journal sequence.
@@ -51,7 +49,11 @@ impl NetworkTransport {
     }
 
     /// Send data to a specific peer using guard chain and network effect system
-    pub async fn send_with_guard_chain<E: GuardEffectSystem + aura_core::PhysicalTimeEffects>(
+    pub async fn send_with_guard_chain<
+        E: aura_protocol::guards::GuardEffects
+            + aura_protocol::guards::GuardEffectSystem
+            + aura_core::PhysicalTimeEffects,
+    >(
         &self,
         recipient: &DeviceId,
         data: Vec<u8>,
@@ -181,7 +183,9 @@ impl NetworkTransport {
 
     /// Broadcast a message to all connected peers using guard chain
     pub async fn broadcast_with_guard_chain<
-        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+        E: aura_protocol::guards::GuardEffects
+            + aura_protocol::guards::GuardEffectSystem
+            + aura_core::PhysicalTimeEffects,
     >(
         &self,
         data: Vec<u8>,
@@ -370,7 +374,11 @@ impl SbbTransportBridge {
             device_id,
             effects.clone(),
         )));
-        let sender = NetworkTransportSender::new(transport, effects.clone());
+        let sender = NetworkTransportSender::new(
+            transport,
+            effects.clone(),
+            AuthorityId::from(device_id.0),
+        );
 
         Self {
             flooding_coordinator,
@@ -661,15 +669,16 @@ pub struct NetworkTransportSender {
     effects: GuardEffectArc,
 }
 
-/// Local wrapper to provide GuardEffectSystem over Arc<dyn AuraEffects>
+/// Local wrapper to provide aura_protocol::guards::GuardEffects over Arc<dyn AuraEffects>
 #[derive(Clone)]
 struct GuardEffectArc {
     inner: Arc<dyn AuraEffects>,
+    authority_id: AuthorityId,
 }
 
 impl GuardEffectArc {
-    fn new(inner: Arc<dyn AuraEffects>) -> Self {
-        Self { inner }
+    fn new(inner: Arc<dyn AuraEffects>, authority_id: AuthorityId) -> Self {
+        Self { inner, authority_id }
     }
 }
 
@@ -743,20 +752,17 @@ impl LeakageEffects for GuardEffectArc {
     }
 }
 
-impl aura_protocol::guards::effect_system_trait::GuardEffectSystem for GuardEffectArc {
+impl GuardEffectSystem for GuardEffectArc {
     fn authority_id(&self) -> AuthorityId {
-        match executor::block_on(async { self.inner.get_config("authority_id").await }) {
-            Ok(id_str) => id_str.parse().unwrap_or_else(|_| AuthorityId::new()),
-            Err(_) => AuthorityId::new(),
-        }
+        self.authority_id
     }
 
     fn execution_mode(&self) -> aura_core::effects::ExecutionMode {
         AuraEffects::execution_mode(self.inner.as_ref())
     }
 
-    fn get_metadata(&self, key: &str) -> Option<String> {
-        executor::block_on(async { self.inner.get_config(key).await }).ok()
+    fn get_metadata(&self, _key: &str) -> Option<String> {
+        None
     }
 
     fn can_perform_operation(&self, _operation: &str) -> bool {
@@ -777,8 +783,7 @@ impl aura_core::effects::PhysicalTimeEffects for GuardEffectArc {
     }
 
     async fn sleep_ms(&self, ms: u64) -> Result<(), aura_core::effects::TimeError> {
-        tokio::time::sleep(Duration::from_millis(ms)).await;
-        Ok(())
+        self.inner.sleep_ms(ms).await
     }
 }
 
@@ -941,16 +946,22 @@ impl aura_protocol::effects::JournalEffects for GuardEffectArc {
 
 impl NetworkTransportSender {
     /// Create new transport sender from NetworkTransport
-    pub fn new(transport: Arc<RwLock<NetworkTransport>>, effects: Arc<dyn AuraEffects>) -> Self {
+    pub fn new(
+        transport: Arc<RwLock<NetworkTransport>>,
+        effects: Arc<dyn AuraEffects>,
+        authority_id: AuthorityId,
+    ) -> Self {
         Self {
             transport,
-            effects: GuardEffectArc::new(effects),
+            effects: GuardEffectArc::new(effects, authority_id),
         }
     }
 
     /// Send message with guard chain enforcement
     pub async fn send_to_peer_with_guard_chain<
-        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+        E: aura_protocol::guards::GuardEffects
+            + aura_protocol::guards::GuardEffectSystem
+            + aura_core::PhysicalTimeEffects,
     >(
         &self,
         peer: DeviceId,
@@ -1198,7 +1209,11 @@ mod tests {
         let context_id = ContextId::new();
         let transport = NetworkTransport::new(device_id, effects, context_id);
 
-        let sender = NetworkTransportSender::new(transport, guard_effects);
+        let sender = NetworkTransportSender::new(
+            transport,
+            guard_effects,
+            AuthorityId::from(device_id.0),
+        );
 
         // Should create successfully
         let unreachable_peer = DeviceId::new();
@@ -1222,7 +1237,11 @@ mod tests {
         let guard_effects = system.clone() as Arc<dyn AuraEffects>;
         let context_id = ContextId::new();
         let transport = NetworkTransport::new(device_id, network_effects, context_id);
-        let sender = NetworkTransportSender::new(transport, guard_effects);
+        let sender = NetworkTransportSender::new(
+            transport,
+            guard_effects,
+            AuthorityId::from(device_id.0),
+        );
 
         bridge.set_transport_sender(Box::new(sender));
 

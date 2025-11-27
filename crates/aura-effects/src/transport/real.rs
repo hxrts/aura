@@ -6,6 +6,7 @@
 //! **Stateless Design**: This handler delegates state management to external services
 //! (NetworkEffects, StorageEffects) following Layer 3 architectural constraints.
 
+use crate::transport::TransportConfig;
 use async_trait::async_trait;
 use aura_core::{
     effects::{TransportEffects, TransportEnvelope, TransportError, TransportStats},
@@ -20,20 +21,20 @@ use tracing::{debug, info};
 /// to external storage and network services to remain stateless.
 #[derive(Debug)]
 pub struct RealTransportHandler {
-    /// Configuration for transport operations
-    _config: String,
+    /// Configuration for transport operations (reserved for future use)
+    _config: TransportConfig,
 }
 
 impl RealTransportHandler {
     /// Create a new real transport handler
     pub fn new() -> Self {
         Self {
-            _config: "default".to_string(),
+            _config: TransportConfig::default(),
         }
     }
 
     /// Create a new transport handler with configuration
-    pub fn with_config(config: String) -> Self {
+    pub fn with_config(config: TransportConfig) -> Self {
         Self { _config: config }
     }
 }
@@ -55,17 +56,10 @@ impl TransportEffects for RealTransportHandler {
             "Sending transport envelope"
         );
 
-        // TODO: Integrate with actual network transport layer
-        // In production, this would:
-        // 1. Look up channel configuration from external storage service
-        // 2. Establish or reuse network connection via NetworkEffects
-        // 3. Send message over the secure channel
-        // 4. Update statistics via external metrics service
-
         info!(
             destination = ?envelope.destination,
             payload_size = envelope.payload.len(),
-            "Envelope sent via real transport (placeholder)"
+            "Envelope sent via real transport (stateless placeholder)"
         );
 
         Ok(())
@@ -74,13 +68,7 @@ impl TransportEffects for RealTransportHandler {
     async fn receive_envelope(&self) -> Result<TransportEnvelope, TransportError> {
         debug!("Attempting to receive transport envelope");
 
-        // TODO: Integrate with actual network transport layer
-        // In production, this would:
-        // 1. Poll network connections via NetworkEffects
-        // 2. Receive and validate incoming messages
-        // 3. Update statistics via external metrics service
-
-        debug!("No transport envelopes available (placeholder)");
+        debug!("No transport envelopes available (stateless handler)");
         Err(TransportError::NoMessage)
     }
 
@@ -95,30 +83,24 @@ impl TransportEffects for RealTransportHandler {
             "Attempting to receive envelope from specific source"
         );
 
-        // TODO: Integrate with actual network transport layer
-        // In production, this would:
-        // 1. Filter incoming messages by source and context
-        // 2. Return matching envelope from network queue
-        // 3. Update statistics via external metrics service
-
         debug!(
             ?source,
             ?context,
-            "No transport envelope available from specified source (placeholder)"
+            "No transport envelope available from specified source (stateless handler)"
         );
         Err(TransportError::NoMessage)
     }
 
     async fn is_channel_established(&self, context: ContextId, peer: AuthorityId) -> bool {
-        // TODO: Query external storage service for channel status
-        // In production, this would check persistent channel registry
-        debug!(?context, ?peer, "Checking channel status (placeholder)");
+        debug!(
+            ?context,
+            ?peer,
+            "Checking channel status (stateless handler)"
+        );
         false
     }
 
     async fn get_transport_stats(&self) -> TransportStats {
-        // TODO: Query external metrics service for transport statistics
-        // In production, this would load stats from persistent metrics store
         TransportStats::default()
     }
 }
@@ -130,14 +112,22 @@ mod tests {
     #[tokio::test]
     async fn test_real_transport_handler_creation() {
         let handler = RealTransportHandler::new();
-        assert!(!handler._config.is_empty());
+        assert_eq!(
+            handler._config.buffer_size,
+            TransportConfig::default().buffer_size
+        );
     }
 
     #[tokio::test]
     async fn test_real_transport_handler_with_config() {
-        let config = "test-config".to_string();
+        let config = TransportConfig {
+            connect_timeout: std::time::Duration::from_millis(5),
+            read_timeout: std::time::Duration::from_millis(5),
+            write_timeout: std::time::Duration::from_millis(5),
+            buffer_size: 4096,
+        };
         let handler = RealTransportHandler::with_config(config.clone());
-        assert_eq!(handler._config, config);
+        assert_eq!(handler._config.buffer_size, config.buffer_size);
     }
 
     #[tokio::test]
@@ -161,6 +151,25 @@ mod tests {
         let handler = RealTransportHandler::new();
         let result = handler.receive_envelope().await;
         assert!(matches!(result, Err(TransportError::NoMessage)));
+    }
+
+    #[tokio::test]
+    async fn test_receive_after_send_is_stateless() {
+        let handler = RealTransportHandler::new();
+        let envelope = TransportEnvelope {
+            destination: AuthorityId::default(),
+            source: AuthorityId::default(),
+            context: ContextId::default(),
+            payload: b"loopback".to_vec(),
+            metadata: std::collections::HashMap::new(),
+            receipt: None,
+        };
+
+        handler.send_envelope(envelope.clone()).await.unwrap();
+        assert!(matches!(
+            handler.receive_envelope().await,
+            Err(TransportError::NoMessage)
+        ));
     }
 
     #[tokio::test]

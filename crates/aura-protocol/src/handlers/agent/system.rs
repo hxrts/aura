@@ -5,7 +5,7 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 use super::{auth::AuthenticationHandler, session::MemorySessionHandler};
 use crate::effects::{
@@ -511,8 +511,8 @@ mod tests {
     use super::*;
     use aura_macros::aura_test;
     use aura_testkit::*;
+    use async_lock::RwLock;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
 
     #[aura_test]
     async fn test_agent_system_creation() -> aura_core::AuraResult<()> {

@@ -365,8 +365,10 @@ impl EffectRegistry {
         _session: LocalSessionType,
         _ctx: &mut HandlerContext,
     ) -> Result<(), RegistryError> {
-        // TODO: Simplified stub - session execution would normally use choreographic handlers
-        Ok(())
+        Err(RegistryError::OperationNotSupported {
+            effect_type: EffectType::Choreographic,
+            operation: "execute_session".to_string(),
+        })
     }
 
     /// Get the execution mode of the registry
@@ -426,8 +428,10 @@ impl Handler for EffectRegistry {
         _session: LocalSessionType,
         _ctx: &HandlerContext,
     ) -> Result<(), HandlerError> {
-        // TODO: Simplified stub - session execution would normally route to choreographic handlers
-        Ok(())
+        let err = std::io::Error::other("session execution not wired in registry");
+        Err(HandlerError::SessionExecution {
+            source: Box::new(err),
+        })
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {

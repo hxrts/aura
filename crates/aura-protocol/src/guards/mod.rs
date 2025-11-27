@@ -61,6 +61,8 @@ pub mod flow;
 pub mod journal_coupler;
 pub mod privacy;
 pub mod send_guard;
+pub mod pure_executor;
+pub mod pure;
 
 // Biscuit-based guards (new implementation)
 pub mod biscuit_evaluator;
@@ -78,9 +80,40 @@ pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 
 // use crate::wot::EffectSystemInterface; // Legacy interface removed - use Biscuit authorization instead
 use aura_core::AuraResult;
+use aura_core::effects::{
+    AuthorizationEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects, RandomEffects,
+    StorageEffects,
+};
 // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
 use biscuit_auth::Biscuit;
 use std::future::Future;
+
+/// Composite effect requirements for guard evaluation/execution.
+pub trait GuardEffects:
+    JournalEffects
+    + StorageEffects
+    + FlowBudgetEffects
+    + PhysicalTimeEffects
+    + RandomEffects
+    + AuthorizationEffects
+    + LeakageEffects
+    + Send
+    + Sync
+{
+}
+
+impl<T> GuardEffects for T where
+    T: JournalEffects
+        + StorageEffects
+        + FlowBudgetEffects
+        + PhysicalTimeEffects
+        + RandomEffects
+        + AuthorizationEffects
+        + LeakageEffects
+        + Send
+        + Sync
+{
+}
 
 /// Protocol execution guard combining authorization checking, delta application, and privacy tracking
 #[derive(Debug, Clone)]

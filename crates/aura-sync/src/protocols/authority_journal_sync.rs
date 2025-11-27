@@ -3,7 +3,6 @@
 //! This module provides journal synchronization for the authority-centric model,
 //! removing all device ID references and using authority IDs instead.
 
-use aura_effects::time::monotonic_now;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -11,9 +10,11 @@ use serde::{Deserialize, Serialize};
 use crate::core::SyncResult;
 use crate::infrastructure::RetryPolicy;
 use aura_core::time::OrderTime;
-use aura_core::{Authority, AuthorityId};
+use aura_core::{hash, Authority, AuthorityId};
 use aura_journal::{Fact, FactJournal as Journal, JournalNamespace};
 use aura_protocol::effects::AuraEffects;
+use bincode;
+use std::collections::BTreeSet;
 
 /// Authority-based journal sync configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -97,7 +98,11 @@ impl AuthorityJournalSyncProtocol {
         local_authority: &dyn Authority,
         peers: Vec<AuthorityId>,
     ) -> SyncResult<AuthoritySyncResult> {
-        let start = monotonic_now();
+        let start = effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
         let mut result = AuthoritySyncResult {
             facts_sent: 0,
             facts_received: 0,
@@ -128,7 +133,13 @@ impl AuthorityJournalSyncProtocol {
             }
         }
 
-        result.duration = start.elapsed();
+        result.duration = Duration::from_millis(
+            effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms.saturating_sub(start))
+                .unwrap_or(0),
+        );
         Ok(result)
     }
 
@@ -153,14 +164,29 @@ impl AuthorityJournalSyncProtocol {
         let local_digest = self.compute_digest(local_authority.authority_id(), local_journal, now);
         let remote_digest = self.request_digest(effects, peer_id).await?;
 
-        // Compute delta
-        let (to_send, to_receive) = self
-            .compute_delta(local_journal, &local_digest, &remote_digest)
+        // Fetch remote journal snapshot
+        let remote_journal = self.get_authority_journal(effects, peer_id).await?;
+
+        // Compute delta based on current journal snapshots
+        let (to_send, to_receive) =
+            self.compute_delta(local_journal, &remote_journal, &local_digest, &remote_digest);
+
+        // Apply local → remote (persist remote journal with new facts)
+        let facts_sent =
+            self.send_facts(effects, peer_id, remote_journal.clone(), to_send)
+                .await?;
+
+        // Apply remote → local (persist local journal with received facts)
+        let facts_received = self
+            .receive_facts(effects, peer_id, remote_journal, to_receive)
             .await?;
 
-        // Exchange facts
-        let facts_sent = self.send_facts(effects, peer_id, to_send).await?;
-        let facts_received = self.receive_facts(effects, peer_id, to_receive).await?;
+        let mut merged_local = local_journal.clone();
+        for fact in &facts_received {
+            merged_local.add_fact(fact.clone())?;
+        }
+        self.persist_authority_journal(effects, local_authority.authority_id(), &merged_local)
+            .await?;
 
         Ok(AuthoritySyncResult {
             facts_sent: facts_sent.len(),
@@ -173,11 +199,21 @@ impl AuthorityJournalSyncProtocol {
     /// Get journal for an authority
     async fn get_authority_journal<E: AuraEffects>(
         &self,
-        _effects: &E,
+        effects: &E,
         authority_id: AuthorityId,
     ) -> SyncResult<Journal> {
-        // TODO: Load from storage via effects
-        Ok(Journal::new(JournalNamespace::Authority(authority_id)))
+        let key = Self::storage_key(authority_id);
+        let maybe_bytes = effects
+            .retrieve(&key)
+            .await
+            .map_err(|e| aura_core::AuraError::storage(format!("load journal: {}", e)))?;
+
+        if let Some(bytes) = maybe_bytes {
+            bincode::deserialize::<Journal>(&bytes)
+                .map_err(|e| aura_core::AuraError::serialization(format!("decode journal: {}", e)))
+        } else {
+            Ok(Journal::new(JournalNamespace::Authority(authority_id)))
+        }
     }
 
     /// Compute digest of journal
@@ -190,8 +226,23 @@ impl AuthorityJournalSyncProtocol {
         let facts: Vec<&Fact> = journal.iter_facts().collect();
         let fact_count = facts.len();
 
-        // TODO: Compute actual merkle root
-        let fact_root = [0u8; 32];
+        let mut leaf_hashes: Vec<[u8; 32]> = facts
+            .iter()
+            .map(|fact| {
+                bincode::serialize(fact)
+                    .map_err(|e| aura_core::AuraError::serialization(e.to_string()))
+                    .map(|bytes| hash::hash(&bytes))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap_or_default();
+
+        // Deterministic merkle-like root: hash concatenated sorted leaves
+        leaf_hashes.sort();
+        let mut accumulator = Vec::with_capacity(leaf_hashes.len() * 32);
+        for leaf in &leaf_hashes {
+            accumulator.extend_from_slice(leaf);
+        }
+        let fact_root = hash::hash(&accumulator);
 
         AuthorityJournalDigest {
             authority_id,
@@ -204,54 +255,111 @@ impl AuthorityJournalSyncProtocol {
     /// Request digest from peer
     async fn request_digest<E: AuraEffects>(
         &self,
-        _effects: &E,
+        effects: &E,
         peer_id: AuthorityId,
     ) -> SyncResult<AuthorityJournalDigest> {
-        // TODO: Implement network request
-        Ok(AuthorityJournalDigest {
-            authority_id: peer_id,
-            fact_count: 0,
-            fact_root: [0u8; 32],
-            timestamp: 0,
-        })
+        let peer_journal = self.get_authority_journal(effects, peer_id).await?;
+        let now = effects.physical_time().await?.ts_ms;
+        Ok(self.compute_digest(peer_id, &peer_journal, now))
     }
 
     /// Compute facts to exchange
-    async fn compute_delta(
+    fn compute_delta(
         &self,
         local_journal: &Journal,
+        remote_journal: &Journal,
         _local_digest: &AuthorityJournalDigest,
         _remote_digest: &AuthorityJournalDigest,
-    ) -> SyncResult<(Vec<Fact>, Vec<OrderTime>)> {
-        // TODO: Implement efficient delta computation
-        // For now, send all facts and request none
-        let to_send: Vec<Fact> = local_journal.iter_facts().cloned().collect();
+    ) -> (Vec<Fact>, Vec<OrderTime>) {
+        let local_set: BTreeSet<_> = local_journal.facts.iter().cloned().collect();
+        let remote_set: BTreeSet<_> = remote_journal.facts.iter().cloned().collect();
 
-        let to_receive = vec![];
+        // Facts to send: present locally but not remotely
+        let mut to_send: Vec<Fact> = local_set
+            .difference(&remote_set)
+            .cloned()
+            .take(self.config.batch_size)
+            .collect();
 
-        Ok((to_send, to_receive))
+        // Facts to receive: present remotely but not locally (represented by order)
+        let mut to_receive: Vec<OrderTime> = remote_set
+            .difference(&local_set)
+            .map(|f| f.order.clone())
+            .take(self.config.batch_size)
+            .collect();
+
+        to_send.shrink_to_fit();
+        to_receive.shrink_to_fit();
+
+        (to_send, to_receive)
     }
 
-    /// Send facts to peer
+    /// Send facts to peer (storage-backed merge for now)
     async fn send_facts<E: AuraEffects>(
         &self,
-        _effects: &E,
-        _peer_id: AuthorityId,
+        effects: &E,
+        peer_id: AuthorityId,
+        mut peer_journal: Journal,
         facts: Vec<Fact>,
     ) -> SyncResult<Vec<Fact>> {
-        // TODO: Implement network send
+        if facts.is_empty() {
+            return Ok(facts);
+        }
+
+        for fact in &facts {
+            peer_journal.add_fact(fact.clone())?;
+        }
+
+        self.persist_authority_journal(effects, peer_id, &peer_journal)
+            .await?;
         Ok(facts)
     }
 
-    /// Receive facts from peer
+    /// Receive facts from peer (select missing facts by order)
     async fn receive_facts<E: AuraEffects>(
         &self,
         _effects: &E,
-        _peer_id: AuthorityId,
-        _fact_ids: Vec<OrderTime>,
+        peer_id: AuthorityId,
+        remote_journal: Journal,
+        fact_ids: Vec<OrderTime>,
     ) -> SyncResult<Vec<Fact>> {
-        // TODO: Implement network receive
-        Ok(vec![])
+        let mut received = Vec::new();
+        if fact_ids.is_empty() {
+            return Ok(received);
+        }
+
+        for fact in remote_journal.iter_facts() {
+            if fact_ids.contains(&fact.order) {
+                received.push(fact.clone());
+            }
+        }
+
+        tracing::debug!(
+            "Fetched {} facts from peer {} based on delta plan",
+            received.len(),
+            peer_id
+        );
+
+        Ok(received)
+    }
+
+    async fn persist_authority_journal<E: AuraEffects>(
+        &self,
+        effects: &E,
+        authority_id: AuthorityId,
+        journal: &Journal,
+    ) -> SyncResult<()> {
+        let key = Self::storage_key(authority_id);
+        let bytes = bincode::serialize(journal)
+            .map_err(|e| aura_core::AuraError::serialization(format!("encode journal: {}", e)))?;
+        effects
+            .store(&key, bytes)
+            .await
+            .map_err(|e| aura_core::AuraError::storage(format!("persist journal: {}", e)))
+    }
+
+    fn storage_key(authority_id: AuthorityId) -> String {
+        format!("authority_journal/{}", authority_id)
     }
 }
 

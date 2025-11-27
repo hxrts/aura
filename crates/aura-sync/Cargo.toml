@@ -26,6 +26,7 @@ async-trait = { workspace = true }
 uuid = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true }
+async-lock = "3"
 blake3 = { workspace = true }
 bincode = { workspace = true }
 parking_lot = { workspace = true }

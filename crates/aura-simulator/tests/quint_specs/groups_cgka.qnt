@@ -100,11 +100,11 @@ module GroupsCGKA {
 
     // ========== Helper Functions ==========
 
-    // Check if position is a leaf
-    pure def isLeaf(position: TreePosition): bool = {
-        // In binary tree, leaves have no children
-        // TODO fix - Simplified check
-        position >= 0
+    // Check if position is a leaf: a node with no children present in the tree
+    pure def isLeaf(tree: BeeKemTree, position: TreePosition): bool = {
+        val left = 2 * position + 1,
+        val right = 2 * position + 2,
+        not(tree.nodes.keys().contains(left)) and not(tree.nodes.keys().contains(right))
     }
 
     // Get parent position
@@ -128,9 +128,9 @@ module GroupsCGKA {
 
     // Find empty leaf position
     pure def findEmptyLeaf(tree: BeeKemTree): TreePosition = {
-        // Find first empty leaf position
+        // Find first empty leaf position (lowest index leaf with isEmpty flag)
         tree.nodes.keys().filter(pos =>
-            isLeaf(pos) and tree.nodes.get(pos).isEmpty
+            isLeaf(tree, pos) and tree.nodes.get(pos).isEmpty
         ).fold(-1, (acc, pos) => if (acc == -1) pos else acc)
     }
 
@@ -348,13 +348,55 @@ module GroupsCGKA {
             val newRoster = {
                 epoch: operation.targetEpoch,
                 members: newMembers,
-                positions: state.roster.positions  // TODO fix - Simplified: would need recomputation
-                    .filter((m, _) => m.in(newMembers)),
+                positions: operation.treeUpdates.foldl(
+                    state.roster.positions.filter((m, _) => m.in(newMembers)),
+                    (positions, update) =>
+                        update.updateType.match {
+                            | AddLeaf(memberId, _) =>
+                                positions.put(memberId, update.position)
+                            | RemoveLeaf(memberId) =>
+                                positions.filter((m, _) => m != memberId)
+                            | UpdateNode(_) => positions
+                        }
+                ),
                 size: newMembers.size()
             },
-            // Apply tree updates (TODO fix - Simplified)
+            // Apply tree updates by mutating the tree nodes and propagating path updates
             val newTree = operation.treeUpdates.foldl(state.tree, (tree, update) =>
-                tree  // TODO fix - Simplified: would actually update nodes
+                val baseNodes = update.updateType.match {
+                    | AddLeaf(memberId, keyPackage) =>
+                        tree.nodes.put(update.position, {
+                            position: update.position,
+                            publicKey: keyPackage.leafKey,
+                            isEmpty: false
+                        })
+                    | RemoveLeaf(memberId) =>
+                        tree.nodes.put(update.position, {
+                            position: update.position,
+                            publicKey: PublicKey("removed_" + memberId),
+                            isEmpty: true
+                        })
+                    | UpdateNode(newPublicKey) =>
+                        tree.nodes.put(update.position, {
+                            position: update.position,
+                            publicKey: newPublicKey,
+                            isEmpty: false
+                        })
+                },
+                val treeWithBase = tree
+                    .with("nodes", baseNodes)
+                    .with("size", if (update.position + 1 > tree.size) update.position + 1 else tree.size),
+                val treeWithPaths = update.pathUpdates.foldl(treeWithBase, (t, pathUpdate) =>
+                    t.with("nodes", t.nodes.put(pathUpdate.position, {
+                        position: pathUpdate.position,
+                        publicKey: pathUpdate.publicKey,
+                        isEmpty: false
+                    }))
+                ),
+                treeWithPaths.with(
+                    "rootSecret",
+                    bytes("root_" + operation.operationId + "_" + operation.targetEpoch.toString())
+                )
             ),
             // Derive new application secret
             val newAppSecret = deriveApplicationSecret(newTree, groupId, operation.targetEpoch),
@@ -430,7 +472,7 @@ module GroupsCGKA {
     invariant treeSizeConsistency = {
         groups.values().forall(state =>
             // Tree has enough leaves for members
-            state.tree.nodes.keys().filter(pos => isLeaf(pos)).size() >= state.roster.size
+            state.tree.nodes.keys().filter(pos => isLeaf(state.tree, pos)).size() >= state.roster.size
         )
     }
 
@@ -491,10 +533,15 @@ module GroupsCGKA {
         always(groups.values().forall(state =>
             // Multiple members can propose operations
             state.roster.members.size() > 1 implies
-                state.roster.members.forall(member =>
-                    // Each member can create valid operation
-                    true  // TODO fix - Simplified: would check operation validity
-                )
+            state.roster.members.forall(member =>
+                // Each member can construct a valid key update operation for the current epoch
+                member.in(state.roster.positions.keys()) and
+                isValidRosterDelta({
+                    previousSize: state.roster.size,
+                    addedMembers: Set(),
+                    removedMembers: Set()
+                }, state.roster)
+            )
         ))
     }
 

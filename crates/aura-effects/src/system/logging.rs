@@ -107,12 +107,23 @@ pub struct LoggingStats {
 pub struct LoggingSystemHandler {
     /// Configuration for logging operations
     config: LoggingConfig,
+    /// In-memory stats (best-effort, not persisted)
+    stats: std::sync::Arc<std::sync::Mutex<LoggingStats>>,
+    /// Recent log entries (bounded)
+    recent_logs: std::sync::Arc<std::sync::Mutex<Vec<LogEntry>>>,
+    /// Recent audit entries (bounded)
+    recent_audit_logs: std::sync::Arc<std::sync::Mutex<Vec<AuditEntry>>>,
 }
 
 impl LoggingSystemHandler {
     /// Create a new logging system handler
     pub fn new(config: LoggingConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            stats: std::sync::Arc::new(std::sync::Mutex::new(LoggingStats::default())),
+            recent_logs: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+            recent_audit_logs: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
     }
 
     /// Create with default configuration
@@ -138,18 +149,33 @@ impl LoggingSystemHandler {
 
     /// Push log entry (stateless - delegates to external logging service)
     async fn push_log(&self, entry: LogEntry) {
-        // TODO: In production, this would send to external logging service
         tracing::debug!(
             level = entry.level,
             component = entry.component,
             message = entry.message,
             "Log entry sent via logging handler"
         );
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.total_logs = stats.total_logs.saturating_add(1);
+            match entry.level.as_str() {
+                "error" => stats.error_logs = stats.error_logs.saturating_add(1),
+                "warn" => stats.warn_logs = stats.warn_logs.saturating_add(1),
+                "info" => stats.info_logs = stats.info_logs.saturating_add(1),
+                _ => stats.debug_logs = stats.debug_logs.saturating_add(1),
+            }
+        }
+        if let Ok(mut logs) = self.recent_logs.lock() {
+            logs.push(entry);
+            let target = self.config.max_log_entries;
+            if logs.len() > target {
+                let overflow = logs.len() - target;
+                logs.drain(0..overflow);
+            }
+        }
     }
 
     /// Push audit entry (stateless - delegates to external audit service)
     async fn push_audit(&self, entry: AuditEntry) {
-        // TODO: In production, this would send to external audit service
         tracing::info!(
             event_type = entry.event_type,
             actor = ?entry.actor,
@@ -158,6 +184,17 @@ impl LoggingSystemHandler {
             outcome = entry.outcome,
             "Audit entry sent via logging handler"
         );
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.total_audit_logs = stats.total_audit_logs.saturating_add(1);
+        }
+        if let Ok(mut logs) = self.recent_audit_logs.lock() {
+            logs.push(entry);
+            let target = self.config.max_audit_entries;
+            if logs.len() > target {
+                let overflow = logs.len() - target;
+                logs.drain(0..overflow);
+            }
+        }
     }
 
     /// Log a structured message
@@ -217,29 +254,31 @@ impl LoggingSystemHandler {
 
     /// Get recent logs (stateless - delegates to external service)
     pub async fn get_recent_logs(&self, count: usize) -> Vec<LogEntry> {
-        // TODO: In production, this would query external logging service
-        tracing::debug!(
-            count = count,
-            "Getting recent logs via logging handler (placeholder)"
-        );
-        Vec::new()
+        let logs = self
+            .recent_logs
+            .lock()
+            .map(|l| l.clone())
+            .unwrap_or_default();
+        let len = logs.len();
+        let start = len.saturating_sub(count);
+        logs[start..].to_vec()
     }
 
     /// Get recent audit logs (stateless - delegates to external service)
     pub async fn get_recent_audit_logs(&self, count: usize) -> Vec<AuditEntry> {
-        // TODO: In production, this would query external audit service
-        tracing::debug!(
-            count = count,
-            "Getting recent audit logs via logging handler (placeholder)"
-        );
-        Vec::new()
+        let logs = self
+            .recent_audit_logs
+            .lock()
+            .map(|l| l.clone())
+            .unwrap_or_default();
+        let len = logs.len();
+        let start = len.saturating_sub(count);
+        logs[start..].to_vec()
     }
 
     /// Get logging statistics (stateless - delegates to external service)
     pub async fn get_statistics(&self) -> LoggingStats {
-        // TODO: In production, this would query external logging service
-        tracing::debug!("Getting logging stats via logging handler (placeholder)");
-        LoggingStats::default()
+        self.stats.lock().map(|s| s.clone()).unwrap_or_default()
     }
 }
 
@@ -273,7 +312,6 @@ impl SystemEffects for LoggingSystemHandler {
     }
 
     async fn get_system_info(&self) -> Result<HashMap<String, String>, SystemError> {
-        // TODO: In production, this would query external logging service
         let mut info = HashMap::new();
         info.insert("component".to_string(), "logging".to_string());
         info.insert("log_level".to_string(), self.config.log_level.clone());
@@ -286,13 +324,6 @@ impl SystemEffects for LoggingSystemHandler {
     }
 
     async fn set_config(&self, key: &str, value: &str) -> Result<(), SystemError> {
-        // TODO: In production, this would update external configuration service
-        tracing::debug!(
-            key = key,
-            value = value,
-            "Config update requested via logging handler (placeholder)"
-        );
-
         match key {
             "log_level" => {
                 // Validate the value but don't store it (stateless handler)
@@ -339,9 +370,38 @@ impl SystemEffects for LoggingSystemHandler {
     }
 
     async fn get_metrics(&self) -> Result<HashMap<String, f64>, SystemError> {
-        // TODO: In production, this would query external metrics service
         let mut metrics = HashMap::new();
-        metrics.insert("uptime".to_string(), 1.0);
+
+        let (total_logs, total_audit_logs, error_logs, warn_logs, info_logs, debug_logs) =
+            if let Ok(stats) = self.stats.lock() {
+                (
+                    stats.total_logs,
+                    stats.total_audit_logs,
+                    stats.error_logs,
+                    stats.warn_logs,
+                    stats.info_logs,
+                    stats.debug_logs,
+                )
+            } else {
+                (0, 0, 0, 0, 0, 0)
+            };
+
+        let (recent_logs, recent_audit) = (
+            self.recent_logs.lock().map(|logs| logs.len()).unwrap_or(0),
+            self.recent_audit_logs
+                .lock()
+                .map(|logs| logs.len())
+                .unwrap_or(0),
+        );
+
+        metrics.insert("logs_total".to_string(), total_logs as f64);
+        metrics.insert("audit_logs_total".to_string(), total_audit_logs as f64);
+        metrics.insert("logs_error".to_string(), error_logs as f64);
+        metrics.insert("logs_warn".to_string(), warn_logs as f64);
+        metrics.insert("logs_info".to_string(), info_logs as f64);
+        metrics.insert("logs_debug".to_string(), debug_logs as f64);
+        metrics.insert("recent_logs".to_string(), recent_logs as f64);
+        metrics.insert("recent_audit_logs".to_string(), recent_audit as f64);
         metrics.insert(
             "max_log_entries_configured".to_string(),
             self.config.max_log_entries as f64,

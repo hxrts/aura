@@ -196,8 +196,8 @@ pub struct InformationFlow {
     pub info_type: String,
     /// Amount of information (for budget tracking)
     pub amount: u64,
-    /// When the flow occurred
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    /// When the flow occurred (using Aura unified time system)
+    pub timestamp: aura_core::time::TimeStamp,
 }
 
 impl InformationFlow {
@@ -217,7 +217,7 @@ impl InformationFlow {
         to: ContextType,
         info_type: impl Into<String>,
         amount: u64,
-        timestamp: chrono::DateTime<chrono::Utc>,
+        timestamp: aura_core::time::TimeStamp,
     ) -> Self {
         Self {
             from,
@@ -303,7 +303,7 @@ impl ContextIsolation {
         to: ContextType,
         info_type: impl Into<String>,
         amount: u64,
-        timestamp: chrono::DateTime<chrono::Utc>,
+        timestamp: aura_core::time::TimeStamp,
     ) -> AuraResult<()> {
         // Check if flow is allowed
         self.check_flow(&from, &to)?;
@@ -409,7 +409,10 @@ mod tests {
         isolation.add_barrier(barrier);
 
         // Flow should be blocked
-        let now = chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap();
+        let now = aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
+            ts_ms: 0,
+            uncertainty: None,
+        });
         assert!(isolation
             .record_flow(rid1, rid2, "test_info", 100, now)
             .is_err());
@@ -421,7 +424,10 @@ mod tests {
         let rid1 = ContextType::new_relationship(Uuid::new_v4());
         let rid2 = ContextType::new_relationship(Uuid::new_v4());
 
-        let now = chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap();
+        let now = aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
+            ts_ms: 0,
+            uncertainty: None,
+        });
         let flow = InformationFlow::new(rid1, rid2, "metadata", 50, now);
         assert!(flow.is_cross_context());
         assert_eq!(flow.info_type, "metadata");

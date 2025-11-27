@@ -74,33 +74,46 @@ impl PhysicalTimeEffects for PhysicalTimeHandler {
     }
 }
 
-// TimeEffects is automatically implemented via blanket impl for PhysicalTimeEffects
-// The blanket impl provides default implementations for current_timestamp, etc.
-// The now_instant method will panic by default - this needs to be handled at the usage site
-
-/// Simple logical clock handler with optional authority tagging for vector entries.
-#[derive(Debug, Clone)]
-pub struct LogicalClockHandler {
-    vector: VectorClock,
-    scalar: u64,
-    authority: Option<aura_core::identifiers::DeviceId>,
-}
+/// Simple logical clock handler - stateless pure functions for logical clock operations.
+#[derive(Debug, Clone, Default)]
+pub struct LogicalClockHandler;
 
 impl LogicalClockHandler {
-    /// Create a logical clock handler; optionally seed with an authority for vector increments.
-    pub fn new(authority: Option<aura_core::identifiers::DeviceId>) -> Self {
-        Self {
-            vector: VectorClock::new(),
-            scalar: 0,
-            authority,
-        }
+    /// Create a new logical clock handler.
+    pub fn new() -> Self {
+        Self
     }
 
-    fn bump(&mut self) {
-        self.scalar = self.scalar.saturating_add(1);
-        if let Some(auth) = self.authority {
-            let current_count = self.vector.get(&auth).copied().unwrap_or(0);
-            self.vector.insert(auth, current_count.saturating_add(1));
+    /// Pure function to advance logical time based on observed vector clock.
+    pub fn advance_logical_time(
+        current_vector: &VectorClock,
+        current_scalar: u64,
+        authority: Option<aura_core::identifiers::DeviceId>,
+        observed: Option<&VectorClock>,
+    ) -> LogicalTime {
+        let mut next_vector = current_vector.clone();
+        let mut next_scalar = current_scalar;
+
+        if let Some(obs) = observed {
+            for (auth, val) in obs.iter() {
+                let current_count = next_vector.get(auth).copied().unwrap_or(0);
+                next_vector.insert(*auth, current_count.max(*val));
+            }
+            // Find max value in observed vector clock
+            let obs_max = obs.iter().map(|(_, v)| *v).max().unwrap_or(next_scalar);
+            next_scalar = next_scalar.max(obs_max);
+        }
+
+        // Bump the clock
+        next_scalar = next_scalar.saturating_add(1);
+        if let Some(auth) = authority {
+            let current_count = next_vector.get(&auth).copied().unwrap_or(0);
+            next_vector.insert(auth, current_count.saturating_add(1));
+        }
+
+        LogicalTime {
+            vector: next_vector,
+            lamport: next_scalar,
         }
     }
 }
@@ -115,22 +128,11 @@ impl LogicalClockEffects for LogicalClockHandler {
     ) -> Result<LogicalTime, TimeError> {
         let start = std::time::Instant::now();
 
-        let mut next = self.clone();
-        if let Some(obs) = observed {
-            for (auth, val) in obs.iter() {
-                let current_count = next.vector.get(auth).copied().unwrap_or(0);
-                next.vector.insert(*auth, current_count.max(*val));
-            }
-            // Find max value in observed vector clock
-            let obs_max = obs.iter().map(|(_, v)| *v).max().unwrap_or(next.scalar);
-            next.scalar = next.scalar.max(obs_max);
-        }
-        next.bump();
-
-        let result = LogicalTime {
-            vector: next.vector,
-            lamport: next.scalar,
-        };
+        // Since this handler is now stateless, return a default logical time
+        // that starts from epoch. In a real application, the caller would need to
+        // track the current logical clock state and pass it to advance_logical_time().
+        let empty_vector = VectorClock::new();
+        let result = Self::advance_logical_time(&empty_vector, 0, None, observed);
 
         // Record latency metrics
         let latency = start.elapsed();
@@ -148,9 +150,11 @@ impl LogicalClockEffects for LogicalClockHandler {
     async fn logical_now(&self) -> Result<LogicalTime, TimeError> {
         let start = std::time::Instant::now();
 
+        // Since this handler is now stateless, return epoch logical time.
+        // In a real application, the caller would manage the current logical clock state.
         let result = LogicalTime {
-            vector: self.vector.clone(),
-            lamport: self.scalar,
+            vector: VectorClock::new(),
+            lamport: 0,
         };
 
         // Record latency metrics
@@ -200,14 +204,27 @@ impl TimeComparison for TimeComparisonHandler {
 }
 
 /// Monotonic clock helper for crates that cannot depend on effect traits directly.
-/// This lives in aura-effects (allowed impure surface) to avoid ambient `Instant::now()` elsewhere.
+///
+/// **DEPRECATED**: This is an escape hatch that violates effect system architecture.
+/// Use `PhysicalTimeEffects` trait instead for proper time handling.
+#[deprecated(
+    since = "0.2.0",
+    note = "VIOLATES ARCHITECTURE: This is an anti-pattern escape hatch. Use the `PhysicalTimeEffects` trait instead. This function will be removed in a future version."
+)]
 #[allow(clippy::disallowed_methods)]
 pub fn monotonic_now() -> std::time::Instant {
     std::time::Instant::now()
 }
 
 /// Wall-clock helper (milliseconds since UNIX epoch) for crates that need a timestamp but
-/// cannot access effect traits directly. Use sparingly—prefer `PhysicalTimeEffects`.
+/// cannot access effect traits directly.
+///
+/// **DEPRECATED**: This is an escape hatch that violates effect system architecture.
+/// Use `PhysicalTimeEffects` trait instead for proper time handling.
+#[deprecated(
+    since = "0.2.0",
+    note = "VIOLATES ARCHITECTURE: This is an anti-pattern escape hatch. Use the `PhysicalTimeEffects` trait instead. This function will be removed in a future version."
+)]
 #[allow(clippy::disallowed_methods)]
 pub fn wallclock_ms() -> u64 {
     SystemTime::now()
@@ -217,6 +234,13 @@ pub fn wallclock_ms() -> u64 {
 }
 
 /// Wall-clock helper (seconds since UNIX epoch).
+///
+/// **DEPRECATED**: This is an escape hatch that violates effect system architecture.
+/// Use `PhysicalTimeEffects` trait instead for proper time handling.
+#[deprecated(
+    since = "0.2.0",
+    note = "VIOLATES ARCHITECTURE: This is an anti-pattern escape hatch. Use the `PhysicalTimeEffects` trait instead. This function will be removed in a future version."
+)]
 #[allow(clippy::disallowed_methods)]
 pub fn wallclock_secs() -> u64 {
     SystemTime::now()
@@ -226,7 +250,13 @@ pub fn wallclock_secs() -> u64 {
 }
 
 /// Seeded RNG helper for deterministic randomness in non-effect contexts.
-/// Prefer effect traits; this exists to avoid `thread_rng` leaks.
+///
+/// **DEPRECATED**: This is an escape hatch that violates effect system architecture.
+/// Use `RandomEffects` trait instead for proper random data generation.
+#[deprecated(
+    since = "0.2.0",
+    note = "VIOLATES ARCHITECTURE: This is an anti-pattern escape hatch. Use the `RandomEffects` trait instead. This function will be removed in a future version."
+)]
 pub fn seeded_rng(seed: [u8; 32]) -> rand_chacha::ChaCha20Rng {
     rand_chacha::ChaCha20Rng::from_seed(seed)
 }

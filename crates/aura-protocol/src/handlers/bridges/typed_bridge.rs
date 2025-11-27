@@ -12,7 +12,7 @@
 //!
 //! ```ignore
 //! use std::sync::Arc;
-//! use tokio::sync::RwLock;
+//! use async_lock::RwLock;
 //!
 //! // Wrap handler for typed trait usage
 //! let handler: Arc<RwLock<Box<dyn AuraHandler>>> = Arc::new(RwLock::new(
@@ -31,7 +31,7 @@ use aura_core::effects::crypto::FrostKeyGenResult;
 use aura_core::effects::CryptoError;
 use aura_core::{identifiers::DeviceId, AuraError};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Helper: Get or create thread-local context

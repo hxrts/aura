@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! # Application State for TUI Demo
 //!
 //! Manages the state of Bob's demo journey through the Aura system.

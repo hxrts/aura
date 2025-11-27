@@ -10,9 +10,11 @@ use async_trait::async_trait;
 use aura_core::{
     effects::{LeakageBudget, LeakageEffects, LeakageEvent, ObserverClass},
     identifiers::ContextId,
-    Result,
+    AuraError, Result,
 };
+use serde_json::to_string;
 use std::path::PathBuf;
+use std::{fs, io::Write};
 
 /// Production leakage handler for production use
 ///
@@ -59,26 +61,32 @@ impl ProductionLeakageHandler {
 #[async_trait]
 impl LeakageEffects for ProductionLeakageHandler {
     async fn record_leakage(&self, event: LeakageEvent) -> Result<()> {
-        // TODO: In production, this would write to persistent storage
-        // Current implementation delegates to higher layer coordination
-        tracing::debug!(
-            context_id = ?event.context_id,
-            observer_class = ?event.observer_class,
-            amount = event.leakage_amount,
-            operation = %event.operation,
-            "Leakage event recorded via production handler (placeholder)"
-        );
+        let path = self.event_file(event.context_id);
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir).map_err(|e| AuraError::storage(e.to_string()))?;
+        }
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| AuraError::storage(e.to_string()))?;
+
+        let line = to_string(&event).map_err(|e| AuraError::serialization(e.to_string()))?;
+        file.write_all(line.as_bytes())
+            .and_then(|_| file.write_all(b"\n"))
+            .map_err(|e| AuraError::storage(e.to_string()))?;
+
         Ok(())
     }
 
     async fn get_leakage_budget(&self, context_id: ContextId) -> Result<LeakageBudget> {
-        // TODO: In production, this would read from persistent storage
-        // Current implementation returns zero budget for stateless operation
-        tracing::debug!(
-            context_id = ?context_id,
-            "Getting leakage budget via production handler (placeholder)"
-        );
-        Ok(LeakageBudget::zero())
+        let events = self.load_events(context_id)?;
+        let mut budget = LeakageBudget::zero();
+        for event in events {
+            let consumed = budget.for_observer(event.observer_class) + event.leakage_amount;
+            budget.set_for_observer(event.observer_class, consumed);
+        }
+        Ok(budget)
     }
 
     async fn check_leakage_budget(
@@ -87,17 +95,18 @@ impl LeakageEffects for ProductionLeakageHandler {
         observer: ObserverClass,
         amount: u64,
     ) -> Result<bool> {
-        // TODO: In production, this would check against persistent storage
-        // For now, always allow within configured limits
+        let current_budget = self.get_leakage_budget(context_id).await?;
+        let consumed = current_budget.for_observer(observer);
         let limit = self.limits.for_observer(observer);
-        let allowed = amount <= limit;
+        let allowed = consumed.saturating_add(amount) <= limit;
 
         tracing::debug!(
             context_id = ?context_id,
             observer_class = ?observer,
-            amount = amount,
-            limit = limit,
-            allowed = allowed,
+            amount,
+            limit,
+            consumed,
+            allowed,
             "Checking leakage budget via production handler"
         );
 
@@ -109,14 +118,34 @@ impl LeakageEffects for ProductionLeakageHandler {
         context_id: ContextId,
         since_timestamp: Option<u64>,
     ) -> Result<Vec<LeakageEvent>> {
-        // TODO: In production, this would query persistent storage
-        // Current implementation returns empty history for stateless operation
-        tracing::debug!(
-            context_id = ?context_id,
-            since_timestamp = since_timestamp,
-            "Getting leakage history via production handler (placeholder)"
-        );
-        Ok(Vec::new())
+        let mut events = self.load_events(context_id)?;
+        if let Some(since) = since_timestamp {
+            events.retain(|e| e.timestamp_ms >= since);
+        }
+        Ok(events)
+    }
+}
+
+impl ProductionLeakageHandler {
+    fn event_file(&self, context_id: ContextId) -> PathBuf {
+        self._storage_path
+            .join(context_id.to_string())
+            .with_extension("jsonl")
+    }
+
+    fn load_events(&self, context_id: ContextId) -> Result<Vec<LeakageEvent>> {
+        let path = self.event_file(context_id);
+        if !path.exists() {
+            return Ok(Vec::new());
+        }
+        let data = fs::read_to_string(&path).map_err(|e| AuraError::storage(e.to_string()))?;
+        let mut events = Vec::new();
+        for line in data.lines() {
+            let evt: LeakageEvent =
+                serde_json::from_str(line).map_err(|e| AuraError::serialization(e.to_string()))?;
+            events.push(evt);
+        }
+        Ok(events)
     }
 }
 

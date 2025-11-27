@@ -1275,7 +1275,10 @@ mod tests {
             },
         };
 
-        execution_trace.add_state(format!("{:?}", state));
+        // Serialize state as JSON for proper deserialization
+        let state_json = serde_json::to_string(&HashMap::<String, QuintValue>::new())
+            .expect("Failed to serialize empty state");
+        execution_trace.add_state(state_json);
 
         let result = converter.convert_trace(&execution_trace);
         assert!(result.is_ok());

@@ -23,9 +23,9 @@
 //! - [`docs/123_commitment_tree.md`](../../../../docs/123_commitment_tree.md) - Tree operations
 //! - FROST paper: https://eprint.iacr.org/2020/852
 
+use crate::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
 use crate::hash;
 use crate::{AttestedOp, TreeOpKind};
-// use crate::effects::SecureStorageLocation; // TODO: Import when using SecureStorageEffects
 use frost_ed25519 as frost;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -127,21 +127,15 @@ impl Nonce {
     ///
     /// Note: FROST nonces cannot be serialized as they contain secret data.
     /// This stores only an identifier for tracking purposes.
-    pub fn from_frost(_nonces: frost::round1::SigningNonces) -> Self {
+    pub fn from_frost(nonces: frost::round1::SigningNonces) -> Self {
         let mut id = [0u8; 32];
         #[allow(clippy::expect_used)]
         getrandom::getrandom(&mut id).expect("Failed to generate nonce ID");
 
-        // TODO: Use SecureStorageEffects to store nonces securely
-        // For now, we use a hash of the nonce commitment as a placeholder.
-        // Real implementation should use:
-        // secure_storage.secure_store(
-        //     &SecureStorageLocation::frost_nonce(&session_id, signer_id),
-        //     &nonce_bytes, &[SecureStorageCapability::Read, SecureStorageCapability::Delete]
-        // ).await
-        let mut h = hash::hasher();
-        h.update(&id);
-        let value = h.finalize().to_vec();
+        // Serialize nonces for secure persistence or in-memory caching
+        let value = nonces
+            .serialize()
+            .unwrap_or_else(|_| hash::hash(&id).to_vec());
 
         Self { id, value }
     }
@@ -434,12 +428,8 @@ fn serialize_tree_op_for_binding(op: &TreeOpKind) -> Vec<u8> {
 /// Generate nonce with a signing share for FROST operations
 ///
 /// This function requires a signing share to properly generate FROST nonces.
-/// TODO: Use SecureStorageEffects to retrieve signing share from secure storage.
-/// Real implementation should retrieve from:
-/// secure_storage.secure_retrieve(
-///     &SecureStorageLocation::signing_share(&account_id, epoch, signer_id),
-///     &[SecureStorageCapability::Read]
-/// ).await
+/// Retrieve signing shares from SecureStorageEffects (see `generate_nonce_with_share_secure`)
+/// before calling this helper when running in production.
 pub fn generate_nonce_with_share(
     signer_id: u16,
     signing_share: &frost::keys::SigningShare,
@@ -459,18 +449,42 @@ pub fn generate_nonce_with_share(
 
     // Create nonce ID for tracking
     let mut nonce_id = [0u8; 32];
-    rand::RngCore::fill_bytes(rng, &mut nonce_id);
+    rng.fill_bytes(&mut nonce_id);
 
     // Note: FROST SigningNonces don't have a serialize method because they contain
     // secret data. We'll store a placeholder and reconstruct when needed.
-    // TODO: Use SecureStorageEffects for secure nonce storage
-    // Real implementation should store nonces using time-bound tokens:
-    // secure_storage.secure_store(&location, &nonce_bytes, &capabilities).await
     let nonce = Nonce::from_frost(frost_nonce);
 
     let commitment = NonceCommitment::from_frost(identifier, frost_commitment);
 
     (nonce, commitment)
+}
+
+/// Generate nonce and persist it using SecureStorageEffects for proper reuse protection
+pub async fn generate_nonce_with_share_secure<E>(
+    signer_id: u16,
+    signing_share: &frost::keys::SigningShare,
+    rng: &mut (impl rand::RngCore + rand::CryptoRng),
+    storage: &E,
+    session_id: &str,
+) -> Result<(Nonce, NonceCommitment), crate::AuraError>
+where
+    E: SecureStorageEffects,
+{
+    let (nonce, commitment) = generate_nonce_with_share(signer_id, signing_share, rng);
+    let location = SecureStorageLocation::frost_nonce(session_id, signer_id);
+    storage
+        .secure_store(
+            &location,
+            &nonce.value,
+            &[
+                SecureStorageCapability::Read,
+                SecureStorageCapability::Write,
+                SecureStorageCapability::Delete,
+            ],
+        )
+        .await?;
+    Ok((nonce, commitment))
 }
 
 /// Create a partial signature using FROST

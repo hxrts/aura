@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Session Coordination Handler
 //!
 //! Session coordination operations using choreography macros instead of manual patterns.
@@ -155,6 +156,8 @@ pub struct SessionOperations {
     _account_id: AccountId,
 }
 
+#[allow(dead_code)]
+#[allow(dead_code)]
 impl SessionOperations {
     /// Create new session operations handler
     #[allow(dead_code)] // Part of future session coordination API
@@ -388,160 +391,159 @@ struct ParticipantResponse {
     timestamp: u64,
 }
 
-// TODO: Move these methods to appropriate impl block
-/*
-/// Get session information
-pub async fn get_session(&self, session_id: &str) -> AgentResult<Option<SessionHandle>> {
-    let effects = self.effects.read().await;
+impl SessionOperations {
+    /// Get session information
+    pub async fn get_session(&self, session_id: &str) -> AgentResult<Option<SessionHandle>> {
+        let effects = self.effects.read().await;
 
-    // Convert string to SessionId by parsing the UUID part
-    let session_id_typed = if let Some(uuid_str) = session_id.strip_prefix("session-") {
-        match uuid::Uuid::parse_str(uuid_str) {
-            Ok(uuid) => aura_core::identifiers::SessionId::from_uuid(uuid),
-            Err(_) => aura_core::identifiers::SessionId::new(),
+        // Convert string to SessionId by parsing the UUID part
+        let session_id_typed = if let Some(uuid_str) = session_id.strip_prefix("session-") {
+            match uuid::Uuid::parse_str(uuid_str) {
+                Ok(uuid) => aura_core::identifiers::SessionId::from_uuid(uuid),
+                Err(_) => aura_core::identifiers::SessionId::new(),
+            }
+        } else {
+            aura_core::identifiers::SessionId::new()
+        };
+
+        // Implement session status lookup via effects system
+        match self
+            .get_session_status_via_effects(&*effects, &session_id_typed)
+            .await
+        {
+            Ok(Some(handle)) => Ok(Some(handle)),
+            Ok(None) => Ok(None),
+            Err(_) => Ok(None), // Session doesn't exist or is inactive
         }
-    } else {
-        aura_core::identifiers::SessionId::new()
-    };
+    }
 
-    // Implement session status lookup via effects system
-    match self
-        .get_session_status_via_effects(&*effects, &session_id_typed)
-        .await
-    {
-        Ok(Some(handle)) => Ok(Some(handle)),
-        Ok(None) => Ok(None),
-        Err(_) => Ok(None), // Session doesn't exist or is inactive
+    /// End a session
+    pub async fn end_session(&self, session_id: &str) -> AgentResult<SessionHandle> {
+        let effects = self.effects.read().await;
+        self.end_session_via_effects(&*effects, session_id).await
+    }
+
+    /// List all active sessions
+    pub async fn list_active_sessions(&self) -> AgentResult<Vec<String>> {
+        let effects = self.effects.read().await;
+        self.list_sessions_via_effects(&*effects).await
+    }
+
+    /// Get session statistics
+    pub async fn get_session_stats(&self) -> AgentResult<SessionStats> {
+        let effects = self.effects.read().await;
+        self.get_session_stats_via_effects(&*effects).await
+    }
+
+    /// Cleanup expired sessions
+    pub async fn cleanup_expired_sessions(&self, max_age_seconds: u64) -> AgentResult<Vec<String>> {
+        let effects = self.effects.read().await;
+        self.cleanup_sessions_via_effects(&*effects, max_age_seconds)
+            .await
+    }
+
+    // Private implementation methods
+
+    /// Create session via effects system
+    async fn create_session_via_effects(
+        &self,
+        _effects: &AuraEffectSystem,
+        _session_type: &SessionType,
+    ) -> AgentResult<String> {
+        use aura_core::identifiers::SessionId;
+
+        // Generate session ID through effects system
+        let session_id = SessionId::new();
+        let session_id_string = format!("session-{}", session_id.uuid().simple());
+
+        // Session created successfully (logging removed for simplicity)
+
+        Ok(session_id_string)
+    }
+
+    /// Get session status via effects system
+    async fn get_session_status_via_effects(
+        &self,
+        _effects: &AuraEffectSystem,
+        _session_id: &aura_core::identifiers::SessionId,
+    ) -> AgentResult<Option<SessionHandle>> {
+        // Lookup session status (logging removed for simplicity)
+
+        // For now, simulate that no sessions are found (no persistent storage yet)
+        Ok(None)
+    }
+
+    /// End session via effects system
+    async fn end_session_via_effects(
+        &self,
+        effects: &AuraEffectSystem,
+        session_id: &str,
+    ) -> AgentResult<SessionHandle> {
+        // End session (logging removed for simplicity)
+        let current_time = effects.current_timestamp_ms().await;
+
+        let device_id = self.device_id();
+        Ok(SessionHandle {
+            session_id: session_id.to_string(),
+            session_type: SessionType::Coordination,
+            participants: vec![device_id],
+            my_role: ChoreographicRole::new(device_id.0, 0),
+            epoch: 0,
+            start_time: current_time,
+            metadata: {
+                let mut metadata = HashMap::new();
+                metadata.insert(
+                    "status".to_string(),
+                    serde_json::Value::String("ended".to_string()),
+                );
+                metadata.insert(
+                    "ended_at".to_string(),
+                    serde_json::Value::Number(current_time.into()),
+                );
+                metadata
+            },
+        })
+    }
+
+    /// List sessions via effects system
+    async fn list_sessions_via_effects(
+        &self,
+        _effects: &AuraEffectSystem,
+    ) -> AgentResult<Vec<String>> {
+        // List sessions (logging removed for simplicity)
+        // Return empty list (no persistent storage yet)
+        Ok(Vec::new())
+    }
+
+    /// Get session statistics via effects system
+    async fn get_session_stats_via_effects(
+        &self,
+        effects: &AuraEffectSystem,
+    ) -> AgentResult<SessionStats> {
+        let current_time = effects.current_timestamp_ms().await;
+
+        // Return empty stats (no persistent storage yet)
+        Ok(SessionStats {
+            active_sessions: 0,
+            sessions_by_type: HashMap::new(),
+            total_participants: 0,
+            average_duration: 0.0,
+            last_cleanup: current_time,
+        })
+    }
+
+    /// Cleanup sessions via effects system
+    async fn cleanup_sessions_via_effects(
+        &self,
+        _effects: &AuraEffectSystem,
+        _max_age_seconds: u64,
+    ) -> AgentResult<Vec<String>> {
+        // Cleanup sessions (logging removed for simplicity)
+
+        // Return empty list (no persistent storage yet)
+        Ok(Vec::new())
     }
 }
-
-/// End a session
-pub async fn end_session(&self, session_id: &str) -> AgentResult<SessionHandle> {
-    let effects = self.effects.read().await;
-    self.end_session_via_effects(&*effects, session_id).await
-}
-
-/// List all active sessions
-pub async fn list_active_sessions(&self) -> AgentResult<Vec<String>> {
-    let effects = self.effects.read().await;
-    self.list_sessions_via_effects(&*effects).await
-}
-
-/// Get session statistics
-pub async fn get_session_stats(&self) -> AgentResult<SessionStats> {
-    let effects = self.effects.read().await;
-    self.get_session_stats_via_effects(&*effects).await
-}
-
-/// Cleanup expired sessions
-pub async fn cleanup_expired_sessions(&self, max_age_seconds: u64) -> AgentResult<Vec<String>> {
-    let effects = self.effects.read().await;
-    self.cleanup_sessions_via_effects(&*effects, max_age_seconds)
-        .await
-}
-
-// Private implementation methods
-
-/// Create session via effects system
-async fn create_session_via_effects(
-    &self,
-    effects: &AuraEffectSystem,
-    session_type: &SessionType,
-) -> AgentResult<String> {
-    use aura_core::identifiers::SessionId;
-
-    // Generate session ID through effects system
-    let session_id = SessionId::new();
-    let session_id_string = format!("session-{}", session_id.uuid().simple());
-
-    // Session created successfully (logging removed for simplicity)
-
-    Ok(session_id_string)
-}
-
-/// Get session status via effects system
-async fn get_session_status_via_effects(
-    &self,
-    effects: &AuraEffectSystem,
-    session_id: &aura_core::identifiers::SessionId,
-) -> AgentResult<Option<SessionHandle>> {
-    // Lookup session status (logging removed for simplicity)
-
-    // For now, simulate that no sessions are found (no persistent storage yet)
-    Ok(None)
-}
-
-/// End session via effects system
-async fn end_session_via_effects(
-    &self,
-    effects: &AuraEffectSystem,
-    session_id: &str,
-) -> AgentResult<SessionHandle> {
-    // End session (logging removed for simplicity)
-    let current_time = effects.current_timestamp_millis().await;
-
-    let device_id = self.device_id();
-    Ok(SessionHandle {
-        session_id: session_id.to_string(),
-        session_type: SessionType::Coordination,
-        participants: vec![device_id],
-        my_role: ChoreographicRole::new(device_id.0, 0),
-        epoch: 0,
-        start_time: current_time,
-        metadata: {
-            let mut metadata = HashMap::new();
-            metadata.insert(
-                "status".to_string(),
-                serde_json::Value::String("ended".to_string()),
-            );
-            metadata.insert(
-                "ended_at".to_string(),
-                serde_json::Value::Number(current_time.into()),
-            );
-            metadata
-        },
-    })
-}
-
-/// List sessions via effects system
-async fn list_sessions_via_effects(
-    &self,
-    effects: &AuraEffectSystem,
-) -> AgentResult<Vec<String>> {
-    // List sessions (logging removed for simplicity)
-    // Return empty list (no persistent storage yet)
-    Ok(Vec::new())
-}
-
-/// Get session statistics via effects system
-async fn get_session_stats_via_effects(
-    &self,
-    effects: &AuraEffectSystem,
-) -> AgentResult<SessionStats> {
-    let current_time = effects.current_timestamp_millis().await;
-
-    // Return empty stats (no persistent storage yet)
-    Ok(SessionStats {
-        active_sessions: 0,
-        sessions_by_type: HashMap::new(),
-        total_participants: 0,
-        average_duration: 0.0,
-        last_cleanup: current_time,
-    })
-}
-
-/// Cleanup sessions via effects system
-async fn cleanup_sessions_via_effects(
-    &self,
-    effects: &AuraEffectSystem,
-    max_age_seconds: u64,
-) -> AgentResult<Vec<String>> {
-    // Cleanup sessions (logging removed for simplicity)
-
-    // Return empty list (no persistent storage yet)
-    Ok(Vec::new())
-}
-*/
 
 #[cfg(test)]
 mod tests {

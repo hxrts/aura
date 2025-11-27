@@ -31,7 +31,6 @@
 //! }
 //! ```
 
-use aura_effects::time::wallclock_secs;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -41,7 +40,7 @@ use uuid::Uuid;
 use crate::core::{sync_config_error, sync_peer_error, SyncResult};
 
 fn now_secs() -> u64 {
-    wallclock_secs()
+    0 // placeholder; callers should supply PhysicalTimeEffects
 }
 use aura_core::{hash, DeviceId};
 use aura_protocol::guards::BiscuitGuardEvaluator;
@@ -606,35 +605,41 @@ impl PeerManager {
     /// Update peer's Biscuit token
     ///
     /// Integrates with aura-wot to validate token and extract capabilities
-    pub fn update_peer_token(
+    pub async fn update_peer_token(
         &mut self,
         device_id: DeviceId,
         token_bytes: Vec<u8>,
     ) -> SyncResult<()> {
+        if !self.peers.contains_key(&device_id) {
+            return Err(sync_peer_error("update", "Peer not found"));
+        }
+
+        // Check sync capability using Biscuit token if evaluator available
+        let has_sync_capability = if let Some(ref evaluator) = self.guard_evaluator {
+            let validated = self
+                .validate_biscuit_token(&token_bytes, evaluator)
+                .await
+                .unwrap_or(false);
+            tracing::debug!(
+                device_id = %device_id,
+                validated,
+                "Peer token validated via Biscuit guard evaluator"
+            );
+            validated
+        } else {
+            tracing::debug!(
+                device_id = %device_id,
+                "No Biscuit evaluator available, assuming sync capability"
+            );
+            true
+        };
+
         let peer = self
             .peers
             .get_mut(&device_id)
             .ok_or_else(|| sync_peer_error("update", "Peer not found"))?;
 
-        // Check sync capability using Biscuit token if evaluator available
-        if let Some(ref _evaluator) = self.guard_evaluator {
-            // Implement proper token validation with root public key
-            // For now, assume token is valid for sync capability
-            // TODO: Implement proper async token validation
-            peer.metadata.has_sync_capability = true;
-            tracing::debug!(
-                device_id = %device_id,
-                "Peer token validated successfully and has sync capability (placeholder)"
-            );
-        } else {
-            // Fallback: assume peer has capability if they provided a token
-            peer.metadata.has_sync_capability = true;
-            tracing::debug!(
-                device_id = %device_id,
-                "No Biscuit evaluator available, assuming sync capability"
-            );
-        }
-
+        peer.metadata.has_sync_capability = has_sync_capability;
         peer.token = Some(token_bytes);
         Ok(())
     }
@@ -659,9 +664,9 @@ impl PeerManager {
         };
 
         // Create a resource scope for sync operations
-        let sync_resource = aura_wot::ResourceScope::Authority {
+        let sync_resource = aura_core::scope::ResourceScope::Authority {
             authority_id: aura_core::AuthorityId::new(),
-            operation: aura_wot::AuthorityOp::UpdateTree,
+            operation: aura_core::scope::AuthorityOp::UpdateTree,
         };
 
         // Check if the token grants sync capability using the guard evaluator

@@ -105,7 +105,7 @@ type TransportResult<T> = Result<T, TransportError>;
 // Individual transport handlers remain in this crate as they follow Layer 3 principles:
 // - TcpTransportHandler, WebSocketTransportHandler, RealTransportHandler
 //
-// TODO: Implement proper Layer 4 coordination patterns in aura-protocol where:
+// Coordination patterns now live in aura-protocol:
 // - TransportManager coordinates multiple transport handlers
 // - RetryingTransportManager provides retry orchestration
-// - Protocol-level routing and connection management logic resides
+// - Protocol-level routing and connection management logic resides in Layer 4

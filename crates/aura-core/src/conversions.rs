@@ -40,13 +40,13 @@ impl FromAuthorizationAction for Cap {
     type Error = String;
 
     fn from_authorization_action(action: String) -> Result<Self, Self::Error> {
+        // Note: These conversions cannot create real capabilities since they lack
+        // the actual Biscuit token. Return empty capability for all actions.
         match action.as_str() {
-            "read" => Ok(Cap::with_permissions(vec!["storage:read".to_string()])),
-            "write" => Ok(Cap::with_permissions(vec!["storage:write".to_string()])),
-            "delete" => Ok(Cap::with_permissions(vec!["storage:delete".to_string()])),
-            "execute" => Ok(Cap::with_permissions(vec!["protocol:execute".to_string()])),
-            "delegate" | "revoke" | "admin" => Ok(Cap::top()),
-            custom => Ok(Cap::with_permissions(vec![format!("custom:{}", custom)])),
+            "read" | "write" | "delete" | "execute" | "delegate" | "revoke" | "admin" => {
+                Ok(Cap::new())
+            }
+            _ => Ok(Cap::new()),
         }
     }
 }
@@ -59,7 +59,7 @@ impl FromJournalOperation for Cap {
         operation: &str,
         _resource: &str,
     ) -> Result<Self, Self::Error> {
-        let capability_string = match (category, operation) {
+        let _capability_string = match (category, operation) {
             // Storage operations
             ("storage", "read") | ("storage", "retrieve") => "storage:read",
             ("storage", "write") | ("storage", "store") => "storage:write",
@@ -76,32 +76,23 @@ impl FromJournalOperation for Cap {
             ("relay", "store") => "storage:write",
             ("relay", "announce") => "admin", // Announcement requires admin
 
-            // Custom or unknown
-            (cat, op) => return Ok(Cap::with_permissions(vec![format!("{}:{}", cat, op)])),
+            // Custom or unknown - return empty capability since we can't create real tokens
+            (_cat, _op) => return Ok(Cap::new()),
         };
 
-        if capability_string == "admin" {
-            Ok(Cap::top())
-        } else {
-            Ok(Cap::with_permissions(vec![capability_string.to_string()]))
-        }
+        // Note: Cannot create real capabilities since we lack Biscuit token context
+        Ok(Cap::new())
     }
 }
 
 /// Helper function to convert Cap to authorization action name
 pub fn cap_to_action(cap: &Cap) -> String {
-    if cap.allows("*") {
-        "admin".to_string()
-    } else if cap.allows("storage:delete") {
-        "delete".to_string()
-    } else if cap.allows("storage:write") {
-        "write".to_string()
-    } else if cap.allows("storage:read") {
-        "read".to_string()
-    } else if cap.allows("protocol:execute") {
-        "execute".to_string()
+    // Note: Cannot inspect capability contents since Cap is now just a token container.
+    // Actual authorization decisions must be made through AuthorizationEffects.
+    if cap.is_empty() {
+        "none".to_string()
     } else {
-        "custom".to_string()
+        "unknown".to_string()
     }
 }
 
@@ -109,18 +100,12 @@ pub fn cap_to_action(cap: &Cap) -> String {
 ///
 /// Returns a tuple of (category, operation) suitable for journal-specific operations
 pub fn cap_to_journal(cap: &Cap) -> (String, String) {
-    if cap.allows("*") {
-        ("admin".to_string(), "all".to_string())
-    } else if cap.allows("storage:delete") {
-        ("storage".to_string(), "delete".to_string())
-    } else if cap.allows("storage:write") {
-        ("storage".to_string(), "write".to_string())
-    } else if cap.allows("storage:read") {
-        ("storage".to_string(), "read".to_string())
-    } else if cap.allows("protocol:execute") {
-        ("protocol".to_string(), "execute".to_string())
-    } else {
+    // Note: Cannot inspect capability contents since Cap is now just a token container.
+    // Actual authorization decisions must be made through AuthorizationEffects.
+    if cap.is_empty() {
         ("custom".to_string(), "unknown".to_string())
+    } else {
+        ("unknown".to_string(), "unknown".to_string())
     }
 }
 
@@ -130,11 +115,11 @@ mod cap_conversion_tests {
     use crate::Cap;
 
     #[test]
-    fn cap_to_journal_defaults_to_admin_all() {
-        // Current Cap implementation treats empty tokens as permissive; verify mapping is stable.
+    fn cap_to_journal_defaults_to_custom_unknown() {
+        // Empty Cap implementation returns false for all permissions
         let cap = Cap::new();
         let (category, op) = cap_to_journal(&cap);
-        assert_eq!(category, "admin");
-        assert_eq!(op, "all");
+        assert_eq!(category, "custom");
+        assert_eq!(op, "unknown");
     }
 }

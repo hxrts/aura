@@ -47,8 +47,7 @@ pub mod crdt;
 /// Unified storage error types
 pub mod errors;
 
-/// Biscuit-based storage authorization
-pub mod biscuit_authorization;
+// Biscuit-based storage authorization moved to aura-wot (proper domain)
 
 // Re-export core types from aura-core
 pub use aura_core::{ChunkId, ContentId, ContentSize};
@@ -60,8 +59,5 @@ pub use crdt::{StorageIndex, StorageOpLog, StorageState};
 pub use errors::StorageError;
 pub use search::{SearchIndexEntry, SearchQuery, SearchResults, SearchScope};
 
-// Re-export Biscuit authorization APIs
-pub use biscuit_authorization::{
-    check_biscuit_access, evaluate_biscuit_access, BiscuitAccessRequest, BiscuitStorageError,
-    BiscuitStorageEvaluator, PermissionMappings,
-};
+// Biscuit authorization APIs now available from aura-wot
+// Import like: use aura_wot::{BiscuitStorageEvaluator, StoragePermission, etc.}

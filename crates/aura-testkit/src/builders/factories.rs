@@ -7,6 +7,7 @@ use crate::device::DeviceSetBuilder;
 use aura_core::hash::hash;
 use aura_core::AccountId;
 use aura_journal::journal_api::Journal;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 /// Factory for creating complete test scenarios with consistent configuration
@@ -146,7 +147,7 @@ impl JournalFactory {
     pub async fn build(self) -> Journal {
         // Create Journal with default group key
         let (_, group_public_key) = crate::test_key_pair(42);
-        Journal::new_with_group_key(self.account_id, group_public_key)
+        Journal::new_with_group_key_bytes(self.account_id, group_public_key.to_bytes().to_vec())
     }
 }
 
@@ -289,10 +290,21 @@ pub mod helpers {
 
     /// Verify scenario data integrity
     pub fn verify_scenario_integrity(data: &MultiDeviceScenarioData) -> bool {
-        // TODO: Rewrite for authority-centric model
-        // Journal no longer has .devices() - need to query authority tree state
-        // For now, return true as stub
-        let _ = data;
+        if data.threshold == 0 || data.threshold > data.devices.len() as u16 {
+            return false;
+        }
+
+        if data.account_state.account_id() != data.account_id {
+            return false;
+        }
+
+        let mut seen = HashSet::new();
+        for device in &data.devices {
+            if !seen.insert(device.device_id()) {
+                return false;
+            }
+        }
+
         true
 
         /* Old device-centric code - needs rewrite:

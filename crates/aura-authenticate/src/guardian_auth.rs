@@ -7,16 +7,17 @@
 #![allow(clippy::unwrap_used)]
 
 use crate::{AuraError, AuraResult, BiscuitGuardEvaluator};
+use aura_core::scope::{ContextOp, ResourceScope};
 use aura_core::{hash::hash, AccountId, ContextId, DeviceId, Ed25519Signature};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
-use aura_wot::{BiscuitTokenManager, ContextOp, ResourceScope};
+use aura_wot::BiscuitTokenManager;
 use biscuit_auth::Biscuit;
+use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// Derive a deterministic device ID from a label (used when no registry mapping exists)
@@ -485,6 +486,15 @@ impl<E> GuardianAuthenticationCoordinator<E>
 where
     E: AuraEffects + ?Sized,
 {
+    /// Monotonic timestamp helper (milliseconds since epoch)
+    async fn now_ms(&self) -> AuraResult<u64> {
+        self.effect_system
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .map_err(|e| AuraError::internal(format!("time access failed: {}", e)))
+    }
+
     /// Derive the local device identifier from the effect system (or fallback)
     async fn local_device_id(&self) -> DeviceId {
         // Prefer a stable ID derived from connected peers; otherwise fall back to random bytes.
@@ -792,50 +802,48 @@ where
 
         // Wait for guardian approvals with timeout
         let mut collected_approvals: Vec<GuardianApproval> = Vec::new();
-        let approval_timeout = tokio::time::Duration::from_secs(300); // 5 minutes
+        let approval_deadline_ms = self.now_ms().await? + 300_000; // 5 minutes
 
-        tokio::time::timeout(approval_timeout, async {
-            while collected_approvals.len() < request.required_guardians
-                && collected_approvals.len() < guardian_devices.len()
-            {
-                // Try to receive from each guardian
-                let mut received_any = false;
-                for guardian_id in &guardian_devices {
-                    // Skip if we already got approval from this guardian
-                    if collected_approvals
-                        .iter()
-                        .any(|a| a.guardian_id == *guardian_id)
-                    {
-                        continue;
-                    }
-
-                    // Implement response receiving via effects
-                    match self
-                        .receive_guardian_response_via_effects(*guardian_id)
-                        .await
-                    {
-                        Ok(Some(approval)) => {
-                            collected_approvals.push(approval);
-                            received_any = true;
-                            tracing::info!("Received approval from guardian {}", guardian_id);
-                        }
-                        Ok(None) => {
-                            // No response available yet
-                        }
-                        Err(e) => {
-                            tracing::warn!("Error receiving from guardian {}: {}", guardian_id, e);
-                        }
-                    }
+        while self.now_ms().await? < approval_deadline_ms
+            && collected_approvals.len() < request.required_guardians
+            && collected_approvals.len() < guardian_devices.len()
+        {
+            // Try to receive from each guardian
+            let mut received_any = false;
+            for guardian_id in &guardian_devices {
+                // Skip if we already got approval from this guardian
+                if collected_approvals
+                    .iter()
+                    .any(|a| a.guardian_id == *guardian_id)
+                {
+                    continue;
                 }
 
-                // Avoid busy-looping if no messages received
-                if !received_any {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                // Implement response receiving via effects
+                match self
+                    .receive_guardian_response_via_effects(*guardian_id)
+                    .await
+                {
+                    Ok(Some(approval)) => {
+                        collected_approvals.push(approval);
+                        received_any = true;
+                        tracing::info!("Received approval from guardian {}", guardian_id);
+                    }
+                    Ok(None) => {
+                        // No response available yet
+                    }
+                    Err(e) => {
+                        tracing::warn!("Error receiving from guardian {}: {}", guardian_id, e);
+                    }
                 }
             }
-        })
-        .await
-        .ok(); // Don't fail on timeout, return what we collected
+
+            // Avoid busy-looping if no messages received
+            if !received_any {
+                // Yield to event loop using effect-injected sleep for simulator control
+                let _ = self.effect_system.sleep_ms(100).await;
+            }
+        }
 
         // Check if we have sufficient approvals
         let approved_count = collected_approvals.iter().filter(|a| a.approved).count();
@@ -898,140 +906,142 @@ where
 
         tracing::info!("Guardian listening for approval requests...");
 
-        // Wait for approval request with timeout
-        let listen_timeout = tokio::time::Duration::from_secs(120); // 2 minutes
+        // Wait for approval request with timeout (effect-injected for simulator control)
+        let listen_deadline_ms = self.now_ms().await? + 120_000; // 2 minutes
 
-        let approval_response = tokio::time::timeout(listen_timeout, async {
-            // Listen for approval requests from any requester
-            loop {
-                let message_received = match self.effect_system.receive().await {
-                    Ok((_, bytes)) => serde_json::from_slice::<GuardianAuthMessage>(&bytes).ok(),
-                    Err(_) => None,
-                };
+        // Listen for approval requests from any requester
+        while self.now_ms().await? < listen_deadline_ms {
+            let message_received = match self.effect_system.receive().await {
+                Ok((_, bytes)) => serde_json::from_slice::<GuardianAuthMessage>(&bytes).ok(),
+                Err(_) => None,
+            };
 
-                if let Some(message) = message_received {
-                    match message {
-                        GuardianAuthMessage::ApprovalRequest {
-                            guardian_id: _requested_guardian,
+            if let Some(message) = message_received {
+                match message {
+                    GuardianAuthMessage::ApprovalRequest {
+                        guardian_id: _requested_guardian,
+                        account_id,
+                        recovery_context,
+                        request_id,
+                    } => {
+                        tracing::info!(
+                            "Guardian {} received approval request for account {} (request: {})",
+                            device_id,
                             account_id,
-                            recovery_context,
-                            request_id,
-                        } => {
-                            tracing::info!(
-                                "Guardian {} received approval request for account {} (request: {})",
-                                device_id, account_id, request_id
-                            );
+                            request_id
+                        );
 
-                            // Verify this guardian is being requested
-                            // For now, we accept any approval request since GuardianId mapping is not complete
+                        // Verify this guardian is being requested
+                        // For now, we accept any approval request since GuardianId mapping is not complete
 
-                            // Perform guardian validation of the recovery request
-                            let approval_decision = self.validate_recovery_request(
+                        // Perform guardian validation of the recovery request
+                        let approval_decision = self
+                            .validate_recovery_request(
                                 &account_id,
                                 &recovery_context,
                                 &request_id,
                                 now,
-                            ).await?;
+                            )
+                            .await?;
 
-                            // Send guardian challenge for additional verification
-                            // Use time-based nonce derived from current timestamp
-                            let nonce = now as u128;
-                            let challenge = self.generate_guardian_challenge(&request_id, nonce).await?;
-                            let expires_at = now + 300; // 5 minutes from now
-                            let _challenge_msg = GuardianAuthMessage::GuardianChallenge {
-                                request_id: request_id.clone(),
-                                challenge: challenge.clone(),
-                                expires_at,
-                            };
+                        // Send guardian challenge for additional verification
+                        // Use time-based nonce derived from current timestamp
+                        let nonce = now as u128;
+                        let challenge =
+                            self.generate_guardian_challenge(&request_id, nonce).await?;
+                        let expires_at = now + 300; // 5 minutes from now
+                        let _challenge_msg = GuardianAuthMessage::GuardianChallenge {
+                            request_id: request_id.clone(),
+                            challenge: challenge.clone(),
+                            expires_at,
+                        };
 
-                            // Broadcast challenge; coordinator/requester will filter by request_id
-                            let _ = self
-                                .effect_system
-                                .broadcast(
-                                    serde_json::to_vec(&_challenge_msg)
-                                        .map_err(|e| AuraError::serialization(e.to_string()))?,
-                                )
-                                .await;
+                        // Broadcast challenge; coordinator/requester will filter by request_id
+                        let _ = self
+                            .effect_system
+                            .broadcast(
+                                serde_json::to_vec(&_challenge_msg)
+                                    .map_err(|e| AuraError::serialization(e.to_string()))?,
+                            )
+                            .await;
 
-                            // Generate guardian signature for approval
-                            let signature = self.sign_approval_decision(
+                        // Generate guardian signature for approval
+                        let signature = self
+                            .sign_approval_decision(
                                 &request_id,
                                 &account_id,
                                 approval_decision.approved,
-                                &approval_decision.justification
-                            ).await?;
+                                &approval_decision.justification,
+                            )
+                            .await?;
 
-                            // Send approval decision
-                            let _decision_msg = GuardianAuthMessage::ApprovalDecision {
-                                request_id: request_id.clone(),
-                                guardian_id: device_id,
-                                approved: approval_decision.approved,
-                                justification: approval_decision.justification.clone(),
-                                signature: signature.clone(),
-                            };
+                        // Send approval decision
+                        let _decision_msg = GuardianAuthMessage::ApprovalDecision {
+                            request_id: request_id.clone(),
+                            guardian_id: device_id,
+                            approved: approval_decision.approved,
+                            justification: approval_decision.justification.clone(),
+                            signature: signature.clone(),
+                        };
 
-                            let _ = self
-                                .effect_system
-                                .broadcast(
-                                    serde_json::to_vec(&_decision_msg)
-                                        .map_err(|e| AuraError::serialization(e.to_string()))?,
-                                )
-                                .await;
+                        let _ = self
+                            .effect_system
+                            .broadcast(
+                                serde_json::to_vec(&_decision_msg)
+                                    .map_err(|e| AuraError::serialization(e.to_string()))?,
+                            )
+                            .await;
 
-                            // Create guardian approval record
-                            let guardian_approval = GuardianApproval {
-                                guardian_id: device_id,
-                                verified_identity: VerifiedIdentity {
-                                    proof: IdentityProof::Device {
-                                        device_id,
-                                        signature: aura_verify::Ed25519Signature::from_bytes(&signature),
-                                    },
-                                    message_hash: [0u8; 32], // Placeholder
+                        // Create guardian approval record
+                        let guardian_approval = GuardianApproval {
+                            guardian_id: device_id,
+                            verified_identity: VerifiedIdentity {
+                                proof: IdentityProof::Device {
+                                    device_id,
+                                    signature: aura_verify::Ed25519Signature::from_bytes(
+                                        &signature,
+                                    ),
                                 },
-                                approved: approval_decision.approved,
-                                justification: approval_decision.justification,
-                                signature,
-                                timestamp: now,
-                            };
+                                message_hash: [0u8; 32], // Placeholder
+                            },
+                            approved: approval_decision.approved,
+                            justification: approval_decision.justification,
+                            signature,
+                            timestamp: now,
+                        };
 
-                            tracing::info!(
-                                "Guardian {} processed approval request: approved={}",
-                                device_id, approval_decision.approved
-                            );
+                        tracing::info!(
+                            "Guardian {} processed approval request: approved={}",
+                            device_id,
+                            approval_decision.approved
+                        );
 
-                            return Ok(GuardianAuthResponse {
-                                guardian_approvals: vec![guardian_approval],
-                                success: approval_decision.approved,
-                                error: if approval_decision.approved {
-                                    None
-                                } else {
-                                    Some("Guardian denied recovery request".to_string())
-                                },
-                            });
-                        }
-                        _ => {
-                            // Ignore other message types
-                            continue;
-                        }
+                        return Ok(GuardianAuthResponse {
+                            guardian_approvals: vec![guardian_approval],
+                            success: approval_decision.approved,
+                            error: if approval_decision.approved {
+                                None
+                            } else {
+                                Some("Guardian denied recovery request".to_string())
+                            },
+                        });
+                    }
+                    _ => {
+                        // Ignore other message types
                     }
                 }
-
-                // Small delay to avoid busy-looping
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
-        }).await;
 
-        match approval_response {
-            Ok(result) => result,
-            Err(_) => {
-                tracing::warn!("Guardian timed out waiting for approval requests");
-                Ok(GuardianAuthResponse {
-                    guardian_approvals: Vec::new(),
-                    success: false,
-                    error: Some("Guardian timed out waiting for approval requests".to_string()),
-                })
-            }
+            // Small delay to avoid busy-looping (simulator-controllable)
+            let _ = self.effect_system.sleep_ms(100).await;
         }
+
+        tracing::warn!("Guardian timed out waiting for approval requests");
+        Ok(GuardianAuthResponse {
+            guardian_approvals: Vec::new(),
+            success: false,
+            error: Some("Guardian timed out waiting for approval requests".to_string()),
+        })
     }
 
     /// Execute as coordinator

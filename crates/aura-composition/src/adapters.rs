@@ -8,7 +8,7 @@ use crate::registry::{HandlerContext, HandlerError, RegistrableHandler};
 use async_trait::async_trait;
 use aura_core::effects::{
     ConsoleEffects, CryptoEffects, NetworkEffects, PhysicalTimeEffects, RandomEffects,
-    StorageEffects,
+    StorageEffects, SystemEffects,
 };
 use aura_core::{EffectType, ExecutionMode};
 use aura_effects::{
@@ -653,25 +653,168 @@ impl RegistrableHandler for LoggingSystemHandlerAdapter {
         &self,
         effect_type: EffectType,
         operation: &str,
-        _parameters: &[u8],
+        parameters: &[u8],
         _ctx: &HandlerContext,
     ) -> Result<Vec<u8>, HandlerError> {
         if effect_type != EffectType::System {
             return Err(HandlerError::UnsupportedEffect { effect_type });
         }
 
-        // System operations would need to be defined based on SystemEffects trait
-        // For now, return unknown operation error
-        Err(HandlerError::UnknownOperation {
-            effect_type,
-            operation: operation.to_string(),
-        })
+        match operation {
+            "log" => {
+                let (level, component, message): (String, String, String) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                self.handler
+                    .log(&level, &component, &message)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                Ok(Vec::new())
+            }
+            "log_with_context" => {
+                let (level, component, message, context): (
+                    String,
+                    String,
+                    String,
+                    std::collections::HashMap<String, String>,
+                ) = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                self.handler
+                    .log_with_context(&level, &component, &message, context)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                Ok(Vec::new())
+            }
+            "health_check" => {
+                let result = self.handler.health_check().await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "get_system_info" => {
+                let result = self.handler.get_system_info().await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "set_config" => {
+                let (key, value): (String, String) =
+                    bincode::deserialize(parameters).map_err(|e| {
+                        HandlerError::EffectDeserialization {
+                            effect_type,
+                            operation: operation.to_string(),
+                            source: Box::new(e),
+                        }
+                    })?;
+                self.handler.set_config(&key, &value).await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                Ok(Vec::new())
+            }
+            "get_config" => {
+                let key: String = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                let value = self.handler.get_config(&key).await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                bincode::serialize(&value).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "get_metrics" => {
+                let result = self.handler.get_metrics().await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    }
+                })?;
+                bincode::serialize(&result).map_err(|e| HandlerError::EffectSerialization {
+                    effect_type,
+                    operation: operation.to_string(),
+                    source: Box::new(e),
+                })
+            }
+            "restart_component" => {
+                let component: String = bincode::deserialize(parameters).map_err(|e| {
+                    HandlerError::EffectDeserialization {
+                        effect_type,
+                        operation: operation.to_string(),
+                        source: Box::new(e),
+                    }
+                })?;
+                self.handler
+                    .restart_component(&component)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                Ok(Vec::new())
+            }
+            "shutdown" => {
+                self.handler
+                    .shutdown()
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                Ok(Vec::new())
+            }
+            _ => Err(HandlerError::UnknownOperation {
+                effect_type,
+                operation: operation.to_string(),
+            }),
+        }
     }
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
         if effect_type == EffectType::System {
-            // TODO: Add actual system operations based on SystemEffects trait
-            vec![]
+            vec![
+                "log".to_string(),
+                "log_with_context".to_string(),
+                "health_check".to_string(),
+                "get_system_info".to_string(),
+                "set_config".to_string(),
+                "get_config".to_string(),
+                "get_metrics".to_string(),
+                "restart_component".to_string(),
+                "shutdown".to_string(),
+            ]
         } else {
             Vec::new()
         }

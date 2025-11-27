@@ -26,25 +26,24 @@ use aura_protocol::transport::{
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Transport Choreography Examples ===\n");
 
     // Example 1: WebSocket handshake choreography
-    websocket_handshake_example().await?;
+    websocket_handshake_example()?;
 
     // Example 2: Channel establishment choreography
-    channel_establishment_example().await?;
+    channel_establishment_example()?;
 
     // Example 3: Custom choreographic transport protocol
-    custom_protocol_example().await?;
+    custom_protocol_example()?;
 
     Ok(())
 }
 
 /// Example 1: WebSocket handshake choreography
 /// Shows multi-party WebSocket coordination with capability negotiation
-async fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>> {
+fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>> {
     println!("🤝 Example 1: WebSocket Handshake Choreography\n");
 
     let initiator_id = DeviceId::from_bytes([1u8; 32]);
@@ -125,7 +124,7 @@ async fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>>
 
 /// Example 2: Channel establishment choreography
 /// Shows complex multi-phase channel setup with resource allocation
-async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error>> {
+fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error>> {
     println!("🔗 Example 2: Channel Establishment Choreography\n");
 
     let coordinator_id = DeviceId::from_bytes([10u8; 32]);
@@ -208,7 +207,7 @@ async fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error
 
 /// Example 3: Custom choreographic transport protocol
 /// Shows how to define custom choreographic protocols using aura-macros
-async fn custom_protocol_example() -> Result<(), Box<dyn std::error::Error>> {
+fn custom_protocol_example() -> Result<(), Box<dyn std::error::Error>> {
     println!("🎭 Example 3: Custom Choreographic Transport Protocol\n");
 
     println!("Defining custom choreographic protocol with aura-macros:");

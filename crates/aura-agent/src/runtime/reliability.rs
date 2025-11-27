@@ -2,6 +2,8 @@
 //!
 //! Consolidated reliability, propagation, and backoff utilities.
 
+use aura_core::effects::time::TimeError;
+use aura_core::effects::PhysicalTimeEffects;
 use std::time::Duration;
 
 /// Reliability configuration and utilities
@@ -32,9 +34,11 @@ impl ReliabilityManager {
 
     /// Execute operation with retry and backoff
     #[allow(dead_code)] // Part of future reliability API
-    pub async fn with_retry<T, E, F>(&self, mut operation: F) -> Result<T, E>
+    pub async fn with_retry<T, E, F, P>(&self, time: &P, mut operation: F) -> Result<T, E>
     where
         F: FnMut() -> Result<T, E>,
+        P: PhysicalTimeEffects,
+        E: From<TimeError>,
     {
         let mut last_error = None;
 
@@ -45,7 +49,7 @@ impl ReliabilityManager {
                     last_error = Some(error);
                     if attempt < self.max_retries {
                         let delay = self.backoff_delay(attempt);
-                        tokio::time::sleep(delay).await;
+                        time.sleep_ms(delay.as_millis() as u64).await?;
                     }
                 }
             }

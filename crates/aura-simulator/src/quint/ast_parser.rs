@@ -4,7 +4,9 @@
 //! property and specification information for the simulation framework.
 
 use crate::quint::cli_runner::{QuintDefinition, QuintModule, QuintParseOutput};
-use crate::quint::types::{QuintInvariant, QuintSpec, QuintTemporalProperty};
+use crate::quint::types::{
+    self, QuintInvariant, QuintSpec, QuintTemporalProperty, QuintSafetyProperty, SafetyPropertyType,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use thiserror::Error;
@@ -127,7 +129,21 @@ impl QuintAstParser {
             module_name: "main".to_string(),
             version: "1.0".to_string(),
             description: "Parsed from Quint CLI output".to_string(),
-            modules: vec![], // We're storing parsed modules separately TODO fix - For now
+            modules: modules
+                .into_iter()
+                .map(|p| {
+                    let definitions = p
+                        .definitions
+                        .into_iter()
+                        .filter_map(|def| self.parsed_definition_to_types(def).transpose())
+                        .collect::<AstParseResult<Vec<_>>>()?;
+
+                    Ok(types::QuintModule {
+                        name: p.name,
+                        definitions,
+                    })
+                })
+                .collect::<AstParseResult<Vec<_>>>()?,
             metadata: HashMap::new(),
             invariants,
             temporal_properties,
@@ -376,6 +392,69 @@ impl QuintAstParser {
             enabled: true,
             tags,
         })
+    }
+
+    /// Convert a parsed definition into the simulator-friendly QuintDefinition enum
+    fn parsed_definition_to_types(
+        &self,
+        def: ParsedQuintDefinition,
+    ) -> AstParseResult<Option<types::QuintDefinition>> {
+        if !def.is_property {
+            return Ok(None);
+        }
+
+        match def.property_type {
+            Some(PropertyType::Invariant) => Ok(Some(types::QuintDefinition::Invariant(
+                self.definition_to_invariant(&def)?,
+            ))),
+            Some(PropertyType::Always) | Some(PropertyType::Eventually) | Some(PropertyType::Until) => {
+                Ok(Some(types::QuintDefinition::Temporal(
+                    self.definition_to_temporal_property(&def)?,
+                )))
+            }
+            Some(PropertyType::Safety) => {
+                let description = def
+                    .annotations
+                    .get("description")
+                    .cloned()
+                    .unwrap_or_else(|| format!("Safety property: {}", def.name));
+
+                Ok(Some(types::QuintDefinition::Safety(QuintSafetyProperty {
+                    name: def.name,
+                    expression: def.expression,
+                    description,
+                    source_location: "ast_parser".to_string(),
+                    safety_type: SafetyPropertyType::General,
+                    monitored_variables: vec![],
+                })))
+            }
+            Some(PropertyType::Liveness) => {
+                let description = def
+                    .annotations
+                    .get("description")
+                    .cloned()
+                    .unwrap_or_else(|| format!("Temporal property: {}", def.name.clone()));
+
+                let tags = def
+                    .annotations
+                    .get("tags")
+                    .map(|s| s.split(',').map(|t| t.trim().to_string()).collect())
+                    .unwrap_or_else(|| vec!["auto-extracted".to_string()]);
+
+                Ok(Some(types::QuintDefinition::Temporal(
+                    QuintTemporalProperty {
+                        name: def.name,
+                        description,
+                        property_type: "Liveness".to_string(),
+                        expression: def.expression,
+                        source_location: "ast_parser".to_string(),
+                        enabled: true,
+                        tags,
+                    },
+                )))
+            }
+            None => Ok(None),
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-//! Unified time semantics for Aura (v2)
+//! Unified time semantics for Aura
 //!
 //! Provides semantic time representations (logical, order-only, physical, range)
 //! and explicit ordering policies. Provenance/attestation is modeled via an

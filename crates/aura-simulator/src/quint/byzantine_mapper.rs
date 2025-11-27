@@ -832,13 +832,19 @@ impl ByzantineMapper {
         }
     }
 
-    // Additional strategy creation methods (TODO fix - Simplified for brevity)
     fn create_signature_forgery_strategy(&self) -> EnhancedByzantineStrategy {
         let mut strategy = self.create_key_corruption_strategy();
         strategy.enhanced_name = "signature_forgery_attack".to_string();
         strategy.base_strategy = ByzantineStrategy::InvalidSignatures;
-        strategy.attack_parameters.intensity.base_level = 8;
+        strategy.attack_parameters.intensity.base_level = 9;
+        strategy.attack_parameters.intensity.escalation = true;
+        strategy
+            .attack_parameters
+            .target_selection
+            .target_message_types = vec!["signed_commit".to_string(), "partial_sig".to_string()];
+        strategy.attack_parameters.timing.attack_pattern = AttackPattern::Burst;
         strategy.property_impact.safety_impact = ImpactLevel::Critical;
+        strategy.property_impact.consistency_impact = ImpactLevel::High;
         strategy
     }
 
@@ -846,8 +852,16 @@ impl ByzantineMapper {
         let mut strategy = self.create_key_corruption_strategy();
         strategy.enhanced_name = "key_substitution_attack".to_string();
         strategy.base_strategy = ByzantineStrategy::SendInvalid;
-        strategy.attack_parameters.target_selection.target_phases =
-            vec!["leader".to_string(), "aggregator".to_string()];
+        strategy.attack_parameters.target_selection.target_phases = vec![
+            "leader".to_string(),
+            "aggregator".to_string(),
+            "rekey".to_string(),
+        ];
+        strategy
+            .attack_parameters
+            .target_selection
+            .target_message_types = vec!["public_key".to_string(), "key_update".to_string()];
+        strategy.attack_parameters.execution_probability = 0.7;
         strategy
     }
 
@@ -855,6 +869,12 @@ impl ByzantineMapper {
         let mut strategy = self.create_key_corruption_strategy();
         strategy.enhanced_name = "threshold_denial_attack".to_string();
         strategy.base_strategy = ByzantineStrategy::RefuseParticipation;
+        strategy.attack_parameters.execution_probability = 1.0;
+        strategy.attack_parameters.timing.initial_delay_ms = 0;
+        strategy
+            .effectiveness_conditions
+            .participant_configurations
+            .preferred_positions = vec![0, 1];
         strategy.property_impact.availability_impact = ImpactLevel::Critical;
         strategy
     }
@@ -863,6 +883,12 @@ impl ByzantineMapper {
         let mut strategy = self.create_threshold_denial_strategy();
         strategy.enhanced_name = "threshold_manipulation".to_string();
         strategy.attack_parameters.intensity.base_level = 9;
+        strategy
+            .attack_parameters
+            .target_selection
+            .target_message_types
+            .push("threshold_vote".to_string());
+        strategy.attack_parameters.coordination.coordinate = true;
         strategy
     }
 
@@ -875,6 +901,7 @@ impl ByzantineMapper {
             .effectiveness_conditions
             .participant_configurations
             .optimal_byzantine_count = 3;
+        strategy.attack_parameters.intensity.escalation = true;
         strategy
     }
 
@@ -903,6 +930,11 @@ impl ByzantineMapper {
         strategy.enhanced_name = "state_forking_attack".to_string();
         strategy.base_strategy = ByzantineStrategy::SendInvalid;
         strategy.attack_parameters.intensity.base_level = 7;
+        strategy.attack_parameters.timing.attack_pattern = AttackPattern::Random;
+        strategy
+            .attack_parameters
+            .target_selection
+            .target_message_types = vec!["state_update".to_string(), "checkpoint".to_string()];
         strategy
     }
 

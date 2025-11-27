@@ -4,15 +4,14 @@
 
 use crate::core::{sync_protocol_error, SyncError};
 use aura_core::{ContextId, DeviceId};
-use aura_effects::time::wallclock_ms;
 // Note: aura-sync intentionally avoids aura-macros for semantic independence
 // use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 fn now_ms() -> u64 {
-    wallclock_ms()
+    0 // placeholder; callers should supply PhysicalTimeEffects
 }
 
 /// Epoch rotation coordinator using choreographic protocols
@@ -28,9 +27,9 @@ pub struct EpochRotationCoordinator {
 /// Configuration for epoch management
 #[derive(Debug, Clone)]
 pub struct EpochConfig {
-    pub epoch_duration: std::time::Duration,
+    pub epoch_duration: Duration,
     pub rotation_threshold: usize, // Minimum participants for rotation
-    pub synchronization_timeout: std::time::Duration,
+    pub synchronization_timeout: Duration,
 }
 
 /// Epoch rotation state

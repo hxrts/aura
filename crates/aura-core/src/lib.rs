@@ -93,6 +93,8 @@ pub mod protocols;
 pub mod relational;
 /// Relationship and web-of-trust types
 pub mod relationships;
+/// Resource scopes for authorization
+pub mod scope;
 /// Core algebraic types and semilattice laws
 pub mod semilattice;
 /// DAG-CBOR serialization (canonical format)
@@ -250,6 +252,8 @@ pub use protocols::*;
 pub use relational::*;
 #[doc = "unstable: Relationship types are under active development"]
 pub use relationships::*;
+#[doc = "stable: Resource scope types for authorization with semver guarantees"]
+pub use scope::{AuthorityOp, ContextOp, ResourceScope};
 #[doc = "internal: Session epoch management is moving to aura-agent"]
 pub use session_epochs::*;
 #[deprecated(

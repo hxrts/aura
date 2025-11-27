@@ -8,7 +8,7 @@ use syn::{parse_macro_input, ItemFn};
 
 /// Test macro with automatic tracing and timeout
 ///
-/// Wraps tokio::test with aura-specific setup:
+/// Wraps async tests with aura-specific setup:
 /// - Automatic tracing initialization via aura-testkit
 /// - Default 30s timeout
 /// - Proper error handling
@@ -35,6 +35,9 @@ pub fn aura_test_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let body = &input.block;
     let fn_name = &sig.ident;
 
+    let mut sync_sig = sig.clone();
+    sync_sig.asyncness = None;
+
     // Check if function is async
     if sig.asyncness.is_none() {
         return syn::Error::new_spanned(
@@ -47,22 +50,45 @@ pub fn aura_test_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         #(#attrs)*
-        #[::tokio::test]
-        #vis #sig {
+        #[test]
+        #vis #sync_sig {
             // Initialize tracing once (safe to call multiple times)
             let _guard = ::aura_testkit::init_test_tracing();
 
-            // Run test with timeout
-            ::tokio::time::timeout(
+            ::aura_macros::internal::block_on_with_timeout(
                 ::std::time::Duration::from_secs(30),
-                async move #body
+                async move #body,
+                stringify!(#fn_name),
             )
-            .await
-            .unwrap_or_else(|_| {
-                panic!("Test '{}' timed out after 30 seconds", stringify!(#fn_name))
-            })
         }
     };
 
     expanded.into()
+}
+
+/// Internal helpers used by generated test wrappers
+#[doc(hidden)]
+pub mod internal {
+    use async_io::Timer;
+    use futures::pin_mut;
+    use futures::{future, Future};
+
+    #[allow(dead_code)]
+    pub fn block_on_with_timeout<F, T>(duration: std::time::Duration, fut: F, name: &str) -> T
+    where
+        F: Future<Output = T>,
+    {
+        async_io::block_on(async {
+            let timer = Timer::after(duration);
+            pin_mut!(timer);
+            pin_mut!(fut);
+
+            match future::select(fut, timer).await {
+                future::Either::Left((result, _)) => result,
+                future::Either::Right((_, _)) => {
+                    panic!("Test '{}' timed out after {:?}", name, duration)
+                }
+            }
+        })
+    }
 }

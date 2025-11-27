@@ -6,8 +6,8 @@
 use aura_core::DeviceId;
 use aura_core::{JoinSemilattice, MeetSemiLattice};
 use aura_journal::semilattice::account_state::AccountState;
-use std::time::Duration;
-use tokio::time::{sleep, Instant};
+use async_io::Timer;
+use std::time::{Duration, Instant};
 
 /// Assert that an account state has the expected number of devices
 #[macro_export]
@@ -208,7 +208,7 @@ pub async fn assert_eventually_eq<T, F>(
             );
         }
 
-        sleep(Duration::from_millis(10)).await;
+        Timer::after(Duration::from_millis(10)).await;
     }
 }
 
@@ -357,7 +357,7 @@ where
             );
         }
 
-        sleep(Duration::from_millis(10)).await;
+        Timer::after(Duration::from_millis(10)).await;
     }
 }
 
@@ -380,22 +380,28 @@ macro_rules! assert_epoch {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[tokio::test]
-    async fn test_assert_device_count_macro() {
-        let fixture = crate::fixtures::AccountTestFixture::new().await;
-        assert_device_count!(fixture.account_state, fixture.all_devices.len());
+    
+    #[test]
+    fn test_assert_device_count_macro() {
+        block_on(async {
+            let fixture = crate::fixtures::AccountTestFixture::new().await;
+            assert_device_count!(fixture.account_state, fixture.all_devices.len());
+        });
     }
 
-    #[tokio::test]
-    async fn test_assert_has_devices_macro() {
-        let fixture = crate::fixtures::AccountTestFixture::with_devices(3, 2).await;
-        assert_has_devices!(fixture.account_state);
+    #[test]
+    fn test_assert_has_devices_macro() {
+        block_on(async {
+            let fixture = crate::fixtures::AccountTestFixture::with_devices(3, 2).await;
+            assert_has_devices!(fixture.account_state);
+        });
     }
 
-    #[tokio::test]
-    async fn test_assert_account_valid() {
-        let fixture = crate::fixtures::AccountTestFixture::new().await;
-        assert_account_valid(&fixture.account_state);
+    #[test]
+    fn test_assert_account_valid() {
+        block_on(async {
+            let fixture = crate::fixtures::AccountTestFixture::new().await;
+            assert_account_valid(&fixture.account_state);
+        });
     }
 }

@@ -13,6 +13,7 @@ use aura_core::effects::NetworkEffects;
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
 use aura_rendezvous::messaging::{NetworkConfig, NetworkTransport};
 // Use testkit for proper test infrastructure
+use async_lock::RwLock;
 use aura_effects::time::monotonic_now;
 use aura_rendezvous::{
     crypto::encryption::PaddingStrategy,
@@ -25,7 +26,6 @@ use aura_rendezvous::{
 use aura_testkit::DeviceTestFixture;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio::time::Duration;
 use tracing_subscriber;
 

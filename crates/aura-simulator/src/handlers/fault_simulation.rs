@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Fault simulation effect handler for simulation
 //!
 //! This module provides simulation-specific fault injection capabilities through

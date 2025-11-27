@@ -3,7 +3,8 @@
 use crate::effects::{EffectApiEffects, EffectApiError, EffectApiEventStream};
 use async_trait::async_trait;
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
-use rand::{Rng, RngCore};
+use std::sync::Mutex;
+use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use std::sync::Arc;
 
 /// Memory-based effect_api handler for testing
@@ -45,43 +46,45 @@ impl Default for MemoryLedgerHandler {
 
 /// Deterministic random handler for memory tests
 struct DeterministicRandom {
-    seed: [u8; 32],
+    rng: Mutex<StdRng>,
 }
 
 impl DeterministicRandom {
     fn new(seed: [u8; 32]) -> Self {
-        Self { seed }
+        Self {
+            rng: Mutex::new(StdRng::from_seed(seed)),
+        }
     }
 }
 
 #[async_trait]
 impl RandomEffects for DeterministicRandom {
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        let mut rng = aura_effects::time::seeded_rng(self.seed);
+        let mut rng = self.rng.lock().unwrap();
         let mut bytes = vec![0u8; len];
         rng.fill_bytes(&mut bytes);
         bytes
     }
 
     async fn random_bytes_32(&self) -> [u8; 32] {
-        let mut rng = aura_effects::time::seeded_rng(self.seed);
+        let mut rng = self.rng.lock().unwrap();
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);
         bytes
     }
 
     async fn random_u64(&self) -> u64 {
-        let mut rng = aura_effects::time::seeded_rng(self.seed);
+        let mut rng = self.rng.lock().unwrap();
         rng.next_u64()
     }
 
     async fn random_range(&self, min: u64, max: u64) -> u64 {
-        let mut rng = aura_effects::time::seeded_rng(self.seed);
+        let mut rng = self.rng.lock().unwrap();
         rng.gen_range(min..=max)
     }
 
     async fn random_uuid(&self) -> uuid::Uuid {
-        let mut rng = aura_effects::time::seeded_rng(self.seed);
+        let mut rng = self.rng.lock().unwrap();
         let mut bytes = [0u8; 16];
         rng.fill_bytes(&mut bytes);
         uuid::Uuid::from_bytes(bytes)

@@ -53,7 +53,7 @@ module DKDProtocol {
 
     // Hash share to scalar and compute point
     pure def computePoint(shareBytes: str, contextId: str): Point =
-        shareBytes + "_point"  // TODO fix - Simplified
+        "P(" + shareBytes + "|" + contextId + ")"
 
     // Compute commitment from point
     pure def computeCommitment(point: Point): Commitment =
@@ -117,7 +117,7 @@ module DKDProtocol {
             dkdParticipants' = participants.fold(dkdParticipants, (acc, deviceId) =>
                 acc.put((sessionId, deviceId), {
                     deviceId: deviceId,
-                    shareBytes: bytes("share_" + deviceId),  // TODO fix - Simplified
+                    shareBytes: bytes("share_" + deviceId),
                     commitment: Commitment(""),
                     point: Point(""),
                     hasCommitted: false,

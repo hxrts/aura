@@ -22,7 +22,7 @@ use std::fmt;
 /// They represent knowledge that has been observed and cannot be "unlearned".
 ///
 /// Uses a proper CRDT (OR-Set with LWW-Map) for distributed consistency.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fact {
     /// CRDT-based fact storage with operation timestamps
     entries: FactCrdt,
@@ -109,7 +109,7 @@ impl Ord for FactOperation {
 }
 
 /// Individual fact values that can be accumulated
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FactValue {
     /// Simple string facts
     String(String),
@@ -436,6 +436,16 @@ impl PartialOrd for Fact {
     }
 }
 
+impl Ord for Fact {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // For total order, use serialization-based comparison
+        // This ensures deterministic ordering for sets/maps
+        let self_bytes = bincode::serialize(self).unwrap_or_default();
+        let other_bytes = bincode::serialize(other).unwrap_or_default();
+        self_bytes.cmp(&other_bytes)
+    }
+}
+
 impl JoinSemilattice for FactValue {
     fn join(&self, other: &Self) -> Self {
         match (self, other) {
@@ -477,6 +487,7 @@ impl Bottom for FactValue {
     }
 }
 
+#[allow(clippy::non_canonical_partial_ord_impl)] // FactValue has proper partial ordering with incomparable sets
 impl PartialOrd for FactValue {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         match (self, other) {
@@ -501,19 +512,44 @@ impl PartialOrd for FactValue {
     }
 }
 
+impl Ord for FactValue {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // For total order, compare by variant index first, then contents
+        match (self, other) {
+            (FactValue::String(a), FactValue::String(b)) => a.cmp(b),
+            (FactValue::Number(a), FactValue::Number(b)) => a.cmp(b),
+            (FactValue::Bytes(a), FactValue::Bytes(b)) => a.cmp(b),
+            (FactValue::Set(a), FactValue::Set(b)) => {
+                // Use ordered vectors for deterministic set comparison
+                let a_vec: Vec<_> = a.iter().collect();
+                let b_vec: Vec<_> = b.iter().collect();
+                a_vec.cmp(&b_vec)
+            }
+            (FactValue::Nested(a), FactValue::Nested(b)) => a.cmp(b),
+            // Different variants: order by variant index
+            (FactValue::String(_), _) => std::cmp::Ordering::Less,
+            (_, FactValue::String(_)) => std::cmp::Ordering::Greater,
+            (FactValue::Number(_), _) => std::cmp::Ordering::Less,
+            (_, FactValue::Number(_)) => std::cmp::Ordering::Greater,
+            (FactValue::Bytes(_), _) => std::cmp::Ordering::Less,
+            (_, FactValue::Bytes(_)) => std::cmp::Ordering::Greater,
+            (FactValue::Set(_), _) => std::cmp::Ordering::Less,
+            (_, FactValue::Set(_)) => std::cmp::Ordering::Greater,
+        }
+    }
+}
+
 impl Default for Fact {
     fn default() -> Self {
         Self::new()
     }
 }
 
-/// Capability type for the journal - represents "what we may do" (⊓-monotone)
+/// A capability, represented as a wrapper around a serialized Biscuit token.
 ///
-/// Capabilities are serialized Biscuit tokens.
-///
-/// The semantic evaluation lives in higher layers (`AuthorizationEffects`). The helper
-/// methods here provide conservative stubs for legacy callers and should not be used
-/// for authorization decisions.
+/// This struct is a simple container for the `token_bytes`. All semantic evaluation
+/// of the capability (e.g., authorization checks) is handled by the `AuthorizationEffects`
+/// trait in a higher-level crate. This type has no authorization logic itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cap {
     /// Serialized Biscuit token (empty if no capabilities)
@@ -578,58 +614,14 @@ impl Cap {
         Ok(())
     }
 
-    // Legacy compatibility stubs
+    /// Check if this capability allows a specific permission.
+    ///
+    /// Authorization enforcement lives in `AuthorizationEffects` at higher layers.
+    /// This compatibility shim treats the presence of a Biscuit token as "authorized"
+    /// and rejects when the token is empty, allowing legacy callers to short-circuit
+    /// while keeping the core crate runtime-agnostic.
     pub fn allows(&self, _permission: &str) -> bool {
-        !self.is_empty()
-    }
-
-    pub fn applies_to(&self, _resource: &str) -> bool {
-        !self.is_empty()
-    }
-
-    pub fn is_valid_at(&self, _timestamp: u64) -> bool {
-        !self.is_empty()
-    }
-
-    pub fn permissions(&self) -> Vec<String> {
-        vec![]
-    }
-
-    pub fn with_permissions<I>(_permissions: I) -> Self
-    where
-        I: IntoIterator,
-        I::Item: AsRef<str>,
-    {
-        Self::new()
-    }
-
-    pub fn with_resources<I>(self, _resources: I) -> Self
-    where
-        I: IntoIterator,
-        I::Item: AsRef<str>,
-    {
-        self
-    }
-
-    pub fn set_usage_limit(&mut self, _limit: u32) {
-        // Stub - actual usage limits managed via Biscuit token caveats
-    }
-
-    pub fn increment_usage(&mut self) {
-        // Stub - actual usage tracking done via Biscuit token facts
-    }
-
-    pub fn add_permission(&mut self, _permission: &str) {
-        // Stub - actual permission management done via Biscuit tokens
-    }
-
-    pub fn add_delegation(
-        &mut self,
-        _delegator: String,
-        _delegatee: String,
-        _constraints: Option<DelegationConstraints>,
-    ) {
-        // Stub - actual delegation done via Biscuit token blocks
+        !self.token_bytes.is_empty()
     }
 }
 
@@ -741,10 +733,10 @@ impl Journal {
     }
 
     /// Check if an operation is authorized
-    pub fn is_authorized(&self, permission: &str, resource: &str, timestamp: u64) -> bool {
-        self.caps.allows(permission)
-            && self.caps.applies_to(resource)
-            && self.caps.is_valid_at(timestamp)
+    /// Note: This method cannot perform real authorization since Cap is now just a token container.
+    /// Always returns false. Use AuthorizationEffects for real authorization decisions.
+    pub fn is_authorized(&self, _permission: &str, _resource: &str, _timestamp: u64) -> bool {
+        false
     }
 
     /// Merge two journals (facts join, capabilities meet)
@@ -772,9 +764,13 @@ impl fmt::Display for Journal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "Journal[facts: {} items, caps: {} permissions]",
+            "Journal[facts: {} items, caps: {}]",
             self.facts.len(),
-            self.caps.permissions().len()
+            if self.caps.is_empty() {
+                "empty"
+            } else {
+                "present"
+            }
         )
     }
 }
@@ -806,9 +802,11 @@ mod tests {
 
     #[test]
     fn test_capability_meet_laws() {
-        let cap1 = Cap::with_permissions(vec!["read".to_string(), "write".to_string()]);
-        let cap2 = Cap::with_permissions(vec!["read".to_string(), "delete".to_string()]);
-        let cap3 = Cap::with_permissions(vec!["execute".to_string()]);
+        // Note: Current Cap implementation is just a token container,
+        // so we'll test with top capabilities and empty capabilities
+        let cap1 = Cap::top();
+        let cap2 = Cap::top();
+        let cap3 = Cap::new(); // empty capability
 
         // Associativity: (a ⊓ b) ⊓ c = a ⊓ (b ⊓ c)
         let left = cap1.meet(&cap2).meet(&cap3);
@@ -881,7 +879,7 @@ mod tests {
     #[test]
     fn test_journal_authorization_stub() {
         let journal = Journal::new();
-        // Current Cap stub always authorizes; ensure the method is wired
-        assert!(journal.is_authorized("read", "resource", 0));
+        // Empty Cap returns false for all permissions
+        assert!(!journal.is_authorized("read", "resource", 0));
     }
 }

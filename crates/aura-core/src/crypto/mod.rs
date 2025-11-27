@@ -1,11 +1,10 @@
 pub mod amp;
-pub mod key_derivation_types;
+pub mod key_derivation;
 pub mod merkle;
 pub mod tree_signing;
 
 use ed25519_dalek::Signer;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 // Re-export frost-friendly tree signing primitives under the legacy `frost` path.
 pub mod frost {
@@ -22,7 +21,7 @@ pub use merkle::{
 };
 
 // Deterministic key derivation types
-pub use key_derivation_types::{IdentityKeyContext, KeyDerivationSpec, PermissionKeyContext};
+pub use key_derivation::{IdentityKeyContext, KeyDerivationSpec, PermissionKeyContext};
 
 /// Basic Ed25519 signature wrapper (bytes form for serialization).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -128,15 +127,6 @@ impl HpkeKeyPair {
             private: HpkePrivateKey(private),
         }
     }
-}
-
-/// Generate a UUID (legacy helper) - DEPRECATED: Use RandomEffects instead.
-/// This function violates the effect system architecture and will be removed.
-#[deprecated(note = "Use RandomEffects trait instead")]
-pub fn generate_uuid() -> Uuid {
-    // This is a temporary compatibility shim that will be removed
-    // All UUID generation should go through RandomEffects
-    panic!("generate_uuid is deprecated - use RandomEffects trait instead")
 }
 
 /// Verify an Ed25519 signature using dalek.

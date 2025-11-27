@@ -9,26 +9,28 @@ use aura_core::effects::crypto::FrostSigningPackage;
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::storage::{StorageError, StorageStats};
 use aura_core::effects::*;
+use aura_core::effects::TreeOperationEffects;
 use aura_core::Journal;
 use aura_core::{
     AttestedOp, AuraError, AuthorityId, ContextId, DeviceId, FlowBudget, Hash32, LeafId, LeafNode,
-    NodeIndex, Policy, TreeOpKind,
+    NodeIndex, Policy,
 };
 use aura_effects::{
     crypto::RealCryptoHandler,
     storage::FilesystemStorageHandler,
     time::{LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler},
 };
-use aura_journal::commitment_tree::state::TreeState;
-use aura_protocol::effects::tree::{Cut, Partial, ProposalId, Snapshot};
+use aura_journal::commitment_tree::state::TreeState as JournalTreeState;
 use aura_protocol::effects::{
-    AuraEffects, AuthorizationEffects, ChoreographicEffects, ChoreographicRole, ChoreographyError,
-    ChoreographyEvent, ChoreographyMetrics, EffectApiEffects, EffectApiError, EffectApiEventStream,
-    LeakageEffects, TreeEffects,
+    AuraEffects, AuthorizationEffects, BloomDigest, ChoreographicEffects, ChoreographicRole,
+    ChoreographyError, ChoreographyEvent, ChoreographyMetrics, EffectApiEffects, EffectApiError,
+    EffectApiEventStream, LeakageEffects, SyncEffects, SyncError,
 };
-use aura_protocol::guards::effect_system_trait::GuardEffectSystem;
+use aura_protocol::guards::GuardEffectSystem;
 use aura_wot::{BiscuitAuthorizationBridge, FlowBudgetHandler};
 use biscuit_auth::{Biscuit, KeyPair};
+use rand::rngs::StdRng;
+use rand::{Rng, RngCore, SeedableRng};
 use std::collections::HashMap;
 
 /// Effect executor for dispatching effect calls
@@ -110,6 +112,34 @@ pub struct AuraEffectSystem {
     journal_policy: Option<(biscuit_auth::Biscuit, aura_wot::BiscuitAuthorizationBridge)>,
     journal_verifying_key: Option<Vec<u8>>,
     authority_id: AuthorityId,
+    tree_handler: aura_protocol::handlers::tree::DummyTreeHandler,
+}
+
+#[derive(Clone, Default)]
+struct NoopBiscuitAuthorizationHandler;
+
+#[async_trait]
+impl BiscuitAuthorizationEffects for NoopBiscuitAuthorizationHandler {
+    async fn authorize_biscuit(
+        &self,
+        _token_data: &[u8],
+        _operation: &str,
+        _scope: &aura_core::scope::ResourceScope,
+    ) -> Result<AuthorizationDecision, AuthorizationError> {
+        Ok(AuthorizationDecision {
+            authorized: true,
+            reason: None,
+        })
+    }
+
+    async fn authorize_fact(
+        &self,
+        _token_data: &[u8],
+        _fact_type: &str,
+        _scope: &aura_core::scope::ResourceScope,
+    ) -> Result<bool, AuthorizationError> {
+        Ok(true)
+    }
 }
 
 impl AuraEffectSystem {
@@ -132,13 +162,14 @@ impl AuraEffectSystem {
             crypto_handler,
             storage_handler: FilesystemStorageHandler::new(storage_base),
             time_handler: PhysicalTimeHandler::new(),
-            logical_clock: LogicalClockHandler::new(Some(device_id)),
+            logical_clock: LogicalClockHandler::new(),
             order_clock: OrderClockHandler,
             authorization_handler,
             leakage_handler,
             journal_policy,
             journal_verifying_key,
             authority_id: authority,
+            tree_handler: aura_protocol::handlers::tree::DummyTreeHandler::new(),
         })
     }
 
@@ -161,13 +192,14 @@ impl AuraEffectSystem {
             crypto_handler,
             storage_handler: FilesystemStorageHandler::new(storage_base),
             time_handler: PhysicalTimeHandler::new(),
-            logical_clock: LogicalClockHandler::new(Some(device_id)),
+            logical_clock: LogicalClockHandler::new(),
             order_clock: OrderClockHandler,
             authorization_handler,
             leakage_handler,
             journal_policy,
             journal_verifying_key,
             authority_id: authority,
+            tree_handler: aura_protocol::handlers::tree::DummyTreeHandler::new(),
         })
     }
 
@@ -188,13 +220,14 @@ impl AuraEffectSystem {
             crypto_handler,
             storage_handler: FilesystemStorageHandler::new(config.storage.base_path.clone()),
             time_handler: PhysicalTimeHandler::new(),
-            logical_clock: LogicalClockHandler::new(Some(device_id)),
+            logical_clock: LogicalClockHandler::new(),
             order_clock: OrderClockHandler,
             authorization_handler,
             leakage_handler,
             journal_policy,
             journal_verifying_key,
             authority_id: AuthorityId::from_uuid(config.device_id().0),
+            tree_handler: aura_protocol::handlers::tree::DummyTreeHandler::new(),
         })
     }
 
@@ -215,13 +248,14 @@ impl AuraEffectSystem {
             crypto_handler,
             storage_handler: FilesystemStorageHandler::new(config.storage.base_path.clone()),
             time_handler: PhysicalTimeHandler::new(),
-            logical_clock: LogicalClockHandler::new(Some(device_id)),
+            logical_clock: LogicalClockHandler::new(),
             order_clock: OrderClockHandler,
             authorization_handler,
             leakage_handler,
             journal_policy,
             journal_verifying_key,
             authority_id: AuthorityId::from_uuid(config.device_id().0),
+            tree_handler: aura_protocol::handlers::tree::DummyTreeHandler::new(),
         })
     }
 
@@ -256,12 +290,24 @@ impl AuraEffectSystem {
     /// Construct a journal handler with current policy hooks.
     fn journal_handler(
         &self,
-    ) -> aura_journal::JournalHandler<RealCryptoHandler, FilesystemStorageHandler> {
+    ) -> aura_journal::JournalHandler<
+        RealCryptoHandler,
+        FilesystemStorageHandler,
+        NoopBiscuitAuthorizationHandler,
+        FlowBudgetHandler,
+    > {
+        let authorization = self
+            .journal_policy
+            .as_ref()
+            .and_then(|(token, _bridge)| token.to_vec().ok())
+            .map(|bytes| (bytes, NoopBiscuitAuthorizationHandler::default()));
+
         aura_journal::JournalHandlerFactory::create(
             self.authority_id,
             self.crypto_handler.clone(),
             self.storage_handler.clone(),
-            self.journal_policy.clone(),
+            authorization,
+            Some(self.flow_budget.clone()),
             self.journal_verifying_key.clone(),
         )
     }
@@ -300,13 +346,101 @@ impl OrderClockEffects for AuraEffectSystem {
     }
 }
 
+#[async_trait::async_trait]
+impl aura_protocol::effects::TreeEffects for AuraEffectSystem {
+    async fn get_current_state(&self) -> Result<JournalTreeState, AuraError> {
+        self.tree_handler.get_current_state().await
+    }
+
+    async fn get_current_commitment(&self) -> Result<aura_core::Hash32, AuraError> {
+        self.tree_handler.get_current_commitment().await
+    }
+
+    async fn get_current_epoch(&self) -> Result<u64, AuraError> {
+        self.tree_handler.get_current_epoch().await
+    }
+
+    async fn apply_attested_op(
+        &self,
+        op: aura_core::AttestedOp,
+    ) -> Result<aura_core::Hash32, AuraError> {
+        self.tree_handler.apply_attested_op(op).await
+    }
+
+    async fn verify_aggregate_sig(
+        &self,
+        op: &aura_core::AttestedOp,
+        state: &JournalTreeState,
+    ) -> Result<bool, AuraError> {
+        self.tree_handler.verify_aggregate_sig(op, state).await
+    }
+
+    async fn add_leaf(
+        &self,
+        leaf: aura_core::LeafNode,
+        under: aura_core::NodeIndex,
+    ) -> Result<aura_core::TreeOpKind, AuraError> {
+        self.tree_handler.add_leaf(leaf, under).await
+    }
+
+    async fn remove_leaf(
+        &self,
+        leaf_id: aura_core::LeafId,
+        reason: u8,
+    ) -> Result<aura_core::TreeOpKind, AuraError> {
+        self.tree_handler.remove_leaf(leaf_id, reason).await
+    }
+
+    async fn change_policy(
+        &self,
+        node: aura_core::NodeIndex,
+        policy: aura_core::Policy,
+    ) -> Result<aura_core::TreeOpKind, AuraError> {
+        self.tree_handler.change_policy(node, policy).await
+    }
+
+    async fn rotate_epoch(
+        &self,
+        affected: Vec<aura_core::NodeIndex>,
+    ) -> Result<aura_core::TreeOpKind, AuraError> {
+        self.tree_handler.rotate_epoch(affected).await
+    }
+
+    async fn propose_snapshot(
+        &self,
+        cut: aura_protocol::effects::tree::Cut,
+    ) -> Result<aura_protocol::effects::tree::ProposalId, AuraError> {
+        self.tree_handler.propose_snapshot(cut).await
+    }
+
+    async fn approve_snapshot(
+        &self,
+        proposal_id: aura_protocol::effects::tree::ProposalId,
+    ) -> Result<aura_protocol::effects::tree::Partial, AuraError> {
+        self.tree_handler.approve_snapshot(proposal_id).await
+    }
+
+    async fn finalize_snapshot(
+        &self,
+        proposal_id: aura_protocol::effects::tree::ProposalId,
+    ) -> Result<aura_protocol::effects::tree::Snapshot, AuraError> {
+        self.tree_handler.finalize_snapshot(proposal_id).await
+    }
+
+    async fn apply_snapshot(
+        &self,
+        snapshot: &aura_protocol::effects::tree::Snapshot,
+    ) -> Result<(), AuraError> {
+        self.tree_handler.apply_snapshot(snapshot).await
+    }
+}
+
 // Implementation of RandomEffects
 #[async_trait]
 impl RandomEffects for AuraEffectSystem {
     #[allow(clippy::disallowed_methods)]
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
-        use rand::RngCore;
-        let mut rng = aura_effects::time::seeded_rng([7u8; 32]);
+        let mut rng = StdRng::from_seed([7u8; 32]);
         let mut bytes = vec![0u8; len];
         rng.fill_bytes(&mut bytes);
         bytes
@@ -314,8 +448,7 @@ impl RandomEffects for AuraEffectSystem {
 
     #[allow(clippy::disallowed_methods)]
     async fn random_bytes_32(&self) -> [u8; 32] {
-        use rand::RngCore;
-        let mut rng = aura_effects::time::seeded_rng([11u8; 32]);
+        let mut rng = StdRng::from_seed([11u8; 32]);
         let mut bytes = [0u8; 32];
         rng.fill_bytes(&mut bytes);
         bytes
@@ -323,21 +456,74 @@ impl RandomEffects for AuraEffectSystem {
 
     #[allow(clippy::disallowed_methods)]
     async fn random_u64(&self) -> u64 {
-        use rand::Rng;
-        let mut rng = aura_effects::time::seeded_rng([19u8; 32]);
+        let mut rng = StdRng::from_seed([19u8; 32]);
         rng.gen()
     }
 
     #[allow(clippy::disallowed_methods)]
     async fn random_range(&self, min: u64, max: u64) -> u64 {
-        use rand::Rng;
-        let mut rng = aura_effects::time::seeded_rng([23u8; 32]);
+        let mut rng = StdRng::from_seed([23u8; 32]);
         rng.gen_range(min..=max)
     }
 
     #[allow(clippy::disallowed_methods)]
     async fn random_uuid(&self) -> uuid::Uuid {
         uuid::Uuid::new_v4()
+    }
+}
+
+// Implementation of SyncEffects (placeholder; real sync wired in orchestration layer)
+#[async_trait]
+impl SyncEffects for AuraEffectSystem {
+    async fn sync_with_peer(&self, _peer_id: uuid::Uuid) -> Result<(), SyncError> {
+        Ok(())
+    }
+
+    async fn get_oplog_digest(&self) -> Result<BloomDigest, SyncError> {
+        Ok(BloomDigest::empty())
+    }
+
+    async fn get_missing_ops(
+        &self,
+        _remote_digest: &BloomDigest,
+    ) -> Result<Vec<AttestedOp>, SyncError> {
+        Ok(Vec::new())
+    }
+
+    async fn request_ops_from_peer(
+        &self,
+        _peer_id: uuid::Uuid,
+        _cids: Vec<Hash32>,
+    ) -> Result<Vec<AttestedOp>, SyncError> {
+        Ok(Vec::new())
+    }
+
+    async fn merge_remote_ops(&self, _ops: Vec<AttestedOp>) -> Result<(), SyncError> {
+        Ok(())
+    }
+
+    async fn announce_new_op(&self, _cid: Hash32) -> Result<(), SyncError> {
+        Ok(())
+    }
+
+    async fn request_op(
+        &self,
+        _peer_id: uuid::Uuid,
+        _cid: Hash32,
+    ) -> Result<AttestedOp, SyncError> {
+        Err(SyncError::AuthorizationFailed)
+    }
+
+    async fn push_op_to_peers(
+        &self,
+        _op: AttestedOp,
+        _peers: Vec<uuid::Uuid>,
+    ) -> Result<(), SyncError> {
+        Ok(())
+    }
+
+    async fn get_connected_peers(&self) -> Result<Vec<uuid::Uuid>, SyncError> {
+        Ok(Vec::new())
     }
 }
 
@@ -829,91 +1015,105 @@ impl ChoreographicEffects for AuraEffectSystem {
     }
 }
 
-// Implementation of TreeEffects
+// Implementation of TreeOperationEffects (placeholder; integrate real tree ops in runtime assembly)
 #[async_trait]
-impl TreeEffects for AuraEffectSystem {
-    async fn get_current_state(&self) -> Result<TreeState, AuraError> {
-        // Mock implementation
-        Ok(TreeState::new())
+impl TreeOperationEffects for AuraEffectSystem {
+    async fn get_current_state(&self) -> Result<Vec<u8>, AuraError> {
+        Err(AuraError::internal(
+            "TreeOperationEffects::get_current_state not implemented",
+        ))
     }
 
     async fn get_current_commitment(&self) -> Result<Hash32, AuraError> {
-        // Mock implementation
-        Ok(Hash32::from([0u8; 32]))
+        Err(AuraError::internal(
+            "TreeOperationEffects::get_current_commitment not implemented",
+        ))
     }
 
     async fn get_current_epoch(&self) -> Result<u64, AuraError> {
-        // Mock implementation
-        Ok(0)
+        Err(AuraError::internal(
+            "TreeOperationEffects::get_current_epoch not implemented",
+        ))
     }
 
     async fn apply_attested_op(&self, _op: AttestedOp) -> Result<Hash32, AuraError> {
-        // Mock implementation
-        Ok(Hash32::from([0u8; 32]))
+        Err(AuraError::internal(
+            "TreeOperationEffects::apply_attested_op not implemented",
+        ))
     }
 
     async fn verify_aggregate_sig(
         &self,
         _op: &AttestedOp,
-        _state: &TreeState,
+        _state: &[u8],
     ) -> Result<bool, AuraError> {
-        // Mock implementation
-        Ok(true)
+        Err(AuraError::internal(
+            "TreeOperationEffects::verify_aggregate_sig not implemented",
+        ))
     }
 
-    async fn add_leaf(&self, _leaf: LeafNode, _under: NodeIndex) -> Result<TreeOpKind, AuraError> {
-        // Mock implementation
-        Ok(TreeOpKind::RotateEpoch { affected: vec![] })
+    async fn add_leaf(&self, _leaf: LeafNode, _under: NodeIndex) -> Result<Vec<u8>, AuraError> {
+        Err(AuraError::internal(
+            "TreeOperationEffects::add_leaf not implemented",
+        ))
     }
 
-    async fn remove_leaf(&self, _leaf_id: LeafId, _reason: u8) -> Result<TreeOpKind, AuraError> {
-        // Mock implementation
-        Ok(TreeOpKind::RotateEpoch { affected: vec![] })
+    async fn remove_leaf(&self, _leaf: LeafId, _reason: u8) -> Result<Vec<u8>, AuraError> {
+        Err(AuraError::internal(
+            "TreeOperationEffects::remove_leaf not implemented",
+        ))
     }
 
     async fn change_policy(
         &self,
         _node: NodeIndex,
         _new_policy: Policy,
-    ) -> Result<TreeOpKind, AuraError> {
-        // Mock implementation
-        Ok(TreeOpKind::RotateEpoch { affected: vec![] })
+    ) -> Result<Vec<u8>, AuraError> {
+        Err(AuraError::internal(
+            "TreeOperationEffects::change_policy not implemented",
+        ))
     }
 
-    async fn rotate_epoch(&self, _affected: Vec<NodeIndex>) -> Result<TreeOpKind, AuraError> {
-        // Mock implementation
-        Ok(TreeOpKind::RotateEpoch { affected: vec![] })
+    async fn rotate_epoch(&self, _affected: Vec<NodeIndex>) -> Result<Vec<u8>, AuraError> {
+        Err(AuraError::internal(
+            "TreeOperationEffects::rotate_epoch not implemented",
+        ))
     }
 
-    async fn propose_snapshot(&self, _cut: Cut) -> Result<ProposalId, AuraError> {
-        // Mock implementation
-        Ok(ProposalId(Hash32::from([0u8; 32])))
+    async fn propose_snapshot(
+        &self,
+        _cut: aura_core::effects::Cut,
+    ) -> Result<aura_core::effects::ProposalId, AuraError> {
+        Err(AuraError::internal(
+            "TreeOperationEffects::propose_snapshot not implemented",
+        ))
     }
 
-    async fn approve_snapshot(&self, _proposal_id: ProposalId) -> Result<Partial, AuraError> {
-        // Mock implementation
-        Ok(Partial {
-            signature_share: vec![0u8; 32],
-            participant_id: DeviceId::new(),
-        })
+    async fn approve_snapshot(
+        &self,
+        _proposal_id: aura_core::effects::ProposalId,
+    ) -> Result<aura_core::effects::Partial, AuraError> {
+        Err(AuraError::internal(
+            "TreeOperationEffects::approve_snapshot not implemented",
+        ))
     }
 
-    async fn finalize_snapshot(&self, _proposal_id: ProposalId) -> Result<Snapshot, AuraError> {
-        // Mock implementation
-        Ok(Snapshot {
-            cut: Cut {
-                epoch: 0,
-                commitment: Hash32::from([0u8; 32]),
-                cid: Hash32::from([0u8; 32]),
-            },
-            tree_state: TreeState::new(),
-            aggregate_signature: vec![0u8; 64],
-        })
+    async fn finalize_snapshot(
+        &self,
+        _proposal_id: aura_core::effects::ProposalId,
+    ) -> Result<aura_core::effects::Snapshot, AuraError> {
+        Err(AuraError::internal(
+            "TreeOperationEffects::finalize_snapshot not implemented",
+        ))
     }
 
-    async fn apply_snapshot(&self, _snapshot: &Snapshot) -> Result<(), AuraError> {
-        // Mock implementation
-        Ok(())
+    async fn apply_snapshot(
+        &self,
+        _snapshot: &aura_core::effects::Snapshot,
+    ) -> Result<(), AuraError> {
+        Err(AuraError::internal(
+            "TreeOperationEffects::apply_snapshot not implemented",
+        ))
     }
 }
 
@@ -1052,37 +1252,20 @@ impl AuraEffects for AuraEffectSystem {
     }
 }
 
-// Implementation of GuardEffectSystem trait
-// This enables automatic AmpJournalEffects implementation
 impl GuardEffectSystem for AuraEffectSystem {
     fn authority_id(&self) -> AuthorityId {
-        // Get the authority ID from the configuration
-        // For now, generate a new one - in production this should be persisted
-        AuthorityId::from_uuid(self.config.device_id().0)
+        self.authority_id
     }
 
     fn execution_mode(&self) -> aura_core::effects::ExecutionMode {
-        // Delegate to AuraEffects implementation
         AuraEffects::execution_mode(self)
     }
 
-    fn get_metadata(&self, key: &str) -> Option<String> {
-        // Access configuration metadata
-        match key {
-            "authority_id" => Some(self.authority_id().to_string()),
-            "execution_mode" => Some(format!("{:?}", self.execution_mode())),
-            "device_id" => Some(self.config.device_id().to_string()),
-            _ => {
-                tracing::debug!(key = %key, "Metadata not found for key");
-                None
-            }
-        }
+    fn get_metadata(&self, _key: &str) -> Option<String> {
+        None
     }
 
-    fn can_perform_operation(&self, operation: &str) -> bool {
-        // For now, allow all operations in the runtime
-        // In production, this could check against configuration or policy
-        tracing::debug!(operation = %operation, "Checking operation permissions");
+    fn can_perform_operation(&self, _operation: &str) -> bool {
         true
     }
 }
@@ -1167,7 +1350,7 @@ mod tests {
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config).unwrap();
 
-        // Test that our GuardEffectSystem implementation enables AmpJournalEffects
+        // Pure guards + EffectInterpreter are used; legacy bridges removed.
         let context = ContextId::new();
         let _journal = effect_system.fetch_context_journal(context).await.unwrap();
 

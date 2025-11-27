@@ -6,7 +6,7 @@ use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{tree::AttestedOp, Hash32};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 use uuid::Uuid;
 
 /// Configuration for broadcast behavior

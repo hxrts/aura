@@ -73,20 +73,16 @@ impl Default for SecurityContext {
 /// GuardEffectSystem for boxed AuraEffects
 impl GuardEffectSystem for Box<dyn AuraEffects> {
     fn authority_id(&self) -> AuthorityId {
-        match futures::executor::block_on(async { self.get_config("authority_id").await }) {
-            Ok(authority_id_str) => authority_id_str
-                .parse()
-                .unwrap_or_else(|_| AuthorityId::new()),
-            Err(_) => AuthorityId::new(),
-        }
+        // Fallback authority ID for boxed trait objects; production systems should pass concrete implementors.
+        AuthorityId::new()
     }
 
     fn execution_mode(&self) -> ExecutionMode {
         AuraEffects::execution_mode(self.as_ref())
     }
 
-    fn get_metadata(&self, key: &str) -> Option<String> {
-        futures::executor::block_on(async { self.get_config(key).await }).ok()
+    fn get_metadata(&self, _key: &str) -> Option<String> {
+        None
     }
 
     fn can_perform_operation(&self, operation: &str) -> bool {

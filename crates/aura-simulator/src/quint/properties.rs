@@ -448,10 +448,12 @@ impl PropertyMonitor {
     // SAFETY: timing measurement for property validation
     #[allow(clippy::disallowed_methods)]
     pub fn evaluate_properties(&mut self, _state: &dyn SimulationState) -> ValidationResult {
+        #[allow(clippy::disallowed_methods)]
         let start_time = aura_effects::time::monotonic_now();
         let mut validation_result = ValidationResult::new();
 
         for property in &self.monitored_properties {
+            #[allow(clippy::disallowed_methods)]
             let eval_start = aura_effects::time::monotonic_now();
 
             // Placeholder evaluation - in production would use actual Quint evaluator

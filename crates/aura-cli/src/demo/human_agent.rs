@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! # Human-Agent Demo Mode
 //!
 //! Provides Bob's real user experience with automated Alice/Charlie guardians.
@@ -5,7 +6,9 @@
 //! a complete demo where Bob has the full interactive experience while
 //! Alice and Charlie are automated for reliable demo presentation.
 
-use aura_effects::time::monotonic_now;
+use aura_core::PhysicalTimeEffects;
+use aura_effects::time::{monotonic_now, PhysicalTimeHandler};
+use std::future;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use uuid::Uuid;
@@ -344,7 +347,11 @@ impl HumanAgentDemo {
         tracing::info!("Setting up automated guardians");
 
         // Simulate guardian registration with delays
-        tokio::time::sleep(std::time::Duration::from_millis(self.config.agent_delay_ms)).await;
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_millis(self.config.agent_delay_ms),
+            future::pending::<()>(),
+        )
+        .await;
 
         // Alice setup
         {
@@ -352,10 +359,10 @@ impl HumanAgentDemo {
             alice.register_as_guardian().await?;
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(
-            self.config.agent_delay_ms / 2,
-        ))
-        .await;
+        PhysicalTimeHandler::new()
+            .sleep_ms((self.config.agent_delay_ms / 2) as u64)
+            .await
+            .ok();
 
         // Charlie setup
         {
@@ -414,7 +421,10 @@ impl HumanAgentDemo {
         // Demo code - alice_authority is guaranteed to be set at this point
         let _alice_authority = self.demo_state.alice_authority.unwrap();
         tokio::spawn(async move {
-            tokio::time::sleep(response_delay).await;
+            PhysicalTimeHandler::new()
+                .sleep_ms(response_delay.as_millis() as u64)
+                .await
+                .ok();
             // Would send approval through actual system
             tracing::info!("Alice automatically approved recovery");
         });
@@ -425,7 +435,10 @@ impl HumanAgentDemo {
         let _charlie_authority = self.demo_state.charlie_authority.unwrap();
         let charlie_delay = response_delay + std::time::Duration::from_millis(1000);
         tokio::spawn(async move {
-            tokio::time::sleep(charlie_delay).await;
+            PhysicalTimeHandler::new()
+                .sleep_ms(charlie_delay.as_millis() as u64)
+                .await
+                .ok();
             // Would send approval through actual system
             tracing::info!("Charlie automatically approved recovery");
         });
@@ -498,8 +511,9 @@ impl HumanAgentDemo {
     async fn simulate_guardian_activity(&self) -> anyhow::Result<()> {
         // Simulate periodic guardian heartbeats, status updates, etc.
         tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+                interval.tick().await;
                 tracing::debug!("Guardian heartbeat");
             }
         });
@@ -512,10 +526,10 @@ impl HumanAgentDemo {
         // Would analyze Bob's message and generate appropriate guardian responses
         // For demo purposes, just simulate some activity
 
-        tokio::time::sleep(std::time::Duration::from_millis(
-            self.config.agent_delay_ms / 2,
-        ))
-        .await;
+        PhysicalTimeHandler::new()
+            .sleep_ms((self.config.agent_delay_ms / 2) as u64)
+            .await
+            .ok();
 
         tracing::debug!("Guardians acknowledged Bob's message");
         Ok(())
@@ -547,8 +561,10 @@ impl HumanAgentDemo {
         agent: Arc<Mutex<SimulatedGuardianAgent>>,
         config: HumanAgentDemoConfig,
     ) {
+        let mut interval =
+            tokio::time::interval(std::time::Duration::from_millis(config.agent_delay_ms));
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(config.agent_delay_ms)).await;
+            interval.tick().await;
 
             // Alice's automated behavior
             {
@@ -565,11 +581,11 @@ impl HumanAgentDemo {
         agent: Arc<Mutex<SimulatedGuardianAgent>>,
         config: HumanAgentDemoConfig,
     ) {
+        let mut interval = tokio::time::interval(std::time::Duration::from_millis(
+            config.agent_delay_ms + 500, // Different timing from Alice
+        ));
         loop {
-            tokio::time::sleep(std::time::Duration::from_millis(
-                config.agent_delay_ms + 500, // Different timing from Alice
-            ))
-            .await;
+            interval.tick().await;
 
             // Charlie's automated behavior
             {

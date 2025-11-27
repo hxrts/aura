@@ -10,7 +10,10 @@ use aura_core::effects::time::{LogicalClockEffects, OrderClockEffects, PhysicalT
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::semilattice::JoinSemilattice;
 use aura_core::time::{OrderTime, TimeDomain, TimeStamp};
-use aura_core::{effects::RandomEffects, AccountId, AuraError, Ed25519VerifyingKey};
+use aura_core::{
+    effects::{CryptoEffects, RandomEffects},
+    AccountId, AuraError, Ed25519VerifyingKey,
+};
 use serde::{Deserialize, Serialize};
 
 /// Simplified Journal interface using fact-based architecture
@@ -29,16 +32,14 @@ pub struct Journal {
 
 impl Journal {
     /// Create a new journal for an account
-    pub async fn new(account_id: AccountId, random: &dyn RandomEffects) -> Result<Self, AuraError> {
-        use ed25519_dalek::SigningKey;
-        use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
+    pub async fn new(account_id: AccountId, crypto: &dyn CryptoEffects) -> Result<Self, AuraError> {
+        // Generate keypair through effects system
+        let (_, public_key_bytes) = crypto
+            .ed25519_generate_keypair()
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to generate keypair: {}", e)))?;
 
-        // Generate deterministic seed from RandomEffects
-        let seed = random.random_bytes_32().await;
-        let mut rng = ChaCha20Rng::from_seed(seed);
-
-        let ed25519_key = SigningKey::generate(&mut rng).verifying_key();
-        let group_key = Ed25519VerifyingKey(ed25519_key.to_bytes().to_vec());
+        let group_key = Ed25519VerifyingKey(public_key_bytes);
 
         // Create authority ID from account ID for namespace
         let authority_id = AuthorityId::from_uuid(account_id.0);
@@ -51,16 +52,13 @@ impl Journal {
         })
     }
 
-    /// Create a new journal for an account with specific group key
-    pub fn new_with_group_key(
-        account_id: AccountId,
-        group_key: ed25519_dalek::VerifyingKey,
-    ) -> Self {
+    /// Create a new journal for an account with specific group key bytes
+    pub fn new_with_group_key_bytes(account_id: AccountId, group_key_bytes: Vec<u8>) -> Self {
         // Create authority ID from account ID for namespace
         let authority_id = AuthorityId::from_uuid(account_id.0);
         let namespace = JournalNamespace::Authority(authority_id);
 
-        let group_key = Ed25519VerifyingKey(group_key.to_bytes().to_vec());
+        let group_key = Ed25519VerifyingKey(group_key_bytes);
 
         Self {
             account_state: AccountState::new(account_id, group_key),

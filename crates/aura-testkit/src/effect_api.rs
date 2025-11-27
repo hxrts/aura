@@ -3,11 +3,11 @@
 //! This module provides standardized helpers for creating and managing test effect_apis
 //! (CRDT-based account effect_apis) across the Aura test suite.
 
+use async_lock::RwLock;
 use aura_core::hash::hash;
 use aura_core::AccountId;
 use aura_journal::semilattice::AccountState;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// Simple AccountEffectApi replacement for testing

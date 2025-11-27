@@ -1,9 +1,9 @@
 //! Leakage tracking handlers for testing
 
+use async_lock::RwLock;
 use aura_core::ContextId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 /// Leakage budget
 #[derive(Debug, Clone)]

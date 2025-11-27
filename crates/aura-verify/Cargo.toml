@@ -21,12 +21,11 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-ed25519-dalek = { workspace = true }
 hex = { workspace = true }
 blake3 = { workspace = true }
 
 [dev-dependencies]
-# tokio-test = { workspace = true } # removed - unused
+# Test utilities now use aura-core crypto functions instead of direct ed25519-dalek
 signature = { workspace = true }
-tokio = { workspace = true }
+ed25519-dalek = { workspace = true }
 rand = { workspace = true }

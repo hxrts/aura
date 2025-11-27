@@ -6,11 +6,12 @@
 
 use super::effect_system_trait::GuardEffectSystem;
 use crate::guards::{privacy::track_leakage_consumption, JournalCoupler, LeakageBudget};
+use crate::guards::pure_executor::{BorrowedEffectInterpreter, GuardChainExecutor};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, Receipt, TimeEffects};
 use biscuit_auth::Biscuit;
 // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 /// Complete send-site guard chain implementing the formal predicate:
 /// need(m) ≤ Auth(ctx) ∧ headroom(ctx, cost) - using Biscuit tokens
@@ -30,6 +31,49 @@ pub struct SendGuardChain {
     journal_coupler: Option<JournalCoupler>,
     /// Optional operation ID for logging
     operation_id: Option<String>,
+}
+
+impl SendGuardChain {
+    /// Temporary basic authorization guard while migrating to pure guard path.
+    /// TODO: replace with pure auth evaluation once available in the interpreter pipeline.
+    async fn evaluate_authorization_guard<E: GuardEffectSystem>(
+        &self,
+        effect_system: &E,
+    ) -> AuraResult<(bool, String)> {
+        // Simplified placeholder: require a Biscuit token that matches the expected authorization string.
+        // In production this should delegate to biscuit_evaluator.
+        let expected = self.message_authorization.clone();
+        // If no authorization requirement, allow.
+        if expected.is_empty() {
+            return Ok((true, "none".to_string()));
+        }
+
+        // Try to load a token from effect system metadata (legacy path)
+        let maybe_token = effect_system.get_metadata("biscuit_token");
+        if let Some(token) = maybe_token {
+            if token == expected {
+                return Ok((true, "biscuit".to_string()));
+            }
+        }
+
+        Ok((false, "authorization_failed".to_string()))
+    }
+
+    pub fn authorization_requirement(&self) -> &str {
+        &self.message_authorization
+    }
+
+    pub fn cost(&self) -> u32 {
+        self.cost
+    }
+
+    pub fn context(&self) -> ContextId {
+        self.context
+    }
+
+    pub fn peer(&self) -> AuthorityId {
+        self.peer
+    }
 }
 
 /// Result of complete send guard evaluation
@@ -121,21 +165,10 @@ impl SendGuardChain {
     ///
     /// # Note
     /// Full evaluation with Biscuit authorization integration
-    async fn evaluate_full<E: GuardEffectSystem + aura_core::PhysicalTimeEffects>(
-        &self,
-        effect_system: &E,
-    ) -> AuraResult<SendGuardResult> {
-        // The full evaluation is now implemented in the main evaluate() method
-        // with proper Biscuit authorization integration
-        self.evaluate(effect_system).await
-    }
-
-    /// Complete evaluation with Biscuit authorization and flow budget
     pub async fn evaluate<E: GuardEffectSystem + aura_core::PhysicalTimeEffects>(
         &self,
         effect_system: &E,
     ) -> AuraResult<SendGuardResult> {
-        let start_time = effect_system.now_instant().await;
         let operation_id = self.operation_id.as_deref().unwrap_or("unnamed_send");
 
         debug!(
@@ -144,19 +177,15 @@ impl SendGuardChain {
             cost = self.cost,
             authorization = %self.message_authorization,
             context = ?self.context,
-            "Starting complete send guard chain evaluation with Biscuit authorization"
+            "Starting send guard evaluation (pure executor path)"
         );
 
-        // Phase 1: AuthGuard - Biscuit authorization evaluation
-        let auth_start = effect_system.now_instant().await;
         let (authorization_satisfied, authorization_level) = self
             .evaluate_authorization_guard(effect_system)
             .await
             .unwrap_or_else(|_| (false, "authorization_failed".to_string()));
-        let auth_time = auth_start.elapsed();
 
         if !authorization_satisfied {
-            let total_time = start_time.elapsed();
             warn!(
                 operation_id = operation_id,
                 authorization = %self.message_authorization,
@@ -169,12 +198,7 @@ impl SendGuardChain {
                 flow_authorized: false,
                 receipt: None,
                 authorization_level: Some(authorization_level.clone()),
-                metrics: SendGuardMetrics {
-                    authorization_eval_time_us: auth_time.as_micros() as u64,
-                    flow_eval_time_us: 0,
-                    total_time_us: total_time.as_micros() as u64,
-                    authorization_checks: 1,
-                },
+                metrics: SendGuardMetrics::default(),
                 denial_reason: Some(format!(
                     "Missing required authorization: {}",
                     self.message_authorization
@@ -182,149 +206,44 @@ impl SendGuardChain {
             });
         }
 
-        // Phase 2: LeakageGuard - consume leakage budget if provided
         if let Some(budget) = &self.leakage_budget {
             track_leakage_consumption(budget, operation_id, effect_system).await?;
         }
 
-        // Phase 3: FlowGuard - Evaluate headroom(ctx, cost) and charge budget
-        let flow_start = effect_system.now_instant().await;
-        let flow_result = self.evaluate_flow_guard(effect_system).await;
-        let flow_time = flow_start.elapsed();
+        let authority = effect_system.authority_id();
+        let interpreter = std::sync::Arc::new(BorrowedEffectInterpreter::new(effect_system));
+        let pure_result = GuardChainExecutor::new(
+            crate::guards::pure::GuardChain::standard(),
+            interpreter,
+        )
+        .execute(
+            effect_system,
+            &crate::guards::pure_executor::convert_send_guard_to_request(self, authority)?,
+        )
+        .await?;
 
-        let (flow_authorized, receipt) = match flow_result {
-            Ok(receipt) => {
-                debug!(
-                    operation_id = operation_id,
-                    "Flow budget charged successfully"
-                );
-                (true, Some(receipt))
-            }
-            Err(err) => {
-                warn!(
-                    operation_id = operation_id,
-                    error = %err,
-                    "Send denied: flow budget charge failed"
-                );
-                (false, None)
-            }
-        };
-
-        let total_time = start_time.elapsed();
-        let authorized = authorization_satisfied && flow_authorized;
-
-        if authorized {
-            info!(
-                operation_id = operation_id,
-                peer = ?self.peer,
-                cost = self.cost,
-                total_time_us = total_time.as_micros(),
-                "Send authorized by complete guard chain"
-            );
-
-            // Phase 0 (optional) - consume leakage budget after successful authorization
-            if let Some(budget) = &self.leakage_budget {
-                track_leakage_consumption(budget, operation_id, effect_system).await?;
-            }
-        } else {
-            warn!(
-                operation_id = operation_id,
-                authorization_ok = authorization_satisfied,
-                flow_ok = flow_authorized,
-                "Send denied by guard chain"
-            );
-        }
+        let authorized = authorization_satisfied && pure_result.authorized;
 
         Ok(SendGuardResult {
             authorized,
             authorization_satisfied,
-            flow_authorized,
-            receipt,
-            authorization_level: Some(authorization_level),
-            metrics: SendGuardMetrics {
-                authorization_eval_time_us: auth_time.as_micros() as u64,
-                flow_eval_time_us: flow_time.as_micros() as u64,
-                total_time_us: total_time.as_micros() as u64,
-                authorization_checks: 1,
-            },
+            flow_authorized: pure_result.authorized,
+            receipt: pure_result.receipt,
+            authorization_level: Some(self.message_authorization.clone()),
+            metrics: SendGuardMetrics::default(),
             denial_reason: if authorized {
                 None
+            } else if !authorization_satisfied {
+                Some(format!(
+                    "Missing required authorization: {}",
+                    self.message_authorization
+                ))
             } else {
-                Some(self.build_denial_reason(authorization_satisfied, flow_authorized))
+                pure_result.denial_reason
             },
         })
     }
 
-    /// Evaluate the authorization guard using Biscuit tokens
-    async fn evaluate_authorization_guard<E: GuardEffectSystem>(
-        &self,
-        effect_system: &E,
-    ) -> AuraResult<(bool, String)> {
-        use crate::authorization::BiscuitAuthorizationBridge;
-        use crate::guards::BiscuitGuardEvaluator;
-        use aura_wot::{ContextOp, ResourceScope};
-        use biscuit_auth::KeyPair;
-
-        debug!(
-            authorization = %self.message_authorization,
-            peer = ?self.peer,
-            context = ?self.context,
-            "Evaluating Biscuit authorization for send guard"
-        );
-
-        // Build a fresh Biscuit token and bridge using a single keypair to keep verification consistent.
-        let keypair = KeyPair::new();
-        let auth_bridge =
-            BiscuitAuthorizationBridge::new(keypair.public(), aura_core::DeviceId::new());
-        let evaluator = BiscuitGuardEvaluator::new(auth_bridge);
-
-        // Parse authorization requirement to extract capability and resource
-        // Format: "capability:resource" or just "capability"
-        let parts: Vec<&str> = self.message_authorization.split(':').collect();
-        let capability = parts[0];
-        let resource = parts.get(1).unwrap_or(&"default");
-
-        // Create resource scope for authorization check
-        let resource_scope = ResourceScope::Context {
-            context_id: self.context,
-            operation: ContextOp::UpdateParams,
-        };
-
-        // Create Biscuit token scoped to this send operation
-        let token = self
-            .create_fresh_send_token_with_keypair(capability, resource, effect_system, &keypair)
-            .await?;
-
-        // Check authorization using the Biscuit evaluator
-        match evaluator.check_guard_default_time(&token, capability, &resource_scope) {
-            Ok(authorized) => {
-                if authorized {
-                    debug!(
-                        capability = %capability,
-                        resource = %resource,
-                        "Send authorization successful"
-                    );
-                    Ok((true, format!("{}:{}", capability, resource)))
-                } else {
-                    warn!(
-                        capability = %capability,
-                        resource = %resource,
-                        "Send authorization failed: insufficient permissions"
-                    );
-                    Ok((false, "authorization_failed".to_string()))
-                }
-            }
-            Err(error) => {
-                warn!(
-                    capability = %capability,
-                    resource = %resource,
-                    error = %error,
-                    "Send authorization error"
-                );
-                Ok((false, format!("authorization_error: {}", error)))
-            }
-        }
-    }
 
     /// Retrieve Biscuit token for send authorization from effect system
     async fn retrieve_send_token<E: GuardEffectSystem>(

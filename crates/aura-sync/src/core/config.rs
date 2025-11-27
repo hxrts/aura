@@ -6,6 +6,7 @@
 
 use aura_core::effects::RandomEffects;
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::time::Duration;
 
 /// Master configuration for all aura-sync operations
@@ -349,9 +350,139 @@ impl SyncConfig {
 
     /// Load configuration from environment variables with fallbacks
     pub fn from_env() -> Self {
-        // TODO: Implement environment variable loading
-        // This would read from AURA_SYNC_* environment variables
-        Self::default()
+        let mut config = Self::default();
+
+        // Network
+        config.network.base_sync_interval = duration_secs(
+            "AURA_SYNC_BASE_SYNC_INTERVAL_SECS",
+            config.network.base_sync_interval,
+        );
+        config.network.min_sync_interval = duration_secs(
+            "AURA_SYNC_MIN_SYNC_INTERVAL_SECS",
+            config.network.min_sync_interval,
+        );
+        config.network.sync_timeout =
+            duration_secs("AURA_SYNC_TIMEOUT_SECS", config.network.sync_timeout);
+        config.network.cleanup_interval = duration_secs(
+            "AURA_SYNC_CLEANUP_INTERVAL_SECS",
+            config.network.cleanup_interval,
+        );
+
+        // Retry
+        config.retry.max_retries =
+            parse_u32("AURA_SYNC_RETRY_MAX_RETRIES", config.retry.max_retries);
+        config.retry.base_delay =
+            duration_millis("AURA_SYNC_RETRY_BASE_DELAY_MS", config.retry.base_delay);
+        config.retry.max_delay =
+            duration_millis("AURA_SYNC_RETRY_MAX_DELAY_MS", config.retry.max_delay);
+        config.retry.jitter_factor =
+            parse_f64("AURA_SYNC_RETRY_JITTER", config.retry.jitter_factor);
+
+        // Batching
+        config.batching.default_batch_size = parse_usize(
+            "AURA_SYNC_DEFAULT_BATCH_SIZE",
+            config.batching.default_batch_size,
+        );
+        config.batching.max_operations_per_round = parse_usize(
+            "AURA_SYNC_MAX_OPS_PER_ROUND",
+            config.batching.max_operations_per_round,
+        );
+        config.batching.enable_compression = parse_bool(
+            "AURA_SYNC_ENABLE_COMPRESSION",
+            config.batching.enable_compression,
+        );
+        config.batching.min_batch_size =
+            parse_usize("AURA_SYNC_MIN_BATCH_SIZE", config.batching.min_batch_size);
+        config.batching.batch_timeout =
+            duration_millis("AURA_SYNC_BATCH_TIMEOUT_MS", config.batching.batch_timeout);
+
+        // Peer management
+        config.peer_management.max_concurrent_syncs = parse_usize(
+            "AURA_SYNC_MAX_CONCURRENT_SYNCS",
+            config.peer_management.max_concurrent_syncs,
+        );
+        config.peer_management.min_priority_threshold = parse_u32(
+            "AURA_SYNC_MIN_PRIORITY_THRESHOLD",
+            config.peer_management.min_priority_threshold,
+        );
+        config.peer_management.pending_operations_boost = parse_u32(
+            "AURA_SYNC_PENDING_OPS_BOOST",
+            config.peer_management.pending_operations_boost,
+        );
+        config.peer_management.failure_penalty = parse_u32(
+            "AURA_SYNC_FAILURE_PENALTY",
+            config.peer_management.failure_penalty,
+        );
+        config.peer_management.failure_backoff_duration = duration_secs(
+            "AURA_SYNC_FAILURE_BACKOFF_SECS",
+            config.peer_management.failure_backoff_duration,
+        );
+
+        // Protocols
+        config.protocols.anti_entropy.min_sync_interval = duration_secs(
+            "AURA_SYNC_ANTI_ENTROPY_MIN_INTERVAL_SECS",
+            config.protocols.anti_entropy.min_sync_interval,
+        );
+        config.protocols.anti_entropy.digest_timeout = duration_secs(
+            "AURA_SYNC_ANTI_ENTROPY_DIGEST_TIMEOUT_SECS",
+            config.protocols.anti_entropy.digest_timeout,
+        );
+        config.protocols.anti_entropy.max_digest_entries = parse_usize(
+            "AURA_SYNC_ANTI_ENTROPY_MAX_DIGEST_ENTRIES",
+            config.protocols.anti_entropy.max_digest_entries,
+        );
+
+        config.protocols.verification.verification_timeout = duration_secs(
+            "AURA_SYNC_VERIFICATION_TIMEOUT_SECS",
+            config.protocols.verification.verification_timeout,
+        );
+        config.protocols.verification.required_confirmations = parse_usize(
+            "AURA_SYNC_VERIFICATION_CONFIRMATIONS",
+            config.protocols.verification.required_confirmations,
+        );
+        config.protocols.verification.max_verification_attempts = parse_u32(
+            "AURA_SYNC_VERIFICATION_MAX_ATTEMPTS",
+            config.protocols.verification.max_verification_attempts,
+        );
+
+        config.protocols.ota_upgrade.soft_fork_timeout = duration_secs(
+            "AURA_SYNC_OTA_SOFT_FORK_TIMEOUT_SECS",
+            config.protocols.ota_upgrade.soft_fork_timeout,
+        );
+        config.protocols.ota_upgrade.hard_fork_timeout = duration_secs(
+            "AURA_SYNC_OTA_HARD_FORK_TIMEOUT_SECS",
+            config.protocols.ota_upgrade.hard_fork_timeout,
+        );
+        config.protocols.ota_upgrade.default_threshold = parse_u32(
+            "AURA_SYNC_OTA_DEFAULT_THRESHOLD",
+            config.protocols.ota_upgrade.default_threshold,
+        );
+        config.protocols.ota_upgrade.max_session_duration = duration_secs(
+            "AURA_SYNC_OTA_MAX_SESSION_DURATION_SECS",
+            config.protocols.ota_upgrade.max_session_duration,
+        );
+        config.protocols.ota_upgrade.enable_auto_validation = parse_bool(
+            "AURA_SYNC_OTA_ENABLE_AUTO_VALIDATION",
+            config.protocols.ota_upgrade.enable_auto_validation,
+        );
+
+        // Performance
+        config.performance.max_cpu_usage =
+            parse_u32("AURA_SYNC_MAX_CPU_USAGE", config.performance.max_cpu_usage);
+        config.performance.max_network_bandwidth = parse_u64(
+            "AURA_SYNC_MAX_NETWORK_BANDWIDTH",
+            config.performance.max_network_bandwidth,
+        );
+        config.performance.adaptive_scheduling = parse_bool(
+            "AURA_SYNC_ADAPTIVE_SCHEDULING",
+            config.performance.adaptive_scheduling,
+        );
+        config.performance.memory_limit = parse_usize(
+            "AURA_SYNC_MEMORY_LIMIT_BYTES",
+            config.performance.memory_limit,
+        );
+
+        config
     }
 
     /// Get a configuration builder for custom setups
@@ -414,6 +545,58 @@ impl SyncConfigBuilder {
         self.config.validate()?;
         Ok(self.config)
     }
+}
+
+fn parse_bool(key: &str, default: bool) -> bool {
+    env::var(key)
+        .ok()
+        .as_deref()
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(default)
+}
+
+fn parse_u32(key: &str, default: u32) -> u32 {
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(default)
+}
+
+fn parse_u64(key: &str, default: u64) -> u64 {
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(default)
+}
+
+fn parse_usize(key: &str, default: usize) -> usize {
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+fn parse_f64(key: &str, default: f64) -> f64 {
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .unwrap_or(default)
+}
+
+fn duration_secs(key: &str, default: Duration) -> Duration {
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(default)
+}
+
+fn duration_millis(key: &str, default: Duration) -> Duration {
+    env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(default)
 }
 
 impl Default for SyncConfigBuilder {

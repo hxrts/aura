@@ -22,7 +22,7 @@ FlowBudget {
 }
 ```
 
-Only `spent` and `epoch` values appear as facts inside the journal. The `limit` field is computed at runtime by intersecting Biscuit-derived capabilities with sovereign policy; it is never stored in the journal. Before any transport effect, `FlowGuard` charges `cost` to the context and peer pair. If `spent` plus `cost` exceeds the computed `limit`, the send is blocked locally with no observable behavior.
+Only `spent` and `epoch` values appear as facts inside the journal. The `limit` field is computed at runtime by intersecting Biscuit-derived capabilities with sovereign policy; it is never stored in the journal. Before any transport effect, `FlowGuard` charges `cost` to the context and peer pair. Guard evaluation runs over a prepared snapshot and emits commands for an interpreter to execute, keeping the guard path pure. If `spent` plus `cost` exceeds the computed `limit`, the send is blocked locally with no observable behavior.
 
 For multi-hop forwarding, relays validate a signed per-hop receipt from the previous hop, then charge their own budget before forwarding. Limits update deterministically via the shared Biscuit/policy evaluation on every device, so replicas converge even though only `spent` charges are recorded. Guard evaluation follows the sequence described in [Authorization](109_authorization.md).
 

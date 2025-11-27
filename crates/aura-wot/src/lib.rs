@@ -49,10 +49,12 @@ pub mod flow_budget;
 // Use Biscuit tokens via BiscuitTokenManager instead
 
 // Biscuit-based authorization (new implementation)
-pub mod biscuit;
+// biscuit module is now consolidated into biscuit_authorization.rs
+pub mod biscuit_authorization;
 pub mod biscuit_resources;
 pub mod biscuit_token;
 pub mod resource_scope; // Authority-based resource scopes
+pub mod storage_authorization; // Storage authorization logic (moved from aura-store)
 
 pub use errors::{AuraError, AuraResult, WotError, WotResult};
 
@@ -73,11 +75,18 @@ pub use biscuit_resources::{
 pub use biscuit_token::{AccountAuthority, BiscuitError, BiscuitTokenManager, SerializableBiscuit};
 pub use flow_budget::FlowBudgetHandler;
 
-// Re-export authority-based resource scopes
-pub use resource_scope::{AuthorityOp, ContextOp, ResourceScope};
+// Re-export authority-based resource scopes from core (compatibility)
+pub use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
 
-// Re-export Biscuit authorization types
-pub use biscuit::{AuthorizationResult, BiscuitAuthorizationBridge};
+// Re-export Biscuit authorization types (now consolidated in biscuit_authorization.rs)
+pub use biscuit_authorization::{AuthorizationResult, BiscuitAuthorizationBridge};
+
+// Re-export storage authorization types (moved from aura-store)
+pub use storage_authorization::{
+    check_biscuit_access, evaluate_biscuit_access, AccessDecision, BiscuitAccessRequest,
+    BiscuitStorageError, BiscuitStorageEvaluator, PermissionMappings, StoragePermission,
+    StorageResource,
+};
 
 /// Type alias for capability meet operation results
 pub type CapResult<T> = Result<T, WotError>;

@@ -119,10 +119,14 @@ module TransportSBB {
         epoch > metadata.expiresAtEpoch
     }
 
-    // Get envelope routing scope
+    // Get envelope routing scope. Routing tags map to a deterministic shard of peers
+    // so gossip can be scoped without embedding topology in the tag itself.
     pure def getRoutingScope(routingTag: RoutingTag): Set[PeerId] = {
-        // TODO fix - Simplified: routing tag determines which peers should receive
-        Set()  // Would compute based on tag
+        val peers = nodes.keys().toList().sorted(),
+        val shard = routingTag.toString().length() % 4,
+        peers.indices().fold(Set(), (acc, idx) =>
+            if (idx % 4 == shard) acc.union(Set(peers[idx])) else acc
+        )
     }
 
     // Check trust transitivity

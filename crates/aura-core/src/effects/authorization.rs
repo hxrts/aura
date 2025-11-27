@@ -5,6 +5,7 @@
 //! of authority, and enforcement of security policies.
 
 use crate::identifiers::AuthorityId;
+use crate::scope::ResourceScope;
 use crate::{AuraError, Cap};
 use async_trait::async_trait;
 
@@ -76,4 +77,52 @@ pub enum AuthorizationError {
     /// System error during authorization
     #[error("Authorization system error: {0}")]
     SystemError(#[from] AuraError),
+}
+
+/// Authorization decision result
+#[derive(Debug, Clone)]
+pub struct AuthorizationDecision {
+    /// Whether the operation is authorized
+    pub authorized: bool,
+    /// Optional reason for the decision
+    pub reason: Option<String>,
+}
+
+/// Biscuit token-based authorization effects
+///
+/// This trait enables Biscuit authorization checks without creating domain dependencies.
+/// The journal domain can use this trait while the implementation lives in aura-wot.
+#[async_trait]
+pub trait BiscuitAuthorizationEffects {
+    /// Authorize an operation against a Biscuit token and resource scope
+    ///
+    /// # Arguments
+    /// * `token_data` - Raw Biscuit token bytes
+    /// * `operation` - The operation being attempted
+    /// * `scope` - The resource scope for the operation
+    ///
+    /// # Returns
+    /// Authorization decision with detailed reasoning
+    async fn authorize_biscuit(
+        &self,
+        token_data: &[u8],
+        operation: &str,
+        scope: &ResourceScope,
+    ) -> Result<AuthorizationDecision, AuthorizationError>;
+
+    /// Verify a fact authorization using Biscuit tokens
+    ///
+    /// # Arguments
+    /// * `token_data` - Raw Biscuit token bytes
+    /// * `fact_type` - Type of fact being authorized
+    /// * `scope` - Resource scope for the fact
+    ///
+    /// # Returns
+    /// Whether the fact is authorized
+    async fn authorize_fact(
+        &self,
+        token_data: &[u8],
+        fact_type: &str,
+        scope: &ResourceScope,
+    ) -> Result<bool, AuthorizationError>;
 }

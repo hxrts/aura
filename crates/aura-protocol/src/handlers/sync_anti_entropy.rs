@@ -2,11 +2,11 @@ use crate::effects::sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncErro
 use crate::guards::effect_system_trait::GuardEffectSystem;
 use crate::guards::send_guard::create_send_guard;
 use async_trait::async_trait;
+use async_lock::RwLock;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{tree::AttestedOp, Hash32};
 use std::collections::BTreeSet;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use uuid::Uuid;
 
 /// Handler implementing anti-entropy synchronization protocol

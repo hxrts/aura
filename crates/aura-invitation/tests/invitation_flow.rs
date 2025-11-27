@@ -15,8 +15,8 @@ use aura_invitation::{
 use aura_journal::semilattice::InvitationRecordRegistry;
 use aura_macros::aura_test;
 use aura_wot::{AccountAuthority, SerializableBiscuit};
+use futures::lock::Mutex;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 // Note: For testing, use mock handlers from aura-effects
 

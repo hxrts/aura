@@ -8,13 +8,13 @@
 //! # Architecture Constraints
 //!
 //! **Layer 2 depends only on aura-core** (foundation).
-//! - ✅ Identity semantics and signature verification logic
-//! - ✅ Device lifecycle management (active, suspended, revoked)
-//! - ✅ Session management and validation
-//! - ✅ Pure domain logic for authentication checks
-//! - ❌ NO cryptographic signing/verification operations (use CryptoEffects from aura-effects)
-//! - ❌ NO handler composition (that's aura-composition)
-//! - ❌ NO multi-party protocol logic (that's aura-protocol)
+//! - YES Identity semantics and signature verification logic
+//! - YES Device lifecycle management (active, suspended, revoked)
+//! - YES Session management and validation
+//! - YES Pure domain logic for authentication checks
+//! - NO cryptographic signing/verification operations (use CryptoEffects from aura-effects)
+//! - NO handler composition (that's aura-composition)
+//! - NO multi-party protocol logic (that's aura-protocol)
 //!
 //! # Core Modules
 //!
@@ -40,6 +40,8 @@ pub mod messages;
 pub mod registry;
 pub mod session;
 pub mod threshold;
+
+// Messages module is now a single consolidated file (messages.rs)
 
 // Re-export commonly used types
 pub use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
@@ -76,8 +78,8 @@ pub use aura_core::relationships::*;
 // Re-export registry types (from merged aura-identity)
 pub use registry::{DeviceInfo, DeviceStatus, IdentityVerifier, VerificationResult};
 
-// Re-export crypto message types
-pub use messages::crypto::{
+// Re-export crypto message types (now consolidated in messages.rs)
+pub use messages::{
     AbortResharingMessage, AcknowledgeSubShareMessage, CryptoMessage, CryptoPayload,
     DistributeSubShareMessage, EncryptedShare, FinalizeResharingMessage, InitiateResharingMessage,
     ParticipantResharingVerification, ResharingAbortReason, ResharingMessage,

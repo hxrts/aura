@@ -42,13 +42,21 @@ pub struct MetricsStats {
 #[derive(Debug, Clone)]
 pub struct MetricsSystemHandler {
     /// Configuration for metrics operations
-    config: MetricsConfig,
+    config: std::sync::Arc<std::sync::Mutex<MetricsConfig>>,
+    counters: std::sync::Arc<std::sync::Mutex<HashMap<String, f64>>>,
+    gauges: std::sync::Arc<std::sync::Mutex<HashMap<String, f64>>>,
+    stats: std::sync::Arc<std::sync::Mutex<MetricsStats>>,
 }
 
 impl MetricsSystemHandler {
     /// Create a new metrics system handler
     pub fn new(config: MetricsConfig) -> Self {
-        Self { config }
+        Self {
+            config: std::sync::Arc::new(std::sync::Mutex::new(config)),
+            counters: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+            gauges: std::sync::Arc::new(std::sync::Mutex::new(HashMap::new())),
+            stats: std::sync::Arc::new(std::sync::Mutex::new(MetricsStats::default())),
+        }
     }
 
     /// Create with default configuration
@@ -68,7 +76,6 @@ impl MetricsSystemHandler {
         value: f64,
         labels: HashMap<String, String>,
     ) -> Result<(), SystemError> {
-        // TODO: In production, this would send to external metrics service
         let key = Self::with_labels(name, &labels);
         tracing::debug!(
             metric_name = name,
@@ -76,6 +83,17 @@ impl MetricsSystemHandler {
             value = value,
             "Counter incremented via metrics handler"
         );
+        if let Ok(mut counters) = self.counters.lock() {
+            *counters.entry(key).or_insert(0.0) += value;
+        }
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.total_metrics_recorded = stats.total_metrics_recorded.saturating_add(1);
+            stats.active_counters = self
+                .counters
+                .lock()
+                .map(|m| m.len() as u64)
+                .unwrap_or(stats.active_counters);
+        }
         Ok(())
     }
 
@@ -86,7 +104,6 @@ impl MetricsSystemHandler {
         value: f64,
         labels: HashMap<String, String>,
     ) -> Result<(), SystemError> {
-        // TODO: In production, this would send to external metrics service
         let key = Self::with_labels(name, &labels);
         tracing::debug!(
             metric_name = name,
@@ -94,6 +111,17 @@ impl MetricsSystemHandler {
             value = value,
             "Gauge set via metrics handler"
         );
+        if let Ok(mut gauges) = self.gauges.lock() {
+            gauges.insert(key, value);
+        }
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.total_metrics_recorded = stats.total_metrics_recorded.saturating_add(1);
+            stats.active_gauges = self
+                .gauges
+                .lock()
+                .map(|m| m.len() as u64)
+                .unwrap_or(stats.active_gauges);
+        }
         Ok(())
     }
 
@@ -104,11 +132,15 @@ impl MetricsSystemHandler {
         value: f64,
         labels: HashMap<String, String>,
     ) -> Result<(), SystemError> {
-        if !self.config.enable_histograms {
+        let enable_histograms = self
+            .config
+            .lock()
+            .map(|cfg| cfg.enable_histograms)
+            .unwrap_or(false);
+        if !enable_histograms {
             return Ok(());
         }
 
-        // TODO: In production, this would send to external metrics service
         let key = Self::with_labels(name, &labels);
         tracing::debug!(
             metric_name = name,
@@ -116,6 +148,9 @@ impl MetricsSystemHandler {
             value = value,
             "Histogram observed via metrics handler"
         );
+        if let Ok(mut stats) = self.stats.lock() {
+            stats.total_metrics_recorded = stats.total_metrics_recorded.saturating_add(1);
+        }
         Ok(())
     }
 
@@ -132,23 +167,17 @@ impl MetricsSystemHandler {
 
     /// Get counters (stateless - delegates to external service)
     pub async fn get_counters(&self) -> HashMap<String, f64> {
-        // TODO: In production, this would query external metrics service
-        tracing::debug!("Getting counters via metrics handler (placeholder)");
-        HashMap::new()
+        self.counters.lock().map(|m| m.clone()).unwrap_or_default()
     }
 
     /// Get gauges (stateless - delegates to external service)
     pub async fn get_gauges(&self) -> HashMap<String, f64> {
-        // TODO: In production, this would query external metrics service
-        tracing::debug!("Getting gauges via metrics handler (placeholder)");
-        HashMap::new()
+        self.gauges.lock().map(|m| m.clone()).unwrap_or_default()
     }
 
     /// Get metrics statistics (stateless - delegates to external service)
     pub async fn get_statistics(&self) -> MetricsStats {
-        // TODO: In production, this would query external metrics service
-        tracing::debug!("Getting metrics stats via metrics handler (placeholder)");
-        MetricsStats::default()
+        self.stats.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
     fn with_labels(name: &str, labels: &HashMap<String, String>) -> String {
@@ -199,34 +228,48 @@ impl SystemEffects for MetricsSystemHandler {
     }
 
     async fn get_system_info(&self) -> Result<HashMap<String, String>, SystemError> {
-        // TODO: In production, this would query external metrics service
+        let stats = self.stats.lock().map(|s| s.clone()).unwrap_or_default();
+        let config = self.config.lock().map(|c| c.clone()).unwrap_or_default();
+
         let mut info = HashMap::new();
         info.insert("component".to_string(), "metrics".to_string());
+        info.insert("status".to_string(), "operational".to_string());
         info.insert(
             "enable_histograms".to_string(),
-            self.config.enable_histograms.to_string(),
+            config.enable_histograms.to_string(),
         );
-        info.insert("status".to_string(), "operational".to_string());
+        info.insert(
+            "active_counters".to_string(),
+            stats.active_counters.to_string(),
+        );
+        info.insert("active_gauges".to_string(), stats.active_gauges.to_string());
+        info.insert(
+            "total_metrics_recorded".to_string(),
+            stats.total_metrics_recorded.to_string(),
+        );
+
         Ok(info)
     }
 
     async fn set_config(&self, key: &str, value: &str) -> Result<(), SystemError> {
-        // TODO: In production, this would update external configuration service
-        tracing::debug!(
-            key = key,
-            value = value,
-            "Config update requested via metrics handler (placeholder)"
-        );
-
         match key {
             "enable_histograms" => {
-                // Validate the value but don't store it (stateless handler)
-                value
-                    .parse::<bool>()
-                    .map_err(|_| SystemError::InvalidConfiguration {
-                        key: key.to_string(),
-                        value: value.to_string(),
-                    })?;
+                let parsed =
+                    value
+                        .parse::<bool>()
+                        .map_err(|_| SystemError::InvalidConfiguration {
+                            key: key.to_string(),
+                            value: value.to_string(),
+                        })?;
+                if let Ok(mut config) = self.config.lock() {
+                    config.enable_histograms = parsed;
+                }
+                // Record the configuration change so we can surface this through metrics.
+                let mut labels = HashMap::new();
+                labels.insert("key".to_string(), key.to_string());
+                labels.insert("value".to_string(), parsed.to_string());
+                self.increment_counter("config_updates_total", 1.0, labels)
+                    .await?;
                 Ok(())
             }
             _ => Err(SystemError::InvalidConfiguration {
@@ -237,8 +280,9 @@ impl SystemEffects for MetricsSystemHandler {
     }
 
     async fn get_config(&self, key: &str) -> Result<String, SystemError> {
+        let config = self.config.lock().map(|c| c.clone()).unwrap_or_default();
         match key {
-            "enable_histograms" => Ok(self.config.enable_histograms.to_string()),
+            "enable_histograms" => Ok(config.enable_histograms.to_string()),
             _ => Err(SystemError::InvalidConfiguration {
                 key: key.to_string(),
                 value: "unknown".to_string(),
@@ -251,17 +295,24 @@ impl SystemEffects for MetricsSystemHandler {
     }
 
     async fn get_metrics(&self) -> Result<HashMap<String, f64>, SystemError> {
-        // TODO: In production, this would query external metrics service
         let mut metrics = HashMap::new();
-        metrics.insert("uptime".to_string(), 1.0);
+
+        let stats = self.stats.lock().map(|s| s.clone()).unwrap_or_default();
+        let config = self.config.lock().map(|c| c.clone()).unwrap_or_default();
+
         metrics.insert(
             "enable_histograms".to_string(),
-            if self.config.enable_histograms {
-                1.0
-            } else {
-                0.0
-            },
+            if config.enable_histograms { 1.0 } else { 0.0 },
         );
+        metrics.insert("active_counters".to_string(), stats.active_counters as f64);
+        metrics.insert("active_gauges".to_string(), stats.active_gauges as f64);
+        metrics.insert(
+            "total_metrics_recorded".to_string(),
+            stats.total_metrics_recorded as f64,
+        );
+        metrics.extend(self.get_counters().await);
+        // Gauges are also returned to expose current values.
+        metrics.extend(self.get_gauges().await);
         Ok(metrics)
     }
 
@@ -283,7 +334,8 @@ mod tests {
     async fn test_metrics_handler_creation() {
         let handler = MetricsSystemHandler::default();
         // MetricsSystemHandler should be created successfully
-        assert!(!handler.config.enable_histograms);
+        let histograms_enabled = handler.get_config("enable_histograms").await.unwrap();
+        assert_eq!(histograms_enabled, "false");
     }
 
     #[tokio::test]
@@ -307,6 +359,7 @@ mod tests {
         // Test system effects
         let info = handler.get_system_info().await.unwrap();
         assert_eq!(info.get("component"), Some(&"metrics".to_string()));
+        assert_eq!(info.get("total_metrics_recorded"), Some(&"2".to_string()));
 
         // Test config operations
         let config_value = handler.get_config("enable_histograms").await.unwrap();

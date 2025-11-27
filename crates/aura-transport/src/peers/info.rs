@@ -3,10 +3,13 @@
 //! Essential peer management with built-in capability blinding and relationship scoping.
 //! Target: <180 lines (concise implementation).
 
-use aura_core::{identifiers::DeviceId, RelationshipId};
+use aura_core::{
+    identifiers::DeviceId,
+    time::{PhysicalTime, TimeStamp},
+    RelationshipId,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::time::SystemTime;
 
 use crate::PrivacyLevel;
 
@@ -22,8 +25,8 @@ pub struct PeerInfo {
     /// Relationship-scoped metrics
     pub metrics: ScopedPeerMetrics,
 
-    /// Last seen time
-    pub last_seen: SystemTime,
+    /// Last seen time (using Aura unified time system)
+    pub last_seen: TimeStamp,
 
     /// Available relationship contexts
     pub relationship_contexts: HashSet<RelationshipId>,
@@ -44,8 +47,8 @@ pub struct BlindedPeerCapabilities {
     /// Capability metadata (blinded)
     metadata: HashMap<String, String>,
 
-    /// Time when capabilities were last updated
-    last_updated: SystemTime,
+    /// Time when capabilities were last updated (using Aura unified time system)
+    last_updated: TimeStamp,
 }
 
 /// Core metrics with relationship scoping
@@ -84,8 +87,8 @@ pub enum PeerStatus {
     },
     /// Peer is offline or unreachable
     Offline {
-        /// Last seen time
-        last_seen: SystemTime,
+        /// Last seen time (using Aura unified time system)
+        last_seen: TimeStamp,
     },
     /// Peer status unknown (privacy-preserving)
     Unknown,
@@ -107,14 +110,20 @@ pub enum ReliabilityLevel {
 impl PeerInfo {
     /// Create new peer info with minimal capabilities
     pub fn new(device_id: DeviceId) -> Self {
-        Self::new_at_time(device_id, SystemTime::UNIX_EPOCH)
+        Self::new_with_timestamp(
+            device_id,
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 0,
+                uncertainty: None,
+            }),
+        )
     }
 
-    /// Create new peer info at specific time
-    pub fn new_at_time(device_id: DeviceId, current_time: SystemTime) -> Self {
+    /// Create new peer info with specific timestamp
+    pub fn new_with_timestamp(device_id: DeviceId, current_time: TimeStamp) -> Self {
         Self {
             device_id,
-            capabilities: BlindedPeerCapabilities::new_at_time(current_time),
+            capabilities: BlindedPeerCapabilities::new_with_timestamp(current_time.clone()),
             metrics: ScopedPeerMetrics::new(),
             last_seen: current_time,
             relationship_contexts: HashSet::new(),
@@ -148,11 +157,17 @@ impl PeerInfo {
 
     /// Update peer status
     pub fn update_status(&mut self, status: PeerStatus) {
-        self.update_status_at_time(status, SystemTime::UNIX_EPOCH)
+        self.update_status_with_timestamp(
+            status,
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 0,
+                uncertainty: None,
+            }),
+        )
     }
 
-    /// Update peer status at specific time
-    pub fn update_status_at_time(&mut self, status: PeerStatus, current_time: SystemTime) {
+    /// Update peer status with specific timestamp
+    pub fn update_status_with_timestamp(&mut self, status: PeerStatus, current_time: TimeStamp) {
         self.status = status;
         self.last_seen = current_time;
     }
@@ -161,11 +176,14 @@ impl PeerInfo {
 impl BlindedPeerCapabilities {
     /// Create new blinded capabilities
     pub fn new() -> Self {
-        Self::new_at_time(SystemTime::UNIX_EPOCH)
+        Self::new_with_timestamp(TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 0,
+            uncertainty: None,
+        }))
     }
 
-    /// Create new blinded capabilities at specific time
-    pub fn new_at_time(current_time: SystemTime) -> Self {
+    /// Create new blinded capabilities with specific timestamp
+    pub fn new_with_timestamp(current_time: TimeStamp) -> Self {
         Self {
             blinded_capabilities: HashSet::new(),
             privacy_level: PrivacyLevel::Blinded,
@@ -176,11 +194,17 @@ impl BlindedPeerCapabilities {
 
     /// Add blinded capability
     pub fn add_capability(&mut self, capability: String) {
-        self.add_capability_at_time(capability, SystemTime::UNIX_EPOCH)
+        self.add_capability_with_timestamp(
+            capability,
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 0,
+                uncertainty: None,
+            }),
+        )
     }
 
-    /// Add blinded capability at specific time
-    pub fn add_capability_at_time(&mut self, capability: String, current_time: SystemTime) {
+    /// Add blinded capability with specific timestamp
+    pub fn add_capability_with_timestamp(&mut self, capability: String, current_time: TimeStamp) {
         // Blind the capability using a simple hash-based approach
         let blinded_cap = format!(
             "cap_{}",

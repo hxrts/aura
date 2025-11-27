@@ -27,9 +27,12 @@ pub mod biometric;
 pub mod bloom;
 pub mod capability;
 pub mod chaos;
+pub mod choreographic; // Multi-party protocol coordination
 pub mod console;
 pub mod crypto;
+pub mod event_sourcing; // Event sourcing and audit trails
 pub mod flow; // Flow budget management
+pub mod guard_effects; // Pure guard evaluation with effect commands
 pub mod journal;
 pub mod leakage; // Privacy leakage tracking
 pub mod migration; // Empty module - migration complete
@@ -41,10 +44,12 @@ pub mod secure;
 pub mod simulation;
 pub mod storage;
 pub mod supertraits;
+pub mod sync; // Anti-entropy synchronization
 pub mod system;
 pub mod testing;
 pub mod time;
 pub mod transport;
+pub mod tree_operations; // Commitment tree operations
 
 // Re-export core effect traits
 pub use agent::{
@@ -54,7 +59,9 @@ pub use agent::{
     SessionManagementEffects, SessionMessage, SessionRole, SessionStatus, SessionType,
 };
 pub use authority::{AuthorityEffects, AuthorityRelationalEffects, RelationalEffects};
-pub use authorization::{AuthorizationEffects, AuthorizationError};
+pub use authorization::{
+    AuthorizationDecision, AuthorizationEffects, AuthorizationError, BiscuitAuthorizationEffects,
+};
 pub use biometric::{
     BiometricCapability, BiometricConfig, BiometricEffects, BiometricEnrollmentResult,
     BiometricError, BiometricSecurityLevel, BiometricStatistics, BiometricType,
@@ -121,6 +128,19 @@ pub use time::{
 pub use transport::{
     TransportEffects, TransportEnvelope, TransportError, TransportReceipt, TransportStats,
 };
+
+// Re-export protocol coordination effect traits
+pub use choreographic::{
+    ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
+    ChoreographyMetrics,
+};
+pub use event_sourcing::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
+pub use guard_effects::{
+    Decision, EffectCommand, EffectInterpreter, FlowBudgetView, GuardOutcome, GuardSnapshot,
+    JournalEntry, MetadataView, SimulationEvent,
+};
+pub use sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
+pub use tree_operations::{Cut, Partial, ProposalId, Snapshot, TreeOperationEffects};
 
 // Re-export unified error system
 pub use crate::AuraError;

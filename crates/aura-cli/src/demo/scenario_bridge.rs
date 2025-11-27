@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! # Scenario System Bridge for Demo
 //!
 //! Provides integration with the scenario system to set up initial demo configuration

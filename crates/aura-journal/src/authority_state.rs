@@ -5,9 +5,10 @@
 
 use crate::{fact::Journal, reduction::reduce_account_facts};
 use async_trait::async_trait;
-use aura_core::effects::CryptoEffects;
+use aura_core::effects::{crypto::FrostKeyGenResult, CryptoEffects};
 use aura_core::{authority::TreeState, AuraError, Authority, AuthorityId, Hash32, Result};
-use ed25519_dalek::{Signature, VerifyingKey as PublicKey};
+// Using aura-core type aliases for cryptographic types
+use aura_core::authority::{Ed25519Signature as Signature, Ed25519VerifyingKey as PublicKey};
 
 /// Authority state derived from facts
 #[derive(Debug, Clone)]
@@ -15,8 +16,8 @@ pub struct AuthorityState {
     /// Tree state derived from attested operations
     pub tree_state: TreeState,
 
-    /// Threshold signing context (placeholder)
-    pub threshold_context: Option<Vec<u8>>,
+    /// Threshold signing key material derived from secure storage or facts
+    pub threshold_context: Option<FrostKeyGenResult>,
 }
 
 impl AuthorityState {
@@ -90,15 +91,14 @@ impl AuthorityState {
         // Step 2: Create list of participant IDs (for now, use first `threshold` devices)
         let participants: Vec<u16> = (1..=threshold).collect();
 
-        // Step 3: Get the public key package from tree state
-        // TODO: This should come from the tree state or secure storage in a real implementation
-        // For now, we'll generate a temporary one to satisfy the effects API
-        let frost_keygen_result = effects
-            .frost_generate_keys(threshold, device_count as u16)
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to generate FROST keys: {}", e)))?;
+        // Step 3: Get the public key package from stored threshold context
+        let frost_keygen_result = self.threshold_context.as_ref().ok_or_else(|| {
+            AuraError::internal(
+                "Threshold signing keys not available. Load FrostKeyGenResult into AuthorityState",
+            )
+        })?;
 
-        let public_key_package = frost_keygen_result.public_key_package;
+        let public_key_package = frost_keygen_result.public_key_package.clone();
 
         // Step 4: Create signing package with message and participants
         let signing_package = effects
@@ -164,7 +164,7 @@ impl AuthorityState {
             ));
         }
 
-        // Step 8: Convert to ed25519_dalek::Signature format
+        // Step 8: Return signature bytes directly through effects system
         if group_signature.len() != 64 {
             return Err(AuraError::invalid(format!(
                 "Invalid signature length: {} (expected 64)",
@@ -172,10 +172,15 @@ impl AuthorityState {
             )));
         }
 
+        // Convert bytes to ed25519_dalek::Signature for trait compatibility
+        if group_signature.len() != 64 {
+            return Err(AuraError::invalid(format!(
+                "Invalid signature length: {}",
+                group_signature.len()
+            )));
+        }
         let mut signature_bytes = [0u8; 64];
         signature_bytes.copy_from_slice(&group_signature);
-
-        // ed25519_dalek::Signature::from_bytes doesn't return a Result
         Ok(Signature::from_bytes(&signature_bytes))
     }
 }
@@ -235,11 +240,8 @@ impl Authority for DerivedAuthority {
     }
 
     async fn sign_operation(&self, _operation: &[u8]) -> Result<Signature> {
-        // TODO: The Authority trait needs to be updated to accept effects parameter
-        // For now, return an error that shows the proper delegation pattern
         Err(AuraError::internal(
-            "Authority trait sign_operation requires effects parameter for FROST delegation. \
-             Use DerivedAuthority::sign_operation_with_effects() instead.",
+            "Authority::sign_operation requires effect-backed crypto; call sign_operation_with_effects instead",
         ))
     }
 

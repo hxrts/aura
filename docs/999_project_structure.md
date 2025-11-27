@@ -51,6 +51,8 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 
 **Exception**: Extension traits providing convenience methods are allowed (e.g., `LeakageChoreographyExt`, `SimulationEffects`, `AuthorityRelationalEffects`). These blanket implementations extend existing effect traits with domain-specific convenience methods while maintaining interface-only semantics.
 
+**Architectural Compliance**: aura-core maintains strict interface-only semantics. Test utilities like MockEffects are provided in aura-testkit (Layer 8) where they architecturally belong.
+
 **Dependencies**: None (foundation crate).
 
 ## Layer 2: Specification — Domain Crates and Choreography
@@ -81,7 +83,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 
 ### `aura-effects` — Stateless Effect Handlers
 
-**Purpose**: Stateless, single-party effect implementations.
+**Purpose**: Stateless, single-party effect implementations. **Architectural Decision**: `aura-effects` is the designated singular point of interaction with non-deterministic operating system services (entropy, wall-clock time, network I/O, file system). This design choice makes the architectural boundary explicit and centralizes impure operations.
 
 **Contains**:
 - **Production handlers**: `RealCryptoHandler`, `TcpNetworkHandler`, `FilesystemStorageHandler`, `RealTimeHandler`
@@ -127,18 +129,22 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 **Contains**:
 - Guard chain coordination (`CapGuard → FlowGuard → JournalCoupler`)
 - Multi-party protocol orchestration (consensus, anti-entropy)
-- Cross-handler coordination logic
+- Cross-handler coordination logic (`TransportCoordinator`, `StorageCoordinator`, etc.)
 - Distributed state management
+- Protocol-specific bridges and adapters
+- Stateful coordinators for multi-party protocols
 
 **What doesn't go here**:
-- Handler composition infrastructure
-- Single-party effect implementations
-- Runtime assembly
-- Application-specific logic
+- Effect trait definitions (all traits belong in `aura-core`)
+- Handler composition infrastructure (belongs in `aura-composition`)
+- Single-party effect implementations (belongs in `aura-effects`)
+- Test/mock handlers (belong in `aura-testkit`)
+- Runtime assembly (belongs in `aura-agent`)
+- Application-specific business logic (belongs in domain crates)
 
-**Key characteristics**: This is specifically about coordinating multiple handlers working together across network boundaries. It's the "choreography conductor" that ensures distributed protocols execute correctly.
+**Key characteristics**: This layer coordinates multiple handlers working together across network boundaries. It implements the "choreography conductor" pattern, ensuring distributed protocols execute correctly with proper authorization, flow control, and state consistency. All handlers here manage multi-party coordination, not single-party operations.
 
-**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, domain crates.
+**Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-mpst`, domain crates. Performance-critical protocol operations may require carefully documented exceptions for direct cryptographic library usage.
 
 ## Layer 5: Feature/Protocol Implementation
 
@@ -401,7 +407,9 @@ graph TD
 
 Not all effect traits are created equal. Aura organizes effect traits into three categories that determine where their implementations should live:
 
-### Infrastructure Effects (Required in aura-effects)
+**Fundamental Principle**: All effect trait definitions belong in `aura-core` (Layer 1) to maintain a single source of truth for interfaces. This includes infrastructure effects (OS integration), application effects (domain-specific), and protocol coordination effects (multi-party orchestration).
+
+### Infrastructure Effects (Implemented in aura-effects)
 
 Infrastructure effects are truly foundational capabilities that every Aura system needs. These traits define OS-level operations that are universal across all Aura use cases.
 
@@ -415,12 +423,12 @@ Infrastructure effects are truly foundational capabilities that every Aura syste
 - `CryptoEffects`: Ed25519 signing, key generation, hashing
 - `NetworkEffects`: TCP connections, message sending/receiving
 - `StorageEffects`: File read/write, directory operations
-- `TimeEffects`: Current time, delays, timeouts
+- `PhysicalTimeEffects`, `LogicalClockEffects`, `OrderClockEffects`: Unified time system
 - `RandomEffects`: Cryptographically secure random generation
 - `ConfigurationEffects`: Configuration file parsing
 - `ConsoleEffects`: Terminal input/output
 
-**Implementation Location**: These traits MUST have corresponding handlers in `aura-effects`.
+**Implementation Location**: These traits have stateless handlers in `aura-effects` that delegate to OS services.
 
 ### Application Effects (Implemented in Domain Crates)
 
@@ -441,7 +449,12 @@ Application effects encode Aura-specific abstractions and business logic. These 
 - `RelationalContextEffects`: Cross-authority relationship management
 - `GuardianEffects`: Recovery protocol operations
 
-**Implementation Location**: These traits are implemented in their respective domain crates (`aura-journal`, `aura-wot`, etc.) because they require deep domain knowledge.
+**Protocol Coordination Effects** (new category):
+- `ChoreographicEffects`: Multi-party protocol coordination
+- `EffectApiEffects`: Event sourcing and audit for protocols
+- `SyncEffects`: Anti-entropy synchronization operations
+
+**Implementation Location**: Application effects are implemented in their respective domain crates (`aura-journal`, `aura-wot`, etc.). Protocol coordination effects are implemented in `aura-protocol` as they manage multi-party state.
 
 **Why Not in aura-effects?**: Moving these to `aura-effects` would create circular dependencies. Domain crates need to implement these effects using their own domain logic, but `aura-effects` cannot depend on domain crates due to the layered architecture.
 

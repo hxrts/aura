@@ -20,7 +20,8 @@
 //! ```
 
 use aura_core::{identifiers::DeviceId, AuraError, AuraResult};
-use chrono::{DateTime, Utc};
+// Time system moved to Aura unified time system
+use aura_core::time::TimeStamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -64,7 +65,7 @@ pub struct LeakageEvent {
     /// Observer who receives the information
     pub observer: DeviceId,
     /// When the leakage occurred
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: TimeStamp,
     /// Description of what was leaked
     pub description: String,
 }
@@ -78,7 +79,7 @@ impl LeakageEvent {
         leak_type: LeakageType,
         cost: u64,
         observer: DeviceId,
-        timestamp: DateTime<Utc>,
+        timestamp: TimeStamp,
         description: impl Into<String>,
     ) -> Self {
         Self {
@@ -102,10 +103,10 @@ pub struct LeakageBudget {
     pub limit: u64,
     /// Currently consumed budget
     pub consumed: u64,
-    /// Budget refresh period (if applicable)
-    pub refresh_period: Option<chrono::Duration>,
-    /// Last refresh time
-    pub last_refresh: DateTime<Utc>,
+    /// Budget refresh period in milliseconds (if applicable)
+    pub refresh_period_ms: Option<u64>,
+    /// Last refresh time (using Aura unified time system)
+    pub last_refresh: TimeStamp,
 }
 
 impl LeakageBudget {
@@ -113,13 +114,13 @@ impl LeakageBudget {
     ///
     /// # Arguments
     /// * `now` - Current timestamp (from TimeEffects)
-    pub fn new(observer: DeviceId, leak_type: LeakageType, limit: u64, now: DateTime<Utc>) -> Self {
+    pub fn new(observer: DeviceId, leak_type: LeakageType, limit: u64, now: TimeStamp) -> Self {
         Self {
             observer,
             leak_type,
             limit,
             consumed: 0,
-            refresh_period: None,
+            refresh_period_ms: None,
             last_refresh: now,
         }
     }
@@ -132,15 +133,15 @@ impl LeakageBudget {
         observer: DeviceId,
         leak_type: LeakageType,
         limit: u64,
-        refresh_period: chrono::Duration,
-        now: DateTime<Utc>,
+        refresh_period_ms: u64,
+        now: TimeStamp,
     ) -> Self {
         Self {
             observer,
             leak_type,
             limit,
             consumed: 0,
-            refresh_period: Some(refresh_period),
+            refresh_period_ms: Some(refresh_period_ms),
             last_refresh: now,
         }
     }
@@ -172,11 +173,27 @@ impl LeakageBudget {
     ///
     /// # Arguments
     /// * `now` - Current timestamp (from TimeEffects)
-    pub fn maybe_refresh(&mut self, now: DateTime<Utc>) {
-        if let Some(period) = self.refresh_period {
-            if now.signed_duration_since(self.last_refresh) >= period {
-                self.consumed = 0;
-                self.last_refresh = now;
+    pub fn maybe_refresh(&mut self, now: TimeStamp) {
+        if let Some(period_ms) = self.refresh_period_ms {
+            // Use unified time system with explicit ordering policy
+            use aura_core::time::{OrderingPolicy, TimeOrdering};
+
+            let ordering = now.compare(&self.last_refresh, OrderingPolicy::Native);
+            if let TimeOrdering::After = ordering {
+                // Check if enough time has elapsed for refresh
+                // For refresh timing, we need physical time comparison
+                if let (
+                    aura_core::time::TimeStamp::PhysicalClock(now_phys),
+                    aura_core::time::TimeStamp::PhysicalClock(last_phys),
+                ) = (&now, &self.last_refresh)
+                {
+                    let elapsed_ms = now_phys.ts_ms.saturating_sub(last_phys.ts_ms);
+
+                    if elapsed_ms >= period_ms {
+                        self.consumed = 0;
+                        self.last_refresh = now;
+                    }
+                }
             }
         }
     }
@@ -248,13 +265,13 @@ impl LeakageTracker {
         leak_type: LeakageType,
         cost: u64,
         observer: DeviceId,
-        now: DateTime<Utc>,
+        now: TimeStamp,
         description: impl Into<String>,
     ) -> AuraResult<()> {
         // Check budget
         let key = (observer, leak_type.clone());
         if let Some(budget) = self.budgets.get_mut(&key) {
-            budget.maybe_refresh(now);
+            budget.maybe_refresh(now.clone());
             budget.consume(cost)?;
         } else {
             // No budget defined - allow but warn
@@ -415,13 +432,16 @@ impl PrivacyContract {
 mod tests {
     use super::*;
     use aura_core::identifiers::DeviceId;
+    use aura_core::time::{PhysicalTime, TimeStamp};
 
     #[test]
     fn test_leakage_budget() {
-        #[allow(clippy::disallowed_methods)]
-        let now = Utc::now();
+        let now = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1000,
+            uncertainty: None,
+        });
         let observer = DeviceId::new();
-        let mut budget = LeakageBudget::new(observer, LeakageType::Metadata, 100, now);
+        let mut budget = LeakageBudget::new(observer, LeakageType::Metadata, 100, now.clone());
 
         assert!(budget.can_afford(50));
         assert!(budget.consume(50).is_ok());
@@ -431,12 +451,14 @@ mod tests {
 
     #[test]
     fn test_leakage_tracker() {
-        #[allow(clippy::disallowed_methods)]
-        let now = Utc::now();
+        let now = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1000,
+            uncertainty: None,
+        });
         let observer = DeviceId::new();
         let mut tracker = LeakageTracker::new();
 
-        let budget = LeakageBudget::new(observer, LeakageType::Metadata, 100, now);
+        let budget = LeakageBudget::new(observer, LeakageType::Metadata, 100, now.clone());
         tracker.add_budget(budget);
 
         assert!(tracker.check_leakage(&LeakageType::Metadata, 50, observer));
@@ -448,10 +470,12 @@ mod tests {
 
     #[test]
     fn test_privacy_contract() {
-        #[allow(clippy::disallowed_methods)]
-        let now = Utc::now();
+        let now = TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1000,
+            uncertainty: None,
+        });
         let observer = DeviceId::new();
-        let budget = LeakageBudget::new(observer, LeakageType::Metadata, 100, now);
+        let budget = LeakageBudget::new(observer, LeakageType::Metadata, 100, now.clone());
 
         let contract = PrivacyContract::new("test_contract")
             .with_description("Test privacy contract")

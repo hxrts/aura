@@ -74,11 +74,13 @@ pub mod context;
 /// Cryptographic effect handlers for signing, verification, and key derivation
 pub mod crypto;
 // NOTE: JournalEffects moved to aura-journal (domain crate) per Layer 2 pattern
+pub mod guard_interpreter;
 pub mod leakage_handler;
 pub mod random;
 pub mod secure;
 pub mod simulation;
 pub mod storage;
+// sync_bridge removed - replaced by pure guard evaluation (ADR-014)
 pub mod system;
 pub mod time;
 pub mod transport;
@@ -92,11 +94,13 @@ pub use console::RealConsoleHandler;
 pub use context::{ExecutionContext, StandardContextHandler};
 pub use crypto::RealCryptoHandler;
 // NOTE: JournalHandler moved to aura-journal per Layer 2 pattern
+pub use guard_interpreter::ProductionEffectInterpreter;
 pub use leakage_handler::ProductionLeakageHandler;
 pub use random::RealRandomHandler;
 pub use secure::RealSecureStorageHandler;
 pub use simulation::StatelessSimulationHandler;
 pub use storage::{EncryptedStorageHandler, FilesystemStorageHandler};
+// ProductionSyncExecutor removed - replaced by ProductionEffectInterpreter (ADR-014)
 pub use time::{
     LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler, TimeComparisonHandler,
 };

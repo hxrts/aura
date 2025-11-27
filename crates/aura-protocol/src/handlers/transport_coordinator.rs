@@ -137,7 +137,7 @@ struct ConnectionInfo {
 }
 
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 /// Local transport coordinator - NO choreography
 /// Composes transport effects for single-device operations

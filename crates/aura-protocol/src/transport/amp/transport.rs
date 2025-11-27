@@ -17,9 +17,9 @@ use std::time::Duration;
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{AuraError, Result};
-use aura_journal::fact::ProposedChannelEpochBump;
+use aura_journal::{fact::ProposedChannelEpochBump, ChannelEpochState};
 use aura_transport::amp::{
-    derive_for_recv, derive_for_send, AmpError, AmpHeader, RatchetDerivation,
+    derive_for_recv, derive_for_send, AmpError, AmpHeader, AmpRatchetState, RatchetDerivation,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -119,7 +119,8 @@ pub async fn prepare_send<E: AmpJournalEffects>(
     channel: ChannelId,
 ) -> Result<RatchetDerivation> {
     let state = get_channel_state(effects, context, channel).await?;
-    derive_for_send(context, channel, &state).map_err(map_amp_error)
+    let ratchet_state = ratchet_from_epoch_state(&state);
+    derive_for_send(context, channel, &ratchet_state, state.current_gen).map_err(map_amp_error)
 }
 
 /// Validate an incoming AMP header against reduced state and derive recv keys.
@@ -129,11 +130,21 @@ pub async fn validate_header<E: AmpJournalEffects>(
     header: AmpHeader,
 ) -> Result<(RatchetDerivation, (u64, u64))> {
     let state = get_channel_state(effects, context, header.channel).await?;
+    let ratchet_state = ratchet_from_epoch_state(&state);
     let (min_gen, max_gen) =
-        aura_transport::amp::window_bounds(state.last_checkpoint_gen, state.skip_window);
-    derive_for_recv(&state, header)
+        aura_transport::amp::window_bounds(ratchet_state.last_checkpoint_gen, ratchet_state.skip_window);
+    derive_for_recv(&ratchet_state, header)
         .map(|deriv| (deriv, (min_gen, max_gen)))
         .map_err(map_amp_error)
+}
+
+fn ratchet_from_epoch_state(state: &ChannelEpochState) -> AmpRatchetState {
+    AmpRatchetState {
+        chan_epoch: state.chan_epoch,
+        last_checkpoint_gen: state.last_checkpoint_gen,
+        skip_window: state.skip_window as u64,
+        pending_epoch: state.pending_bump.as_ref().map(|p| p.new_epoch),
+    }
 }
 
 /// Insert a proposed bump as a fact.

@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
+use aura_core::effects::PhysicalTimeEffects;
 use aura_core::TimeEffects;
 use aura_protocol::effect_traits::StorageEffects;
 use std::path::Path;
@@ -81,13 +82,20 @@ async fn run_daemon_mode(
     let _ = effects;
     println!("Node started at epoch: {}", start_time);
 
-    // Simulate some startup delay
-    simulate_startup_delay(_ctx, effects).await;
+    // Simulate some startup delay and health checks
+    simulate_startup_delay(_ctx, effects).await?;
 
     println!("Node daemon started successfully on port {}", port);
 
-    // TODO fix - In a real implementation, this would start the actual node service
-    println!("Daemon is running. Use 'aura status' to check node status.");
+    // Run a short, effect-driven heartbeat loop to verify the node can make progress
+    for idx in 0..3 {
+        effects
+            .sleep_ms(200)
+            .await
+            .map_err(|e| anyhow::anyhow!("daemon heartbeat sleep failed: {}", e))?;
+        let epoch = effects.current_epoch().await;
+        println!("Daemon heartbeat {} at epoch {}", idx + 1, epoch);
+    }
 
     Ok(())
 }
@@ -107,7 +115,7 @@ async fn run_interactive_mode(
     println!("Started at epoch: {}", start_time);
 
     // Simulate interactive mode - in real implementation would handle signals
-    simulate_interactive_session(_ctx, effects).await;
+    simulate_interactive_session(_ctx, effects).await?;
 
     println!("Node stopped");
 
@@ -115,7 +123,7 @@ async fn run_interactive_mode(
 }
 
 /// Simulate startup delay using time effects
-async fn simulate_startup_delay(_ctx: &EffectContext, effects: &AuraEffectSystem) {
+async fn simulate_startup_delay(_ctx: &EffectContext, effects: &AuraEffectSystem) -> Result<()> {
     let delay_start = effects.current_epoch().await;
 
     // Simulate 1 second startup time
@@ -124,27 +132,37 @@ async fn simulate_startup_delay(_ctx: &EffectContext, effects: &AuraEffectSystem
         let current = effects.current_epoch().await;
         elapsed = current.saturating_sub(delay_start);
 
-        // Yield control
-        tokio::task::yield_now().await;
+        // Yield control using effect-driven sleep
+        effects
+            .sleep_ms(25)
+            .await
+            .map_err(|e| anyhow::anyhow!("startup sleep failed: {}", e))?;
     }
 
     println!("Startup complete");
+
+    Ok(())
 }
 
 /// Simulate interactive session
-async fn simulate_interactive_session(_ctx: &EffectContext, effects: &AuraEffectSystem) {
-    // TODO fix - In a real implementation, this would listen for signals
-    // TODO fix - For now, simulate a short interactive session
-
+async fn simulate_interactive_session(
+    _ctx: &EffectContext,
+    effects: &AuraEffectSystem,
+) -> Result<()> {
     for i in 1..=3 {
         let current = effects.current_epoch().await;
         println!("Interactive tick {} at epoch {}", i, current);
 
         // Simulate some work
-        tokio::task::yield_now().await;
+        effects
+            .sleep_ms(50)
+            .await
+            .map_err(|e| anyhow::anyhow!("interactive sleep failed: {}", e))?;
     }
 
     println!("Interactive session ended (simulated)");
+
+    Ok(())
 }
 
 /// Node configuration structure

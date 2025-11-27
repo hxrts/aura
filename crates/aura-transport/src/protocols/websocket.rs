@@ -4,8 +4,8 @@
 //! Target: <100 lines (simple implementation).
 
 use aura_core::identifiers::DeviceId;
+use aura_core::time::{PhysicalTime, TimeStamp};
 use serde::{Deserialize, Serialize};
-use std::time::SystemTime;
 use uuid::Uuid;
 
 /// Core WebSocket protocol messages for choreographic usage
@@ -79,8 +79,8 @@ pub enum HandshakeResult {
 pub struct FrameMetadata {
     /// Frame type
     pub frame_type: FrameType,
-    /// Timestamp when frame was created
-    pub timestamp: SystemTime,
+    /// Timestamp when frame was created (using Aura unified time system)
+    pub timestamp: TimeStamp,
     /// Frame sequence number
     pub sequence: u64,
 }
@@ -141,17 +141,27 @@ impl WebSocketMessage {
         }
     }
 
-    /// Create data frame
+    /// Create data frame with default timestamp
+    ///
+    /// Note: In production, timestamp should be provided via PhysicalTimeEffects
     pub fn data_frame(session_id: Uuid, payload: Vec<u8>, frame_type: FrameType) -> Self {
-        Self::data_frame_at_time(session_id, payload, frame_type, SystemTime::UNIX_EPOCH)
+        Self::data_frame_with_timestamp(
+            session_id,
+            payload,
+            frame_type,
+            TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 0,
+                uncertainty: None,
+            }),
+        )
     }
 
     /// Create data frame with specific timestamp
-    pub fn data_frame_at_time(
+    pub fn data_frame_with_timestamp(
         session_id: Uuid,
         payload: Vec<u8>,
         frame_type: FrameType,
-        timestamp: SystemTime,
+        timestamp: TimeStamp,
     ) -> Self {
         Self::DataFrame {
             session_id,

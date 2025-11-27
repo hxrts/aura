@@ -2,6 +2,8 @@
 //!
 //! Main demo orchestration interface for Bob's recovery journey.
 
+use aura_core::PhysicalTimeEffects;
+use aura_effects::time::PhysicalTimeHandler;
 use std::collections::HashMap;
 use tokio::sync::mpsc;
 
@@ -185,8 +187,8 @@ impl DemoInterface {
             self.app.state_mut().set_bob_authority(bob_authority);
         }
 
-        // Simulate onboarding delay (TODO: Use TimeEffects for deterministic testing)
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        // Simulate onboarding delay
+        PhysicalTimeHandler::new().sleep_ms(500).await.ok();
 
         tracing::info!("Bob onboarding completed");
         Ok(())
@@ -198,8 +200,8 @@ impl DemoInterface {
             self.app.state_mut().setup_alice_guardian(alice_authority);
         }
 
-        // Simulate setup delay (TODO: Use TimeEffects for deterministic testing)
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        // Simulate setup delay
+        PhysicalTimeHandler::new().sleep_ms(300).await.ok();
 
         if let Some(charlie_authority) = self.authorities.get("charlie").copied() {
             self.app

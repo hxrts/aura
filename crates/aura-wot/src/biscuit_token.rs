@@ -69,6 +69,7 @@ impl AccountAuthority {
     }
 }
 
+#[derive(Clone)]
 pub struct BiscuitTokenManager {
     device_id: DeviceId,
     current_token: Biscuit,

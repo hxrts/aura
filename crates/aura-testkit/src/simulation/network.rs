@@ -7,11 +7,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use async_lock::Mutex;
 use aura_core::{AuraError, AuraResult, DeviceId};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use tokio::sync::Mutex;
-use tokio::time::sleep;
+use std::thread;
 
 /// Network simulator for testing distributed scenarios
 pub struct NetworkSimulator {
@@ -183,11 +183,11 @@ impl NetworkSimulator {
         // Simulate bandwidth delay
         if let Some(bandwidth) = conditions.bandwidth {
             let transmission_time = Duration::from_secs_f64(message_size as f64 / bandwidth as f64);
-            sleep(transmission_time).await;
+            thread::sleep(transmission_time);
         }
 
         // Simulate network latency
-        sleep(latency).await;
+        thread::sleep(latency);
 
         Ok(())
     }

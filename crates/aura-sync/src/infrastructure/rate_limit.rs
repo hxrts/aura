@@ -29,9 +29,9 @@
 //!         // Perform sync operation
 //!     }
 //!     result => {
-//!         // Rate limit exceeded, backoff
-//!         if let Some(retry_after) = result.retry_after() {
-//!             tokio::time::sleep(retry_after).await;
+//!         // Rate limit exceeded, apply backoff using your time provider (TimeEffects)
+//!         if let Some(_retry_after) = result.retry_after() {
+//!             // sleep via injected TimeEffects here
 //!         }
 //!     }
 //! }

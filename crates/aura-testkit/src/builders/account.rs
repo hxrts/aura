@@ -31,7 +31,7 @@ pub fn test_account_with_seed_sync(seed: u64) -> Journal {
     let hash_bytes = hash(hash_input.as_bytes());
     let account_id = AccountId(Uuid::from_bytes(hash_bytes[..16].try_into().unwrap()));
 
-    Journal::new_with_group_key(account_id, group_public_key)
+    Journal::new_with_group_key_bytes(account_id, group_public_key.to_bytes().to_vec())
 }
 
 /// Create a test account with seed (async version for compatibility)
@@ -67,7 +67,7 @@ pub async fn test_account_with_threshold(seed: u64, _threshold: u16, _total: u16
     let hash_bytes = hash(hash_input.as_bytes());
     let account_id = AccountId(Uuid::from_bytes(hash_bytes[..16].try_into().unwrap()));
 
-    Journal::new_with_group_key(account_id, group_public_key)
+    Journal::new_with_group_key_bytes(account_id, group_public_key.to_bytes().to_vec())
 }
 
 /// Create a test account with specific account ID
@@ -80,7 +80,7 @@ pub async fn test_account_with_threshold(seed: u64, _threshold: u16, _total: u16
 pub async fn test_account_with_id(account_id: AccountId, seed: u64) -> Journal {
     let (_, group_public_key) = crate::test_key_pair(seed);
 
-    Journal::new_with_group_key(account_id, group_public_key)
+    Journal::new_with_group_key_bytes(account_id, group_public_key.to_bytes().to_vec())
 }
 
 /// Create a test account with specific group public key
@@ -96,5 +96,5 @@ pub async fn test_account_with_group_key(group_public_key: VerifyingKey, seed: u
     let hash_bytes = hash(hash_input.as_bytes());
     let account_id = AccountId(Uuid::from_bytes(hash_bytes[..16].try_into().unwrap()));
 
-    Journal::new_with_group_key(account_id, group_public_key)
+    Journal::new_with_group_key_bytes(account_id, group_public_key.to_bytes().to_vec())
 }

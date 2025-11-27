@@ -10,14 +10,18 @@
 #![allow(dead_code)]
 
 use aura_core::identifiers::DeviceId;
+use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_mpst::{
     context::{ContextIsolation, ContextType},
     leakage::{LeakageBudget, LeakageTracker, LeakageType, PrivacyContract},
 };
-use chrono::Duration;
 use uuid::Uuid;
-fn fixed_now() -> chrono::DateTime<chrono::Utc> {
-    chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap()
+
+fn fixed_now() -> TimeStamp {
+    TimeStamp::PhysicalClock(PhysicalTime {
+        ts_ms: 0,
+        uncertainty: None,
+    })
 }
 
 #[test]
@@ -25,7 +29,7 @@ fn test_privacy_contract_creation() {
     #[allow(clippy::disallowed_methods)]
     let now = fixed_now();
     let observer = DeviceId::new();
-    let budget = LeakageBudget::new(observer, LeakageType::Metadata, 1000, now);
+    let budget = LeakageBudget::new(observer, LeakageType::Metadata, 1000, now.clone());
 
     let contract = PrivacyContract::new("test_contract")
         .with_description("Test privacy contract for metadata leakage")
@@ -44,8 +48,8 @@ fn test_privacy_contract_validation() {
     let observer = DeviceId::new();
 
     // Create duplicate budgets (should fail validation)
-    let budget1 = LeakageBudget::new(observer, LeakageType::Metadata, 1000, now);
-    let budget2 = LeakageBudget::new(observer, LeakageType::Metadata, 500, now);
+    let budget1 = LeakageBudget::new(observer, LeakageType::Metadata, 1000, now.clone());
+    let budget2 = LeakageBudget::new(observer, LeakageType::Metadata, 500, now.clone());
 
     let contract = PrivacyContract::new("invalid_contract")
         .add_budget(budget1)
@@ -62,12 +66,18 @@ fn test_leakage_budget_enforcement() {
     let mut tracker = LeakageTracker::new();
 
     // Add budget for metadata leakage
-    let budget = LeakageBudget::new(observer, LeakageType::Metadata, 100, now);
+    let budget = LeakageBudget::new(observer, LeakageType::Metadata, 100, now.clone());
     tracker.add_budget(budget);
 
     // Should succeed within budget
     assert!(tracker
-        .record_leakage(LeakageType::Metadata, 50, observer, now, "test metadata")
+        .record_leakage(
+            LeakageType::Metadata,
+            50,
+            observer,
+            now.clone(),
+            "test metadata"
+        )
         .is_ok());
     assert_eq!(
         tracker.remaining_budget(observer, &LeakageType::Metadata),
@@ -89,7 +99,7 @@ fn test_leakage_budget_refresh() {
         observer,
         LeakageType::Timing,
         1000,
-        Duration::milliseconds(1), // Very short refresh for testing
+        1, // Very short refresh for testing (in milliseconds)
         now,
     );
 
@@ -99,9 +109,10 @@ fn test_leakage_budget_refresh() {
 
     // Wait and refresh (in real implementation, this would be time-based)
     std::thread::sleep(std::time::Duration::from_millis(2));
-    #[allow(clippy::disallowed_methods)]
-    let now_after = chrono::DateTime::<chrono::Utc>::from_timestamp(0, 0).unwrap()
-        + chrono::Duration::milliseconds(2);
+    let now_after = TimeStamp::PhysicalClock(PhysicalTime {
+        ts_ms: 2,
+        uncertainty: None,
+    });
     budget.maybe_refresh(now_after);
 
     // Budget should be refreshed
@@ -163,7 +174,7 @@ fn test_unlinkability_property() {
     let mut tracker = LeakageTracker::new();
 
     let observer = DeviceId::new();
-    let budget = LeakageBudget::new(observer, LeakageType::Patterns, 1000, now);
+    let budget = LeakageBudget::new(observer, LeakageType::Patterns, 1000, now.clone());
     tracker.add_budget(budget);
 
     // Record pattern leakage
@@ -172,7 +183,7 @@ fn test_unlinkability_property() {
             LeakageType::Patterns,
             100,
             observer,
-            now,
+            now.clone(),
             "access pattern 1"
         )
         .is_ok());
@@ -209,9 +220,9 @@ fn test_multi_type_leakage_budgets() {
     let mut tracker = LeakageTracker::new();
 
     // Add budgets for different types of leakage
-    let metadata_budget = LeakageBudget::new(observer, LeakageType::Metadata, 500, now);
-    let timing_budget = LeakageBudget::new(observer, LeakageType::Timing, 200, now);
-    let pattern_budget = LeakageBudget::new(observer, LeakageType::Patterns, 1000, now);
+    let metadata_budget = LeakageBudget::new(observer, LeakageType::Metadata, 500, now.clone());
+    let timing_budget = LeakageBudget::new(observer, LeakageType::Timing, 200, now.clone());
+    let pattern_budget = LeakageBudget::new(observer, LeakageType::Patterns, 1000, now.clone());
 
     tracker.add_budget(metadata_budget);
     tracker.add_budget(timing_budget);
@@ -219,13 +230,25 @@ fn test_multi_type_leakage_budgets() {
 
     // Each type should have independent budgets
     assert!(tracker
-        .record_leakage(LeakageType::Metadata, 400, observer, now, "metadata")
+        .record_leakage(
+            LeakageType::Metadata,
+            400,
+            observer,
+            now.clone(),
+            "metadata"
+        )
         .is_ok());
     assert!(tracker
-        .record_leakage(LeakageType::Timing, 150, observer, now, "timing")
+        .record_leakage(LeakageType::Timing, 150, observer, now.clone(), "timing")
         .is_ok());
     assert!(tracker
-        .record_leakage(LeakageType::Patterns, 800, observer, now, "patterns")
+        .record_leakage(
+            LeakageType::Patterns,
+            800,
+            observer,
+            now.clone(),
+            "patterns"
+        )
         .is_ok());
 
     // Check remaining budgets
@@ -255,8 +278,8 @@ fn test_privacy_contract_application() {
     let observer1 = DeviceId::new();
     let observer2 = DeviceId::new();
 
-    let budget1 = LeakageBudget::new(observer1, LeakageType::Metadata, 1000, now);
-    let budget2 = LeakageBudget::new(observer2, LeakageType::Timing, 500, now);
+    let budget1 = LeakageBudget::new(observer1, LeakageType::Metadata, 1000, now.clone());
+    let budget2 = LeakageBudget::new(observer2, LeakageType::Timing, 500, now.clone());
 
     let contract = PrivacyContract::new("multi_observer_contract")
         .with_description("Contract with multiple observers")
@@ -332,8 +355,8 @@ fn test_complex_privacy_scenario() {
     // isolation.add_barrier(relationship_barrier);
 
     // Set up leakage budgets
-    let metadata_budget1 = LeakageBudget::new(relay1, LeakageType::Metadata, 1000, now);
-    let metadata_budget2 = LeakageBudget::new(relay2, LeakageType::Metadata, 1000, now);
+    let metadata_budget1 = LeakageBudget::new(relay1, LeakageType::Metadata, 1000, now.clone());
+    let metadata_budget2 = LeakageBudget::new(relay2, LeakageType::Metadata, 1000, now.clone());
     tracker.add_budget(metadata_budget1);
     tracker.add_budget(metadata_budget2);
 
@@ -375,10 +398,22 @@ fn test_complex_privacy_scenario() {
 
     // Test leakage tracking
     assert!(tracker
-        .record_leakage(LeakageType::Metadata, 100, relay1, now, "message metadata")
+        .record_leakage(
+            LeakageType::Metadata,
+            100,
+            relay1,
+            now.clone(),
+            "message metadata"
+        )
         .is_ok());
     assert!(tracker
-        .record_leakage(LeakageType::Metadata, 200, relay2, now, "routing metadata")
+        .record_leakage(
+            LeakageType::Metadata,
+            200,
+            relay2,
+            now.clone(),
+            "routing metadata"
+        )
         .is_ok());
 
     // Verify budgets are properly consumed

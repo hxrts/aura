@@ -63,8 +63,6 @@ impl Default for GuardianPolicy {
 
 // SessionId is now imported from aura-core
 
-// OperationType is now imported from aura-core
-
 // ProtocolType is now imported from aura-core
 
 // EventNonce is now imported from aura-core

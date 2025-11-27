@@ -7,14 +7,14 @@ use crate::{transport::deliver_via_rendezvous, InvitationError, InvitationResult
 use aura_core::effects::NetworkEffects;
 use aura_core::hash;
 use aura_core::time::{PhysicalTime, TimeStamp};
-use aura_core::{AccountId, DeviceId};
+use aura_core::{AccountId, DeviceId, ExecutionMode};
 use aura_journal::semilattice::{InvitationRecord, InvitationRecordRegistry};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_wot::SerializableBiscuit;
+use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// Device invitation request
@@ -366,7 +366,6 @@ where
         .await?;
 
         // Skip network sending in testing mode to avoid MockNetworkHandler connectivity issues
-        use aura_protocol::handlers::ExecutionMode;
         if self.effects.execution_mode() != ExecutionMode::Testing {
             NetworkEffects::send_to_peer(self.effects.as_ref(), envelope.invitee.0, payload)
                 .await

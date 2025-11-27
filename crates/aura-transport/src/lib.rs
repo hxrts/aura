@@ -62,7 +62,7 @@ pub mod types {
     pub mod envelope;
 }
 
-/// AMP ratchet helpers
+/// AMP types (clean - no domain dependencies)
 pub mod amp;
 
 /// Privacy-aware peer management
@@ -122,3 +122,6 @@ pub use messages::{
     RendezvousMessage, SocialMessage, SocialPayload, StorageCapabilityAnnouncement,
     TransportDescriptor, TransportKind, TransportOfferPayload,
 };
+
+// Re-export AMP types
+pub use amp::{AmpError, AmpHeader, AmpRatchetState, RatchetDerivation};

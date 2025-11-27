@@ -16,17 +16,7 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects, TimeError};
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
-use uuid::Uuid;
-
-/// Context registry for managing time contexts and timeouts
-#[derive(Debug, Default)]
-struct ContextRegistry {
-    contexts: HashMap<Uuid, broadcast::Sender<()>>,
-    timeouts: HashMap<Uuid, tokio::task::JoinHandle<()>>,
-}
 
 /// Timeout coordinator that adds multi-context coordination to a base TimeEffects handler
 #[derive(Debug, Clone)]
@@ -35,8 +25,8 @@ pub struct TimeoutCoordinator<T, R> {
     inner: T,
     /// Random effects for UUID generation
     random: R,
-    /// Shared registry for coordinating timeouts and contexts
-    registry: Arc<RwLock<ContextRegistry>>,
+    /// Placeholder registry hook for future coordination (kept for API compatibility)
+    _registry: Arc<()>,
 }
 
 impl<T: PhysicalTimeEffects + Clone, R: RandomEffects + Clone> TimeoutCoordinator<T, R> {
@@ -45,7 +35,7 @@ impl<T: PhysicalTimeEffects + Clone, R: RandomEffects + Clone> TimeoutCoordinato
         Self {
             inner,
             random,
-            registry: Arc::new(RwLock::new(ContextRegistry::default())),
+            _registry: Arc::new(()),
         }
     }
 }

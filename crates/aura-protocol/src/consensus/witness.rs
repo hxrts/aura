@@ -14,7 +14,7 @@ use aura_core::{
 // use rand_chacha::rand_core::SeedableRng; // Used in tests
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use async_lock::RwLock;
 
 /// Set of witnesses participating in consensus
 #[derive(Debug, Clone)]

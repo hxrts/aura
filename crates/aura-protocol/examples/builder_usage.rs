@@ -3,8 +3,7 @@
 use aura_composition::EffectRegistry;
 use aura_core::{effects::ExecutionMode, AuraResult, DeviceId};
 
-#[tokio::main]
-async fn main() -> AuraResult<()> {
+fn main() -> AuraResult<()> {
     // Example 1: Simple test configuration
     println!("Example 1: Simple test configuration");
     let _device_id = DeviceId::new();

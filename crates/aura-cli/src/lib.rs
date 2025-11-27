@@ -71,7 +71,7 @@
 //! aura scenario run --directory ... --pattern ...
 //! ```
 
-#![allow(clippy::disallowed_methods)] // CLI handlers need system calls in some TODO/placeholder code
+#![allow(clippy::disallowed_methods)] // CLI handlers intentionally call system APIs for user interactions
 #![allow(clippy::disallowed_types)] // CLI uses blake3::Hasher directly in some places
 
 pub mod commands;

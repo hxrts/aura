@@ -33,14 +33,13 @@ serde_json = { workspace = true }
 # Error handling
 thiserror = { workspace = true }
 
-# Async support
+# Async support (runtime dependencies removed for Layer 2 compliance)
 async-trait = { workspace = true }
-futures = { workspace = true }
-tokio = { workspace = true }
+# futures = { workspace = true } # Removed - violates Layer 2 runtime abstraction
+# tokio = { workspace = true } # Removed - violates Layer 2 runtime abstraction
 
-# Identifiers and time
+# Identifiers and time (unified time system via aura-core)
 uuid = { workspace = true }
-chrono = { workspace = true }
 
 # Cryptographic and utility dependencies
 blake3 = { workspace = true }
@@ -56,6 +55,8 @@ tracing = { workspace = true }
 aura-macros = { path = "../aura-macros" }
 proptest = { workspace = true }
 tokio = { workspace = true }
+futures = { workspace = true }
+chrono = { workspace = true }
 
 [features]
 default = []

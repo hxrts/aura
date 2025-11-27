@@ -4,9 +4,11 @@
 //! all sync protocols. It eliminates duplication and provides consistent interfaces.
 
 use aura_core::{DeviceId, SessionId};
-use aura_effects::time::wallclock_secs;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+fn current_timestamp_secs() -> u64 {
+    0 // placeholder; callers should inject PhysicalTimeEffects
+}
 use uuid::Uuid;
 
 /// Common trait for protocol message pairs
@@ -78,10 +80,7 @@ impl<T> TimestampedMessage<T> {
 
     /// Create a new timestamped message with provided timestamp
     pub fn new_with_timestamp(timestamp_secs: Option<u64>, payload: T) -> Self {
-        let timestamp = timestamp_secs.unwrap_or_else(|| {
-            // Fallback for compatibility when time is not provided
-            wallclock_secs()
-        });
+        let timestamp = timestamp_secs.unwrap_or_else(current_timestamp_secs);
         Self { timestamp, payload }
     }
 
@@ -104,7 +103,7 @@ impl<T> TimestampedMessage<T> {
     /// DEPRECATED: Use age_seconds with timestamp parameter for proper time abstraction
     #[deprecated(note = "Use age_seconds with timestamp parameter for proper time abstraction")]
     pub fn age_seconds_now(&self) -> u64 {
-        let now = wallclock_secs();
+        let now = current_timestamp_secs();
         self.age_seconds(now)
     }
 }

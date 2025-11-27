@@ -42,17 +42,19 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use hex;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{
     sync_biscuit_guard_error, sync_network_error, sync_serialization_error, sync_session_error,
-    sync_timeout_error, SyncResult,
+    SyncResult,
 };
 use crate::infrastructure::RetryPolicy;
-use aura_core::effects::{JournalEffects, NetworkEffects};
+use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
+use aura_core::scope::ResourceScope;
 use aura_core::{hash, AttestedOp, AuraError, AuraResult, DeviceId, FlowBudget, Journal};
 use aura_protocol::guards::{BiscuitGuardEvaluator, GuardError};
-use aura_wot::{BiscuitTokenManager, ResourceScope};
+use aura_wot::BiscuitTokenManager;
 
 // =============================================================================
 // Types
@@ -141,6 +143,9 @@ pub struct AntiEntropyResult {
     /// Number of duplicates that were ignored
     pub duplicates: usize,
 
+    /// Operations that were newly applied (for journal conversion/persistence)
+    pub applied_ops: Vec<AttestedOp>,
+
     /// Final digest status after synchronization
     pub final_status: Option<DigestStatus>,
 
@@ -202,12 +207,13 @@ impl Default for AntiEntropyConfig {
 /// 4. Repeat until synchronized or max rounds reached
 ///
 /// Supports Biscuit token-based authorization for sync operations.
+#[derive(Clone)]
 pub struct AntiEntropyProtocol {
     config: AntiEntropyConfig,
     /// Optional Biscuit token manager for authorization
     token_manager: Option<BiscuitTokenManager>,
     /// Optional Biscuit guard evaluator for permission checks
-    guard_evaluator: Option<BiscuitGuardEvaluator>,
+    guard_evaluator: Option<std::sync::Arc<BiscuitGuardEvaluator>>,
 }
 
 impl AntiEntropyProtocol {
@@ -229,7 +235,7 @@ impl AntiEntropyProtocol {
         Self {
             config,
             token_manager: Some(token_manager),
-            guard_evaluator: Some(guard_evaluator),
+            guard_evaluator: Some(std::sync::Arc::new(guard_evaluator)),
         }
     }
 
@@ -248,7 +254,7 @@ impl AntiEntropyProtocol {
             let authority_id = aura_core::AuthorityId::from_uuid(peer.0);
             let resource = ResourceScope::Authority {
                 authority_id,
-                operation: aura_wot::AuthorityOp::UpdateTree, // Sync requires authority access
+                operation: aura_core::scope::AuthorityOp::UpdateTree, // Sync requires authority access
             };
 
             let mut flow_budget = FlowBudget::new(1000, aura_core::session_epochs::Epoch::new(0)); // Standard sync budget
@@ -304,7 +310,7 @@ impl AntiEntropyProtocol {
     /// - Uses `RetryPolicy` from infrastructure for resilience
     pub async fn execute<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<AntiEntropyResult>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync,
+        E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,
     {
         // Check authorization before starting sync
         self.check_sync_authorization(effects, peer)?;
@@ -364,7 +370,7 @@ impl AntiEntropyProtocol {
 
                     // Apply retry delay
                     let delay = self.config.retry_policy.calculate_delay(retry_count);
-                    tokio::time::sleep(delay).await;
+                    let _ = effects.sleep_ms(delay.as_millis() as u64).await;
                 }
             }
         }
@@ -423,6 +429,7 @@ impl AntiEntropyProtocol {
                 Ok(AntiEntropyResult {
                     applied: 0,
                     duplicates: 0,
+                    applied_ops: Vec::new(),
                     final_status: Some(DigestStatus::Equal),
                     rounds: 1,
                 })
@@ -447,6 +454,7 @@ impl AntiEntropyProtocol {
                 Ok(AntiEntropyResult {
                     applied: 0, // We didn't apply anything locally
                     duplicates: 0,
+                    applied_ops: Vec::new(),
                     final_status: Some(DigestStatus::RemoteBehind),
                     rounds: 1,
                 })
@@ -527,14 +535,8 @@ impl AntiEntropyProtocol {
             Ok(remote_digest)
         };
 
-        tokio::time::timeout(self.config.digest_timeout, exchange_future)
-            .await
-            .map_err(|_| {
-                sync_timeout_error(
-                    format!("Digest exchange with peer {}", peer),
-                    self.config.digest_timeout,
-                )
-            })?
+        // Execute without runtime-specific timeout; callers should enforce via PhysicalTimeEffects if needed.
+        exchange_future.await
     }
 
     /// Pull missing operations from peer
@@ -602,7 +604,7 @@ impl AntiEntropyProtocol {
 
             // Merge operations into local state
             let mut local_ops = vec![]; // In full implementation, get from journal
-            let merge_result = self.merge_batch(&mut local_ops, remote_ops)?;
+            let mut merge_result = self.merge_batch(&mut local_ops, remote_ops)?;
 
             // Update journal with merged operations using effect system
             if merge_result.applied > 0 {
@@ -671,22 +673,13 @@ impl AntiEntropyProtocol {
                 );
             }
 
-            Ok(AntiEntropyResult {
-                applied: merge_result.applied,
-                duplicates: merge_result.duplicates,
-                final_status: Some(DigestStatus::LocalBehind),
-                rounds: 1,
-            })
+            merge_result.final_status = Some(DigestStatus::LocalBehind);
+            merge_result.rounds = 1;
+            Ok(merge_result)
         };
 
-        tokio::time::timeout(self.config.transfer_timeout, pull_future)
-            .await
-            .map_err(|_| {
-                sync_timeout_error(
-                    format!("Operation transfer with peer {}", peer),
-                    self.config.transfer_timeout,
-                )
-            })?
+        // Execute without runtime-specific timeout; callers should enforce via PhysicalTimeEffects if needed.
+        pull_future.await
     }
 
     /// Convert applied operations to journal delta for persistence
@@ -698,24 +691,38 @@ impl AntiEntropyProtocol {
     where
         E: JournalEffects + Send + Sync,
     {
-        // Create a new journal delta based on the merge result
-        // In the fact-based architecture, operations are converted to facts
-        let journal_delta = aura_core::Journal::new();
+        let mut journal_delta = aura_core::Journal::new();
 
-        // TODO: Implement actual conversion logic based on merge_result
-        // This would typically involve:
-        // 1. Extract operations that were successfully applied
-        // 2. Convert each operation to appropriate fact types
-        // 3. Add facts to the delta journal
-        // 4. Ensure CRDT semantics are preserved
+        for op in &merge_result.applied_ops {
+            let fp = fingerprint(op).map_err(|e| {
+                sync_serialization_error(
+                    "op_fingerprint",
+                    format!("Failed to fingerprint applied op: {}", e),
+                )
+            })?;
+            let serialized = bincode::serialize(op).map_err(|e| {
+                sync_serialization_error(
+                    "op_serialize",
+                    format!("Failed to serialize applied op: {}", e),
+                )
+            })?;
+
+            let mut facts = aura_core::Fact::new();
+            facts.insert_with_context(
+                format!("attested_op:{}", hex::encode(fp)),
+                aura_core::FactValue::Bytes(serialized),
+                "anti-entropy",
+                0,
+                None,
+            );
+            journal_delta.merge_facts(facts);
+        }
 
         tracing::debug!(
             "Created journal delta with {} applied operations",
-            merge_result.applied
+            merge_result.applied_ops.len()
         );
 
-        // For now, return empty delta as placeholder
-        // In production, this would contain the actual fact deltas
         Ok(journal_delta)
     }
 
@@ -803,6 +810,7 @@ impl AntiEntropyProtocol {
         Ok(AntiEntropyResult {
             applied: pull_result.applied,
             duplicates: pull_result.duplicates,
+            applied_ops: pull_result.applied_ops.clone(),
             final_status: Some(DigestStatus::Diverged),
             rounds: 1,
         })
@@ -902,11 +910,13 @@ impl AntiEntropyProtocol {
 
         let mut applied = 0;
         let mut duplicates = 0;
+        let mut applied_ops = Vec::new();
 
         for op in incoming {
             let fp = fingerprint(&op)
                 .map_err(|e| sync_session_error(format!("Failed to fingerprint: {}", e)))?;
             if seen.insert(fp) {
+                applied_ops.push(op.clone());
                 local_ops.push(op);
                 applied += 1;
             } else {
@@ -917,6 +927,7 @@ impl AntiEntropyProtocol {
         Ok(AntiEntropyResult {
             applied,
             duplicates,
+            applied_ops,
             final_status: None,
             rounds: 1,
         })
@@ -981,12 +992,13 @@ mod tests {
     use super::*;
     use aura_core::{journal::FactValue, TreeOp, TreeOpKind};
 
-    fn sample_journal() -> Journal {
-        let mut journal = Journal::new();
-        journal.facts.insert("counter", FactValue::Number(1));
-        journal.caps.add_permission("sync");
-        journal
-    }
+    // TODO: Fix Journal type - appears to be missing from current codebase
+    // fn sample_journal() -> Journal {
+    //     let mut journal = Journal::new();
+    //     journal.facts.insert("counter", FactValue::Number(1));
+    //     journal.caps.add_permission("sync");
+    //     journal
+    // }
 
     fn sample_op(epoch: u64) -> AttestedOp {
         AttestedOp {

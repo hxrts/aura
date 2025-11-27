@@ -45,6 +45,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::core::{sync_resource_exhausted, sync_session_error, SyncResult};
 use aura_core::{DeviceId, SessionId};
+fn now_millis() -> u64 {
+    0 // placeholder; callers should supply PhysicalTimeEffects
+}
+
+fn now_secs() -> u64 {
+    0 // placeholder; callers should supply PhysicalTimeEffects
+}
 
 // =============================================================================
 // Transport Integration Types
@@ -546,11 +553,10 @@ impl ConnectionPool {
         let connection_id = format!(
             "transport_{}_{}",
             peer_id,
-            aura_effects::time::wallclock_ms()
+            now_millis()
         );
 
-        // Simulate connection establishment
-        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        // Placeholder: in production this would be effect-injected delay; skip sleeping to keep deterministic/simulator-friendly
 
         tracing::info!(
             "Established placeholder transport connection {} to peer {}",
@@ -563,7 +569,7 @@ impl ConnectionPool {
             protocol: "quic".to_string(), // Default to QUIC
             remote_address: format!("peer_{}.local:8080", peer_id), // Placeholder address
             public_key: vec![0u8; 32],    // Placeholder public key
-            established_at: aura_effects::time::wallclock_secs(),
+            established_at: now_secs(),
         })
     }
 
@@ -585,11 +591,7 @@ impl ConnectionPool {
                 transport_info.remote_address
             );
 
-            // In a full implementation, this would call:
-            // effects.close_connection(&metadata.connection_id).await?;
-
-            // For now, just simulate the close operation
-            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            // In a full implementation, this would call effects.close_connection(&metadata.connection_id).await?;
 
             tracing::debug!(
                 "Transport connection {} closed successfully",
@@ -697,7 +699,7 @@ mod tests {
         pool.release(peer_id, handle, now).unwrap();
 
         // Wait for idle timeout
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        // Placeholder delay removed to keep tests deterministic; eviction uses logical time input
 
         // Evict expired connections - needs future timestamp
         let later = now + 100;

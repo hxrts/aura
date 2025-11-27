@@ -193,41 +193,41 @@ Coordination functions typically accept multiple handlers or a composed system. 
 
 ### Guard Chain Execution Pattern
 
-The guard chain coordinates authorization, flow budgets, and journal effects in strict sequence. This pattern ensures that authorization decisions are made before flow budgets are charged and before journal facts are committed.
-
-The sequence is critical for security and auditability. Authorization failures do not charge flow or modify the journal. This prevents observable side effects from failed authorization attempts.
+The guard chain coordinates authorization, flow budgets, and journal effects in strict sequence. Guards themselves are pure: evaluation runs synchronously over a prepared `GuardSnapshot` and yields `EffectCommand` items that an async interpreter executes. This keeps guard logic deterministic and prevents observable side effects from failed authorization attempts.
 
 ```rust
 async fn send_storage_put(
-    authz: &dyn AuthorizationEffects,
-    flow: &dyn FlowEffects,
-    journal: &dyn JournalEffects,
-    transport: &dyn TransportEffects,
+    bridge: &BiscuitAuthorizationBridge,
+    guards: &GuardChain,
+    interpreter: &dyn EffectInterpreter,
     ctx: ContextId,
     peer: AuthorityId,
     token: Biscuit,
     payload: PutRequest,
 ) -> Result<()> {
-    // Phase 1: Authorization via CapGuard
-    let cap_frontier = authz.evaluate_guard(token, CapabilityPredicate::StorageWrite)?;
-    authz.ensure_allowed(&cap_frontier, CapabilityPredicate::StorageWrite)?;
-    
-    // Phase 2: Flow budget charging via FlowGuard
-    let receipt = flow.charge(ctx, peer, payload.flow_cost)?;
-    
-    // Phase 3: Journal fact commit via JournalCoupler
-    journal.merge_facts(payload.delta.copy_with_receipt(receipt));
-    
-    // Phase 4: Transport emission
-    transport.send(peer, Msg::new(ctx, payload, cap_frontier.summary()))?;
-    
+    // Phase 1: Authorization via Biscuit + policy (async, cached)
+    let auth_result = bridge.authorize(&token, "storage_write", &payload.scope())?;
+    if !auth_result.authorized {
+        return Err(AuraError::permission_denied("Token authorization failed"));
+    }
+
+    // Phase 2: Prepare snapshot (async) and evaluate guards (sync)
+    let snapshot = prepare_guard_snapshot(ctx, peer, &auth_result.cap_frontier).await?;
+    let outcome = guards.evaluate(&snapshot, &payload.guard_request());
+    if outcome.decision.is_denied() {
+        return Err(AuraError::permission_denied("Guard evaluation denied"));
+    }
+
+    // Phase 3: Execute commands (async) - charge, record leakage, commit journal, send transport
+    for cmd in outcome.effects {
+        interpreter.exec(cmd).await?;
+    }
+
     Ok(())
 }
 ```
 
-This pattern implements the guard chain guarantee. Each phase is executed only if all previous phases succeed. Authorization failures return without side effects. Flow failures prevent journal modification. Journal failures signal retry.
-
-Implement guard chain execution by calling effect handlers in strict order. Do not rearrange the sequence. Authorization must complete before flow budgets are charged. Flow budgets must be charged before journal facts are committed. Journal facts must be committed before transport sends packets.
+This pattern implements the guard chain guarantee: snapshot preparation happens before synchronous guard evaluation, and no transport observable occurs until the interpreter executes the resulting commands in order.
 
 ## Security-First Design Philosophy
 

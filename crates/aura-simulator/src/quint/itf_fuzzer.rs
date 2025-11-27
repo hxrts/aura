@@ -16,6 +16,7 @@ use async_trait::async_trait;
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::AuraError;
 use aura_effects::storage::FilesystemStorageHandler;
+use futures::Future;
 
 /// ITF trace with Model-Based Testing metadata
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -75,6 +76,10 @@ pub struct ITFState {
 pub struct ITFStateMeta {
     /// State index in the trace
     pub index: usize,
+}
+
+fn run_sync<F: Future>(fut: F) -> F::Output {
+    futures::executor::block_on(fut)
 }
 
 /// Result of bounded model checking
@@ -245,13 +250,16 @@ impl ITFBasedFuzzer {
 
     /// Parse ITF trace from file
     pub fn parse_itf_file(&self, path: &Path) -> Result<ITFTrace, ITFFuzzError> {
-        let content = self.read_path_to_string(path)?;
+        let content = run_sync(self.read_path_to_string(path))?;
         self.parse_itf_trace(&content)
     }
 
-    fn read_path_to_string(&self, path: &Path) -> Result<String, ITFFuzzError> {
+    async fn read_path_to_string(&self, path: &Path) -> Result<String, ITFFuzzError> {
         let key = path.to_string_lossy();
-        let bytes = futures::executor::block_on(self.storage.retrieve(key.as_ref()))
+        let bytes = self
+            .storage
+            .retrieve(key.as_ref())
+            .await
             .map_err(|e| ITFFuzzError::FileSystemError(e.to_string()))?
             .ok_or_else(|| {
                 ITFFuzzError::FileSystemError(format!("File not found: {}", key.as_ref()))
@@ -262,9 +270,11 @@ impl ITFBasedFuzzer {
         })
     }
 
-    fn write_string_to_path(&self, path: &Path, content: String) -> Result<(), ITFFuzzError> {
+    async fn write_string_to_path(&self, path: &Path, content: String) -> Result<(), ITFFuzzError> {
         let key = path.to_string_lossy();
-        futures::executor::block_on(self.storage.store(key.as_ref(), content.into_bytes()))
+        self.storage
+            .store(key.as_ref(), content.into_bytes())
+            .await
             .map_err(|e| ITFFuzzError::FileSystemError(e.to_string()))
     }
 
@@ -477,6 +487,7 @@ impl ITFBasedFuzzer {
         spec_file: &Path,
         properties: &[String],
     ) -> Result<ModelCheckingResult, ITFFuzzError> {
+        #[allow(clippy::disallowed_methods)]
         let start_time = aura_effects::time::monotonic_now();
         let deepening = &self.config.iterative_deepening;
 
@@ -560,20 +571,19 @@ impl ITFBasedFuzzer {
 
         // If property was violated, parse the counterexample
         if !satisfied
-            && futures::executor::block_on(
-                self.storage
-                    .exists(counterexample_file.to_string_lossy().as_ref()),
-            )
-            .unwrap_or(false)
+            && self
+                .storage
+                .exists(counterexample_file.to_string_lossy().as_ref())
+                .await
+                .map_err(|e| ITFFuzzError::FileSystemError(e.to_string()))?
         {
             match self.parse_itf_file(&counterexample_file) {
                 Ok(trace) => {
                     counterexample_trace = Some(trace);
                     // Clean up temporary file
-                    let _ = futures::executor::block_on(
-                        self.storage
-                            .remove(counterexample_file.to_string_lossy().as_ref()),
-                    );
+                    let _ = (self
+                        .storage
+                        .remove(counterexample_file.to_string_lossy().as_ref()),);
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to parse counterexample file: {}", e);
@@ -663,6 +673,7 @@ impl ITFBasedFuzzer {
         spec_file: &Path,
         properties: &[String],
     ) -> Result<ModelCheckingReport, ITFFuzzError> {
+        #[allow(clippy::disallowed_methods)]
         let start_time = aura_effects::time::monotonic_now();
 
         // Run bounded model checking
@@ -722,6 +733,7 @@ impl ITFBasedFuzzer {
         &self,
         spec_file: &Path,
     ) -> Result<SimulationResult, ITFFuzzError> {
+        #[allow(clippy::disallowed_methods)]
         let start_time = aura_effects::time::monotonic_now();
         let sim_config = &self.config.simulation;
 
@@ -817,9 +829,7 @@ impl ITFBasedFuzzer {
         let trace = self.parse_itf_file(&output_file)?;
 
         // Clean up temporary file
-        let _ = futures::executor::block_on(
-            self.storage.remove(output_file.to_string_lossy().as_ref()),
-        );
+        let _ = (self.storage.remove(output_file.to_string_lossy().as_ref()),);
 
         Ok(trace)
     }
@@ -997,6 +1007,7 @@ impl ITFBasedFuzzer {
         &self,
         spec_file: &Path,
     ) -> Result<TestSuite, ITFFuzzError> {
+        #[allow(clippy::disallowed_methods)]
         let start_time = aura_effects::time::monotonic_now();
 
         // Phase 1: Run simulations
@@ -1068,6 +1079,7 @@ impl ITFBasedFuzzer {
         spec_file: &Path,
         campaign_config: FuzzingCampaignConfig,
     ) -> Result<FuzzingCampaignResult, ITFFuzzError> {
+        #[allow(clippy::disallowed_methods)]
         let start_time = aura_effects::time::monotonic_now();
         let mut performance_monitor = PerformanceMonitor::new();
 
@@ -1181,11 +1193,13 @@ impl ITFBasedFuzzer {
                 &result,
                 export_path,
                 &campaign_config.ci_integration.output_format,
-            )?;
+            )
+            .await?;
         }
 
         if let Some(ref coverage_path) = campaign_config.ci_integration.export_coverage {
-            self.export_coverage_report(&result.coverage_summary, coverage_path)?;
+            self.export_coverage_report(&result.coverage_summary, coverage_path)
+                .await?;
         }
 
         println!(
@@ -1329,7 +1343,7 @@ impl ITFBasedFuzzer {
     }
 
     /// Export campaign results in various formats
-    fn export_campaign_results(
+    async fn export_campaign_results(
         &self,
         result: &FuzzingCampaignResult,
         export_path: &Path,
@@ -1344,7 +1358,7 @@ impl ITFBasedFuzzer {
             CIOutputFormat::Text => self.generate_text_report(result),
         };
 
-        self.write_string_to_path(export_path, content)?;
+        self.write_string_to_path(export_path, content).await?;
 
         Ok(())
     }
@@ -1527,7 +1541,7 @@ Details:
     }
 
     /// Export coverage report to file
-    fn export_coverage_report(
+    async fn export_coverage_report(
         &self,
         coverage: &CoverageSummary,
         export_path: &Path,
@@ -1549,7 +1563,7 @@ Goals Achieved: {}
             if coverage.goals_achieved { "Yes" } else { "No" }
         );
 
-        self.write_string_to_path(export_path, report)?;
+        self.write_string_to_path(export_path, report).await?;
 
         Ok(())
     }
@@ -1612,8 +1626,9 @@ impl PerformanceMonitor {
     }
 
     pub fn start_phase(&mut self, phase_name: &str) {
-        self.phase_start_times
-            .insert(phase_name.to_string(), aura_effects::time::monotonic_now());
+        #[allow(clippy::disallowed_methods)]
+        let now = aura_effects::time::monotonic_now();
+        self.phase_start_times.insert(phase_name.to_string(), now);
     }
 
     pub fn end_phase(&mut self, phase_name: &str) {
@@ -1693,7 +1708,7 @@ impl PerformanceMonitor {
     #[cfg(target_os = "linux")]
     fn get_memory_usage() -> Option<u64> {
         let storage = default_storage_provider();
-        let status = futures::executor::block_on(storage.retrieve("/proc/self/status")).ok()??;
+        let status = (storage.retrieve("/proc/self/status")).ok()??;
         let status = String::from_utf8(status).ok()?;
         for line in status.lines() {
             if line.starts_with("VmRSS:") {

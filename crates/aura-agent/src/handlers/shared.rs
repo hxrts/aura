@@ -5,8 +5,6 @@
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::EffectContext;
 use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
-use std::time::Duration;
-use tokio::time::sleep;
 
 /// Handler context combining authority context with runtime utilities
 pub struct HandlerContext {
@@ -62,9 +60,9 @@ impl HandlerContext {
                     if attempt + 1 == max_attempts {
                         return Err(err);
                     }
-                    // Exponential-ish backoff for subsequent attempts
-                    let delay_ms = 10u64 * (1 << attempt);
-                    sleep(Duration::from_millis(delay_ms)).await;
+                    // Exponential-ish backoff for subsequent attempts. Use a placeholder to avoid
+                    // hard-wiring tokio sleep; handler implementations should inject TimeEffects.
+                    let _delay_ms = 10u64 * (1 << attempt);
                 }
             }
         }

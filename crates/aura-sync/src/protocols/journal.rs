@@ -38,10 +38,10 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use crate::core::{sync_session_error, sync_timeout_error, SyncResult};
+use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::RetryPolicy;
 use crate::protocols::anti_entropy::{AntiEntropyConfig, AntiEntropyProtocol, JournalDigest};
-use aura_core::effects::{JournalEffects, NetworkEffects};
+use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::{AccountId, AttestedOp, DeviceId};
 use aura_protocol::guards::BiscuitGuardEvaluator;
 use aura_wot::BiscuitTokenManager;
@@ -174,6 +174,7 @@ impl Default for JournalSyncConfig {
 /// management, retry logic, and connection pooling.
 ///
 /// Supports Biscuit token-based authorization for sync operations.
+#[derive(Clone)]
 pub struct JournalSyncProtocol {
     config: JournalSyncConfig,
     anti_entropy: AntiEntropyProtocol,
@@ -227,7 +228,7 @@ impl JournalSyncProtocol {
         start: std::time::Instant,
     ) -> SyncResult<JournalSyncResult>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync,
+        E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,
     {
         let mut operations_synced = 0;
         let mut peers_synced = Vec::new();
@@ -300,7 +301,7 @@ impl JournalSyncProtocol {
 
             // Small delay between batches to prevent overwhelming network
             if chunk.len() == self.config.max_concurrent_syncs {
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                let _ = effects.sleep_ms(100).await;
             }
         }
 
@@ -324,7 +325,7 @@ impl JournalSyncProtocol {
     /// Synchronize with a single peer
     pub async fn sync_with_peer<E>(&mut self, effects: &E, peer: DeviceId) -> SyncResult<usize>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync,
+        E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,
     {
         self.peer_states.insert(peer, SyncState::Syncing);
         self.sync_with_peer_impl(effects, peer).await
@@ -333,7 +334,7 @@ impl JournalSyncProtocol {
     /// Internal implementation of peer synchronization
     async fn sync_with_peer_impl<E>(&self, effects: &E, peer: DeviceId) -> SyncResult<usize>
     where
-        E: JournalEffects + NetworkEffects + Send + Sync,
+        E: JournalEffects + NetworkEffects + Send + Sync + PhysicalTimeEffects,
     {
         tracing::debug!("Starting synchronization with peer {}", peer);
 
@@ -368,11 +369,8 @@ impl JournalSyncProtocol {
                 Ok(result.applied)
             };
 
-        tokio::time::timeout(self.config.sync_timeout, sync_future)
-            .await
-            .map_err(|_| {
-                sync_timeout_error(format!("Sync with peer {}", peer), self.config.sync_timeout)
-            })?
+        // Execute without runtime-specific timeout; external callers should enforce via PhysicalTimeEffects.
+        sync_future.await
     }
 
     /// Get synchronization state for a peer

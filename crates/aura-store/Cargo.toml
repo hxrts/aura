@@ -15,11 +15,7 @@ workspace = true
 # Foundation layer only
 aura-core = { path = "../aura-core" }
 
-# Web of Trust - for ResourceScope types
-aura-wot = { path = "../aura-wot" }
-
-# Biscuit token authorization
-biscuit-auth = { workspace = true }
+# Authorization logic moved to aura-wot (proper domain separation)
 
 # Serialization
 serde = { workspace = true }

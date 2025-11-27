@@ -167,6 +167,30 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     info "No direct OS ops in domain crates"
   fi
 
+  section "Runtime coupling"
+  runtime_pattern="tokio::|async_std::"
+  runtime_hits=$(rg --no-heading "$runtime_pattern" crates -g "*.rs" || true)
+  filtered_runtime=$(echo "$runtime_hits" \
+    | grep -v "crates/aura-effects/" \
+    | grep -v "crates/aura-agent/" \
+    | grep -v "crates/aura-simulator/" \
+    | grep -v "crates/aura-cli/" \
+    | grep -v "crates/aura-composition/" \
+    | grep -v "#\\[tokio::test\\]" \
+    | grep -v "#\\[async_std::test\\]" \
+    | grep -v "/tests/" \
+    | grep -v "benches/" || true)
+  if [ -n "$filtered_runtime" ]; then
+    warning "Concrete runtime usage detected outside handler/composition layers (aura-core and domain crates must stay runtime-agnostic):"
+    echo "$filtered_runtime"
+    echo "  👉 Fix by replacing tokio/async-std types with effect-injected abstractions:"
+    echo "     - Sleep/timeout -> PhysicalTimeEffects::sleep_ms or effect-injected timers"
+    echo "     - Mutex/RwLock -> effects-backed state or futures locks in tests/examples only"
+    echo "     - Runtime-specific imports -> move to aura-effects/testkit/composition layers"
+  else
+    info "No concrete runtime coupling detected outside handler/composition layers"
+  fi
+
   section "Impure functions"
   # Strict flag for direct wall-clock/random usage outside allowed areas
   impure_pattern="SystemTime::now|Instant::now|thread_rng\\(|rand::thread_rng|chrono::Utc::now|chrono::Local::now|rand::rngs::OsRng|rand::random"
@@ -215,6 +239,21 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     echo "$filtered_sim"
   else
     info "Randomness/IO/spawn hooks appear confined to injectable layers"
+  fi
+
+  section "Pure interpreter alignment"
+  guard_bridge_hits=$(
+    rg --no-heading "GuardEffectSystem" crates -g "*.rs" || true
+  )
+  guard_block_on_hits=$(
+    rg --no-heading "futures::executor::block_on" crates -g "*.rs" || true
+  )
+  sync_output=$(printf "%s\n%s" "$guard_bridge_hits" "$guard_block_on_hits" | sed '/^$/d' | sort -u)
+  if [ -n "$sync_output" ]; then
+    warning "Synchronous guard/effect bridges detected (migrate to pure snapshot + EffectCommand + interpreter; see docs/adr/014_guard.md and docs/806_simulation_guide.md):"
+    echo "$sync_output"
+  else
+    info "No synchronous guard/effect bridges detected"
   fi
 fi
 
@@ -270,8 +309,15 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_TODOS" = true ]; then
   todo_hits=$(rg --no-heading "TODO|FIXME" crates || true)
   if [ -n "$todo_hits" ]; then
     count=$(echo "$todo_hits" | wc -l | tr -d ' ')
-    warning "TODO/FIXME markers present [$count]; full list numbered:" 
-    nl -ba <<< "$todo_hits"
+    warning "TODO/FIXME markers present [$count]; full list numbered (layer-ordered L1→L8):" 
+    sorted_todos=$(while IFS= read -r line; do
+      path=${line%%:*}
+      crate=$(echo "$path" | cut -d/ -f2)
+      layer=$(layer_of "$crate")
+      [ "$layer" = "0" ] && layer=99
+      printf "%02d:%s\n" "$layer" "$line"
+    done <<< "$todo_hits" | sort -t: -k1,1n -k2,2 | sed 's/^[0-9]\\{2\\}://')
+    nl -ba <<< "$sorted_todos"
   fi
 fi
 

@@ -162,15 +162,13 @@ This snippet shows parallel initialization of handlers. Parallel initialization 
 
 ## 8. Guard Chain and Leakage Integration
 
-The effect runtime enforces the guard-chain sequencing defined in [Authorization](109_authorization.md) and the leakage contract from [Privacy and Information Flow](003_information_flow_contract.md). Each projected choreography message expands to the following effect calls:
+The effect runtime enforces the guard-chain sequencing defined in [Authorization](109_authorization.md) and the leakage contract from [Privacy and Information Flow](003_information_flow_contract.md) using pure guard evaluation plus asynchronous interpretation. Each projected choreography message expands to:
 
-1. **CapGuard / AuthorizationEffects** – evaluate Biscuit tokens plus sovereign policy to derive the capability frontier for the `(ContextId, peer)` pair.
-2. **FlowGuard / FlowBudgetEffects** – atomically increment the replicated `spent` counter (stored as journal facts) and produce a receipt if the operation succeeds.
-3. **LeakageEffects** – record observer-class leakage costs (`external`, `neighbor`, `group`) so privacy budgets remain monotone, as described in `002_theoretical_model.md`.
-4. **JournalCoupler / JournalEffects** – merge protocol facts together with the FlowBudget charge to preserve the charge-before-send invariant.
-5. **TransportEffects** – finally emit the encrypted packet over the secure channel.
+1. **Snapshot preparation (async)** – gather capability frontier, budget headroom, leakage metadata, and randomness into a `GuardSnapshot` via `AuthorizationEffects`, `FlowBudgetEffects`, and cache state.
+2. **Pure guard evaluation (sync)** – `CapGuard → FlowGuard → JournalCoupler` runs over the snapshot and request, producing a `Vec<EffectCommand>` that describes the required charges, leakage records, journal writes, and transport sends.
+3. **Command interpretation (async)** – an `EffectInterpreter` executes each `EffectCommand` using `FlowBudgetEffects`, `LeakageEffects`, `JournalEffects`, and `TransportEffects`, preserving charge-before-send.
 
-Handlers that implement `LeakageEffects` must surface both production-grade implementations (wired into the agent runtime) and deterministic versions for the simulator so privacy tests can assert leakage bounds. Because the effect executor orchestrates these calls explicitly, no transport observable can occur unless the preceding guards succeed, preserving the semantics laid out in the theoretical model.
+Handlers that implement `LeakageEffects` must surface both production-grade implementations (wired into the agent runtime) and deterministic versions for the simulator so privacy tests can assert leakage bounds. Because the executor orchestrates snapshots, pure evaluation, and interpretation explicitly, no transport observable can occur unless the preceding guards succeed, preserving the semantics laid out in the theoretical model.
 
 ## 9. Session Management and Choreography Execution
 

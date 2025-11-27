@@ -7,7 +7,7 @@
 use async_trait::async_trait;
 use std::fmt;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use async_lock::Mutex;
 
 use crate::effects::*;
 use crate::handlers::{
@@ -15,7 +15,6 @@ use crate::handlers::{
 };
 use aura_core::hash::hash;
 use aura_core::LocalSessionType;
-use std::time::Duration;
 
 /// Type-erased bridge for dynamic handler composition
 ///
@@ -446,7 +445,10 @@ impl UnifiedAuraHandlerBridge {
                     AuraHandlerError::ParameterDeserializationFailed { source: e.into() }
                 })?;
 
-                tokio::time::sleep(Duration::from_millis(ms)).await;
+                effects
+                    .sleep_ms(ms)
+                    .await
+                    .map_err(|e| AuraHandlerError::ExecutionFailed { source: e.into() })?;
                 Ok(bincode::serialize(&()).unwrap_or_default())
             }
             _ => Err(AuraHandlerError::UnsupportedOperation {

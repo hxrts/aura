@@ -856,26 +856,23 @@ mod tests {
     use aura_core::DeviceId;
     use aura_testkit::TestEffectsBuilder;
 
-    #[test]
-    fn test_dkd_session_creation() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            let config = create_test_config(2, 3);
-            let mut protocol = DkdProtocol::new(config);
+    #[tokio::test]
+    async fn test_dkd_session_creation() {
+        let config = create_test_config(2, 3);
+        let mut protocol = DkdProtocol::new(config);
 
-            let participants = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
+        let participants = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
 
-            let effects = TestEffectsBuilder::for_unit_tests(DeviceId::new())
-                .build()
-                .unwrap_or_else(|_| panic!("Failed to build test effects"));
-            let session_id = protocol
-                .initiate_session(&effects, participants, None)
-                .await
-                .unwrap();
+        let effects = TestEffectsBuilder::for_unit_tests(DeviceId::new())
+            .build()
+            .unwrap_or_else(|_| panic!("Failed to build test effects"));
+        let session_id = protocol
+            .initiate_session(&effects, participants, None)
+            .await
+            .unwrap();
 
-            assert!(protocol.is_session_active(&session_id));
-            assert_eq!(protocol.active_session_count(), 1);
-        });
+        assert!(protocol.is_session_active(&session_id));
+        assert_eq!(protocol.active_session_count(), 1);
     }
 
     #[tokio::test]
@@ -897,8 +894,8 @@ mod tests {
         assert!(!contribution.signature.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_contribution_validation() {
+    #[test]
+    fn test_contribution_validation() {
         let protocol = DkdProtocol::new(create_test_config(2, 3));
 
         let mut contribution = ParticipantContribution {
@@ -917,8 +914,8 @@ mod tests {
         assert!(protocol.validate_contribution(&contribution).is_err());
     }
 
-    #[tokio::test]
-    async fn test_combined_commitment() {
+    #[test]
+    fn test_combined_commitment() {
         let protocol = DkdProtocol::new(create_test_config(2, 3));
 
         let contributions = vec![

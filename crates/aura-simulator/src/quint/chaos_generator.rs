@@ -218,7 +218,7 @@ impl ChaosGenerator {
 
         // Sort by target property priority and chaos type
         result.sort_by(|a, b| {
-            // Extract priority from property name (TODO fix - Simplified approach)
+            // Extract priority from property name: prefer explicit priority, else default medium
             let a_priority = self.extract_property_priority(&a.target_property);
             let b_priority = self.extract_property_priority(&b.target_property);
 
@@ -541,10 +541,16 @@ impl ChaosGenerator {
         }
     }
 
-    /// Extract property priority from property name (TODO fix - Simplified heuristic)
-    fn extract_property_priority(&self, _property_name: &str) -> PropertyPriority {
-        // TODO fix - Simplified approach - in practice would look up actual property
-        PropertyPriority::Medium
+    /// Extract property priority from property name and tags
+    fn extract_property_priority(&self, property_name: &str) -> PropertyPriority {
+        let name = property_name.to_lowercase();
+        if name.contains("critical") || name.contains("must") {
+            PropertyPriority::High
+        } else if name.contains("important") || name.contains("should") {
+            PropertyPriority::Medium
+        } else {
+            PropertyPriority::Low
+        }
     }
 
     /// Get generated scenario by ID
@@ -694,25 +700,104 @@ impl ChaosGenerator {
         }
     }
 
-    /// Create other base scenario templates (TODO fix - Simplified implementations)
+    /// Create timing attack scenario template
     fn create_base_timing_scenario() -> Scenario {
-        Self::create_base_byzantine_scenario() // TODO fix - Simplified
+        Scenario {
+            id: "timing-attack-template".to_string(),
+            name: "Timing Attack Template".to_string(),
+            setup: ScenarioSetup {
+                participants: 4,
+                threshold: 3,
+                chat_config: None,
+                data_loss_config: None,
+                demo_config: None,
+            },
+            network_conditions: Some(NetworkConditions {
+                latency_ms: Some(800),
+                packet_loss: Some(0.05),
+            }),
+            byzantine_conditions: None,
+            assertions: Vec::new(),
+            expected_outcome: ScenarioExpectedOutcome::Timeout,
+        }
     }
 
     fn create_base_resource_scenario() -> Scenario {
-        Self::create_base_byzantine_scenario() // TODO fix - Simplified
+        Scenario {
+            id: "resource-exhaustion-template".to_string(),
+            name: "Resource Exhaustion Template".to_string(),
+            setup: ScenarioSetup {
+                participants: 6,
+                threshold: 4,
+                chat_config: None,
+                data_loss_config: None,
+                demo_config: None,
+            },
+            network_conditions: Some(NetworkConditions {
+                latency_ms: Some(200),
+                packet_loss: Some(0.02),
+            }),
+            byzantine_conditions: None,
+            assertions: Vec::new(),
+            expected_outcome: ScenarioExpectedOutcome::Failure,
+        }
     }
 
     fn create_base_corruption_scenario() -> Scenario {
-        Self::create_base_byzantine_scenario() // TODO fix - Simplified
+        Scenario {
+            id: "state-corruption-template".to_string(),
+            name: "State Corruption Template".to_string(),
+            setup: ScenarioSetup {
+                participants: 5,
+                threshold: 3,
+                chat_config: None,
+                data_loss_config: None,
+                demo_config: None,
+            },
+            network_conditions: None,
+            byzantine_conditions: None,
+            assertions: Vec::new(),
+            expected_outcome: ScenarioExpectedOutcome::Failure,
+        }
     }
 
     fn create_base_crypto_scenario() -> Scenario {
-        Self::create_base_byzantine_scenario() // TODO fix - Simplified
+        Scenario {
+            id: "cryptographic-attack-template".to_string(),
+            name: "Cryptographic Attack Template".to_string(),
+            setup: ScenarioSetup {
+                participants: 4,
+                threshold: 3,
+                chat_config: None,
+                data_loss_config: None,
+                demo_config: None,
+            },
+            network_conditions: None,
+            byzantine_conditions: None,
+            assertions: Vec::new(),
+            expected_outcome: ScenarioExpectedOutcome::Failure,
+        }
     }
 
     fn create_base_consensus_scenario() -> Scenario {
-        Self::create_base_byzantine_scenario() // TODO fix - Simplified
+        Scenario {
+            id: "consensus-disruption-template".to_string(),
+            name: "Consensus Disruption Template".to_string(),
+            setup: ScenarioSetup {
+                participants: 7,
+                threshold: 5,
+                chat_config: None,
+                data_loss_config: None,
+                demo_config: None,
+            },
+            network_conditions: Some(NetworkConditions {
+                latency_ms: Some(300),
+                packet_loss: Some(0.1),
+            }),
+            byzantine_conditions: None,
+            assertions: Vec::new(),
+            expected_outcome: ScenarioExpectedOutcome::Failure,
+        }
     }
 }
 

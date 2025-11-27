@@ -1,10 +1,11 @@
+#![allow(deprecated)]
 //! # Demo Orchestration System
 //!
 //! Provides complete orchestration of the human-agent demo experience,
 //! integrating TUI, simulator agents, and scenario system.
 
-use aura_effects::time::monotonic_now;
-use aura_effects::time::wallclock_ms;
+use aura_core::PhysicalTimeEffects;
+use aura_effects::time::{monotonic_now, wallclock_ms, PhysicalTimeHandler};
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
@@ -325,7 +326,8 @@ impl DemoOrchestrator {
         let event_sender = self.event_broadcast.clone();
 
         tokio::spawn(async move {
-            tokio::time::sleep(timeout).await;
+            let time = PhysicalTimeHandler::new();
+            let _ = time.sleep_ms(timeout.as_millis() as u64).await;
 
             tracing::warn!("Demo session {} timed out", session_id);
             let _ = event_sender.send(DemoOrchestratorEvent::SessionFailed {

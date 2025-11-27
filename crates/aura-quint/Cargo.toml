@@ -14,12 +14,14 @@ aura-effects = { path = "../aura-effects" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
 futures = { workspace = true }
 uuid = { workspace = true }
 chrono = { version = "0.4", features = ["serde"] }
 tracing = { workspace = true }
 async-trait = { workspace = true }
+async-process = "1"
+async-io = "1"
+tempfile = "3.0"
 
 # Session types integration - temporarily removed during refactor
 
@@ -28,8 +30,8 @@ quint_evaluator = { git = "https://github.com/informalsystems/quint", tag = "v0.
 
 # For development and testing
 [dev-dependencies]
-tempfile = "3.0"
 hex = "0.4"
+tokio = { workspace = true }
 
 # Logging and tracing (for tests)
 tracing-subscriber = { workspace = true }

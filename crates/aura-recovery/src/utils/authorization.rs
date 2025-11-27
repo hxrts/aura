@@ -1,8 +1,9 @@
 //! Common authorization logic for recovery operations
 
+use aura_core::scope::{ContextOp, ResourceScope};
 use aura_core::{effects::PhysicalTimeEffects, AccountId, ContextId, DeviceId};
 use aura_protocol::guards::BiscuitGuardEvaluator;
-use aura_wot::{BiscuitTokenManager, ContextOp, ResourceScope};
+use aura_wot::BiscuitTokenManager;
 
 /// Helper for common Biscuit authorization patterns in recovery operations
 pub struct AuthorizationHelper;

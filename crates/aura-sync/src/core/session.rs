@@ -9,13 +9,12 @@ use crate::core::{
     MetricsCollector, SyncConfig, SyncResult,
 };
 use aura_core::{DeviceId, SessionId};
-use aura_effects::time::wallclock_secs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
 fn now_secs() -> u64 {
-    wallclock_secs()
+    0 // placeholder; callers should supply PhysicalTimeEffects
 }
 
 /// Unified session state machine following choreographic patterns

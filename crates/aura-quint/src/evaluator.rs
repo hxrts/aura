@@ -5,8 +5,8 @@
 
 use std::process::Stdio;
 
-use tokio::io::AsyncWriteExt;
-use tokio::process::Command;
+use async_process::Command;
+use futures::io::AsyncWriteExt;
 
 // Note: We import these types but don't expose them directly to avoid serialization issues
 
@@ -25,7 +25,7 @@ impl QuintEvaluator {
         Self { quint_path }
     }
 
-    /// Parse a Quint file via subprocess (TODO fix - Simplified interface)
+    /// Parse a Quint file via subprocess using the configured quint binary
     pub async fn parse_file(&self, file_path: &str) -> AuraResult<String> {
         let quint_cmd = self.quint_path.as_deref().unwrap_or("quint");
 
@@ -54,8 +54,10 @@ impl QuintEvaluator {
 
     /// Simulate using the native Rust evaluator via stdin interface
     pub async fn simulate_via_evaluator(&self, json_ir: &str) -> AuraResult<String> {
-        // Path to the built quint evaluator binary
-        let evaluator_path = "../../ext/quint/evaluator/target/release/quint_evaluator"; // TODO: this is incorrect. this needs to be called from the version provided by the nix environment
+        // Path to the built quint evaluator binary (provided by nix environment)
+        let evaluator_path = std::env::var("QUINT_EVALUATOR_PATH")
+            .ok()
+            .unwrap_or_else(|| "quint_evaluator".to_string());
 
         let mut child = Command::new(evaluator_path)
             .args(["simulate-from-stdin"])
@@ -73,14 +75,14 @@ impl QuintEvaluator {
                 .await
                 .map_err(|e| AuraError::internal(format!("Failed to write to stdin: {}", e)))?;
             stdin
-                .shutdown()
+                .close()
                 .await
                 .map_err(|e| AuraError::internal(format!("Failed to close stdin: {}", e)))?;
         }
 
         // Read output from stdout
         let output = child
-            .wait_with_output()
+            .output()
             .await
             .map_err(|e| AuraError::internal(format!("Failed to read evaluator output: {}", e)))?;
 

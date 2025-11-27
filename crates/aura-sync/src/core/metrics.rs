@@ -11,6 +11,14 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+fn now_millis() -> u64 {
+    0 // placeholder; call sites should use PhysicalTimeEffects
+}
+
+fn now_secs() -> u64 {
+    0 // placeholder; call sites should use PhysicalTimeEffects
+}
+
 /// Unified metrics collector following observability best practices
 #[derive(Debug, Clone)]
 pub struct MetricsCollector {
@@ -618,7 +626,7 @@ impl MetricsCollector {
     pub fn get_last_sync_timestamp(&self) -> Option<u64> {
         // For now, use the system time as a placeholder
         // In a real implementation, this would track the actual last sync time
-        Some(aura_effects::time::wallclock_ms())
+        Some(now_millis())
     }
 
     /// Get total number of requests processed
@@ -659,7 +667,7 @@ impl MetricsCollector {
     pub fn get_last_operation_timestamp(&self) -> Option<u64> {
         // For now, use the system time as a placeholder
         // In a real implementation, this would track the actual last operation time
-        Some(aura_effects::time::wallclock_ms())
+        Some(now_millis())
     }
 
     /// Export comprehensive metrics snapshot
@@ -810,7 +818,7 @@ impl MetricsCollector {
             performance: performance_snapshot,
             resources: resources_snapshot,
             errors: errors_snapshot,
-            timestamp: aura_effects::time::wallclock_secs(),
+            timestamp: now_secs(),
         }
     }
 

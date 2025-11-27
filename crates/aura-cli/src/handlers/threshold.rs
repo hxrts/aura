@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
-use aura_authenticate::DkdResult;
+use aura_authenticate::{DkdConfig, DkdProtocol};
 use aura_core::effects::StorageEffects;
 use aura_core::DeviceId;
 // Removed unused effect traits
@@ -16,7 +16,7 @@ pub async fn handle_threshold(
     ctx: &EffectContext,
     effects: &AuraEffectSystem,
     configs: &str,
-    _threshold: u32,
+    threshold: u32,
     mode: &str,
 ) -> Result<()> {
     let config_paths: Vec<&str> = configs.split(',').collect();
@@ -24,7 +24,7 @@ pub async fn handle_threshold(
     println!(
         "Running threshold operation with {} configs (threshold: {}, mode: {})",
         config_paths.len(),
-        _threshold,
+        threshold,
         mode
     );
 
@@ -72,14 +72,14 @@ pub async fn handle_threshold(
     }
 
     // Validate threshold parameters
-    validate_threshold_params(ctx, &valid_configs, _threshold).await?;
+    validate_threshold_params(ctx, &valid_configs, threshold).await?;
 
     // Execute threshold operation based on mode
     match mode {
-        "sign" => execute_threshold_signing(ctx, effects, &valid_configs, _threshold).await,
-        "verify" => execute_threshold_verification(ctx, effects, &valid_configs, _threshold).await,
-        "keygen" => execute_threshold_keygen(ctx, effects, &valid_configs, _threshold).await,
-        "dkd" => execute_dkd_protocol(ctx, effects, &valid_configs, _threshold).await,
+        "sign" => execute_threshold_signing(ctx, effects, &valid_configs, threshold).await,
+        "verify" => execute_threshold_verification(ctx, effects, &valid_configs, threshold).await,
+        "keygen" => execute_threshold_keygen(ctx, effects, &valid_configs, threshold).await,
+        "dkd" => execute_dkd_protocol(ctx, effects, &valid_configs, threshold).await,
         _ => {
             eprintln!("Unknown threshold mode: {}", mode);
             Err(anyhow::anyhow!("Unknown threshold mode: {}", mode))
@@ -232,9 +232,9 @@ async fn execute_threshold_keygen(
 /// Execute DKD (Distributed Key Derivation) protocol
 async fn execute_dkd_protocol(
     _ctx: &EffectContext,
-    _effects: &AuraEffectSystem,
+    effects: &AuraEffectSystem,
     configs: &[(PathBuf, ThresholdConfig)],
-    _threshold: u32,
+    threshold: u32,
 ) -> Result<()> {
     println!("Executing DKD (Distributed Key Derivation) protocol");
 
@@ -262,31 +262,39 @@ async fn execute_dkd_protocol(
             .join(", ")
     );
 
-    // TODO: Integrate DKD protocol with current effect system architecture
-    // The execute_simple_dkd function needs specific effect trait implementations
-    // that require bridging between AuraEffectSystem and individual effect traits
+    let total_participants = participants.len() as u16;
+    let config = DkdConfig {
+        threshold: threshold as u16,
+        total_participants,
+        app_id: "aura-cli".to_string(),
+        context: format!("threshold-mode:{}", threshold),
+        ..Default::default()
+    };
 
-    // For now, return a placeholder result to get CLI compiling
-    match Result::<DkdResult, String>::Err("DKD integration pending".to_string()) {
-        Ok(_result) => {
-            println!("DKD protocol completed successfully!");
+    let mut protocol = DkdProtocol::new(config);
+    let session_id = protocol
+        .initiate_session(effects, participants.clone(), None)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to initiate DKD session: {}", e))?;
 
-            // TODO: Extract result fields when DKD integration is complete
-            println!("Session, participants, and key data available");
+    let result = protocol
+        .execute_protocol(effects, &session_id, participants[0])
+        .await
+        .map_err(|e| anyhow::anyhow!("DKD protocol execution failed: {}", e))?;
 
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("DKD protocol failed: {}", e);
-            Err(anyhow::anyhow!("DKD protocol failed: {}", e))
-        }
-    }
+    println!("DKD protocol completed successfully!");
+    println!("Session: {}", result.session_id.0);
+    println!("Participants: {}", result.participant_count);
+    println!("Derived key (len): {}", result.derived_key.len());
+    println!("Epoch: {}", result.epoch);
+
+    Ok(())
 }
 
 /// Handle DKD testing with specific parameters
 pub async fn handle_dkd_test(
     _ctx: &EffectContext,
-    _effects: &AuraEffectSystem,
+    effects: &AuraEffectSystem,
     app_id: &str,
     context: &str,
     threshold: u16,
@@ -298,7 +306,7 @@ pub async fn handle_dkd_test(
     );
 
     // Create test participants
-    let _participants: Vec<DeviceId> = (0..total)
+    let participants: Vec<DeviceId> = (0..total)
         .map(|i| {
             let mut uuid_bytes = [0u8; 16];
             uuid_bytes[0] = i as u8 + 1;
@@ -306,30 +314,42 @@ pub async fn handle_dkd_test(
         })
         .collect();
 
-    // TODO: Bridge AuraEffectSystem to individual effect traits needed by execute_simple_dkd
-    // For now, return placeholder result to get CLI compiling
-    let dkd_result: Result<DkdResult, String> =
-        Err("DKD integration with effect system pending".to_string());
-
-    // Execute DKD protocol
-    match dkd_result {
-        Ok(result) => {
-            println!("DKD test completed successfully!");
-
-            println!(
-                "Results: session={}, participants={}, key_len={}",
-                result.session_id.0,
-                result.participant_count,
-                result.derived_key.len()
-            );
-
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("DKD test failed: {}", e);
-            Err(anyhow::anyhow!("DKD test failed: {}", e))
-        }
+    if participants.is_empty() || threshold == 0 || threshold > total {
+        return Err(anyhow::anyhow!(
+            "Invalid DKD parameters: threshold={}, total={}",
+            threshold,
+            total
+        ));
     }
+
+    let config = DkdConfig {
+        threshold,
+        total_participants: total,
+        app_id: app_id.to_string(),
+        context: context.to_string(),
+        ..Default::default()
+    };
+
+    let mut protocol = DkdProtocol::new(config);
+    let session_id = protocol
+        .initiate_session(effects, participants.clone(), None)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to initiate DKD session: {}", e))?;
+
+    let result = protocol
+        .execute_protocol(effects, &session_id, participants[0])
+        .await
+        .map_err(|e| anyhow::anyhow!("DKD protocol execution failed: {}", e))?;
+
+    println!("DKD test completed successfully!");
+    println!(
+        "Results: session={}, participants={}, key_len={}",
+        result.session_id.0,
+        result.participant_count,
+        result.derived_key.len()
+    );
+
+    Ok(())
 }
 
 /// Threshold configuration structure

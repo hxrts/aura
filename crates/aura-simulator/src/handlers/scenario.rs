@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 //! Scenario management effect handler for simulation
 //!
 //! This module provides simulation-specific scenario injection and management
@@ -10,12 +11,28 @@ use aura_core::frost::ThresholdSignature;
 use aura_core::{AuraError, AuthorityId};
 use aura_effects::time::monotonic_now;
 use aura_testkit::simulation::choreography::{test_threshold_group, ChoreographyTestHarness};
-use futures::executor::block_on;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use std::time::Instant;
+use futures::task::noop_waker;
+use futures::Future;
+use futures::pin_mut;
+use std::task::{Context, Poll};
+use std::thread;
+
+fn run_sync<F: Future>(fut: F) -> F::Output {
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    pin_mut!(fut);
+    loop {
+        match fut.as_mut().poll(&mut cx) {
+            Poll::Ready(val) => return val,
+            Poll::Pending => thread::yield_now(),
+        }
+    }
+}
 
 // Minimal placeholder FROST-like types to avoid aura-frost dependency.
 #[derive(Debug, Clone)]
@@ -748,7 +765,7 @@ impl SimulationScenarioHandler {
         params: &HashMap<String, String>,
     ) -> Result<(), TestingError> {
         let (harness, config, authorities) = self.frost_setup(participants, params)?;
-        let result = block_on(async {
+        let result = run_sync(async {
             let device_ctx = harness
                 .device_context(0)
                 .ok_or_else(|| AuraError::internal("missing device context"))?;
@@ -789,7 +806,7 @@ impl SimulationScenarioHandler {
         params: &HashMap<String, String>,
     ) -> Result<(), TestingError> {
         let (harness, config, authorities) = self.frost_setup(participants, params)?;
-        let result = block_on(async {
+        let result = run_sync(async {
             let device_ctx = harness
                 .device_context(0)
                 .ok_or_else(|| AuraError::internal("missing device context"))?;
@@ -837,7 +854,7 @@ impl SimulationScenarioHandler {
         params: &HashMap<String, String>,
     ) -> Result<(), TestingError> {
         let (harness, config, authorities) = self.frost_setup(participants, params)?;
-        let result = block_on(async {
+        let result = run_sync(async {
             let device_ctx = harness
                 .device_context(0)
                 .ok_or_else(|| AuraError::internal("missing device context"))?;
@@ -962,7 +979,7 @@ impl SimulationScenarioHandler {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or_else(|| total.min(2));
 
-        let result = block_on(async {
+        let result = run_sync(async {
             let config = ThresholdSigningConfig::new(threshold, total, 120);
             let authorities: Vec<AuthorityId> = (0..config.total_signers)
                 .map(|_| AuthorityId::new())
@@ -1069,7 +1086,7 @@ impl SimulationScenarioHandler {
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or_else(|| total.min(2));
 
-        let result = block_on(async {
+        let result = run_sync(async {
             let config = ThresholdSigningConfig::new(threshold, total, 120);
             let authorities: Vec<AuthorityId> = (0..config.total_signers)
                 .map(|_| AuthorityId::new())
@@ -1169,7 +1186,7 @@ impl SimulationScenarioHandler {
 
     fn execute_session_setup(&self, participants: &[String]) -> Result<(), TestingError> {
         let harness = self.harness_for_participants(participants);
-        let result = block_on(async {
+        let result = run_sync(async {
             let session = harness
                 .create_coordinated_session("simulated")
                 .await

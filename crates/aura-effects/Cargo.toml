@@ -17,19 +17,12 @@ workspace = true
 # Core traits (interface layer)
 aura-core = { path = "../aura-core" }
 
-# Proc macros for generating boilerplate
-aura-macros = { path = "../aura-macros" }
-
-# Domain crates (for specialized types)
-aura-journal = { path = "../aura-journal" }
-aura-transport = { path = "../aura-transport" }
 # NOTE: aura-store creates circular dependency (aura-store → aura-protocol → aura-effects)
 # Encrypted storage handler belongs in a higher layer
 # aura-store = { path = "../aura-store" }
 
 # Async runtime
 tokio = { workspace = true }
-tokio-stream = "0.1"
 async-trait = { workspace = true }
 futures = { workspace = true }
 futures-util = "0.3"
@@ -46,13 +39,10 @@ bincode = { workspace = true }
 # Cryptography
 ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
-blake3 = { workspace = true }
 hkdf = { workspace = true }
 sha2 = { workspace = true }
 rand = { workspace = true }
 rand_chacha = "0.3"
-hmac = { workspace = true }
-subtle = { workspace = true }
 zeroize = { workspace = true }
 aes-gcm = { workspace = true }
 chacha20 = { workspace = true }
@@ -61,11 +51,7 @@ getrandom = { workspace = true }
 # Utilities
 uuid = { workspace = true }
 thiserror = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
-chrono = { workspace = true }
-once_cell = { workspace = true }
-hex = { workspace = true }
 fastrand = "2.1"
 
 [dev-dependencies]

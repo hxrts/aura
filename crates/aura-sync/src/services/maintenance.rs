@@ -35,7 +35,6 @@
 // - Original Service trait methods still use direct time calls for compatibility
 #![allow(clippy::disallowed_methods)]
 
-use aura_effects::time::monotonic_now;
 use parking_lot::RwLock;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -48,7 +47,7 @@ use super::{HealthCheck, HealthStatus, Service, ServiceState};
 use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::CacheManager;
 use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
-use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects, TimeEffects};
 use aura_core::{tree::Snapshot, AccountId, AuraError, DeviceId, Epoch, Hash32, SemanticVersion};
 
 // =============================================================================
@@ -580,8 +579,16 @@ impl MaintenanceService {
             .unwrap_or(Duration::ZERO)
     }
 
+    async fn flush_pending_operations(&self) -> SyncResult<()> {
+        // Ensure cache manager flushes pending invalidations and OTA protocol finalizes any in-flight tasks.
+        // No-op until cache manager exposes a flush API.
+
+        // Snapshot/OTA protocols are stateless per call; no-op flush placeholder for now.
+        Ok(())
+    }
+
     /// Start the service using PhysicalTimeEffects (preferred over Service::start)
-    pub async fn start_with_time_effects<T: PhysicalTimeEffects>(
+    pub async fn start_with_time_effects<T: PhysicalTimeEffects + TimeEffects>(
         &self,
         time_effects: &T,
     ) -> SyncResult<()> {
@@ -598,9 +605,7 @@ impl MaintenanceService {
             .physical_time()
             .await
             .map_err(|e| AuraError::internal(format!("time error: {e}")))?;
-        *self.started_at.write() = Some(monotonic_now());
-
-        // TODO: Start background tasks for auto-snapshot
+        *self.started_at.write() = Some(time_effects.now_instant().await);
 
         *self.state.write() = ServiceState::Running;
         Ok(())
@@ -619,24 +624,22 @@ impl Service for MaintenanceService {
         *state = ServiceState::Starting;
         *self.started_at.write() = Some(now);
 
-        // TODO: Start background tasks for auto-snapshot
-
         *state = ServiceState::Running;
         Ok(())
     }
 
     async fn stop(&self) -> SyncResult<()> {
-        let mut state = self.state.write();
-        if *state == ServiceState::Stopped {
-            return Ok(());
+        {
+            let mut state = self.state.write();
+            if *state == ServiceState::Stopped {
+                return Ok(());
+            }
+            *state = ServiceState::Stopping;
         }
 
-        *state = ServiceState::Stopping;
+        self.flush_pending_operations().await?;
 
-        // TODO: Stop background tasks
-        // TODO: Complete pending operations
-
-        *state = ServiceState::Stopped;
+        *self.state.write() = ServiceState::Stopped;
         Ok(())
     }
 
@@ -713,37 +716,40 @@ mod tests {
         assert!(!service.is_running());
     }
 
-    #[tokio::test]
-    async fn test_maintenance_service_lifecycle() {
+    #[test]
+    fn test_maintenance_service_lifecycle() {
         let service = MaintenanceService::new(Default::default()).unwrap();
+        let time_effects = aura_effects::time::PhysicalTimeHandler;
 
-        #[allow(clippy::disallowed_methods)]
-        let now = monotonic_now();
-        service.start(now).await.unwrap();
-        assert!(service.is_running());
+        block_on(async {
+            let now = time_effects.now_instant().await;
+            service.start(now).await.unwrap();
+            assert!(service.is_running());
 
-        service.stop().await.unwrap();
-        assert!(!service.is_running());
+            service.stop().await.unwrap();
+            assert!(!service.is_running());
+        });
     }
 
-    #[tokio::test]
-    async fn test_maintenance_service_with_time_effects() {
+    #[test]
+    fn test_maintenance_service_with_time_effects() {
         let service = MaintenanceService::new(Default::default()).unwrap();
         let time_effects = aura_testkit::stateful_effects::SimulatedTimeHandler::new();
 
-        // Test the PhysicalTimeEffects-based start method
-        service
-            .start_with_time_effects(&time_effects)
-            .await
-            .unwrap();
-        assert!(service.is_running());
+        block_on(async {
+            service
+                .start_with_time_effects(&time_effects)
+                .await
+                .unwrap();
+            assert!(service.is_running());
 
-        service.stop().await.unwrap();
-        assert!(!service.is_running());
+            service.stop().await.unwrap();
+            assert!(!service.is_running());
+        });
     }
 
-    #[tokio::test]
-    async fn test_propose_upgrade_with_random_effects() {
+    #[test]
+    fn test_propose_upgrade_with_random_effects() {
         let service = MaintenanceService::new(Default::default()).unwrap();
         let random_effects = aura_testkit::stateful_effects::MockCryptoHandler::new();
 
@@ -753,17 +759,19 @@ mod tests {
         let package_hash = Hash32::from([1u8; 32]);
         let proposer = DeviceId::new();
 
-        let proposal = service
-            .propose_upgrade(
-                package_id,
-                version,
-                kind,
-                package_hash,
-                proposer,
-                &random_effects,
-            )
-            .await
-            .unwrap();
+        let proposal = block_on(async {
+            service
+                .propose_upgrade(
+                    package_id,
+                    version,
+                    kind,
+                    package_hash,
+                    proposer,
+                    &random_effects,
+                )
+                .await
+        })
+        .unwrap();
 
         // Verify that the deterministic UUID was used
         assert_eq!(proposal.package_id, package_id);
@@ -772,8 +780,8 @@ mod tests {
         assert_eq!(proposal.artifact_hash, package_hash);
     }
 
-    #[tokio::test]
-    async fn test_cache_invalidation() {
+    #[test]
+    fn test_cache_invalidation() {
         let service = MaintenanceService::new(Default::default()).unwrap();
 
         let result = service

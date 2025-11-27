@@ -8,10 +8,11 @@
 
 use crate::foundation::CompositeTestHandler;
 use crate::{DeviceTestFixture, TestEffectsBuilder, TestExecutionMode};
+use async_channel::{unbounded, Receiver, Sender};
+use async_lock::RwLock;
 use aura_core::DeviceId;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 // No futures import needed for sequential execution
 
 /// Multi-device test harness for choreographic protocols
@@ -364,13 +365,13 @@ impl MockChoreographyTransport {
 /// Mock channel for device-to-device communication
 #[derive(Debug)]
 pub struct MockChannel {
-    messages: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
-    receiver: Arc<RwLock<tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>>,
+    messages: Sender<Vec<u8>>,
+    receiver: Arc<RwLock<Receiver<Vec<u8>>>>,
 }
 
 impl MockChannel {
     pub fn new() -> Self {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let (sender, receiver) = unbounded();
         Self {
             messages: sender,
             receiver: Arc::new(RwLock::new(receiver)),
@@ -380,18 +381,17 @@ impl MockChannel {
     pub async fn send(&self, message: Vec<u8>) -> Result<(), TransportError> {
         self.messages
             .send(message)
+            .await
             .map_err(|_| TransportError::ChannelClosed)?;
         Ok(())
     }
 
     pub async fn try_receive(&self) -> Result<Option<Vec<u8>>, TransportError> {
-        let mut receiver = self.receiver.write().await;
+        let receiver = self.receiver.write().await;
         match receiver.try_recv() {
             Ok(message) => Ok(Some(message)),
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => Ok(None),
-            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
-                Err(TransportError::ChannelClosed)
-            }
+            Err(async_channel::TryRecvError::Empty) => Ok(None),
+            Err(async_channel::TryRecvError::Closed) => Err(TransportError::ChannelClosed),
         }
     }
 }

@@ -1,5 +1,6 @@
 //! Mock journal effect handlers for testing
 
+use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::{
     effects::JournalEffects, session_epochs::Epoch, AuraError, AuthorityId, ContextId, FlowBudget,
@@ -7,7 +8,6 @@ use aura_core::{
 };
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio::sync::RwLock;
 
 /// Mock journal for testing
 #[derive(Debug)]

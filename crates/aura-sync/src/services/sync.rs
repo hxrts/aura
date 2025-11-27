@@ -27,12 +27,9 @@
 //! # }
 //! ```
 
-use aura_effects::time::{monotonic_now, wallclock_ms};
 use parking_lot::RwLock;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::watch;
-use tokio::task::JoinHandle;
 
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +37,7 @@ use super::{HealthCheck, HealthStatus, Service, ServiceMetrics, ServiceState};
 use crate::core::{sync_session_error, MetricsCollector, SessionManager, SyncResult};
 use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
 use crate::protocols::{JournalSyncConfig, JournalSyncProtocol};
-use aura_core::effects::{PhysicalTimeEffects, TimeError};
+use aura_core::effects::{PhysicalTimeEffects, TimeError, TimeEffects};
 use aura_core::{AuraError, DeviceId};
 use aura_effects::time::PhysicalTimeHandler;
 
@@ -123,6 +120,7 @@ pub struct SyncServiceHealth {
 /// unified protocols and infrastructure from Phases 2 and 3.
 pub struct SyncService {
     /// Configuration
+    #[allow(dead_code)]
     config: SyncServiceConfig,
 
     /// Service state
@@ -145,10 +143,6 @@ pub struct SyncService {
 
     /// Service start time
     started_at: Arc<RwLock<Option<Instant>>>,
-    /// Background task shutdown signal
-    shutdown_tx: Arc<RwLock<Option<watch::Sender<bool>>>>,
-    /// Background task handles
-    task_handles: Arc<RwLock<Vec<JoinHandle<()>>>>,
 
     /// Time effects for unified time operations
     time_effects: PhysicalTimeHandler,
@@ -156,42 +150,11 @@ pub struct SyncService {
 
 impl SyncService {
     /// Create a new sync service
-    pub fn new(config: SyncServiceConfig) -> SyncResult<Self> {
+    pub async fn new(config: SyncServiceConfig) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
-        let now_instant = monotonic_now();
-        let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
-        // Use current system time for initialization (replaced by PhysicalTimeEffects later)
-        let now = wallclock_ms();
-        let session_manager = SessionManager::new(Default::default(), now);
-        let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
-        let metrics = MetricsCollector::new();
         let time_effects = PhysicalTimeHandler;
-
-        Ok(Self {
-            config,
-            state: Arc::new(RwLock::new(ServiceState::Stopped)),
-            peer_manager: Arc::new(RwLock::new(peer_manager)),
-            rate_limiter: Arc::new(RwLock::new(rate_limiter)),
-            session_manager: Arc::new(RwLock::new(session_manager)),
-            journal_sync: Arc::new(RwLock::new(journal_sync)),
-            metrics: Arc::new(RwLock::new(metrics)),
-            started_at: Arc::new(RwLock::new(None)),
-            shutdown_tx: Arc::new(RwLock::new(None)),
-            task_handles: Arc::new(RwLock::new(Vec::new())),
-            time_effects,
-        })
-    }
-
-    /// Create a new sync service with PhysicalTimeEffects (preferred for deterministic testing)
-    pub async fn new_with_time_effects<T: PhysicalTimeEffects>(
-        config: SyncServiceConfig,
-        time_effects: &T,
-    ) -> SyncResult<Self> {
-        let peer_manager = PeerManager::new(config.peer_discovery.clone());
-        // Use PhysicalTimeEffects for deterministic time access
-        let now_instant = monotonic_now();
+        let now_instant = time_effects.now_instant().await;
         let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
-        // Use PhysicalTimeEffects for current timestamp
         let now = time_effects
             .physical_time()
             .await
@@ -210,8 +173,36 @@ impl SyncService {
             journal_sync: Arc::new(RwLock::new(journal_sync)),
             metrics: Arc::new(RwLock::new(metrics)),
             started_at: Arc::new(RwLock::new(None)),
-            shutdown_tx: Arc::new(RwLock::new(None)),
-            task_handles: Arc::new(RwLock::new(Vec::new())),
+            time_effects,
+        })
+    }
+
+    /// Create a new sync service with PhysicalTimeEffects (preferred for deterministic testing)
+    pub async fn new_with_time_effects<T: PhysicalTimeEffects>(
+        config: SyncServiceConfig,
+        time_effects: &T,
+    ) -> SyncResult<Self> {
+        let peer_manager = PeerManager::new(config.peer_discovery.clone());
+        let now_instant = time_effects.now_instant().await;
+        let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
+        let now = time_effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .map_err(time_error_to_aura)?;
+        let session_manager = SessionManager::new(Default::default(), now);
+        let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
+        let metrics = MetricsCollector::new();
+
+        Ok(Self {
+            config,
+            state: Arc::new(RwLock::new(ServiceState::Stopped)),
+            peer_manager: Arc::new(RwLock::new(peer_manager)),
+            rate_limiter: Arc::new(RwLock::new(rate_limiter)),
+            session_manager: Arc::new(RwLock::new(session_manager)),
+            journal_sync: Arc::new(RwLock::new(journal_sync)),
+            metrics: Arc::new(RwLock::new(metrics)),
+            started_at: Arc::new(RwLock::new(None)),
             time_effects: PhysicalTimeHandler,
         })
     }
@@ -224,7 +215,11 @@ impl SyncService {
     /// Synchronize with specific peers
     pub async fn sync_with_peers<E>(&self, effects: &E, peers: Vec<DeviceId>) -> SyncResult<()>
     where
-        E: aura_core::effects::JournalEffects + aura_core::effects::NetworkEffects + Send + Sync,
+        E: aura_core::effects::JournalEffects
+            + aura_core::effects::NetworkEffects
+            + aura_core::effects::PhysicalTimeEffects
+            + Send
+            + Sync,
     {
         if peers.is_empty() {
             return Ok(());
@@ -259,7 +254,11 @@ impl SyncService {
     /// Discover and sync with available peers
     pub async fn discover_and_sync<E>(&self, effects: &E) -> SyncResult<()>
     where
-        E: aura_core::effects::JournalEffects + aura_core::effects::NetworkEffects + Send + Sync,
+        E: aura_core::effects::JournalEffects
+            + aura_core::effects::NetworkEffects
+            + aura_core::effects::PhysicalTimeEffects
+            + Send
+            + Sync,
     {
         // Implement peer synchronization using journal_sync
 
@@ -330,64 +329,9 @@ impl SyncService {
         }
     }
 
-    // =============================================================================
-    // Background Task Management
-    // =============================================================================
-
-    /// Start the automatic synchronization background task
-    async fn start_auto_sync_task(&self) -> SyncResult<()> {
-        // Create shutdown signal channel
-        let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
-        *self.shutdown_tx.write() = Some(shutdown_tx);
-
-        // Clone necessary data for the task
-        let interval = self.config.auto_sync_interval;
-        let peer_manager = Arc::clone(&self.peer_manager);
-        let session_manager = Arc::clone(&self.session_manager);
-        let journal_sync = Arc::clone(&self.journal_sync);
-        let rate_limiter = Arc::clone(&self.rate_limiter);
-        let max_concurrent = self.config.max_concurrent_syncs;
-        let time_effects = Arc::new(PhysicalTimeHandler);
-
-        // Spawn the background auto-sync task
-        let handle = tokio::spawn(async move {
-            let mut interval_timer = tokio::time::interval(interval);
-            interval_timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-            loop {
-                tokio::select! {
-                    // Check for shutdown signal
-                    _ = shutdown_rx.changed() => {
-                        if *shutdown_rx.borrow() {
-                            break;
-                        }
-                    }
-
-                    // Handle interval tick for auto-sync
-                    _ = interval_timer.tick() => {
-                        if let Err(e) = Self::perform_auto_sync_with_time_effects(
-                            &peer_manager,
-                            &session_manager,
-                            &journal_sync,
-                            &rate_limiter,
-                            max_concurrent,
-                            &*time_effects,
-                        ).await {
-                            eprintln!("Auto-sync failed: {}", e);
-                        }
-                    }
-                }
-            }
-        });
-
-        // Store the task handle
-        self.task_handles.write().push(handle);
-
-        Ok(())
-    }
-
     /// Perform one round of automatic synchronization with PhysicalTimeEffects
-    async fn perform_auto_sync_with_time_effects<T: PhysicalTimeEffects>(
+    #[allow(dead_code)]
+    async fn perform_auto_sync_with_time_effects<T: PhysicalTimeEffects + TimeEffects>(
         peer_manager: &Arc<RwLock<PeerManager>>,
         session_manager: &Arc<RwLock<SessionManager<serde_json::Value>>>,
         journal_sync: &Arc<RwLock<JournalSyncProtocol>>,
@@ -412,7 +356,7 @@ impl SyncService {
 
         // Check rate limits before proceeding
         tracing::debug!("Auto-sync tick at {}", tick_ts.ts_ms);
-        let now = monotonic_now();
+        let now = time_effects.now_instant().await;
         {
             let mut limiter = rate_limiter.write();
             for peer in &peers {
@@ -482,9 +426,10 @@ impl SyncService {
     async fn check_rate_limits(&self, peers: &[DeviceId]) -> SyncResult<Vec<DeviceId>> {
         let mut allowed_peers = Vec::new();
         let mut rate_limiter = self.rate_limiter.write();
+        let now = self.time_effects.now_instant().await;
 
         for &peer in peers {
-            let result = rate_limiter.check_rate_limit(peer, 1, monotonic_now());
+            let result = rate_limiter.check_rate_limit(peer, 1, now);
             if result.is_allowed() {
                 allowed_peers.push(peer);
             } else if let Some(retry_after) = result.retry_after() {
@@ -507,19 +452,21 @@ impl SyncService {
         peers: &[DeviceId],
     ) -> SyncResult<Vec<(DeviceId, usize)>>
     where
-        E: aura_core::effects::JournalEffects + aura_core::effects::NetworkEffects + Send + Sync,
+        E: aura_core::effects::JournalEffects
+            + aura_core::effects::NetworkEffects
+            + aura_core::effects::PhysicalTimeEffects
+            + Send
+            + Sync,
     {
         let mut sync_results = Vec::new();
 
         for &peer in peers {
             tracing::debug!("Executing journal sync with peer {}", peer);
 
-            // TODO: Refactor to use tokio::sync::Mutex or restructure to avoid holding lock across await
-            #[allow(clippy::await_holding_lock)]
-            let result = {
-                let mut journal_sync = self.journal_sync.write();
-                journal_sync.sync_with_peer(effects, peer).await
-            }; // Lock dropped here
+            // Clone protocol state to avoid holding lock across await; write back after sync.
+            let mut protocol_clone = { self.journal_sync.write().clone() };
+            let result = protocol_clone.sync_with_peer(effects, peer).await;
+            *self.journal_sync.write() = protocol_clone;
 
             match result {
                 Ok(synced_operations) => {
@@ -630,26 +577,6 @@ impl SyncService {
         Ok(())
     }
 
-    /// Stop all background tasks
-    async fn stop_background_tasks(&self) -> SyncResult<()> {
-        // Send shutdown signal
-        if let Some(tx) = self.shutdown_tx.write().take() {
-            let _ = tx.send(true);
-        }
-
-        // Wait for all tasks to complete
-        let handles = {
-            let mut task_handles = self.task_handles.write();
-            std::mem::take(&mut *task_handles)
-        };
-
-        for handle in handles {
-            let _ = handle.await;
-        }
-
-        Ok(())
-    }
-
     /// Wait for active sessions to complete with timeout
     async fn wait_for_sessions_to_complete(&self) -> SyncResult<()> {
         self.wait_for_sessions_to_complete_with_time_effects(&self.time_effects)
@@ -657,13 +584,13 @@ impl SyncService {
     }
 
     /// Wait for active sessions to complete with timeout using PhysicalTimeEffects
-    async fn wait_for_sessions_to_complete_with_time_effects<T: PhysicalTimeEffects>(
+    async fn wait_for_sessions_to_complete_with_time_effects<T: PhysicalTimeEffects + TimeEffects>(
         &self,
         time_effects: &T,
     ) -> SyncResult<()> {
         let timeout = Duration::from_secs(30); // 30 second timeout
         let check_interval = Duration::from_millis(100);
-        let start = monotonic_now();
+        let start = time_effects.now_instant().await;
 
         while start.elapsed() < timeout {
             let active_sessions = {
@@ -685,6 +612,7 @@ impl SyncService {
     }
 
     /// Select best auto-sync peers based on health and priority (static helper)
+    #[allow(dead_code)]
     async fn select_best_auto_sync_peers(
         peer_manager: &Arc<RwLock<PeerManager>>,
         peers: &[DeviceId],
@@ -748,6 +676,7 @@ impl SyncService {
     }
 
     /// Execute auto-sync protocols for peers (static method)
+    #[allow(dead_code)]
     async fn execute_auto_sync_protocols(
         journal_sync: &Arc<RwLock<JournalSyncProtocol>>,
         peers: &[DeviceId],
@@ -763,6 +692,7 @@ impl SyncService {
     }
 
     /// Update peer scores based on sync results (static method)
+    #[allow(dead_code)]
     async fn update_peer_scores_from_sync(
         peer_manager: &Arc<RwLock<PeerManager>>,
         results: &[(DeviceId, bool)],
@@ -784,6 +714,7 @@ impl SyncService {
     }
 
     /// Update auto-sync metrics (static method)
+    #[allow(dead_code)]
     async fn update_auto_sync_metrics(results: &[(DeviceId, bool)]) -> SyncResult<()> {
         let total_peers = results.len();
         let successful_syncs = results.iter().filter(|(_, success)| *success).count();
@@ -816,11 +747,6 @@ impl Service for SyncService {
             *self.started_at.write() = Some(now);
         } // Drop state lock before await
 
-        // Start background auto-sync task if enabled
-        if self.config.auto_sync_enabled {
-            self.start_auto_sync_task().await?;
-        }
-
         {
             let mut state = self.state.write();
             *state = ServiceState::Running;
@@ -837,9 +763,6 @@ impl Service for SyncService {
 
             *state = ServiceState::Stopping;
         } // Drop state lock before await
-
-        // Stop background tasks
-        self.stop_background_tasks().await?;
 
         // Wait for active sessions to complete with timeout
         self.wait_for_sessions_to_complete().await?;
@@ -931,9 +854,9 @@ impl SyncServiceBuilder {
     }
 
     /// Build the service
-    pub fn build(self) -> SyncResult<SyncService> {
+    pub async fn build(self) -> SyncResult<SyncService> {
         let config = self.config.unwrap_or_default();
-        SyncService::new(config)
+        SyncService::new(config).await
     }
 }
 
@@ -944,11 +867,12 @@ impl SyncServiceBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_io::block_on;
 
     #[test]
     fn test_sync_service_creation() {
         let config = SyncServiceConfig::default();
-        let service = SyncService::new(config).unwrap();
+        let service = block_on(SyncService::new(config)).unwrap();
 
         assert_eq!(service.name(), "SyncService");
         assert!(!service.is_running());
@@ -956,37 +880,39 @@ mod tests {
 
     #[test]
     fn test_sync_service_builder() {
-        let service = SyncService::builder()
+        let service = block_on(
+            SyncService::builder()
             .with_auto_sync(true)
             .with_sync_interval(Duration::from_secs(30))
-            .build()
-            .unwrap();
+            .build(),
+        )
+        .unwrap();
 
         assert!(service.config.auto_sync_enabled);
         assert_eq!(service.config.auto_sync_interval, Duration::from_secs(30));
     }
 
-    #[tokio::test]
-    async fn test_sync_service_lifecycle() {
-        let service = SyncService::builder().build().unwrap();
+    #[test]
+    fn test_sync_service_lifecycle() {
+        let service = block_on(SyncService::builder().build()).unwrap();
 
         assert!(!service.is_running());
 
-        let now = monotonic_now();
-        service.start(now).await.unwrap();
+        let now = block_on(service.time_effects.now_instant());
+        block_on(service.start(now)).unwrap();
         assert!(service.is_running());
 
-        service.stop().await.unwrap();
+        block_on(service.stop()).unwrap();
         assert!(!service.is_running());
     }
 
-    #[tokio::test]
-    async fn test_sync_service_health_check() {
-        let service = SyncService::builder().build().unwrap();
-        let now = monotonic_now();
-        service.start(now).await.unwrap();
+    #[test]
+    fn test_sync_service_health_check() {
+        let service = block_on(SyncService::builder().build()).unwrap();
+        let now = block_on(service.time_effects.now_instant());
+        block_on(service.start(now)).unwrap();
 
-        let health = service.health_check().await.unwrap();
+        let health = block_on(service.health_check()).unwrap();
         assert_eq!(health.status, HealthStatus::Healthy);
         assert!(health.details.contains_key("active_sessions"));
     }

@@ -12,15 +12,12 @@ workspace = true
 
 [dependencies]
 
-# Internal crates
+# Internal crates  
 aura-core = { path = "../aura-core" }
-aura-macros = { path = "../aura-macros" }
-aura-mpst = { path = "../aura-mpst" }
-aura-wot = { path = "../aura-wot" }
+# aura-wot dependency removed - authorization via effects system only
+# aura-macros, aura-mpst, aura-verify dependencies removed - Layer 2 horizontal coupling violations
 
-# Choreography dependencies (required by aura-macros)
-rumpsteak-aura-choreography = "0.6.0"
-aura-verify = { path = "../aura-verify" }
+# Choreography dependencies removed - unused
 # Note: Cannot import aura-protocol due to circular dependency (aura-protocol imports journal)
 # Protocol types are now available through aura-core
 # aura-session-core = { path = "../aura-session-core" }  # For future session types implementation
@@ -28,22 +25,16 @@ aura-verify = { path = "../aura-verify" }
 # CRDT
 automerge = { workspace = true }
 
-# Cryptography provided through aura-core
-ed25519-dalek = { workspace = true }
-signature = { workspace = true }
-aes-gcm = { workspace = true }
-sha2 = { workspace = true }
+# Cryptography provided through aura-core effects system
+# Cryptographic types now imported through aura-core
 
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_cbor = { workspace = true }
 bincode = { workspace = true }
-biscuit-auth = { workspace = true }
 
-# Async
-tokio = { workspace = true }
-futures = { workspace = true }
+# Async traits only (runtime dependencies removed for Layer 2 compliance)
 async-trait = { workspace = true }
 
 # Utilities
@@ -52,8 +43,6 @@ time = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
-rand = { workspace = true }
-rand_chacha = { workspace = true }
 hex = { workspace = true }
 
 # KeyJournal external dependencies

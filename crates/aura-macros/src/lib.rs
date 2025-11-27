@@ -191,7 +191,7 @@ pub fn aura_error_types(input: TokenStream) -> TokenStream {
 
 /// Attribute macro for Aura async tests with automatic setup
 ///
-/// This macro wraps `#[tokio::test]` and provides:
+/// This macro wraps async tests and provides:
 /// - Automatic tracing initialization via `aura_testkit::init_test_tracing()`
 /// - 30 second timeout by default
 /// - Better error messages on timeout

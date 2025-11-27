@@ -543,8 +543,6 @@ mod tests {
         assert_eq!(request.account_id, deserialized.account_id);
     }
 
-    // TODO: This test is disabled due to runtime context issues in the effect system builder
-    // The effect system initialization requires careful async runtime management
     #[aura_test]
     async fn test_coordinator_creation() -> aura_core::AuraResult<()> {
         let device_id = test_device_id(2);

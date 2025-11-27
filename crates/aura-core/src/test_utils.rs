@@ -1,11 +1,18 @@
-//! Internal test utilities for aura-core
+//! Test utilities for aura-core and Layer 2 crates
 //!
 //! **Architecture Note**: These utilities are internal to aura-core and DO NOT use aura-testkit
 //! to avoid circular dependencies. aura-testkit depends on aura-core, so aura-core cannot depend
 //! on aura-testkit.
 //!
-//! These utilities should remain minimal and focused only on creating deterministic instances
-//! of core types for testing purposes.
+//! This module provides:
+//! 1. Deterministic ID and key generation (always available)
+//! 2. Mock effect implementations (available with `test-utils` feature)
+//!
+//! Layer 2 crates can use the mock effects by enabling the feature:
+//! ```toml
+//! [dev-dependencies]
+//! aura-core = { path = "../aura-core", features = ["test-utils"] }
+//! ```
 
 #![allow(clippy::expect_used)] // Test utilities use expect for fixed-size slice conversions
 

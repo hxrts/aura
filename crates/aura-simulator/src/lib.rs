@@ -1,5 +1,7 @@
 #![allow(missing_docs)]
 #![allow(dead_code)]
+#![allow(clippy::disallowed_methods)]
+#![allow(deprecated)] // Simulator intentionally uses deprecated time functions for testing purposes
 
 //! # Aura Simulator - Layer 6: Runtime Composition
 //!

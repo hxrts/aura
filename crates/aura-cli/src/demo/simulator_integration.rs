@@ -1,8 +1,11 @@
+#![allow(deprecated)]
 //! # Simulator Integration for Demo
 //!
 //! Integrates aura-simulator with the demo system to provide automated
 //! Alice and Charlie agents for Bob's recovery demo experience.
 
+use aura_core::PhysicalTimeEffects;
+use aura_effects::time::PhysicalTimeHandler;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -174,7 +177,10 @@ impl SimulatedGuardianAgent {
 
         // Simulate realistic response delay
         let delay_ms = self.calculate_response_delay();
-        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+        PhysicalTimeHandler::new()
+            .sleep_ms(delay_ms as u64)
+            .await
+            .ok();
 
         // Determine if this guardian will approve (based on config)
         let will_approve = self.should_approve_recovery(demo_state);
@@ -262,7 +268,7 @@ impl SimulatedGuardianAgent {
 
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                PhysicalTimeHandler::new().sleep_ms(30_000).await.ok();
                 tracing::debug!("Guardian {} heartbeat", name);
                 // Could send status updates here
             }
@@ -342,7 +348,10 @@ impl SimulatedGuardianAgent {
 
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(std::time::Duration::from_millis(frequency)).await;
+                PhysicalTimeHandler::new()
+                    .sleep_ms(frequency as u64)
+                    .await
+                    .ok();
 
                 // Occasionally send autonomous messages during normal operation
                 // This would integrate with demo event system in full implementation
@@ -360,7 +369,7 @@ impl SimulatedGuardianAgent {
 
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                PhysicalTimeHandler::new().sleep_ms(5_000).await.ok();
                 tracing::trace!("Guardian {} recovery monitoring", name);
                 // Monitor recovery state and respond as needed
             }

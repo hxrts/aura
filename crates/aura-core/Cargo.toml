@@ -16,6 +16,7 @@ serde = { workspace = true }
 serde_ipld_dagcbor = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
+bincode = { workspace = true }
 
 # Identifiers
 uuid = { workspace = true }
@@ -53,8 +54,7 @@ serde_bytes = { workspace = true }
 chrono = { workspace = true }
 time = { workspace = true }
 
-# Async runtime and crypto utilities
-tokio = { workspace = true }
+# Crypto utilities
 subtle = { workspace = true }
 zeroize = { workspace = true }
 

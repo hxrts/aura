@@ -313,7 +313,7 @@
 //!     use aura_protocol::handlers::factory::{AuraHandlerFactory, DefaultHandlerFactory};
 //!     use aura_core::DeviceId;
 //!
-//!     #[tokio::test]
+//!     #[test]
 //!     async fn test_account_creation() -> Result<(), Box<dyn std::error::Error>> {
 //!         // Fast, isolated testing
 //!         let device_id = DeviceId::generate();
@@ -327,7 +327,7 @@
 //!         Ok(())
 //!     }
 //!
-//!     #[tokio::test]
+//!     #[test]
 //!     async fn test_with_simulation() -> Result<(), Box<dyn std::error::Error>> {
 //!         // Deterministic simulation testing
 //!         let device_id = DeviceId::generate();
@@ -1114,7 +1114,7 @@ impl PlatformDetector {
 }
 
 // Use the proper FilesystemStorageHandler from aura-effects instead of reimplementing
-// This maintains the architectural boundary and avoids direct tokio::fs usage outside effects layer
+// This maintains the architectural boundary and avoids direct runtime/filesystem usage outside effects layer
 use aura_effects::storage::FilesystemStorageHandler;
 
 /// Create a path-based storage handler for platform detection

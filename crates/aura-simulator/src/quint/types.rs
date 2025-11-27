@@ -4,7 +4,9 @@
 //! including chaos generation, Byzantine mapping, and ITF trace conversion.
 //!
 //! Core Quint types (Property, PropertySpec, EvaluationResult) have been moved
-//! to aura-core and aura-quint for proper architectural separation.
+//! to aura-core and aura-quint for proper architectural separation. The
+//! simulator keeps lightweight mirrors here and provides adapters at the bridge
+//! layer to avoid leaking runtime dependencies back into the core crates.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -52,7 +54,7 @@ pub struct QuintSpec {
     /// Description of the specification
     pub description: String,
     /// Modules defined in this specification
-    pub modules: Vec<String>,
+    pub modules: Vec<QuintModule>,
     /// Metadata for the specification
     pub metadata: HashMap<String, String>,
     /// Invariant properties defined in this specification
@@ -65,6 +67,23 @@ pub struct QuintSpec {
     pub state_variables: Vec<QuintStateVariable>,
     /// Actions/transitions defined in the module
     pub actions: Vec<QuintAction>,
+}
+
+/// Parsed Quint module with definitions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuintModule {
+    pub name: String,
+    pub definitions: Vec<QuintDefinition>,
+}
+
+/// Quint definition kinds captured during parsing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum QuintDefinition {
+    Invariant(QuintInvariant),
+    Temporal(QuintTemporalProperty),
+    Safety(QuintSafetyProperty),
+    StateVar(QuintStateVariable),
+    Action(QuintAction),
 }
 
 /// Invariant property from a Quint specification (simulation-specific)
@@ -506,7 +525,8 @@ pub struct ChaosGenerationStats {
 }
 
 // Legacy simulation-specific evaluation types (different from aura-core types)
-// TODO: Eventually migrate to use aura-core types with adapters
+// These remain for backward compatibility with existing simulation harnesses;
+// adapters translate to the newer aura-core types at the bridge layer.
 
 /// Result of evaluating a Quint property against simulation state (legacy)
 #[derive(Debug, Clone, Serialize, Deserialize)]
