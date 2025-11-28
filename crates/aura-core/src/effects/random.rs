@@ -40,3 +40,27 @@ pub trait RandomEffects: Send + Sync {
     /// Generate a random UUID v4
     async fn random_uuid(&self) -> Uuid;
 }
+
+/// Blanket implementation for Arc<T> where T: RandomEffects
+#[async_trait]
+impl<T: RandomEffects + ?Sized> RandomEffects for std::sync::Arc<T> {
+    async fn random_bytes(&self, len: usize) -> Vec<u8> {
+        (**self).random_bytes(len).await
+    }
+
+    async fn random_bytes_32(&self) -> [u8; 32] {
+        (**self).random_bytes_32().await
+    }
+
+    async fn random_u64(&self) -> u64 {
+        (**self).random_u64().await
+    }
+
+    async fn random_range(&self, min: u64, max: u64) -> u64 {
+        (**self).random_range(min, max).await
+    }
+
+    async fn random_uuid(&self) -> Uuid {
+        (**self).random_uuid().await
+    }
+}

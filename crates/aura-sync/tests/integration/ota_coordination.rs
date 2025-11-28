@@ -6,8 +6,8 @@
 use super::test_utils::*;
 use aura_core::{AuraError, AuraResult, Hash32};
 use aura_sync::protocols::{EpochConfirmation, OTAConfig, UpgradeKind, UpgradeProposal};
-use std::time::{Duration};
 use aura_testkit::simulation::network::NetworkCondition;
+use std::time::Duration;
 use tokio::time::timeout;
 use uuid::Uuid;
 
@@ -269,8 +269,8 @@ async fn test_ota_rollback() -> AuraResult<()> {
 
         // Step 3: Initiate emergency rollback
         let rollback_proposal = UpgradeProposal {
-            proposal_id: Uuid::new_v4(),
-            package_id: Uuid::new_v4(),
+            proposal_id: Uuid::from_bytes([0x01; 16]),
+            package_id: Uuid::from_bytes([0x02; 16]),
             version: String::from("1.4.0"),
             kind: UpgradeKind::SoftFork, // Use SoftFork for rollback
             package_hash: Hash32::from([0x12u8; 32]),

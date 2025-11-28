@@ -190,3 +190,35 @@ pub trait NetworkEffects: Send + Sync {
     /// Subscribe to peer connection events
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError>;
 }
+
+/// Blanket implementation for Arc<T> where T: NetworkEffects
+#[async_trait]
+impl<T: NetworkEffects + ?Sized> NetworkEffects for std::sync::Arc<T> {
+    async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
+        (**self).send_to_peer(peer_id, message).await
+    }
+
+    async fn broadcast(&self, message: Vec<u8>) -> Result<(), NetworkError> {
+        (**self).broadcast(message).await
+    }
+
+    async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
+        (**self).receive().await
+    }
+
+    async fn receive_from(&self, peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
+        (**self).receive_from(peer_id).await
+    }
+
+    async fn connected_peers(&self) -> Vec<Uuid> {
+        (**self).connected_peers().await
+    }
+
+    async fn is_peer_connected(&self, peer_id: Uuid) -> bool {
+        (**self).is_peer_connected(peer_id).await
+    }
+
+    async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
+        (**self).subscribe_to_peer_events().await
+    }
+}

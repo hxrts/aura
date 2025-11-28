@@ -337,10 +337,7 @@ mod tests {
         let fetched = history.get_message(&msg.id).await.unwrap();
         assert_eq!(fetched, Some(msg.clone()));
 
-        let count = history
-            .get_message_count(&msg.group_id)
-            .await
-            .expect("count");
+        let count = history.get_message_count(&msg.group_id).await.unwrap();
         assert_eq!(count, 1);
 
         let group_history = history

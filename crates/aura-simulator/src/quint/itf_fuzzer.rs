@@ -4,7 +4,6 @@
 //! for model-based test generation. It uses the existing Quint-Apalache integration to
 //! generate traces in ITF format and convert them to executable test cases.
 
-
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

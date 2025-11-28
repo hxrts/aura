@@ -27,3 +27,23 @@ pub trait ConsoleEffects: Send + Sync {
     /// Log a debug message
     async fn log_debug(&self, message: &str) -> Result<(), AuraError>;
 }
+
+/// Blanket implementation for Arc<T> where T: ConsoleEffects
+#[async_trait]
+impl<T: ConsoleEffects + ?Sized> ConsoleEffects for std::sync::Arc<T> {
+    async fn log_info(&self, message: &str) -> Result<(), AuraError> {
+        (**self).log_info(message).await
+    }
+
+    async fn log_warn(&self, message: &str) -> Result<(), AuraError> {
+        (**self).log_warn(message).await
+    }
+
+    async fn log_error(&self, message: &str) -> Result<(), AuraError> {
+        (**self).log_error(message).await
+    }
+
+    async fn log_debug(&self, message: &str) -> Result<(), AuraError> {
+        (**self).log_debug(message).await
+    }
+}

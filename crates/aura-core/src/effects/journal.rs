@@ -58,3 +58,53 @@ pub trait JournalEffects: Send + Sync {
         cost: u32,
     ) -> Result<FlowBudget, AuraError>;
 }
+
+/// Blanket implementation for Arc<T> where T: JournalEffects
+#[async_trait]
+impl<T: JournalEffects + ?Sized> JournalEffects for std::sync::Arc<T> {
+    async fn merge_facts(&self, target: &Journal, delta: &Journal) -> Result<Journal, AuraError> {
+        (**self).merge_facts(target, delta).await
+    }
+
+    async fn refine_caps(
+        &self,
+        target: &Journal,
+        refinement: &Journal,
+    ) -> Result<Journal, AuraError> {
+        (**self).refine_caps(target, refinement).await
+    }
+
+    async fn get_journal(&self) -> Result<Journal, AuraError> {
+        (**self).get_journal().await
+    }
+
+    async fn persist_journal(&self, journal: &Journal) -> Result<(), AuraError> {
+        (**self).persist_journal(journal).await
+    }
+
+    async fn get_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+    ) -> Result<FlowBudget, AuraError> {
+        (**self).get_flow_budget(context, peer).await
+    }
+
+    async fn update_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+        budget: &FlowBudget,
+    ) -> Result<FlowBudget, AuraError> {
+        (**self).update_flow_budget(context, peer, budget).await
+    }
+
+    async fn charge_flow_budget(
+        &self,
+        context: &ContextId,
+        peer: &AuthorityId,
+        cost: u32,
+    ) -> Result<FlowBudget, AuraError> {
+        (**self).charge_flow_budget(context, peer, cost).await
+    }
+}

@@ -25,7 +25,6 @@ use aura_testkit::stateful_effects::random::MockRandomHandler;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// Generate a UUID from random bytes for testing

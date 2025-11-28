@@ -8,8 +8,7 @@
 //! - Flow budget enforcement and trust-based forwarding
 
 #![allow(clippy::disallowed_methods)]
-
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+#![allow(clippy::unwrap_used)] // Tests are allowed to use unwrap for clarity
 
 use aura_core::effects::NetworkEffects;
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
@@ -28,7 +27,6 @@ use aura_testkit::DeviceTestFixture;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::Duration;
-use tracing_subscriber;
 
 /// End-to-end test scenario configuration
 #[derive(Debug, Clone)]

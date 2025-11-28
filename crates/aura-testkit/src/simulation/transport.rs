@@ -7,7 +7,6 @@ use async_trait::async_trait;
 use aura_core::{AuraResult, DeviceId};
 // Note: Transport middleware patterns removed - use effect system instead
 use async_lock::RwLock;
-use futures::executor::block_on;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -123,45 +122,41 @@ mod tests {
         assert!(!transport.device_id().0.is_nil());
     }
 
-    #[test]
-    fn test_memory_transport_communication() {
-        block_on(async {
-            let (transport1, transport2) = MemoryTransport::create_pair();
+    #[tokio::test]
+    async fn test_memory_transport_communication() {
+        let (transport1, transport2) = MemoryTransport::create_pair();
 
-            // Send message from transport1 to transport2
-            let message = b"hello world";
-            transport1
-                .send_message(transport2.device_id(), message)
-                .await
-                .unwrap();
+        // Send message from transport1 to transport2
+        let message = b"hello world";
+        transport1
+            .send_message(transport2.device_id(), message)
+            .await
+            .unwrap();
 
-            // Receive message at transport2
-            let received = transport2.receive_message().await.unwrap();
-            assert!(received.is_some());
+        // Receive message at transport2
+        let received = transport2.receive_message().await.unwrap();
+        assert!(received.is_some());
 
-            let (sender, msg) = received.unwrap();
-            assert_eq!(sender, transport1.device_id());
-            assert_eq!(msg, message);
-        });
+        let (sender, msg) = received.unwrap();
+        assert_eq!(sender, transport1.device_id());
+        assert_eq!(msg, message);
     }
 
-    #[test]
-    fn test_message_queue() {
-        block_on(async {
-            let transport = test_memory_transport();
+    #[tokio::test]
+    async fn test_message_queue() {
+        let transport = test_memory_transport();
 
-            assert_eq!(transport.pending_message_count().await, 0);
+        assert_eq!(transport.pending_message_count().await, 0);
 
-            // Send message to self
-            transport
-                .send_message(transport.device_id(), b"test")
-                .await
-                .unwrap();
-            assert_eq!(transport.pending_message_count().await, 1);
+        // Send message to self
+        transport
+            .send_message(transport.device_id(), b"test")
+            .await
+            .unwrap();
+        assert_eq!(transport.pending_message_count().await, 1);
 
-            // Clear messages
-            transport.clear_messages().await;
-            assert_eq!(transport.pending_message_count().await, 0);
-        });
+        // Clear messages
+        transport.clear_messages().await;
+        assert_eq!(transport.pending_message_count().await, 0);
     }
 }

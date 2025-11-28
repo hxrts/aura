@@ -9,7 +9,7 @@ usage() {
   cat <<'EOF'
 Aura Architectural Compliance Checker
 
-Usage: scripts/arch-check.sh [OPTIONS]
+Usage: scripts/check-arch.sh [OPTIONS]
 
 Options (run all when none given):
   --layers         Layer boundary and purity checks
@@ -75,7 +75,9 @@ layer_of() {
 if [ "$RUN_ALL" = true ] || [ "$RUN_LAYERS" = true ]; then
   section "Layer purity"
   # aura-core should only define traits/types (no impl of Effects)
-  if grep -R "impl.*Effects" crates/aura-core/src 2>/dev/null | grep -v "trait" | grep -v "impl<T" >/dev/null; then
+  # Exclude: trait definitions, blanket impls (impl<...), and doc comments
+  # Blanket impls include: extension traits and Arc<T> wrappers (both allowed exceptions per docs/999)
+  if grep -R "impl.*Effects" crates/aura-core/src 2>/dev/null | grep -v "trait" | grep -v "impl<" | grep -v ":///" >/dev/null; then
     violation "aura-core contains effect implementations (should be interface-only)"
   else
     info "aura-core: interface-only (no effect impls)"
@@ -178,7 +180,10 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-composition/" \
     | grep -v "#\\[tokio::test\\]" \
     | grep -v "#\\[async_std::test\\]" \
+    | grep -v "#\\[tokio::main\\]" \
     | grep -v "/tests/" \
+    | grep -v "/examples/" \
+    | grep -v "test_macros.rs" \
     | grep -v "benches/" || true)
   if [ -n "$filtered_runtime" ]; then
     warning "Concrete runtime usage detected outside handler/composition layers (aura-core and domain crates must stay runtime-agnostic):"

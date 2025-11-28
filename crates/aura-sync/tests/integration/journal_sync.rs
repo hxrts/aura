@@ -240,7 +240,7 @@ async fn test_sync_state_transitions() -> AuraResult<()> {
     // Test sync state machine transitions
     let state_test_result = timeout(Duration::from_secs(30), async {
         // Mock state transitions during sync
-        let states = vec![
+        let states = [
             SyncState::Idle,
             SyncState::Syncing,
             SyncState::Synced {
@@ -366,24 +366,19 @@ async fn test_sync_message_handling() -> AuraResult<()> {
             // Simulate message processing
             match message_type {
                 "JournalRequest" => {
-                    // Mock request handling
-                    assert!(true, "Should handle journal requests");
+                    // Mock request handling - should handle journal requests
                 }
                 "JournalResponse" => {
-                    // Mock response handling
-                    assert!(true, "Should handle journal responses");
+                    // Mock response handling - should handle journal responses
                 }
                 "EntryBatch" => {
-                    // Mock batch processing
-                    assert!(true, "Should handle entry batches");
+                    // Mock batch processing - should handle entry batches
                 }
                 "SyncComplete" => {
-                    // Mock completion handling
-                    assert!(true, "Should handle sync completion");
+                    // Mock completion handling - should handle sync completion
                 }
                 "SyncError" => {
-                    // Mock error handling
-                    assert!(true, "Should handle sync errors gracefully");
+                    // Mock error handling - should handle sync errors gracefully
                 }
                 _ => unreachable!(),
             }

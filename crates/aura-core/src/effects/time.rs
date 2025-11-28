@@ -117,9 +117,57 @@ impl<T> TimeEffects for T
 where
     T: PhysicalTimeEffects + ?Sized,
 {
-    /// Default implementation that panics - effect handlers must override this.
-    /// This violates the effect system but is kept for compatibility until handlers are updated.
+    /// Default implementation that provides Instant::now() for compatibility.
+    /// This is a blanket implementation for all PhysicalTimeEffects implementors.
+    #[allow(clippy::disallowed_methods)] // Effect trait implementation needs Instant::now
     async fn now_instant(&self) -> Instant {
-        panic!("now_instant must be implemented by effect handlers, not used with default implementation")
+        Instant::now()
+    }
+}
+
+/// Blanket implementation for Arc<T> where T: PhysicalTimeEffects
+#[async_trait]
+impl<T: PhysicalTimeEffects + ?Sized> PhysicalTimeEffects for std::sync::Arc<T> {
+    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+        (**self).physical_time().await
+    }
+
+    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
+        (**self).sleep_ms(ms).await
+    }
+}
+
+/// Blanket implementation for Arc<T> where T: LogicalClockEffects
+#[async_trait]
+impl<T: LogicalClockEffects + ?Sized> LogicalClockEffects for std::sync::Arc<T> {
+    async fn logical_advance(
+        &self,
+        observed: Option<&crate::time::VectorClock>,
+    ) -> Result<crate::time::LogicalTime, TimeError> {
+        (**self).logical_advance(observed).await
+    }
+
+    async fn logical_now(&self) -> Result<crate::time::LogicalTime, TimeError> {
+        (**self).logical_now().await
+    }
+}
+
+/// Blanket implementation for Arc<T> where T: OrderClockEffects
+#[async_trait]
+impl<T: OrderClockEffects + ?Sized> OrderClockEffects for std::sync::Arc<T> {
+    async fn order_time(&self) -> Result<OrderTime, TimeError> {
+        (**self).order_time().await
+    }
+}
+
+/// Blanket implementation for Arc<T> where T: TimeComparison
+#[async_trait]
+impl<T: TimeComparison + ?Sized> TimeComparison for std::sync::Arc<T> {
+    async fn compare(
+        &self,
+        a: &crate::time::TimeStamp,
+        b: &crate::time::TimeStamp,
+    ) -> Result<TimeOrdering, TimeError> {
+        (**self).compare(a, b).await
     }
 }

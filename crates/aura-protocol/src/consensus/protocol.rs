@@ -249,7 +249,11 @@ impl ConsensusProtocol {
         let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
         let commitment = NonceCommitment {
             signer: share.identifier,
-            commitment: nonces.commitments().hiding().serialize().to_vec(),
+            commitment: nonces
+                .commitments()
+                .serialize()
+                .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {}", e)))?
+                .to_vec(),
         };
 
         // Cache nonce token for signing when SignRequest arrives
@@ -295,7 +299,13 @@ impl ConsensusProtocol {
             let nonces = frost_ed25519::round1::SigningNonces::new(&signing_share, &mut rng);
             let commitment = NonceCommitment {
                 signer: share.identifier,
-                commitment: nonces.commitments().hiding().serialize().to_vec(),
+                commitment: nonces
+                    .commitments()
+                    .serialize()
+                    .map_err(|e| {
+                        AuraError::crypto(format!("Failed to serialize commitments: {}", e))
+                    })?
+                    .to_vec(),
             };
             instance.tracker.add_nonce(self.authority_id, commitment);
             NonceToken::from(nonces)

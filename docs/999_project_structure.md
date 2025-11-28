@@ -49,7 +49,20 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 
 **Key principle**: Interfaces only, no implementations or business logic.
 
-**Exception**: Extension traits providing convenience methods are allowed (e.g., `LeakageChoreographyExt`, `SimulationEffects`, `AuthorityRelationalEffects`). These blanket implementations extend existing effect traits with domain-specific convenience methods while maintaining interface-only semantics.
+**Exceptions**:
+
+1. **Extension traits** providing convenience methods are allowed (e.g., `LeakageChoreographyExt`, `SimulationEffects`, `AuthorityRelationalEffects`). These blanket implementations extend existing effect traits with domain-specific convenience methods while maintaining interface-only semantics.
+
+2. **Arc<T> blanket implementations** for effect traits are required in aura-core due to Rust's orphan rules. These are *not* "runtime instantiations" - they are purely mechanical delegations that enable `Arc<AuraEffectSystem>` to satisfy trait bounds. Example:
+   ```rust
+   impl<T: CryptoEffects + ?Sized> CryptoEffects for std::sync::Arc<T> {
+       async fn ed25519_sign(&self, msg: &[u8], key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+           (**self).ed25519_sign(msg, key).await  // Pure delegation
+       }
+   }
+   ```
+
+   **Why this is architecturally sound**: `Arc` is a language-level primitive (like `Vec`, `Box`, or `&`), not a "runtime" in the architectural sense. These implementations add no behavior or state - they simply say "if T can do X, then Arc<T> can too by asking T." Without these, any handler wrapped in `Arc` would fail to satisfy effect trait bounds, breaking the entire dependency injection pattern.
 
 **Architectural Compliance**: aura-core maintains strict interface-only semantics. Test utilities like MockEffects are provided in aura-testkit (Layer 8) where they architecturally belong.
 
@@ -756,7 +769,7 @@ For detailed guidance on code location decisions, see [Development Patterns and 
 
 The project includes an automated architectural compliance checker to enforce these layering principles:
 
-**Command**: `just arch-check`  
+**Command**: `just check-arch`  
 **Script**: `scripts/arch-check.sh`
 
 **What it validates**:
@@ -981,7 +994,7 @@ async fn test_frost_ceremony_timing() {
 
 ### Compliance Checking
 
-The `just arch-check` command validates these principles by:
+The `just check-arch` command validates these principles by:
 
 1. **Scanning for direct impure usage**: Detects `SystemTime::now`, `thread_rng()`, `std::fs::`, etc.
 2. **Enforcing precise exemptions**: Only allows usage in `impl.*Effects`, `runtime/effects.rs`
@@ -1034,7 +1047,7 @@ Run before every commit to maintain architectural compliance and simulation dete
 - **How maintenance and OTA updates work** → `docs/807_maintenance_ota_guide.md` + `docs/111_maintenance.md`
 - **How development patterns work** → `docs/805_development_patterns.md`
 - **The project's goals and constraints** → `docs/000_project_overview.md`
-- **How to debug architecture** → `just arch-check` + this document
+- **How to debug architecture** → `just check-arch` + this document
 
 ### Layer-Based Development Workflow
 **Working on Layer 1 (Foundation)?** Read: `docs/106_effect_system_and_runtime.md`  

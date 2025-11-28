@@ -4,10 +4,10 @@
 //! Integrates aura-simulator with the demo system to provide automated
 //! Alice and Charlie agents for Bob's recovery demo experience.
 
-use std::time::Instant;
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Mutex;
 
 use aura_core::{AuthorityId, DeviceId};
@@ -177,10 +177,7 @@ impl SimulatedGuardianAgent {
 
         // Simulate realistic response delay
         let delay_ms = self.calculate_response_delay();
-        PhysicalTimeHandler::new()
-            .sleep_ms(delay_ms)
-            .await
-            .ok();
+        PhysicalTimeHandler::new().sleep_ms(delay_ms).await.ok();
 
         // Determine if this guardian will approve (based on config)
         let will_approve = self.should_approve_recovery(demo_state);
@@ -348,10 +345,7 @@ impl SimulatedGuardianAgent {
 
         tokio::spawn(async move {
             loop {
-                PhysicalTimeHandler::new()
-                    .sleep_ms(frequency)
-                    .await
-                    .ok();
+                PhysicalTimeHandler::new().sleep_ms(frequency).await.ok();
 
                 // Occasionally send autonomous messages during normal operation
                 // This would integrate with demo event system in full implementation

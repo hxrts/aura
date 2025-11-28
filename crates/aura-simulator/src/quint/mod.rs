@@ -4,7 +4,6 @@
 //! Aura simulation framework. It enables property-based testing driven by formal
 //! verification specifications.
 
-
 pub mod ast_parser;
 pub mod byzantine_mapper;
 pub mod chaos_generator;

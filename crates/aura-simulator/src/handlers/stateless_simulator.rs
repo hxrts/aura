@@ -30,7 +30,10 @@ use aura_core::{
     AuraError, Result as AuraResult,
 };
 use serde_json::Value;
-use std::{collections::HashMap, time::{Duration, Instant}};
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 use tracing::{debug, info};
 
 /// Stateless simulator handler that delegates all operations to effect handlers

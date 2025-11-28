@@ -205,9 +205,7 @@ pub use context::{ContextIsolation, ContextType};
 // guards re-exports REMOVED - use aura-protocol::guards instead
 #[allow(deprecated)]
 pub use leakage::{LeakageBudget, LeakageTracker};
-pub use runtime::{
-    AuraEndpoint, AuraHandler, ConnectionState, ExecutionContext, ExecutionMode,
-};
+pub use runtime::{AuraEndpoint, AuraHandler, ConnectionState, ExecutionContext, ExecutionMode};
 
 /// Standard result type for MPST operations
 pub type MpstResult<T> = std::result::Result<T, MpstError>;
@@ -308,7 +306,6 @@ where
 }
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use super::*;
 

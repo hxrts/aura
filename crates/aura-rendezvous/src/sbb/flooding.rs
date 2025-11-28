@@ -286,7 +286,8 @@ impl SbbFlooding for SbbFloodingCoordinator {
 
         // Check relay capability using AuthorizationEffects
         // (migrated from deprecated Cap::allows() to use proper authorization)
-        let authorized = self.effects
+        let authorized = self
+            .effects
             .verify_capability(&journal.caps, &relay_permission, resource)
             .await
             .unwrap_or(false);

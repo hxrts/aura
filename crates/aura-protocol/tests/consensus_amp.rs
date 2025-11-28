@@ -61,7 +61,7 @@ async fn amp_consensus_success_path() {
     };
 
     let prestate = aura_core::Prestate::new(vec![], aura_core::Hash32::default());
-    let witnesses = vec![AuthorityId::new()];
+    let witnesses = vec![AuthorityId::new(), AuthorityId::new()];
     let mut key_packages: HashMap<AuthorityId, Share> = HashMap::new();
 
     // Create test FROST keys using testkit
@@ -71,20 +71,24 @@ async fn amp_consensus_success_path() {
         54321, // different deterministic seed
     );
 
-    // Insert the first key package for the witness
-    if let Some((_, key_pkg)) = frost_key_packages.into_iter().next() {
-        key_packages.insert(witnesses[0], key_pkg.into());
+    // Insert the first two key packages for the witnesses
+    for (witness, (_, key_pkg)) in witnesses.iter().zip(frost_key_packages.into_iter().take(2)) {
+        key_packages.insert(*witness, key_pkg.into());
     }
 
     let result = run_amp_channel_epoch_bump(
         &prestate,
         &proposal,
         witnesses,
-        1,
+        2,
         key_packages,
         gp.into(),
         Epoch::from(1),
     )
     .await;
-    assert!(result.is_ok(), "consensus should succeed with key material");
+    assert!(
+        result.is_ok(),
+        "consensus should succeed with key material: {:?}",
+        result.as_ref().err()
+    );
 }

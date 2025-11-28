@@ -8,13 +8,14 @@
 
 use async_trait::async_trait;
 use aura_core::effects::time::{
-    LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeComparison, TimeError,
+    LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeComparison, TimeEffects,
+    TimeError,
 };
 use aura_core::hash::hash;
 use aura_core::time::{
     LogicalTime, OrderTime, OrderingPolicy, TimeOrdering, TimeStamp, VectorClock,
 };
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::time;
 use uuid::Uuid;
 

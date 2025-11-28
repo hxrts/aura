@@ -150,7 +150,14 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
         })
         .collect();
 
-    let first_role = roles.first().unwrap();
+    let first_role = match roles.first() {
+        Some(role) => role,
+        None => {
+            return quote! {
+                compile_error!("Choreography must have at least one role");
+            };
+        }
+    };
 
     // Generate module name using namespace
     let module_name = if let Some(ns) = namespace {

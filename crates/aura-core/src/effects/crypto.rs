@@ -227,3 +227,173 @@ pub trait CryptoEffects: RandomEffects + Send + Sync {
     /// Securely zero memory
     fn secure_zero(&self, data: &mut [u8]);
 }
+
+/// Blanket implementation for Arc<T> where T: CryptoEffects
+/// Note: CryptoEffects inherits RandomEffects, and Arc<T> gets RandomEffects from the blanket impl in random.rs
+#[async_trait]
+impl<T: CryptoEffects + ?Sized> CryptoEffects for std::sync::Arc<T> {
+    async fn hkdf_derive(
+        &self,
+        ikm: &[u8],
+        salt: &[u8],
+        info: &[u8],
+        output_len: usize,
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).hkdf_derive(ikm, salt, info, output_len).await
+    }
+
+    async fn derive_key(
+        &self,
+        master_key: &[u8],
+        context: &KeyDerivationContext,
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).derive_key(master_key, context).await
+    }
+
+    async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), CryptoError> {
+        (**self).ed25519_generate_keypair().await
+    }
+
+    async fn ed25519_sign(
+        &self,
+        message: &[u8],
+        private_key: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).ed25519_sign(message, private_key).await
+    }
+
+    async fn ed25519_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        public_key: &[u8],
+    ) -> Result<bool, CryptoError> {
+        (**self)
+            .ed25519_verify(message, signature, public_key)
+            .await
+    }
+
+    async fn frost_generate_keys(
+        &self,
+        threshold: u16,
+        max_signers: u16,
+    ) -> Result<FrostKeyGenResult, CryptoError> {
+        (**self).frost_generate_keys(threshold, max_signers).await
+    }
+
+    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
+        (**self).frost_generate_nonces().await
+    }
+
+    async fn frost_create_signing_package(
+        &self,
+        message: &[u8],
+        nonces: &[Vec<u8>],
+        participants: &[u16],
+        public_key_package: &[u8],
+    ) -> Result<FrostSigningPackage, CryptoError> {
+        (**self)
+            .frost_create_signing_package(message, nonces, participants, public_key_package)
+            .await
+    }
+
+    async fn frost_sign_share(
+        &self,
+        signing_package: &FrostSigningPackage,
+        key_share: &[u8],
+        nonces: &[u8],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self)
+            .frost_sign_share(signing_package, key_share, nonces)
+            .await
+    }
+
+    async fn frost_aggregate_signatures(
+        &self,
+        signing_package: &FrostSigningPackage,
+        signature_shares: &[Vec<u8>],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self)
+            .frost_aggregate_signatures(signing_package, signature_shares)
+            .await
+    }
+
+    async fn frost_verify(
+        &self,
+        message: &[u8],
+        signature: &[u8],
+        group_public_key: &[u8],
+    ) -> Result<bool, CryptoError> {
+        (**self)
+            .frost_verify(message, signature, group_public_key)
+            .await
+    }
+
+    async fn ed25519_public_key(&self, private_key: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        (**self).ed25519_public_key(private_key).await
+    }
+
+    async fn chacha20_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).chacha20_encrypt(plaintext, key, nonce).await
+    }
+
+    async fn chacha20_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).chacha20_decrypt(ciphertext, key, nonce).await
+    }
+
+    async fn aes_gcm_encrypt(
+        &self,
+        plaintext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).aes_gcm_encrypt(plaintext, key, nonce).await
+    }
+
+    async fn aes_gcm_decrypt(
+        &self,
+        ciphertext: &[u8],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
+    ) -> Result<Vec<u8>, CryptoError> {
+        (**self).aes_gcm_decrypt(ciphertext, key, nonce).await
+    }
+
+    async fn frost_rotate_keys(
+        &self,
+        old_shares: &[Vec<u8>],
+        old_threshold: u16,
+        new_threshold: u16,
+        new_max_signers: u16,
+    ) -> Result<FrostKeyGenResult, CryptoError> {
+        (**self)
+            .frost_rotate_keys(old_shares, old_threshold, new_threshold, new_max_signers)
+            .await
+    }
+
+    fn is_simulated(&self) -> bool {
+        (**self).is_simulated()
+    }
+
+    fn crypto_capabilities(&self) -> Vec<String> {
+        (**self).crypto_capabilities()
+    }
+
+    fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
+        (**self).constant_time_eq(a, b)
+    }
+
+    fn secure_zero(&self, data: &mut [u8]) {
+        (**self).secure_zero(data)
+    }
+}

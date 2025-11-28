@@ -267,8 +267,8 @@ where
             request.device_id
         );
 
-        // Generate session ID
-        let session_id = uuid::Uuid::new_v4().to_string();
+        // Generate session ID via RandomEffects
+        let session_id = self.effects.random_uuid().await.to_string();
 
         // Create session request for choreography
         let session_request = SessionRequest {
@@ -410,9 +410,14 @@ where
         let mut nonce = [0u8; 16];
         nonce.copy_from_slice(&nonce_bytes[..16]);
 
+        // Parse session ID or generate a new one via RandomEffects
+        let session_id = match uuid::Uuid::parse_str(&request.session_id) {
+            Ok(id) => id,
+            Err(_) => self.effects.random_uuid().await,
+        };
+
         let session_ticket = SessionTicket {
-            session_id: uuid::Uuid::parse_str(&request.session_id)
-                .unwrap_or_else(|_| uuid::Uuid::new_v4()),
+            session_id,
             issuer_device_id: request.device_id,
             scope: request.requested_scope.clone(),
             issued_at: current_time,
@@ -438,8 +443,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_testkit::builders::test_device_id;
     use aura_macros::aura_test;
+    use aura_testkit::builders::test_device_id;
     use aura_verify::session::SessionScope;
     use aura_verify::VerifiedIdentity;
 

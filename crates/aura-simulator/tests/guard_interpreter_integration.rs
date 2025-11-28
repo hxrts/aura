@@ -5,10 +5,7 @@
 
 use aura_core::{
     effects::{
-        guard::{
-            EffectCommand, EffectInterpreter, EffectResult,
-            JournalEntry, SimulationEvent,
-        },
+        guard::{EffectCommand, EffectInterpreter, EffectResult, JournalEntry, SimulationEvent},
         NetworkAddress,
     },
     identifiers::{AuthorityId, ContextId},
@@ -32,7 +29,10 @@ async fn test_multi_party_protocol_simulation() {
     let carol = AuthorityId::new();
 
     // Create interpreters with shared state
-    let shared_state = Arc::new(std::sync::Mutex::new(SimulationState::new(42, time.clone())));
+    let shared_state = Arc::new(std::sync::Mutex::new(SimulationState::new(
+        42,
+        time.clone(),
+    )));
 
     let alice_interp = SimulationEffectInterpreter::from_state(
         shared_state.clone(),
@@ -184,7 +184,7 @@ async fn test_multi_party_protocol_simulation() {
 
     // Verify deterministic nonces (same seed should produce same nonces in replay)
     let events = alice_interp.events();
-    assert!(events.len() > 0);
+    assert!(!events.is_empty());
 
     // Test replay in new interpreter
     let _replay_state = SimulationState::new(42, time.clone()); // Same seed

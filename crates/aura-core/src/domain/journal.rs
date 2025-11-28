@@ -613,7 +613,6 @@ impl Cap {
             .map_err(|e| CapError::Serialization(e.to_string()))?;
         Ok(())
     }
-
 }
 
 #[derive(Debug, thiserror::Error)]

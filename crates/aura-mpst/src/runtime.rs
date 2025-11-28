@@ -44,12 +44,18 @@ pub struct CapabilityGuard {
 impl CapabilityGuard {
     /// Create a new capability guard
     pub fn new(required: Cap) -> Self {
-        Self { required, description: None }
+        Self {
+            required,
+            description: None,
+        }
     }
 
     /// Create with description
     pub fn with_description(required: Cap, description: impl Into<String>) -> Self {
-        Self { required, description: Some(description.into()) }
+        Self {
+            required,
+            description: Some(description.into()),
+        }
     }
 
     /// Check if capabilities satisfy this guard
@@ -63,7 +69,9 @@ impl CapabilityGuard {
             Ok(())
         } else {
             Err(aura_core::AuraError::permission_denied(
-                self.description.clone().unwrap_or_else(|| "Capability guard failed".to_string())
+                self.description
+                    .clone()
+                    .unwrap_or_else(|| "Capability guard failed".to_string()),
             ))
         }
     }
@@ -256,7 +264,6 @@ impl Default for ProtocolRequirements {
 }
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use super::*;
     use aura_core::identifiers::DeviceId;

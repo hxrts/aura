@@ -8,7 +8,10 @@
 
 use aura_core::{
     effects::{
-        guard::{EffectCommand, EffectInterpreter, EffectResult, GuardOutcome, GuardSnapshot, JournalEntry},
+        guard::{
+            EffectCommand, EffectInterpreter, EffectResult, GuardOutcome, GuardSnapshot,
+            JournalEntry,
+        },
         FlowBudgetView, MetadataView,
     },
     identifiers::{AuthorityId, ContextId},
@@ -16,8 +19,8 @@ use aura_core::{
     time::{PhysicalTime, TimeStamp},
     AuraResult,
 };
-use futures::executor::block_on;
 use aura_protocol::guards::pure::{Guard, GuardChain, GuardRequest};
+// Note: Examples can use tokio::main for simplicity (arch-check accepts this for examples/)
 use std::collections::HashMap;
 
 /// Example custom guard that checks domain-specific rules
@@ -69,8 +72,17 @@ impl SimulationInterpreter {
 impl EffectInterpreter for SimulationInterpreter {
     async fn execute(&self, cmd: EffectCommand) -> AuraResult<EffectResult> {
         match cmd {
-            EffectCommand::ChargeBudget { context, authority, amount, peer: _ } => {
-                let current = self.flow_budgets.get(&(context, authority)).copied().unwrap_or(0);
+            EffectCommand::ChargeBudget {
+                context,
+                authority,
+                amount,
+                peer: _,
+            } => {
+                let current = self
+                    .flow_budgets
+                    .get(&(context, authority))
+                    .copied()
+                    .unwrap_or(0);
                 if current < amount {
                     Ok(EffectResult::Failure("Insufficient budget".to_string()))
                 } else {
@@ -181,6 +193,7 @@ async fn run_effects(
     Ok(executed)
 }
 
-fn main() -> AuraResult<()> {
-    block_on(run_examples())
+#[tokio::main]
+async fn main() -> AuraResult<()> {
+    run_examples().await
 }

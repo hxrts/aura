@@ -28,7 +28,7 @@
 //! - `PhysicalTimeEffects` for replay protection and timeouts
 
 use aura_core::{
-    effects::{CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects},
+    effects::{CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects, RandomEffects},
     hash, AuraError, AuraResult, DeviceId, Hash32,
 };
 use aura_macros::choreography;
@@ -77,14 +77,9 @@ impl Default for DkdConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DkdSessionId(pub String);
 
-impl Default for DkdSessionId {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl DkdSessionId {
-    /// Create a new DKD session ID
+    /// Create a new DKD session ID for testing (production code should use RandomEffects)
+    #[cfg(test)]
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
@@ -221,7 +216,7 @@ impl DkdProtocol {
         session_id: Option<DkdSessionId>,
     ) -> Result<DkdSessionId, DkdError>
     where
-        E: CryptoEffects + NetworkEffects + JournalEffects + PhysicalTimeEffects + Send + Sync,
+        E: CryptoEffects + NetworkEffects + JournalEffects + PhysicalTimeEffects + RandomEffects + Send + Sync,
     {
         // Validate configuration
         if participants.len() < self.config.threshold as usize {
@@ -237,7 +232,12 @@ impl DkdProtocol {
             });
         }
 
-        let session_id = session_id.unwrap_or_default();
+        // Generate session ID via RandomEffects if not provided
+        let session_id = if let Some(id) = session_id {
+            id
+        } else {
+            DkdSessionId(effects.random_uuid().await.to_string())
+        };
         let current_time = effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0);
 
         let context = KeyDerivationContext {
@@ -826,7 +826,7 @@ pub async fn execute_simple_dkd<E>(
     context: &str,
 ) -> AuraResult<DkdResult>
 where
-    E: CryptoEffects + NetworkEffects + JournalEffects + PhysicalTimeEffects + Send + Sync,
+    E: CryptoEffects + NetworkEffects + JournalEffects + PhysicalTimeEffects + RandomEffects + Send + Sync,
 {
     let config = DkdConfig {
         threshold: 2,

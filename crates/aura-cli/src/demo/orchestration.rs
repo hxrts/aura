@@ -4,10 +4,10 @@
 //! Provides complete orchestration of the human-agent demo experience,
 //! integrating TUI, simulator agents, and scenario system.
 
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, Mutex};
 use uuid::Uuid;
 
@@ -227,7 +227,10 @@ impl DemoOrchestrator {
 
         let session_id = Uuid::new_v4();
         #[allow(clippy::disallowed_methods)]
-        let start_time_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+        let start_time_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
         #[allow(clippy::disallowed_methods)]
         let start_instant = Instant::now();
 

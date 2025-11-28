@@ -658,8 +658,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_connection_pool_limits() {
-        let mut config = PoolConfig::default();
-        config.max_total_connections = 2;
+        let config = PoolConfig {
+            max_total_connections: 2,
+            ..Default::default()
+        };
 
         let mut pool = ConnectionPool::new(config);
 
@@ -681,8 +683,10 @@ mod tests {
     #[tokio::test]
     #[ignore = "Needs rewrite for timestamp-based API - requires manual time advancement"]
     async fn test_connection_eviction() {
-        let mut config = PoolConfig::default();
-        config.idle_timeout = Duration::from_millis(10);
+        let config = PoolConfig {
+            idle_timeout: Duration::from_millis(10),
+            ..Default::default()
+        };
 
         let mut pool = ConnectionPool::new(config);
 

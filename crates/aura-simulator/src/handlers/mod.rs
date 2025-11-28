@@ -15,7 +15,6 @@
 //! - Fault injection for resilience testing (Byzantine, network failures)
 //! - Time acceleration (no wall-clock waits)
 
-
 pub mod core;
 pub mod effect_composer;
 pub mod fault_simulation;

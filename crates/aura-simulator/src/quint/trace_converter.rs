@@ -4,8 +4,6 @@
 //! into formats compatible with Quint formal verification, enabling
 //! trace-based property verification and temporal analysis.
 
-
-
 use crate::quint::types::{
     PropertyEvaluationResult, QuintInvariant, QuintSpec, QuintTemporalProperty, QuintValue,
     ValidationResult,
@@ -1250,7 +1248,7 @@ mod tests {
         let mut converter = TraceConverter::new();
         let mut execution_trace = ExecutionTrace::new(10);
 
-        let state = TestSimulationState {
+        let _state = TestSimulationState {
             tick: 1,
             time: 1000,
             variables: HashMap::new(),

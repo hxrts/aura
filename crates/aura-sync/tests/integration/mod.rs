@@ -12,7 +12,6 @@
 //! - `network_partition`: Network partition behavior and recovery
 //! - `multi_device_scenarios`: Complex scenarios combining multiple protocols
 
-
 // Sub-modules containing specific test scenarios
 pub mod anti_entropy;
 pub mod journal_sync;
@@ -51,6 +50,7 @@ pub fn test_session_manager() -> SessionManager<()> {
 }
 
 /// Helper to create deterministic device IDs for test reproducibility
+#[allow(clippy::unwrap_used)]
 pub fn test_device_id(seed: &[u8]) -> DeviceId {
     use aura_core::hash::hash;
     let hash_bytes = hash(seed);

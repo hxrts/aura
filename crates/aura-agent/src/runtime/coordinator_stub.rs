@@ -4,15 +4,17 @@
 //! for the new authority-centric architecture. This is a temporary coordinator
 //! while refactoring from the legacy system.
 
-use aura_core::effects::ExecutionMode;
+use aura_core::effects::{ExecutionMode, PhysicalTimeEffects};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
+use aura_effects::PhysicalTimeHandler;
 
 /// Main effect system coordinator for authority-based runtime
 #[derive(Debug)]
 pub struct AuraEffectSystem {
     pub(crate) authority_id: AuthorityId,
     pub(crate) execution_mode: ExecutionMode,
+    pub(crate) time_effects: PhysicalTimeHandler,
 }
 
 impl AuraEffectSystem {
@@ -21,6 +23,7 @@ impl AuraEffectSystem {
         Self {
             authority_id,
             execution_mode,
+            time_effects: PhysicalTimeHandler,
         }
     }
 
@@ -32,6 +35,11 @@ impl AuraEffectSystem {
     /// Get the execution mode
     pub fn execution_mode(&self) -> ExecutionMode {
         self.execution_mode
+    }
+
+    /// Get access to time effects
+    pub fn time_effects(&self) -> &PhysicalTimeHandler {
+        &self.time_effects
     }
 
     /// Initialize the effect system
@@ -51,24 +59,24 @@ impl AuraEffectSystem {
         super::EffectContext::new(self.authority_id, context_id, self.execution_mode.clone())
     }
 
-    /// Get current timestamp in milliseconds (stub)
-    pub fn current_timestamp_millis(&self) -> u64 {
-        // STUB: For proper implementation, this should delegate to TimeEffects
-        // Currently needed for CLI compatibility during refactor
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis() as u64
+    /// Get current timestamp in milliseconds
+    pub async fn current_timestamp_millis(&self) -> u64 {
+        // Delegate to PhysicalTimeEffects for proper time handling
+        self.time_effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0)
     }
 
-    /// Get current timestamp (stub)
-    pub fn current_timestamp(&self) -> u64 {
-        // STUB: For proper implementation, this should delegate to TimeEffects
-        // Currently needed for CLI compatibility during refactor
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
+    /// Get current timestamp
+    pub async fn current_timestamp(&self) -> u64 {
+        // Delegate to PhysicalTimeEffects for proper time handling
+        self.time_effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms / 1000)
+            .unwrap_or(0)
     }
 
     /// Production constructor

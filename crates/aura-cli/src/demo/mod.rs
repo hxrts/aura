@@ -2,7 +2,6 @@
 //!
 //! Provides demo modes for showcasing Aura's capabilities.
 
-
 pub mod human_agent;
 pub mod orchestration;
 pub mod scenario_bridge;

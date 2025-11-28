@@ -283,7 +283,10 @@ mod tests {
         budgets.insert((aura_core::ContextId::default(), AuthorityId::new()), 1000);
 
         GuardSnapshot {
-            now: TimeStamp::PhysicalClock(PhysicalTime { ts_ms: 1000, uncertainty: None }),
+            now: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1000,
+                uncertainty: None,
+            }),
             caps: Cap::default(),
             budgets: FlowBudgetView::new(budgets),
             metadata: MetadataView::default(),

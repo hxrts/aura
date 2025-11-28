@@ -358,7 +358,11 @@ impl FrostConsensusOrchestrator {
         // Create commitment
         let commitment = NonceCommitment {
             signer: share.identifier,
-            commitment: nonces.commitments().hiding().serialize().to_vec(),
+            commitment: nonces
+                .commitments()
+                .serialize()
+                .map_err(|e| AuraError::crypto(format!("Failed to serialize commitments: {}", e)))?
+                .to_vec(),
         };
 
         let token = NonceToken::from(nonces);

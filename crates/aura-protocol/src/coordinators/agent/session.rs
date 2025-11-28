@@ -629,7 +629,9 @@ mod tests {
 
     #[async_trait::async_trait]
     impl aura_core::PhysicalTimeEffects for TestTimeEffects {
-        async fn physical_time(&self) -> std::result::Result<aura_core::time::PhysicalTime, aura_effects::TimeError> {
+        async fn physical_time(
+            &self,
+        ) -> std::result::Result<aura_core::time::PhysicalTime, aura_effects::TimeError> {
             Ok(aura_core::time::PhysicalTime {
                 ts_ms: 1234567890000,
                 uncertainty: None,
@@ -708,11 +710,7 @@ mod tests {
         };
 
         let session_id = handler
-            .create_choreographic_session(
-                SessionType::Coordination,
-                vec![],
-                choreography_config,
-            )
+            .create_choreographic_session(SessionType::Coordination, vec![], choreography_config)
             .await
             .unwrap();
 

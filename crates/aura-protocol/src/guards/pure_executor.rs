@@ -25,7 +25,9 @@ use aura_core::{
 };
 
 // Re-export key types for easier use by macro-generated code
-pub use aura_core::effects::guard::{EffectCommand as ChoreographyCommand, EffectResult as ChoreographyResult};
+pub use aura_core::effects::guard::{
+    EffectCommand as ChoreographyCommand, EffectResult as ChoreographyResult,
+};
 use std::{collections::HashMap, sync::Arc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -116,7 +118,9 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
                     effects_executed += 1;
 
                     // Capture receipt from budget charge
-                    if let (EffectCommand::ChargeBudget { .. }, EffectResult::Receipt(r)) = (command, &result) {
+                    if let (EffectCommand::ChargeBudget { .. }, EffectResult::Receipt(r)) =
+                        (command, &result)
+                    {
                         receipt = Some(r.clone());
                     }
                 }
@@ -683,6 +687,6 @@ mod tests {
     fn test_convert_send_guard_to_request() {
         // This would require access to SendGuardChain constructor
         // For now, just test the function exists
-        assert!(true);
+        // TODO: Add actual test once SendGuardChain constructor is accessible
     }
 }

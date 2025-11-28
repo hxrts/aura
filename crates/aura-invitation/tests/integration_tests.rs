@@ -187,7 +187,6 @@ async fn test_invitation_acceptance_coordinator_integration() -> aura_core::Aura
 }
 
 #[aura_test]
-#[cfg(FALSE)] // Temporarily disabled due to Arc<AuraEffectSystem> trait bound issues
 #[ignore]
 async fn test_relationship_formation_coordinator_integration() -> aura_core::AuraResult<()> {
     println!("Testing relationship formation coordinator integration...");
@@ -195,7 +194,7 @@ async fn test_relationship_formation_coordinator_integration() -> aura_core::Aur
     let test = InvitationIntegrationTest::new_with_seed(30).await;
 
     // Test legacy relationship formation
-    let _formation_request = RelationshipFormationRequest {
+    let formation_request = RelationshipFormationRequest {
         party_a: test.inviter_device,
         party_b: test.invitee_device,
         account_id: test.account_id,
@@ -230,7 +229,6 @@ async fn test_relationship_formation_coordinator_integration() -> aura_core::Aur
 }
 
 #[aura_test]
-#[cfg(FALSE)] // Temporarily disabled due to Arc<AuraEffectSystem> trait bound issues
 #[ignore] // Requires full network effects implementation
 async fn test_full_invitation_to_relationship_flow() -> aura_core::AuraResult<()> {
     println!("Testing full invitation to relationship flow integration...");

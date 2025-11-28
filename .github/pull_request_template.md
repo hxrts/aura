@@ -14,7 +14,7 @@
 ## Testing
 
 - [ ] Tests pass locally (`just test`)
-- [ ] Architecture check passes (`just arch-check`)
+- [ ] Architecture check passes (`just check-arch`)
 - [ ] New tests added for new functionality
 - [ ] Existing tests updated as needed
 

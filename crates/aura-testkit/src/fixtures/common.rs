@@ -49,10 +49,7 @@ impl ProtocolTestFixture {
         let fixtures = DeviceSetBuilder::new(total_devices as usize)
             .with_seed(seed)
             .build();
-        let device_id = fixtures
-            .first()
-            .map(|f| f.device_id())
-            .unwrap_or_default();
+        let device_id = fixtures.first().map(|f| f.device_id()).unwrap_or_default();
         let all_device_ids: Vec<_> = fixtures.iter().map(|f| f.device_id()).collect();
 
         Self {
@@ -280,10 +277,7 @@ impl AccountTestFixture {
         let fixtures = DeviceSetBuilder::new(total_devices as usize)
             .with_seed(seed)
             .build();
-        let primary_device = fixtures
-            .first()
-            .map(|f| f.device_id())
-            .unwrap_or_default();
+        let primary_device = fixtures.first().map(|f| f.device_id()).unwrap_or_default();
         let all_devices: Vec<_> = fixtures.iter().map(|f| f.device_id()).collect();
 
         Self {

@@ -141,13 +141,12 @@ pub fn generate_aura_choreography_code(
     code
 }
 
-/// Detect annotations in choreography text (simple pattern matching)
+/// Detect annotations in choreography text
 fn detect_annotations_in_text(
     choreography_str: &str,
     effects: &mut Vec<AuraEffect>,
 ) -> Result<(), AuraExtractionError> {
-    // Simple pattern matching for demonstration
-    // Following the rumpsteak-aura demo approach
+    // Simple pattern matching following the rumpsteak-aura demo approach
 
     for line in choreography_str.lines() {
         // Check if this line has a role annotation (contains '[' and has a send arrow '->')
@@ -346,7 +345,6 @@ fn extract_leakage_observers_from_line(line: &str) -> Option<Vec<String>> {
 }
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -514,7 +512,10 @@ mod tests {
                 && role == "Alice")
         });
 
-        assert!(has_leakage, "Should extract leak annotation with parentheses");
+        assert!(
+            has_leakage,
+            "Should extract leak annotation with parentheses"
+        );
     }
 
     #[test]
@@ -530,6 +531,9 @@ mod tests {
                 && role == "Alice")
         });
 
-        assert!(has_leakage, "Should extract leak annotation with quoted string");
+        assert!(
+            has_leakage,
+            "Should extract leak annotation with quoted string"
+        );
     }
 }

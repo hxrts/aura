@@ -11,12 +11,10 @@
 use async_trait::async_trait;
 use aura_core::{
     effects::{
-        guard::{
-            EffectCommand, EffectInterpreter, EffectResult, JournalEntry, SimulationEvent,
-        },
+        guard::{EffectCommand, EffectInterpreter, EffectResult, JournalEntry, SimulationEvent},
         NetworkAddress,
     },
-    identifiers::{AuthorityId, ContextId},
+    identifiers::AuthorityId,
     time::TimeStamp,
     AuraError, AuraResult as Result,
 };
@@ -154,7 +152,10 @@ impl SimulationEffectInterpreter {
 
     /// Get a clone of the current state
     pub fn snapshot_state(&self) -> SimulationState {
-        self.state.lock().expect("Simulator state lock poisoned").clone()
+        self.state
+            .lock()
+            .expect("Simulator state lock poisoned")
+            .clone()
     }
 
     /// Get all recorded events
@@ -250,7 +251,9 @@ impl EffectInterpreter for SimulationEffectInterpreter {
         let mut state = self.state.lock().unwrap();
 
         match cmd {
-            EffectCommand::ChargeBudget { authority, amount, .. } => {
+            EffectCommand::ChargeBudget {
+                authority, amount, ..
+            } => {
                 debug!(?authority, amount, "Simulation: Charging flow budget");
 
                 let current_budget = state.get_budget(&authority);
@@ -394,7 +397,6 @@ mod tests {
     use super::*;
     use aura_core::{
         identifiers::{AuthorityId, ContextId},
-        journal::Fact,
         time::{PhysicalTime, TimeStamp},
     };
 

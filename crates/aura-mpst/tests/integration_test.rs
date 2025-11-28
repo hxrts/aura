@@ -6,8 +6,6 @@
 //! Note: Tests for deprecated AuraRuntime have been removed.
 //! Use aura-agent::AgentRuntime for new code.
 
-#![allow(deprecated)]
-
 use aura_core::{identifiers::DeviceId, ContextId};
 use aura_mpst::{AuraEndpoint, AuraHandler};
 use rumpsteak_aura_choreography::extensions::ExtensionRegistry;

@@ -171,7 +171,6 @@ pub fn create_snapshot_protocol() -> SnapshotProtocol {
         approval_threshold: 2,
         quorum_size: 3,
         use_writer_fence: true,
-        ..Default::default()
     };
     SnapshotProtocol::new(config)
 }

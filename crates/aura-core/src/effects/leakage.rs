@@ -187,6 +187,39 @@ pub trait LeakageChoreographyExt: LeakageEffects {
 // Blanket implementation
 impl<T: LeakageEffects> LeakageChoreographyExt for T {}
 
+/// Blanket implementation for Arc<T> where T: LeakageEffects
+#[async_trait]
+impl<T: LeakageEffects + ?Sized> LeakageEffects for std::sync::Arc<T> {
+    async fn record_leakage(&self, event: LeakageEvent) -> Result<()> {
+        (**self).record_leakage(event).await
+    }
+
+    async fn get_leakage_budget(&self, context_id: ContextId) -> Result<LeakageBudget> {
+        (**self).get_leakage_budget(context_id).await
+    }
+
+    async fn check_leakage_budget(
+        &self,
+        context_id: ContextId,
+        observer: ObserverClass,
+        amount: u64,
+    ) -> Result<bool> {
+        (**self)
+            .check_leakage_budget(context_id, observer, amount)
+            .await
+    }
+
+    async fn get_leakage_history(
+        &self,
+        context_id: ContextId,
+        since_timestamp: Option<u64>,
+    ) -> Result<Vec<LeakageEvent>> {
+        (**self)
+            .get_leakage_history(context_id, since_timestamp)
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

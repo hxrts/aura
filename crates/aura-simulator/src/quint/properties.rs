@@ -4,7 +4,6 @@
 //! specifications. Provides categorization, monitoring, and verification
 //! capabilities for different types of properties.
 
-
 use crate::quint::types::{
     PropertyEvaluationResult, QuintInvariant, QuintTemporalProperty, SimulationState,
     ValidationResult,

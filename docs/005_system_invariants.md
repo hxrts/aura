@@ -67,7 +67,7 @@ These invariants follow from the core invariants:
 
 Run architectural validation:
 ```bash
-just arch-check
+just check-arch
 ```
 
 This validates:

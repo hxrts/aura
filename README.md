@@ -1,34 +1,28 @@
 # Aura
 
-Aura is a private peer-to-peer social network which takes the following as a point of departure:
+Aura is a private peer-to-peer social network. Its design takes the following as points of departure:
 
 **Identity is relational**
 
-Each account is a opaque threshold authority described by a commitment tree reduction. Social recovery possible via Guardian nomination without requiring decrypted data.
+Identity emerges through shared contexts rather than global identifiers. Each relationship forms its own identity boundary, an opaque authority. Threshold policies and device membership are maintained through commitment tree reduction. This enables social recovery without exposing private keys. 
 
 **Your friends are the network**
 
-Aura runs as an encrypted mesh across the social graph. Distributed protocols run within scoped session and channel contexts that never reveal participant structure. Storage, gossip, rendezvous, and consensus all operate through these context boundaries.
+Aura runs as an encrypted mesh across the social graph. Distributed protocols run within scoped session and channel contexts that conceal participant structure. Storage, gossip, rendezvous, and consensus all operate through these context boundaries.
 
 **Agency from consent**
 
-Capabilities are expressed through attenuation with sovereign policy. Authorization is handled at send-time, i.e. packets cannot be transmitted without satisfying consent predicates.
+Relationships are expressed through a web-of-trust. Capabilities form a semilattice that restricts authority through attenuation. Information flow is governed by explicit consent predicates. Consent enables participants to coordinate more flexibly by ensuring boundaries are by design.
 
 ## Architecture
 
-Aura’s architecture is built from four interacting systems: journals, session types, consensus, and the effect runtime.
+Aura implements a choreographic programming model that projects global protocols into local session types. The architecture is organized into layers that separate interfaces from implementations and isolates impure evaluation through algebraic effects. This enables deterministic testing and simulation.
 
-The journal system is a fact-only CRDT. Facts merge through set union and reduce into account state and relational state deterministically. Account state is defined by the commitment tree semilattice. Contexts use the same reduction pipeline for relational facts. This ensures that all replicas converge once they share the same facts.
+Most state evolves through CRDT merges that require no coordination. Journals store facts that merge via set union and reduce deterministically. When operations require linearization beyond CRDT convergence, Aura runs single-shot consensus scoped to a context-level witness group, with leaderless fallback. Each instance binds an operation to an explicit prestate hash. Witnesses produce threshold signature shares over the deterministic result. Compact commit facts produced by consensus are then merged into the journal.
 
-The choreography and session type system specifies distributed protocols globally and projects them into per-role local types. Projection establishes ordering, duality, and deadlock-freedom. The interpreter executes steps via effect calls, embedding capability checks, journal updates, and flow-budget charges before each send. This couples protocol safety with authorization and budgeting semantics.
+Pure evaluation enforces authorization, consent predicates, and resource budgets, returning effects as data. Effect commands are executed by an async interpreter. The separation between pure decision logic and effectful execution enables deterministic testing. The simulator runs protocol code with mock interpreters that provide full control over network conditions, fault injection, and state inspection.
 
-Consensus provides single-shot agreement for operations that cannot be expressed as monotone fact growth. Each instance binds an operation to an explicit prestate hash and outputs a commit fact containing a threshold signature. Commit facts merge into journals and are interpreted during reduction. Fast-path and fallback execute through session-typed flows. Consensus is scoped to authorities or relational contexts and never produces a global log.
-
-The effect system supplies the operational substrate. Handlers implement cryptography, storage, transport, and journal operations. All handlers run under an explicit context object. The runtime enforces guard-chain order, capability refinement, and deterministic charging. This keeps side effects isolated, testable, and uniform across native and WASM targets.
-
-For detailed system architecture see the system-architecture document .
-
-See [](docs/001_system_architecture.md) and [Project Structure](docs/999_project_structure.md) for more details.
+For more details see [System Architecture](docs/001_system_architecture.md) and [Project Structure](docs/999_project_structure.md).
 
 ## Quick Start
 

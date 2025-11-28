@@ -3,8 +3,6 @@
 //! This module provides simulation-specific wrappers around the core Quint
 //! functionality, adapting simulation state to work with Quint property evaluation.
 
-
-
 use async_trait::async_trait;
 use aura_core::effects::{
     Property, PropertyEvaluator, PropertySpec, QuintEvaluationEffects, QuintVerificationEffects,

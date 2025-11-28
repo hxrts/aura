@@ -6,11 +6,11 @@
 //! a complete demo where Bob has the full interactive experience while
 //! Alice and Charlie are automated for reliable demo presentation.
 
-use std::time::Instant;
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 use std::future;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::{mpsc, Mutex};
 use uuid::Uuid;
 

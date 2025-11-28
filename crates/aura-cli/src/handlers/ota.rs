@@ -3,7 +3,6 @@
 //!
 //! Commands for managing over-the-air upgrades using the proper effect system architecture.
 
-
 use anyhow::{Context, Result};
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_core::effects::{ConsoleEffects, StorageEffects};

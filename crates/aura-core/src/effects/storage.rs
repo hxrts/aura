@@ -164,3 +164,46 @@ pub trait StorageEffects: Send + Sync {
     /// Get storage statistics
     async fn stats(&self) -> Result<StorageStats, StorageError>;
 }
+
+/// Blanket implementation for Arc<T> where T: StorageEffects
+#[async_trait]
+impl<T: StorageEffects + ?Sized> StorageEffects for std::sync::Arc<T> {
+    async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+        (**self).store(key, value).await
+    }
+
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        (**self).retrieve(key).await
+    }
+
+    async fn remove(&self, key: &str) -> Result<bool, StorageError> {
+        (**self).remove(key).await
+    }
+
+    async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+        (**self).list_keys(prefix).await
+    }
+
+    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
+        (**self).exists(key).await
+    }
+
+    async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
+        (**self).store_batch(pairs).await
+    }
+
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+        (**self).retrieve_batch(keys).await
+    }
+
+    async fn clear_all(&self) -> Result<(), StorageError> {
+        (**self).clear_all().await
+    }
+
+    async fn stats(&self) -> Result<StorageStats, StorageError> {
+        (**self).stats().await
+    }
+}

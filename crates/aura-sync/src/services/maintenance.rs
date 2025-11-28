@@ -600,12 +600,13 @@ impl MaintenanceService {
             *state = ServiceState::Starting;
         } // Lock dropped here
 
-        // Use PhysicalTimeEffects for deterministic wall-clock; store local Instant for uptime
+        // Use PhysicalTimeEffects for deterministic wall-clock; store Instant for uptime tracking
         let _ts = time_effects
             .physical_time()
             .await
             .map_err(|e| AuraError::internal(format!("time error: {e}")))?;
-        *self.started_at.write() = Some(Instant::now());
+        // Use time effects for uptime tracking
+        *self.started_at.write() = Some(time_effects.now_instant().await);
 
         *self.state.write() = ServiceState::Running;
         Ok(())
@@ -720,8 +721,11 @@ mod tests {
     async fn test_maintenance_service_lifecycle() {
         let service = MaintenanceService::new(Default::default()).unwrap();
 
-        let now = std::time::Instant::now();
-        service.start(now).await.unwrap();
+        let time_effects = aura_effects::time::PhysicalTimeHandler;
+        service
+            .start_with_time_effects(&time_effects)
+            .await
+            .unwrap();
         assert!(service.is_running());
 
         service.stop().await.unwrap();
@@ -787,9 +791,11 @@ mod tests {
 
     #[test]
     fn test_snapshot_due_check() {
-        let mut config = MaintenanceServiceConfig::default();
-        config.auto_snapshot_enabled = true;
-        config.min_snapshot_interval_epochs = 100;
+        let config = MaintenanceServiceConfig {
+            auto_snapshot_enabled: true,
+            min_snapshot_interval_epochs: 100,
+            ..Default::default()
+        };
 
         let service = MaintenanceService::new(config).unwrap();
 

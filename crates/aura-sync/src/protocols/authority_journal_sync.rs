@@ -277,7 +277,8 @@ impl AuthorityJournalSyncProtocol {
         // Facts to send: present locally but not remotely
         let mut to_send: Vec<Fact> = local_set
             .difference(&remote_set)
-            .take(self.config.batch_size).cloned()
+            .take(self.config.batch_size)
+            .cloned()
             .collect();
 
         // Facts to receive: present remotely but not locally (represented by order)

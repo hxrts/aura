@@ -40,7 +40,7 @@ impl ReliabilityManager {
         P: PhysicalTimeEffects,
         E: From<TimeError>,
     {
-        let mut last_error = None;
+        let mut last_error: Option<E> = None;
 
         for attempt in 0..=self.max_retries {
             match operation() {
@@ -55,7 +55,11 @@ impl ReliabilityManager {
             }
         }
 
-        Err(last_error.unwrap())
+        // SAFETY: Loop runs at least once (0..=max_retries), so last_error is always Some
+        match last_error {
+            Some(e) => Err(e),
+            None => unreachable!("Loop always executes at least once"),
+        }
     }
 }
 

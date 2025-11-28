@@ -287,6 +287,11 @@ impl AuraEffectSystem {
         &self.composite
     }
 
+    /// Get access to time effects
+    pub fn time_effects(&self) -> &PhysicalTimeHandler {
+        &self.time_handler
+    }
+
     /// Build a permissive Biscuit policy/bridge pair for journal enforcement.
     fn init_journal_policy(
         device_id: DeviceId,

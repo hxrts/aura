@@ -990,7 +990,6 @@ pub fn compute_digest(journal: &Journal, operations: &[AttestedOp]) -> SyncResul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::journal::FactValue;
     use aura_journal::commitment_tree::{TreeOp, TreeOpKind};
 
     fn sample_journal() -> Journal {

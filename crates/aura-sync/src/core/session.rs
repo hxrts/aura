@@ -77,9 +77,7 @@ impl<T> SessionState<T> {
         let now = current_timestamp_secs;
 
         match self {
-            SessionState::Active { started_at, .. } => {
-                Some(now.saturating_sub(*started_at) * 1000)
-            }
+            SessionState::Active { started_at, .. } => Some(now.saturating_sub(*started_at) * 1000),
             SessionState::Terminating { result, .. } | SessionState::Completed(result) => {
                 match result {
                     SessionResult::Success { duration_ms, .. } => Some(*duration_ms),
@@ -997,7 +995,9 @@ mod tests {
             phase: "test".to_string(),
             data: vec![],
         };
-        manager.activate_session(session_id, state, Some(now)).unwrap();
+        manager
+            .activate_session(session_id, state, Some(now))
+            .unwrap();
         manager
             .complete_session(session_id, 0, 0, HashMap::new(), Some(now + 50))
             .unwrap();

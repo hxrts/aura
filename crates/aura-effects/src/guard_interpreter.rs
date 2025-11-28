@@ -330,8 +330,8 @@ mod tests {
     use async_trait::async_trait;
     use aura_core::{
         effects::{
-            FlowBudgetEffects, JournalEffects, LeakageEffects, NetworkEffects,
-            RandomEffects, StorageEffects,
+            FlowBudgetEffects, JournalEffects, LeakageEffects, NetworkEffects, RandomEffects,
+            StorageEffects,
         },
         time::PhysicalTime,
     };
@@ -381,7 +381,7 @@ mod tests {
             _peer: &AuthorityId,
             budget: &aura_core::FlowBudget,
         ) -> Result<aura_core::FlowBudget> {
-            Ok(budget.clone())
+            Ok(*budget)
         }
 
         async fn charge_flow_budget(
@@ -421,7 +421,7 @@ mod tests {
                 Ok(aura_core::flow::Receipt {
                     ctx: *context,
                     src: *peer,
-                    dst: *peer,  // Using peer for both in mock
+                    dst: *peer, // Using peer for both in mock
                     epoch: aura_core::types::Epoch::new(0),
                     cost,
                     nonce: 0,
@@ -471,19 +471,32 @@ mod tests {
 
     #[async_trait]
     impl StorageEffects for MockStorageEffects {
-        async fn store(&self, _key: &str, _value: Vec<u8>) -> std::result::Result<(), aura_core::effects::StorageError> {
+        async fn store(
+            &self,
+            _key: &str,
+            _value: Vec<u8>,
+        ) -> std::result::Result<(), aura_core::effects::StorageError> {
             Ok(())
         }
 
-        async fn retrieve(&self, _key: &str) -> std::result::Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
+        async fn retrieve(
+            &self,
+            _key: &str,
+        ) -> std::result::Result<Option<Vec<u8>>, aura_core::effects::StorageError> {
             Ok(None)
         }
 
-        async fn remove(&self, _key: &str) -> std::result::Result<bool, aura_core::effects::StorageError> {
+        async fn remove(
+            &self,
+            _key: &str,
+        ) -> std::result::Result<bool, aura_core::effects::StorageError> {
             Ok(true)
         }
 
-        async fn exists(&self, _key: &str) -> std::result::Result<bool, aura_core::effects::StorageError> {
+        async fn exists(
+            &self,
+            _key: &str,
+        ) -> std::result::Result<bool, aura_core::effects::StorageError> {
             Ok(false)
         }
 
@@ -497,7 +510,10 @@ mod tests {
         async fn retrieve_batch(
             &self,
             _keys: &[String],
-        ) -> std::result::Result<std::collections::HashMap<String, Vec<u8>>, aura_core::effects::StorageError> {
+        ) -> std::result::Result<
+            std::collections::HashMap<String, Vec<u8>>,
+            aura_core::effects::StorageError,
+        > {
             Ok(std::collections::HashMap::new())
         }
 
@@ -505,11 +521,17 @@ mod tests {
             Ok(())
         }
 
-        async fn list_keys(&self, _prefix: Option<&str>) -> std::result::Result<Vec<String>, aura_core::effects::StorageError> {
+        async fn list_keys(
+            &self,
+            _prefix: Option<&str>,
+        ) -> std::result::Result<Vec<String>, aura_core::effects::StorageError> {
             Ok(vec![])
         }
 
-        async fn stats(&self) -> std::result::Result<aura_core::effects::StorageStats, aura_core::effects::StorageError> {
+        async fn stats(
+            &self,
+        ) -> std::result::Result<aura_core::effects::StorageStats, aura_core::effects::StorageError>
+        {
             Ok(aura_core::effects::StorageStats {
                 key_count: 0,
                 total_size: 0,
@@ -538,8 +560,10 @@ mod tests {
             Ok(())
         }
 
-        async fn receive(&self) -> std::result::Result<(uuid::Uuid, Vec<u8>), aura_core::effects::NetworkError> {
-            Ok((uuid::Uuid::new_v4(), vec![]))
+        async fn receive(
+            &self,
+        ) -> std::result::Result<(uuid::Uuid, Vec<u8>), aura_core::effects::NetworkError> {
+            Ok((uuid::Uuid::nil(), vec![]))
         }
 
         async fn receive_from(
@@ -559,7 +583,10 @@ mod tests {
 
         async fn subscribe_to_peer_events(
             &self,
-        ) -> std::result::Result<aura_core::effects::PeerEventStream, aura_core::effects::NetworkError> {
+        ) -> std::result::Result<
+            aura_core::effects::PeerEventStream,
+            aura_core::effects::NetworkError,
+        > {
             Err(aura_core::effects::NetworkError::SendFailed {
                 peer_id: None,
                 reason: "MockNetworkEffects not implemented".to_string(),
@@ -597,14 +624,19 @@ mod tests {
 
     #[async_trait::async_trait]
     impl PhysicalTimeEffects for MockTimeEffects {
-        async fn physical_time(&self) -> std::result::Result<PhysicalTime, aura_core::effects::time::TimeError> {
+        async fn physical_time(
+            &self,
+        ) -> std::result::Result<PhysicalTime, aura_core::effects::time::TimeError> {
             Ok(PhysicalTime {
                 ts_ms: 1_650_000_000_000,
                 uncertainty: None,
             })
         }
 
-        async fn sleep_ms(&self, _ms: u64) -> std::result::Result<(), aura_core::effects::time::TimeError> {
+        async fn sleep_ms(
+            &self,
+            _ms: u64,
+        ) -> std::result::Result<(), aura_core::effects::time::TimeError> {
             Ok(())
         }
     }

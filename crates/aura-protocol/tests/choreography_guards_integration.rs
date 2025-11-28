@@ -15,6 +15,7 @@ struct MockEffectInterpreter {
     executed_commands: Arc<Mutex<Vec<EffectCommand>>>,
 }
 
+#[allow(clippy::unwrap_used)]
 impl MockEffectInterpreter {
     fn new() -> Self {
         Self {
@@ -25,13 +26,10 @@ impl MockEffectInterpreter {
     fn get_executed_commands(&self) -> Vec<EffectCommand> {
         self.executed_commands.lock().unwrap().clone()
     }
-
-    fn clear(&self) {
-        self.executed_commands.lock().unwrap().clear();
-    }
 }
 
 #[async_trait::async_trait]
+#[allow(clippy::unwrap_used)]
 impl aura_core::effects::guard::EffectInterpreter for MockEffectInterpreter {
     async fn execute(&self, command: EffectCommand) -> Result<EffectResult> {
         // Record the command

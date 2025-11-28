@@ -6,8 +6,8 @@
 use aura_core::{
     effects::{
         guard::{
-            EffectCommand, EffectInterpreter, FlowBudgetView, GuardOutcome,
-            GuardSnapshot, JournalEntry, MetadataView, SimulationEvent,
+            EffectCommand, EffectInterpreter, FlowBudgetView, GuardOutcome, GuardSnapshot,
+            JournalEntry, MetadataView, SimulationEvent,
         },
         NetworkAddress,
     },
@@ -40,7 +40,10 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
         _ => 25,
     };
 
-    if !snapshot.budgets.has_budget(&context, &authority, required_budget) {
+    if !snapshot
+        .budgets
+        .has_budget(&context, &authority, required_budget)
+    {
         return GuardOutcome::denied("Insufficient flow budget");
     }
 
@@ -135,10 +138,11 @@ async fn main() {
         let state = interpreter.snapshot_state();
         // Convert flow_budgets to include context
         let context = ContextId::new();
-        let budgets_with_context: std::collections::HashMap<(ContextId, AuthorityId), u32> =
-            state.flow_budgets.iter()
-                .map(|(auth, amount)| ((context, *auth), *amount))
-                .collect();
+        let budgets_with_context: std::collections::HashMap<(ContextId, AuthorityId), u32> = state
+            .flow_budgets
+            .iter()
+            .map(|(auth, amount)| ((context, *auth), *amount))
+            .collect();
         let snapshot = GuardSnapshot {
             now: state.current_time,
             caps: Cap::new(),

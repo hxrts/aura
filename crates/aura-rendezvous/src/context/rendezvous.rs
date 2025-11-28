@@ -239,7 +239,9 @@ impl ContextRendezvousCoordinator {
             expires_at,
             nonce: {
                 let bytes = self.effects.random_bytes(32).await;
-                bytes.try_into().unwrap()
+                bytes.try_into().map_err(|_| {
+                    AuraError::internal("Random bytes length mismatch - expected 32 bytes")
+                })?
             },
         })
     }
@@ -940,6 +942,7 @@ impl ContextRendezvousCoordinator {
     }
 
     /// Construct canonical receipt message for signing
+    #[allow(clippy::unwrap_used)] // Writing to Vec is infallible (only fails on OOM which panics anyway)
     fn construct_receipt_message(
         &self,
         envelope_id: &EnvelopeId,

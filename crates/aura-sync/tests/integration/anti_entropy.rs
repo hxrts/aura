@@ -243,15 +243,13 @@ async fn test_digest_comparison() -> AuraResult<()> {
     let status = comparison_result.map_err(|_| AuraError::internal(String::from("Timeout")))??;
     match status {
         DigestStatus::LocalBehind => {
-            // This is the expected case for our test
-            assert!(true, "Digest comparison correctly identified need for sync");
+            // This is the expected case for our test - digest comparison correctly identified need for sync
         }
         DigestStatus::Equal => {
-            // If digests match, no sync needed
-            assert!(true, "Devices are already in sync");
+            // If digests match, no sync needed - devices are already in sync
         }
         _ => {
-            assert!(true, "Other digest status handled correctly");
+            // Other digest status handled correctly
         }
     }
 

@@ -119,9 +119,11 @@ pub mod privacy {
 }
 
 // Re-export commonly used items from modular structure
+#[allow(ambiguous_glob_reexports)]
 pub use builders::*;
 pub use configuration::TestConfig as ConfigTestConfig;
 pub use effect_api::*;
+#[allow(ambiguous_glob_reexports)]
 pub use fixtures::*;
 pub use foundation::*;
 pub use infrastructure::*;

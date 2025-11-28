@@ -339,7 +339,7 @@ where
         Ok(ChallengeResponse {
             challenge: challenge_bytes,
             expires_at,
-            session_id: uuid::Uuid::new_v4().to_string(),
+            session_id: self.effects.random_uuid().await.to_string(),
         })
     }
 
@@ -494,8 +494,14 @@ where
             }
         };
 
+        // Parse session ID or generate a new one via RandomEffects
+        let session_id = match uuid::Uuid::parse_str(session_id) {
+            Ok(id) => id,
+            Err(_) => self.effects.random_uuid().await,
+        };
+
         Ok(SessionTicket {
-            session_id: uuid::Uuid::parse_str(session_id).unwrap_or_else(|_| uuid::Uuid::new_v4()),
+            session_id,
             issuer_device_id,
             scope: SessionScope::Protocol {
                 protocol_type: "device_auth".to_string(),
@@ -515,8 +521,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_testkit::builders::test_device_id;
     use aura_macros::aura_test;
+    use aura_testkit::builders::test_device_id;
     use aura_verify::session::SessionScope;
 
     #[test]

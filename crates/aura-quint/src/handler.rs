@@ -363,46 +363,42 @@ mod tests {
         assert_eq!(evaluator.config.max_evaluation_time_ms, 30_000);
     }
 
-    #[test]
-    fn test_property_evaluation() {
-        async {
-            let evaluator = QuintEvaluator::new();
-            let property = Property::new(
-                "test_prop",
-                "Test Property",
-                PropertyKind::Invariant,
-                "x > 0",
-            );
-            let state = Value::Object(serde_json::Map::new());
+    #[tokio::test]
+    async fn test_property_evaluation() {
+        let evaluator = QuintEvaluator::new();
+        let property = Property::new(
+            "test_prop",
+            "Test Property",
+            PropertyKind::Invariant,
+            "x > 0",
+        );
+        let state = Value::Object(serde_json::Map::new());
 
-            let result = evaluator.evaluate_property(&property, &state).await;
-            assert!(result.is_ok());
+        let result = evaluator.evaluate_property(&property, &state).await;
+        assert!(result.is_ok());
 
-            let eval_result = result.unwrap();
-            assert_eq!(eval_result.property_id, property.id);
-            assert!(eval_result.passed); // Currently always passes in placeholder
-        };
+        let eval_result = result.unwrap();
+        assert_eq!(eval_result.property_id, property.id);
+        assert!(eval_result.passed); // Currently always passes in placeholder
     }
 
-    #[test]
-    fn test_verification_run() {
-        async {
-            let evaluator = QuintEvaluator::new();
-            let property = Property::new(
-                "test_prop",
-                "Test Property",
-                PropertyKind::Invariant,
-                "x > 0",
-            );
-            let spec = PropertySpec::new("test_spec").with_property(property);
+    #[tokio::test]
+    async fn test_verification_run() {
+        let evaluator = QuintEvaluator::new();
+        let property = Property::new(
+            "test_prop",
+            "Test Property",
+            PropertyKind::Invariant,
+            "x > 0",
+        );
+        let spec = PropertySpec::new("test_spec").with_property(property);
 
-            let result = evaluator.run_verification(&spec).await;
-            assert!(result.is_ok());
+        let result = evaluator.run_verification(&spec).await;
+        assert!(result.is_ok());
 
-            let verification_result = result.unwrap();
-            assert_eq!(verification_result.spec_name, "test_spec");
-            assert_eq!(verification_result.property_results.len(), 1);
-            assert!(verification_result.overall_success);
-        };
+        let verification_result = result.unwrap();
+        assert_eq!(verification_result.spec_name, "test_spec");
+        assert_eq!(verification_result.property_results.len(), 1);
+        assert!(verification_result.overall_success);
     }
 }

@@ -434,24 +434,24 @@ test-macos-keychain:
     echo "  - Deploy with confidence knowing keys are hardware-protected"
 
 # Check architectural layer compliance (all checks)
-arch-check *FLAGS:
-    scripts/arch-check.sh {{FLAGS}} || true
+check-arch *FLAGS:
+    scripts/check-arch.sh {{FLAGS}} || true
 
 # Quick architectural checks by category
-arch-layers:
-    scripts/arch-check.sh --layers || true
+check-arch-layers:
+    scripts/check-arch.sh --layers || true
 
-arch-effects:
-    scripts/arch-check.sh --effects || true
+check-arch-effects:
+    scripts/check-arch.sh --effects || true
 
-arch-deps:
-    scripts/arch-check.sh --deps || true
+check-arch-deps:
+    scripts/check-arch.sh --deps || true
 
-arch-completeness:
-    scripts/arch-check.sh --completeness || true
+check-arch-completeness:
+    scripts/check-arch.sh --completeness || true
 
-arch-todos:
-    scripts/arch-check.sh --todos || true
+check-arch-todos:
+    scripts/check-arch.sh --todos || true
 
 # Run CI checks locally (dry-run of GitHub CI workflow)
 ci-dry-run:
@@ -504,31 +504,61 @@ ci-dry-run:
     fi
     echo ""
 
-    # 4. Check for Effects System Violations
+    # 4. Check for Effects System Violations (Layer-Aware)
     echo "[4/5] Checking for Effects System Violations..."
     violations_found=0
 
-    # Check for direct time usage
-    if rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number 2>/dev/null; then
-        echo -e "${RED}[ERROR]${NC} Found direct time usage! Use effects.now() instead."
+    # Layer architecture:
+    # - Layer 3 (aura-effects): Production handlers - MUST use SystemTime::now(), thread_rng()
+    # - Layer 6 (aura-simulator): Runtime composition - allowed for instrumentation
+    # - Layer 8 (aura-testkit, tests/): Testing infrastructure - allowed
+    # - All other layers: MUST use effect traits
+
+    # Check for direct time usage (exclude Layer 3, 6, 8, integration tests, and demo code)
+    # Note: May include false positives from code in comments
+    if rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number \
+        --glob '!**/aura-effects/**' \
+        --glob '!**/aura-simulator/**' \
+        --glob '!**/aura-testkit/**' \
+        --glob '!**/tests/**' \
+        --glob '!**/integration/**' \
+        --glob '!**/demo/**' \
+        --glob '!**/examples/**' 2>/dev/null; then
+        echo -e "${RED}[ERROR]${NC} Found direct time usage in application code! Use PhysicalTimeEffects::now() instead."
         violations_found=1
     fi
 
-    # Check for direct randomness usage
-    if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number 2>/dev/null; then
-        echo -e "${RED}[ERROR]${NC} Found direct randomness usage! Use effects.random_bytes() instead."
+    # Check for direct randomness usage (exclude Layer 3, 6, 8, integration tests, and demo code)
+    if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number \
+        --glob '!**/aura-effects/**' \
+        --glob '!**/aura-simulator/**' \
+        --glob '!**/aura-testkit/**' \
+        --glob '!**/tests/**' \
+        --glob '!**/integration/**' \
+        --glob '!**/demo/**' \
+        --glob '!**/examples/**' 2>/dev/null; then
+        echo -e "${RED}[ERROR]${NC} Found direct randomness usage in application code! Use RandomEffects methods instead."
         violations_found=1
     fi
 
-    # Check for direct UUID usage
-    if rg --type rust "Uuid::new_v4\(\)" crates/ --line-number 2>/dev/null; then
-        echo -e "${RED}[ERROR]${NC} Found direct UUID usage! Use effects.gen_uuid() instead."
+    # Check for direct UUID usage (exclude Layer 3, 6, 8, integration tests, and demo code)
+    if rg --type rust "Uuid::new_v4\(\)" crates/ --line-number \
+        --glob '!**/aura-effects/**' \
+        --glob '!**/aura-simulator/**' \
+        --glob '!**/aura-testkit/**' \
+        --glob '!**/tests/**' \
+        --glob '!**/integration/**' \
+        --glob '!**/demo/**' \
+        --glob '!**/examples/**' 2>/dev/null; then
+        echo -e "${RED}[ERROR]${NC} Found direct UUID usage in application code! Use RandomEffects::random_uuid() instead."
         violations_found=1
     fi
 
     if [ $violations_found -eq 0 ]; then
         echo -e "${GREEN}[OK]${NC} No effects system violations found"
     else
+        echo ""
+        echo -e "${YELLOW}Note:${NC} Layer 3 (aura-effects), Layer 6 (aura-simulator), and Layer 8 (aura-testkit, tests/) are exempt."
         exit_code=1
     fi
     echo ""

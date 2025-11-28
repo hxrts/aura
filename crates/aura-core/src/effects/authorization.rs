@@ -135,3 +135,63 @@ pub trait BiscuitAuthorizationEffects {
         scope: &ResourceScope,
     ) -> Result<bool, AuthorizationError>;
 }
+
+/// Blanket implementation for Arc<T> where T: AuthorizationEffects
+#[async_trait]
+impl<T> AuthorizationEffects for std::sync::Arc<T>
+where
+    T: AuthorizationEffects + ?Sized + Send + Sync,
+{
+    async fn verify_capability(
+        &self,
+        capabilities: &Cap,
+        operation: &str,
+        resource: &str,
+    ) -> Result<bool, AuthorizationError> {
+        (**self)
+            .verify_capability(capabilities, operation, resource)
+            .await
+    }
+
+    async fn delegate_capabilities(
+        &self,
+        source_capabilities: &Cap,
+        requested_capabilities: &Cap,
+        target_authority: &AuthorityId,
+    ) -> Result<Cap, AuthorizationError> {
+        (**self)
+            .delegate_capabilities(
+                source_capabilities,
+                requested_capabilities,
+                target_authority,
+            )
+            .await
+    }
+}
+
+/// Blanket implementation for Arc<T> where T: BiscuitAuthorizationEffects
+#[async_trait]
+impl<T> BiscuitAuthorizationEffects for std::sync::Arc<T>
+where
+    T: BiscuitAuthorizationEffects + ?Sized + Send + Sync,
+{
+    async fn authorize_biscuit(
+        &self,
+        token_data: &[u8],
+        operation: &str,
+        scope: &ResourceScope,
+    ) -> Result<AuthorizationDecision, AuthorizationError> {
+        (**self)
+            .authorize_biscuit(token_data, operation, scope)
+            .await
+    }
+
+    async fn authorize_fact(
+        &self,
+        token_data: &[u8],
+        fact_type: &str,
+        scope: &ResourceScope,
+    ) -> Result<bool, AuthorizationError> {
+        (**self).authorize_fact(token_data, fact_type, scope).await
+    }
+}

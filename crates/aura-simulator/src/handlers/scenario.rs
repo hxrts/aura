@@ -10,16 +10,16 @@ use aura_core::effects::{TestingEffects, TestingError};
 use aura_core::frost::ThresholdSignature;
 use aura_core::{AuraError, AuthorityId};
 use aura_testkit::simulation::choreography::{test_threshold_group, ChoreographyTestHarness};
+use futures::pin_mut;
+use futures::task::noop_waker;
+use futures::Future;
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use std::time::Instant;
-use futures::task::noop_waker;
-use futures::Future;
-use futures::pin_mut;
 use std::task::{Context, Poll};
 use std::thread;
+use std::time::Duration;
+use std::time::Instant;
 
 fn run_sync<F: Future>(fut: F) -> F::Output {
     let waker = noop_waker();

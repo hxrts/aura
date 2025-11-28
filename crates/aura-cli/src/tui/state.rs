@@ -4,10 +4,11 @@
 //! Manages the state of Bob's demo journey through the Aura system.
 
 use aura_chat::{ChatGroupId, ChatMessage};
+use aura_core::effects::PhysicalTimeEffects;
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_effects::PhysicalTimeHandler;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Application state for the TUI demo interface
 #[derive(Debug, Clone)]
@@ -136,7 +137,7 @@ impl AppState {
     }
 
     /// Set up Alice as guardian
-    pub fn setup_alice_guardian(&mut self, authority: AuthorityId) {
+    pub async fn setup_alice_guardian(&mut self, authority: AuthorityId) {
         self.alice_authority = Some(authority);
         self.guardian_states.insert(
             authority,
@@ -145,14 +146,14 @@ impl AppState {
                 name: "Alice".to_string(),
                 online: true,
                 approved_recovery: false,
-                last_activity: Self::now_ts(),
+                last_activity: Self::now_ts().await,
             },
         );
         self.add_status("Alice setup as guardian".to_string());
     }
 
     /// Set up Charlie as guardian
-    pub fn setup_charlie_guardian(&mut self, authority: AuthorityId) {
+    pub async fn setup_charlie_guardian(&mut self, authority: AuthorityId) {
         self.charlie_authority = Some(authority);
         self.guardian_states.insert(
             authority,
@@ -161,7 +162,7 @@ impl AppState {
                 name: "Charlie".to_string(),
                 online: true,
                 approved_recovery: false,
-                last_activity: Self::now_ts(),
+                last_activity: Self::now_ts().await,
             },
         );
         self.add_status("Charlie setup as guardian".to_string());
@@ -267,12 +268,16 @@ impl AppState {
         }
     }
 
-    fn now_ts() -> TimeStamp {
-        #[allow(clippy::disallowed_methods)]
-        let ts_ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-        TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms,
-            uncertainty: None,
-        })
+    async fn now_ts() -> TimeStamp {
+        // Use PhysicalTimeEffects for timestamp generation
+        let time_effects = PhysicalTimeHandler;
+        let physical_time = time_effects
+            .physical_time()
+            .await
+            .unwrap_or(PhysicalTime {
+                ts_ms: 0,
+                uncertainty: None,
+            });
+        TimeStamp::PhysicalClock(physical_time)
     }
 }

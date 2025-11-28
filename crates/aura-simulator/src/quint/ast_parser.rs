@@ -3,10 +3,9 @@
 //! Parses Quint CLI output and AST structures to extract meaningful
 //! property and specification information for the simulation framework.
 
-
 use crate::quint::cli_runner::{QuintDefinition, QuintModule, QuintParseOutput};
 use crate::quint::types::{
-    self, QuintInvariant, QuintSpec, QuintTemporalProperty, QuintSafetyProperty, SafetyPropertyType,
+    self, QuintInvariant, QuintSafetyProperty, QuintSpec, QuintTemporalProperty, SafetyPropertyType,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -408,11 +407,11 @@ impl QuintAstParser {
             Some(PropertyType::Invariant) => Ok(Some(types::QuintDefinition::Invariant(
                 self.definition_to_invariant(&def)?,
             ))),
-            Some(PropertyType::Always) | Some(PropertyType::Eventually) | Some(PropertyType::Until) => {
-                Ok(Some(types::QuintDefinition::Temporal(
-                    self.definition_to_temporal_property(&def)?,
-                )))
-            }
+            Some(PropertyType::Always)
+            | Some(PropertyType::Eventually)
+            | Some(PropertyType::Until) => Ok(Some(types::QuintDefinition::Temporal(
+                self.definition_to_temporal_property(&def)?,
+            ))),
             Some(PropertyType::Safety) => {
                 let description = def
                     .annotations

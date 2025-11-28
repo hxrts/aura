@@ -160,7 +160,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **Adding new effect trait**: `docs/106_effect_system_and_runtime.md` → `docs/805_development_patterns.md`
 - **Building choreography**: `docs/107_mpst_and_choreography.md` → `docs/803_coordination_guide.md`
 - **Understanding authorities**: `docs/100_authority_and_identity.md` → `docs/102_journal.md`
-- **Debugging architecture**: `docs/999_project_structure.md` + `just arch-check`
+- **Debugging architecture**: `docs/999_project_structure.md` + `just check-arch`
 - **Implementing consensus**: `docs/104_consensus.md` → `aura-protocol/src/consensus/`
 - **Working with journals**: `docs/102_journal.md` → `aura-journal/src/`
 - **Creating recovery flows**: `docs/103_relational_contexts.md` → `aura-recovery/`
@@ -235,7 +235,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 To conserve agent usage, prefer:
 - Specific file paths over broad searches when known
 - Targeted grep patterns over reading entire files
-- Architecture compliance (`just arch-check`) before complex refactoring
+- Architecture compliance (`just check-arch`) before complex refactoring
 - Quick reference skills over re-reading documentation
 - Batch operations and parallel tool calls when possible
 - Use `.claude/skills/` for project-specific knowledge

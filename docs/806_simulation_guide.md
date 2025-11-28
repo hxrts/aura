@@ -427,7 +427,7 @@ Before running simulations, ensure protocol code follows effect guidelines:
 
 ```bash
 # Run architectural compliance checker
-just arch-check
+just check-arch
 
 # Look for effect system violations
 # - Direct time usage: SystemTime::now, Instant::now

@@ -1826,7 +1826,6 @@ mod tests {
     use super::*;
     use aura_agent::{AgentConfig, AuraEffectSystem};
     use aura_core::PhysicalTimeEffects;
-    use futures::executor::block_on;
 
     #[tokio::test]
     async fn test_connection_manager_creation() {
@@ -1844,57 +1843,57 @@ mod tests {
 
     #[tokio::test]
     async fn test_connection_priority_logic() {
-            let device_id = DeviceId::from("test_device");
-            let stun_config = StunConfig::default();
-            let effects = std::sync::Arc::new(
-                AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
-            );
-            let random =
-                std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
-            let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
+        let device_id = DeviceId::from("test_device");
+        let stun_config = StunConfig::default();
+        let effects = std::sync::Arc::new(
+            AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
+        );
+        let random =
+            std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
 
-            let offers = vec![
-                TransportDescriptor::quic("192.168.1.100:8080".to_string(), "aura".to_string()),
-                TransportDescriptor::websocket("ws://relay.example.com:8081".to_string()),
-            ];
+        let offers = vec![
+            TransportDescriptor::quic("192.168.1.100:8080".to_string(), "aura".to_string()),
+            TransportDescriptor::websocket("ws://relay.example.com:8081".to_string()),
+        ];
 
-            let config = ConnectionConfig {
-                attempt_timeout: Duration::from_millis(100),
-                total_timeout: Duration::from_millis(500),
-                enable_stun: false,           // Disable for test
-                enable_hole_punch: false,     // Disable for test
-                enable_relay_fallback: false, // Disable for test
-                punch_config: PunchConfig::default(),
-            };
+        let config = ConnectionConfig {
+            attempt_timeout: Duration::from_millis(100),
+            total_timeout: Duration::from_millis(500),
+            enable_stun: false,           // Disable for test
+            enable_hole_punch: false,     // Disable for test
+            enable_relay_fallback: false, // Disable for test
+            punch_config: PunchConfig::default(),
+        };
 
-            // Get current timestamp for test
-            let physical_time = effects.physical_time().await.unwrap();
-            let timestamp = physical_time.ts_ms / 1000; // Convert to seconds
+        // Get current timestamp for test
+        let physical_time = effects.physical_time().await.unwrap();
+        let timestamp = physical_time.ts_ms / 1000; // Convert to seconds
 
-            let peer_id = DeviceId::from("peer_device");
-            let result = manager
-                .establish_connection(peer_id, offers, config, timestamp)
-                .await
-                .unwrap();
+        let peer_id = DeviceId::from("peer_device");
+        let result = manager
+            .establish_connection(peer_id, offers, config, timestamp)
+            .await
+            .unwrap();
 
-            // Should either succeed or fail since we have placeholder implementations
-            match result {
-                ConnectionResult::Failed { attempts, .. } => {
-                    assert!(!attempts.is_empty());
-                    assert_eq!(attempts[0].method, ConnectionMethod::Direct);
-                }
-                ConnectionResult::DirectConnection {
-                    transport, method, ..
-                } => {
-                    // Connection succeeded - this is also acceptable for placeholder implementations
-                    assert_eq!(method, ConnectionMethod::Direct);
-                    // Verify that the transport is one of the expected ones
-                    assert!(
-                        matches!(transport.kind, TransportKind::Quic)
-                            || matches!(transport.kind, TransportKind::WebSocket)
-                    );
-                }
+        // Should either succeed or fail since we have placeholder implementations
+        match result {
+            ConnectionResult::Failed { attempts, .. } => {
+                assert!(!attempts.is_empty());
+                assert_eq!(attempts[0].method, ConnectionMethod::Direct);
             }
+            ConnectionResult::DirectConnection {
+                transport, method, ..
+            } => {
+                // Connection succeeded - this is also acceptable for placeholder implementations
+                assert_eq!(method, ConnectionMethod::Direct);
+                // Verify that the transport is one of the expected ones
+                assert!(
+                    matches!(transport.kind, TransportKind::Quic)
+                        || matches!(transport.kind, TransportKind::WebSocket)
+                );
+            }
+        }
     }
 
     #[test]
@@ -1928,79 +1927,78 @@ mod tests {
 
     #[tokio::test]
     async fn test_coordinated_hole_punch() {
-            use aura_protocol::messages::social_rendezvous::{
-                TransportDescriptor, TransportKind, TransportOfferPayload,
-            };
+        use aura_protocol::messages::social_rendezvous::{
+            TransportDescriptor, TransportKind, TransportOfferPayload,
+        };
 
-            let device_id = DeviceId::from("test_device");
-            let stun_config = StunConfig::default();
-            let effects = std::sync::Arc::new(
-                AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
-            );
-            let random =
-                std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
-            let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
+        let device_id = DeviceId::from("test_device");
+        let stun_config = StunConfig::default();
+        let effects = std::sync::Arc::new(
+            AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
+        );
+        let random =
+            std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
 
-            // Create transport with reflexive address
-            let transport = TransportDescriptor {
-                kind: TransportKind::Quic,
-                metadata: std::collections::BTreeMap::new(),
-                local_addresses: vec!["192.168.1.100:8080".to_string()],
-                reflexive_addresses: vec!["203.0.113.42:12345".to_string()],
-            };
+        // Create transport with reflexive address
+        let transport = TransportDescriptor {
+            kind: TransportKind::Quic,
+            metadata: std::collections::BTreeMap::new(),
+            local_addresses: vec!["192.168.1.100:8080".to_string()],
+            reflexive_addresses: vec!["203.0.113.42:12345".to_string()],
+        };
 
-            // Create offer and answer with punch nonces
-            let offer_nonce = [1u8; 32];
-            let answer_nonce = [2u8; 32];
+        // Create offer and answer with punch nonces
+        let offer_nonce = [1u8; 32];
+        let answer_nonce = [2u8; 32];
 
-            let offer = TransportOfferPayload::new_offer_with_punch(
-                vec![transport.clone()],
-                vec![],
-                offer_nonce,
-            );
+        let offer = TransportOfferPayload::new_offer_with_punch(
+            vec![transport.clone()],
+            vec![],
+            offer_nonce,
+        );
 
-            let answer =
-                TransportOfferPayload::new_answer_with_punch(vec![transport], 0, answer_nonce);
+        let answer = TransportOfferPayload::new_answer_with_punch(vec![transport], 0, answer_nonce);
 
-            let config = ConnectionConfig {
-                attempt_timeout: Duration::from_millis(100),
-                total_timeout: Duration::from_millis(500),
-                enable_stun: false,
-                enable_hole_punch: true,
-                enable_relay_fallback: false,
-                punch_config: PunchConfig {
-                    max_attempts: 10,
-                    punch_timeout: Duration::from_millis(50),
-                    punch_interval: Duration::from_millis(10),
-                    enable_symmetric_detection: false,
-                    relay_servers: vec![],
-                },
-            };
+        let config = ConnectionConfig {
+            attempt_timeout: Duration::from_millis(100),
+            total_timeout: Duration::from_millis(500),
+            enable_stun: false,
+            enable_hole_punch: true,
+            enable_relay_fallback: false,
+            punch_config: PunchConfig {
+                max_attempts: 10,
+                punch_timeout: Duration::from_millis(50),
+                punch_interval: Duration::from_millis(10),
+                enable_symmetric_detection: false,
+                relay_servers: vec![],
+            },
+        };
 
-            // Get current time values for test
-            let physical_time = effects.physical_time().await.unwrap();
-            let start_time = std::time::Instant::now(); // Monotonic timing for test measurements
-            let timestamp = physical_time.ts_ms / 1000; // Convert to seconds
+        // Get current time values for test
+        let physical_time = effects.physical_time().await.unwrap();
+        let start_time = std::time::Instant::now(); // Monotonic timing for test measurements
+        let timestamp = physical_time.ts_ms / 1000; // Convert to seconds
 
-            let peer_id = DeviceId::from("peer_device");
-            let result = manager
-                .establish_connection_with_punch(
-                    peer_id, &offer, &answer, config, start_time, timestamp,
-                )
-                .await
-                .unwrap();
+        let peer_id = DeviceId::from("peer_device");
+        let result = manager
+            .establish_connection_with_punch(
+                peer_id, &offer, &answer, config, start_time, timestamp,
+            )
+            .await
+            .unwrap();
 
-            // Should fail since we have placeholder implementations and no actual peer
-            match result {
-                ConnectionResult::Failed { attempts, .. } => {
-                    // This is expected - we don't have actual QUIC/punch infrastructure running
-                    assert!(!attempts.is_empty());
-                }
-                _ => {
-                    // Unexpected success in test environment would be surprising
-                    // but not necessarily wrong if punch logic worked
-                }
+        // Should fail since we have placeholder implementations and no actual peer
+        match result {
+            ConnectionResult::Failed { attempts, .. } => {
+                // This is expected - we don't have actual QUIC/punch infrastructure running
+                assert!(!attempts.is_empty());
             }
+            _ => {
+                // Unexpected success in test environment would be surprising
+                // but not necessarily wrong if punch logic worked
+            }
+        }
     }
 
     #[test]

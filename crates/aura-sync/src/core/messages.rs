@@ -407,7 +407,6 @@ impl ProgressMessage {
 mod tests {
     use super::*;
     use aura_testkit::builders::test_device_id;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_session_message() {

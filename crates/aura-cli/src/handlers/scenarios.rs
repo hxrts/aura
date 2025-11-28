@@ -379,11 +379,11 @@ async fn execute_scenarios_through_effects(
 
     for scenario in scenario_files {
         println!("Executing: {}", scenario.display());
-        #[allow(clippy::disallowed_methods)]
+        // Use monotonic time directly for duration measurement (not via deprecated effects method)
         let start = Instant::now();
         let run_result = run_scenario_file(ctx, effects.clone(), &scenario).await;
 
-        let duration_ms = start.elapsed().as_millis() as u64;
+        let duration_ms = Instant::now().duration_since(start).as_millis() as u64;
         let (success, error, log_path) = match run_result {
             Ok(log_path) => (true, None, log_path),
             Err(e) => (false, Some(e.to_string()), None),
@@ -831,7 +831,7 @@ async fn simulate_cli_recovery_demo(
 ) -> Result<CliRecoverySimResult, anyhow::Error> {
     let handler = SimulationScenarioHandler::new(seed);
     let mut steps = Vec::new();
-    #[allow(clippy::disallowed_methods)]
+    // Use monotonic time directly for duration measurement (not via deprecated effects method)
     let start = Instant::now();
 
     // Run guardian setup choreography via recovery coordinator using simulation effects
