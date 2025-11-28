@@ -492,7 +492,8 @@ ci-dry-run:
         -D clippy::disallowed_methods \
         -D clippy::disallowed_types \
         -D clippy::unwrap_used \
-        -D clippy::expect_used; then
+        -D clippy::expect_used \
+        -D clippy::duplicated_attributes; then
         echo -e "${GREEN}[OK]${NC} Clippy check passed"
     else
         echo -e "${RED}[FAIL]${NC} Clippy check failed"
@@ -636,11 +637,13 @@ ci-dry-run:
     fi
 
     doc_errors=0
+    doc_output=$(mktemp)
     for file in docs/*.md CLAUDE.md README.md; do
         if [ -f "$file" ]; then
-            if markdown-link-check "$file" --config .github/config/markdown-link-check.json > /dev/null 2>&1; then
+            if ! markdown-link-check "$file" --config .github/config/markdown-link-check.json 2>&1 | tee -a "$doc_output" | grep -q "ERROR:"; then
                 :
             else
+                echo -e "${RED}Broken links found in $file${NC}"
                 doc_errors=1
             fi
         fi
@@ -650,8 +653,10 @@ ci-dry-run:
         echo -e "${GREEN}[OK]${NC} Documentation links check passed"
     else
         echo -e "${RED}[FAIL]${NC} Documentation links check failed"
+        echo "See errors above for details"
         exit_code=1
     fi
+    rm -f "$doc_output"
     echo ""
 
     # 6. Build Check
