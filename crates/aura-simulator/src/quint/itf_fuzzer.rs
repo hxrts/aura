@@ -1702,9 +1702,7 @@ impl PerformanceMonitor {
 
     #[cfg(target_os = "linux")]
     fn get_memory_usage() -> Option<u64> {
-        let storage = default_storage_provider();
-        let status = (storage.retrieve("/proc/self/status")).ok()??;
-        let status = String::from_utf8(status).ok()?;
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
         for line in status.lines() {
             if line.starts_with("VmRSS:") {
                 let parts: Vec<&str> = line.split_whitespace().collect();

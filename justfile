@@ -470,9 +470,9 @@ ci-dry-run:
 
     exit_code=0
 
-    # Clean incremental cache to avoid stale artifacts
-    echo "Cleaning incremental compilation cache..."
-    rm -rf target/debug/incremental target/release/incremental 2>/dev/null || true
+    # Clean ALL build artifacts to ensure fresh compilation (matches GitHub CI behavior)
+    echo "Cleaning build cache to ensure fresh compilation..."
+    cargo clean
     echo ""
 
     # 1. Format Check
