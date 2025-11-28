@@ -12,7 +12,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_sync::infrastructure::{RateLimiter, RateLimitConfig};
 //! use aura_core::DeviceId;
 //! use std::time::Duration;

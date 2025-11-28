@@ -283,3 +283,11 @@ Classical consensus protocols for ordered logs provide a total order of operatio
 Aura consensus uses an initiator for low latency decision in the common case and a leaderless gossip protocol for fallback. It relies on local timers and partial synchrony assumptions. It scopes consensus to a context level witness group and a single operation per instance.
 
 The protocol integrates CRDT based state, threshold signatures, and session style message flows. Aura's novelty is the combination of context scoped single shot consensus, CRDT based evidence and commit facts, and a threshold signature based fast path with a gossip based fallback. This design provides strong agreement when required while keeping most of the system available and convergent through CRDT merges.
+
+## See Also
+
+- [Consensus](../104_consensus.md) - Full consensus specification and implementation
+- [Journal](../102_journal.md) - CRDT fact stores and deterministic reduction
+- [Relational Contexts](../103_relational_contexts.md) - Context scoped witness groups
+- [System Architecture](../001_system_architecture.md) - Integration with choreographic protocols
+- [Distributed Systems Contract](../004_distributed_systems_contract.md) - Safety and liveness guarantees

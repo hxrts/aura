@@ -16,7 +16,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_sync::protocols::{JournalSyncProtocol, JournalSyncConfig};
 //! use aura_core::effects::{JournalEffects, NetworkEffects};
 //!

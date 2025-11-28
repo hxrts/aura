@@ -42,10 +42,15 @@ async fn test_basic_anti_entropy_sync() -> AuraResult<()> {
         "Anti-entropy sync should complete successfully"
     );
 
-    // Verify session completion
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(30))
-        .await?;
+    // End the session and wait for completion using type-state pattern
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(30))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     // Verify journal consistency after sync
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -93,10 +98,15 @@ async fn test_multi_device_anti_entropy_sync() -> AuraResult<()> {
         }
     }
 
-    // Wait for overall session completion
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(60))
-        .await?;
+    // End the session and wait for completion using type-state pattern
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(60))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     // Verify all devices have consistent state
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -143,9 +153,15 @@ async fn test_anti_entropy_with_network_conditions() -> AuraResult<()> {
         "Anti-entropy should succeed despite poor network"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(45))
-        .await?;
+    // End the session and wait for completion using type-state pattern
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(45))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     // Verify eventual consistency
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -201,9 +217,15 @@ async fn test_anti_entropy_with_packet_loss() -> AuraResult<()> {
         "Anti-entropy should succeed despite packet loss"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(60))
-        .await?;
+    // End the session and wait for completion using type-state pattern
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(60))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
     assert!(
@@ -253,9 +275,15 @@ async fn test_digest_comparison() -> AuraResult<()> {
         }
     }
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(30))
-        .await?;
+    // End the session and wait for completion using type-state pattern
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(30))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     Ok(())
 }
@@ -299,9 +327,15 @@ async fn test_gradual_divergence_recovery() -> AuraResult<()> {
         "Should recover from divergent states"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(90))
-        .await?;
+    // End the session and wait for completion using type-state pattern
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(90))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     // Verify all devices converged to consistent state
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -357,12 +391,26 @@ async fn test_concurrent_anti_entropy_sessions() -> AuraResult<()> {
     let session2 = fixture.create_coordinated_session("concurrent_2").await?;
     let session3 = fixture.create_coordinated_session("concurrent_3").await?;
 
+    // End all sessions and capture EndedSession handles
+    let ended1 = session1
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    let ended2 = session2
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    let ended3 = session3
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+
     // All sessions should be able to run concurrently
     let concurrent_result = timeout(Duration::from_secs(60), async {
         tokio::join!(
-            fixture.wait_for_session_completion(&session1, Duration::from_secs(45)),
-            fixture.wait_for_session_completion(&session2, Duration::from_secs(45)),
-            fixture.wait_for_session_completion(&session3, Duration::from_secs(45))
+            ended1.wait_for_completion(Duration::from_secs(45)),
+            ended2.wait_for_completion(Duration::from_secs(45)),
+            ended3.wait_for_completion(Duration::from_secs(45))
         )
     })
     .await;

@@ -15,7 +15,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_testkit::foundation::{TestEffectComposer, SimpleTestContext};
 //! use aura_core::effects::{ExecutionMode, CryptoEffects, PhysicalTimeEffects};
 //!

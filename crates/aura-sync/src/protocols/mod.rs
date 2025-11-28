@@ -14,6 +14,10 @@
 //! - **Composable**: Can be combined without tight coupling via effect composition
 //! - **Reusable**: Building blocks for services (aura-sync/services) and higher-level workflows
 //! - **Guard-integrated**: Messages flow through guard chain (CapGuard → FlowGuard → Journal)
+//!
+//! ```rust,ignore
+//! async fn sync_with_peer<E>(effects: &E, peer: DeviceId) -> SyncResult<()>
+//! where
 //!     E: JournalEffects + NetworkEffects,
 //! {
 //!     let protocol = AntiEntropyProtocol::new(config);

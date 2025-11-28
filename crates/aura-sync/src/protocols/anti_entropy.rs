@@ -22,7 +22,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_sync::protocols::{AntiEntropyProtocol, AntiEntropyConfig};
 //! use aura_core::effects::{JournalEffects, NetworkEffects};
 //!

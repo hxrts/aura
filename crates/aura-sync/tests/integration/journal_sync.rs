@@ -37,9 +37,15 @@ async fn test_basic_journal_sync() -> AuraResult<()> {
 
     assert!(sync_result.is_ok(), "Basic journal sync should succeed");
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(30))
-        .await?;
+    // End the session and wait for completion using type-state pattern
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(30))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
     assert!(consistency, "Journals should be consistent after sync");
@@ -84,9 +90,14 @@ async fn test_divergent_state_resolution() -> AuraResult<()> {
 
     assert!(resolution_result.is_ok(), "Should resolve divergent states");
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(60))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(60))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     // Verify all devices converged to same state
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -147,9 +158,14 @@ async fn test_batched_journal_sync() -> AuraResult<()> {
 
     assert!(sync_result.is_ok(), "Batched journal sync should succeed");
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(90))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(90))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
     assert!(consistency, "Batched sync should maintain consistency");
@@ -214,9 +230,14 @@ async fn test_journal_sync_with_interruptions() -> AuraResult<()> {
         "Should recover from network interruptions"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(120))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(120))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
     assert!(
@@ -264,9 +285,14 @@ async fn test_sync_state_transitions() -> AuraResult<()> {
         "State transitions should proceed correctly"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(45))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(45))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     Ok(())
 }
@@ -324,9 +350,14 @@ async fn test_concurrent_journal_writers() -> AuraResult<()> {
         "Concurrent writes should be handled correctly"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(90))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(90))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     // After sync, all devices should have same journal state
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -393,9 +424,14 @@ async fn test_sync_message_handling() -> AuraResult<()> {
         "All message types should be handled correctly"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(30))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(30))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     Ok(())
 }
@@ -466,9 +502,14 @@ async fn test_sync_retry_logic() -> AuraResult<()> {
         "Retry logic should eventually succeed"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(150))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(150))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
     assert!(consistency, "Should achieve consistency after retries");

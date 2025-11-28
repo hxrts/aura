@@ -16,7 +16,7 @@ use aura_sync::{
 use aura_testkit::{
     foundation::TestEffectComposer,
     simulation::{
-        choreography::{ChoreographyTestHarness, CoordinatedSession, SessionStatus},
+        choreography::{ChoreographyTestHarness, CoordinatedSession},
         network::{NetworkCondition, NetworkSimulator},
     },
 };
@@ -118,26 +118,14 @@ impl MultiDeviceTestFixture {
             .map_err(|e| AuraError::internal(format!("Failed to create session: {}", e)))
     }
 
-    /// Wait for session to complete with timeout
-    pub async fn wait_for_session_completion(
-        &self,
-        session: &CoordinatedSession,
-        timeout_duration: Duration,
-    ) -> AuraResult<()> {
-        timeout(timeout_duration, async {
-            loop {
-                let status = session.status().await.map_err(|e| {
-                    AuraError::internal(format!("Failed to get session status: {}", e))
-                })?;
-                match status.status {
-                    SessionStatus::Ended => return Ok(()),
-                    SessionStatus::Active => tokio::time::sleep(Duration::from_millis(100)).await,
-                }
-            }
-        })
-        .await
-        .map_err(|_| AuraError::internal(String::from("Session timeout")))?
-    }
+    // REMOVED: wait_for_session_completion
+    //
+    // This method has been removed in favor of the type-state pattern.
+    // Use EndedSession::wait_for_completion instead:
+    //
+    // OLD:  fixture.wait_for_session_completion(&session, timeout).await?;
+    // NEW:  let ended = session.end().await?;
+    //       ended.wait_for_completion(timeout).await?;
 }
 
 /// Helper for creating anti-entropy protocol instances
@@ -256,10 +244,16 @@ pub async fn verify_journal_consistency(fixture: &MultiDeviceTestFixture) -> Aur
 
     let session = fixture.create_coordinated_session("verification").await?;
 
-    // Wait for verification to complete
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(30))
-        .await?;
+    // End the session and wait for completion using type-state pattern
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to end verification session: {}", e)))?;
+
+    ended
+        .wait_for_completion(Duration::from_secs(30))
+        .await
+        .map_err(|e| AuraError::internal(format!("Verification session timeout: {}", e)))?;
 
     // In a real implementation, this would check actual journal state equality
     Ok(true)

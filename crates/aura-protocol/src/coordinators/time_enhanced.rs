@@ -4,7 +4,7 @@
 
 use crate::effects::{TimeoutHandle, WakeCondition};
 use async_lock::RwLock;
-use aura_core::effects::PhysicalTimeEffects;
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
 use aura_core::{AuraError, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,6 +30,8 @@ pub struct EnhancedTimeHandler {
     stats: Arc<RwLock<TimeHandlerStats>>,
     /// Underlying time provider for deterministic/testing overrides
     provider: Arc<dyn PhysicalTimeEffects>,
+    /// Random provider for generating unique IDs
+    random_provider: Arc<dyn RandomEffects>,
 }
 
 /// Statistics for the time handler
@@ -46,7 +48,10 @@ pub struct TimeHandlerStats {
 impl EnhancedTimeHandler {
     /// Create a new enhanced time handler
     pub fn new() -> Self {
-        Self::with_provider(Arc::new(aura_effects::time::PhysicalTimeHandler))
+        Self::with_providers(
+            Arc::new(aura_effects::time::PhysicalTimeHandler),
+            Arc::new(aura_effects::random::RealRandomHandler),
+        )
     }
 
     /// Check if this is a simulated time handler (for testing)
@@ -68,7 +73,7 @@ impl EnhancedTimeHandler {
 
     /// Set a timeout and return a handle
     pub async fn set_timeout(&self, timeout_ms: u64) -> TimeoutHandle {
-        let timeout_id = uuid::Uuid::new_v4();
+        let timeout_id = self.random_provider.random_uuid().await;
         let current_ms = self.current_timestamp().await;
         let expires_at_ms = current_ms.saturating_add(timeout_ms);
 
@@ -202,12 +207,20 @@ impl EnhancedTimeHandler {
 
     /// Create a new enhanced time handler with explicit time provider
     pub fn with_provider(provider: Arc<dyn PhysicalTimeEffects>) -> Self {
+        Self::with_providers(provider, Arc::new(aura_effects::random::RealRandomHandler))
+    }
+
+    pub fn with_providers(
+        provider: Arc<dyn PhysicalTimeEffects>,
+        random_provider: Arc<dyn RandomEffects>,
+    ) -> Self {
         Self {
             contexts: Arc::new(RwLock::new(HashMap::new())),
             timeouts: Arc::new(RwLock::new(HashMap::new())),
             event_count: Arc::new(RwLock::new(0)),
             stats: Arc::new(RwLock::new(TimeHandlerStats::default())),
             provider,
+            random_provider,
         }
     }
 

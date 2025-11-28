@@ -326,7 +326,7 @@ impl TreeSigningContext {
 /// ## Examples
 ///
 /// ```
-/// use aura_core::frost::tree_signing::{TreeSigningContext, binding_message};
+/// use aura_core::crypto::tree_signing::{TreeSigningContext, binding_message};
 /// use aura_core::TreeOp;
 ///
 /// let ctx = TreeSigningContext::new(1, 42, [0u8; 32]);
@@ -418,7 +418,7 @@ fn serialize_tree_op_for_binding(op: &TreeOpKind) -> Vec<u8> {
 /// ## Examples
 ///
 /// ```
-/// use aura_core::frost::tree_signing::generate_nonce_with_share;
+/// use aura_core::crypto::tree_signing::generate_nonce_with_share;
 ///
 /// // Use generate_nonce_with_share for proper FROST nonces
 /// // let (nonce, commitment) = generate_nonce_with_share(1, &signing_share);

@@ -5,7 +5,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_sync::protocols::{ReceiptVerificationProtocol, ReceiptVerificationConfig};
 //!
 //! # fn example() -> Result<(), Box<dyn std::error::Error>> {

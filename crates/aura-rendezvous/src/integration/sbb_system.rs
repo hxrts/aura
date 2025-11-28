@@ -457,10 +457,12 @@ mod tests {
     use aura_agent::AgentConfig;
     use aura_agent::AuraEffectSystem;
 
-    fn test_effects(_device_id: DeviceId) -> Arc<dyn AuraEffects> {
+    fn test_effects(
+        _device_id: DeviceId,
+    ) -> Result<Arc<dyn AuraEffects>, Box<dyn std::error::Error>> {
         let config = AgentConfig::default();
-        let system = AuraEffectSystem::testing(&config).expect("test effect system");
-        Arc::new(system)
+        let system = AuraEffectSystem::testing(&config)?;
+        Ok(Arc::new(system))
     }
 
     fn create_test_transport_offer(device_id: DeviceId) -> TransportOfferPayload {
@@ -481,30 +483,32 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_integrated_sbb_system_creation() {
+    async fn test_integrated_sbb_system_creation() -> Result<(), Box<dyn std::error::Error>> {
         let device_id = DeviceId::new();
         let config = SbbConfig::default();
-        let effects = test_effects(device_id);
+        let effects = test_effects(device_id)?;
         let _system = IntegratedSbbSystem::new(device_id, config, effects);
         // Should create without errors
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_sbb_system_builder() {
+    async fn test_sbb_system_builder() -> Result<(), Box<dyn std::error::Error>> {
         let device_id = DeviceId::new();
 
         let system = SbbSystemBuilder::new(device_id)
             .with_app_context("test-sbb".to_string())
             .with_padding_strategy(PaddingStrategy::ExactSize { size: 2048 })
-            .build(test_effects(device_id));
+            .build(test_effects(device_id)?);
 
         assert_eq!(system.device_id, device_id);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_relationship_management() {
+    async fn test_relationship_management() -> Result<(), Box<dyn std::error::Error>> {
         let device_id = DeviceId::new();
-        let effects = test_effects(device_id);
+        let effects = test_effects(device_id)?;
         let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default(), effects);
 
         let friend_id = DeviceId::new();
@@ -526,13 +530,14 @@ mod tests {
         assert_eq!(stats.guardian_count, 1);
         assert_eq!(stats.medium_count, 1);
         assert_eq!(stats.high_count, 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_discovery_request_flooding() {
+    async fn test_discovery_request_flooding() -> Result<(), Box<dyn std::error::Error>> {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
-        let alice_effects = test_effects(alice_id);
+        let alice_effects = test_effects(alice_id)?;
         let mut alice_system =
             IntegratedSbbSystem::new(alice_id, SbbConfig::default(), alice_effects);
 
@@ -552,8 +557,7 @@ mod tests {
 
         let result = alice_system
             .flood_discovery_request(discovery_request)
-            .await
-            .unwrap();
+            .await?;
 
         // Should successfully forward to Bob
         match result.flood_result {
@@ -563,13 +567,14 @@ mod tests {
 
         assert!(!result.encrypted);
         assert_eq!(result.peers_reached, 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_encrypted_discovery_to_peer() {
+    async fn test_encrypted_discovery_to_peer() -> Result<(), Box<dyn std::error::Error>> {
         let alice_id = DeviceId::new();
         let bob_id = DeviceId::new();
-        let alice_effects = test_effects(alice_id);
+        let alice_effects = test_effects(alice_id)?;
         let mut alice_system =
             IntegratedSbbSystem::new(alice_id, SbbConfig::default(), alice_effects);
 
@@ -583,8 +588,7 @@ mod tests {
 
         let result = alice_system
             .flood_encrypted_discovery_to_peer(bob_id, discovery_request)
-            .await
-            .expect("flood_encrypted_discovery_to_peer should succeed");
+            .await?;
 
         assert!(result.encrypted);
         assert_eq!(result.peers_reached, 1);
@@ -597,12 +601,13 @@ mod tests {
             "Encrypted message size should be > 100, got {}",
             result.message_size
         );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_trust_level_updates() {
+    async fn test_trust_level_updates() -> Result<(), Box<dyn std::error::Error>> {
         let device_id = DeviceId::new();
-        let effects = test_effects(device_id);
+        let effects = test_effects(device_id)?;
         let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default(), effects);
 
         let peer_id = DeviceId::new();
@@ -619,19 +624,18 @@ mod tests {
         assert_eq!(stats1.high_count, 0);
 
         // Update to high trust
-        system
-            .update_trust_level(peer_id, TrustLevel::High, now)
-            .unwrap();
+        system.update_trust_level(peer_id, TrustLevel::High, now)?;
 
         let stats2 = system.get_statistics();
         assert_eq!(stats2.low_count, 0);
         assert_eq!(stats2.high_count, 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_peer_capability_checking() {
+    async fn test_peer_capability_checking() -> Result<(), Box<dyn std::error::Error>> {
         let device_id = DeviceId::new();
-        let effects = test_effects(device_id);
+        let effects = test_effects(device_id)?;
         let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default(), effects);
 
         let peer_id = DeviceId::new();
@@ -647,7 +651,7 @@ mod tests {
         assert!(system.can_forward_to_peer(peer_id, 1024, now).await);
 
         // Check eligible peers
-        let peers = system.get_eligible_peers(1024, now).await.unwrap();
+        let peers = system.get_eligible_peers(1024, now).await?;
         assert_eq!(peers.len(), 1);
         assert_eq!(peers[0], peer_id);
 
@@ -657,7 +661,8 @@ mod tests {
         // Should no longer be able to forward
         assert!(!system.can_forward_to_peer(peer_id, 1024, now).await);
 
-        let peers = system.get_eligible_peers(1024, now).await.unwrap();
+        let peers = system.get_eligible_peers(1024, now).await?;
         assert!(peers.is_empty());
+        Ok(())
     }
 }

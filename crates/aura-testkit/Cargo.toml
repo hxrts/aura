@@ -58,6 +58,9 @@ proptest = { workspace = true }
 # Authorization system
 biscuit-auth = { workspace = true }
 
+# Test serialization for global state tests
+serial_test = { workspace = true }
+
 [dev-dependencies]
 # For testing the test utilities themselves
 # tokio-test = { workspace = true } # removed - unused

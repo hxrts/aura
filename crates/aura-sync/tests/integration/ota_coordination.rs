@@ -86,9 +86,14 @@ async fn test_basic_ota_coordination() -> AuraResult<()> {
 
     assert!(ota_result.is_ok(), "OTA coordination should succeed");
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(120))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(120))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     Ok(())
 }
@@ -157,9 +162,13 @@ async fn test_ota_insufficient_approvals() -> AuraResult<()> {
     }
 
     // Session might complete with failure status
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
     let session_completion = timeout(
         Duration::from_secs(30),
-        fixture.wait_for_session_completion(&session, Duration::from_secs(90)),
+        ended.wait_for_completion(Duration::from_secs(90)),
     )
     .await;
 
@@ -240,9 +249,14 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
         "Epoch fencing should work correctly"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(90))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(90))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     Ok(())
 }
@@ -301,9 +315,14 @@ async fn test_ota_rollback() -> AuraResult<()> {
 
     assert!(rollback_result.is_ok(), "OTA rollback should succeed");
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(120))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(120))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     Ok(())
 }
@@ -364,9 +383,14 @@ async fn test_ota_network_partition() -> AuraResult<()> {
         "OTA should handle network partitions gracefully"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(150))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(150))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     Ok(())
 }
@@ -432,9 +456,14 @@ async fn test_concurrent_ota_attempts() -> AuraResult<()> {
         "Should handle concurrent OTA proposals correctly"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(120))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(120))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     Ok(())
 }
@@ -549,9 +578,14 @@ async fn test_ota_device_failures() -> AuraResult<()> {
         "OTA should handle device failures gracefully"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(150))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(150))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     Ok(())
 }

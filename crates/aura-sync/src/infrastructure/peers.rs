@@ -17,7 +17,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_sync::infrastructure::{PeerManager, PeerDiscoveryConfig};
 //! use aura_core::effects::{NetworkEffects, StorageEffects};
 //!
@@ -429,6 +429,8 @@ impl PeerManager {
     fn create_sync_discovery_query(&self) -> aura_rendezvous::discovery::DiscoveryQuery {
         use aura_rendezvous::discovery::*;
 
+        #[allow(clippy::disallowed_methods)]
+        // [VERIFIED] Acceptable in discovery query ID generation
         let query_id: QueryId = hash::hash(Uuid::new_v4().as_bytes());
 
         // Create query for sync-capable peers using generic capabilities

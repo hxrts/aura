@@ -4,7 +4,6 @@
 //! model, replacing the device-centric guardian authentication.
 
 use aura_core::relational::GuardianBinding;
-use aura_core::TimeEffects;
 use aura_core::{
     relational::{GenericBinding, RelationalFact},
     AuraError, Authority, AuthorityId, Hash32, Result,
@@ -105,7 +104,11 @@ pub async fn authenticate_guardian<T: aura_core::effects::PhysicalTimeEffects>(
         guardian_id: guardian_authority.authority_id(),
         binding_proof: binding.consensus_proof.clone(),
         operation_signature: signature.to_bytes().to_vec(),
-        issued_at: time_effects.current_timestamp().await,
+        issued_at: time_effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0),
     })
 }
 
@@ -140,7 +143,11 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
         .ok_or_else(|| AuraError::not_found("Guardian binding not found"))?;
 
     // Basic freshness check (10 minutes)
-    let now = time_effects.current_timestamp().await;
+    let now = time_effects
+        .physical_time()
+        .await
+        .map(|t| t.ts_ms)
+        .unwrap_or(0);
     if now.saturating_sub(proof.issued_at) > 600 {
         return Ok(GuardianAuthResponse {
             success: false,
@@ -293,7 +300,11 @@ impl GuardianAuthHandler {
         let record = RecoveryRequestRecord {
             guardian_id: guardian.authority_id(),
             account_id: request.account_id,
-            requested_at: time_effects.current_timestamp().await,
+            requested_at: time_effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
             operation: request.operation.clone(),
         };
 
@@ -347,7 +358,11 @@ impl GuardianAuthHandler {
                     .max()
                     .unwrap_or(0);
 
-                let now = time_effects.current_timestamp().await;
+                let now = time_effects
+                    .physical_time()
+                    .await
+                    .map(|t| t.ts_ms)
+                    .unwrap_or(0);
 
                 if latest_request_time > 0 && now < latest_request_time + recovery_delay.as_secs() {
                     return Ok(false);

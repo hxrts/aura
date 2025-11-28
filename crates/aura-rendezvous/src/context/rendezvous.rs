@@ -227,7 +227,12 @@ impl ContextRendezvousCoordinator {
             ));
         }
 
-        let now = aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await;
+        let now = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
         let expires_at = now + 3600; // 1 hour expiration
 
         Ok(ContextRendezvousDescriptor {
@@ -528,7 +533,12 @@ impl ContextRendezvousCoordinator {
             required_tokens: Vec::new(), // Empty since we're not using tokens for now
             leakage_budget: guard.leakage_budget,
             operation_id: guard.operation_id,
-            timestamp: aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await,
+            timestamp: self
+                .effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
             nonce: {
                 let bytes = self.effects.random_bytes(16).await;
                 bytes
@@ -599,7 +609,12 @@ impl ContextRendezvousCoordinator {
         }
 
         // Check timestamp freshness (prevent replay attacks)
-        let current_time = aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await;
+        let current_time = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
         let max_age = 300; // 5 minutes
         if current_time.saturating_sub(guard_chain.timestamp) > max_age {
             tracing::warn!(
@@ -913,7 +928,12 @@ impl ContextRendezvousCoordinator {
             envelope.context_id
         );
 
-        let timestamp = aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await;
+        let timestamp = self
+            .effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
 
         // Construct receipt message for signing
         let receipt_message =
@@ -1323,7 +1343,12 @@ impl ContextTransportBridge {
             target_authority: *authority,
             transport_protocol: transport_offer.protocol.clone(),
             connection_nonce,
-            timestamp: aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await,
+            timestamp: self
+                .effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
             metadata: transport_offer.metadata.clone(),
         };
 
@@ -1362,7 +1387,12 @@ impl ContextTransportBridge {
             connection_id: hex::encode(&connection_id),
             protocol: "quic".to_string(),
             endpoint: offer.endpoint.clone(),
-            established_at: aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await,
+            established_at: self
+                .effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
             peer_authority: request.target_authority,
             context_id: request.context_id,
         })
@@ -1393,7 +1423,12 @@ impl ContextTransportBridge {
             connection_id: hex::encode(&connection_id),
             protocol: "tcp".to_string(),
             endpoint: offer.endpoint.clone(),
-            established_at: aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await,
+            established_at: self
+                .effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
             peer_authority: request.target_authority,
             context_id: request.context_id,
         })
@@ -1419,7 +1454,12 @@ impl ContextTransportBridge {
             connection_id: hex::encode(&connection_id),
             protocol: "webrtc".to_string(),
             endpoint: signaling_server.clone(),
-            established_at: aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await,
+            established_at: self
+                .effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
             peer_authority: request.target_authority,
             context_id: request.context_id,
         })
@@ -1447,7 +1487,12 @@ impl ContextTransportBridge {
             context_id: *context_id,
             authority_id: self.local_authority,
             challenge,
-            timestamp: aura_core::TimeEffects::current_timestamp(self.effects.as_ref()).await,
+            timestamp: self
+                .effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
         };
 
         let _auth_data = bincode::serialize(&auth_message).map_err(|e| {
@@ -1475,18 +1520,17 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_context_rendezvous_creation() {
+    async fn test_context_rendezvous_creation() -> Result<(), Box<dyn std::error::Error>> {
         use aura_agent::{AgentConfig, AuraEffectSystem};
 
         let authority = AuthorityId::new();
-        let effects = Arc::new(
-            AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
-        );
+        let effects = Arc::new(AuraEffectSystem::testing(&AgentConfig::default())?);
 
         let coordinator =
             ContextRendezvousCoordinator::new(authority, effects as Arc<dyn AuraEffects>);
 
         assert_eq!(coordinator.local_authority, authority);
         assert!(coordinator.contexts.is_empty());
+        Ok(())
     }
 }

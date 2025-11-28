@@ -12,7 +12,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_sync::infrastructure::{RetryPolicy, BackoffStrategy};
 //! use std::time::Duration;
 //!

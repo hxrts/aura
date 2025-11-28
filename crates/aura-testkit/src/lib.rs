@@ -84,7 +84,7 @@
 //! ```
 //!
 //! Then in your tests:
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_testkit::*;
 //! use aura_macros::aura_test;
 //!

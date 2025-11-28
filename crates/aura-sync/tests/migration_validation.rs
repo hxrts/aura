@@ -60,6 +60,13 @@ struct TestSyncProtocolState {
 #[test]
 fn test_unified_error_hierarchy_compatibility() {
     // Test that new error system provides all error categories needed by existing code
+    // NOTE: After simplification to unified AuraError, categories map to core variants:
+    // - protocol, session, timeout, resource, consistency -> "internal"
+    // - authorization -> "permission_denied"
+    // - validation -> "invalid"
+    // - network -> "network"
+    // - serialization -> "serialization"
+    // Retryability: only Network and Storage errors are retryable
 
     // Network errors (common in sync operations)
     let network_err = sync_network_error("Connection failed");
@@ -67,39 +74,39 @@ fn test_unified_error_hierarchy_compatibility() {
     assert!(network_err.is_retryable());
     assert!(network_err.to_string().contains("Network"));
 
-    // Protocol errors (choreographic violations)
+    // Protocol errors (choreographic violations) - maps to internal
     let protocol_err = sync_protocol_error("anti_entropy", "Invalid digest");
-    assert_eq!(protocol_err.category(), "protocol");
+    assert_eq!(protocol_err.category(), "internal");
     assert!(!protocol_err.is_retryable());
 
-    // Session errors (state management)
+    // Session errors (state management) - maps to internal
     let session_err = sync_session_error("Invalid state transition");
-    assert_eq!(session_err.category(), "session");
-    assert!(session_err.is_retryable());
+    assert_eq!(session_err.category(), "internal");
+    assert!(!session_err.is_retryable()); // Only Network/Storage are retryable
 
-    // Authorization errors (capability violations)
+    // Authorization errors (capability violations) - maps to permission_denied
     let auth_err = sync_authorization_error("Insufficient permissions");
-    assert_eq!(auth_err.category(), "authorization");
+    assert_eq!(auth_err.category(), "permission_denied");
     assert!(!auth_err.is_retryable());
 
-    // Biscuit authorization errors (token-based access control)
+    // Biscuit authorization errors (token-based access control) - maps to permission_denied
     let biscuit_auth_err = sync_biscuit_authorization_error("Token expired", DeviceId::new());
-    assert_eq!(biscuit_auth_err.category(), "authorization");
+    assert_eq!(biscuit_auth_err.category(), "permission_denied");
     assert!(!biscuit_auth_err.is_retryable());
 
-    // Timeout errors (common in distributed systems)
+    // Timeout errors (common in distributed systems) - maps to internal
     let timeout_err = sync_timeout_error("journal_sync", Duration::from_secs(30));
-    assert_eq!(timeout_err.category(), "timeout");
-    assert!(timeout_err.is_retryable());
+    assert_eq!(timeout_err.category(), "internal");
+    assert!(!timeout_err.is_retryable()); // Only Network/Storage are retryable
 
-    // Resource exhaustion (memory, bandwidth limits)
+    // Resource exhaustion (memory, bandwidth limits) - maps to internal
     let resource_err = sync_resource_with_limit("memory", "Buffer overflow", 1024);
-    assert_eq!(resource_err.category(), "resource");
-    assert!(resource_err.is_retryable());
+    assert_eq!(resource_err.category(), "internal");
+    assert!(!resource_err.is_retryable()); // Only Network/Storage are retryable
 
-    // Validation errors (data integrity)
+    // Validation errors (data integrity) - maps to invalid
     let validation_err = sync_validation_field_error("Invalid timestamp", "created_at");
-    assert_eq!(validation_err.category(), "validation");
+    assert_eq!(validation_err.category(), "invalid");
     assert!(!validation_err.is_retryable());
 
     // Serialization errors (message format issues)
@@ -107,9 +114,9 @@ fn test_unified_error_hierarchy_compatibility() {
     assert_eq!(ser_err.category(), "serialization");
     assert!(!ser_err.is_retryable());
 
-    // Consistency errors (CRDT violations)
+    // Consistency errors (CRDT violations) - maps to internal
     let consistency_err = sync_consistency_error("journal_merge", "Conflicting operations");
-    assert_eq!(consistency_err.category(), "consistency");
+    assert_eq!(consistency_err.category(), "internal");
     assert!(!consistency_err.is_retryable());
 }
 
@@ -118,8 +125,9 @@ fn test_error_context_preservation() {
     // Test that error context (peer, operation, etc.) is preserved
     let peer_id = DeviceId::new();
 
+    // Network errors are retryable (only Network and Storage are retryable)
     let network_err = sync_network_error("Invalid protocol version");
-    assert!(!network_err.is_retryable());
+    assert!(network_err.is_retryable());
 
     let protocol_err = sync_protocol_with_peer("sync", "Message out of order", peer_id);
     assert!(protocol_err.to_string().contains(&peer_id.to_string()));
@@ -669,9 +677,10 @@ fn test_error_propagation_consistency() {
     };
 
     // Verify error can be converted/wrapped appropriately
+    // Note: sync_session_error maps to internal (only Network/Storage are retryable)
     let sync_error = sync_session_error(session_error.to_string());
-    assert_eq!(sync_error.category(), "session");
-    assert!(sync_error.is_retryable());
+    assert_eq!(sync_error.category(), "internal");
+    assert!(!sync_error.is_retryable());
 }
 
 #[test]

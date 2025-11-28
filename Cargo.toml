@@ -128,6 +128,7 @@ jni = "0.21"
 tokio-test = "0.4"
 tempfile = "3.8"
 quickcheck = "1.0"
+serial_test = "3.0"
 
 # Additional missing dependencies
 hpke = "0.12"

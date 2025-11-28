@@ -41,7 +41,7 @@ mod integration_test_examples {
     //! Example tests demonstrating the integration test framework
 
     use super::*;
-    use aura_core::AuraResult;
+    use aura_core::{AuraError, AuraResult};
     use std::time::Duration;
 
     #[tokio::test]
@@ -55,10 +55,15 @@ mod integration_test_examples {
         let session = fixture.create_coordinated_session("example").await?;
         println!("Created test session");
 
-        // Clean completion
-        fixture
-            .wait_for_session_completion(&session, Duration::from_secs(10))
-            .await?;
+        // Clean completion using type-state pattern
+        let ended = session
+            .end()
+            .await
+            .map_err(|e| AuraError::internal(e.to_string()))?;
+        ended
+            .wait_for_completion(Duration::from_secs(10))
+            .await
+            .map_err(|e| AuraError::internal(e.to_string()))?;
 
         Ok(())
     }

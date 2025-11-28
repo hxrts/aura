@@ -685,8 +685,22 @@ mod tests {
 
     #[test]
     fn test_convert_send_guard_to_request() {
-        // This would require access to SendGuardChain constructor
-        // For now, just test the function exists
-        // TODO: Add actual test once SendGuardChain constructor is accessible
+        use crate::guards::send_guard::SendGuardChain;
+
+        let context = ContextId::new();
+        let peer = AuthorityId::new();
+        let authority = AuthorityId::new(); // Create once and reuse
+        let message_authorization = "guard:send".to_string();
+        let cost = 42;
+
+        let guard = SendGuardChain::new(message_authorization.clone(), context, peer, cost);
+
+        let request = convert_send_guard_to_request(&guard, authority).expect("conversion");
+
+        assert_eq!(request.operation, message_authorization);
+        assert_eq!(request.cost, cost);
+        assert_eq!(request.context, context);
+        assert_eq!(request.peer, peer);
+        assert_eq!(request.authority, authority);
     }
 }

@@ -197,8 +197,10 @@ pub mod assertions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_time_freeze() {
         let _guard = TimeGuard::freeze_at_epoch();
 
@@ -211,6 +213,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_time_advance() {
         let _guard = TimeGuard::freeze_at_epoch();
 

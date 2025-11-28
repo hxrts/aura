@@ -50,10 +50,7 @@ impl NetworkTransport {
 
     /// Send data to a specific peer using guard chain and network effect system
     pub async fn send_with_guard_chain<
-        E: aura_protocol::guards::GuardEffects
-            + GuardContextProvider
-            + aura_core::PhysicalTimeEffects
-            + aura_core::TimeEffects,
+        E: aura_protocol::guards::GuardEffects + GuardContextProvider + aura_core::PhysicalTimeEffects,
     >(
         &self,
         recipient: &DeviceId,
@@ -769,7 +766,12 @@ impl aura_core::effects::PhysicalTimeEffects for GuardEffectArc {
     async fn physical_time(
         &self,
     ) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
-        let ts_ms = aura_core::effects::time::TimeEffects::current_timestamp(&*self.inner).await;
+        let ts_ms = self
+            .inner
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
         Ok(aura_core::time::PhysicalTime {
             ts_ms,
             uncertainty: None,
@@ -1081,28 +1083,31 @@ mod tests {
     use super::*;
     use aura_testkit::DeviceTestFixture;
 
-    fn test_effects(_device_id: DeviceId) -> Arc<dyn AuraEffects> {
+    fn test_effects(
+        _device_id: DeviceId,
+    ) -> Result<Arc<dyn AuraEffects>, Box<dyn std::error::Error>> {
         let config = aura_agent::AgentConfig::default();
-        let system = aura_agent::AuraEffectSystem::testing(&config).expect("test effect system");
-        Arc::new(system)
+        let system = aura_agent::AuraEffectSystem::testing(&config)?;
+        Ok(Arc::new(system))
     }
 
     #[tokio::test]
-    async fn test_sbb_transport_bridge_creation() {
+    async fn test_sbb_transport_bridge_creation() -> Result<(), Box<dyn std::error::Error>> {
         let fixture = DeviceTestFixture::new(0);
         let device_id = fixture.device_id();
-        let effects = test_effects(device_id);
+        let effects = test_effects(device_id)?;
         let bridge = SbbTransportBridge::new(device_id, effects);
 
         // Should create successfully
         assert!(bridge.transport_sender.is_none());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_relationship_management() {
+    async fn test_relationship_management() -> Result<(), Box<dyn std::error::Error>> {
         let fixture = DeviceTestFixture::new(0);
         let device_id = fixture.device_id();
-        let effects = test_effects(device_id);
+        let effects = test_effects(device_id)?;
         let bridge = SbbTransportBridge::new(device_id, effects);
 
         let friend_fixture = DeviceTestFixture::new(1);
@@ -1117,12 +1122,13 @@ mod tests {
         let (friends, guardians) = bridge.relationship_counts().await;
         assert_eq!(friends, 1);
         assert_eq!(guardians, 1);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_rendezvous_offer_creation() {
+    async fn test_rendezvous_offer_creation() -> Result<(), Box<dyn std::error::Error>> {
         let device_id = DeviceId::new();
-        let effects = test_effects(device_id);
+        let effects = test_effects(device_id)?;
         let bridge = SbbTransportBridge::new(device_id, effects);
 
         let offer = TransportOfferPayload {
@@ -1143,12 +1149,13 @@ mod tests {
         // Should serialize and flood offer
         let result = bridge.flood_rendezvous_offer(offer).await;
         assert!(result.is_ok());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_message_handling() {
+    async fn test_message_handling() -> Result<(), Box<dyn std::error::Error>> {
         let device_id = DeviceId::new();
-        let effects = test_effects(device_id);
+        let effects = test_effects(device_id)?;
         let bridge = SbbTransportBridge::new(device_id, effects);
 
         // Create test envelope
@@ -1163,6 +1170,7 @@ mod tests {
         // Should handle message without error
         let result = bridge.handle_transport_message(message).await;
         assert!(result.is_ok());
+        Ok(())
     }
 
     #[tokio::test]
@@ -1191,14 +1199,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_network_transport_sender_creation() {
+    async fn test_network_transport_sender_creation() -> Result<(), Box<dyn std::error::Error>> {
         use super::NetworkTransport;
 
         let fixture = DeviceTestFixture::new(0);
         let device_id = fixture.device_id();
         let config = aura_agent::AgentConfig::default();
-        let system =
-            Arc::new(aura_agent::AuraEffectSystem::testing(&config).expect("test effect system"));
+        let system = Arc::new(aura_agent::AuraEffectSystem::testing(&config)?);
         let effects = system.clone() as Arc<dyn NetworkEffects>;
         let guard = system.clone() as Arc<dyn AuraEffects>;
         let context_id = ContextId::new();
@@ -1209,21 +1216,21 @@ mod tests {
         // Should create successfully
         let unreachable_peer = DeviceId::new();
         assert!(!sender.is_peer_reachable(&unreachable_peer).await);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_sbb_bridge_with_network_transport() {
+    async fn test_sbb_bridge_with_network_transport() -> Result<(), Box<dyn std::error::Error>> {
         use super::NetworkTransport;
 
         let fixture = DeviceTestFixture::new(0);
         let device_id = fixture.device_id();
-        let effects = test_effects(device_id);
+        let effects = test_effects(device_id)?;
         let mut bridge = SbbTransportBridge::new(device_id, effects);
 
         // Set up real transport sender using effect system
         let config = aura_agent::AgentConfig::default();
-        let system =
-            Arc::new(aura_agent::AuraEffectSystem::testing(&config).expect("test effect system"));
+        let system = Arc::new(aura_agent::AuraEffectSystem::testing(&config)?);
         let network_effects = system.clone() as Arc<dyn NetworkEffects>;
         let guard = system.clone() as Arc<dyn AuraEffects>;
         let context_id = ContextId::new();
@@ -1248,5 +1255,6 @@ mod tests {
         // Should handle offer creation (even if no peers to forward to)
         let result = bridge.flood_rendezvous_offer(offer).await;
         assert!(result.is_ok());
+        Ok(())
     }
 }

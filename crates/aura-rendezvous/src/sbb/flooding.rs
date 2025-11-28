@@ -379,40 +379,41 @@ mod tests {
     use aura_agent::AgentConfig;
     use aura_agent::AuraEffectSystem;
 
-    fn create_test_effects(_device_id: DeviceId) -> SharedEffects {
+    fn create_test_effects(
+        _device_id: DeviceId,
+    ) -> Result<SharedEffects, Box<dyn std::error::Error>> {
         let config = AgentConfig::default();
-        let system = AuraEffectSystem::testing(&config).expect("test effect system");
-        Arc::new(system)
+        let system = AuraEffectSystem::testing(&config)?;
+        Ok(Arc::new(system))
     }
 
     #[test]
-    fn test_coordinator_creation() {
+    fn test_coordinator_creation() -> Result<(), Box<dyn std::error::Error>> {
         let device_id = DeviceId::new();
-        let effects = create_test_effects(device_id);
+        let effects = create_test_effects(device_id)?;
         let coordinator = SbbFloodingCoordinator::new(device_id, effects);
 
         assert_eq!(coordinator.device_id, device_id);
         assert!(coordinator.friends.is_empty());
         assert!(coordinator.guardians.is_empty());
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_flood_with_zero_ttl() {
+    async fn test_flood_with_zero_ttl() -> Result<(), Box<dyn std::error::Error>> {
         let device_id = DeviceId::new();
-        let effects = create_test_effects(device_id);
+        let effects = create_test_effects(device_id)?;
         let mut coordinator = SbbFloodingCoordinator::new(device_id, effects);
 
         let payload = b"test".to_vec();
         let envelope = RendezvousEnvelope::new(payload, Some(0));
         let now = 1000000u64;
 
-        let result = coordinator
-            .flood_envelope(envelope, None, now)
-            .await
-            .unwrap();
+        let result = coordinator.flood_envelope(envelope, None, now).await?;
         match result {
             FloodResult::Dropped => (),
             _ => panic!("Expected envelope with TTL 0 to be dropped"),
         }
+        Ok(())
     }
 }

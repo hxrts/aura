@@ -77,6 +77,13 @@ impl Default for DkdConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DkdSessionId(pub String);
 
+#[cfg(test)]
+impl Default for DkdSessionId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DkdSessionId {
     /// Create a new DKD session ID for testing (production code should use RandomEffects)
     #[cfg(test)]
@@ -216,7 +223,13 @@ impl DkdProtocol {
         session_id: Option<DkdSessionId>,
     ) -> Result<DkdSessionId, DkdError>
     where
-        E: CryptoEffects + NetworkEffects + JournalEffects + PhysicalTimeEffects + RandomEffects + Send + Sync,
+        E: CryptoEffects
+            + NetworkEffects
+            + JournalEffects
+            + PhysicalTimeEffects
+            + RandomEffects
+            + Send
+            + Sync,
     {
         // Validate configuration
         if participants.len() < self.config.threshold as usize {
@@ -826,7 +839,13 @@ pub async fn execute_simple_dkd<E>(
     context: &str,
 ) -> AuraResult<DkdResult>
 where
-    E: CryptoEffects + NetworkEffects + JournalEffects + PhysicalTimeEffects + RandomEffects + Send + Sync,
+    E: CryptoEffects
+        + NetworkEffects
+        + JournalEffects
+        + PhysicalTimeEffects
+        + RandomEffects
+        + Send
+        + Sync,
 {
     let config = DkdConfig {
         threshold: 2,

@@ -5,8 +5,8 @@
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_core::effects::PhysicalTimeEffects;
-use aura_core::TimeEffects;
 use aura_protocol::effect_traits::StorageEffects;
+use aura_protocol::effects::EffectApiEffects;
 use std::path::Path;
 
 /// Handle node operations through effects
@@ -78,7 +78,7 @@ async fn run_daemon_mode(
     println!("Initializing daemon mode...");
 
     // Simulate daemon initialization
-    let start_time = effects.current_epoch().await;
+    let start_time = effects.current_epoch().await.unwrap_or(0);
     let _ = effects;
     println!("Node started at epoch: {}", start_time);
 
@@ -93,7 +93,7 @@ async fn run_daemon_mode(
             .sleep_ms(200)
             .await
             .map_err(|e| anyhow::anyhow!("daemon heartbeat sleep failed: {}", e))?;
-        let epoch = effects.current_epoch().await;
+        let epoch = effects.current_epoch().await.unwrap_or(0);
         println!("Daemon heartbeat {} at epoch {}", idx + 1, epoch);
     }
 
@@ -111,7 +111,7 @@ async fn run_interactive_mode(
         port
     );
 
-    let start_time = effects.current_epoch().await;
+    let start_time = effects.current_epoch().await.unwrap_or(0);
     println!("Started at epoch: {}", start_time);
 
     // Simulate interactive mode - in real implementation would handle signals
@@ -124,12 +124,12 @@ async fn run_interactive_mode(
 
 /// Simulate startup delay using time effects
 async fn simulate_startup_delay(_ctx: &EffectContext, effects: &AuraEffectSystem) -> Result<()> {
-    let delay_start = effects.current_epoch().await;
+    let delay_start = effects.current_epoch().await.unwrap_or(0);
 
     // Simulate 1 second startup time
     let mut elapsed = 0u64;
     while elapsed < 1000 {
-        let current = effects.current_epoch().await;
+        let current = effects.current_epoch().await.unwrap_or(0);
         elapsed = current.saturating_sub(delay_start);
 
         // Yield control using effect-driven sleep
@@ -150,7 +150,7 @@ async fn simulate_interactive_session(
     effects: &AuraEffectSystem,
 ) -> Result<()> {
     for i in 1..=3 {
-        let current = effects.current_epoch().await;
+        let current = effects.current_epoch().await.unwrap_or(0);
         println!("Interactive tick {} at epoch {}", i, current);
 
         // Simulate some work

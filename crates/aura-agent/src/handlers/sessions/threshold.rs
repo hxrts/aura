@@ -4,9 +4,8 @@
 
 use super::{coordination::SessionOperations, shared::*};
 use crate::core::{AgentError, AgentResult};
-use aura_core::effects::time::TimeEffects;
 use aura_core::identifiers::DeviceId;
-use aura_protocol::effects::SessionType;
+use aura_protocol::effects::{EffectApiEffects, SessionType};
 
 impl SessionOperations {
     /// Create threshold operation session
@@ -60,7 +59,7 @@ impl SessionOperations {
             serde_json::Value::String("self_rotation".to_string()),
         );
 
-        let timestamp = effects.current_timestamp_ms().await;
+        let timestamp = effects.current_timestamp().await.unwrap_or(0);
 
         handle.metadata.insert(
             "requested_at".to_string(),

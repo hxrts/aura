@@ -12,7 +12,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_quint::{QuintRunner, PropertySpec, VerificationResult};
 //!
 //! fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,7 +22,9 @@
 //!         .with_invariant("counter >= 0")
 //!         .with_context("counter", "Int");
 //!
-//!     let result = futures::executor::async { runner.verify_property(&property).await })?;
+//!     let result = futures::executor::block_on(async {
+//!         runner.verify_property(&property).await
+//!     })?;
 //!     println!("Verification result: {:?}", result);
 //!
 //!     Ok(())

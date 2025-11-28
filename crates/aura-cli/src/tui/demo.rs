@@ -197,7 +197,10 @@ impl DemoInterface {
     /// Setup guardians (Alice & Charlie)
     async fn setup_guardians(&mut self) -> anyhow::Result<()> {
         if let Some(alice_authority) = self.authorities.get("alice").copied() {
-            self.app.state_mut().setup_alice_guardian(alice_authority);
+            self.app
+                .state_mut()
+                .setup_alice_guardian(alice_authority)
+                .await;
         }
 
         // Simulate setup delay
@@ -206,7 +209,8 @@ impl DemoInterface {
         if let Some(charlie_authority) = self.authorities.get("charlie").copied() {
             self.app
                 .state_mut()
-                .setup_charlie_guardian(charlie_authority);
+                .setup_charlie_guardian(charlie_authority)
+                .await;
         }
 
         tracing::info!("Guardians setup completed");

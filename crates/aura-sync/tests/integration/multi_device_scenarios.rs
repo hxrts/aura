@@ -84,9 +84,14 @@ async fn test_complete_partition_healing_recovery() -> AuraResult<()> {
         "Complete partition healing should succeed"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(360))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(360))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     // Verify final consistency across all devices
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -175,9 +180,14 @@ async fn test_multi_protocol_coordination() -> AuraResult<()> {
         "Multi-protocol coordination should succeed"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(300))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(300))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     // Verify system is in a good state after multi-protocol operations
     let consistency = verify_journal_consistency(&fixture).await?;
@@ -270,9 +280,14 @@ async fn test_large_scale_device_coordination() -> AuraResult<()> {
         "Large-scale coordination should succeed"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(420))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(420))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
     assert!(
@@ -422,9 +437,14 @@ async fn test_concurrent_failure_recovery() -> AuraResult<()> {
         "Should recover from concurrent failures"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(360))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(360))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
     assert!(
@@ -565,9 +585,14 @@ async fn test_complete_end_to_end_workflow() -> AuraResult<()> {
         "Complete end-to-end workflow should succeed"
     );
 
-    fixture
-        .wait_for_session_completion(&session, Duration::from_secs(480))
-        .await?;
+    let ended = session
+        .end()
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
+    ended
+        .wait_for_completion(Duration::from_secs(480))
+        .await
+        .map_err(|e| AuraError::internal(e.to_string()))?;
 
     let consistency = verify_journal_consistency(&fixture).await?;
     assert!(

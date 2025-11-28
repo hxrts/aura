@@ -496,9 +496,18 @@ impl CoordinatedSession {
         &self.devices
     }
 
-    /// End the coordinated session
-    pub async fn end(self) -> Result<(), TestError> {
-        self.coordinator.end_session(&self.session_id).await
+    /// End the coordinated session, transitioning to EndedSession
+    ///
+    /// This consumes the active session and returns an EndedSession that can be
+    /// waited on. This type-state pattern prevents forgetting to call end() before
+    /// waiting for completion.
+    pub async fn end(self) -> Result<EndedSession, TestError> {
+        self.coordinator.end_session(&self.session_id).await?;
+        Ok(EndedSession {
+            session_id: self.session_id,
+            coordinator: self.coordinator,
+            devices: self.devices,
+        })
     }
 
     /// Get session status
@@ -509,6 +518,64 @@ impl CoordinatedSession {
             .ok_or_else(|| TestError::SessionNotFound {
                 session_id: self.session_id.clone(),
             })
+    }
+}
+
+/// Session that has been properly ended and can be waited on
+///
+/// This type is returned from `CoordinatedSession::end()` and provides the
+/// `wait_for_completion` method. The type system ensures you cannot wait for
+/// completion without first ending the session.
+pub struct EndedSession {
+    session_id: String,
+    coordinator: Arc<MockSessionCoordinator>,
+    devices: Vec<DeviceId>,
+}
+
+impl EndedSession {
+    /// Get the session ID
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// Get participating device IDs
+    pub fn participants(&self) -> &[DeviceId] {
+        &self.devices
+    }
+
+    /// Wait for session cleanup to complete with timeout
+    ///
+    /// This method polls the session coordinator until the session status
+    /// transitions to `Ended`. Only available on EndedSession to enforce
+    /// that sessions must be ended before waiting.
+    pub async fn wait_for_completion(
+        &self,
+        timeout_duration: std::time::Duration,
+    ) -> Result<(), TestError> {
+        use tokio::time::timeout;
+
+        timeout(timeout_duration, async {
+            loop {
+                let status = self
+                    .coordinator
+                    .get_session_state(&self.session_id)
+                    .await
+                    .ok_or_else(|| TestError::SessionNotFound {
+                        session_id: self.session_id.clone(),
+                    })?;
+                match status.status {
+                    SessionStatus::Ended => return Ok(()),
+                    SessionStatus::Active => {
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await
+                    }
+                }
+            }
+        })
+        .await
+        .map_err(|_| TestError::SessionTimeout {
+            session_id: self.session_id.clone(),
+            timeout: timeout_duration,
+        })?
     }
 }
 
@@ -531,10 +598,21 @@ pub enum SessionStatus {
 /// Test-specific errors
 #[derive(Debug)]
 pub enum TestError {
-    InvalidDeviceIndex { index: usize, max: usize },
-    SessionNotFound { session_id: String },
+    InvalidDeviceIndex {
+        index: usize,
+        max: usize,
+    },
+    SessionNotFound {
+        session_id: String,
+    },
+    SessionTimeout {
+        session_id: String,
+        timeout: std::time::Duration,
+    },
     Transport(TransportError),
-    ChoreographyExecution { reason: String },
+    ChoreographyExecution {
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for TestError {
@@ -545,6 +623,21 @@ impl std::fmt::Display for TestError {
             }
             TestError::SessionNotFound { session_id } => {
                 write!(f, "Session not found: {}", session_id)
+            }
+            TestError::SessionTimeout {
+                session_id,
+                timeout,
+            } => {
+                write!(
+                    f,
+                    "Session '{}' did not complete within {:?}. This usually means:\n\
+                     1. The session was never ended (call session.end().await?)\n\
+                     2. The session has a deadlock or is waiting for an event that never occurs\n\
+                     3. The timeout duration is too short for the test workload\n\
+                     Debugging: Check session status, verify all devices are responding, \
+                     and ensure the choreography completes successfully.",
+                    session_id, timeout
+                )
             }
             TestError::Transport(err) => write!(f, "Transport error: {}", err),
             TestError::ChoreographyExecution { reason } => {

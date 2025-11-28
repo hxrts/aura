@@ -22,6 +22,8 @@
 //!
 //! **Guard Chain Integration**: Each protocol message expands through effects in order
 //! (per docs/109_authorization.md): Authorization → FlowBudget → Leakage → Journal → Transport.
+//!
+//! ```rust,ignore
 //! use crate::effects::{NetworkEffects, CryptoEffects, PhysicalTimeEffects};
 //!
 //! // Pure protocol function that accepts effects

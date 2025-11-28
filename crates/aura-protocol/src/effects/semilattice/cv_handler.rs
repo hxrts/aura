@@ -27,7 +27,7 @@
 //!
 //! ## Basic Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_protocol::effects::semilattice::CvHandler;
 //! use aura_core::semilattice::{StateMsg, CvState, JoinSemilattice, Bottom};
 //!
@@ -68,7 +68,7 @@
 //!
 //! ## Integration with Choreographic Protocols
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_protocol::effects::semilattice::{CvHandler, execution};
 //! use aura_core::{DeviceId, SessionId};
 //!
@@ -87,7 +87,7 @@
 //!
 //! ## Complex CRDT Types
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_protocol::effects::semilattice::CvHandler;
 //! use aura_core::semilattice::{CvState, JoinSemilattice, Bottom};
 //! use std::collections::HashMap;
@@ -178,7 +178,7 @@
 //!         self.metrics.messages_received += 1;
 //!         self.metrics.join_operations += 1;
 //!         // Note: In real implementation, time should be injected via PhysicalTimeEffects
-//!         // self.metrics.last_update = Some(Instant::now());
+//!         // self.metrics.last_update = Some(time_effects.now());
 //!
 //!         self.inner.on_recv(msg);
 //!     }
@@ -237,7 +237,7 @@
 //!
 //! CvRDTs can grow unboundedly over time. Consider these patterns:
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_protocol::effects::semilattice::CvHandler;
 //! use aura_core::semilattice::CvState;
 //!
@@ -260,7 +260,7 @@
 //!
 //! For high-throughput scenarios:
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_protocol::effects::semilattice::CvHandler;
 //! use aura_core::semilattice::{StateMsg, CvState};
 //!

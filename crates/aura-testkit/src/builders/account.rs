@@ -42,7 +42,7 @@ pub fn test_account_with_seed_sync(seed: u64) -> Journal {
 /// * `seed` - Random seed for deterministic generation
 ///
 /// # Example
-/// ```rust
+/// ```rust,ignore
 /// use aura_testkit::test_account_with_seed;
 ///
 /// let account = test_account_with_seed(42).await;

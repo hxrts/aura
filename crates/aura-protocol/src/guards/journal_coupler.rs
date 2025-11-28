@@ -22,7 +22,7 @@ use aura_core::{AuraResult, Journal, TimeEffects};
 use aura_mpst::journal::{JournalAnnotation, JournalOpType};
 use serde_json::Value as JsonValue;
 use std::{collections::HashMap, future::Future};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 /// Journal coupling coordinator for the guard chain
 ///
@@ -143,6 +143,9 @@ impl JournalCoupler {
     /// 1. Execute the protocol operation
     /// 2. On success, apply journal annotations atomically
     /// 3. Return both the operation result and journal coupling result
+    ///
+    /// Timing is captured via the tracing span (subscriber handles `Instant::now()`).
+    #[instrument(skip(self, effect_system, operation), fields(optimistic = self.optimistic_application))]
     pub async fn execute_with_coupling<E, T, F, Fut>(
         &self,
         operation_id: &str,
@@ -154,13 +157,7 @@ impl JournalCoupler {
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
-        let coupling_start = effect_system.now_instant().await;
-
-        debug!(
-            operation_id = operation_id,
-            optimistic = self.optimistic_application,
-            "Starting journal-coupled execution"
-        );
+        debug!("Starting journal-coupled execution");
 
         // Get current journal state from the effect system
         let initial_journal = effect_system
@@ -186,6 +183,9 @@ impl JournalCoupler {
     }
 
     /// Execute with optimistic journal application (apply deltas first)
+    ///
+    /// Timing is captured via the tracing span (subscriber handles `Instant::now()`).
+    #[instrument(skip(self, effect_system, operation, initial_journal))]
     async fn execute_optimistic<E, T, F, Fut>(
         &self,
         operation_id: &str,
@@ -198,14 +198,10 @@ impl JournalCoupler {
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
-        let application_start = effect_system.now_instant().await;
-
         // Phase 1: Apply journal annotations optimistically
         let (updated_journal, journal_ops) = self
             .apply_annotations(operation_id, effect_system, &initial_journal)
             .await?;
-
-        let journal_application_time = application_start.elapsed();
 
         // Phase 2: Execute the protocol operation
         let execution_result = operation(effect_system).await;
@@ -223,7 +219,8 @@ impl JournalCoupler {
                     applied_operations: journal_ops.clone(),
                     updated_journal,
                     coupling_metrics: CouplingMetrics {
-                        journal_application_time_us: journal_application_time.as_micros() as u64,
+                        // Timing captured by tracing span, not explicit measurement
+                        journal_application_time_us: 0,
                         operations_applied: journal_ops.len(),
                         retry_attempts: 0,
                         coupling_successful: true,
@@ -247,6 +244,9 @@ impl JournalCoupler {
     }
 
     /// Execute with pessimistic journal application (apply deltas after operation succeeds)
+    ///
+    /// Timing is captured via the tracing span (subscriber handles `Instant::now()`).
+    #[instrument(skip(self, effect_system, operation, initial_journal))]
     async fn execute_pessimistic<E, T, F, Fut>(
         &self,
         operation_id: &str,
@@ -263,12 +263,9 @@ impl JournalCoupler {
         let execution_result = operation(effect_system).await?;
 
         // Phase 2: Apply journal annotations only after success
-        let application_start = effect_system.now_instant().await;
         let (updated_journal, journal_ops) = self
             .apply_annotations(operation_id, effect_system, &initial_journal)
             .await?;
-
-        let journal_application_time = application_start.elapsed();
 
         info!(
             operation_id = operation_id,
@@ -281,7 +278,8 @@ impl JournalCoupler {
             applied_operations: journal_ops.clone(),
             updated_journal,
             coupling_metrics: CouplingMetrics {
-                journal_application_time_us: journal_application_time.as_micros() as u64,
+                // Timing captured by tracing span, not explicit measurement
+                journal_application_time_us: 0,
                 operations_applied: journal_ops.len(),
                 retry_attempts: 0,
                 coupling_successful: true,
@@ -358,18 +356,17 @@ impl JournalCoupler {
     ///
     /// This method is called by the send guard chain after successful authorization
     /// and flow budget charging to atomically apply any journal changes.
+    ///
+    /// Timing is captured via the tracing span (subscriber handles `Instant::now()`).
+    #[instrument(skip(self, effect_system, receipt), fields(receipt_present = receipt.is_some()))]
     pub async fn couple_with_send<E: aura_core::effects::JournalEffects + TimeEffects>(
         &self,
         effect_system: &E,
         receipt: &Option<aura_core::Receipt>,
     ) -> AuraResult<CouplingMetrics> {
-        let coupling_start = effect_system.now_instant().await;
         let operation_id = "send_coupling";
 
-        debug!(
-            receipt_present = receipt.is_some(),
-            "Coupling journal operations with send"
-        );
+        debug!("Coupling journal operations with send");
 
         // Get the current journal state
         let current_journal = effect_system
@@ -392,10 +389,9 @@ impl JournalCoupler {
             );
         }
 
-        let coupling_time = coupling_start.elapsed();
-
         Ok(CouplingMetrics {
-            journal_application_time_us: coupling_time.as_micros() as u64,
+            // Timing captured by tracing span, not explicit measurement
+            journal_application_time_us: 0,
             operations_applied: applied_ops.len(),
             retry_attempts: 0,
             coupling_successful: true,

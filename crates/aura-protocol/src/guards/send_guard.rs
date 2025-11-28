@@ -181,10 +181,7 @@ impl SendGuardChain {
     /// # Note
     /// Full evaluation with Biscuit authorization integration
     pub async fn evaluate<
-        E: GuardEffects
-            + GuardContextProvider
-            + aura_core::TimeEffects
-            + aura_core::PhysicalTimeEffects,
+        E: GuardEffects + GuardContextProvider + aura_core::PhysicalTimeEffects,
     >(
         &self,
         effect_system: &E,
@@ -318,7 +315,11 @@ impl SendGuardChain {
         let context_str = self.context.to_string();
         let peer_str = self.peer.to_string();
         let authority_str = effect_system.authority_id().to_string();
-        let timestamp_secs = effect_system.current_timestamp().await as i64;
+        let timestamp_secs = effect_system
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0) as i64;
         let expiry_secs = timestamp_secs + 3600; // 1 hour from now
 
         // Create a Biscuit token with comprehensive send permissions

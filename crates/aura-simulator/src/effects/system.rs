@@ -535,7 +535,7 @@ impl SimulationEffectSystem {
             device_id: self.device_id,
             simulation_seed: self.seed,
             deterministic_mode: true,
-            current_time: self.time.current_timestamp().await,
+            current_time: self.time.get_time(),
             fault_injection_enabled: self.fault_injection_enabled,
             active_fault_count: self
                 .injected_faults

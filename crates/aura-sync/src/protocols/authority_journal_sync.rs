@@ -151,7 +151,7 @@ impl AuthorityJournalSyncProtocol {
         let _session = AuthoritySyncSession {
             local_authority: local_authority.authority_id(),
             remote_authority: peer_id,
-            session_id: uuid::Uuid::new_v4().to_string(),
+            session_id: effects.random_uuid().await.to_string(),
             facts_exchanged: 0,
         };
 

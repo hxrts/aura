@@ -425,7 +425,7 @@ The FlowBudget system enforces both spam resistance and privacy budgets by combi
 - **Epoch rotation**: Journals carry `Epoch(ctx)` facts. When the epoch increments, transport handlers discard pending receipts and reset `spent` counters for the new epoch.
 - **Receipts**: Each send/forward that succeeds produces a Receipt fact scoped to `(context, epoch)` with chained hashes. Relays validate receipts before forwarding and record them as relational facts so downstream peers can audit budget usage.
 - **Multi-hop enforcement**: Every hop independently executes CapGuard → FlowGuard → JournalCoupler. Headroom must exist at each hop; failures block locally and leak no metadata. Because `spent` is monotone, convergence holds even if later hops fail.
-- **Charge-before-send invariant**: FlowGuard charges occur before any observable transport action. JournalCoupler atomically merges the charge fact and optional protocol deltas, ensuring the calculus guarantees from `docs_2/002_theoretical_model.md` hold in implementation.
+- **Charge-before-send invariant**: FlowGuard charges occur before any observable transport action. JournalCoupler atomically merges the charge fact and optional protocol deltas, ensuring the calculus guarantees from `docs/002_theoretical_model.md` hold in implementation.
 
 Together these rules ensure that spam limits, leakage budgets, and receipt accountability share the same semilattice foundation described throughout this document.
 

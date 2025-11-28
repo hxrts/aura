@@ -14,7 +14,7 @@ use crate::effects::{
 use aura_core::{
     effects::agent::{ChoreographicMessage, ChoreographicRole, ChoreographyConfig},
     identifiers::{DeviceId, SessionId},
-    AuraResult as Result, PhysicalTimeEffects, TimeEffects,
+    AuraResult as Result, PhysicalTimeEffects,
 };
 
 // Session lifecycle choreography
@@ -215,9 +215,13 @@ impl MemorySessionHandler {
             .unwrap_or(0)
     }
 
-    /// Get current timestamp using TimeEffects
+    /// Get current timestamp using PhysicalTimeEffects
     async fn current_timestamp(&self) -> u64 {
-        self.time_effects.current_timestamp().await
+        self.time_effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0)
     }
 
     /// Simulate participant joining choreographically

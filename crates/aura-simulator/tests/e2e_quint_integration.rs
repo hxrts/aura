@@ -2,7 +2,7 @@
 //!
 //! This test validates the basic simulator effect system
 
-use aura_core::effects::TimeEffects;
+use aura_core::effects::PhysicalTimeEffects;
 use aura_macros::aura_test;
 use aura_testkit::{DeviceTestFixture, TestEffectsBuilder};
 
@@ -13,8 +13,8 @@ async fn test_simulator_effect_composition_basic() -> aura_core::AuraResult<()> 
     let effects_builder = TestEffectsBuilder::for_unit_tests(fixture.device_id());
     let effects = effects_builder.build()?;
 
-    // Test basic time effect
-    let timestamp = effects.current_timestamp().await;
+    // Test basic time effect - use physical_time() instead of current_timestamp()
+    let timestamp = effects.physical_time().await?.ts_ms;
 
     assert!(timestamp > 0);
 
@@ -30,8 +30,8 @@ async fn test_simulator_full_effect_composition() -> aura_core::AuraResult<()> {
     let effects_builder = TestEffectsBuilder::for_unit_tests(fixture.device_id());
     let effects = effects_builder.build()?;
 
-    // Test time effects
-    let timestamp = effects.current_timestamp().await;
+    // Test time effects - use physical_time() instead of current_timestamp()
+    let timestamp = effects.physical_time().await?.ts_ms;
     assert!(timestamp > 0);
 
     // Test crypto effects

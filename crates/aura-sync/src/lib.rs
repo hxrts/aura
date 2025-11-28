@@ -53,7 +53,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_sync::{
 //!     protocols::{AntiEntropyProtocol, JournalSyncProtocol},
 //!     core::{SyncConfig, MetricsCollector, SessionManager},

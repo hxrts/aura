@@ -13,7 +13,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_sync::services::{SyncService, SyncServiceConfig};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -150,11 +150,16 @@ pub struct SyncService {
 
 impl SyncService {
     /// Create a new sync service
-    pub async fn new(config: SyncServiceConfig) -> SyncResult<Self> {
+    ///
+    /// # Arguments
+    /// - `config`: Service configuration
+    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
+    pub async fn new(
+        config: SyncServiceConfig,
+        now_instant: std::time::Instant,
+    ) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
         let time_effects = PhysicalTimeHandler;
-        // Use time effects for monotonic time
-        let now_instant = time_effects.now_instant().await;
         let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
         let now = time_effects
             .physical_time()
@@ -179,13 +184,17 @@ impl SyncService {
     }
 
     /// Create a new sync service with PhysicalTimeEffects (preferred for deterministic testing)
+    ///
+    /// # Arguments
+    /// - `config`: Service configuration
+    /// - `time_effects`: Time effects provider
+    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
     pub async fn new_with_time_effects<T: TimeEffects>(
         config: SyncServiceConfig,
         time_effects: &T,
+        now_instant: std::time::Instant,
     ) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
-        // Use time effects for monotonic time
-        let now_instant = time_effects.now_instant().await;
         let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
         let now = time_effects
             .physical_time()
@@ -215,7 +224,17 @@ impl SyncService {
     }
 
     /// Synchronize with specific peers
-    pub async fn sync_with_peers<E>(&self, effects: &E, peers: Vec<DeviceId>) -> SyncResult<()>
+    ///
+    /// # Arguments
+    /// - `effects`: Effect system providing journal, network, and time capabilities
+    /// - `peers`: List of peer device IDs to sync with
+    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
+    pub async fn sync_with_peers<E>(
+        &self,
+        effects: &E,
+        peers: Vec<DeviceId>,
+        now_instant: std::time::Instant,
+    ) -> SyncResult<()>
     where
         E: aura_core::effects::JournalEffects
             + aura_core::effects::NetworkEffects
@@ -231,7 +250,7 @@ impl SyncService {
         tracing::info!("Starting journal sync with {} peers", peers.len());
 
         // 1. Check rate limits for each peer
-        let allowed_peers = self.check_rate_limits(&peers).await?;
+        let allowed_peers = self.check_rate_limits(&peers, now_instant).await?;
 
         // 2. Create sessions for allowed peers
         let session_peers =
@@ -254,7 +273,15 @@ impl SyncService {
     }
 
     /// Discover and sync with available peers
-    pub async fn discover_and_sync<E>(&self, effects: &E) -> SyncResult<()>
+    ///
+    /// # Arguments
+    /// - `effects`: Effect system providing journal, network, and time capabilities
+    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
+    pub async fn discover_and_sync<E>(
+        &self,
+        effects: &E,
+        now_instant: std::time::Instant,
+    ) -> SyncResult<()>
     where
         E: aura_core::effects::JournalEffects
             + aura_core::effects::NetworkEffects
@@ -273,7 +300,7 @@ impl SyncService {
             return Ok(());
         }
 
-        self.sync_with_peers(effects, available_peers.clone())
+        self.sync_with_peers(effects, available_peers.clone(), now_instant)
             .await?;
 
         // 4. Update peer states based on sync results
@@ -332,6 +359,9 @@ impl SyncService {
     }
 
     /// Perform one round of automatic synchronization with PhysicalTimeEffects
+    ///
+    /// # Arguments
+    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
     #[allow(dead_code)]
     async fn perform_auto_sync_with_time_effects<T: PhysicalTimeEffects + TimeEffects>(
         peer_manager: &Arc<RwLock<PeerManager>>,
@@ -340,6 +370,7 @@ impl SyncService {
         rate_limiter: &Arc<RwLock<RateLimiter>>,
         max_concurrent: usize,
         time_effects: &T,
+        now_instant: std::time::Instant,
     ) -> SyncResult<()> {
         let tick_ts = time_effects
             .physical_time()
@@ -358,12 +389,10 @@ impl SyncService {
 
         // Check rate limits before proceeding
         tracing::debug!("Auto-sync tick at {}", tick_ts.ts_ms);
-        // Use time effects for rate limiting
-        let now = time_effects.now_instant().await;
         {
             let mut limiter = rate_limiter.write();
             for peer in &peers {
-                match limiter.check_rate_limit(*peer, 100, now) {
+                match limiter.check_rate_limit(*peer, 100, now_instant) {
                     aura_core::RateLimitResult::Allowed => continue,
                     aura_core::RateLimitResult::Denied { .. } => {
                         return Ok(()); // Rate limited, skip this round
@@ -426,14 +455,20 @@ impl SyncService {
     }
 
     /// Check rate limits for peer sync operations
-    async fn check_rate_limits(&self, peers: &[DeviceId]) -> SyncResult<Vec<DeviceId>> {
+    ///
+    /// # Arguments
+    /// - `peers`: List of peer device IDs to check
+    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
+    async fn check_rate_limits(
+        &self,
+        peers: &[DeviceId],
+        now_instant: std::time::Instant,
+    ) -> SyncResult<Vec<DeviceId>> {
         let mut allowed_peers = Vec::new();
-        // Use time effects for rate limiting
-        let now = self.time_effects.now_instant().await;
         let mut rate_limiter = self.rate_limiter.write();
 
         for &peer in peers {
-            let result = rate_limiter.check_rate_limit(peer, 1, now);
+            let result = rate_limiter.check_rate_limit(peer, 1, now_instant);
             if result.is_allowed() {
                 allowed_peers.push(peer);
             } else if let Some(retry_after) = result.retry_after() {
@@ -582,25 +617,32 @@ impl SyncService {
     }
 
     /// Wait for active sessions to complete with timeout
-    async fn wait_for_sessions_to_complete(&self) -> SyncResult<()> {
-        self.wait_for_sessions_to_complete_with_time_effects(&self.time_effects)
+    ///
+    /// # Arguments
+    /// - `start_instant`: Starting monotonic time instant (obtain from runtime layer)
+    async fn wait_for_sessions_to_complete(
+        &self,
+        start_instant: std::time::Instant,
+    ) -> SyncResult<()> {
+        self.wait_for_sessions_to_complete_with_time_effects(&self.time_effects, start_instant)
             .await
     }
 
     /// Wait for active sessions to complete with timeout using PhysicalTimeEffects
-    async fn wait_for_sessions_to_complete_with_time_effects<
-        T: PhysicalTimeEffects + TimeEffects,
-    >(
+    ///
+    /// # Arguments
+    /// - `time_effects`: Time effects provider for sleep operations
+    /// - `start_instant`: Starting monotonic time instant (obtain from runtime layer)
+    async fn wait_for_sessions_to_complete_with_time_effects<T: PhysicalTimeEffects>(
         &self,
         time_effects: &T,
+        start_instant: std::time::Instant,
     ) -> SyncResult<()> {
         let timeout = Duration::from_secs(30); // 30 second timeout
         let check_interval = Duration::from_millis(100);
-        // Use time effects for timeout tracking
-        let start = time_effects.now_instant().await;
 
         loop {
-            let elapsed = time_effects.now_instant().await.duration_since(start);
+            let elapsed = start_instant.elapsed();
             if elapsed >= timeout {
                 break;
             }
@@ -745,9 +787,14 @@ impl SyncService {
     }
 
     /// Start the service using PhysicalTimeEffects (preferred over Service::start)
+    ///
+    /// # Arguments
+    /// - `time_effects`: Time effects provider
+    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
     pub async fn start_with_time_effects<T: aura_core::effects::PhysicalTimeEffects>(
         &self,
         time_effects: &T,
+        now_instant: std::time::Instant,
     ) -> SyncResult<()> {
         // Use PhysicalTimeEffects for deterministic wall-clock; store Instant for uptime tracking
         let _ts = time_effects
@@ -755,8 +802,7 @@ impl SyncService {
             .await
             .map_err(|e| AuraError::internal(format!("time error: {e}")))?;
 
-        // Use time effects for uptime tracking
-        self.start(self.time_effects.now_instant().await).await
+        self.start(now_instant).await
     }
 }
 
@@ -780,7 +826,7 @@ impl Service for SyncService {
         Ok(())
     }
 
-    async fn stop(&self) -> SyncResult<()> {
+    async fn stop(&self, now: std::time::Instant) -> SyncResult<()> {
         {
             let mut state = self.state.write();
             if *state == ServiceState::Stopped {
@@ -791,7 +837,7 @@ impl Service for SyncService {
         } // Drop state lock before await
 
         // Wait for active sessions to complete with timeout
-        self.wait_for_sessions_to_complete().await?;
+        self.wait_for_sessions_to_complete(now).await?;
 
         {
             let mut state = self.state.write();
@@ -880,9 +926,12 @@ impl SyncServiceBuilder {
     }
 
     /// Build the service
-    pub async fn build(self) -> SyncResult<SyncService> {
+    ///
+    /// # Arguments
+    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
+    pub async fn build(self, now_instant: std::time::Instant) -> SyncResult<SyncService> {
         let config = self.config.unwrap_or_default();
-        SyncService::new(config).await
+        SyncService::new(config, now_instant).await
     }
 }
 
@@ -893,11 +942,12 @@ impl SyncServiceBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[tokio::test]
     async fn test_sync_service_creation() {
         let config = SyncServiceConfig::default();
-        let service = SyncService::new(config).await.unwrap();
+        let service = SyncService::new(config, Instant::now()).await.unwrap();
 
         assert_eq!(service.name(), "SyncService");
         assert!(!service.is_running());
@@ -908,7 +958,7 @@ mod tests {
         let service = SyncService::builder()
             .with_auto_sync(true)
             .with_sync_interval(Duration::from_secs(30))
-            .build()
+            .build(Instant::now())
             .await
             .unwrap();
 
@@ -918,27 +968,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_service_lifecycle() {
-        let service = SyncService::builder().build().await.unwrap();
+        let service = SyncService::builder().build(Instant::now()).await.unwrap();
 
         assert!(!service.is_running());
 
         let time_effects = PhysicalTimeHandler;
         service
-            .start_with_time_effects(&time_effects)
+            .start_with_time_effects(&time_effects, Instant::now())
             .await
             .unwrap();
         assert!(service.is_running());
 
-        service.stop().await.unwrap();
+        service.stop(Instant::now()).await.unwrap();
         assert!(!service.is_running());
     }
 
     #[tokio::test]
     async fn test_sync_service_health_check() {
-        let service = SyncService::builder().build().await.unwrap();
+        let service = SyncService::builder().build(Instant::now()).await.unwrap();
         let time_effects = PhysicalTimeHandler;
         service
-            .start_with_time_effects(&time_effects)
+            .start_with_time_effects(&time_effects, Instant::now())
             .await
             .unwrap();
 

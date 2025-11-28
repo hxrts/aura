@@ -90,7 +90,7 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== Simulation Effect Interpreter Demo ===\n");
 
     // Initialize simulation
@@ -114,8 +114,7 @@ async fn main() {
             key: "user:authorized".to_string(),
             value: "true".to_string(),
         })
-        .await
-        .unwrap();
+        .await?;
 
     println!("Initial state:");
     println!("  Authority: {:?}", authority);
@@ -172,13 +171,16 @@ async fn main() {
                     _ => {}
                 }
 
-                interpreter.execute(effect).await.unwrap();
+                interpreter.execute(effect).await?;
             }
 
             let new_budget = interpreter.state().get_budget(&authority);
             println!("  - Remaining budget: {}", new_budget);
         } else {
-            println!("  ✗ Denied: {}", outcome.decision.denial_reason().unwrap());
+            println!(
+                "  ✗ Denied: {}",
+                outcome.decision.denial_reason().unwrap_or("Unknown reason")
+            );
         }
 
         println!();
@@ -224,7 +226,7 @@ async fn main() {
     replay_interpreter.set_initial_budget(authority, 200);
 
     // Replay events
-    replay_interpreter.replay(events).await.unwrap();
+    replay_interpreter.replay(events).await?;
 
     let replay_state = replay_interpreter.snapshot_state();
     println!("Replay successful!");
@@ -240,4 +242,6 @@ async fn main() {
         "  States match: {}",
         final_state.get_budget(&authority) == replay_state.get_budget(&authority)
     );
+
+    Ok(())
 }

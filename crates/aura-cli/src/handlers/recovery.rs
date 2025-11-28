@@ -5,11 +5,12 @@
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
-use aura_core::effects::{JournalEffects, StorageEffects, TimeEffects};
+use aura_core::effects::{JournalEffects, StorageEffects};
 use aura_core::identifiers::{ContextId, GuardianId};
 use aura_core::time::TimeStamp;
 use aura_core::{AccountId, AuthorityId, DeviceId, FactValue};
 use aura_journal::fact::{FactContent, RelationalFact};
+use aura_protocol::effects::EffectApiEffects;
 use aura_recovery::types::{GuardianProfile, GuardianSet};
 use aura_recovery::{RecoveryRequest, RecoveryResponse};
 use std::path::Path;
@@ -157,7 +158,7 @@ async fn start_recovery(
             .unwrap_or("CLI recovery operation")
             .to_string(),
         is_emergency: priority == "emergency",
-        timestamp: <AuraEffectSystem as TimeEffects>::current_timestamp(effects).await,
+        timestamp: effects.current_timestamp().await.unwrap_or(0),
     };
 
     // Derive requesting device from authority context
@@ -562,7 +563,7 @@ async fn dispute_recovery(
             .get("dispute_window_ends_at")
             .and_then(|v| v.as_u64())
         {
-            let current_time = <AuraEffectSystem as TimeEffects>::current_timestamp(effects).await;
+            let current_time = effects.current_timestamp().await.unwrap_or(0);
             if current_time > dispute_window_ends {
                 return Err(anyhow::anyhow!(
                     "Dispute window has closed for evidence {}",
@@ -585,7 +586,7 @@ async fn dispute_recovery(
     // Create dispute record
     use aura_recovery::types::RecoveryDispute;
 
-    let current_timestamp = <AuraEffectSystem as TimeEffects>::current_timestamp(effects).await;
+    let current_timestamp = effects.current_timestamp().await.unwrap_or(0);
 
     let dispute = RecoveryDispute {
         guardian_id,
@@ -698,7 +699,7 @@ async fn generate_guardian_approval(
     use aura_recovery::guardian_key_recovery::GuardianKeyApproval;
 
     // Get current timestamp
-    let timestamp_ms = <AuraEffectSystem as TimeEffects>::current_timestamp(effects).await;
+    let timestamp_ms = effects.current_timestamp().await.unwrap_or(0);
 
     // Create recovery message to sign
     let recovery_message = serde_json::to_vec(&request)

@@ -5,7 +5,6 @@
 
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
-use aura_core::TimeEffects;
 use std::collections::HashMap;
 
 /// Authority-first context for agent operations
@@ -99,7 +98,11 @@ impl RelationalContext {
         participants: Vec<AuthorityId>,
         time_effects: &T,
     ) -> Self {
-        let timestamp = time_effects.current_timestamp().await;
+        let timestamp = time_effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms / 1000)
+            .unwrap_or(0);
         Self {
             context_id,
             participants,
@@ -113,6 +116,10 @@ impl RelationalContext {
 
     /// Update last activity timestamp
     pub async fn touch<T: PhysicalTimeEffects>(&mut self, time_effects: &T) {
-        self.metadata.last_activity = time_effects.current_timestamp().await;
+        self.metadata.last_activity = time_effects
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms / 1000)
+            .unwrap_or(0);
     }
 }

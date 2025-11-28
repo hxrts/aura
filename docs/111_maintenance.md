@@ -1,6 +1,6 @@
 # Maintenance Guidelines
 
-This document captures the operational practices required to keep Aura deployments healthy. It complements the architecture docs by explaining when to rotate epochs, prune journals, refresh capabilities, and upgrade handlers. The procedures below reference the canonical specs inside `docs_2/`.
+This document captures the operational practices required to keep Aura deployments healthy. It complements the architecture docs by explaining when to rotate epochs, prune journals, refresh capabilities, and upgrade handlers. The procedures below reference the canonical specs inside `docs/`.
 
 ## Journal Hygiene
 
@@ -37,4 +37,4 @@ Operators should monitor the following indicators:
 4. **Receipt validation errors** – may point to relay misbehavior or epoch drift.
 5. **Capability cache hit rate** – excessively low values suggest churning policy facts.
 
-Keeping these maintenance routines in place ensures the architecture described throughout `docs_2/` remains reliable in production deployments.
+Keeping these maintenance routines in place ensures the architecture described throughout `docs/` remains reliable in production deployments.

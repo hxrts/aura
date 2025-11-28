@@ -13,7 +13,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_sync::services::{MaintenanceService, MaintenanceServiceConfig};
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -47,7 +47,7 @@ use super::{HealthCheck, HealthStatus, Service, ServiceState};
 use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::CacheManager;
 use crate::protocols::{OTAConfig, OTAProtocol, SnapshotConfig, SnapshotProtocol, UpgradeKind};
-use aura_core::effects::{PhysicalTimeEffects, RandomEffects, TimeEffects};
+use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
 use aura_core::{tree::Snapshot, AccountId, AuraError, DeviceId, Epoch, Hash32, SemanticVersion};
 
 // =============================================================================
@@ -588,9 +588,14 @@ impl MaintenanceService {
     }
 
     /// Start the service using PhysicalTimeEffects (preferred over Service::start)
-    pub async fn start_with_time_effects<T: PhysicalTimeEffects + TimeEffects>(
+    ///
+    /// # Arguments
+    /// - `time_effects`: Time effects provider
+    /// - `now_instant`: Current monotonic time instant (obtain from runtime layer)
+    pub async fn start_with_time_effects<T: PhysicalTimeEffects>(
         &self,
         time_effects: &T,
+        now_instant: std::time::Instant,
     ) -> SyncResult<()> {
         {
             let mut state = self.state.write();
@@ -605,8 +610,7 @@ impl MaintenanceService {
             .physical_time()
             .await
             .map_err(|e| AuraError::internal(format!("time error: {e}")))?;
-        // Use time effects for uptime tracking
-        *self.started_at.write() = Some(time_effects.now_instant().await);
+        *self.started_at.write() = Some(now_instant);
 
         *self.state.write() = ServiceState::Running;
         Ok(())
@@ -629,7 +633,7 @@ impl Service for MaintenanceService {
         Ok(())
     }
 
-    async fn stop(&self) -> SyncResult<()> {
+    async fn stop(&self, _now: Instant) -> SyncResult<()> {
         {
             let mut state = self.state.write();
             if *state == ServiceState::Stopped {
@@ -719,31 +723,33 @@ mod tests {
 
     #[tokio::test]
     async fn test_maintenance_service_lifecycle() {
+        use std::time::Instant;
         let service = MaintenanceService::new(Default::default()).unwrap();
 
         let time_effects = aura_effects::time::PhysicalTimeHandler;
         service
-            .start_with_time_effects(&time_effects)
+            .start_with_time_effects(&time_effects, Instant::now())
             .await
             .unwrap();
         assert!(service.is_running());
 
-        service.stop().await.unwrap();
+        service.stop(Instant::now()).await.unwrap();
         assert!(!service.is_running());
     }
 
     #[tokio::test]
     async fn test_maintenance_service_with_time_effects() {
+        use std::time::Instant;
         let service = MaintenanceService::new(Default::default()).unwrap();
         let time_effects = aura_testkit::stateful_effects::SimulatedTimeHandler::new();
 
         service
-            .start_with_time_effects(&time_effects)
+            .start_with_time_effects(&time_effects, Instant::now())
             .await
             .unwrap();
         assert!(service.is_running());
 
-        service.stop().await.unwrap();
+        service.stop(Instant::now()).await.unwrap();
         assert!(!service.is_running());
     }
 

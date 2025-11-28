@@ -271,13 +271,10 @@ impl AppState {
     async fn now_ts() -> TimeStamp {
         // Use PhysicalTimeEffects for timestamp generation
         let time_effects = PhysicalTimeHandler;
-        let physical_time = time_effects
-            .physical_time()
-            .await
-            .unwrap_or(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            });
+        let physical_time = time_effects.physical_time().await.unwrap_or(PhysicalTime {
+            ts_ms: 0,
+            uncertainty: None,
+        });
         TimeStamp::PhysicalClock(physical_time)
     }
 }

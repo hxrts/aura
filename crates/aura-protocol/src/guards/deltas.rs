@@ -8,13 +8,16 @@ use aura_core::TimeEffects;
 use aura_core::{AuraError, AuraResult, Fact, FactValue, Journal};
 use serde_json::Value as JsonValue;
 use std::collections::BTreeSet;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 /// Apply delta facts to the journal atomically
 ///
 /// This function implements the "join-only commits" principle from the formal model.
 /// Facts are accumulated monotonically in the journal CRDT, ensuring convergence
 /// across replicas while preserving join-semilattice properties.
+///
+/// Timing is captured via the tracing span (subscriber handles `Instant::now()`).
+#[instrument(skip(effect_system), fields(fact_count = delta_facts.len()))]
 pub async fn apply_delta_facts<E: aura_core::effects::JournalEffects + TimeEffects>(
     delta_facts: &[JsonValue],
     effect_system: &E,
@@ -24,12 +27,7 @@ pub async fn apply_delta_facts<E: aura_core::effects::JournalEffects + TimeEffec
         return Ok(Vec::new());
     }
 
-    let start_time = effect_system.now_instant().await;
-
-    debug!(
-        fact_count = delta_facts.len(),
-        "Starting atomic delta fact application"
-    );
+    debug!("Starting atomic delta fact application");
 
     // Validate facts before application (fail fast)
     let validated_facts = validate_delta_facts(delta_facts)?;
@@ -72,11 +70,8 @@ pub async fn apply_delta_facts<E: aura_core::effects::JournalEffects + TimeEffec
         }
     }
 
-    let application_time = start_time.elapsed();
-
     info!(
         facts_applied = applied_facts.len(),
-        application_time_us = application_time.as_micros(),
         "Delta facts applied successfully"
     );
 
@@ -510,7 +505,7 @@ async fn generate_compensation_fact<E: TimeEffects>(
                     (
                         "timestamp".to_string(),
                         JsonValue::Number(serde_json::Number::from(
-                            effects.current_timestamp().await,
+                            effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0),
                         )),
                     ),
                 ]);
@@ -705,7 +700,9 @@ impl<E: aura_core::effects::JournalEffects + TimeEffects> JournalOperationExt fo
                 device_fact_map.insert("metadata".to_string(), metadata);
                 device_fact_map.insert(
                     "timestamp".to_string(),
-                    JsonValue::Number(serde_json::Number::from(self.current_timestamp().await)),
+                    JsonValue::Number(serde_json::Number::from(
+                        self.physical_time().await.map(|t| t.ts_ms).unwrap_or(0),
+                    )),
                 );
                 let device_fact = JsonValue::Object(device_fact_map);
 

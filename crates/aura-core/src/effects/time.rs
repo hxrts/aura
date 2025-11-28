@@ -112,19 +112,6 @@ pub trait TimeEffects: PhysicalTimeEffects {
     }
 }
 
-#[async_trait]
-impl<T> TimeEffects for T
-where
-    T: PhysicalTimeEffects + ?Sized,
-{
-    /// Default implementation that provides Instant::now() for compatibility.
-    /// This is a blanket implementation for all PhysicalTimeEffects implementors.
-    #[allow(clippy::disallowed_methods)] // Effect trait implementation needs Instant::now
-    async fn now_instant(&self) -> Instant {
-        Instant::now()
-    }
-}
-
 /// Blanket implementation for Arc<T> where T: PhysicalTimeEffects
 #[async_trait]
 impl<T: PhysicalTimeEffects + ?Sized> PhysicalTimeEffects for std::sync::Arc<T> {

@@ -6,11 +6,10 @@
 use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::time::TimeEffects;
 use aura_core::effects::RandomEffects;
 use aura_core::identifiers::{AccountId, DeviceId};
 use aura_macros::choreography;
-use aura_protocol::effects::{ChoreographicRole, SessionType};
+use aura_protocol::effects::{ChoreographicRole, EffectApiEffects, SessionType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -202,7 +201,7 @@ impl SessionOperations {
     ) -> AgentResult<SessionHandle> {
         let effects = self.effects.read().await;
         let device_id = self.device_id();
-        let _timestamp_millis = effects.current_timestamp_ms().await;
+        let _timestamp_millis = effects.current_timestamp().await.unwrap_or(0);
 
         // Generate unique session ID
         let session_uuid = effects.random_uuid().await;
@@ -314,7 +313,7 @@ impl SessionOperations {
         effects: &AuraEffectSystem,
     ) -> AgentResult<Vec<ParticipantResponse>> {
         let mut responses = Vec::new();
-        let timestamp = effects.current_timestamp().await;
+        let timestamp = effects.current_timestamp().await.unwrap_or(0);
 
         // For each participant (excluding initiator), simulate invitation and response
         for participant_id in &request.participants {
@@ -348,7 +347,7 @@ impl SessionOperations {
         effects: &AuraEffectSystem,
     ) -> AgentResult<SessionHandle> {
         let device_id = self.device_id();
-        let timestamp_millis = effects.current_timestamp_ms().await;
+        let timestamp_millis = effects.current_timestamp().await.unwrap_or(0);
         let my_role = ChoreographicRole::new(device_id.0, 0);
 
         let session_handle = SessionHandle {
@@ -479,7 +478,7 @@ impl SessionOperations {
         session_id: &str,
     ) -> AgentResult<SessionHandle> {
         // End session (logging removed for simplicity)
-        let current_time = effects.current_timestamp_ms().await;
+        let current_time = effects.current_timestamp().await.unwrap_or(0);
 
         let device_id = self.device_id();
         Ok(SessionHandle {
@@ -519,7 +518,7 @@ impl SessionOperations {
         &self,
         effects: &AuraEffectSystem,
     ) -> AgentResult<SessionStats> {
-        let current_time = effects.current_timestamp_ms().await;
+        let current_time = effects.current_timestamp().await.unwrap_or(0);
 
         // Return empty stats (no persistent storage yet)
         Ok(SessionStats {

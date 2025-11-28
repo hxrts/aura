@@ -21,7 +21,7 @@
 //!
 //! # Service Hierarchy
 //!
-//! ```
+//! ```text
 //! Services (Layer 5 - Runtime Libraries)
 //!   ├── Compose Protocols (anti-entropy, journal sync, snapshots, OTA)
 //!   ├── Use Infrastructure (peers, connections, rate limiting)
@@ -30,7 +30,7 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_sync::services::{SyncService, SyncServiceConfig};
 //! use aura_core::effects::{JournalEffects, NetworkEffects};
 //!
@@ -117,7 +117,10 @@ pub trait Service: Send + Sync {
     async fn start(&self, now: Instant) -> SyncResult<()>;
 
     /// Stop the service gracefully
-    async fn stop(&self) -> SyncResult<()>;
+    ///
+    /// Note: Callers should obtain `now` from their chosen clock source
+    /// and pass it to this method for consistent timeout tracking during shutdown.
+    async fn stop(&self, now: Instant) -> SyncResult<()>;
 
     /// Check service health
     async fn health_check(&self) -> SyncResult<HealthCheck>;

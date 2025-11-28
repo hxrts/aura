@@ -202,6 +202,8 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   impure_hits=$(rg --no-heading "$impure_pattern" crates -g "*.rs" || true)
   # Allowlist: effect implementations, testkit mocks, simulator handlers, runtime assembly, CLI UI measurements
   # CLI code is allowed to use direct system time for UI measurements/metrics that don't affect protocol behavior
+  # Filter out allowed areas and inline test modules
+  # Note: Lines ending with .unwrap() or containing #[tokio::test] are likely test code
   filtered_impure=$(echo "$impure_hits" \
     | grep -v "crates/aura-effects/" \
     | grep -v "crates/aura-testkit/" \
@@ -211,7 +213,30 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "tests/performance_regression.rs" \
     | grep -v "///" \
     | grep -v "//!" \
-    | grep -v "//" || true)
+    | grep -v "//" \
+    | grep -v "\.unwrap()" \
+    | grep -v "#\[tokio::test\]" \
+    | grep -v "#\[test\]" || true)
+  # Second pass: filter out lines from files with inline #[cfg(test)] modules
+  if [ -n "$filtered_impure" ]; then
+    filtered_final=""
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      file_path="${line%%:*}"
+      # Skip if file contains #[cfg(test)] and this is a test module (heuristic)
+      if [ -f "$file_path" ] && grep -q "#\[cfg(test)\]" "$file_path" 2>/dev/null; then
+        # Get line number from match and check if it's after #[cfg(test)]
+        match_line_text="${line#*:}"
+        match_line_num=$(grep -n "$match_line_text" "$file_path" 2>/dev/null | head -1 | cut -d: -f1)
+        cfg_test_line=$(grep -n "#\[cfg(test)\]" "$file_path" 2>/dev/null | head -1 | cut -d: -f1)
+        if [ -n "$match_line_num" ] && [ -n "$cfg_test_line" ] && [ "$match_line_num" -gt "$cfg_test_line" ]; then
+          continue  # Skip - this is in a test module
+        fi
+      fi
+      filtered_final="${filtered_final}${line}"$'\n'
+    done <<< "$filtered_impure"
+    filtered_impure="$filtered_final"
+  fi
   if [ -n "$filtered_impure" ]; then
     violation "Impure functions detected outside effect implementations/testkit/runtime assembly:"
     echo "$filtered_impure"

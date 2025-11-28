@@ -12,7 +12,7 @@ use super::{
     SimulationTimeHandler,
 };
 use aura_agent::{AgentBuilder, AuraEffectSystem};
-use aura_core::effects::{ChaosEffects, TestingEffects, TimeEffects};
+use aura_core::effects::{ChaosEffects, TestingEffects};
 use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
 use std::sync::Arc;
@@ -180,8 +180,13 @@ impl ComposedSimulationEnvironment {
 
     /// Access time effects through trait
     pub async fn current_timestamp(&self) -> Result<u64, SimulationComposerError> {
+        use aura_core::effects::PhysicalTimeEffects;
         match &self.time_handler {
-            Some(handler) => Ok(handler.current_timestamp().await),
+            Some(handler) => handler
+                .physical_time()
+                .await
+                .map(|pt| pt.ts_ms)
+                .map_err(|e| SimulationComposerError::EffectOperationFailed(e.to_string())),
             None => Err(SimulationComposerError::MissingRequiredComponent(
                 "time_handler".to_string(),
             )),

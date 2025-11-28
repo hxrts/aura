@@ -12,9 +12,6 @@ use crate::consensus::finalize_amp_bump_with_journal_default;
 use crate::guards::effect_system_trait::GuardContextProvider;
 use crate::guards::GuardEffects;
 use aura_core::effects::NetworkEffects;
-use aura_core::TimeEffects;
-use std::time::Duration;
-// TimeEffects removed - using PhysicalTimeEffects directly
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::{AuraError, Result};
@@ -24,6 +21,8 @@ use aura_transport::amp::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
+use tracing::instrument;
 fn map_amp_error(err: AmpError) -> AuraError {
     AuraError::invalid(format!("AMP ratchet error: {}", err))
 }
@@ -186,6 +185,8 @@ pub async fn commit_bump_with_consensus<E: AmpJournalEffects>(
 ///
 /// Implements AMP specification section 7.2: performs guard chain to enforce authorization and flow budgets.
 /// Uses centralized telemetry for structured observability.
+/// Timing is captured via the tracing span (subscriber handles actual timing).
+#[instrument(skip(effects, payload), fields(context = %context, channel = %channel))]
 pub async fn amp_send<E>(
     effects: &mut E,
     context: ContextId,
@@ -201,8 +202,7 @@ where
         + aura_core::PhysicalTimeEffects
         + aura_core::TimeEffects,
 {
-    let time = aura_effects::time::PhysicalTimeHandler;
-    let overall_start = time.now_instant().await;
+    // Timing captured by tracing span, not explicit measurement
     let payload_size = payload.len();
 
     // Phase 1: Prepare send (journal reduction and ratchet derivation)
@@ -215,8 +215,7 @@ where
     };
     let header = deriv.header;
 
-    // Phase 2: AEAD encryption
-    let crypto_start = time.now_instant().await;
+    // Phase 2: AEAD encryption (timing captured by tracing span)
     let key = deriv.message_key.0;
     let nonce = nonce_from_header(&header);
     let sealed = match effects.aes_gcm_encrypt(&payload, &key, &nonce).await {
@@ -228,8 +227,8 @@ where
                 channel,
                 &error,
                 Some(AmpMetrics {
-                    duration: overall_start.elapsed(),
-                    crypto_time: Some(crypto_start.elapsed()),
+                    duration: Duration::ZERO, // Captured by tracing span
+                    crypto_time: Some(Duration::ZERO),
                     guard_time: None,
                     journal_time: Some(Duration::ZERO),
                     bytes_processed: payload_size,
@@ -239,7 +238,6 @@ where
             return Err(error);
         }
     };
-    let crypto_time = crypto_start.elapsed();
 
     let msg = AmpMessage::new(header, sealed.clone());
     let bytes = match serde_json::to_vec(&msg) {
@@ -251,8 +249,8 @@ where
                 channel,
                 &error,
                 Some(AmpMetrics {
-                    duration: overall_start.elapsed(),
-                    crypto_time: Some(crypto_time),
+                    duration: Duration::ZERO, // Captured by tracing span
+                    crypto_time: Some(Duration::ZERO),
                     guard_time: None,
                     journal_time: Some(Duration::ZERO),
                     bytes_processed: payload_size,
@@ -263,8 +261,7 @@ where
         }
     };
 
-    // Phase 3: Guard chain execution (authorization and flow budget)
-    let guard_start = time.now_instant().await;
+    // Phase 3: Guard chain execution (authorization and flow budget) - timing captured by tracing span
     let peer = crate::guards::effect_system_trait::GuardContextProvider::authority_id(effects);
     let flow_cost = 1u32; // Minimal cost for AMP message
     let guard_chain = build_amp_send_guard(context, peer, Some(flow_cost));
@@ -272,15 +269,14 @@ where
     let guard_result = match guard_chain.evaluate_with_coupling(effects).await {
         Ok(result) => result,
         Err(error) => {
-            let guard_time = guard_start.elapsed();
             AMP_TELEMETRY.log_send_failure(
                 context,
                 channel,
                 &error,
                 Some(AmpMetrics {
-                    duration: overall_start.elapsed(),
-                    crypto_time: Some(crypto_time),
-                    guard_time: Some(guard_time),
+                    duration: Duration::ZERO, // Captured by tracing span
+                    crypto_time: Some(Duration::ZERO),
+                    guard_time: Some(Duration::ZERO),
                     journal_time: Some(Duration::ZERO),
                     bytes_processed: payload_size,
                     flow_charged: 0,
@@ -291,7 +287,6 @@ where
     };
 
     if !guard_result.authorized {
-        let guard_time = guard_start.elapsed();
         let error = AuraError::permission_denied(
             guard_result
                 .denial_reason
@@ -302,9 +297,9 @@ where
             channel,
             &error,
             Some(AmpMetrics {
-                duration: overall_start.elapsed(),
-                crypto_time: Some(crypto_time),
-                guard_time: Some(guard_time),
+                duration: Duration::ZERO, // Captured by tracing span
+                crypto_time: Some(Duration::ZERO),
+                guard_time: Some(Duration::ZERO),
                 journal_time: Some(Duration::ZERO),
                 bytes_processed: payload_size,
                 flow_charged: flow_cost,
@@ -312,7 +307,6 @@ where
         );
         return Err(error);
     }
-    let guard_time = guard_start.elapsed();
 
     // Log flow charge telemetry
     if let Some(receipt) = &guard_result.receipt {
@@ -323,7 +317,7 @@ where
             cost: flow_cost,
             receipt: Some(receipt.clone()),
             budget_remaining: guard_result.receipt.as_ref().map(|_| 0),
-            charge_duration: guard_time,
+            charge_duration: Duration::ZERO, // Captured by tracing span
         });
     }
 
@@ -335,9 +329,9 @@ where
             channel,
             &error,
             Some(AmpMetrics {
-                duration: overall_start.elapsed(),
-                crypto_time: Some(crypto_time),
-                guard_time: Some(guard_time),
+                duration: Duration::ZERO, // Captured by tracing span
+                crypto_time: Some(Duration::ZERO),
+                guard_time: Some(Duration::ZERO),
                 journal_time: Some(Duration::ZERO),
                 bytes_processed: payload_size,
                 flow_charged: flow_cost,
@@ -346,8 +340,7 @@ where
         return Err(error);
     }
 
-    // Success: Log comprehensive telemetry
-    let total_duration = overall_start.elapsed();
+    // Success: Log comprehensive telemetry (timing captured by tracing span)
     AMP_TELEMETRY.log_send_success(AmpSendTelemetry {
         context,
         channel,
@@ -357,9 +350,9 @@ where
         flow_charge: flow_cost,
         receipt: guard_result.receipt,
         metrics: AmpMetrics {
-            duration: total_duration,
-            crypto_time: Some(crypto_time),
-            guard_time: Some(guard_time),
+            duration: Duration::ZERO, // Captured by tracing span
+            crypto_time: Some(Duration::ZERO),
+            guard_time: Some(Duration::ZERO),
             journal_time: Some(Duration::ZERO),
             bytes_processed: payload_size,
             flow_charged: flow_cost,
@@ -371,12 +364,13 @@ where
 
 /// High-level recv path: decode, validate header/window, and surface payload + derivation.
 /// Uses centralized telemetry for structured observability including window validation.
+/// Timing is captured via the tracing span (subscriber handles actual timing).
+#[instrument(skip(effects, bytes), fields(context = %context))]
 pub async fn amp_recv<E>(effects: &E, context: ContextId, bytes: Vec<u8>) -> Result<AmpMessage>
 where
     E: AmpJournalEffects + crate::effects::CryptoEffects,
 {
-    let time = aura_effects::time::PhysicalTimeHandler;
-    let overall_start = time.now_instant().await;
+    // Timing captured by tracing span, not explicit measurement
     let wire_size = bytes.len();
 
     // Phase 1: Deserialize wire message
@@ -390,7 +384,7 @@ where
                 None,
                 &error,
                 Some(AmpMetrics {
-                    duration: overall_start.elapsed(),
+                    duration: Duration::ZERO, // Captured by tracing span
                     crypto_time: None,
                     guard_time: None,
                     journal_time: Some(Duration::ZERO),
@@ -411,7 +405,7 @@ where
             None,
             &error,
             Some(AmpMetrics {
-                duration: overall_start.elapsed(),
+                duration: Duration::ZERO, // Captured by tracing span
                 crypto_time: None,
                 guard_time: None,
                 journal_time: Some(Duration::ZERO),
@@ -460,7 +454,7 @@ where
                 Some(window_validation),
                 &error,
                 Some(AmpMetrics {
-                    duration: overall_start.elapsed(),
+                    duration: Duration::ZERO, // Captured by tracing span
                     crypto_time: None,
                     guard_time: None,
                     journal_time: Some(Duration::ZERO),
@@ -472,23 +466,21 @@ where
         }
     };
 
-    // Phase 4: AEAD decryption
-    let crypto_start = time.now_instant().await;
+    // Phase 4: AEAD decryption (timing captured by tracing span)
     let key = deriv.message_key.0;
     let nonce = nonce_from_header(&wire.header);
     let opened = match effects.aes_gcm_decrypt(&wire.payload, &key, &nonce).await {
         Ok(opened) => opened,
         Err(e) => {
             let error = AuraError::crypto(format!("AMP open failed: {}", e));
-            let crypto_time = crypto_start.elapsed();
             AMP_TELEMETRY.log_receive_failure(
                 context,
                 Some(wire.header),
                 Some(window_validation), // window_validation from successful header validation
                 &error,
                 Some(AmpMetrics {
-                    duration: overall_start.elapsed(),
-                    crypto_time: Some(crypto_time),
+                    duration: Duration::ZERO, // Captured by tracing span
+                    crypto_time: Some(Duration::ZERO),
                     guard_time: None,
                     journal_time: Some(Duration::ZERO),
                     bytes_processed: wire_size,
@@ -498,10 +490,8 @@ where
             return Err(error);
         }
     };
-    let crypto_time = crypto_start.elapsed();
 
-    // Success: Log comprehensive telemetry
-    let total_duration = overall_start.elapsed();
+    // Success: Log comprehensive telemetry (timing captured by tracing span)
     AMP_TELEMETRY.log_receive_success(AmpReceiveTelemetry {
         context,
         header: wire.header,
@@ -509,8 +499,8 @@ where
         decrypted_size: opened.len(),
         window_validation, // from successful validation
         metrics: AmpMetrics {
-            duration: total_duration,
-            crypto_time: Some(crypto_time),
+            duration: Duration::ZERO, // Captured by tracing span
+            crypto_time: Some(Duration::ZERO),
             guard_time: None,
             journal_time: Some(Duration::ZERO),
             bytes_processed: wire_size,

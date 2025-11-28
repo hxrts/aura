@@ -3,7 +3,7 @@
 ## Session Initialization
 
 **IMPORTANT**: When starting any session, immediately:
-1. Enter the Nix environment if not already in the shell: `[ "$IN_NIX_SHELL" ] || nix develop`
+1. Enter the Nix environment if not already in the shell: `nix develop`
 3. Read `.claude/skills/aura_quick_ref.md` for enhanced context
 4. Provide a 3-sentence project status summary
 

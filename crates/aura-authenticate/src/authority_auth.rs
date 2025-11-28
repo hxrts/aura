@@ -240,9 +240,14 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
                 let ticket_nonce_bytes = self.effects.random_bytes(16).await;
                 ticket_nonce.copy_from_slice(&ticket_nonce_bytes[..16]);
 
+                // Parse session ID or generate a new one via RandomEffects
+                let session_id = match uuid::Uuid::parse_str(&challenge.session_id) {
+                    Ok(id) => id,
+                    Err(_) => self.effects.random_uuid().await,
+                };
+
                 let session_ticket = SessionTicket {
-                    session_id: uuid::Uuid::parse_str(&challenge.session_id)
-                        .unwrap_or_else(|_| uuid::Uuid::new_v4()),
+                    session_id,
                     issuer_device_id: aura_core::DeviceId::from_uuid(request.authority_id.uuid()),
                     scope: request.requested_scope,
                     issued_at: challenge.timestamp,
@@ -309,7 +314,7 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
 
         Ok(ChallengeData {
             nonce,
-            session_id: uuid::Uuid::new_v4().to_string(),
+            session_id: self.effects.random_uuid().await.to_string(),
             timestamp: self
                 .effects
                 .physical_time()
@@ -343,7 +348,7 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
                 nonce.copy_from_slice(&nonce_bytes[..16]);
 
                 let session_ticket = SessionTicket {
-                    session_id: uuid::Uuid::new_v4(),
+                    session_id: self.effects.random_uuid().await,
                     issuer_device_id: authority_to_device_id(&request.authority_id),
                     scope: request.requested_scope.clone(),
                     issued_at: timestamp,

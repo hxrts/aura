@@ -14,7 +14,7 @@
 //! # Usage
 //!
 
-//! ```rust,no_run
+//! ```rust,ignore
 //! use aura_sync::infrastructure::{ConnectionPool, PoolConfig};
 //! use aura_core::DeviceId;
 //!

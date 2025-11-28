@@ -1828,26 +1828,23 @@ mod tests {
     use aura_core::PhysicalTimeEffects;
 
     #[tokio::test]
-    async fn test_connection_manager_creation() {
+    async fn test_connection_manager_creation() -> Result<(), Box<dyn std::error::Error>> {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let effects = std::sync::Arc::new(
-            AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
-        );
+        let effects = std::sync::Arc::new(AuraEffectSystem::testing(&AgentConfig::default())?);
         let random =
             std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
         let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
 
         assert_eq!(manager.device_id, device_id);
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_connection_priority_logic() {
+    async fn test_connection_priority_logic() -> Result<(), Box<dyn std::error::Error>> {
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let effects = std::sync::Arc::new(
-            AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
-        );
+        let effects = std::sync::Arc::new(AuraEffectSystem::testing(&AgentConfig::default())?);
         let random =
             std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
         let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
@@ -1894,6 +1891,7 @@ mod tests {
                 );
             }
         }
+        Ok(())
     }
 
     #[test]
@@ -1926,16 +1924,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_coordinated_hole_punch() {
+    async fn test_coordinated_hole_punch() -> Result<(), Box<dyn std::error::Error>> {
         use aura_protocol::messages::social_rendezvous::{
             TransportDescriptor, TransportKind, TransportOfferPayload,
         };
 
         let device_id = DeviceId::from("test_device");
         let stun_config = StunConfig::default();
-        let effects = std::sync::Arc::new(
-            AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
-        );
+        let effects = std::sync::Arc::new(AuraEffectSystem::testing(&AgentConfig::default())?);
         let random =
             std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
         let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
@@ -1999,6 +1995,7 @@ mod tests {
                 // but not necessarily wrong if punch logic worked
             }
         }
+        Ok(())
     }
 
     #[test]

@@ -16,11 +16,12 @@ use aura_journal::{
     reduce_context, ChannelEpochState, FactJournal,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 /// Protocol-layer journal adapter for AMP.
 #[async_trait::async_trait]
-pub trait AmpJournalEffects: JournalEffects + StorageEffects + Sized {
+pub trait AmpJournalEffects:
+    JournalEffects + StorageEffects + aura_core::effects::RandomEffects + Sized
+{
     /// Fetch the full context journal (fact-based) for reduction.
     async fn fetch_context_journal(&self, context: ContextId) -> Result<FactJournal>;
 
@@ -59,7 +60,9 @@ pub trait AmpJournalEffects: JournalEffects + StorageEffects + Sized {
 }
 
 #[async_trait::async_trait]
-impl<E: JournalEffects + StorageEffects> AmpJournalEffects for E {
+impl<E: JournalEffects + StorageEffects + aura_core::effects::RandomEffects> AmpJournalEffects
+    for E
+{
     async fn fetch_context_journal(&self, context: ContextId) -> Result<FactJournal> {
         match self.retrieve(&context_journal_key(context)).await {
             Ok(Some(bytes)) => serde_json::from_slice(&bytes)
@@ -75,7 +78,8 @@ impl<E: JournalEffects + StorageEffects> AmpJournalEffects for E {
     async fn insert_relational_fact(&self, fact: RelationalFact) -> Result<()> {
         let context = fact_context(&fact)?;
         let mut journal = self.fetch_context_journal(context).await?;
-        let ts = TimeStamp::OrderClock(OrderTime(hash(Uuid::new_v4().as_bytes())));
+        let random_bytes = self.random_bytes(16).await;
+        let ts = TimeStamp::OrderClock(OrderTime(hash(&random_bytes)));
         journal
             .add_fact(Fact {
                 order: match &ts {
@@ -174,11 +178,16 @@ fn fact_context(fact: &RelationalFact) -> Result<ContextId> {
 }
 
 /// Focused context journal helper that hides storage keys/serialization.
-pub struct AmpContextStore<'a, E: ?Sized + JournalEffects + StorageEffects> {
+pub struct AmpContextStore<
+    'a,
+    E: ?Sized + JournalEffects + StorageEffects + aura_core::effects::RandomEffects,
+> {
     effects: &'a E,
 }
 
-impl<'a, E: ?Sized + JournalEffects + StorageEffects> AmpContextStore<'a, E> {
+impl<'a, E: ?Sized + JournalEffects + StorageEffects + aura_core::effects::RandomEffects>
+    AmpContextStore<'a, E>
+{
     pub async fn fetch_context_journal(&self, context: ContextId) -> Result<FactJournal> {
         match self.effects.retrieve(&context_journal_key(context)).await {
             Ok(Some(bytes)) => serde_json::from_slice(&bytes)
@@ -194,7 +203,8 @@ impl<'a, E: ?Sized + JournalEffects + StorageEffects> AmpContextStore<'a, E> {
     pub async fn insert_relational_fact(&self, fact: RelationalFact) -> Result<()> {
         let context = fact_context(&fact)?;
         let mut journal = self.fetch_context_journal(context).await?;
-        let ts = TimeStamp::OrderClock(OrderTime(hash(Uuid::new_v4().as_bytes())));
+        let random_bytes = self.effects.random_bytes(16).await;
+        let ts = TimeStamp::OrderClock(OrderTime(hash(&random_bytes)));
         journal
             .add_fact(Fact {
                 order: match &ts {

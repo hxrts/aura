@@ -473,19 +473,16 @@ pub static AMP_TELEMETRY: AmpTelemetry = AmpTelemetry {
 };
 
 /// Convenience macro for timing AMP operations with automatic telemetry
+///
+/// Uses tracing spans for timing - the subscriber (runtime layer) handles
+/// the actual timing measurement. This keeps timing out of protocol-layer code.
+///
+/// Returns just the result; timing is captured via span lifecycle.
 #[macro_export]
 macro_rules! time_amp_operation {
     ($operation:expr, $block:block) => {{
-        let start = aura_effects::time::RealTimeHandler::default()
-            .now_instant()
-            .await;
-        let result = $block;
-        let duration = start.elapsed();
-        tracing::debug!(
-            operation = $operation,
-            duration_ms = duration.as_millis(),
-            "AMP operation timing"
-        );
-        (result, duration)
+        // Timing captured by tracing span lifecycle (subscriber handles Instant::now())
+        let _span = tracing::debug_span!("amp_operation", operation = $operation).entered();
+        $block
     }};
 }
