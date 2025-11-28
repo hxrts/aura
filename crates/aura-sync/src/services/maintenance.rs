@@ -710,6 +710,7 @@ impl Service for MaintenanceService {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::disallowed_methods)] // Test code uses Instant::now() for coordination
     use super::*;
 
     #[test]

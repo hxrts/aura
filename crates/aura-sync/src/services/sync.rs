@@ -941,6 +941,7 @@ impl SyncServiceBuilder {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::disallowed_methods)] // Test code uses Instant::now() for coordination
     use super::*;
     use std::time::Instant;
 

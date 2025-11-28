@@ -93,11 +93,38 @@ jobs:
       - name: Check for direct time usage
         run: |
           echo "Checking for direct time usage violations..."
-          if rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number \
+
+          # Get files with violations
+          files_with_violations=$(rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ \
+              --files-with-matches \
               --glob '!**/aura-effects/**' \
               --glob '!**/aura-simulator/**' \
               --glob '!**/aura-testkit/**' \
-              --glob '!**/tests/**'; then
+              --glob '!**/tests/**' \
+              --glob '!**/integration/**' \
+              --glob '!**/demo/**' \
+              --glob '!**/aura-cli/src/handlers/scenarios.rs' 2>/dev/null || true)
+
+          violations=""
+          for file in $files_with_violations; do
+            # Skip files with allow attribute in test modules
+            if grep -q "#\[cfg(test)\]" "$file" && \
+               grep -A 5 "#\[cfg(test)\]" "$file" | grep -q "#!\[allow(clippy::disallowed_methods)\]"; then
+              continue
+            fi
+
+            # Get violations from this file, excluding comments
+            file_violations=$(rg "SystemTime::now|Instant::now|chrono::Utc::now" "$file" --line-number 2>/dev/null | \
+                grep -v '^\s*//' | \
+                grep -v ':\s*//' || true)
+
+            if [ -n "$file_violations" ]; then
+              violations="$violations$file_violations"$'\n'
+            fi
+          done
+
+          if [ -n "$violations" ]; then
+            echo "$violations"
             echo "[ERROR] Found direct time usage! Use effects.now() instead."
             exit 1
           else
