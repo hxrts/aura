@@ -638,7 +638,10 @@ ci-dry-run:
 
     doc_errors=0
     doc_output=$(mktemp)
-    for file in docs/*.md CLAUDE.md README.md; do
+
+    # Find all markdown files recursively (matching GitHub CI behavior)
+    # Exclude node_modules, target, and .git directories
+    while IFS= read -r file; do
         if [ -f "$file" ]; then
             if ! markdown-link-check "$file" --config .github/config/markdown-link-check.json 2>&1 | tee -a "$doc_output" | grep -q "ERROR:"; then
                 :
@@ -647,7 +650,11 @@ ci-dry-run:
                 doc_errors=1
             fi
         fi
-    done
+    done < <(find . -name "*.md" -type f \
+        ! -path "*/node_modules/*" \
+        ! -path "*/target/*" \
+        ! -path "*/.git/*" \
+        ! -path "*/.aura-test/*")
 
     if [ $doc_errors -eq 0 ]; then
         echo -e "${GREEN}[OK]${NC} Documentation links check passed"
