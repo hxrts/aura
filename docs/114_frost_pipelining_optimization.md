@@ -223,4 +223,3 @@ pub async fn handle_sign_request<R: RandomEffects + ?Sized>(
 
 - [FROST Paper](https://eprint.iacr.org/2020/852): Flexible Round-Optimized Schnorr Threshold Signatures
 - [`docs/104_consensus.md`](104_consensus.md): Aura Consensus Protocol
-- [`work/kernel_impl.md`](../work/kernel_impl.md): Implementation work plan

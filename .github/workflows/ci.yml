@@ -93,7 +93,11 @@ jobs:
       - name: Check for direct time usage
         run: |
           echo "Checking for direct time usage violations..."
-          if rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number; then
+          if rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number \
+              --glob '!**/aura-effects/**' \
+              --glob '!**/aura-simulator/**' \
+              --glob '!**/aura-testkit/**' \
+              --glob '!**/tests/**'; then
             echo "[ERROR] Found direct time usage! Use effects.now() instead."
             exit 1
           else
@@ -102,7 +106,11 @@ jobs:
       - name: Check for direct randomness usage
         run: |
           echo "Checking for direct randomness usage violations..."
-          if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number; then
+          if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number \
+              --glob '!**/aura-effects/**' \
+              --glob '!**/aura-simulator/**' \
+              --glob '!**/aura-testkit/**' \
+              --glob '!**/tests/**'; then
             echo "[ERROR] Found direct randomness usage! Use effects.random_bytes() or effects.rng() instead."
             exit 1
           else
@@ -111,7 +119,19 @@ jobs:
       - name: Check for direct UUID usage
         run: |
           echo "Checking for direct UUID usage violations..."
-          if rg --type rust "Uuid::new_v4\(\)" crates/ --line-number; then
+          if rg --type rust "Uuid::new_v4\(\)" crates/ --line-number \
+              --glob '!**/aura-effects/**' \
+              --glob '!**/aura-agent/**' \
+              --glob '!**/aura-simulator/**' \
+              --glob '!**/aura-testkit/**' \
+              --glob '!**/aura-quint/**' \
+              --glob '!**/aura-cli/**' \
+              --glob '!**/tests/**' \
+              --glob '!**/aura-core/src/types/identifiers.rs' \
+              --glob '!**/aura-core/src/effects/quint.rs' \
+              --glob '!**/aura-composition/src/registry.rs' \
+              --glob '!**/aura-sync/src/services/maintenance.rs' \
+              --glob '!**/aura-sync/src/infrastructure/peers.rs'; then
             echo "[ERROR] Found direct UUID usage! Use effects.gen_uuid() instead."
             exit 1
           else

@@ -100,7 +100,6 @@
 //! // Execute simulation through effect composition
 //! let timestamp = environment.time_handler.as_ref().unwrap().current_timestamp().await?;
 //! ```
-#![allow(clippy::disallowed_methods)]
 
 // Core simulator types following algebraic effects architecture
 pub mod types;
