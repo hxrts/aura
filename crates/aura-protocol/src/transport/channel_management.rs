@@ -9,6 +9,8 @@ use aura_core::effects::PhysicalTimeEffects;
 use aura_core::{identifiers::DeviceId, ContextId};
 use aura_effects::time::PhysicalTimeHandler;
 use aura_macros::choreography;
+use futures::pin_mut;
+use futures::task::noop_waker;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::future::Future;
@@ -16,8 +18,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::thread;
 use std::time::{Duration, SystemTime};
-use futures::task::noop_waker;
-use futures::pin_mut;
 
 /// Channel establishment coordinator using choreographic protocols
 #[derive(Clone)]

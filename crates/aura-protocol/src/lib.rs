@@ -125,17 +125,27 @@ pub mod authorization; // Biscuit-based authorization (moved up from authorizati
 pub mod choreography;
 pub mod consensus; // Real Aura Consensus implementation
 pub mod context;
+pub mod coordinators;
 pub mod effects;
 pub mod facades; // High-level facade traits (Layer 4 appropriate - traits only, implementations in Layer 6)
 pub mod guards;
 pub mod handlers;
-pub mod coordinators;
 pub mod messages;
+pub mod session; // Session orchestration types (SessionStatus, SessionOutcome)
 pub mod state;
 pub mod transport;
+pub mod types; // Protocol orchestration types
 
 // Re-export authorization types for convenient access
 pub use authorization::{AuthorizationResult, BiscuitAuthorizationBridge};
+
+// Re-export session types for convenient access
+pub use session::{SessionOutcome, SessionStatus};
+
+// Re-export protocol orchestration types for convenient access
+pub use types::{
+    ProtocolDuration, ProtocolMode, ProtocolPriority, ProtocolSessionStatus, ProtocolType,
+};
 
 // Unified AuraEffectSystem architecture only
 
@@ -251,209 +261,11 @@ pub use effects::AuraEffects;
 // Note: AuraEffectSystem, EffectRegistry, and effect bundles are in aura-agent runtime
 // aura-protocol (Layer 4) should not depend on aura-agent (Layer 6)
 // See: docs/001_system_architecture.md for correct layering
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::AntiEntropyConfig` instead"
-)]
-pub use effects::AntiEntropyConfig;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::BloomDigest` instead"
-)]
-pub use effects::BloomDigest;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::ChoreographicEffects` instead"
-)]
-pub use effects::ChoreographicEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::ChoreographicRole` instead"
-)]
-pub use effects::ChoreographicRole;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::ChoreographyEvent` instead"
-)]
-pub use effects::ChoreographyEvent;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::ChoreographyMetrics` instead"
-)]
-pub use effects::ChoreographyMetrics;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::ConsoleEffects` instead"
-)]
-pub use effects::ConsoleEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::CryptoEffects` instead"
-)]
-pub use effects::CryptoEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::EffectApiEffects` instead"
-)]
-pub use effects::EffectApiEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::EffectApiError` instead"
-)]
-pub use effects::EffectApiError;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::EffectApiEvent` instead"
-)]
-pub use effects::EffectApiEvent;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::EffectApiEventStream` instead"
-)]
-pub use effects::EffectApiEventStream;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::JournalEffects` instead"
-)]
-pub use effects::JournalEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::NetworkAddress` instead"
-)]
-pub use effects::NetworkAddress;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::NetworkEffects` instead"
-)]
-pub use effects::NetworkEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::NetworkError` instead"
-)]
-pub use effects::NetworkError;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::standard_patterns::ProtocolRequirements` instead"
-)]
-pub use effects::ProtocolRequirements;
-// NOTE: QuickBuilder removed - it's from aura-agent (Layer 6), not aura-protocol (Layer 4)
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::LogicalClockEffects` instead"
-)]
-pub use effects::LogicalClockEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::OrderClockEffects` instead"
-)]
-pub use effects::OrderClockEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::PhysicalTimeEffects` instead"
-)]
-pub use effects::PhysicalTimeEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::RandomEffects` instead"
-)]
-pub use effects::RandomEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::StorageEffects` instead"
-)]
-pub use effects::StorageEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::StorageError` instead"
-)]
-pub use effects::StorageError;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::StorageLocation` instead"
-)]
-pub use effects::StorageLocation;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::SyncEffects` instead"
-)]
-pub use effects::SyncEffects;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::SyncError` instead"
-)]
-pub use effects::SyncError;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::effect_traits::WakeCondition` instead"
-)]
-pub use effects::WakeCondition;
-
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::composition::AuraHandlerFactory` instead"
-)]
-pub use crate::handlers::core::erased::AuraHandlerFactory;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::AuraContext` instead"
-)]
-pub use handlers::AuraContext;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::composition::AuraHandler` instead"
-)]
-pub use handlers::AuraHandler;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::internal::AuraHandlerError` instead"
-)]
-pub use handlers::AuraHandlerError;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::composition::EffectType` instead"
-)]
-pub use handlers::EffectType;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::ExecutionMode` instead"
-)]
-pub use handlers::ExecutionMode;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::composition::HandlerUtils` instead"
-)]
-pub use handlers::HandlerUtils;
-
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::LeakageBudget` instead"
-)]
-pub use guards::LeakageBudget;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::ProtocolGuard` instead"
-)]
-pub use guards::ProtocolGuard;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::AuraMessage` instead"
-)]
-pub use messages::AuraMessage;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::CryptoMessage` instead"
-)]
-pub use messages::CryptoMessage;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::CryptoPayload` instead"
-)]
-pub use messages::CryptoPayload;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use `aura_protocol::orchestration::WIRE_FORMAT_VERSION` instead"
-)]
-pub use messages::WIRE_FORMAT_VERSION;
+//
+// Legacy re-exports removed (v0.2.0). Use qualified paths from appropriate modules:
+// - orchestration::* for coordination types
+// - effect_traits::* for effect trait definitions
+// - composition::* for handler composition
 
 // IntentState and PeerView removed - only used in internal tests
 

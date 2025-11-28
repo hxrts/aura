@@ -64,10 +64,7 @@ pub use aura_verify::{
 
 // Re-export Biscuit authorization types
 pub use aura_protocol::guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
-pub use aura_wot::{
-    AccountAuthority, AdminOperation, BiscuitTokenManager, JournalOp, RecoveryType, ResourceScope,
-    StorageCategory,
-};
+pub use aura_wot::{AccountAuthority, BiscuitTokenManager, ResourceScope};
 
 // Re-export DKD types
 pub use dkd::{

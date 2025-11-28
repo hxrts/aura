@@ -48,16 +48,16 @@ fn meet(a: &Policy, b: &Policy) -> Policy {
 fn is_stricter_or_equal(a: &Policy, b: &Policy) -> bool {
     use Policy::*;
     match (a, b) {
-        (All, _) => true,                 // All is bottom (strictest) - ≤ everything
-        (_, Any) => true,                 // Any is top (least strict) - everything is ≤ Any
-        (Any, All) => false,              // Any is not ≤ All
-        (Any, Threshold { .. }) => false, // Any is not ≤ Threshold
-        (a, b) if a == b => true,         // Reflexive
-        (Threshold { m: m1, n: n1 }, Threshold { m: m2, n: n2 }) => {
+        (All, _) => true,    // All is bottom (strictest) - ≤ everything
+        (_, Any) => true,    // Any is top (least strict) - everything is ≤ Any
+        (Any, All) => false, // Any is not ≤ All
+        (Any, Policy::Threshold { .. }) => false, // Any is not ≤ Threshold
+        (a, b) if a == b => true, // Reflexive
+        (Policy::Threshold { m: m1, n: n1 }, Policy::Threshold { m: m2, n: n2 }) => {
             // a is stricter (≤) if a's fraction ≥ b's fraction
             (m1 * n2) >= (m2 * n1)
         }
-        (Threshold { m, n }, All) => m == n, // Threshold{n,n} ≤ All, but other thresholds are not
+        (Policy::Threshold { m, n }, All) => m == n, // Threshold{n,n} ≤ All, but other thresholds are not
     }
 }
 

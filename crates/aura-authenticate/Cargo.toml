@@ -35,6 +35,7 @@ bincode = { workspace = true }
 # Testing infrastructure (Layer 5 can use testkit)
 aura-agent = { path = "../aura-agent" }
 aura-testkit = { path = "../aura-testkit" }
+tokio = { workspace = true }
 
 [lints]
 workspace = true

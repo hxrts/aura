@@ -656,7 +656,7 @@ pub fn validate_invariants(state: &TreeState) -> ApplicationResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::tree::LeafNode;
+    use crate::commitment_tree::LeafNode;
 
     #[test]
     fn test_policy_strictness() {

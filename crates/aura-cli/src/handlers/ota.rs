@@ -1,8 +1,8 @@
+#![allow(clippy::disallowed_methods)]
 //! OTA Upgrade CLI Commands
 //!
 //! Commands for managing over-the-air upgrades using the proper effect system architecture.
 
-#![allow(clippy::disallowed_methods)]
 
 use anyhow::{Context, Result};
 use aura_agent::{AuraEffectSystem, EffectContext};

@@ -1,10 +1,3 @@
-#![allow(
-    clippy::unwrap_used,
-    clippy::expect_used,
-    clippy::type_complexity,
-    clippy::while_let_loop
-)]
-
 //! # Aura Effects - Layer 3: Implementation (Stateless Effect Handlers)
 //!
 //! **Purpose**: Production-grade stateless effect handlers that delegate to OS services.
@@ -87,7 +80,7 @@ pub mod transport;
 
 // Re-export production handlers only - mock handlers moved to aura-testkit
 // NOTE: WotAuthorizationHandler moved to aura-wot per Layer 2 pattern
-pub use biometric::RealBiometricHandler;
+pub use biometric::FallbackBiometricHandler;
 pub use bloom::BloomHandler;
 pub use configuration::RealConfigurationHandler;
 pub use console::RealConsoleHandler;
@@ -98,7 +91,7 @@ pub use guard_interpreter::ProductionEffectInterpreter;
 pub use leakage_handler::ProductionLeakageHandler;
 pub use random::RealRandomHandler;
 pub use secure::RealSecureStorageHandler;
-pub use simulation::StatelessSimulationHandler;
+pub use simulation::FallbackSimulationHandler;
 pub use storage::{EncryptedStorageHandler, FilesystemStorageHandler};
 // ProductionSyncExecutor removed - replaced by ProductionEffectInterpreter (ADR-014)
 pub use time::{

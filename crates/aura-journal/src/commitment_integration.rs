@@ -6,7 +6,7 @@
 use crate::commitment_tree::authority_state::AuthorityTreeState;
 use crate::fact::AttestedOp;
 use aura_core::authority::TreeState;
-use aura_core::{session_epochs::Epoch, Hash32};
+use aura_core::{epochs::Epoch, Hash32};
 
 /// Convert AuthorityTreeState to the canonical TreeState
 impl From<&AuthorityTreeState> for TreeState {

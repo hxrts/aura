@@ -39,7 +39,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 **Purpose**: Single source of truth for all domain concepts and interfaces.
 
 **Contains**:
-- Effect traits (20 total) for core infrastructure, authentication, storage, network, cryptography, privacy, configuration, and testing
+- Effect traits for core infrastructure, authentication, storage, network, cryptography, privacy, configuration, and testing
 - Domain types: `AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`, `ObserverClass`, `Capability`
 - Cryptographic utilities: key derivation, FROST types, merkle trees, Ed25519 helpers
 - Semantic traits: `JoinSemilattice`, `MeetSemilattice`, `CvState`, `MvState`
@@ -55,6 +55,37 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 
 **Dependencies**: None (foundation crate).
 
+### Commitment Tree Types and Functions
+
+**Location**: `aura-core/src/tree/`
+
+**Contains**:
+- Core tree types: `TreeOp`, `AttestedOp`, `Policy`, `LeafNode`, `BranchNode`, `TreeCommitment`, `Epoch`
+- Commitment functions: `commit_branch()`, `commit_leaf()`, `policy_hash()`, `compute_root_commitment()`
+- Policy meet-semilattice implementation for threshold refinement
+- Snapshot types: `Snapshot`, `Cut`, `ProposalId`, `Partial`
+
+**Why Layer 1?**
+
+Commitment tree types MUST remain in `aura-core` because:
+1. **Effect traits require them**: `TreeEffects` and `SyncEffects` in `aura-core/src/effects/` use these types in their signatures
+2. **FROST primitives depend on them**: `aura-core/src/crypto/tree_signing.rs` implements threshold signing over tree operations
+3. **Authority abstraction needs them**: `aura-core/src/authority.rs` uses `Policy`, `AttestedOp`, and `TreeOpKind`
+4. **Foundational cryptographic structures**: Commitment trees are merkle trees with threshold policies - core cryptographic primitives, not domain logic
+
+**Layer 2 separation (`aura-journal`) contains**:
+- Tree state machine: `TreeState` with node storage and path validation
+- Reduction logic: Deterministic state derivation from `OpLog<AttestedOp>`
+- Domain validation: Business rules for tree operations (e.g., policy monotonicity, leaf lifecycle)
+- Application logic: `apply_verified()`, compaction, garbage collection
+- Re-exports: `pub use aura_core::tree::*` for convenience via `aura_journal::commitment_tree`
+
+**Key architectural distinction**:
+- **Layer 1 (`aura-core`)**: Tree *types* and *cryptographic commitment functions* (pure primitives)
+- **Layer 2 (`aura-journal`)**: Tree *state machine*, *CRDT semantics*, and *validation rules* (domain implementation)
+
+This separation allows effect traits in Layer 1 to reference tree types without creating circular dependencies, while keeping the stateful CRDT logic in the appropriate domain crate.
+
 ## Layer 2: Specification — Domain Crates and Choreography
 
 **Purpose**: Define domain semantics and protocol specifications.
@@ -63,7 +94,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 
 | Crate | Domain | Responsibility |
 |-------|--------|-----------------|
-| `aura-journal` | Fact-based journal | Fact model, validation, deterministic reduction |
+| `aura-journal` | Fact-based journal | CRDT semantics, tree state machine, reduction logic, validation (re-exports tree types from `aura-core`) |
 | `aura-wot` | Trust and authorization | Capability refinement, Biscuit token helpers |
 | `aura-verify` | Identity semantics | Signature verification, device lifecycle |
 | `aura-store` | Storage domain | Storage types, capabilities, domain logic |
@@ -561,6 +592,31 @@ impl<N: NetworkEffects> MyDomainHandler<N> {
 - **Clean separation**: Domain handlers should not contain OS integration code
 - **Testability**: Mock infrastructure effects for unit testing domain logic
 
+### Fallback Handlers and the Null Object Pattern
+
+Infrastructure effects sometimes require **fallback implementations** for platforms or environments where the underlying capability is unavailable (e.g., biometric hardware on servers, secure enclaves in CI, HSMs in development).
+
+**When fallback handlers are appropriate**:
+- The effect trait represents optional hardware/OS capabilities
+- Code must run on platforms without the capability
+- Graceful degradation is preferable to compile-time feature flags everywhere
+
+**Naming conventions**:
+- ✅ `FallbackBiometricHandler`, `NoOpSecureEnclaveHandler`, `UnsupportedHsmHandler`
+- ❌ `RealBiometricHandler` (misleading - implies real implementation)
+
+**Fallback handler behavior**:
+- Return `false` for capability checks (`is_available()`, `supports_feature()`)
+- Return descriptive errors for operations (`Err(NotSupported)`)
+- Never panic or silently succeed when the capability is unavailable
+
+**Before removing a "stub" handler**:
+1. Check if the trait is used anywhere in the codebase
+2. If **trait is unused**: Remove both the trait (aura-core) AND implementation (aura-effects)
+3. If **trait is used**: Keep a properly-named fallback handler in aura-effects
+
+**Why this matters**: A fallback handler is not dead code if its trait is actively used. It's the Null Object Pattern providing safe defaults. The architectural violation is a misleading name, not the existence of the fallback.
+
 ### Composite Effects (Convenience Extensions)
 
 Composite effects provide convenience methods that combine multiple lower-level operations. These are typically extension traits that add domain-specific convenience to infrastructure effects.
@@ -645,6 +701,54 @@ Use these principles to classify code and determine the correct crate.
 - The "choreography conductor" that ensures distributed protocols execute correctly
 
 The distinctions are critical for understanding where code belongs. Single-party operations and handler composition both belong in Layer 3. Multi-party coordination goes in `aura-protocol`.
+
+### Composition vs. Orchestration
+
+A common source of confusion is distinguishing **composition** (Layer 3) from **orchestration** (Layer 4). The key distinction is whether code makes **cross-handler coordination decisions**.
+
+| Pattern | Layer | Characteristics |
+|---------|-------|-----------------|
+| **Composition** | Layer 3 | Handler implements one trait, takes other effects as generics, each operation dispatches to one handler |
+| **Orchestration** | Layer 4 | Coordinator makes cross-handler decisions, manages multi-party protocols, handles rollback/compensation |
+
+**Composition example** (Layer 3 - correct):
+```rust
+// Takes multiple effects but each command dispatches to ONE handler
+pub struct EffectInterpreter<J: JournalEffects, S: StorageEffects> {
+    journal: Arc<J>,
+    storage: Arc<S>,
+}
+
+async fn execute(&self, cmd: Command) -> Result<()> {
+    match cmd {
+        Command::AppendFact(f) => self.journal.append(f).await,  // One handler
+        Command::Store(k, v) => self.storage.store(k, v).await,  // One handler
+    }
+}
+```
+
+**Orchestration example** (Layer 4 - requires coordination):
+```rust
+// Makes cross-handler decisions with compensation logic
+async fn transfer(&self, from: Account, to: Account, amount: u64) -> Result<()> {
+    let receipt = self.budget.charge(from, amount).await?;
+
+    if let Err(e) = self.ledger.credit(to, amount).await {
+        self.budget.refund(receipt).await?;  // Cross-handler compensation
+        return Err(e);
+    }
+
+    self.journal.record_transfer(from, to, amount).await  // Coordination
+}
+```
+
+**Rule of thumb**: If removing one effect handler would require changing the logic of how other handlers are called (not just removing calls), it's orchestration.
+
+### Pure Mathematical Utilities
+
+Some effect traits in aura-core (e.g., `BloomEffects`) represent pure mathematical operations without OS integration. These follow the standard trait/handler pattern for consistency, but are technically not "effects" in the algebraic sense (no side effects).
+
+This is acceptable technical debt - the pattern consistency outweighs the semantic impurity. Future refactoring may move pure math to methods on types in aura-core.
 
 For detailed guidance on code location decisions, see [Development Patterns and Workflows](805_development_patterns.md).
 
@@ -891,6 +995,8 @@ Run before every commit to maintain architectural compliance and simulation dete
 ### "I'm implementing..."
 - **A new hash function** → `aura-core` (pure function) + `aura-effects` (if OS integration needed)
 - **FROST ceremony logic** → use core primitives or colocate with callers (aura-frost removed)
+- **Tree types or commitment functions** → `aura-core/src/tree/` (types and cryptographic primitives)
+- **Tree state machine or reduction logic** → `aura-journal/src/commitment_tree/` (CRDT semantics)
 - **Guardian recovery flow** → `aura-recovery`
 - **Journal fact validation** → `aura-journal`
 - **Network transport** → `aura-transport` (abstractions) + `aura-effects` (TCP implementation)
@@ -943,13 +1049,13 @@ Run before every commit to maintain architectural compliance and simulation dete
 ## Crate Summary
 
 ### aura-core
-Foundation types and effect traits. Single source of truth for `AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`, error types, and configuration.
+Foundation types and effect traits. Single source of truth for `AuthorityId`, `ContextId`, `SessionId`, `FlowBudget`, error types, configuration, and **commitment tree types** (`TreeOp`, `AttestedOp`, `Policy`, commitment functions).
 
 ### aura-verify
 Signature verification and identity validation interfaces.
 
 ### aura-journal
-Fact-based CRDT domain with validation rules and deterministic reduction.
+CRDT semantics for fact-based journals and commitment trees. Implements tree state machine, deterministic reduction, and domain validation. Re-exports tree types from `aura-core` for convenience.
 
 ### aura-relational
 Cross-authority relationships, including Guardian relationship protocols with cross-authority consensus coordination and relational state management.

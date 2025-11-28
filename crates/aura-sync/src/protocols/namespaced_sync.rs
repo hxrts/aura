@@ -406,11 +406,7 @@ impl NamespacedSync {
         _effects: &E,
         response: SyncResponse,
     ) -> Result<SyncStats> {
-        let start = _effects
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0);
+        let start = _effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0);
         let mut stats = SyncStats::default();
 
         // Verify namespace matches

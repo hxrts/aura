@@ -29,9 +29,8 @@ use aura_core::{
     },
     AuraError, Result as AuraResult,
 };
-use aura_effects::time::monotonic_now;
 use serde_json::Value;
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, time::{Duration, Instant}};
 use tracing::{debug, info};
 
 /// Stateless simulator handler that delegates all operations to effect handlers
@@ -137,7 +136,7 @@ where
             );
         }
 
-        let start_time = monotonic_now();
+        let start_time = Instant::now();
 
         // Advance simulation time instead of maintaining tick counters
         self.effects.advance_time(delta_time).await?;

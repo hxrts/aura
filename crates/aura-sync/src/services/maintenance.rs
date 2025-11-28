@@ -605,7 +605,7 @@ impl MaintenanceService {
             .physical_time()
             .await
             .map_err(|e| AuraError::internal(format!("time error: {e}")))?;
-        *self.started_at.write() = Some(time_effects.now_instant().await);
+        *self.started_at.write() = Some(Instant::now());
 
         *self.state.write() = ServiceState::Running;
         Ok(())
@@ -716,40 +716,35 @@ mod tests {
         assert!(!service.is_running());
     }
 
-    #[test]
-    fn test_maintenance_service_lifecycle() {
+    #[tokio::test]
+    async fn test_maintenance_service_lifecycle() {
         let service = MaintenanceService::new(Default::default()).unwrap();
-        let time_effects = aura_effects::time::PhysicalTimeHandler;
 
-        block_on(async {
-            let now = time_effects.now_instant().await;
-            service.start(now).await.unwrap();
-            assert!(service.is_running());
+        let now = std::time::Instant::now();
+        service.start(now).await.unwrap();
+        assert!(service.is_running());
 
-            service.stop().await.unwrap();
-            assert!(!service.is_running());
-        });
+        service.stop().await.unwrap();
+        assert!(!service.is_running());
     }
 
-    #[test]
-    fn test_maintenance_service_with_time_effects() {
+    #[tokio::test]
+    async fn test_maintenance_service_with_time_effects() {
         let service = MaintenanceService::new(Default::default()).unwrap();
         let time_effects = aura_testkit::stateful_effects::SimulatedTimeHandler::new();
 
-        block_on(async {
-            service
-                .start_with_time_effects(&time_effects)
-                .await
-                .unwrap();
-            assert!(service.is_running());
+        service
+            .start_with_time_effects(&time_effects)
+            .await
+            .unwrap();
+        assert!(service.is_running());
 
-            service.stop().await.unwrap();
-            assert!(!service.is_running());
-        });
+        service.stop().await.unwrap();
+        assert!(!service.is_running());
     }
 
-    #[test]
-    fn test_propose_upgrade_with_random_effects() {
+    #[tokio::test]
+    async fn test_propose_upgrade_with_random_effects() {
         let service = MaintenanceService::new(Default::default()).unwrap();
         let random_effects = aura_testkit::stateful_effects::MockCryptoHandler::new();
 
@@ -759,19 +754,17 @@ mod tests {
         let package_hash = Hash32::from([1u8; 32]);
         let proposer = DeviceId::new();
 
-        let proposal = block_on(async {
-            service
-                .propose_upgrade(
-                    package_id,
-                    version,
-                    kind,
-                    package_hash,
-                    proposer,
-                    &random_effects,
-                )
-                .await
-        })
-        .unwrap();
+        let proposal = service
+            .propose_upgrade(
+                package_id,
+                version,
+                kind,
+                package_hash,
+                proposer,
+                &random_effects,
+            )
+            .await
+            .unwrap();
 
         // Verify that the deterministic UUID was used
         assert_eq!(proposal.package_id, package_id);

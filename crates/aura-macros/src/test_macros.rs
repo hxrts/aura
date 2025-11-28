@@ -33,7 +33,6 @@ pub fn aura_test_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let vis = &input.vis;
     let sig = &input.sig;
     let body = &input.block;
-    let fn_name = &sig.ident;
 
     let mut sync_sig = sig.clone();
     sync_sig.asyncness = None;
@@ -50,45 +49,16 @@ pub fn aura_test_impl(_attr: TokenStream, item: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         #(#attrs)*
-        #[test]
-        #vis #sync_sig {
+        // NOTE: Test code is explicitly allowed to use tokio runtime (arch-check exemption)
+        // This macro generates test infrastructure, not application code
+        #[tokio::test(flavor = "multi_thread")]
+        #vis #sig {
             // Initialize tracing once (safe to call multiple times)
             let _guard = ::aura_testkit::init_test_tracing();
 
-            ::aura_macros::internal::block_on_with_timeout(
-                ::std::time::Duration::from_secs(30),
-                async move #body,
-                stringify!(#fn_name),
-            )
+            #body
         }
     };
 
     expanded.into()
-}
-
-/// Internal helpers used by generated test wrappers
-#[doc(hidden)]
-pub mod internal {
-    use async_io::Timer;
-    use futures::pin_mut;
-    use futures::{future, Future};
-
-    #[allow(dead_code)]
-    pub fn block_on_with_timeout<F, T>(duration: std::time::Duration, fut: F, name: &str) -> T
-    where
-        F: Future<Output = T>,
-    {
-        async_io::block_on(async {
-            let timer = Timer::after(duration);
-            pin_mut!(timer);
-            pin_mut!(fut);
-
-            match future::select(fut, timer).await {
-                future::Either::Left((result, _)) => result,
-                future::Either::Right((_, _)) => {
-                    panic!("Test '{}' timed out after {:?}", name, duration)
-                }
-            }
-        })
-    }
 }

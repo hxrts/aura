@@ -5,7 +5,8 @@
 //! and runtime reconfiguration of effect handlers.
 
 use async_trait::async_trait;
-use aura_core::{AccountId, DeviceId, EffectType, ExecutionMode, LocalSessionType, SessionId};
+use aura_core::{AccountId, DeviceId, EffectType, ExecutionMode, SessionId};
+use aura_mpst::LocalSessionType;
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;

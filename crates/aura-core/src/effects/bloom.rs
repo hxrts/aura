@@ -4,6 +4,16 @@
 //! efficient set membership testing and data synchronization. Bloom filters
 //! provide space-efficient probabilistic data structures for anti-entropy protocols.
 //!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: Bloom filter operations for sync protocols, set reconciliation
+//!
+//! This is an infrastructure effect providing pure mathematical Bloom filter
+//! operations with no Aura-specific semantics. Could be implemented as pure
+//! functions in `aura-core` or as stateless handlers in `aura-effects`.
+//!
 //! ## Use Cases
 //!
 //! - OpLog digest computation for sync protocols

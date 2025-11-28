@@ -7,7 +7,6 @@
 
 use async_trait::async_trait;
 use aura_core::effects::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
-use aura_effects::time::monotonic_now;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -74,7 +73,7 @@ impl SimulationFaultHandler {
     fn track_fault(&self, fault_id: String, fault_type: String, duration: Option<Duration>) {
         let fault = ActiveFault {
             fault_type,
-            start_time: monotonic_now(),
+            start_time: Instant::now(),
             duration,
             parameters: HashMap::new(),
         };
@@ -86,7 +85,7 @@ impl SimulationFaultHandler {
     /// Remove expired faults
     fn cleanup_expired_faults(&self) {
         let mut active_faults = self.active_faults.lock().unwrap();
-        let now = monotonic_now();
+        let now = Instant::now();
 
         active_faults.retain(|_, fault| {
             match fault.duration {
@@ -133,7 +132,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("corruption_{}", monotonic_now().elapsed().as_nanos());
+        let fault_id = format!("corruption_{}", Instant::now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
             format!("MessageCorruption({:?})", corruption_type),
@@ -163,7 +162,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("delay_{}", monotonic_now().elapsed().as_nanos());
+        let fault_id = format!("delay_{}", Instant::now().elapsed().as_nanos());
         let peers_desc = match affected_peers {
             Some(ref peers) => format!("peers: {:?}", peers),
             None => "all peers".to_string(),
@@ -198,7 +197,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("partition_{}", monotonic_now().elapsed().as_nanos());
+        let fault_id = format!("partition_{}", Instant::now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
             format!("NetworkPartition({} groups)", partition_groups.len()),
@@ -228,7 +227,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("byzantine_{}", monotonic_now().elapsed().as_nanos());
+        let fault_id = format!("byzantine_{}", Instant::now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
             format!(
@@ -262,7 +261,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("resource_{}", monotonic_now().elapsed().as_nanos());
+        let fault_id = format!("resource_{}", Instant::now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
             format!(
@@ -295,7 +294,7 @@ impl ChaosEffects for SimulationFaultHandler {
             });
         }
 
-        let fault_id = format!("timing_{}", monotonic_now().elapsed().as_nanos());
+        let fault_id = format!("timing_{}", Instant::now().elapsed().as_nanos());
         self.track_fault(
             fault_id,
             format!(

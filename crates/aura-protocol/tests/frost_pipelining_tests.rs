@@ -13,7 +13,7 @@
 use aura_core::{
     crypto::tree_signing::{NonceCommitment, NonceToken, PublicKeyPackage, Share},
     effects::{PhysicalTimeEffects, RandomEffects},
-    session_epochs::Epoch,
+    epochs::Epoch,
     AuthorityId, Hash32,
 };
 use aura_protocol::consensus::{
@@ -35,7 +35,7 @@ fn create_test_key_packages(
     witnesses: &[AuthorityId],
     threshold: u16,
 ) -> (HashMap<AuthorityId, Share>, PublicKeyPackage) {
-// NOTE: Implement proper FROST DKG for test key generation
+    // NOTE: Implement proper FROST DKG for test key generation
     // For now, create dummy shares
     let mut shares = HashMap::new();
 

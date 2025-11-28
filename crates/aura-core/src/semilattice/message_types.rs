@@ -3,7 +3,7 @@
 //! These types serve as precise payloads (`T`) in session type communication.
 //! They wrap CRDT-specific data with metadata for protocol clarity.
 
-use crate::identifiers::{DeviceId, SessionId};
+use crate::types::identifiers::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 
 /// Message kind for protocol clarity

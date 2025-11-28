@@ -11,12 +11,12 @@
 use async_trait::async_trait;
 use aura_core::{
     effects::{
-        guard_effects::{
+        guard::{
             EffectCommand, EffectInterpreter, EffectResult, JournalEntry, SimulationEvent,
         },
         NetworkAddress,
     },
-    identifiers::AuthorityId,
+    identifiers::{AuthorityId, ContextId},
     time::TimeStamp,
     AuraError, AuraResult as Result,
 };
@@ -149,12 +149,12 @@ impl SimulationEffectInterpreter {
 
     /// Get a read lock on the state for inspection
     pub fn state(&self) -> MutexGuard<'_, SimulationState> {
-        self.state.lock().unwrap()
+        self.state.lock().expect("Simulator state lock poisoned")
     }
 
     /// Get a clone of the current state
     pub fn snapshot_state(&self) -> SimulationState {
-        self.state.lock().unwrap().clone()
+        self.state.lock().expect("Simulator state lock poisoned").clone()
     }
 
     /// Get all recorded events
@@ -408,7 +408,7 @@ mod tests {
         });
 
         // Create two interpreters with same seed
-        let interp1 = SimulationEffectInterpreter::new(42, time, authority, addr);
+        let interp1 = SimulationEffectInterpreter::new(42, time.clone(), authority, addr.clone());
         let interp2 = SimulationEffectInterpreter::new(42, time, authority, addr);
 
         // Generate nonces
@@ -517,12 +517,14 @@ mod tests {
         });
 
         // First execution
-        let interp1 = SimulationEffectInterpreter::new(42, time, authority, addr);
+        let interp1 = SimulationEffectInterpreter::new(42, time.clone(), authority, addr.clone());
         interp1.set_initial_budget(authority, 1000);
 
         let cmds = vec![
             EffectCommand::ChargeBudget {
+                context: ContextId::new(),
                 authority,
+                peer: authority,
                 amount: 100,
             },
             EffectCommand::StoreMetadata {

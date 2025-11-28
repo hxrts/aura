@@ -165,9 +165,8 @@ impl QuintEvaluationEffects for QuintEvaluator {
         let mut temp_file = NamedTempFile::new()
             .map_err(|e| AuraError::invalid(format!("Failed to create temp file: {}", e)))?;
         let module_src = format!("module ExprEval {{\n  val expr = {}\n}}\n", expression);
-        std::io::Write::write_all(&mut temp_file, module_src.as_bytes()).map_err(|e| {
-            AuraError::invalid(format!("Failed to write temp Quint module: {}", e))
-        })?;
+        std::io::Write::write_all(&mut temp_file, module_src.as_bytes())
+            .map_err(|e| AuraError::invalid(format!("Failed to write temp Quint module: {}", e)))?;
 
         let status = Command::new("quint")
             .args(["parse", temp_file.path().to_str().unwrap_or_default()])
@@ -192,7 +191,10 @@ impl QuintEvaluationEffects for QuintEvaluator {
 
         // Try to use the native evaluator to derive an initial state from the parsed IR.
         let evaluator = crate::evaluator::QuintEvaluator::default();
-        if let Ok(raw_state) = evaluator.simulate_via_evaluator(&spec.context.to_string()).await {
+        if let Ok(raw_state) = evaluator
+            .simulate_via_evaluator(&spec.context.to_string())
+            .await
+        {
             if let Ok(simulation) = serde_json::from_str::<Value>(&raw_state) {
                 if let Some(states) = simulation.get("states").and_then(|s| s.as_array()) {
                     if let Some(first) = states.first() {
@@ -235,7 +237,10 @@ impl QuintEvaluationEffects for QuintEvaluator {
                 .unwrap_or_default();
             history.push(Value::String(action.to_string()));
             obj.insert("__action_history".to_string(), Value::Array(history));
-            obj.insert("__last_action".to_string(), Value::String(action.to_string()));
+            obj.insert(
+                "__last_action".to_string(),
+                Value::String(action.to_string()),
+            );
             obj.insert(
                 "__last_action_ms".to_string(),
                 Value::from(0u64), // placeholder timestamp
@@ -299,8 +304,8 @@ impl QuintVerificationEffects for QuintEvaluator {
 
         let evaluator = crate::evaluator::QuintEvaluator::new(None);
         let json_ir = evaluator.parse_file(spec_path).await?;
-        let spec = PropertySpec::new(spec_path.to_string())
-            .with_context(serde_json::from_str(&json_ir)?);
+        let spec =
+            PropertySpec::new(spec_path.to_string()).with_context(serde_json::from_str(&json_ir)?);
 
         Ok(spec)
     }

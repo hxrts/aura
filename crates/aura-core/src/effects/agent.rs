@@ -8,9 +8,20 @@
 //! This module was moved from aura-protocol/src/effects/agent.rs (Layer 4) because
 //! these are foundational capability trait definitions, similar to CryptoEffects,
 //! NetworkEffects, etc., and belong in the interface layer.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Application Effect
+//! - **Implementation**: `aura-agent` (Layer 6)
+//! - **Usage**: Agent coordination, device sessions, authentication flows
+//!
+//! This is an application effect with heavy Aura-specific semantics for device
+//! enrollment, session management, and authentication flows. Handlers implement
+//! the agent runtime in `aura-agent` by composing infrastructure effects with
+//! domain-specific logic.
 
 use crate::{
-    identifiers::{AccountId, DeviceId, SessionId},
+    types::identifiers::{AccountId, DeviceId, SessionId},
     AuraResult as Result,
 };
 use async_trait::async_trait;
@@ -222,18 +233,12 @@ pub trait SessionManagementEffects: Send + Sync {
         target_role: Option<ChoreographicRole>,
     ) -> Result<()>;
 
-    /// Send message within session context (legacy compatibility)
-    async fn send_session_message(&self, session_id: SessionId, message: &[u8]) -> Result<()>;
-
     /// Receive choreographic messages for session with role filtering
     async fn receive_choreographic_messages(
         &self,
         session_id: SessionId,
         role_filter: Option<ChoreographicRole>,
     ) -> Result<Vec<ChoreographicMessage>>;
-
-    /// Receive messages for session (legacy compatibility)
-    async fn receive_session_messages(&self, session_id: SessionId) -> Result<Vec<SessionMessage>>;
 
     /// Get choreography phase for session
     async fn get_choreography_phase(&self, session_id: SessionId) -> Result<Option<String>>;

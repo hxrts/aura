@@ -8,7 +8,8 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 
 use crate::registry::{Handler, HandlerContext, HandlerError, RegistrableHandler};
-use aura_core::{DeviceId, EffectType, ExecutionMode, LocalSessionType};
+use aura_core::{DeviceId, EffectType, ExecutionMode};
+use aura_mpst::LocalSessionType;
 
 /// A composite handler that delegates to specialized handlers based on effect type
 pub struct CompositeHandler {

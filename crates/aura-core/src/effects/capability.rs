@@ -4,6 +4,15 @@
 //! parsing, verification, creation, and management. Capability tokens provide
 //! fine-grained access control using cryptographically verifiable tokens.
 //!
+//! # Effect Classification
+//!
+//! - **Category**: Application Effect
+//! - **Implementation**: `aura-wot` (Layer 2)
+//! - **Usage**: Capability token management (Biscuit, JWT, custom formats)
+//!
+//! This is an application effect implemented in domain crates by composing
+//! infrastructure effects (crypto, storage) with capability-specific logic.
+//!
 //! ## Security Model
 //!
 //! Capability tokens provide:

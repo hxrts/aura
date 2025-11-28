@@ -10,8 +10,8 @@ use super::protocol::run_consensus;
 use super::types::CommitFact;
 use crate::amp::AmpJournalEffects;
 // use aura_core::effects::{PhysicalTimeEffects, RandomEffects}; // Available if needed
+use aura_core::epochs::Epoch;
 use aura_core::frost::{PublicKeyPackage, Share};
-use aura_core::session_epochs::Epoch;
 use aura_core::{AuthorityId, Prestate, Result};
 use aura_effects::random::RealRandomHandler;
 use aura_effects::time::PhysicalTimeHandler;

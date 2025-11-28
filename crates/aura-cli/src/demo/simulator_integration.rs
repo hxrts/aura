@@ -4,13 +4,13 @@
 //! Integrates aura-simulator with the demo system to provide automated
 //! Alice and Charlie agents for Bob's recovery demo experience.
 
+use std::time::Instant;
 use aura_core::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use aura_core::{AuthorityId, DeviceId};
-use aura_effects::time::monotonic_now;
 use aura_simulator::{ComposedSimulationEnvironment, SimulationEffectComposer};
 
 use super::human_agent::{DemoPhase, DemoState};
@@ -178,7 +178,7 @@ impl SimulatedGuardianAgent {
         // Simulate realistic response delay
         let delay_ms = self.calculate_response_delay();
         PhysicalTimeHandler::new()
-            .sleep_ms(delay_ms as u64)
+            .sleep_ms(delay_ms)
             .await
             .ok();
 
@@ -349,7 +349,7 @@ impl SimulatedGuardianAgent {
         tokio::spawn(async move {
             loop {
                 PhysicalTimeHandler::new()
-                    .sleep_ms(frequency as u64)
+                    .sleep_ms(frequency)
                     .await
                     .ok();
 
@@ -418,7 +418,10 @@ impl SimulatedGuardianAgent {
         }
 
         // Process any pending scenarios or actions
-        self.state.last_action_time = Some(monotonic_now());
+        #[allow(clippy::disallowed_methods)]
+        {
+            self.state.last_action_time = Some(Instant::now());
+        }
 
         Ok(())
     }

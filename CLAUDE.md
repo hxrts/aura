@@ -228,7 +228,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 ## Legacy Cleanup Status
 
 - Graph-based `journal_ops` directory removed; guard/tests now track fact deltas.
-- `DeviceMetadata`/`DeviceType` removal in progress. Until the new authority-derived device view lands, legacy structs remain in `aura-journal::types`, Effect APIs, and testkit builders.
+- `DeviceMetadata`/`DeviceType`/`DeviceRegistry` removed - device information now derived from `LeafNode` in commitment tree (`aura-core/src/tree/types.rs`). Device views are obtained via `TreeEffects::get_current_state()`.
 
 ## Usage Efficiency Guidelines
 

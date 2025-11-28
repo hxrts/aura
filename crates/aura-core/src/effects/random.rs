@@ -2,6 +2,16 @@
 //!
 //! This module defines the trait interface for random number generation.
 //! Implementations are provided in aura-protocol handlers.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: All crates needing cryptographically secure randomness
+//!
+//! This is an infrastructure effect that must be implemented in `aura-effects`
+//! with stateless handlers. Provides production (system RNG), testing (seeded),
+//! and simulation (controlled) implementations.
 
 use async_trait::async_trait;
 use uuid::Uuid;

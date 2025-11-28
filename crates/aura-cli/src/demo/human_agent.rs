@@ -6,8 +6,9 @@
 //! a complete demo where Bob has the full interactive experience while
 //! Alice and Charlie are automated for reliable demo presentation.
 
+use std::time::Instant;
 use aura_core::PhysicalTimeEffects;
-use aura_effects::time::{monotonic_now, PhysicalTimeHandler};
+use aura_effects::time::PhysicalTimeHandler;
 use std::future;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
@@ -195,7 +196,10 @@ impl HumanAgentDemo {
         tracing::info!("Starting human-agent demo");
 
         // Initialize demo metrics
-        self.demo_state.metrics.start_time = Some(monotonic_now());
+        #[allow(clippy::disallowed_methods)]
+        {
+            self.demo_state.metrics.start_time = Some(Instant::now());
+        }
 
         // Start Bob's TUI in background
         let bob_handle = {
@@ -253,7 +257,8 @@ impl HumanAgentDemo {
         let max_duration =
             std::time::Duration::from_secs(self.config.max_demo_duration_minutes * 60);
 
-        let start_time = monotonic_now();
+        #[allow(clippy::disallowed_methods)]
+        let start_time = Instant::now();
 
         while start_time.elapsed() < max_duration {
             // Handle demo events from Bob's TUI
@@ -360,7 +365,7 @@ impl HumanAgentDemo {
         }
 
         PhysicalTimeHandler::new()
-            .sleep_ms((self.config.agent_delay_ms / 2) as u64)
+            .sleep_ms(self.config.agent_delay_ms / 2)
             .await
             .ok();
 
@@ -527,7 +532,7 @@ impl HumanAgentDemo {
         // For demo purposes, just simulate some activity
 
         PhysicalTimeHandler::new()
-            .sleep_ms((self.config.agent_delay_ms / 2) as u64)
+            .sleep_ms(self.config.agent_delay_ms / 2)
             .await
             .ok();
 

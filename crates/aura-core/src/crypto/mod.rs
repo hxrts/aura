@@ -1,18 +1,12 @@
 pub mod amp;
+pub mod frost;
+pub mod hash;
 pub mod key_derivation;
 pub mod merkle;
 pub mod tree_signing;
 
 use ed25519_dalek::Signer;
 use serde::{Deserialize, Serialize};
-
-// Re-export frost-friendly tree signing primitives under the legacy `frost` path.
-pub mod frost {
-    pub mod tree_signing {
-        pub use crate::crypto::tree_signing::*;
-    }
-    pub use crate::crypto::tree_signing::*;
-}
 
 // Merkle helpers
 pub use merkle::{

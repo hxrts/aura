@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use aura_core::{AuraResult, DeviceId};
 // Note: Transport middleware patterns removed - use effect system instead
 use async_lock::RwLock;
+use futures::executor::block_on;
 use std::collections::HashMap;
 use std::sync::Arc;
 

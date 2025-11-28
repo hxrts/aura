@@ -6,8 +6,9 @@ use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use aura_core::{AuraError, LocalSessionType};
 use aura_core::effects::ExecutionMode;
+use aura_core::AuraError;
+use aura_mpst::LocalSessionType;
 
 /// Minimal effect type placeholder for test mocks
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]

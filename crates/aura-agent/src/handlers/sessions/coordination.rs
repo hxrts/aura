@@ -157,7 +157,6 @@ pub struct SessionOperations {
 }
 
 #[allow(dead_code)]
-#[allow(dead_code)]
 impl SessionOperations {
     /// Create new session operations handler
     #[allow(dead_code)] // Part of future session coordination API
@@ -408,7 +407,7 @@ impl SessionOperations {
 
         // Implement session status lookup via effects system
         match self
-            .get_session_status_via_effects(&*effects, &session_id_typed)
+            .get_session_status_via_effects(&effects, &session_id_typed)
             .await
         {
             Ok(Some(handle)) => Ok(Some(handle)),
@@ -420,25 +419,25 @@ impl SessionOperations {
     /// End a session
     pub async fn end_session(&self, session_id: &str) -> AgentResult<SessionHandle> {
         let effects = self.effects.read().await;
-        self.end_session_via_effects(&*effects, session_id).await
+        self.end_session_via_effects(&effects, session_id).await
     }
 
     /// List all active sessions
     pub async fn list_active_sessions(&self) -> AgentResult<Vec<String>> {
         let effects = self.effects.read().await;
-        self.list_sessions_via_effects(&*effects).await
+        self.list_sessions_via_effects(&effects).await
     }
 
     /// Get session statistics
     pub async fn get_session_stats(&self) -> AgentResult<SessionStats> {
         let effects = self.effects.read().await;
-        self.get_session_stats_via_effects(&*effects).await
+        self.get_session_stats_via_effects(&effects).await
     }
 
     /// Cleanup expired sessions
     pub async fn cleanup_expired_sessions(&self, max_age_seconds: u64) -> AgentResult<Vec<String>> {
         let effects = self.effects.read().await;
-        self.cleanup_sessions_via_effects(&*effects, max_age_seconds)
+        self.cleanup_sessions_via_effects(&effects, max_age_seconds)
             .await
     }
 

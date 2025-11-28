@@ -5,6 +5,8 @@
 use aura_core::identifiers::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 
+use super::WIRE_FORMAT_VERSION;
+
 /// Generic message envelope for wire protocol communication
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WireEnvelope<T> {
@@ -32,7 +34,7 @@ impl<T> WireEnvelope<T> {
         payload: T,
     ) -> Self {
         Self {
-            version: crate::WIRE_FORMAT_VERSION,
+            version: WIRE_FORMAT_VERSION,
             session_id,
             sender_id,
             sequence,

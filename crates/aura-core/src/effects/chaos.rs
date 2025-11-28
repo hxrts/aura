@@ -3,6 +3,17 @@
 //! Provides controlled fault injection capabilities for chaos engineering and
 //! resilience testing. These effects enable systematic testing of system behavior
 //! under adverse conditions including network failures, Byzantine faults, and timing issues.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Testing/Simulation Effect
+//! - **Implementation**: `aura-simulator` (Layer 8)
+//! - **Usage**: Fault injection for chaos engineering, resilience testing
+//!
+//! This is a testing/simulation effect for controlled fault injection. Enables
+//! systematic testing of Byzantine behavior, network partitions, corruption, and
+//! resource constraints. Handlers in `aura-simulator` inject faults into the
+//! deterministic simulation environment.
 
 use crate::AuraError;
 use async_trait::async_trait;

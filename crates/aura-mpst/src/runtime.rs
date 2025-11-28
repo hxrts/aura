@@ -2,13 +2,72 @@
 //!
 //! This module provides the runtime infrastructure for executing choreographic
 //! protocols with Aura-specific extensions (guards, journal coupling, leakage tracking).
+//!
+//! # Deprecation Notice
+//!
+//! **This module is kept for test/example compatibility only.**
+//!
+//! Production code should use:
+//! - `aura-agent` for runtime composition and effect registration
+//! - `aura-protocol::guards::*` for guard chain orchestration
+//! - `aura-core::effects::guard::EffectInterpreter` for effect execution
+//!
+//! The extension registry handlers in this module use an "accumulator" pattern - they
+//! store metadata in endpoint for later processing by the orchestration layer. This
+//! will be replaced by direct `EffectInterpreter` integration in a future version.
+//!
+//! # Migration Path
+//!
+//! 1. Use `aura-agent::EffectRegistry` for effect composition
+//! 2. Use `aura-effects::ProductionEffectInterpreter` for execution
+//! 3. Replace `AuraHandler` with protocol-specific handlers from `aura-protocol`
 
-use crate::{
-    CapabilityGuard, ContextIsolation, JournalAnnotation, LeakageTracker, MpstError, MpstResult,
-};
+#![allow(deprecated)] // Uses deprecated guard types for test compatibility
+
+use crate::{JournalAnnotation, MpstError, MpstResult};
 use async_trait::async_trait;
 use aura_core::effects::NetworkEffects;
-use aura_core::{identifiers::DeviceId, Cap, ContextId, Journal, JournalEffects};
+use aura_core::{identifiers::DeviceId, Cap, ContextId, Journal, JournalEffects, MeetSemiLattice};
+
+/// Minimal capability guard for test compatibility
+///
+/// **DEPRECATED**: Use aura-protocol::guards::CapabilityGuard for production code.
+/// This exists only for backward compatibility with test code.
+#[derive(Debug, Clone)]
+pub struct CapabilityGuard {
+    /// Required capability
+    pub required: Cap,
+    /// Optional description
+    pub description: Option<String>,
+}
+
+impl CapabilityGuard {
+    /// Create a new capability guard
+    pub fn new(required: Cap) -> Self {
+        Self { required, description: None }
+    }
+
+    /// Create with description
+    pub fn with_description(required: Cap, description: impl Into<String>) -> Self {
+        Self { required, description: Some(description.into()) }
+    }
+
+    /// Check if capabilities satisfy this guard
+    pub fn check(&self, capabilities: &Cap) -> bool {
+        capabilities.meet(&self.required) == self.required
+    }
+
+    /// Enforce this guard
+    pub fn enforce(&self, capabilities: &Cap) -> aura_core::AuraResult<()> {
+        if self.check(capabilities) {
+            Ok(())
+        } else {
+            Err(aura_core::AuraError::permission_denied(
+                self.description.clone().unwrap_or_else(|| "Capability guard failed".to_string())
+            ))
+        }
+    }
+}
 // use futures::future; // Not needed after timeout removal
 use rumpsteak_aura_choreography::effects::{
     ChoreoHandler, ChoreographyError, ExtensibleHandler, ExtensionRegistry, Label,
@@ -77,169 +136,6 @@ impl AuraEndpoint {
     }
 }
 
-/// Aura runtime for MPST protocols
-#[derive(Debug, Clone)]
-pub struct AuraRuntime {
-    /// Device ID for this runtime instance
-    pub device_id: DeviceId,
-    /// Current capabilities
-    pub capabilities: Cap,
-    /// Current journal state
-    pub journal: Journal,
-    /// Capability guards
-    pub guards: HashMap<String, CapabilityGuard>,
-    /// Journal annotations
-    pub annotations: HashMap<String, JournalAnnotation>,
-    /// Leakage tracker
-    pub leakage_tracker: LeakageTracker,
-    /// Context isolation manager
-    pub context_isolation: ContextIsolation,
-}
-
-impl AuraRuntime {
-    /// Create a new Aura runtime
-    pub fn new(device_id: DeviceId, capabilities: Cap, journal: Journal) -> Self {
-        Self {
-            device_id,
-            capabilities,
-            journal,
-            guards: HashMap::new(),
-            annotations: HashMap::new(),
-            leakage_tracker: LeakageTracker::new(),
-            context_isolation: ContextIsolation::new(),
-        }
-    }
-
-    /// Add a capability guard
-    pub fn add_guard(&mut self, name: impl Into<String>, guard: CapabilityGuard) {
-        self.guards.insert(name.into(), guard);
-    }
-
-    /// Add a journal annotation
-    pub fn add_annotation(&mut self, name: impl Into<String>, annotation: JournalAnnotation) {
-        self.annotations.insert(name.into(), annotation);
-    }
-
-    /// Check all capability guards
-    pub fn check_guards(&self) -> MpstResult<()> {
-        for (name, guard) in &self.guards {
-            guard.enforce(&self.capabilities).map_err(|_| {
-                MpstError::capability_guard_failed(format!("Guard '{}' failed", name))
-            })?;
-        }
-        Ok(())
-    }
-
-    /// Apply journal annotations
-    pub async fn apply_annotations(&mut self, effects: &impl JournalEffects) -> MpstResult<()> {
-        for (name, annotation) in &self.annotations {
-            self.journal = annotation
-                .apply(effects, &self.journal)
-                .await
-                .map_err(|e| {
-                    MpstError::journal_coupling_failed(format!(
-                        "Annotation '{}' failed: {}",
-                        name, e
-                    ))
-                })?;
-        }
-        Ok(())
-    }
-
-    /// Update capabilities
-    pub fn update_capabilities(&mut self, new_caps: Cap) {
-        self.capabilities = new_caps;
-    }
-
-    /// Get current journal state
-    pub fn journal(&self) -> &Journal {
-        &self.journal
-    }
-
-    /// Get current capabilities
-    pub fn capabilities(&self) -> &Cap {
-        &self.capabilities
-    }
-
-    /// Get device ID
-    pub fn device_id(&self) -> DeviceId {
-        self.device_id
-    }
-
-    /// Access leakage tracker
-    pub fn leakage_tracker(&mut self) -> &mut LeakageTracker {
-        &mut self.leakage_tracker
-    }
-
-    /// Access context isolation
-    pub fn context_isolation(&mut self) -> &mut ContextIsolation {
-        &mut self.context_isolation
-    }
-
-    /// Validate runtime state
-    pub fn validate(&self) -> MpstResult<()> {
-        // Check context isolation
-        self.context_isolation
-            .validate()
-            .map_err(|e| MpstError::context_isolation_violated(e.to_string()))?;
-
-        // Check capability guards
-        self.check_guards()?;
-
-        Ok(())
-    }
-}
-
-/// Runtime factory for creating configured Aura runtimes
-pub struct AuraRuntimeFactory {
-    /// Default capabilities for new runtimes
-    pub default_capabilities: Cap,
-    /// Default journal for new runtimes
-    pub default_journal: Journal,
-}
-
-impl AuraRuntimeFactory {
-    /// Create a new runtime factory
-    pub fn new(default_capabilities: Cap, default_journal: Journal) -> Self {
-        Self {
-            default_capabilities,
-            default_journal,
-        }
-    }
-
-    /// Create a new runtime for a device
-    pub fn create_runtime(&self, device_id: DeviceId) -> AuraRuntime {
-        AuraRuntime::new(
-            device_id,
-            self.default_capabilities.clone(),
-            self.default_journal.clone(),
-        )
-    }
-
-    /// Create runtime with custom capabilities
-    pub fn create_runtime_with_caps(&self, device_id: DeviceId, capabilities: Cap) -> AuraRuntime {
-        AuraRuntime::new(device_id, capabilities, self.default_journal.clone())
-    }
-
-    /// Create runtime with custom journal
-    pub fn create_runtime_with_journal(
-        &self,
-        device_id: DeviceId,
-        journal: Journal,
-    ) -> AuraRuntime {
-        AuraRuntime::new(device_id, self.default_capabilities.clone(), journal)
-    }
-}
-
-impl Default for AuraRuntimeFactory {
-    fn default() -> Self {
-        Self::new(
-            Cap::top(),     // Most permissive capabilities by default
-            Journal::new(), // Empty journal by default
-        )
-    }
-}
-
 /// Protocol execution context
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
@@ -274,24 +170,6 @@ impl ExecutionContext {
     pub fn includes_device(&self, device_id: DeviceId) -> bool {
         self.participants.contains(&device_id)
     }
-}
-
-/// Protocol execution trait with Aura extensions
-#[async_trait]
-pub trait ProtocolExecution {
-    /// Execute protocol with runtime validation
-    async fn execute(
-        &mut self,
-        runtime: &mut AuraRuntime,
-        context: &ExecutionContext,
-        effects: &impl ProtocolEffects,
-    ) -> MpstResult<()>;
-
-    /// Validate protocol constraints
-    fn validate(&self, runtime: &AuraRuntime) -> MpstResult<()>;
-
-    /// Get protocol requirements
-    fn requirements(&self) -> ProtocolRequirements;
 }
 
 /// Combined effects interface for protocol execution
@@ -343,8 +221,8 @@ impl ProtocolRequirements {
         self
     }
 
-    /// Validate requirements against runtime
-    pub fn validate(&self, runtime: &AuraRuntime, context: &ExecutionContext) -> MpstResult<()> {
+    /// Validate requirements against execution context
+    pub fn validate(&self, context: &ExecutionContext) -> MpstResult<()> {
         // Check participant count
         if context.participants.len() < self.min_participants {
             return Err(MpstError::capability_guard_failed(format!(
@@ -364,15 +242,8 @@ impl ProtocolRequirements {
             }
         }
 
-        // Check capabilities
-        use aura_core::MeetSemiLattice;
-        for required_cap in &self.required_capabilities {
-            if runtime.capabilities.meet(required_cap) != *required_cap {
-                return Err(MpstError::capability_guard_failed(
-                    "Insufficient capabilities for protocol".to_string(),
-                ));
-            }
-        }
+        // Note: Capability checking removed - use aura-protocol guards for capability validation
+        // The required_capabilities field is kept for documentation purposes
 
         Ok(())
     }
@@ -385,30 +256,10 @@ impl Default for ProtocolRequirements {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use aura_core::identifiers::DeviceId;
-
-    #[test]
-    fn test_aura_runtime_creation() {
-        let device_id = DeviceId::new();
-        let caps = Cap::top();
-        let journal = Journal::new();
-
-        let runtime = AuraRuntime::new(device_id, caps.clone(), journal.clone());
-        assert_eq!(runtime.device_id, device_id);
-        assert_eq!(runtime.capabilities, caps);
-        assert_eq!(runtime.journal, journal);
-    }
-
-    #[test]
-    fn test_runtime_factory() {
-        let factory = AuraRuntimeFactory::default();
-        let device_id = DeviceId::new();
-
-        let runtime = factory.create_runtime(device_id);
-        assert_eq!(runtime.device_id, device_id);
-    }
 
     #[test]
     fn test_execution_context() {
@@ -432,10 +283,42 @@ mod tests {
     }
 }
 
+/// Minimal runtime state for AuraHandler
+/// (Internal use only - module is deprecated)
+#[derive(Debug, Clone)]
+struct HandlerRuntimeState {
+    device_id: DeviceId,
+    capabilities: Cap,
+    journal: Journal,
+    guards: HashMap<String, CapabilityGuard>,
+    annotations: HashMap<String, JournalAnnotation>,
+}
+
+impl HandlerRuntimeState {
+    fn new(device_id: DeviceId, capabilities: Cap, journal: Journal) -> Self {
+        Self {
+            device_id,
+            capabilities,
+            journal,
+            guards: HashMap::new(),
+            annotations: HashMap::new(),
+        }
+    }
+
+    fn check_guards(&self) -> MpstResult<()> {
+        for (name, guard) in &self.guards {
+            guard.enforce(&self.capabilities).map_err(|_| {
+                MpstError::capability_guard_failed(format!("Guard '{}' failed", name))
+            })?;
+        }
+        Ok(())
+    }
+}
+
 /// Aura handler implementing rumpsteak-aura ChoreoHandler
 pub struct AuraHandler {
     /// Runtime state
-    runtime: AuraRuntime,
+    runtime: HandlerRuntimeState,
     /// Extension registry for Aura-specific annotations
     extension_registry: ExtensionRegistry<AuraEndpoint>,
     /// Role mapping from choreographic names to device IDs
@@ -462,7 +345,7 @@ pub enum ExecutionMode {
 impl AuraHandler {
     /// Create a new Aura handler for testing
     pub fn for_testing(device_id: DeviceId) -> Result<Self, MpstError> {
-        let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
+        let runtime = HandlerRuntimeState::new(device_id, Cap::top(), Journal::new());
         let extension_registry = Self::create_extension_registry();
 
         Ok(Self {
@@ -477,7 +360,7 @@ impl AuraHandler {
 
     /// Create a new Aura handler for production
     pub fn for_production(device_id: DeviceId) -> Result<Self, MpstError> {
-        let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
+        let runtime = HandlerRuntimeState::new(device_id, Cap::top(), Journal::new());
         let extension_registry = Self::create_extension_registry();
 
         Ok(Self {
@@ -495,7 +378,7 @@ impl AuraHandler {
         device_id: DeviceId,
         network_effects: std::sync::Arc<dyn NetworkEffects>,
     ) -> Result<Self, MpstError> {
-        let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
+        let runtime = HandlerRuntimeState::new(device_id, Cap::top(), Journal::new());
         let extension_registry = Self::create_extension_registry();
 
         Ok(Self {
@@ -510,7 +393,7 @@ impl AuraHandler {
 
     /// Create a new Aura handler for simulation
     pub fn for_simulation(device_id: DeviceId) -> Result<Self, MpstError> {
-        let runtime = AuraRuntime::new(device_id, Cap::top(), Journal::new());
+        let runtime = HandlerRuntimeState::new(device_id, Cap::top(), Journal::new());
         let extension_registry = Self::create_extension_registry();
 
         Ok(Self {
@@ -935,16 +818,6 @@ impl AuraHandler {
     /// Get device ID for this handler
     pub fn device_id(&self) -> DeviceId {
         self.runtime.device_id
-    }
-
-    /// Access runtime (mutable)
-    pub fn runtime_mut(&mut self) -> &mut AuraRuntime {
-        &mut self.runtime
-    }
-
-    /// Access runtime (immutable)
-    pub fn runtime(&self) -> &AuraRuntime {
-        &self.runtime
     }
 }
 

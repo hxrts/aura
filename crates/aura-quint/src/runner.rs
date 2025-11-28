@@ -1462,7 +1462,7 @@ enum PrivacyPropertyType {
 #[allow(clippy::expect_used)]
 mod tests {
     use super::*;
-        use std::io::Write;
+    use std::io::Write;
     use std::time::Duration;
     use tempfile::NamedTempFile;
 

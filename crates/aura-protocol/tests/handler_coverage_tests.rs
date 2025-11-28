@@ -134,7 +134,7 @@ async fn test_effect_registry_validation() {
 
         async fn execute_session(
             &self,
-            session: aura_core::LocalSessionType,
+            session: aura_mpst::LocalSessionType,
             ctx: &AuraContext,
         ) -> Result<(), AuraHandlerError> {
             self.0.execute_session(session, ctx).await

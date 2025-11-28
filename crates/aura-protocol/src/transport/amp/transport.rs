@@ -9,7 +9,8 @@ use super::telemetry::{
 };
 use crate::amp::{get_channel_state, AmpJournalEffects};
 use crate::consensus::finalize_amp_bump_with_journal_default;
-use crate::guards::effect_system_trait::GuardEffectSystem;
+use crate::guards::effect_system_trait::GuardContextProvider;
+use crate::guards::GuardEffects;
 use aura_core::effects::NetworkEffects;
 use aura_core::TimeEffects;
 use std::time::Duration;
@@ -131,8 +132,10 @@ pub async fn validate_header<E: AmpJournalEffects>(
 ) -> Result<(RatchetDerivation, (u64, u64))> {
     let state = get_channel_state(effects, context, header.channel).await?;
     let ratchet_state = ratchet_from_epoch_state(&state);
-    let (min_gen, max_gen) =
-        aura_transport::amp::window_bounds(ratchet_state.last_checkpoint_gen, ratchet_state.skip_window);
+    let (min_gen, max_gen) = aura_transport::amp::window_bounds(
+        ratchet_state.last_checkpoint_gen,
+        ratchet_state.skip_window,
+    );
     derive_for_recv(&ratchet_state, header)
         .map(|deriv| (deriv, (min_gen, max_gen)))
         .map_err(map_amp_error)
@@ -173,7 +176,7 @@ pub async fn commit_bump_with_consensus<E: AmpJournalEffects>(
         proposal,
         key_packages,
         group_public_key,
-        aura_core::session_epochs::Epoch::from(proposal.new_epoch),
+        aura_core::epochs::Epoch::from(proposal.new_epoch),
     )
     .await?;
     Ok(())
@@ -192,10 +195,11 @@ pub async fn amp_send<E>(
 where
     E: AmpJournalEffects
         + NetworkEffects
-        + GuardEffectSystem
-        + crate::guards::effect_system_trait::GuardContextProvider
+        + GuardEffects
+        + GuardContextProvider
         + crate::effects::CryptoEffects
-        + aura_core::PhysicalTimeEffects,
+        + aura_core::PhysicalTimeEffects
+        + aura_core::TimeEffects,
 {
     let time = aura_effects::time::PhysicalTimeHandler;
     let overall_start = time.now_instant().await;

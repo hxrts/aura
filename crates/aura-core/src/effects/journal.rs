@@ -1,7 +1,16 @@
 //! Journal effect interface for CRDT operations
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Application Effect
+//! - **Implementation**: `aura-journal` (Layer 2)
+//! - **Usage**: Aura-specific fact-based journal operations and CRDT merging
+//!
+//! This is an application effect implemented in domain crates by composing
+//! infrastructure effects with domain-specific business logic.
 
 use crate::{
-    identifiers::{AuthorityId, ContextId},
+    types::identifiers::{AuthorityId, ContextId},
     AuraError, FlowBudget, Journal,
 };
 use async_trait::async_trait;

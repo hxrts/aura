@@ -15,22 +15,55 @@ use crate::effects::{
     SessionInfo, SessionManagementEffects, SessionMessage, SessionStatus, SessionType,
     StorageEffects, PhysicalTimeEffects,
 };
-use aura_core::hash::hash;
-use aura_core::{identifiers::DeviceId, AuraResult as Result};
+use aura_core::{
+    effects::agent::{ChoreographicMessage, ChoreographicRole, ChoreographyConfig},
+    hash::hash,
+    identifiers::DeviceId,
+    AuraResult as Result,
+};
+
+/// Adapter to provide PhysicalTimeEffects from Arc<RwLock<AuraEffectSystem>>
+struct TimeEffectsAdapter {
+    effects: Arc<RwLock<AuraEffectSystem>>,
+}
+
+#[async_trait]
+impl aura_core::PhysicalTimeEffects for TimeEffectsAdapter {
+    async fn physical_time(&self) -> Result<aura_core::time::PhysicalTime, aura_core::effects::TimeError> {
+        self.effects.read().await.physical_time().await
+    }
+
+    async fn sleep_ms(&self, ms: u64) -> Result<(), aura_core::effects::TimeError> {
+        self.effects.read().await.sleep_ms(ms).await
+    }
+}
 
 /// Unified agent effect system that implements all agent-specific effects
 pub struct AgentEffectSystemHandler {
     device_id: DeviceId,
     core_effects: Arc<RwLock<AuraEffectSystem>>,
     auth_handler: AuthenticationHandler,
-    session_handler: MemorySessionHandler,
+    session_handler: MemorySessionHandler<TimeEffectsAdapter>,
 }
 
 impl AgentEffectSystemHandler {
     /// Create a new agent effect system handler
     pub fn new(device_id: DeviceId, core_effects: Arc<RwLock<AuraEffectSystem>>) -> Self {
         let auth_handler = AuthenticationHandler::new(device_id, core_effects.clone());
-        let session_handler = MemorySessionHandler::new(device_id);
+
+        // Create a time effects wrapper from core effects for session handler
+        // Since we need Arc<T: PhysicalTimeEffects>, we'll need to extract it from the RwLock
+        // For now, we'll use a simpler approach by cloning the Arc
+        let time_effects_arc = core_effects.clone();
+
+        // We need to create an Arc that implements PhysicalTimeEffects
+        // AuraEffectSystem already implements this, so we create a wrapper
+        let session_handler = MemorySessionHandler::new(
+            device_id,
+            Arc::new(TimeEffectsAdapter {
+                effects: time_effects_arc,
+            }),
+        );
 
         Self {
             device_id,
@@ -364,22 +397,76 @@ impl SessionManagementEffects for AgentEffectSystemHandler {
         self.session_handler.get_session_status(session_id).await
     }
 
-    async fn send_session_message(
+    async fn create_choreographic_session(
         &self,
-        session_id: aura_core::identifiers::SessionId,
-        message: &[u8],
-    ) -> Result<()> {
+        session_type: SessionType,
+        participants: Vec<DeviceId>,
+        choreography_config: ChoreographyConfig,
+    ) -> Result<aura_core::identifiers::SessionId> {
         self.session_handler
-            .send_session_message(session_id, message)
+            .create_choreographic_session(session_type, participants, choreography_config)
             .await
     }
 
-    async fn receive_session_messages(
+    async fn join_choreographic_session(
         &self,
         session_id: aura_core::identifiers::SessionId,
-    ) -> Result<Vec<SessionMessage>> {
+        role: ChoreographicRole,
+    ) -> Result<SessionHandle> {
         self.session_handler
-            .receive_session_messages(session_id)
+            .join_choreographic_session(session_id, role)
+            .await
+    }
+
+    async fn send_choreographic_message(
+        &self,
+        session_id: aura_core::identifiers::SessionId,
+        message_type: &str,
+        payload: &[u8],
+        target_role: Option<ChoreographicRole>,
+    ) -> Result<()> {
+        self.session_handler
+            .send_choreographic_message(session_id, message_type, payload, target_role)
+            .await
+    }
+
+    async fn receive_choreographic_messages(
+        &self,
+        session_id: aura_core::identifiers::SessionId,
+        role_filter: Option<ChoreographicRole>,
+    ) -> Result<Vec<ChoreographicMessage>> {
+        self.session_handler
+            .receive_choreographic_messages(session_id, role_filter)
+            .await
+    }
+
+    async fn get_choreography_phase(
+        &self,
+        session_id: aura_core::identifiers::SessionId,
+    ) -> Result<Option<String>> {
+        self.session_handler
+            .get_choreography_phase(session_id)
+            .await
+    }
+
+    async fn update_choreography_state(
+        &self,
+        session_id: aura_core::identifiers::SessionId,
+        phase: &str,
+        state_data: &[u8],
+    ) -> Result<()> {
+        self.session_handler
+            .update_choreography_state(session_id, phase, state_data)
+            .await
+    }
+
+    async fn validate_choreographic_message(
+        &self,
+        session_id: aura_core::identifiers::SessionId,
+        message: &ChoreographicMessage,
+    ) -> Result<bool> {
+        self.session_handler
+            .validate_choreographic_message(session_id, message)
             .await
     }
 }

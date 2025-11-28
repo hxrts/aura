@@ -210,10 +210,10 @@ Biscuit Authorization Bridge: `aura-protocol/src/authorization/biscuit_bridge.rs
 
 Biscuit Token Management: `aura-wot/src/biscuit_token.rs` contains `AccountAuthority`, `BiscuitTokenManager`, and attenuation logic.
 
+Biscuit Authorization: `aura-wot/src/biscuit_authorization.rs` contains `BiscuitAuthorizationBridge` and `AuthorizationResult`.
+
 Authority-Based Resources: `aura-wot/src/resource_scope.rs` contains `ResourceScope`, `AuthorityOp`, and `ContextOp`.
 
 Guard Chain: `aura-protocol/src/guards/capability_guard.rs` contains `CapabilityGuard` for Biscuit integration.
 
-Storage Authorization: `aura-store/src/biscuit_authorization.rs` contains storage-specific Biscuit authorization.
-
-Legacy Compatibility: `aura-wot/src/capability.rs` contains the deprecated capability semilattice marked for removal.
+Storage Authorization: `aura-wot/src/storage_authorization.rs` contains storage-specific Biscuit authorization (moved from aura-store).

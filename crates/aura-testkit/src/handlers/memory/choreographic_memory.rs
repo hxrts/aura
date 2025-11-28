@@ -1,10 +1,10 @@
 //! Memory-based choreographic handler for testing
 
+use async_trait::async_trait;
 use aura_core::effects::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
     ChoreographyMetrics,
 };
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;

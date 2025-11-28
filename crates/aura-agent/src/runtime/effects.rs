@@ -8,8 +8,8 @@ use aura_composition::CompositeHandlerAdapter;
 use aura_core::effects::crypto::FrostSigningPackage;
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::storage::{StorageError, StorageStats};
-use aura_core::effects::*;
 use aura_core::effects::TreeOperationEffects;
+use aura_core::effects::*;
 use aura_core::Journal;
 use aura_core::{
     AttestedOp, AuraError, AuthorityId, ContextId, DeviceId, FlowBudget, Hash32, LeafId, LeafNode,
@@ -26,12 +26,13 @@ use aura_protocol::effects::{
     ChoreographyError, ChoreographyEvent, ChoreographyMetrics, EffectApiEffects, EffectApiError,
     EffectApiEventStream, LeakageEffects, SyncEffects, SyncError,
 };
-use aura_protocol::guards::GuardEffectSystem;
+use aura_protocol::guards::GuardContextProvider;
 use aura_wot::{BiscuitAuthorizationBridge, FlowBudgetHandler};
 use biscuit_auth::{Biscuit, KeyPair};
 use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Effect executor for dispatching effect calls
 ///
@@ -108,7 +109,8 @@ pub struct AuraEffectSystem {
     order_clock: OrderClockHandler,
     authorization_handler:
         aura_wot::effects::WotAuthorizationHandler<aura_effects::crypto::RealCryptoHandler>,
-    leakage_handler: aura_effects::leakage_handler::ProductionLeakageHandler,
+    leakage_handler:
+        aura_effects::leakage_handler::ProductionLeakageHandler<FilesystemStorageHandler>,
     journal_policy: Option<(biscuit_auth::Biscuit, aura_wot::BiscuitAuthorizationBridge)>,
     journal_verifying_key: Option<Vec<u8>>,
     authority_id: AuthorityId,
@@ -153,14 +155,18 @@ impl AuraEffectSystem {
         let crypto_handler = RealCryptoHandler::new();
         let authorization_handler =
             aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
-        let leakage_handler =
-            aura_effects::leakage_handler::ProductionLeakageHandler::with_defaults();
+        let storage_handler = FilesystemStorageHandler::new(storage_base);
+        let leakage_storage =
+            FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
+        let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
+            Arc::new(leakage_storage),
+        );
         Ok(Self {
             config,
             composite,
             flow_budget: FlowBudgetHandler::new(authority),
             crypto_handler,
-            storage_handler: FilesystemStorageHandler::new(storage_base),
+            storage_handler,
             time_handler: PhysicalTimeHandler::new(),
             logical_clock: LogicalClockHandler::new(),
             order_clock: OrderClockHandler,
@@ -183,14 +189,18 @@ impl AuraEffectSystem {
         let crypto_handler = RealCryptoHandler::new();
         let authorization_handler =
             aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
-        let leakage_handler =
-            aura_effects::leakage_handler::ProductionLeakageHandler::with_defaults();
+        let storage_handler = FilesystemStorageHandler::new(storage_base);
+        let leakage_storage =
+            FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
+        let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
+            Arc::new(leakage_storage),
+        );
         Ok(Self {
             config,
             composite,
             flow_budget: FlowBudgetHandler::new(authority),
             crypto_handler,
-            storage_handler: FilesystemStorageHandler::new(storage_base),
+            storage_handler,
             time_handler: PhysicalTimeHandler::new(),
             logical_clock: LogicalClockHandler::new(),
             order_clock: OrderClockHandler,
@@ -211,14 +221,18 @@ impl AuraEffectSystem {
         let crypto_handler = RealCryptoHandler::new();
         let authorization_handler =
             aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
-        let leakage_handler =
-            aura_effects::leakage_handler::ProductionLeakageHandler::with_defaults();
+        let storage_handler = FilesystemStorageHandler::new(config.storage.base_path.clone());
+        let leakage_storage =
+            FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
+        let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
+            Arc::new(leakage_storage),
+        );
         Ok(Self {
             config: config.clone(),
             composite,
             flow_budget: FlowBudgetHandler::new(AuthorityId::from_uuid(config.device_id().0)),
             crypto_handler,
-            storage_handler: FilesystemStorageHandler::new(config.storage.base_path.clone()),
+            storage_handler,
             time_handler: PhysicalTimeHandler::new(),
             logical_clock: LogicalClockHandler::new(),
             order_clock: OrderClockHandler,
@@ -239,14 +253,18 @@ impl AuraEffectSystem {
         let crypto_handler = RealCryptoHandler::new();
         let authorization_handler =
             aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
-        let leakage_handler =
-            aura_effects::leakage_handler::ProductionLeakageHandler::with_defaults();
+        let storage_handler = FilesystemStorageHandler::new(config.storage.base_path.clone());
+        let leakage_storage =
+            FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
+        let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
+            Arc::new(leakage_storage),
+        );
         Ok(Self {
             config: config.clone(),
             composite,
             flow_budget: FlowBudgetHandler::new(AuthorityId::from_uuid(config.device_id().0)),
             crypto_handler,
-            storage_handler: FilesystemStorageHandler::new(config.storage.base_path.clone()),
+            storage_handler,
             time_handler: PhysicalTimeHandler::new(),
             logical_clock: LogicalClockHandler::new(),
             order_clock: OrderClockHandler,
@@ -300,7 +318,7 @@ impl AuraEffectSystem {
             .journal_policy
             .as_ref()
             .and_then(|(token, _bridge)| token.to_vec().ok())
-            .map(|bytes| (bytes, NoopBiscuitAuthorizationHandler::default()));
+            .map(|bytes| (bytes, NoopBiscuitAuthorizationHandler));
 
         aura_journal::JournalHandlerFactory::create(
             self.authority_id,
@@ -1252,17 +1270,22 @@ impl AuraEffects for AuraEffectSystem {
     }
 }
 
-impl GuardEffectSystem for AuraEffectSystem {
+impl GuardContextProvider for AuraEffectSystem {
     fn authority_id(&self) -> AuthorityId {
         self.authority_id
     }
 
-    fn execution_mode(&self) -> aura_core::effects::ExecutionMode {
-        AuraEffects::execution_mode(self)
+    fn get_metadata(&self, key: &str) -> Option<String> {
+        match key {
+            "authority_id" => Some(self.authority_id.to_string()),
+            "execution_mode" => Some(format!("{:?}", self.execution_mode())),
+            "device_id" => Some(self.config.device_id().to_string()),
+            _ => None,
+        }
     }
 
-    fn get_metadata(&self, _key: &str) -> Option<String> {
-        None
+    fn execution_mode(&self) -> aura_core::effects::ExecutionMode {
+        AuraEffects::execution_mode(self)
     }
 
     fn can_perform_operation(&self, _operation: &str) -> bool {

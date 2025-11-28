@@ -8,14 +8,15 @@
 
 use aura_core::{
     effects::{
-        Decision, EffectCommand, EffectInterpreter, EffectResult, FlowBudgetView, GuardOutcome,
-        GuardSnapshot, JournalEntry, MetadataView,
+        guard::{EffectCommand, EffectInterpreter, EffectResult, GuardOutcome, GuardSnapshot, JournalEntry},
+        FlowBudgetView, MetadataView,
     },
-    identifiers::AuthorityId,
+    identifiers::{AuthorityId, ContextId},
     journal::Cap,
-    time::TimeStamp,
+    time::{PhysicalTime, TimeStamp},
     AuraResult,
 };
+use futures::executor::block_on;
 use aura_protocol::guards::pure::{Guard, GuardChain, GuardRequest};
 use std::collections::HashMap;
 
@@ -27,10 +28,10 @@ struct DomainSpecificGuard {
 
 impl Guard for DomainSpecificGuard {
     fn evaluate(&self, _snapshot: &GuardSnapshot, request: &GuardRequest) -> GuardOutcome {
-        if request.context.len() > self.max_message_size {
+        if request.operation.len() > self.max_message_size {
             return GuardOutcome::denied(format!(
-                "Message size {} exceeds limit {}",
-                request.context.len(),
+                "Operation size {} exceeds limit {}",
+                request.operation.len(),
                 self.max_message_size
             ));
         }
@@ -46,7 +47,7 @@ impl Guard for DomainSpecificGuard {
 /// Example deterministic interpreter for simulation
 struct SimulationInterpreter {
     events: Vec<String>,
-    flow_budgets: HashMap<AuthorityId, u32>,
+    flow_budgets: HashMap<(ContextId, AuthorityId), u32>,
     journal_entries: Vec<JournalEntry>,
 }
 
@@ -59,8 +60,8 @@ impl SimulationInterpreter {
         }
     }
 
-    fn set_budget(&mut self, authority: AuthorityId, budget: u32) {
-        self.flow_budgets.insert(authority, budget);
+    fn set_budget(&mut self, context: ContextId, authority: AuthorityId, budget: u32) {
+        self.flow_budgets.insert((context, authority), budget);
     }
 }
 
@@ -68,8 +69,8 @@ impl SimulationInterpreter {
 impl EffectInterpreter for SimulationInterpreter {
     async fn execute(&self, cmd: EffectCommand) -> AuraResult<EffectResult> {
         match cmd {
-            EffectCommand::ChargeBudget { authority, amount } => {
-                let current = self.flow_budgets.get(&authority).copied().unwrap_or(0);
+            EffectCommand::ChargeBudget { context, authority, amount, peer: _ } => {
+                let current = self.flow_budgets.get(&(context, authority)).copied().unwrap_or(0);
                 if current < amount {
                     Ok(EffectResult::Failure("Insufficient budget".to_string()))
                 } else {
@@ -104,11 +105,15 @@ async fn run_examples() -> AuraResult<()> {
     }));
 
     let authority = AuthorityId::new();
+    let context = ContextId::new();
     let mut budgets = HashMap::new();
-    budgets.insert(authority, 1000);
+    budgets.insert((context, authority), 1000);
 
     let snapshot = GuardSnapshot {
-        now: TimeStamp::from_millis(1000),
+        now: TimeStamp::PhysicalClock(PhysicalTime {
+            ts_ms: 1000,
+            uncertainty: None,
+        }),
         caps: Cap::default(),
         budgets: FlowBudgetView::new(budgets),
         metadata: MetadataView::default(),
@@ -119,7 +124,7 @@ async fn run_examples() -> AuraResult<()> {
         GuardRequest::new(authority, "send_message", 100).with_context(b"Hello, World!".to_vec());
 
     let mut interpreter = SimulationInterpreter::new();
-    interpreter.set_budget(authority, 1000);
+    interpreter.set_budget(context, authority, 1000);
 
     let outcome = guard_chain.evaluate(&snapshot, &request);
     let executed = run_effects(&interpreter, &outcome.effects).await?;

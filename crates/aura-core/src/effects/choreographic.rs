@@ -1,6 +1,17 @@
 //! Choreographic effect interface
 //!
 //! Pure trait definitions for choreographic protocol operations.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Protocol Coordination Effect
+//! - **Implementation**: `aura-protocol::choreography` (Layer 4)
+//! - **Usage**: Multi-party protocol coordination (roles, sessions, message passing)
+//!
+//! This is a protocol coordination effect for multi-party choreography. Implements
+//! role-based message passing, session management, and protocol coordination needed
+//! for distributed FROST ceremonies, recovery protocols, and other multi-device
+//! operations. Handlers in `aura-protocol` coordinate protocol execution.
 
 use async_trait::async_trait;
 use uuid::Uuid;

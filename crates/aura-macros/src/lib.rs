@@ -9,13 +9,13 @@
 //! # Architecture Constraints
 //!
 //! **Layer 2 depends only on aura-core** (foundation).
-//! - ✅ Choreography DSL parsing and code generation
-//! - ✅ Aura-specific annotation extraction
-//! - ✅ Type-safe macro generation for distributed protocols
-//! - ✅ Integration with rumpsteak-aura projection
-//! - ❌ NO effect handler implementations (that's aura-effects)
-//! - ❌ NO runtime coordination logic (that's aura-protocol)
-//! - ❌ NO handler composition (that's aura-composition)
+//! - YES Choreography DSL parsing and code generation
+//! - YES Aura-specific annotation extraction
+//! - YES Type-safe macro generation for distributed protocols
+//! - YES Integration with rumpsteak-aura projection
+//! - NO effect handler implementations (that's aura-effects)
+//! - NO runtime coordination logic (that's aura-protocol)
+//! - NO handler composition (that's aura-composition)
 
 use proc_macro::TokenStream;
 
@@ -73,30 +73,43 @@ pub fn choreography(input: TokenStream) -> TokenStream {
 /// use aura_macros::aura_effect_handlers;
 ///
 /// aura_effect_handlers! {
-///     trait_name: RandomEffects,
+///     trait_name: StorageEffects,
 ///     mock: {
-///         struct_name: MockRandomHandler,
+///         struct_name: MockStorageHandler,
 ///         state: {
-///             seed: u64,
+///             data: HashMap<String, Vec<u8>>,
 ///         },
 ///         methods: {
-///             random_bytes(len: usize) -> Vec<u8> => {
-///                 vec![0; len] // deterministic for testing
+///             read(key: String) -> Result<Vec<u8>, StorageError> => {
+///                 self.data.get(&key)
+///                     .cloned()
+///                     .ok_or_else(|| StorageError::NotFound(key))
+///             },
+///             write(key: String, value: Vec<u8>) -> Result<(), StorageError> => {
+///                 self.data.insert(key, value);
+///                 Ok(())
 ///             },
 ///         },
 ///     },
 ///     real: {
-///         struct_name: RealRandomHandler,
+///         struct_name: RealStorageHandler,
 ///         methods: {
-///             random_bytes(len: usize) -> Vec<u8> => {
-///                 let mut bytes = vec![0u8; len];
-///                 seeded_rng.fill_bytes(&mut bytes);
-///                 bytes
+///             read(key: String) -> Result<Vec<u8>, StorageError> => {
+///                 std::fs::read(&key)
+///                     .map_err(|e| StorageError::IoError(e.to_string()))
+///             },
+///             write(key: String, value: Vec<u8>) -> Result<(), StorageError> => {
+///                 std::fs::write(&key, value)
+///                     .map_err(|e| StorageError::IoError(e.to_string()))
 ///             },
 ///         },
 ///     },
 /// }
 /// ```
+///
+/// Note: Effect implementations in aura-effects are the abstraction boundary where
+/// direct OS calls are expected. Application code should always use injected effects,
+/// never call OS functions directly.
 #[proc_macro]
 pub fn aura_effect_handlers(input: TokenStream) -> TokenStream {
     match effect_handlers::aura_effect_handlers_impl(input) {

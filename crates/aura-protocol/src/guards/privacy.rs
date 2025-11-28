@@ -4,8 +4,7 @@
 //! as specified in the formal model. It provides observer models for external,
 //! neighbor, and in-group adversaries with appropriate privacy guarantees.
 
-use super::effect_system_trait::GuardEffectSystem;
-use super::LeakageBudget;
+use super::{effect_system_trait::GuardContextProvider, GuardEffects, LeakageBudget};
 use aura_core::{effects::PhysicalTimeEffects, identifiers::AuthorityId, AuraError, AuraResult};
 // TimeEffects removed - using PhysicalTimeEffects directly
 use tracing::{debug, info, warn};
@@ -205,7 +204,9 @@ impl PrivacyBudgetTracker {
 }
 
 /// Track leakage consumption for an operation with persistent state management
-pub async fn track_leakage_consumption<E: GuardEffectSystem + PhysicalTimeEffects>(
+pub async fn track_leakage_consumption<
+    E: GuardEffects + PhysicalTimeEffects + GuardContextProvider,
+>(
     leakage_budget: &LeakageBudget,
     operation_id: &str,
     effect_system: &E,
@@ -258,7 +259,7 @@ pub async fn track_leakage_consumption<E: GuardEffectSystem + PhysicalTimeEffect
 }
 
 /// Classify which adversary classes can observe an operation
-async fn classify_operation_observability<E: GuardEffectSystem>(
+async fn classify_operation_observability<E: GuardEffects>(
     operation_id: &str,
     effect_system: &E,
 ) -> Vec<AdversaryClass> {
@@ -294,7 +295,7 @@ async fn classify_operation_observability<E: GuardEffectSystem>(
 }
 
 /// Load privacy tracker state from persistent storage
-async fn load_privacy_tracker<E: GuardEffectSystem>(
+async fn load_privacy_tracker<E: GuardEffects>(
     authority_id: AuthorityId,
     effect_system: &E,
 ) -> AuraResult<PrivacyBudgetTracker> {
@@ -337,7 +338,7 @@ async fn load_privacy_tracker<E: GuardEffectSystem>(
 }
 
 /// Save privacy tracker state to persistent storage
-async fn save_privacy_tracker<E: GuardEffectSystem>(
+async fn save_privacy_tracker<E: GuardEffects>(
     tracker: &PrivacyBudgetTracker,
     effect_system: &E,
 ) -> AuraResult<()> {
@@ -346,7 +347,7 @@ async fn save_privacy_tracker<E: GuardEffectSystem>(
     let serialized = serde_json::to_vec(&tracker.state)
         .map_err(|e| AuraError::invalid(format!("Failed to serialize privacy state: {}", e)))?;
 
-    // Use StorageEffects trait method (inherited via GuardEffectSystem)
+    // Uses StorageEffects via GuardEffects
     effect_system
         .store(&storage_key, serialized)
         .await
@@ -356,7 +357,7 @@ async fn save_privacy_tracker<E: GuardEffectSystem>(
 }
 
 /// Check if an authority can afford a specific operation using persistent state
-pub async fn can_afford_operation<E: GuardEffectSystem>(
+pub async fn can_afford_operation<E: GuardEffects>(
     authority_id: AuthorityId,
     requested_budget: &LeakageBudget,
     effect_system: &E,
@@ -369,7 +370,7 @@ pub async fn can_afford_operation<E: GuardEffectSystem>(
 }
 
 /// Get privacy budget status for an authority using persistent storage
-pub async fn get_privacy_budget_status<E: GuardEffectSystem>(
+pub async fn get_privacy_budget_status<E: GuardEffects>(
     authority_id: AuthorityId,
     effect_system: &E,
 ) -> AuraResult<Option<PrivacyBudgetState>> {
@@ -398,7 +399,7 @@ pub async fn get_privacy_budget_status<E: GuardEffectSystem>(
 }
 
 /// Reset privacy budget for an authority with new limits
-pub async fn reset_privacy_budget<E: GuardEffectSystem>(
+pub async fn reset_privacy_budget<E: GuardEffects>(
     authority_id: AuthorityId,
     new_limits: LeakageBudget,
     effect_system: &E,

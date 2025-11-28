@@ -3,29 +3,62 @@
 //! Choreographic enforcement of authorization, flow budgets, privacy, and journal consistency
 //! through a composable guard chain applied to **every send** (per docs/003_information_flow_contract.md).
 //!
-//! **Guard Chain Sequence**:
+//! # Choreography-First Architecture
+//!
+//! Guard effects can originate from two sources that use the same `EffectCommand` system:
+//!
+//! 1. **Choreographic Annotations** (compile-time): The `choreography!` macro generates
+//!    `EffectCommand` sequences from annotations like `guard_capability`, `flow_cost`,
+//!    `journal_facts`, and `leak`. These are produced by `aura_macros::choreography`
+//!    via the generated `effect_bridge::annotation_to_commands()` function.
+//!
+//! 2. **Runtime Guard Chain** (send-site): The `GuardChain::standard()` evaluates
+//!    pure guards (`CapabilityGuard`, `FlowBudgetGuard`, `JournalCouplingGuard`,
+//!    `LeakageTrackingGuard`) against a `GuardSnapshot` and produces `EffectCommand`
+//!    sequences at each protocol send site.
+//!
+//! Both sources produce `Vec<EffectCommand>` that are executed through an `EffectInterpreter`:
+//! - Production: `ProductionEffectInterpreter` (aura-effects)
+//! - Simulation: `SimulationEffectInterpreter` (aura-simulator)
+//! - Testing: `BorrowedEffectInterpreter` / mock interpreters
+//!
+//! # Guard Chain Sequence
+//!
 //! `CapGuard` → `FlowGuard` → `JournalCoupler` → `LeakageTracker` → `Transport`
 //!
-//! **Invariant: Charge-Before-Send**:
+//! # Invariant: Charge-Before-Send
+//!
 //! No transport side effect occurs unless all preceding guards succeed. Ensures:
 //! - Authorization verified (Biscuit tokens evaluated)
 //! - Flow budgets charged (atomically incremented spent counter)
 //! - Delta facts committed to journal (atomic with send)
 //! - Leakage budget validated (per observer class)
 //!
-//! **Receipt Semantics** (per docs/003_information_flow_contract.md §3.2):
+//! # Receipt Semantics
+//!
+//! (per docs/003_information_flow_contract.md §3.2)
 //! FlowGuard produces receipts proving budget charges, scoped to (ContextId, peer) pairs,
 //! bound to Epochs (budget rotation). Required for relayed messages (per-hop forwarding).
 //!
-//! **Guard Implementations**:
+//! # Guard Implementations
+//!
 //! - **CapGuard**: Biscuit token evaluation with `need(σ) ≤ C` predicate
 //! - **FlowGuard**: Flow budget enforcement, atomically increments spent counter
 //! - **JournalCoupler**: Merges delta facts atomic with send
 //! - **LeakageTracker**: Privacy budget per observer class (external, neighbor, group)
 //!
-//! **Receipt Semantics**: FlowGuard produces receipts proving budget charges,
-//! scoped to ContextId/peer pairs, bound to Epochs (budget rotation). Required
-//! for relayed messages (per-hop forwarding).
+//! # Example: Using Guard Chain with Effect Interpreter
+//!
+//! ```rust,ignore
+//! use aura_protocol::guards::{create_send_guard, SendGuardChain};
+//!
+//! let guard = create_send_guard(
+//!     "message:send".to_string(),
+//!     context_id,
+//!     peer_device,
+//!     100, // flow cost
+//! );
+//!
 //! let result = send_guard.evaluate(&effect_system).await?;
 //! if result.authorized {
 //!     // Proceed with send using receipt for anti-replay protection
@@ -59,15 +92,15 @@ pub mod execution;
 pub mod flow;
 pub mod journal_coupler;
 pub mod privacy;
-pub mod send_guard;
-pub mod pure_executor;
 pub mod pure;
+pub mod pure_executor;
+pub mod send_guard;
 
 // Biscuit-based guards (new implementation)
 pub mod biscuit_evaluator;
 pub mod capability_guard; // Authority-based capability guards
 
-pub use effect_system_trait::GuardEffectSystem;
+pub use effect_system_trait::GuardContextProvider;
 // Legacy guard evaluation removed - use BiscuitAuthorizationBridge instead
 pub use flow::FlowGuard;
 // FlowBudgetEffects and FlowHint moved to aura-core
@@ -78,11 +111,11 @@ pub use journal_coupler::{
 pub use send_guard::{create_send_guard, SendGuardChain, SendGuardResult};
 
 // use crate::wot::EffectSystemInterface; // Legacy interface removed - use Biscuit authorization instead
-use aura_core::AuraResult;
 use aura_core::effects::{
     AuthorizationEffects, JournalEffects, LeakageEffects, PhysicalTimeEffects, RandomEffects,
     StorageEffects,
 };
+use aura_core::AuraResult;
 // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
 use biscuit_auth::Biscuit;
 use std::future::Future;
@@ -210,7 +243,7 @@ impl ProtocolGuard {
         operation: F,
     ) -> AuraResult<GuardedExecutionResult<T>>
     where
-        E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+        E: GuardEffects + aura_core::TimeEffects + effect_system_trait::GuardContextProvider,
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
@@ -282,3 +315,10 @@ pub use privacy::*;
 // Re-export Biscuit guard types
 pub use biscuit_evaluator::{BiscuitGuardEvaluator, GuardError, GuardResult};
 pub use capability_guard::{CapabilityGuard, CapabilityGuardExt};
+
+// Re-export pure executor functions for choreography integration
+pub use pure_executor::{
+    execute_effect_commands, execute_guarded_choreography, BorrowedEffectInterpreter,
+    ChoreographyCommand, ChoreographyResult, EffectSystemInterpreter, GuardChainExecutor,
+    GuardChainResult,
+};

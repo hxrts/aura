@@ -3,8 +3,8 @@
 //! This test demonstrates using the ProductionEffectInterpreter with mock effect handlers.
 
 use aura_core::{
-    effects::guard_effects::{EffectCommand, GuardOutcome},
-    identifiers::AuthorityId,
+    effects::guard::{EffectCommand, GuardOutcome},
+    identifiers::{AuthorityId, ContextId},
 };
 
 // Mock trait implementations would go here...
@@ -43,7 +43,9 @@ fn test_guard_outcome_creation() {
     // Test pure guard outcome creation
     let effects = vec![
         EffectCommand::ChargeBudget {
+            context: ContextId::new(),
             authority: AuthorityId::new(),
+            peer: AuthorityId::new(),
             amount: 100,
         },
         EffectCommand::RecordLeakage { bits: 64 },

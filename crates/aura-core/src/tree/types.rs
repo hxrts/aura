@@ -68,7 +68,7 @@ pub struct LeafNode {
     pub leaf_id: LeafId,
 
     /// Device identifier for this leaf
-    pub device_id: crate::identifiers::DeviceId,
+    pub device_id: crate::types::identifiers::DeviceId,
 
     /// Role (device or guardian)
     pub role: LeafRole,
@@ -85,7 +85,7 @@ impl LeafNode {
     /// Create a new device leaf node
     pub fn new_device(
         leaf_id: LeafId,
-        device_id: crate::identifiers::DeviceId,
+        device_id: crate::types::identifiers::DeviceId,
         public_key: Vec<u8>,
     ) -> Self {
         Self {
@@ -100,7 +100,7 @@ impl LeafNode {
     /// Create a new guardian leaf node
     pub fn new_guardian(
         leaf_id: LeafId,
-        device_id: crate::identifiers::DeviceId,
+        device_id: crate::types::identifiers::DeviceId,
         public_key: Vec<u8>,
     ) -> Self {
         Self {

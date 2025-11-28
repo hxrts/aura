@@ -7,14 +7,14 @@
 use super::types::ConsensusId;
 use aura_core::{
     crypto::tree_signing::NonceToken,
+    epochs::Epoch,
     frost::{NonceCommitment, PartialSignature},
-    session_epochs::Epoch,
     AuthorityId, Hash32, Result,
 };
 // use rand_chacha::rand_core::SeedableRng; // Used in tests
+use async_lock::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use async_lock::RwLock;
 
 /// Set of witnesses participating in consensus
 #[derive(Debug, Clone)]

@@ -4,6 +4,16 @@
 //! that interface with platform-specific biometric APIs (TouchID, FaceID,
 //! Windows Hello, fingerprint scanners, etc.).
 //!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: Platform-specific biometric APIs for authentication
+//!
+//! This is an infrastructure effect that provides OS-level biometric integration
+//! with no Aura-specific semantics. Implementations should interface with platform
+//! biometric APIs and provide software fallback for testing environments.
+//!
 //! ## Security Model
 //!
 //! Biometric authentication provides:

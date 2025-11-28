@@ -3,9 +3,19 @@
 //! This module defines the trait interfaces for cryptographic operations.
 //! Actual cryptographic implementations are provided by aura-crypto crate.
 //! Effect handlers that integrate aura-crypto are provided by aura-protocol handlers.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: All crates needing cryptographic operations (signing, hashing, key derivation)
+//!
+//! This is an infrastructure effect that must be implemented in `aura-effects`
+//! with stateless handlers. Domain crates should not implement this trait directly
+//! but rather use it via dependency injection.
 
 use super::RandomEffects;
-use crate::identifiers::DeviceId;
+use crate::types::identifiers::DeviceId;
 use crate::{AccountId, AuraError};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

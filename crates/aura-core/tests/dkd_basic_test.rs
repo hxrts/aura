@@ -3,7 +3,7 @@
 //! Tests basic Deterministic Key Derivation concepts using only aura-core
 //! and standard Rust libraries.
 
-use aura_core::hash::hasher;
+use aura_core::crypto::hash::hasher;
 use aura_core::{AccountId, DeviceId, SessionId};
 
 /// Test basic DKD key derivation simulation

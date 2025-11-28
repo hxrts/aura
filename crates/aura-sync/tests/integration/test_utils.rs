@@ -103,7 +103,8 @@ impl MultiDeviceTestFixture {
 
     /// Get current time for session management
     fn current_time() -> u64 {
-        aura_effects::time::wallclock_secs()
+        // Use deterministic timestamp for reproducible tests
+        1700000000u64 // 2023-11-15 in seconds
     }
 
     /// Create coordinated session across all devices

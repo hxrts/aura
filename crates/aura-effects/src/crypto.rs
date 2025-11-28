@@ -159,19 +159,16 @@ impl RealCryptoHandler {
     /// Get random bytes using the handler's RNG strategy
     fn get_random_bytes(&self, len: usize) -> Result<Vec<u8>, CryptoError> {
         let mut bytes = vec![0u8; len];
-        match self.seed {
-            Some(_) => {
-                // Use seeded randomness
-                use rand::{RngCore, SeedableRng};
-                let mut rng = rand_chacha::ChaCha20Rng::from_seed(self.seed.unwrap());
-                rng.fill_bytes(&mut bytes);
-            }
-            None => {
-                // Use OS entropy
-                getrandom::getrandom(&mut bytes).map_err(|e| {
-                    CryptoError::invalid(format!("Failed to generate random bytes: {}", e))
-                })?;
-            }
+        if let Some(seed) = self.seed {
+            // Use seeded randomness
+            use rand::{RngCore, SeedableRng};
+            let mut rng = rand_chacha::ChaCha20Rng::from_seed(seed);
+            rng.fill_bytes(&mut bytes);
+        } else {
+            // Use OS entropy
+            getrandom::getrandom(&mut bytes).map_err(|e| {
+                CryptoError::invalid(format!("Failed to generate random bytes: {}", e))
+            })?;
         }
         Ok(bytes)
     }
@@ -180,24 +177,30 @@ impl RealCryptoHandler {
 // RandomEffects implementation for RealCryptoHandler
 #[async_trait]
 impl RandomEffects for RealCryptoHandler {
+    // JUSTIFICATION: RandomEffects trait doesn't support Results by design.
+    // Cryptographic RNG failure is a fatal system error that should panic.
+    // OS RNG failure indicates system compromise or resource exhaustion.
+    #[allow(clippy::expect_used)]
     async fn random_bytes(&self, len: usize) -> Vec<u8> {
         self.get_random_bytes(len)
-            .expect("Failed to generate random bytes")
+            .expect("Fatal: cryptographic RNG failure")
     }
 
+    #[allow(clippy::expect_used)]
     async fn random_bytes_32(&self) -> [u8; 32] {
         let bytes = self
             .get_random_bytes(32)
-            .expect("Failed to generate random bytes");
+            .expect("Fatal: cryptographic RNG failure");
         let mut result = [0u8; 32];
         result.copy_from_slice(&bytes);
         result
     }
 
+    #[allow(clippy::expect_used)]
     async fn random_u64(&self) -> u64 {
         let bytes = self
             .get_random_bytes(8)
-            .expect("Failed to generate random bytes");
+            .expect("Fatal: cryptographic RNG failure");
         u64::from_le_bytes([
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
         ])

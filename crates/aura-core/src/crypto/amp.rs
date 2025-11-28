@@ -118,28 +118,8 @@ pub fn derive_message_key(
     Ok(Hash32::from(output))
 }
 
-/// Simple XOR-based encryption (for testing and fallback only).
-///
-/// **WARNING**: This is NOT cryptographically secure and should only be used
-/// for testing or as a placeholder. Production code should use AES-GCM via
-/// CryptoEffects.
-///
-/// # Arguments
-///
-/// * `key` - Encryption key (will be repeated to match data length)
-/// * `data` - Data to encrypt/decrypt
-///
-/// # Returns
-///
-/// XOR-encrypted data (encryption and decryption are the same operation)
-#[deprecated(note = "Use AES-GCM via CryptoEffects for production")]
-pub fn xor_cipher(key: &Hash32, data: &[u8]) -> Vec<u8> {
-    let key_bytes = key.as_bytes();
-    data.iter()
-        .enumerate()
-        .map(|(i, b)| b ^ key_bytes[i % key_bytes.len()])
-        .collect()
-}
+// XOR cipher function removed - was insecure and deprecated
+// Use AES-GCM via CryptoEffects for production encryption
 
 #[cfg(test)]
 mod tests {
@@ -212,15 +192,5 @@ mod tests {
         );
     }
 
-    #[test]
-    #[allow(deprecated)]
-    fn test_xor_cipher_symmetric() {
-        let key = Hash32::from([42u8; 32]);
-        let data = b"Hello, AMP!";
-
-        let encrypted = xor_cipher(&key, data);
-        let decrypted = xor_cipher(&key, &encrypted);
-
-        assert_eq!(data, &decrypted[..], "XOR cipher should be symmetric");
-    }
+    // XOR cipher test removed - function was insecure and has been deleted
 }

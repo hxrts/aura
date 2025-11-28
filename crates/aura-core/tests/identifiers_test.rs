@@ -138,32 +138,36 @@ fn test_identifier_serialization() {
 
     // Test DAG-CBOR serialization
     let account_cbor =
-        aura_core::serialization::to_vec(&account).expect("Should serialize AccountId");
-    let device_cbor = aura_core::serialization::to_vec(&device).expect("Should serialize DeviceId");
+        aura_core::util::serialization::to_vec(&account).expect("Should serialize AccountId");
+    let device_cbor =
+        aura_core::util::serialization::to_vec(&device).expect("Should serialize DeviceId");
     let session_cbor =
-        aura_core::serialization::to_vec(&session).expect("Should serialize SessionId");
-    let event_cbor = aura_core::serialization::to_vec(&event).expect("Should serialize EventId");
+        aura_core::util::serialization::to_vec(&session).expect("Should serialize SessionId");
+    let event_cbor =
+        aura_core::util::serialization::to_vec(&event).expect("Should serialize EventId");
     let guardian_cbor =
-        aura_core::serialization::to_vec(&guardian).expect("Should serialize GuardianId");
+        aura_core::util::serialization::to_vec(&guardian).expect("Should serialize GuardianId");
     let operation_cbor =
-        aura_core::serialization::to_vec(&operation).expect("Should serialize OperationId");
-    let nonce_cbor = aura_core::serialization::to_vec(&nonce).expect("Should serialize EventNonce");
+        aura_core::util::serialization::to_vec(&operation).expect("Should serialize OperationId");
+    let nonce_cbor =
+        aura_core::util::serialization::to_vec(&nonce).expect("Should serialize EventNonce");
 
     // Test DAG-CBOR deserialization
-    let account_restored: AccountId =
-        aura_core::serialization::from_slice(&account_cbor).expect("Should deserialize AccountId");
-    let device_restored: DeviceId =
-        aura_core::serialization::from_slice(&device_cbor).expect("Should deserialize DeviceId");
-    let session_restored: SessionId =
-        aura_core::serialization::from_slice(&session_cbor).expect("Should deserialize SessionId");
-    let event_restored: EventId =
-        aura_core::serialization::from_slice(&event_cbor).expect("Should deserialize EventId");
-    let guardian_restored: GuardianId = aura_core::serialization::from_slice(&guardian_cbor)
+    let account_restored: AccountId = aura_core::util::serialization::from_slice(&account_cbor)
+        .expect("Should deserialize AccountId");
+    let device_restored: DeviceId = aura_core::util::serialization::from_slice(&device_cbor)
+        .expect("Should deserialize DeviceId");
+    let session_restored: SessionId = aura_core::util::serialization::from_slice(&session_cbor)
+        .expect("Should deserialize SessionId");
+    let event_restored: EventId = aura_core::util::serialization::from_slice(&event_cbor)
+        .expect("Should deserialize EventId");
+    let guardian_restored: GuardianId = aura_core::util::serialization::from_slice(&guardian_cbor)
         .expect("Should deserialize GuardianId");
-    let operation_restored: OperationId = aura_core::serialization::from_slice(&operation_cbor)
-        .expect("Should deserialize OperationId");
-    let nonce_restored: EventNonce =
-        aura_core::serialization::from_slice(&nonce_cbor).expect("Should deserialize EventNonce");
+    let operation_restored: OperationId =
+        aura_core::util::serialization::from_slice(&operation_cbor)
+            .expect("Should deserialize OperationId");
+    let nonce_restored: EventNonce = aura_core::util::serialization::from_slice(&nonce_cbor)
+        .expect("Should deserialize EventNonce");
 
     // Verify round-trip consistency
     assert_eq!(account, account_restored);

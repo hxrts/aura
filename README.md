@@ -1,34 +1,46 @@
 # Aura
 
-Threshold identity and encrypted storage platform built on relational security principles.
+Aura is a private peer-to-peer social network which takes the following as a point of departure:
 
-## Overview
+**Identity is relational**
 
-Current identity systems force an impossible choice: trust a single device that can be lost or compromised, or trust a corporation that can lock you out. Aura eliminates this choice by building on the trust you already have. Friends, family, and your own devices work together through threshold cryptography and social recovery to create resilient digital identity.
+Each account is a opaque threshold authority described by a commitment tree reduction. Social recovery possible via Guardian nomination without requiring decrypted data.
 
-Aura combines threshold signatures with social networks to create a new model for digital ownership. Your identity is distributed across trusted guardians who can help you recover access. Your data is replicated across social relationships that provide natural redundancy. No single point of failure can lock you out or compromise your security.
+**Your friends are the network**
+
+Aura runs as an encrypted mesh across the social graph. Distributed protocols run within scoped session and channel contexts that never reveal participant structure. Storage, gossip, rendezvous, and consensus all operate through these context boundaries.
+
+**Agency from consent**
+
+Capabilities are expressed through attenuation with sovereign policy. Authorization is handled at send-time, i.e. packets cannot be transmitted without satisfying consent predicates.
 
 ## Architecture
 
-Aura uses choreographic programming with session types to coordinate distributed protocols across peer devices. Threshold cryptography eliminates single points of failure while social networks provide natural trust relationships for recovery and storage replication.
+Aura’s architecture is built from four interacting systems: journals, session types, consensus, and the effect runtime.
 
-The system coordinates multi-device threshold protocols through choreographic programming. Session types provide compile-time safety for distributed state machines while runtime witnesses verify global conditions like quorum thresholds. A unified CRDT Effect API maintains eventual consistency across all devices without requiring centralized coordination.
+The journal system is a fact-only CRDT. Facts merge through set union and reduce into account state and relational state deterministically. Account state is defined by the commitment tree semilattice. Contexts use the same reduction pipeline for relational facts. This ensures that all replicas converge once they share the same facts.
 
-### Authorization Model
+The choreography and session type system specifies distributed protocols globally and projects them into per-role local types. Projection establishes ordering, duality, and deadlock-freedom. The interpreter executes steps via effect calls, embedding capability checks, journal updates, and flow-budget charges before each send. This couples protocol safety with authorization and budgeting semantics.
 
-Aura uses **Biscuit tokens** for distributed authorization - cryptographically-verified tokens that carry authorization policies without requiring centralized validation. Biscuit tokens enable:
+Consensus provides single-shot agreement for operations that cannot be expressed as monotone fact growth. Each instance binds an operation to an explicit prestate hash and outputs a commit fact containing a threshold signature. Commit facts merge into journals and are interpreted during reduction. Fast-path and fallback execute through session-typed flows. Consensus is scoped to authorities or relational contexts and never produces a global log.
 
-- **Capability-based access control**: Fine-grained permissions that can be attenuated (restricted) but never escalated
-- **Distributed verification**: Tokens can be validated locally without contacting authorization servers
-- **Social delegation**: Authority can be safely delegated between trusted devices and guardians
-- **Mathematically guaranteed security**: Meet-semilattice operations ensure privilege escalation is impossible
+The effect system supplies the operational substrate. Handlers implement cryptography, storage, transport, and journal operations. All handlers run under an explicit context object. The runtime enforces guard-chain order, capability refinement, and deterministic charging. This keeps side effects isolated, testable, and uniform across native and WASM targets.
 
-This replaces traditional role-based access control with a more flexible, distributed system suited to peer-to-peer environments.
+For detailed system architecture see the system-architecture document .
 
-### Session Types & Choreographic Programming:
+See [](docs/001_system_architecture.md) and [Project Structure](docs/999_project_structure.md) for more details.
 
-These complementary techniques provide both local and global protocol safety. Choreographic programming describes protocols from a global viewpoint across all participants, automatically generating deadlock-free coordination patterns and local projections for each device. Session types then enforce local protocol correctness through typestate, ensuring individual devices follow their projected protocol steps correctly at compile-time (e.g., preventing message sends before prerequisite states are reached). Runtime witnesses verify distributed invariants that span multiple participants, such as threshold quorum requirements or epoch synchronization.
+## Quick Start
 
-## Crate Organization
+Aura builds with Nix.
 
-See [Project Structure](docs/999_project_structure.md) for a breakdown of the layered project structure and design principles.
+```
+# Enter development shell
+nix develop
+
+# Build all crates
+nix build .#aura
+
+# Run tests
+nix flake check
+```

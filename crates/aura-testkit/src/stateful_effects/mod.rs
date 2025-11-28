@@ -22,7 +22,7 @@
 //!
 //! - Mock handlers with state: MockConsoleHandler, MockCryptoHandler, etc.
 //! - Test infrastructure: MetricsHandler, MonitoringHandler, LoggingHandler
-//! - Simulation handlers: MockSimulationHandler, StatelessSimulationHandler
+//! - Simulation handlers: MockSimulationHandler (use aura_effects::FallbackSimulationHandler for fallback)
 //! - Memory transport handlers with shared registries
 //! - Biometric mock handlers with template storage
 //! - Time handlers with controllable time progression
@@ -63,10 +63,10 @@ pub use biometric::MockBiometricHandler;
 pub use console::MockConsoleHandler;
 pub use crypto::MockCryptoHandler;
 pub use journal::MockJournalHandler;
-pub use leakage_handler::{ProductionLeakageHandler, TestLeakageHandler};
+// leakage_handler types removed - use aura_effects::ProductionLeakageHandler<S> with MemoryStorageHandler
 pub use random::MockRandomHandler;
 pub use secure::MockSecureStorageHandler;
-pub use simulation::{MockSimulationHandler, StatelessSimulationHandler};
+pub use simulation::MockSimulationHandler;
 pub use storage::MemoryStorageHandler;
 pub use system::{LoggingHandler, MetricsHandler, MonitoringHandler};
 pub use time::SimulatedTimeHandler;

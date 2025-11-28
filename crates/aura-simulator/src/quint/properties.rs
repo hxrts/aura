@@ -4,6 +4,7 @@
 //! specifications. Provides categorization, monitoring, and verification
 //! capabilities for different types of properties.
 
+
 use crate::quint::types::{
     PropertyEvaluationResult, QuintInvariant, QuintTemporalProperty, SimulationState,
     ValidationResult,
@@ -449,12 +450,12 @@ impl PropertyMonitor {
     #[allow(clippy::disallowed_methods)]
     pub fn evaluate_properties(&mut self, _state: &dyn SimulationState) -> ValidationResult {
         #[allow(clippy::disallowed_methods)]
-        let start_time = aura_effects::time::monotonic_now();
+        let start_time = std::time::Instant::now();
         let mut validation_result = ValidationResult::new();
 
         for property in &self.monitored_properties {
             #[allow(clippy::disallowed_methods)]
-            let eval_start = aura_effects::time::monotonic_now();
+            let eval_start = std::time::Instant::now();
 
             // Placeholder evaluation - in production would use actual Quint evaluator
             let holds = self.evaluate_single_property(property, _state);

@@ -43,6 +43,7 @@ base64 = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 # tokio-test = { workspace = true } # removed - unused
+tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 rand = { workspace = true }
 aura-effects = { path = "../aura-effects" }

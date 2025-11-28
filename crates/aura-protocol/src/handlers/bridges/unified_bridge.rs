@@ -4,17 +4,17 @@
 //! effect traits into a type-erased AuraHandler. This enables dynamic composition
 //! and runtime flexibility while maintaining type safety through the effect system.
 
+use async_lock::Mutex;
 use async_trait::async_trait;
 use std::fmt;
 use std::sync::Arc;
-use async_lock::Mutex;
 
 use crate::effects::*;
 use crate::handlers::{
     context_immutable::AuraContext, AuraHandler, AuraHandlerError, EffectType, ExecutionMode,
 };
 use aura_core::hash::hash;
-use aura_core::LocalSessionType;
+use aura_mpst::LocalSessionType;
 
 /// Type-erased bridge for dynamic handler composition
 ///

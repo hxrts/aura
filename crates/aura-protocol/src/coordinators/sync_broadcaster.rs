@@ -182,10 +182,10 @@ impl SyncEffects for BroadcasterHandler {
         let remote_set: BTreeSet<Hash32> = remote_digest
             .filter
             .chunks_exact(32)
-            .filter_map(|chunk| {
+            .map(|chunk| {
                 let mut arr = [0u8; 32];
                 arr.copy_from_slice(chunk);
-                Some(Hash32::from(arr))
+                Hash32::from(arr)
             })
             .collect();
 
@@ -337,7 +337,9 @@ impl BroadcasterHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::tree::{LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
+    use aura_journal::commitment_tree::{
+        LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
+    };
 
     fn create_test_op(commitment: Hash32) -> AttestedOp {
         AttestedOp {

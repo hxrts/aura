@@ -6,9 +6,9 @@
 use crate::{AuraResult, BiscuitAuthorizationBridge, ContextOp, ResourceScope};
 use async_trait::async_trait;
 use aura_core::effects::FlowBudgetEffects;
+use aura_core::epochs::Epoch;
 use aura_core::flow::{FlowBudget, FlowBudgetKey, Receipt};
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::session_epochs::Epoch;
 use aura_core::{AuraError, Hash32};
 use biscuit_auth::Biscuit;
 use std::collections::BTreeMap;

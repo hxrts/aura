@@ -14,7 +14,7 @@ pub mod keys;
 
 // Re-export builders without glob re-exports to avoid ambiguity with helpers submodules
 pub use account::*;
-pub use device::{DeviceSetBuilder, DeviceTestFixture};
+pub use device::{test_device_id, DeviceSetBuilder, DeviceTestFixture};
 pub use factories::{
     JournalFactory, MultiDeviceScenarioData, MultiDeviceScenarioFactory, TestScenarioConfig,
     TestScenarioFactory,

@@ -429,6 +429,7 @@ impl PrivacyContract {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
     use aura_core::identifiers::DeviceId;

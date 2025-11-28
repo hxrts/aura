@@ -550,11 +550,7 @@ impl ConnectionPool {
 
         // For now, create a placeholder transport connection
         // This should be replaced with actual aura-transport integration
-        let connection_id = format!(
-            "transport_{}_{}",
-            peer_id,
-            now_millis()
-        );
+        let connection_id = format!("transport_{}_{}", peer_id, now_millis());
 
         // Placeholder: in production this would be effect-injected delay; skip sleeping to keep deterministic/simulator-friendly
 

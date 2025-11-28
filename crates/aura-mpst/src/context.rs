@@ -372,6 +372,7 @@ impl Default for ContextIsolation {
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 

@@ -4,8 +4,8 @@
 
 use super::types::{CommitFact, ConsensusId};
 use aura_core::{
+    epochs::Epoch,
     frost::{NonceCommitment, PartialSignature},
-    session_epochs::Epoch,
     Hash32,
 };
 use serde::{Deserialize, Serialize};

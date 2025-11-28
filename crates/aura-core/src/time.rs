@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::SystemTime;
 
-use crate::identifiers::{AuthorityId, DeviceId};
+use crate::types::identifiers::{AuthorityId, DeviceId};
 
 /// Physical clock representation with optional uncertainty.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

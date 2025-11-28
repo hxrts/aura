@@ -5,24 +5,26 @@
 
 use aura_core::{
     effects::{
-        guard_effects::{
-            EffectCommand, EffectInterpreter, EffectResult, GuardOutcome, GuardSnapshot,
+        guard::{
+            EffectCommand, EffectInterpreter, EffectResult,
             JournalEntry, SimulationEvent,
         },
         NetworkAddress,
     },
     identifiers::{AuthorityId, ContextId},
     journal::Fact,
-    time::TimeStamp,
+    time::{PhysicalTime, TimeStamp},
 };
 use aura_simulator::effects::{SimulationEffectInterpreter, SimulationState};
-use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Simulate a multi-party protocol with deterministic replay
 #[tokio::test]
 async fn test_multi_party_protocol_simulation() {
-    let time = TimeStamp::now_physical();
+    let time = TimeStamp::PhysicalClock(PhysicalTime {
+        ts_ms: 1000,
+        uncertainty: None,
+    });
 
     // Create three authorities
     let alice = AuthorityId::new();
@@ -30,22 +32,22 @@ async fn test_multi_party_protocol_simulation() {
     let carol = AuthorityId::new();
 
     // Create interpreters with shared state
-    let shared_state = Arc::new(std::sync::Mutex::new(SimulationState::new(42, time)));
+    let shared_state = Arc::new(std::sync::Mutex::new(SimulationState::new(42, time.clone())));
 
     let alice_interp = SimulationEffectInterpreter::from_state(
         shared_state.clone(),
         alice,
-        NetworkAddress::from_parts("test", "alice"),
+        NetworkAddress::new("test://alice".to_string()),
     );
     let bob_interp = SimulationEffectInterpreter::from_state(
         shared_state.clone(),
         bob,
-        NetworkAddress::from_parts("test", "bob"),
+        NetworkAddress::new("test://bob".to_string()),
     );
     let carol_interp = SimulationEffectInterpreter::from_state(
         shared_state,
         carol,
-        NetworkAddress::from_parts("test", "carol"),
+        NetworkAddress::new("test://carol".to_string()),
     );
 
     // Set initial budgets
@@ -74,7 +76,7 @@ async fn test_multi_party_protocol_simulation() {
     let signing_request = vec![1, 2, 3, 4, 5]; // Mock signing package
     alice_interp
         .execute(EffectCommand::SendEnvelope {
-            to: NetworkAddress::from_parts("test", "bob"),
+            to: NetworkAddress::new("test://bob".to_string()),
             envelope: signing_request.clone(),
         })
         .await
@@ -82,16 +84,19 @@ async fn test_multi_party_protocol_simulation() {
 
     alice_interp
         .execute(EffectCommand::SendEnvelope {
-            to: NetworkAddress::from_parts("test", "carol"),
+            to: NetworkAddress::new("test://carol".to_string()),
             envelope: signing_request,
         })
         .await
         .unwrap();
 
     // 3. Bob and Carol process requests and charge flow budget
+    let context = ContextId::new();
     bob_interp
         .execute(EffectCommand::ChargeBudget {
+            context,
             authority: bob,
+            peer: alice,
             amount: 50,
         })
         .await
@@ -99,7 +104,9 @@ async fn test_multi_party_protocol_simulation() {
 
     carol_interp
         .execute(EffectCommand::ChargeBudget {
+            context,
             authority: carol,
+            peer: alice,
             amount: 50,
         })
         .await
@@ -131,7 +138,7 @@ async fn test_multi_party_protocol_simulation() {
             entry: JournalEntry {
                 fact: fact.clone(),
                 authority: bob,
-                timestamp: time,
+                timestamp: time.clone(),
             },
         })
         .await
@@ -142,7 +149,7 @@ async fn test_multi_party_protocol_simulation() {
             entry: JournalEntry {
                 fact,
                 authority: carol,
-                timestamp: time,
+                timestamp: time.clone(),
             },
         })
         .await
@@ -151,7 +158,7 @@ async fn test_multi_party_protocol_simulation() {
     // 6. Send shares back to Alice
     bob_interp
         .execute(EffectCommand::SendEnvelope {
-            to: NetworkAddress::from_parts("test", "alice"),
+            to: NetworkAddress::new("test://alice".to_string()),
             envelope: bob_nonce.clone(),
         })
         .await
@@ -159,7 +166,7 @@ async fn test_multi_party_protocol_simulation() {
 
     carol_interp
         .execute(EffectCommand::SendEnvelope {
-            to: NetworkAddress::from_parts("test", "alice"),
+            to: NetworkAddress::new("test://alice".to_string()),
             envelope: carol_nonce.clone(),
         })
         .await
@@ -180,12 +187,12 @@ async fn test_multi_party_protocol_simulation() {
     assert!(events.len() > 0);
 
     // Test replay in new interpreter
-    let replay_state = SimulationState::new(42, time); // Same seed
+    let _replay_state = SimulationState::new(42, time.clone()); // Same seed
     let replay_interp = SimulationEffectInterpreter::new(
         42,
         time,
         alice,
-        NetworkAddress::from_parts("test", "alice"),
+        NetworkAddress::new("test://alice".to_string()),
     );
 
     // Set same initial conditions
@@ -206,11 +213,14 @@ async fn test_multi_party_protocol_simulation() {
 /// Test guard chain evaluation with simulation
 #[tokio::test]
 async fn test_guard_chain_simulation() {
-    let time = TimeStamp::now_physical();
+    let time = TimeStamp::PhysicalClock(PhysicalTime {
+        ts_ms: 1000,
+        uncertainty: None,
+    });
     let authority = AuthorityId::new();
-    let addr = NetworkAddress::from_parts("test", "guard_test");
+    let addr = NetworkAddress::new("test://guard_test".to_string());
 
-    let interp = SimulationEffectInterpreter::new(42, time, authority, addr);
+    let interp = SimulationEffectInterpreter::new(42, time.clone(), authority, addr);
     interp.set_initial_budget(authority, 500);
 
     // Simulate a guard chain that:
@@ -230,9 +240,11 @@ async fn test_guard_chain_simulation() {
         .unwrap();
 
     // Guard evaluation produces these effects
-    let guard_effects = vec![
+    let guard = vec![
         EffectCommand::ChargeBudget {
+            context: ContextId::new(),
             authority,
+            peer: authority,
             amount: 100,
         },
         EffectCommand::RecordLeakage {
@@ -246,13 +258,13 @@ async fn test_guard_chain_simulation() {
             },
         },
         EffectCommand::SendEnvelope {
-            to: NetworkAddress::from_parts("test", "client"),
+            to: NetworkAddress::new("test://client".to_string()),
             envelope: vec![200], // HTTP 200 OK
         },
     ];
 
     // Execute all effects
-    for effect in guard_effects {
+    for effect in guard {
         interp.execute(effect).await.unwrap();
     }
 
@@ -276,9 +288,12 @@ async fn test_guard_chain_simulation() {
 /// Test failure scenarios and budget exhaustion
 #[tokio::test]
 async fn test_budget_exhaustion_simulation() {
-    let time = TimeStamp::now_physical();
+    let time = TimeStamp::PhysicalClock(PhysicalTime {
+        ts_ms: 1000,
+        uncertainty: None,
+    });
     let authority = AuthorityId::new();
-    let addr = NetworkAddress::from_parts("test", "exhaustion_test");
+    let addr = NetworkAddress::new("test://exhaustion_test".to_string());
 
     let interp = SimulationEffectInterpreter::new(42, time, authority, addr);
     interp.set_initial_budget(authority, 100);
@@ -286,7 +301,9 @@ async fn test_budget_exhaustion_simulation() {
     // First charge should succeed
     let result = interp
         .execute(EffectCommand::ChargeBudget {
+            context: ContextId::new(),
             authority,
+            peer: authority,
             amount: 60,
         })
         .await
@@ -302,7 +319,9 @@ async fn test_budget_exhaustion_simulation() {
     // Second charge should succeed
     let result = interp
         .execute(EffectCommand::ChargeBudget {
+            context: ContextId::new(),
             authority,
+            peer: authority,
             amount: 40,
         })
         .await
@@ -318,7 +337,9 @@ async fn test_budget_exhaustion_simulation() {
     // Third charge should fail
     let result = interp
         .execute(EffectCommand::ChargeBudget {
+            context: ContextId::new(),
             authority,
+            peer: authority,
             amount: 10,
         })
         .await;
@@ -331,19 +352,22 @@ async fn test_budget_exhaustion_simulation() {
 /// Test deterministic behavior across multiple runs
 #[tokio::test]
 async fn test_determinism_guarantee() {
-    let time = TimeStamp::now_physical();
+    let time = TimeStamp::PhysicalClock(PhysicalTime {
+        ts_ms: 1000,
+        uncertainty: None,
+    });
     let authority = AuthorityId::new();
-    let addr = NetworkAddress::from_parts("test", "determinism_test");
+    let addr = NetworkAddress::new("test://determinism_test".to_string());
 
     // Run the same scenario twice with same seed
     let mut run_results = Vec::new();
 
     for _ in 0..2 {
-        let interp = SimulationEffectInterpreter::new(42, time, authority, addr);
+        let interp = SimulationEffectInterpreter::new(42, time.clone(), authority, addr.clone());
 
         // Generate multiple nonces
         let mut nonces = Vec::new();
-        for i in 0..5 {
+        for _i in 0..5 {
             let result = interp
                 .execute(EffectCommand::GenerateNonce { bytes: 16 })
                 .await

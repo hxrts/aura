@@ -7,11 +7,11 @@ use crate::{
     InvitationError, InvitationResult,
 };
 use aura_core::effects::NetworkEffects;
-use aura_protocol::EffectApiEvent;
 use aura_core::{AccountId, DeviceId, ExecutionMode, RelationshipId, TrustLevel};
 use aura_journal::semilattice::InvitationRecordRegistry;
 use aura_protocol::effect_traits::EffectApiEffects;
 use aura_protocol::effects::AuraEffects;
+use aura_protocol::effect_traits::EffectApiEvent;
 use aura_wot::SerializableBiscuit;
 use futures::lock::Mutex;
 use serde::{Deserialize, Serialize};
@@ -324,20 +324,17 @@ where
             .unwrap_or(5_000);
 
         while let Some(event) = stream.next().await {
-            match event {
-                EffectApiEvent::EventAppended { event, .. } => {
-                    if event
-                        .windows(envelope.invitation_id.as_bytes().len())
-                        .any(|w| w == envelope.invitation_id.as_bytes())
-                    {
-                        tracing::info!(
-                            "Transport receipt observed for invitation {}",
-                            envelope.invitation_id
-                        );
-                        return Ok(());
-                    }
+            if let EffectApiEvent::EventAppended { event, .. } = event {
+                if event
+                    .windows(envelope.invitation_id.len())
+                    .any(|w| w == envelope.invitation_id.as_bytes())
+                {
+                    tracing::info!(
+                        "Transport receipt observed for invitation {}",
+                        envelope.invitation_id
+                    );
+                    return Ok(());
                 }
-                _ => {}
             }
 
             let now = effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0);

@@ -4,11 +4,12 @@
 //! and docs/101_auth_authz.md, providing the CapGuard → FlowGuard → JournalCoupler sequence
 //! that enforces both authorization and budget constraints at every protocol send site.
 
-use super::effect_system_trait::{GuardContextProvider, GuardEffectSystem};
-use crate::guards::{privacy::track_leakage_consumption, JournalCoupler, LeakageBudget};
+use super::effect_system_trait::GuardContextProvider;
+use super::GuardEffects;
 use crate::guards::pure_executor::{BorrowedEffectInterpreter, GuardChainExecutor};
+use crate::guards::{privacy::track_leakage_consumption, JournalCoupler, LeakageBudget};
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_core::{AuraError, AuraResult, Receipt, TimeEffects};
+use aura_core::{AuraError, AuraResult, Receipt};
 use biscuit_auth::Biscuit;
 // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
 use tracing::{debug, warn};
@@ -36,7 +37,7 @@ pub struct SendGuardChain {
 impl SendGuardChain {
     /// Temporary basic authorization guard while migrating to pure guard path.
     /// Uses a metadata-provided Biscuit token string until the interpreter pipeline wires in BiscuitGuardEvaluator.
-    async fn evaluate_authorization_guard<E: GuardEffectSystem>(
+    async fn evaluate_authorization_guard<E: GuardContextProvider>(
         &self,
         effect_system: &E,
     ) -> AuraResult<(bool, String)> {
@@ -179,7 +180,12 @@ impl SendGuardChain {
     ///
     /// # Note
     /// Full evaluation with Biscuit authorization integration
-    pub async fn evaluate<E: GuardEffectSystem + GuardContextProvider + aura_core::PhysicalTimeEffects>(
+    pub async fn evaluate<
+        E: GuardEffects
+            + GuardContextProvider
+            + aura_core::TimeEffects
+            + aura_core::PhysicalTimeEffects,
+    >(
         &self,
         effect_system: &E,
     ) -> AuraResult<SendGuardResult> {
@@ -226,15 +232,13 @@ impl SendGuardChain {
 
         let authority = GuardContextProvider::authority_id(effect_system);
         let interpreter = std::sync::Arc::new(BorrowedEffectInterpreter::new(effect_system));
-        let pure_result = GuardChainExecutor::new(
-            crate::guards::pure::GuardChain::standard(),
-            interpreter,
-        )
-        .execute(
-            effect_system,
-            &crate::guards::pure_executor::convert_send_guard_to_request(self, authority)?,
-        )
-        .await?;
+        let pure_result =
+            GuardChainExecutor::new(crate::guards::pure::GuardChain::standard(), interpreter)
+                .execute(
+                    effect_system,
+                    &crate::guards::pure_executor::convert_send_guard_to_request(self, authority)?,
+                )
+                .await?;
 
         let authorized = authorization_satisfied && pure_result.authorized;
 
@@ -258,9 +262,8 @@ impl SendGuardChain {
         })
     }
 
-
     /// Retrieve Biscuit token for send authorization from effect system
-    async fn retrieve_send_token<E: GuardEffectSystem>(
+    async fn retrieve_send_token<E: GuardContextProvider + aura_core::TimeEffects>(
         &self,
         capability: &str,
         resource: &str,
@@ -286,7 +289,7 @@ impl SendGuardChain {
     }
 
     /// Create a fresh Biscuit token for send authorization using authorization bridge
-    async fn create_fresh_send_token<E: GuardEffectSystem>(
+    async fn create_fresh_send_token<E: GuardContextProvider + aura_core::TimeEffects>(
         &self,
         capability: &str,
         resource: &str,
@@ -301,7 +304,9 @@ impl SendGuardChain {
             .await
     }
 
-    async fn create_fresh_send_token_with_keypair<E: GuardEffectSystem>(
+    async fn create_fresh_send_token_with_keypair<
+        E: GuardContextProvider + aura_core::TimeEffects,
+    >(
         &self,
         capability: &str,
         resource: &str,
@@ -350,10 +355,7 @@ impl SendGuardChain {
     }
 
     /// Evaluate the flow guard: headroom(ctx, cost) and charge flow budget
-    async fn evaluate_flow_guard<E: GuardEffectSystem>(
-        &self,
-        effect_system: &E,
-    ) -> AuraResult<Receipt> {
+    async fn evaluate_flow_guard<E: GuardEffects>(&self, effect_system: &E) -> AuraResult<Receipt> {
         debug!(
             context = ?self.context,
             peer = ?self.peer,
@@ -409,7 +411,10 @@ impl SendGuardChain {
 
     /// Convenience method to evaluate and return only the authorization decision
     pub async fn is_send_authorized<
-        E: GuardEffectSystem + GuardContextProvider + aura_core::PhysicalTimeEffects,
+        E: GuardEffects
+            + GuardContextProvider
+            + aura_core::TimeEffects
+            + aura_core::PhysicalTimeEffects,
     >(
         &self,
         effect_system: &E,
@@ -420,7 +425,10 @@ impl SendGuardChain {
 
     /// Convenience method to evaluate and return the receipt if authorized
     pub async fn authorize_send<
-        E: GuardEffectSystem + GuardContextProvider + aura_core::PhysicalTimeEffects,
+        E: GuardEffects
+            + GuardContextProvider
+            + aura_core::TimeEffects
+            + aura_core::PhysicalTimeEffects,
     >(
         &self,
         effect_system: &E,
@@ -439,7 +447,10 @@ impl SendGuardChain {
 
     /// Evaluate the guard chain and, if authorized, apply journal coupling hooks (requires &mut).
     pub async fn evaluate_with_coupling<
-        E: GuardEffectSystem + GuardContextProvider + aura_core::PhysicalTimeEffects,
+        E: GuardEffects
+            + GuardContextProvider
+            + aura_core::TimeEffects
+            + aura_core::PhysicalTimeEffects,
     >(
         &self,
         effect_system: &mut E,

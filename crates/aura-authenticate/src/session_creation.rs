@@ -438,7 +438,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::test_utils::test_device_id;
+    use aura_testkit::builders::test_device_id;
     use aura_macros::aura_test;
     use aura_verify::session::SessionScope;
     use aura_verify::VerifiedIdentity;

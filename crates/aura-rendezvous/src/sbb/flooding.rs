@@ -272,7 +272,7 @@ impl SbbFlooding for SbbFloodingCoordinator {
     ) -> AuraResult<bool> {
         // 1. Check relay capability for this peer
         let relay_permission = format!("relay:forward_to:{}", peer);
-        let _resource = "relay:network";
+        let resource = "relay:network";
 
         // Get current journal to check capabilities
         let journal_result = self.effects.get_journal().await;
@@ -284,8 +284,14 @@ impl SbbFlooding for SbbFloodingCoordinator {
             }
         };
 
-        // Check relay capability
-        if !journal.caps.allows(&relay_permission) {
+        // Check relay capability using AuthorizationEffects
+        // (migrated from deprecated Cap::allows() to use proper authorization)
+        let authorized = self.effects
+            .verify_capability(&journal.caps, &relay_permission, resource)
+            .await
+            .unwrap_or(false);
+
+        if !authorized {
             tracing::debug!(
                 peer = ?peer,
                 permission = relay_permission,

@@ -112,7 +112,7 @@ where
         for (_, key) in entries.into_iter().rev() {
             // Extract message ID from the index key
             // Key format: chat_group_message:{group_id}:{timestamp}:{message_id}
-            if let Some(message_id_str) = key.split(':').last() {
+            if let Some(message_id_str) = key.split(':').next_back() {
                 if let Ok(message_id_uuid) = Uuid::parse_str(message_id_str) {
                     let message_id = ChatMessageId(message_id_uuid);
                     if let Ok(Some(msg)) = self.get_message(&message_id).await {
@@ -301,6 +301,10 @@ mod tests {
         }
     }
 
+    fn sample_group_id() -> ChatGroupId {
+        ChatGroupId::from_uuid(Uuid::nil())
+    }
+
     fn sample_message(ts_ms: u64) -> ChatMessage {
         use aura_core::time::PhysicalTime;
 
@@ -315,7 +319,7 @@ mod tests {
 
         ChatMessage::new_text(
             ChatMessageId(message_id),
-            ChatGroupId::from_uuid(Uuid::nil()),
+            sample_group_id(),
             aura_core::identifiers::AuthorityId::from_uuid(Uuid::nil()),
             format!("hello-{ts_ms}"),
             timestamp,

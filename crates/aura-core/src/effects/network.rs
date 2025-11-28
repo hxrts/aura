@@ -2,6 +2,15 @@
 //!
 //! This module defines the trait interfaces for network communication operations.
 //! Implementations are provided by aura-protocol handlers using aura-transport.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: All crates needing network communication (TCP, message sending/receiving)
+//!
+//! This is an infrastructure effect that must be implemented in `aura-effects`
+//! with stateless handlers. Domain crates should not implement this trait directly.
 
 use async_trait::async_trait;
 use uuid::Uuid;

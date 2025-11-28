@@ -140,8 +140,7 @@ impl EnhancedTimeHandler {
                 threshold,
                 timeout_ms,
             } => {
-                let start_count = self.get_event_count().await;
-                let target_count = start_count + threshold;
+                let target_count = threshold;
 
                 let timeout_future = self.sleep_ms(timeout_ms);
                 let wait_future = async {
@@ -320,162 +319,142 @@ impl Default for EnhancedTimeHandler {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_enhanced_time_handler_creation() {
-        block_on(async {
-            let handler = EnhancedTimeHandler::default();
-            let stats = handler.get_statistics().await;
+    #[tokio::test]
+    async fn test_enhanced_time_handler_creation() {
+        let handler = EnhancedTimeHandler::default();
+        let stats = handler.get_statistics().await;
 
-            assert_eq!(stats.total_sleeps, 0);
-            assert_eq!(stats.active_contexts, 0);
-            assert!(!handler.is_simulated());
-        });
+        assert_eq!(stats.total_sleeps, 0);
+        assert_eq!(stats.active_contexts, 0);
+        assert!(!handler.is_simulated());
     }
 
-    #[test]
-    fn test_time_operations() {
-        block_on(async {
-            let handler = EnhancedTimeHandler::default();
+    #[tokio::test]
+    async fn test_time_operations() {
+        let handler = EnhancedTimeHandler::default();
 
-            let current_epoch = handler.current_epoch().await;
-            let current_timestamp = handler.current_timestamp().await;
-            let current_timestamp_millis = handler.current_timestamp_millis().await;
+        let current_epoch = handler.current_epoch().await;
+        let current_timestamp = handler.current_timestamp().await;
+        let current_timestamp_millis = handler.current_timestamp_millis().await;
 
-            assert!(current_epoch > 0);
-            assert!(current_timestamp > 0);
-            assert!(current_timestamp_millis > 0);
-            assert_eq!(current_epoch, current_timestamp_millis);
-        });
+        assert!(current_epoch > 0);
+        assert!(current_timestamp > 0);
+        assert!(current_timestamp_millis > 0);
+        assert_eq!(current_epoch, current_timestamp_millis);
     }
 
-    #[test]
-    fn test_sleep_operations() {
-        block_on(async {
-            let handler = EnhancedTimeHandler::default();
+    #[tokio::test]
+    async fn test_sleep_operations() {
+        let handler = EnhancedTimeHandler::default();
 
-            let start_time = handler.current_timestamp().await;
-            handler.sleep_ms(1).await;
-            let end_time = handler.current_timestamp().await;
+        let start_time = handler.current_timestamp().await;
+        handler.sleep_ms(1).await;
+        let end_time = handler.current_timestamp().await;
 
-            let stats = handler.get_statistics().await;
-            assert_eq!(stats.total_sleeps, 1);
-            assert!(end_time >= start_time);
-        });
+        let stats = handler.get_statistics().await;
+        assert_eq!(stats.total_sleeps, 1);
+        assert!(end_time >= start_time);
     }
 
-    #[test]
-    fn test_timeout_operations() {
-        block_on(async {
-            let handler = EnhancedTimeHandler::default();
+    #[tokio::test]
+    async fn test_timeout_operations() {
+        let handler = EnhancedTimeHandler::default();
 
-            let timeout_handle = handler.set_timeout(1).await;
+        let timeout_handle = handler.set_timeout(1).await;
 
-            let stats = handler.get_statistics().await;
-            assert_eq!(stats.total_timeouts_set, 1);
-            assert_eq!(stats.active_timeouts, 1);
+        let stats = handler.get_statistics().await;
+        assert_eq!(stats.total_timeouts_set, 1);
+        assert_eq!(stats.active_timeouts, 1);
 
-            handler.cancel_timeout(timeout_handle).await.unwrap();
+        handler.cancel_timeout(timeout_handle).await.unwrap();
 
-            let stats = handler.get_statistics().await;
-            assert_eq!(stats.total_timeouts_cancelled, 1);
-        });
+        let stats = handler.get_statistics().await;
+        assert_eq!(stats.total_timeouts_cancelled, 1);
     }
 
-    #[test]
-    fn test_context_management() {
-        block_on(async {
-            let handler = EnhancedTimeHandler::default();
+    #[tokio::test]
+    async fn test_context_management() {
+        let handler = EnhancedTimeHandler::default();
 
-            let context_id = Uuid::new_v4();
+        let context_id = Uuid::new_v4();
 
-            handler.register_context(context_id).await;
+        handler.register_context(context_id).await;
 
-            let stats = handler.get_statistics().await;
-            assert_eq!(stats.active_contexts, 1);
+        let stats = handler.get_statistics().await;
+        assert_eq!(stats.active_contexts, 1);
 
-            handler.unregister_context(context_id).await;
+        handler.unregister_context(context_id).await;
 
-            let stats = handler.get_statistics().await;
-            assert_eq!(stats.active_contexts, 0);
-        });
+        let stats = handler.get_statistics().await;
+        assert_eq!(stats.active_contexts, 0);
     }
 
-    #[test]
-    fn test_yield_until_immediate() {
-        block_on(async {
-            let handler = EnhancedTimeHandler::default();
+    #[tokio::test]
+    async fn test_yield_until_immediate() {
+        let handler = EnhancedTimeHandler::default();
 
-            let result = handler.yield_until(WakeCondition::Immediate).await;
-            assert!(result.is_ok());
+        let result = handler.yield_until(WakeCondition::Immediate).await;
+        assert!(result.is_ok());
 
-            let stats = handler.get_statistics().await;
-            assert_eq!(stats.total_yield_operations, 1);
-        });
+        let stats = handler.get_statistics().await;
+        assert_eq!(stats.total_yield_operations, 1);
     }
 
-    #[test]
-    fn test_yield_until_timeout() {
-        block_on(async {
-            let handler = EnhancedTimeHandler::default();
+    #[tokio::test]
+    async fn test_yield_until_timeout() {
+        let handler = EnhancedTimeHandler::default();
 
-            let current_time = handler.current_timestamp().await;
-            let future_time = current_time + 1; // 1ms in future
+        let current_time = handler.current_timestamp().await;
+        let future_time = current_time + 1; // 1ms in future
 
-            let result = handler
-                .yield_until(WakeCondition::TimeoutAt(future_time))
-                .await;
+        let result = handler
+            .yield_until(WakeCondition::TimeoutAt(future_time))
+            .await;
 
-            assert!(result.is_ok());
-        });
+        assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_yield_until_threshold_events() {
-        block_on(async {
-            let handler = Arc::new(EnhancedTimeHandler::default());
+    #[tokio::test]
+    async fn test_yield_until_threshold_events() {
+        let handler = Arc::new(EnhancedTimeHandler::default());
 
-            handler.simulate_event().await;
-            handler.simulate_event().await;
-            handler.simulate_event().await;
+        handler.simulate_event().await;
+        handler.simulate_event().await;
+        handler.simulate_event().await;
 
-            let result = handler
-                .yield_until(WakeCondition::ThresholdEvents {
-                    threshold: 3,
-                    timeout_ms: 10,
-                })
-                .await;
+        let result = handler
+            .yield_until(WakeCondition::ThresholdEvents {
+                threshold: 3,
+                timeout_ms: 10,
+            })
+            .await;
 
-            assert!(result.is_ok());
-        });
+        assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_event_notification() {
-        block_on(async {
-            let handler = EnhancedTimeHandler::default();
+    #[tokio::test]
+    async fn test_event_notification() {
+        let handler = EnhancedTimeHandler::default();
 
-            let initial_count = handler.get_event_count().await;
+        let initial_count = handler.get_event_count().await;
 
-            handler.notify_events_available().await;
+        handler.notify_events_available().await;
 
-            let new_count = handler.get_event_count().await;
-            assert_eq!(new_count, initial_count + 1);
-        });
+        let new_count = handler.get_event_count().await;
+        assert_eq!(new_count, initial_count + 1);
     }
 
-    #[test]
-    fn test_cleanup_expired_timeouts() {
-        block_on(async {
-            let handler = EnhancedTimeHandler::default();
+    #[tokio::test]
+    async fn test_cleanup_expired_timeouts() {
+        let handler = EnhancedTimeHandler::default();
 
-            let timeout_handle = handler.set_timeout(1).await;
+        let timeout_handle = handler.set_timeout(1).await;
 
-            handler.sleep_ms(10).await;
+        handler.sleep_ms(10).await;
 
-            handler.cleanup_expired_timeouts().await;
+        handler.cleanup_expired_timeouts().await;
 
-            let result = handler.cancel_timeout(timeout_handle).await;
-            assert!(result.is_err());
-        });
+        let result = handler.cancel_timeout(timeout_handle).await;
+        assert!(result.is_err());
     }
 }

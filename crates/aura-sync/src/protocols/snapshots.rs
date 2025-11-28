@@ -40,8 +40,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{sync_protocol_error, SyncResult};
-use aura_core::tree::Epoch as TreeEpoch;
 use aura_core::{AuraError, AuraResult, DeviceId, Hash32};
+use aura_journal::commitment_tree::Epoch as TreeEpoch;
 
 // =============================================================================
 // Types

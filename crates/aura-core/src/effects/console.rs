@@ -1,4 +1,13 @@
 //! Console effect interface for logging and debug output
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: All crates needing logging and terminal output
+//!
+//! This is an infrastructure effect that must be implemented in `aura-effects`
+//! with stateless handlers. Domain crates should not implement this trait directly.
 
 use crate::AuraError;
 use async_trait::async_trait;

@@ -1,7 +1,7 @@
 //! Consensus integration smoke test for AMP bumps.
 
+use aura_core::epochs::Epoch;
 use aura_core::frost::Share;
-use aura_core::session_epochs::Epoch;
 use aura_core::AuthorityId;
 use aura_journal::fact::{ChannelBumpReason, ProposedChannelEpochBump};
 use aura_protocol::consensus::run_amp_channel_epoch_bump;

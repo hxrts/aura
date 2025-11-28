@@ -238,7 +238,7 @@ pub fn sync_consistency_error(
 mod tests {
     use super::*;
     #[cfg(test)]
-    use aura_core::test_utils::test_device_id;
+    use aura_testkit::builders::test_device_id;
 
     #[test]
     fn test_sync_error_creation() {

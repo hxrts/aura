@@ -3,6 +3,17 @@
 //! This module defines the effect traits for Quint formal verification integration.
 //! Following the algebraic effects architecture, these traits define capabilities
 //! without implementation details.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Testing/Simulation Effect
+//! - **Implementation**: `aura-quint` (Layer 8)
+//! - **Usage**: Quint formal verification, property evaluation, model checking
+//!
+//! This is a testing/simulation effect for formal verification integration. Provides
+//! interfaces for Quint property evaluation, state space exploration, and model
+//! checking. Handlers in `aura-quint` integrate with the Quint formal verification
+//! toolchain.
 
 use crate::Result;
 use serde_json::Value;

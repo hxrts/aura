@@ -916,14 +916,13 @@ where
                 Err(_) => None,
             };
 
-            if let Some(message) = message_received {
-                match message {
-                    GuardianAuthMessage::ApprovalRequest {
-                        guardian_id: _requested_guardian,
-                        account_id,
-                        recovery_context,
-                        request_id,
-                    } => {
+            if let Some(GuardianAuthMessage::ApprovalRequest {
+                guardian_id: _requested_guardian,
+                account_id,
+                recovery_context,
+                request_id,
+            }) = message_received
+            {
                         tracing::info!(
                             "Guardian {} received approval request for account {} (request: {})",
                             device_id,
@@ -1025,11 +1024,6 @@ where
                                 Some("Guardian denied recovery request".to_string())
                             },
                         });
-                    }
-                    _ => {
-                        // Ignore other message types
-                    }
-                }
             }
 
             // Small delay to avoid busy-looping (simulator-controllable)

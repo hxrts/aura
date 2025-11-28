@@ -4,6 +4,7 @@
 //! for model-based test generation. It uses the existing Quint-Apalache integration to
 //! generate traces in ITF format and convert them to executable test cases.
 
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -16,7 +17,6 @@ use async_trait::async_trait;
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::AuraError;
 use aura_effects::storage::FilesystemStorageHandler;
-use futures::Future;
 
 /// ITF trace with Model-Based Testing metadata
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -76,10 +76,6 @@ pub struct ITFState {
 pub struct ITFStateMeta {
     /// State index in the trace
     pub index: usize,
-}
-
-fn run_sync<F: Future>(fut: F) -> F::Output {
-    futures::executor::block_on(fut)
 }
 
 /// Result of bounded model checking
@@ -249,8 +245,8 @@ impl ITFBasedFuzzer {
     }
 
     /// Parse ITF trace from file
-    pub fn parse_itf_file(&self, path: &Path) -> Result<ITFTrace, ITFFuzzError> {
-        let content = run_sync(self.read_path_to_string(path))?;
+    pub async fn parse_itf_file(&self, path: &Path) -> Result<ITFTrace, ITFFuzzError> {
+        let content = self.read_path_to_string(path).await?;
         self.parse_itf_trace(&content)
     }
 
@@ -488,7 +484,7 @@ impl ITFBasedFuzzer {
         properties: &[String],
     ) -> Result<ModelCheckingResult, ITFFuzzError> {
         #[allow(clippy::disallowed_methods)]
-        let start_time = aura_effects::time::monotonic_now();
+        let start_time = std::time::Instant::now();
         let deepening = &self.config.iterative_deepening;
 
         let mut all_counterexamples = Vec::new();
@@ -577,7 +573,7 @@ impl ITFBasedFuzzer {
                 .await
                 .map_err(|e| ITFFuzzError::FileSystemError(e.to_string()))?
         {
-            match self.parse_itf_file(&counterexample_file) {
+            match self.parse_itf_file(&counterexample_file).await {
                 Ok(trace) => {
                     counterexample_trace = Some(trace);
                     // Clean up temporary file
@@ -674,7 +670,7 @@ impl ITFBasedFuzzer {
         properties: &[String],
     ) -> Result<ModelCheckingReport, ITFFuzzError> {
         #[allow(clippy::disallowed_methods)]
-        let start_time = aura_effects::time::monotonic_now();
+        let start_time = std::time::Instant::now();
 
         // Run bounded model checking
         let model_check_result = self
@@ -734,7 +730,7 @@ impl ITFBasedFuzzer {
         spec_file: &Path,
     ) -> Result<SimulationResult, ITFFuzzError> {
         #[allow(clippy::disallowed_methods)]
-        let start_time = aura_effects::time::monotonic_now();
+        let start_time = std::time::Instant::now();
         let sim_config = &self.config.simulation;
 
         let mut traces = Vec::new();
@@ -826,7 +822,7 @@ impl ITFBasedFuzzer {
         }
 
         // Parse the generated ITF file
-        let trace = self.parse_itf_file(&output_file)?;
+        let trace = self.parse_itf_file(&output_file).await?;
 
         // Clean up temporary file
         let _ = (self.storage.remove(output_file.to_string_lossy().as_ref()),);
@@ -1008,7 +1004,7 @@ impl ITFBasedFuzzer {
         spec_file: &Path,
     ) -> Result<TestSuite, ITFFuzzError> {
         #[allow(clippy::disallowed_methods)]
-        let start_time = aura_effects::time::monotonic_now();
+        let start_time = std::time::Instant::now();
 
         // Phase 1: Run simulations
         let simulation_result = self.run_simulation_based_testing(spec_file).await?;
@@ -1080,7 +1076,7 @@ impl ITFBasedFuzzer {
         campaign_config: FuzzingCampaignConfig,
     ) -> Result<FuzzingCampaignResult, ITFFuzzError> {
         #[allow(clippy::disallowed_methods)]
-        let start_time = aura_effects::time::monotonic_now();
+        let start_time = std::time::Instant::now();
         let mut performance_monitor = PerformanceMonitor::new();
 
         println!(
@@ -1627,7 +1623,7 @@ impl PerformanceMonitor {
 
     pub fn start_phase(&mut self, phase_name: &str) {
         #[allow(clippy::disallowed_methods)]
-        let now = aura_effects::time::monotonic_now();
+        let now = std::time::Instant::now();
         self.phase_start_times.insert(phase_name.to_string(), now);
     }
 

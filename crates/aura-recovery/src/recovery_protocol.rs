@@ -4,11 +4,11 @@
 //! replacing the device-centric recovery model with authority-based recovery.
 
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
+use aura_core::epochs::Epoch;
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash;
 use aura_core::relational::fact::RelationalFact;
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
-use aura_core::session_epochs::Epoch;
 use aura_core::time::TimeStamp;
 use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};

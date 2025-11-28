@@ -23,8 +23,8 @@
 //! - [`docs/123_commitment_tree.md`](../../../../docs/123_commitment_tree.md) - Tree operations
 //! - FROST paper: https://eprint.iacr.org/2020/852
 
+use crate::crypto::hash;
 use crate::effects::{SecureStorageCapability, SecureStorageEffects, SecureStorageLocation};
-use crate::hash;
 use crate::{AttestedOp, TreeOpKind};
 use frost_ed25519 as frost;
 use serde::{Deserialize, Serialize};

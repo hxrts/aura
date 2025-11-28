@@ -49,36 +49,109 @@ pub trait ChoreoHandler {
 
 This trait defines the interface for session type execution. Implementations call the underlying effects. They also apply guard chains and journal updates.
 
-## 4. Extension Effects
+## 4. Choreography Annotations and Effect Commands
 
-Choreographies support annotations that modify runtime behavior. Extension effects interpret these annotations. Capability annotations attach required capabilities to a message. Flow cost annotations specify the budget cost of a message. Journal annotations define facts to insert into the journal.
+Choreographies support annotations that modify runtime behavior. The `choreography!` macro extracts these annotations and generates `EffectCommand` sequences. This is the **choreography-first architecture**: choreographic annotations are the canonical source of truth for guard requirements.
 
-Extension effects allow choreographies to express authorization and accounting rules. These rules apply before each send and receive.
+### Supported Annotations
+
+| Annotation | Description | Generated Effect |
+|------------|-------------|------------------|
+| `guard_capability = "cap"` | Capability requirement | `StoreMetadata` (audit trail) |
+| `flow_cost = N` | Flow budget charge | `ChargeBudget` |
+| `journal_facts = "fact"` | Journal fact recording | `StoreMetadata` (fact key) |
+| `journal_merge = true` | Request journal merge | `StoreMetadata` (merge flag) |
+| `audit_log = "event"` | Audit trail entry | `StoreMetadata` (audit key) |
+| `leak = "External"` | Leakage tracking | `RecordLeakage` |
+
+### Annotation Syntax
 
 ```rust
-// Annotation example
-A[guard_capability = "sync", flow_cost = 10] -> B: SyncMsg;
+// Single annotation
+A[guard_capability = "sync"] -> B: SyncMsg;
+
+// Multiple annotations
+A[guard_capability = "sync", flow_cost = 10, journal_facts = "sync_started"] -> B: SyncMsg;
+
+// Leakage annotation (multiple syntaxes supported)
+A[leak = "External,Neighbor"] -> B: PublicMsg;
+A[leak: External] -> B: PublicMsg;
 ```
 
-This annotation specifies a capability requirement and a flow budget cost for the send action.
+### Effect Command Generation
+
+The macro generates an `effect_bridge` module containing:
+
+```rust
+pub mod effect_bridge {
+    use aura_core::effects::guard::{EffectCommand, EffectInterpreter};
+
+    /// Convert annotations to effect commands
+    pub fn annotation_to_commands(ctx: &EffectContext, annotation: ...) -> Vec<EffectCommand>;
+
+    /// Execute commands through interpreter
+    pub async fn execute_commands<I: EffectInterpreter>(
+        interpreter: &I,
+        ctx: &EffectContext,
+        annotations: Vec<...>,
+    ) -> Result<Vec<EffectResult>, String>;
+}
+```
+
+### Integration with Effect Interpreters
+
+Generated `EffectCommand` sequences execute through:
+- **Production**: `ProductionEffectInterpreter` (aura-effects)
+- **Simulation**: `SimulationEffectInterpreter` (aura-simulator)
+- **Testing**: `BorrowedEffectInterpreter` / mock interpreters
+
+This unified approach ensures consistent guard behavior across all execution environments.
 
 ## 5. Guard Chain Integration
 
-Each send action in a session type is evaluated through a [guard chain](109_authorization.md). The chain contains `CapGuard`, `FlowGuard`, and `JournalCoupler`. These guards enforce authorization and budget constraints.
+Guard effects originate from two sources that share the same `EffectCommand` system:
 
-`CapGuard` checks that the active capabilities satisfy the message requirements. `FlowGuard` checks that flow budget is available for the context and peer. `JournalCoupler` synchronizes journal updates with protocol execution.
+1. **Choreographic Annotations** (compile-time): The `choreography!` macro generates `EffectCommand` sequences from annotations. These represent per-message guard requirements.
+
+2. **Runtime Guard Chain** (send-site): The `GuardChain::standard()` evaluates pure guards against a `GuardSnapshot` at each protocol send site. This enforces invariants like charge-before-send.
+
+### Guard Chain Sequence
+
+The runtime guard chain contains `CapGuard`, `FlowGuard`, `JournalCoupler`, and `LeakageTracker`. These guards enforce authorization and budget constraints:
+
+- `CapGuard` checks that the active capabilities satisfy the message requirements
+- `FlowGuard` checks that flow budget is available for the context and peer
+- `JournalCoupler` synchronizes journal updates with protocol execution
+- `LeakageTracker` records metadata leakage per observer class
 
 Guard evaluation is synchronous over a prepared `GuardSnapshot` and yields `EffectCommand` items. An async interpreter executes those commands, keeping guard logic pure while preserving charge-before-send.
 
 ```mermaid
 graph TD
-    S[Send] --> C[CapGuard];
+    S[Send] --> A[Annotation Effects];
+    A --> C[CapGuard];
     C --> F[FlowGuard];
     F --> J[JournalCoupler];
-    J --> N[Network Send];
+    J --> L[LeakageTracker];
+    L --> N[Network Send];
 ```
 
-This diagram shows the guard sequence for all send operations. Each guard must succeed for the message to be sent.
+This diagram shows the combined guard sequence. Annotation-derived effects execute first, then runtime guards validate and charge budgets before the send.
+
+### Combined Execution
+
+Use `execute_guarded_choreography()` from `aura_protocol::guards` to execute both annotation-derived commands and runtime guards atomically:
+
+```rust
+use aura_protocol::guards::{execute_guarded_choreography, GuardChain};
+
+let result = execute_guarded_choreography(
+    &effect_system,
+    &request,
+    annotation_commands,  // From choreography macro
+    interpreter,
+).await?;
+```
 
 ## 6. Execution Modes
 

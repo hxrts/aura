@@ -14,7 +14,7 @@
 //!
 //! ```rust,no_run
 //! use aura_sync::infrastructure::CacheManager;
-//! use aura_core::tree::Epoch;
+//! use aura_journal::commitment_tree::Epoch;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut cache = CacheManager::new();
@@ -32,7 +32,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use aura_core::tree::Epoch as TreeEpoch;
+use aura_journal::commitment_tree::Epoch as TreeEpoch;
 
 // =============================================================================
 // Cache Invalidation Events

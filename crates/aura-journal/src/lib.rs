@@ -54,6 +54,9 @@ pub mod reduction;
 // Authority state derivation (Phase 5)
 pub mod authority_state;
 
+// Domain event types
+pub mod events;
+
 // Note: Choreographic protocols moved to aura-sync (Layer 5)
 
 // Test effects moved to aura-testkit to maintain clean domain layer
@@ -111,6 +114,9 @@ pub use aura_core::time::VectorClock;
 pub use causal_context::{ActorId, CausalContext, OperationId, VectorClockExt};
 
 // Selective re-exports to avoid conflicts
-pub use types::{GuardianMetadata, Session};
+pub use types::GuardianMetadata;
+
+// Event type re-exports
+pub use events::{AdminReplaced, MaintenanceEvent};
 
 // See docs/100_authority_and_identity.md for migration guidance

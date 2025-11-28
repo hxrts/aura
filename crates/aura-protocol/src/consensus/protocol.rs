@@ -10,21 +10,21 @@ use super::{
     types::{CommitFact, ConsensusConfig, ConsensusId},
     witness::{WitnessSet, WitnessTracker},
 };
+use async_lock::RwLock;
 use aura_core::{
     crypto::tree_signing::frost_aggregate,
-    effects::{PhysicalTimeEffects, RandomEffects},
-    frost::{NonceCommitment, PublicKeyPackage, Share},
     crypto::tree_signing::NonceToken,
-    session_epochs::Epoch,
+    effects::{PhysicalTimeEffects, RandomEffects},
+    epochs::Epoch,
+    frost::{NonceCommitment, PublicKeyPackage, Share},
     time::{PhysicalTime, ProvenancedTime, TimeStamp},
     AuraError, AuthorityId, Hash32, Prestate, Result,
 };
+use aura_macros::choreography;
 use frost_ed25519;
 use rand::SeedableRng;
-use aura_macros::choreography;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use async_lock::RwLock;
 // Timeout support should be implemented via injected timer effects rather than runtime-specific APIs
 use tracing::{debug, info, warn};
 
@@ -302,9 +302,12 @@ impl ConsensusProtocol {
         };
 
         // Sign using FROST with provided aggregated nonces
-        let signature = self
-            .frost_orchestrator
-            .sign_with_nonce(message, share, &nonce_token, &aggregated_nonces)?;
+        let signature = self.frost_orchestrator.sign_with_nonce(
+            message,
+            share,
+            &nonce_token,
+            &aggregated_nonces,
+        )?;
 
         // No pipelined commitment until interpreter path supports token handoff
         let next_commitment = None;
@@ -394,8 +397,11 @@ impl ConsensusProtocol {
         let participants = instance.tracker.get_participants();
 
         // Aggregate using FROST
-        let frost_group_pkg: frost_ed25519::keys::PublicKeyPackage =
-            self.group_public_key.clone().try_into().map_err(|e: String| {
+        let frost_group_pkg: frost_ed25519::keys::PublicKeyPackage = self
+            .group_public_key
+            .clone()
+            .try_into()
+            .map_err(|e: String| {
                 AuraError::crypto(format!("Invalid group public key package: {}", e))
             })?;
 

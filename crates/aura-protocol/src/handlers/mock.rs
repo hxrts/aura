@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 
 use super::context::immutable::AuraContext;
 use super::{AuraHandler, AuraHandlerError, EffectType, ExecutionMode};
-use aura_core::LocalSessionType;
+use aura_mpst::LocalSessionType;
 
 /// Mock handler for testing effect execution
 #[derive(Clone)]

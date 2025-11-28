@@ -4,8 +4,8 @@
 
 use aura_core::{
     crypto::tree_signing::frost_verify_aggregate,
+    epochs::Epoch,
     frost::{PublicKeyPackage, ThresholdSignature},
-    session_epochs::Epoch,
     time::ProvenancedTime,
     AuthorityId, Hash32,
 };
@@ -124,10 +124,9 @@ impl CommitFact {
             .clone()
             .ok_or_else(|| "Missing group public key for verification".to_string())?;
 
-        let frost_pkg: frost_ed25519::keys::PublicKeyPackage =
-            group_pkg.try_into().map_err(|e: String| {
-                format!("Invalid group public key package: {}", e)
-            })?;
+        let frost_pkg: frost_ed25519::keys::PublicKeyPackage = group_pkg
+            .try_into()
+            .map_err(|e: String| format!("Invalid group public key package: {}", e))?;
 
         frost_verify_aggregate(
             frost_pkg.verifying_key(),

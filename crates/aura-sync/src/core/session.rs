@@ -77,7 +77,9 @@ impl<T> SessionState<T> {
         let now = current_timestamp_secs;
 
         match self {
-            SessionState::Active { started_at, .. } => Some((now - started_at) * 1000),
+            SessionState::Active { started_at, .. } => {
+                Some(now.saturating_sub(*started_at) * 1000)
+            }
             SessionState::Terminating { result, .. } | SessionState::Completed(result) => {
                 match result {
                     SessionResult::Success { duration_ms, .. } => Some(*duration_ms),
@@ -85,7 +87,9 @@ impl<T> SessionState<T> {
                     SessionResult::Timeout { duration_ms, .. } => Some(*duration_ms),
                 }
             }
-            SessionState::Initializing { created_at, .. } => Some((now - created_at) * 1000),
+            SessionState::Initializing { created_at, .. } => {
+                Some(now.saturating_sub(*created_at) * 1000)
+            }
         }
     }
 
@@ -787,7 +791,7 @@ where
 mod tests {
     use super::*;
     use crate::SyncError;
-    use aura_core::test_utils::test_device_id;
+    use aura_testkit::builders::test_device_id;
     use std::thread;
     use std::time::Duration as StdDuration;
 
@@ -853,7 +857,7 @@ mod tests {
         metadata.insert("test_key".to_string(), "test_value".to_string());
 
         manager
-            .complete_session(session_id, 100, 1024, metadata, None)
+            .complete_session(session_id, 100, 1024, metadata, Some(now + 100))
             .unwrap();
         assert_eq!(manager.count_active_sessions(), 0);
         assert_eq!(manager.count_completed_sessions(), 1);
@@ -993,9 +997,9 @@ mod tests {
             phase: "test".to_string(),
             data: vec![],
         };
-        manager.activate_session(session_id, state, None).unwrap();
+        manager.activate_session(session_id, state, Some(now)).unwrap();
         manager
-            .complete_session(session_id, 0, 0, HashMap::new(), None)
+            .complete_session(session_id, 0, 0, HashMap::new(), Some(now + 50))
             .unwrap();
 
         assert_eq!(manager.sessions.len(), 1);
@@ -1034,7 +1038,7 @@ mod tests {
                         10 * (i + 1),
                         100 * (i + 1),
                         HashMap::new(),
-                        None,
+                        Some(now + 100 * (i as u64 + 1)),
                     )
                     .unwrap();
             } else {

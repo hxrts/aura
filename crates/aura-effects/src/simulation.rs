@@ -1,6 +1,10 @@
-//! Layer 3: Simulation Effect Handlers (stubbed)
+//! Layer 3: Fallback Simulation Effect Handlers (Null Object Pattern)
 //!
-//! Minimal implementations to satisfy trait bounds; real simulation lives in higher layers.
+//! Provides fallback implementations for simulation effects when full simulation is not active.
+//! Real simulation logic resides in higher layers (aura-simulator).
+//!
+//! This follows the Null Object Pattern: provides safe no-op implementations that satisfy
+//! trait bounds and allow code to compile/run when simulation features are not needed.
 
 use async_trait::async_trait;
 use aura_core::effects::{
@@ -13,33 +17,42 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Minimal simulation handler for testing and local development
+/// Fallback simulation handler (Null Object Pattern)
 ///
-/// Provides stubbed implementations of simulation control, observation, and fault injection
-/// effects. Real simulation logic resides in higher layers (aura-simulator).
+/// Provides no-op implementations of simulation effects for contexts where full simulation
+/// is not active. This allows code to be written against simulation effect traits without
+/// requiring a full simulation runtime.
+///
+/// **Use Cases:**
+/// - Local development without simulation harness
+/// - Production deployment where simulation features are disabled
+/// - Testing contexts that don't require simulation control
+///
+/// **Pattern:** This is a Null Object - all methods succeed with empty/default values.
+/// Real simulation logic is provided by `aura-simulator` layer.
 #[derive(Debug, Clone)]
-pub struct StatelessSimulationHandler<S, T> {
-    /// Storage effects handler reference
+pub struct FallbackSimulationHandler<S, T> {
+    /// Storage effects handler reference (currently unused in fallback mode)
     #[allow(dead_code)]
     storage: Arc<S>,
-    /// Time effects handler reference
+    /// Time effects handler reference (currently unused in fallback mode)
     #[allow(dead_code)]
     time: Arc<T>,
 }
 
-impl<S, T> StatelessSimulationHandler<S, T>
+impl<S, T> FallbackSimulationHandler<S, T>
 where
     S: StorageEffects,
     T: Send + Sync,
 {
-    /// Create a new simulation handler with storage and time effects
+    /// Create a new fallback simulation handler
     pub fn new(storage: Arc<S>, time: Arc<T>) -> Self {
         Self { storage, time }
     }
 }
 
 #[async_trait]
-impl<S, T> SimulationControlEffects for StatelessSimulationHandler<S, T>
+impl<S, T> SimulationControlEffects for FallbackSimulationHandler<S, T>
 where
     S: StorageEffects + Send + Sync,
     T: Send + Sync,
@@ -129,7 +142,7 @@ where
 }
 
 #[async_trait]
-impl<S, T> FaultInjectionEffects for StatelessSimulationHandler<S, T>
+impl<S, T> FaultInjectionEffects for FallbackSimulationHandler<S, T>
 where
     S: StorageEffects + Send + Sync,
     T: Send + Sync,
@@ -175,7 +188,7 @@ where
 }
 
 #[async_trait]
-impl<S, T> SimulationObservationEffects for StatelessSimulationHandler<S, T>
+impl<S, T> SimulationObservationEffects for FallbackSimulationHandler<S, T>
 where
     S: StorageEffects + Send + Sync,
     T: Send + Sync,

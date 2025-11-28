@@ -46,23 +46,8 @@ pub mod threshold;
 // Re-export commonly used types
 pub use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 
-// Legacy low-level verification functions - prefer SimpleIdentityVerifier instead
-#[deprecated(
-    since = "0.2.0",
-    note = "Use SimpleIdentityVerifier::verify_device_signature instead"
-)]
-pub use device::verify_device_signature;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use SimpleIdentityVerifier::verify_guardian_signature instead"
-)]
-pub use guardian::verify_guardian_signature;
+// Re-export session verification
 pub use session::verify_session_ticket;
-#[deprecated(
-    since = "0.2.0",
-    note = "Use SimpleIdentityVerifier::verify_threshold_signature instead"
-)]
-pub use threshold::verify_threshold_signature;
 
 // Re-export identity validation functions
 pub use event_validation::{
@@ -71,6 +56,11 @@ pub use event_validation::{
 };
 
 use aura_core::hash::hash;
+
+// Internal imports for SimpleIdentityVerifier implementation
+use device::verify_device_signature;
+use guardian::verify_guardian_signature;
+use threshold::verify_threshold_signature;
 
 // Re-export domain types
 pub use aura_core::relationships::*;
@@ -387,74 +377,4 @@ impl Default for SimpleIdentityVerifier {
     fn default() -> Self {
         Self::new()
     }
-}
-
-/// Verify an identity proof against a message
-///
-/// **Deprecated**: Use `SimpleIdentityVerifier` methods instead for better API and complete
-/// support for all identity proof types including threshold signatures.
-#[deprecated(since = "0.2.0", note = "Use SimpleIdentityVerifier methods instead")]
-pub fn verify_identity_proof(
-    proof: &IdentityProof,
-    message: &[u8],
-    key_material: &KeyMaterial,
-) -> Result<VerifiedIdentity> {
-    let message_hash = hash(message);
-
-    match proof {
-        IdentityProof::Device {
-            device_id,
-            signature,
-        } => {
-            let public_key = key_material.get_device_public_key(device_id)?;
-            verify_device_signature(*device_id, message, signature, public_key)?;
-        }
-        IdentityProof::Guardian {
-            guardian_id,
-            signature,
-        } => {
-            let public_key = key_material.get_guardian_public_key(guardian_id)?;
-            verify_guardian_signature(*guardian_id, message, signature, public_key)?;
-        }
-        IdentityProof::Threshold(threshold_sig) => {
-            // Extract account_id from the message context for threshold verification
-            // Try to parse the message as an AccountId (32-byte UUID)
-            let account_id = if message.len() == 16 {
-                // Message is a UUID in bytes - convert to AccountId
-                let uuid_bytes: [u8; 16] = message.try_into().map_err(|_| {
-                    AuthenticationError::InvalidThresholdSignature(
-                        "Invalid message format for threshold verification".to_string(),
-                    )
-                })?;
-                aura_core::AccountId(uuid::Uuid::from_bytes(uuid_bytes))
-            } else {
-                // Try to parse message as string representation of UUID
-                let message_str = std::str::from_utf8(message).map_err(|_| {
-                    AuthenticationError::InvalidThresholdSignature(
-                        "Message is not valid UTF-8".to_string(),
-                    )
-                })?;
-
-                // Try to parse as UUID string
-                let uuid = uuid::Uuid::parse_str(message_str).map_err(|_| {
-                    AuthenticationError::InvalidThresholdSignature(
-                        "Message does not contain a valid AccountId".to_string(),
-                    )
-                })?;
-                aura_core::AccountId(uuid)
-            };
-
-            let group_key = key_material.get_group_public_key(&account_id)?;
-
-            // Calculate minimum signers from the signature shares
-            let min_signers = threshold_sig.signers.len().max(1);
-
-            verify_threshold_signature(message, &threshold_sig.signature, group_key, min_signers)?;
-        }
-    }
-
-    Ok(VerifiedIdentity {
-        proof: proof.clone(),
-        message_hash,
-    })
 }

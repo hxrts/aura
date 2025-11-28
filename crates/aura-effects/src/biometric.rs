@@ -1,10 +1,14 @@
 //! Layer 3: Biometric Authentication Effect Handlers
 //!
-//! Stateless single-party implementation of BiometricEffects from aura-core (Layer 1).
-//! This handler implements pure biometric effect operations, delegating to platform APIs.
+//! Fallback implementation of BiometricEffects for platforms without biometric hardware.
 //!
-//! **Layer Constraint**: NO mock handlers - those belong in aura-testkit (Layer 8).
-//! This module contains only production-grade stateless handlers.
+//! This handler implements the Null Object Pattern - it provides safe defaults for
+//! environments where biometric authentication is unavailable (servers, CI, headless
+//! systems, development machines without sensors).
+//!
+//! **When to use**: This is the default handler for platforms without biometric hardware.
+//! **For testing**: Use `MockBiometricHandler` from aura-testkit (Layer 8).
+//! **For production with hardware**: Implement platform-specific handlers (iOS, Android, etc.)
 
 use async_trait::async_trait;
 use aura_core::effects::{
@@ -13,32 +17,45 @@ use aura_core::effects::{
 };
 use std::collections::HashMap;
 
-/// Real biometric handler for production use
+/// Fallback biometric handler for platforms without biometric hardware.
+///
+/// This handler returns "not available" for all capability checks and descriptive
+/// errors for all operations. It enables code to run on any platform without
+/// requiring compile-time feature flags.
+///
+/// # Usage
+///
+/// ```rust,ignore
+/// use aura_effects::FallbackBiometricHandler;
+///
+/// let handler = FallbackBiometricHandler::new()?;
+/// // All capability checks return false
+/// assert!(!handler.supports_hardware_security());
+/// ```
 #[derive(Debug)]
-pub struct RealBiometricHandler {
+pub struct FallbackBiometricHandler {
     platform_config: String,
 }
 
-impl RealBiometricHandler {
-    /// Create a new real biometric handler
+impl FallbackBiometricHandler {
+    /// Create a new fallback biometric handler
     pub fn new() -> Result<Self, BiometricError> {
-        // Production integrations would initialize platform APIs here.
         Ok(Self {
-            platform_config: "software-fallback".to_string(),
+            platform_config: "fallback-no-hardware".to_string(),
         })
     }
 }
 
-impl Default for RealBiometricHandler {
+impl Default for FallbackBiometricHandler {
     fn default() -> Self {
         Self {
-            platform_config: "software-fallback".to_string(),
+            platform_config: "fallback-no-hardware".to_string(),
         }
     }
 }
 
 #[async_trait]
-impl BiometricEffects for RealBiometricHandler {
+impl BiometricEffects for FallbackBiometricHandler {
     fn supports_hardware_security(&self) -> bool {
         false
     }
@@ -166,14 +183,14 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_real_biometric_handler_creation_succeeds() {
-        let result = RealBiometricHandler::new();
+    async fn test_fallback_biometric_handler_creation_succeeds() {
+        let result = FallbackBiometricHandler::new();
         assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn test_real_biometric_handler_capabilities() {
-        let handler = RealBiometricHandler::default();
+    async fn test_fallback_biometric_handler_capabilities() {
+        let handler = FallbackBiometricHandler::default();
         let result = handler.get_biometric_capabilities().await;
         assert!(result.is_ok());
     }

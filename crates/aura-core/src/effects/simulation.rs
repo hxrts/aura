@@ -4,6 +4,17 @@
 //! These effects enable deterministic, controllable simulation of distributed systems
 //! behavior while following the stateless effect pattern.
 //!
+//! # Effect Classification
+//!
+//! - **Category**: Testing/Simulation Effect
+//! - **Implementation**: `aura-simulator` (Layer 8)
+//! - **Usage**: Simulation control, time advancement, checkpointing, fault injection
+//!
+//! This is a testing/simulation effect for deterministic simulation control. Provides
+//! time manipulation, scenario management, checkpointing, and observation capabilities
+//! for reproducible distributed systems testing. Handlers in `aura-simulator` manage
+//! the simulation lifecycle.
+//!
 //! ## Core Principles
 //!
 //! - **Deterministic Control**: All simulation effects are deterministic and reproducible

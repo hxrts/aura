@@ -11,7 +11,7 @@ use super::{
 use crate::guards::effect_system_trait::GuardContextProvider;
 use aura_core::{
     effects::{
-        guard_effects::{
+        guard::{
             Decision, EffectCommand, EffectInterpreter, EffectResult, FlowBudgetView,
             GuardSnapshot, MetadataView,
         },
@@ -23,6 +23,9 @@ use aura_core::{
     time::TimeStamp,
     AuraError, AuraResult as Result, Cap, Receipt,
 };
+
+// Re-export key types for easier use by macro-generated code
+pub use aura_core::effects::guard::{EffectCommand as ChoreographyCommand, EffectResult as ChoreographyResult};
 use std::{collections::HashMap, sync::Arc};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -113,14 +116,8 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
                     effects_executed += 1;
 
                     // Capture receipt from budget charge
-                    match (command, &result) {
-                        (
-                            EffectCommand::ChargeBudget { .. },
-                            EffectResult::Receipt(r),
-                        ) => {
-                            receipt = Some(r.clone());
-                        }
-                        _ => {}
+                    if let (EffectCommand::ChargeBudget { .. }, EffectResult::Receipt(r)) = (command, &result) {
+                        receipt = Some(r.clone());
                     }
                 }
                 Err(e) => {
@@ -158,7 +155,11 @@ impl<I: EffectInterpreter> GuardChainExecutor<I> {
     }
 
     /// Prepare guard snapshot from current effect system state
-    async fn prepare_snapshot<E>(&self, effect_system: &E, request: &GuardRequest) -> Result<GuardSnapshot>
+    async fn prepare_snapshot<E>(
+        &self,
+        effect_system: &E,
+        request: &GuardRequest,
+    ) -> Result<GuardSnapshot>
     where
         E: crate::guards::GuardEffects
             + PhysicalTimeEffects
@@ -278,9 +279,11 @@ where
                 Ok(EffectResult::Receipt(receipt))
             }
             EffectCommand::AppendJournal { entry } => {
-                let current = self.effects.get_journal().await.map_err(|e| {
-                    AuraError::invalid(format!("Failed to get journal: {}", e))
-                })?;
+                let current = self
+                    .effects
+                    .get_journal()
+                    .await
+                    .map_err(|e| AuraError::invalid(format!("Failed to get journal: {}", e)))?;
                 // Build a delta journal containing the new fact
                 let delta = Journal::with_facts(entry.fact.clone());
                 let merged = self
@@ -356,9 +359,11 @@ where
                 Ok(EffectResult::Receipt(receipt))
             }
             EffectCommand::AppendJournal { entry } => {
-                let current = self.effects.get_journal().await.map_err(|e| {
-                    AuraError::invalid(format!("Failed to get journal: {}", e))
-                })?;
+                let current = self
+                    .effects
+                    .get_journal()
+                    .await
+                    .map_err(|e| AuraError::invalid(format!("Failed to get journal: {}", e)))?;
                 let delta = Journal::with_facts(entry.fact.clone());
                 let merged = self
                     .effects
@@ -425,35 +430,139 @@ pub fn convert_send_guard_to_request(
     Ok(request)
 }
 
+/// Execute a batch of effect commands through an interpreter
+///
+/// This is the primary integration point for choreography-generated commands.
+/// Use this function to execute `EffectCommand` sequences produced by the
+/// `aura_macros::choreography` macro's `effect_bridge::annotation_to_commands()`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use aura_protocol::guards::pure_executor::{execute_effect_commands, BorrowedEffectInterpreter};
+/// use aura_core::effects::guard::EffectCommand;
+///
+/// // Commands from choreography! macro
+/// let commands: Vec<EffectCommand> = effect_bridge::annotations_to_commands(&ctx, annotations);
+///
+/// // Execute through interpreter
+/// let interpreter = std::sync::Arc::new(BorrowedEffectInterpreter::new(&effect_system));
+/// let results = execute_effect_commands(&interpreter, commands).await?;
+/// ```
+pub async fn execute_effect_commands<I: EffectInterpreter>(
+    interpreter: &I,
+    commands: Vec<EffectCommand>,
+) -> Result<Vec<EffectResult>> {
+    let mut results = Vec::with_capacity(commands.len());
+
+    for (i, command) in commands.into_iter().enumerate() {
+        debug!(
+            command_index = i,
+            command_type = ?std::mem::discriminant(&command),
+            "Executing choreography effect command"
+        );
+
+        match interpreter.execute(command).await {
+            Ok(result) => {
+                results.push(result);
+            }
+            Err(e) => {
+                error!(
+                    command_index = i,
+                    error = %e,
+                    "Failed to execute choreography effect command"
+                );
+                return Err(e);
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+/// Execute guard chain and then additional choreography commands
+///
+/// This combines the runtime guard chain evaluation with macro-generated
+/// effect commands, ensuring both sources of effects are executed atomically.
+///
+/// # Arguments
+///
+/// * `effect_system` - The effect system providing runtime state
+/// * `request` - The guard request for pure guard evaluation
+/// * `additional_commands` - Effect commands from choreography annotations
+/// * `interpreter` - The effect interpreter for command execution
+///
+/// # Returns
+///
+/// Combined result including guard chain outcome and all executed effects
+pub async fn execute_guarded_choreography<E, I>(
+    effect_system: &E,
+    request: &GuardRequest,
+    additional_commands: Vec<EffectCommand>,
+    interpreter: Arc<I>,
+) -> Result<GuardChainResult>
+where
+    E: crate::guards::GuardEffects + PhysicalTimeEffects + FlowBudgetEffects + StorageEffects,
+    I: EffectInterpreter,
+{
+    // First, execute the standard guard chain
+    let guard_chain = GuardChain::standard();
+    let executor = GuardChainExecutor::new(guard_chain, interpreter.clone());
+    let mut result = executor.execute(effect_system, request).await?;
+
+    // If guard chain passed and we have additional commands, execute them
+    if result.authorized && !additional_commands.is_empty() {
+        debug!(
+            additional_count = additional_commands.len(),
+            "Executing additional choreography commands after guard chain"
+        );
+
+        for (i, command) in additional_commands.into_iter().enumerate() {
+            match interpreter.execute(command).await {
+                Ok(_) => {
+                    result.effects_executed += 1;
+                }
+                Err(e) => {
+                    error!(
+                        command_index = i,
+                        error = %e,
+                        "Failed to execute additional choreography command"
+                    );
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 /// Prepare guard snapshot from crate::guards::GuardEffects
 pub async fn prepare_snapshot_from_effects<E>(
     effect_system: &E,
     authority: &AuthorityId,
     context: &ContextId,
 ) -> Result<GuardSnapshot>
-    where
-        E: crate::guards::GuardEffects
-            + PhysicalTimeEffects
-            + FlowBudgetEffects
-            + RandomEffects,
-    {
-        let now = TimeStamp::PhysicalClock(effect_system.physical_time().await?);
+where
+    E: crate::guards::GuardEffects + PhysicalTimeEffects + FlowBudgetEffects + RandomEffects,
+{
+    let now = TimeStamp::PhysicalClock(effect_system.physical_time().await?);
 
-        let mut budgets = HashMap::new();
-        if let Ok(budget) = effect_system.get_flow_budget(context, authority).await {
-            budgets.insert((*context, *authority), budget.remaining() as u32);
-        }
+    let mut budgets = HashMap::new();
+    if let Ok(budget) = effect_system.get_flow_budget(context, authority).await {
+        budgets.insert((*context, *authority), budget.remaining() as u32);
+    }
 
-        let mut metadata = HashMap::new();
-        metadata.insert("authority_id".to_string(), authority.to_string());
+    let mut metadata = HashMap::new();
+    metadata.insert("authority_id".to_string(), authority.to_string());
 
-        Ok(GuardSnapshot {
-            now,
-            caps: Cap::new(),
-            budgets: FlowBudgetView::new(budgets),
-            metadata: MetadataView::new(metadata),
-            rng_seed: effect_system.random_bytes_32().await,
-        })
+    Ok(GuardSnapshot {
+        now,
+        caps: Cap::new(),
+        budgets: FlowBudgetView::new(budgets),
+        metadata: MetadataView::new(metadata),
+        rng_seed: effect_system.random_bytes_32().await,
+    })
 }
 
 /// Compatibility adapter for SendGuardChain
@@ -517,7 +626,7 @@ impl SendGuardChain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::effects::guard_effects::EffectCommand;
+    use aura_core::effects::guard::EffectCommand;
     use std::sync::{Arc, Mutex};
 
     struct MockInterpreter {

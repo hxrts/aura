@@ -17,8 +17,7 @@
 //! where protocol operations atomically update both local state and distributed
 //! journal facts using join-semilattice operations.
 
-use super::ProtocolGuard;
-use crate::guards::GuardEffectSystem;
+use super::{GuardEffects, ProtocolGuard};
 use aura_core::{AuraResult, Journal, TimeEffects};
 use aura_mpst::journal::{JournalAnnotation, JournalOpType};
 use serde_json::Value as JsonValue;
@@ -151,7 +150,7 @@ impl JournalCoupler {
         operation: F,
     ) -> AuraResult<JournalCouplingResult<T>>
     where
-        E: GuardEffectSystem,
+        E: GuardEffects + aura_core::TimeEffects,
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
@@ -195,7 +194,7 @@ impl JournalCoupler {
         initial_journal: Journal,
     ) -> AuraResult<JournalCouplingResult<T>>
     where
-        E: GuardEffectSystem,
+        E: GuardEffects + aura_core::TimeEffects,
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
@@ -256,7 +255,7 @@ impl JournalCoupler {
         initial_journal: Journal,
     ) -> AuraResult<JournalCouplingResult<T>>
     where
-        E: GuardEffectSystem,
+        E: GuardEffects + aura_core::TimeEffects,
         F: FnOnce(&mut E) -> Fut,
         Fut: Future<Output = AuraResult<T>>,
     {
@@ -514,7 +513,7 @@ impl ProtocolGuard {
         operation: F,
     ) -> AuraResult<JournalCouplingResult<T>>
     where
-        E: GuardEffectSystem,
+        E: GuardEffects + aura_core::TimeEffects,
         F: FnOnce(&mut E) -> Fut + Send,
         Fut: Future<Output = AuraResult<T>> + Send,
     {
@@ -528,7 +527,7 @@ impl ProtocolGuard {
 
         // Phase 1: Evaluate authorization guards (using existing guard evaluation)
         use crate::guards::execution::evaluate_guard;
-        let guard_result = evaluate_guard(self, effect_system).await?;
+        let guard_result = evaluate_guard(self).await?;
 
         if !guard_result.passed {
             warn!(

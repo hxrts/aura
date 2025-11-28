@@ -2,7 +2,7 @@
 //!
 //! Provides a unified envelope format for all message types.
 
-use crate::identifiers::{DeviceId, SessionId};
+use crate::types::identifiers::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 
 use super::constants::WIRE_FORMAT_VERSION;

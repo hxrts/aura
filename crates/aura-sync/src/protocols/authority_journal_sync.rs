@@ -98,11 +98,7 @@ impl AuthorityJournalSyncProtocol {
         local_authority: &dyn Authority,
         peers: Vec<AuthorityId>,
     ) -> SyncResult<AuthoritySyncResult> {
-        let start = effects
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0);
+        let start = effects.physical_time().await.map(|t| t.ts_ms).unwrap_or(0);
         let mut result = AuthoritySyncResult {
             facts_sent: 0,
             facts_received: 0,
@@ -168,13 +164,17 @@ impl AuthorityJournalSyncProtocol {
         let remote_journal = self.get_authority_journal(effects, peer_id).await?;
 
         // Compute delta based on current journal snapshots
-        let (to_send, to_receive) =
-            self.compute_delta(local_journal, &remote_journal, &local_digest, &remote_digest);
+        let (to_send, to_receive) = self.compute_delta(
+            local_journal,
+            &remote_journal,
+            &local_digest,
+            &remote_digest,
+        );
 
         // Apply local → remote (persist remote journal with new facts)
-        let facts_sent =
-            self.send_facts(effects, peer_id, remote_journal.clone(), to_send)
-                .await?;
+        let facts_sent = self
+            .send_facts(effects, peer_id, remote_journal.clone(), to_send)
+            .await?;
 
         // Apply remote → local (persist local journal with received facts)
         let facts_received = self
@@ -277,8 +277,7 @@ impl AuthorityJournalSyncProtocol {
         // Facts to send: present locally but not remotely
         let mut to_send: Vec<Fact> = local_set
             .difference(&remote_set)
-            .cloned()
-            .take(self.config.batch_size)
+            .take(self.config.batch_size).cloned()
             .collect();
 
         // Facts to receive: present remotely but not locally (represented by order)

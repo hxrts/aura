@@ -1,8 +1,9 @@
-//! Biometric Authentication Effect Handler Implementations
+//! Biometric Authentication Effect Handler Implementations (Testing Layer)
 //!
-//! Provides implementations of BiometricEffects for different execution modes:
+//! Provides mock implementations of BiometricEffects for testing:
 //! - MockBiometricHandler: Configurable simulation for testing
-//! - RealBiometricHandler: Platform-specific implementation for production
+//!
+//! For production fallback handler, see `aura_effects::FallbackBiometricHandler`.
 //!
 //! ## Mock Implementation Features
 //!
@@ -526,119 +527,6 @@ impl BiometricEffects for MockBiometricHandler {
             "statistics_tracking".to_string(),
             "deterministic_testing".to_string(),
         ]
-    }
-}
-
-/// Real biometric handler for production use
-///
-/// Currently delegates to the deterministic mock implementation while keeping a
-/// platform configuration marker to make future platform wiring straightforward.
-#[derive(Debug)]
-pub struct RealBiometricHandler {
-    platform_config: String,
-    inner: MockBiometricHandler,
-}
-
-impl RealBiometricHandler {
-    /// Create a new real biometric handler
-    pub fn new() -> Result<Self, BiometricError> {
-        Ok(Self {
-            platform_config: "mock-platform".to_string(),
-            inner: MockBiometricHandler::default(),
-        })
-    }
-}
-
-impl Default for RealBiometricHandler {
-    fn default() -> Self {
-        Self::new().expect("RealBiometricHandler default initialization must succeed")
-    }
-}
-
-#[async_trait]
-impl BiometricEffects for RealBiometricHandler {
-    async fn get_biometric_capabilities(&self) -> Result<Vec<BiometricCapability>, BiometricError> {
-        let mut capabilities = self.inner.get_biometric_capabilities().await?;
-        for capability in &mut capabilities {
-            capability
-                .platform_features
-                .push(self.platform_config.clone());
-        }
-        Ok(capabilities)
-    }
-
-    async fn is_biometric_available(
-        &self,
-        biometric_type: BiometricType,
-    ) -> Result<bool, BiometricError> {
-        self.inner.is_biometric_available(biometric_type).await
-    }
-
-    async fn enroll_biometric(
-        &self,
-        config: BiometricConfig,
-        user_prompt: &str,
-    ) -> Result<BiometricEnrollmentResult, BiometricError> {
-        self.inner.enroll_biometric(config, user_prompt).await
-    }
-
-    async fn verify_biometric(
-        &self,
-        biometric_type: BiometricType,
-        user_prompt: &str,
-        template_id: Option<&str>,
-    ) -> Result<BiometricVerificationResult, BiometricError> {
-        self.inner
-            .verify_biometric(biometric_type, user_prompt, template_id)
-            .await
-    }
-
-    async fn delete_biometric_template(
-        &self,
-        biometric_type: BiometricType,
-        template_id: Option<&str>,
-    ) -> Result<(), BiometricError> {
-        self.inner
-            .delete_biometric_template(biometric_type, template_id)
-            .await
-    }
-
-    async fn list_enrolled_templates(
-        &self,
-    ) -> Result<Vec<(String, BiometricType, f32)>, BiometricError> {
-        self.inner.list_enrolled_templates().await
-    }
-
-    async fn test_biometric_hardware(
-        &self,
-        biometric_type: BiometricType,
-    ) -> Result<bool, BiometricError> {
-        self.inner.test_biometric_hardware(biometric_type).await
-    }
-
-    async fn configure_biometric_security(
-        &self,
-        config: BiometricConfig,
-    ) -> Result<(), BiometricError> {
-        self.inner.configure_biometric_security(config).await
-    }
-
-    async fn get_biometric_statistics(&self) -> Result<BiometricStatistics, BiometricError> {
-        self.inner.get_biometric_statistics().await
-    }
-
-    async fn cancel_biometric_operation(&self) -> Result<(), BiometricError> {
-        self.inner.cancel_biometric_operation().await
-    }
-
-    fn supports_hardware_security(&self) -> bool {
-        self.inner.supports_hardware_security()
-    }
-
-    fn get_platform_capabilities(&self) -> Vec<String> {
-        let mut capabilities = self.inner.get_platform_capabilities();
-        capabilities.push(self.platform_config.clone());
-        capabilities
     }
 }
 

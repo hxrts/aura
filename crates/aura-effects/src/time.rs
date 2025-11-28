@@ -14,7 +14,6 @@ use aura_core::hash::hash;
 use aura_core::time::{
     LogicalTime, OrderTime, OrderingPolicy, TimeOrdering, TimeStamp, VectorClock,
 };
-use rand::SeedableRng;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time;
 use uuid::Uuid;
@@ -201,62 +200,4 @@ impl TimeComparison for TimeComparisonHandler {
     async fn compare(&self, a: &TimeStamp, b: &TimeStamp) -> Result<TimeOrdering, TimeError> {
         Ok(a.compare(b, OrderingPolicy::Native))
     }
-}
-
-/// Monotonic clock helper for crates that cannot depend on effect traits directly.
-///
-/// **DEPRECATED**: This is an escape hatch that violates effect system architecture.
-/// Use `PhysicalTimeEffects` trait instead for proper time handling.
-#[deprecated(
-    since = "0.2.0",
-    note = "VIOLATES ARCHITECTURE: This is an anti-pattern escape hatch. Use the `PhysicalTimeEffects` trait instead. This function will be removed in a future version."
-)]
-#[allow(clippy::disallowed_methods)]
-pub fn monotonic_now() -> std::time::Instant {
-    std::time::Instant::now()
-}
-
-/// Wall-clock helper (milliseconds since UNIX epoch) for crates that need a timestamp but
-/// cannot access effect traits directly.
-///
-/// **DEPRECATED**: This is an escape hatch that violates effect system architecture.
-/// Use `PhysicalTimeEffects` trait instead for proper time handling.
-#[deprecated(
-    since = "0.2.0",
-    note = "VIOLATES ARCHITECTURE: This is an anti-pattern escape hatch. Use the `PhysicalTimeEffects` trait instead. This function will be removed in a future version."
-)]
-#[allow(clippy::disallowed_methods)]
-pub fn wallclock_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_millis() as u64
-}
-
-/// Wall-clock helper (seconds since UNIX epoch).
-///
-/// **DEPRECATED**: This is an escape hatch that violates effect system architecture.
-/// Use `PhysicalTimeEffects` trait instead for proper time handling.
-#[deprecated(
-    since = "0.2.0",
-    note = "VIOLATES ARCHITECTURE: This is an anti-pattern escape hatch. Use the `PhysicalTimeEffects` trait instead. This function will be removed in a future version."
-)]
-#[allow(clippy::disallowed_methods)]
-pub fn wallclock_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_secs()
-}
-
-/// Seeded RNG helper for deterministic randomness in non-effect contexts.
-///
-/// **DEPRECATED**: This is an escape hatch that violates effect system architecture.
-/// Use `RandomEffects` trait instead for proper random data generation.
-#[deprecated(
-    since = "0.2.0",
-    note = "VIOLATES ARCHITECTURE: This is an anti-pattern escape hatch. Use the `RandomEffects` trait instead. This function will be removed in a future version."
-)]
-pub fn seeded_rng(seed: [u8; 32]) -> rand_chacha::ChaCha20Rng {
-    rand_chacha::ChaCha20Rng::from_seed(seed)
 }

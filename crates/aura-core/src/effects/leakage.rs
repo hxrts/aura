@@ -2,8 +2,17 @@
 //!
 //! This module defines the effect traits for privacy leakage tracking
 //! as specified in docs/002_theoretical_model.md §2.4 and docs/003_information_flow.md
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Application Effect
+//! - **Implementation**: `aura-protocol/guards` (Layer 4)
+//! - **Usage**: Metadata leakage tracking and privacy budget enforcement
+//!
+//! This is an application effect implemented in orchestration layer by composing
+//! infrastructure effects with privacy-specific business logic.
 
-use crate::identifiers::ContextId;
+use crate::types::identifiers::ContextId;
 use crate::{AuthorityId, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

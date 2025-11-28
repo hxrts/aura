@@ -970,7 +970,7 @@ impl<N: NetworkEffects + aura_core::PhysicalTimeEffects> ConnectionManager<N> {
 
         match select(sleep, fut).await {
             Either::Left((sleep_result, _ongoing)) => {
-                let _ = sleep_result?;
+                sleep_result?;
                 Err(AuraError::network(format!(
                     "{} timed out after {:?}",
                     operation, duration
@@ -1826,26 +1826,24 @@ mod tests {
     use super::*;
     use aura_agent::{AgentConfig, AuraEffectSystem};
     use aura_core::PhysicalTimeEffects;
+    use futures::executor::block_on;
 
-    #[test]
-    fn test_connection_manager_creation() {
-        block_on(async {
-            let device_id = DeviceId::from("test_device");
-            let stun_config = StunConfig::default();
-            let effects = std::sync::Arc::new(
-                AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
-            );
-            let random =
-                std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
-            let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
+    #[tokio::test]
+    async fn test_connection_manager_creation() {
+        let device_id = DeviceId::from("test_device");
+        let stun_config = StunConfig::default();
+        let effects = std::sync::Arc::new(
+            AuraEffectSystem::testing(&AgentConfig::default()).expect("test effect system"),
+        );
+        let random =
+            std::sync::Arc::clone(&effects) as std::sync::Arc<dyn aura_core::RandomEffects>;
+        let manager = ConnectionManager::new(device_id, stun_config, effects.clone(), random);
 
-            assert_eq!(manager.device_id, device_id);
-        });
+        assert_eq!(manager.device_id, device_id);
     }
 
-    #[test]
-    fn test_connection_priority_logic() {
-        block_on(async {
+    #[tokio::test]
+    async fn test_connection_priority_logic() {
             let device_id = DeviceId::from("test_device");
             let stun_config = StunConfig::default();
             let effects = std::sync::Arc::new(
@@ -1897,7 +1895,6 @@ mod tests {
                     );
                 }
             }
-        });
     }
 
     #[test]
@@ -1929,9 +1926,8 @@ mod tests {
         assert_eq!(priority_addrs[1], "192.168.1.100:8080"); // Local second
     }
 
-    #[test]
-    fn test_coordinated_hole_punch() {
-        block_on(async {
+    #[tokio::test]
+    async fn test_coordinated_hole_punch() {
             use aura_protocol::messages::social_rendezvous::{
                 TransportDescriptor, TransportKind, TransportOfferPayload,
             };
@@ -1983,7 +1979,7 @@ mod tests {
 
             // Get current time values for test
             let physical_time = effects.physical_time().await.unwrap();
-            let start_time = effects.now_instant().await; // Monotonic timing for test measurements via proper effects
+            let start_time = std::time::Instant::now(); // Monotonic timing for test measurements
             let timestamp = physical_time.ts_ms / 1000; // Convert to seconds
 
             let peer_id = DeviceId::from("peer_device");
@@ -2005,7 +2001,6 @@ mod tests {
                     // but not necessarily wrong if punch logic worked
                 }
             }
-        });
     }
 
     #[test]

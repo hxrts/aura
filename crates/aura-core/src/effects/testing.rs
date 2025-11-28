@@ -3,6 +3,17 @@
 //! Provides testing and debugging capabilities for protocol verification and
 //! property-based testing. These effects enable controlled execution environments,
 //! state inspection, and property validation during testing.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Testing/Simulation Effect
+//! - **Implementation**: `aura-testkit` (Layer 8)
+//! - **Usage**: Test utilities, checkpoints, property assertions, event recording
+//!
+//! This is a testing/simulation effect for test infrastructure. Provides checkpoint/
+//! restore for time-travel debugging, state inspection, property assertions, and
+//! event recording for analysis. Handlers in `aura-testkit` implement test harness
+//! capabilities.
 
 use crate::AuraError;
 use async_trait::async_trait;

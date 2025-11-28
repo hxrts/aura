@@ -3,8 +3,8 @@
 //! These tests establish performance baselines and catch regressions.
 //! They run faster than full benchmarks but provide regression detection.
 
-use aura_core::identifiers::DeviceId;
 use aura_core::time::{OrderingPolicy, PhysicalTime, TimeStamp, VectorClock};
+use aura_core::types::identifiers::DeviceId;
 use std::collections::BTreeMap;
 
 // Allow std::time::Instant in performance tests for accurate timing measurement

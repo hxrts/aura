@@ -11,13 +11,13 @@ use super::{auth::AuthenticationHandler, session::MemorySessionHandler};
 use crate::effects::{
     AgentEffects, AgentHealthStatus, AuthMethod, AuthenticationEffects, AuthenticationResult,
     ConfigValidationError, ConfigurationEffects, CredentialBackup, DeviceConfig, DeviceInfo,
-    DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
-    SessionManagementEffects, SessionMessage, SessionStatus, SessionType,
+    DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo, SessionManagementEffects,
+    SessionStatus, SessionType,
 };
 use aura_core::effects::agent::{BiometricType, ChoreographicMessage, ChoreographicRole};
-use aura_effects::time::PhysicalTimeHandler;
 use aura_core::hash::hash;
 use aura_core::{identifiers::DeviceId, AuraResult as Result};
+use aura_effects::time::PhysicalTimeHandler;
 
 /// Unified agent effect system that implements all agent-specific effects
 pub struct AgentEffectSystemHandler {
@@ -34,8 +34,7 @@ impl AgentEffectSystemHandler {
         core_effects: Arc<RwLock<Box<dyn crate::effects::AuraEffects>>>,
     ) -> Self {
         let auth_handler = AuthenticationHandler::new(device_id, core_effects.clone());
-        let session_handler =
-            MemorySessionHandler::new(device_id, Arc::new(PhysicalTimeHandler));
+        let session_handler = MemorySessionHandler::new(device_id, Arc::new(PhysicalTimeHandler));
 
         Self {
             device_id,
@@ -357,25 +356,6 @@ impl SessionManagementEffects for AgentEffectSystemHandler {
         session_id: aura_core::identifiers::SessionId,
     ) -> Result<SessionStatus> {
         self.session_handler.get_session_status(session_id).await
-    }
-
-    async fn send_session_message(
-        &self,
-        session_id: aura_core::identifiers::SessionId,
-        message: &[u8],
-    ) -> Result<()> {
-        self.session_handler
-            .send_session_message(session_id, message)
-            .await
-    }
-
-    async fn receive_session_messages(
-        &self,
-        session_id: aura_core::identifiers::SessionId,
-    ) -> Result<Vec<SessionMessage>> {
-        self.session_handler
-            .receive_session_messages(session_id)
-            .await
     }
 
     // Choreographic session methods - delegate to session handler

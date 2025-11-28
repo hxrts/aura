@@ -1,6 +1,19 @@
 //! Domain-specific time trait definitions (v2).
 //!
 //! These traits correspond to the semantic time types defined in `crate::time`.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: All crates needing time operations (physical timestamps, logical clocks, ordering tokens)
+//!
+//! This module provides multiple time-related traits:
+//! - `PhysicalTimeEffects`: Wall-clock time for timestamps, expiration, cooldowns
+//! - `LogicalClockEffects`: Vector + Lamport clocks for causal ordering
+//! - `OrderClockEffects`: Privacy-preserving deterministic ordering tokens
+//!
+//! All are infrastructure effects implemented in `aura-effects` with stateless handlers.
 
 use crate::time::{OrderTime, PhysicalTime, TimeOrdering};
 use async_trait::async_trait;

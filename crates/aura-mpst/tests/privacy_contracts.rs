@@ -8,6 +8,7 @@
 
 #![cfg(test)]
 #![allow(dead_code)]
+#![allow(deprecated)]
 
 use aura_core::identifiers::DeviceId;
 use aura_core::time::{PhysicalTime, TimeStamp};

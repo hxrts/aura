@@ -21,10 +21,10 @@ use aura_core::effects::{
     BiscuitAuthorizationEffects, CryptoEffects, FlowBudgetEffects, JournalEffects, NetworkEffects,
     RandomEffects, StorageEffects,
 };
+use aura_core::epochs::Epoch;
 use aura_core::flow::{FlowBudget, Receipt};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::scope::ResourceScope;
-use aura_core::session_epochs::Epoch;
 use aura_core::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
 use aura_core::{AuraError, Hash32, Journal};
 use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
@@ -569,7 +569,7 @@ impl JournalEffects for MockEffects {
         _authority: &AuthorityId,
         budget: &FlowBudget,
     ) -> Result<FlowBudget, AuraError> {
-        Ok(budget.clone())
+        Ok(*budget)
     }
 
     async fn charge_flow_budget(

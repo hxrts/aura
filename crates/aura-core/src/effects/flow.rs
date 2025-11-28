@@ -10,8 +10,8 @@
 //! - Core trait definition belongs in Layer 1 (foundation)
 
 use crate::{
-    flow::Receipt,
-    identifiers::{AuthorityId, ContextId},
+    types::flow::Receipt,
+    types::identifiers::{AuthorityId, ContextId},
     AuraResult,
 };
 use async_trait::async_trait;

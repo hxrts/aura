@@ -15,7 +15,6 @@
 
 use aura_core::effects::{NetworkEffects, PhysicalTimeEffects, StorageEffects};
 use aura_core::{identifiers::DeviceId, ContextId};
-use aura_effects::time::monotonic_now;
 use aura_effects::transport::{TransportConfig, TransportError};
 use std::collections::HashMap;
 
@@ -136,8 +135,8 @@ struct ConnectionInfo {
     connection_id: String,
 }
 
-use std::sync::Arc;
 use async_lock::RwLock;
+use std::sync::Arc;
 
 /// Local transport coordinator - NO choreography
 /// Composes transport effects for single-device operations
@@ -155,7 +154,7 @@ struct ConnectionState {
     device_id: DeviceId,
     context_id: ContextId,
     _connection_id: String,
-    last_activity: std::time::Instant,
+    last_activity_ms: u64, // Timestamp in milliseconds from PhysicalTimeEffects
     _retry_count: u32,
 }
 
@@ -202,13 +201,17 @@ where
         // Attempt connection with retry logic
         let connection = self.transport_manager.connect_with_retry(address).await?;
 
-        // Store connection state
-        let now = monotonic_now();
+        // Store connection state using injected time effects
+        let current_time = self.effects.physical_time().await.map_err(|e| {
+            TransportCoordinationError::Effect(format!("Failed to get time: {}", e))
+        })?;
+        let now_ms = current_time.ts_ms;
+
         let connection_state = ConnectionState {
             device_id: peer_id,
             context_id,
             _connection_id: connection.connection_id.clone(),
-            last_activity: now,
+            last_activity_ms: now_ms,
             _retry_count: 0,
         };
 
@@ -222,11 +225,15 @@ where
 
     /// Send data to connected peer - NO choreography
     pub async fn send_data(&self, connection_id: &str, data: Vec<u8>) -> CoordinationResult<()> {
-        let now = monotonic_now();
+        let current_time = self.effects.physical_time().await.map_err(|e| {
+            TransportCoordinationError::Effect(format!("Failed to get time: {}", e))
+        })?;
+        let now_ms = current_time.ts_ms;
+
         {
             let mut connections = self.active_connections.write().await;
             if let Some(connection_state) = connections.get_mut(connection_id) {
-                connection_state.last_activity = now;
+                connection_state.last_activity_ms = now_ms;
             } else {
                 return Err(TransportCoordinationError::ProtocolFailed(format!(
                     "Connection not found: {}",
@@ -284,14 +291,18 @@ where
         &self,
         max_idle: std::time::Duration,
     ) -> CoordinationResult<usize> {
-        let now = monotonic_now();
+        let current_time = self.effects.physical_time().await.map_err(|e| {
+            TransportCoordinationError::Effect(format!("Failed to get time: {}", e))
+        })?;
+        let now_ms = current_time.ts_ms;
+        let max_idle_ms = max_idle.as_millis() as u64;
         let mut to_remove = Vec::new();
 
         // Find stale connections
         {
             let connections = self.active_connections.read().await;
             for (connection_id, state) in connections.iter() {
-                if now.duration_since(state.last_activity) > max_idle {
+                if now_ms.saturating_sub(state.last_activity_ms) > max_idle_ms {
                     to_remove.push(connection_id.clone());
                 }
             }
@@ -312,29 +323,46 @@ where
     pub async fn get_stats(&self) -> CoordinationStats {
         let connections = self.active_connections.read().await;
 
+        // Get current time for calculating ages
+        let current_time_ms = self.effects.physical_time().await.ok().map(|t| t.ts_ms);
+
         let mut connection_count_by_context = HashMap::new();
-        let mut oldest_connection = None;
-        let mut newest_connection = None;
+        let mut oldest_connection_ms = None;
+        let mut newest_connection_ms = None;
 
         for state in connections.values() {
             *connection_count_by_context
                 .entry(state.context_id)
                 .or_insert(0) += 1;
 
-            if oldest_connection.is_none() || state.last_activity < oldest_connection.unwrap() {
-                oldest_connection = Some(state.last_activity);
+            if oldest_connection_ms.is_none()
+                || state.last_activity_ms < oldest_connection_ms.unwrap()
+            {
+                oldest_connection_ms = Some(state.last_activity_ms);
             }
 
-            if newest_connection.is_none() || state.last_activity > newest_connection.unwrap() {
-                newest_connection = Some(state.last_activity);
+            if newest_connection_ms.is_none()
+                || state.last_activity_ms > newest_connection_ms.unwrap()
+            {
+                newest_connection_ms = Some(state.last_activity_ms);
             }
         }
+
+        let oldest_connection_age = current_time_ms.and_then(|now_ms| {
+            oldest_connection_ms
+                .map(|oldest_ms| std::time::Duration::from_millis(now_ms.saturating_sub(oldest_ms)))
+        });
+
+        let newest_connection_age = current_time_ms.and_then(|now_ms| {
+            newest_connection_ms
+                .map(|newest_ms| std::time::Duration::from_millis(now_ms.saturating_sub(newest_ms)))
+        });
 
         CoordinationStats {
             total_connections: connections.len(),
             connection_count_by_context,
-            oldest_connection_age: oldest_connection.map(|t| t.elapsed()),
-            newest_connection_age: newest_connection.map(|t| t.elapsed()),
+            oldest_connection_age,
+            newest_connection_age,
         }
     }
 }

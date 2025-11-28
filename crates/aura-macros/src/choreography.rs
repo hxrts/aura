@@ -521,6 +521,147 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                 }
             }
 
+            /// Bridge module for converting annotations to EffectCommand sequences
+            ///
+            /// This module provides runtime conversion from choreographic annotations
+            /// to the algebraic effect commands defined in aura-core::effects::guard.
+            pub mod effect_bridge {
+                use aura_core::effects::guard::EffectCommand;
+                use aura_core::time::TimeStamp;
+                use aura_core::types::identifiers::{AuthorityId, ContextId};
+
+                /// Runtime context for effect command generation
+                #[derive(Clone)]
+                pub struct EffectContext {
+                    /// Current context ID
+                    pub context: ContextId,
+                    /// Local authority ID
+                    pub authority: AuthorityId,
+                    /// Peer authority ID (for communication)
+                    pub peer: AuthorityId,
+                    /// Current timestamp
+                    pub timestamp: TimeStamp,
+                }
+
+                /// Convert an annotation tuple to effect commands
+                ///
+                /// Takes: (role_name, annotation_type, value, flow_cost)
+                /// Returns: Vec of EffectCommand for the interpreter
+                pub fn annotation_to_commands(
+                    ctx: &EffectContext,
+                    annotation: (String, String, String, u64),
+                ) -> Vec<EffectCommand> {
+                    let (_role_name, annotation_type, value, flow_cost) = annotation;
+                    let mut commands = Vec::new();
+
+                    match annotation_type.as_str() {
+                        "guard_capability" => {
+                            // Capability checks are pure (done against snapshot)
+                            // Store capability validation metadata for audit trail
+                            commands.push(EffectCommand::StoreMetadata {
+                                key: "guard_validated".to_string(),
+                                value: value.clone(),
+                            });
+                        }
+                        "flow_cost" | "guard_with_flow" => {
+                            // Charge flow budget
+                            commands.push(EffectCommand::ChargeBudget {
+                                context: ctx.context,
+                                authority: ctx.authority,
+                                peer: ctx.peer,
+                                amount: flow_cost as u32,
+                            });
+                        }
+                        "journal_facts" => {
+                            // Append journal entry
+                            // Note: Creating minimal fact - actual fact details stored in metadata
+                            commands.push(EffectCommand::StoreMetadata {
+                                key: format!("journal_fact:{}", value),
+                                value: value.clone(),
+                            });
+                        }
+                        "journal_merge" => {
+                            // Record merge operation in metadata
+                            commands.push(EffectCommand::StoreMetadata {
+                                key: "journal_merge_requested".to_string(),
+                                value: "true".to_string(),
+                            });
+                        }
+                        "audit_log" => {
+                            // Record audit entry as metadata (audit trail)
+                            commands.push(EffectCommand::StoreMetadata {
+                                key: format!("audit_log:{}", value),
+                                value: value.clone(),
+                            });
+                        }
+                        "leak" => {
+                            // Parse leakage bits from value or use default
+                            let bits = value.split(',').count() as u32 * 8; // Rough estimate: 8 bits per observer class
+                            commands.push(EffectCommand::RecordLeakage { bits });
+                        }
+                        _ => {
+                            // Unknown annotation - store in metadata for debugging
+                            commands.push(EffectCommand::StoreMetadata {
+                                key: format!("unknown_annotation:{}", annotation_type),
+                                value,
+                            });
+                        }
+                    }
+
+                    commands
+                }
+
+                /// Convert a batch of annotations to effect commands
+                pub fn annotations_to_commands(
+                    ctx: &EffectContext,
+                    annotations: Vec<(String, String, String, u64)>,
+                ) -> Vec<EffectCommand> {
+                    annotations
+                        .into_iter()
+                        .flat_map(|ann| annotation_to_commands(ctx, ann))
+                        .collect()
+                }
+
+                /// Create effect context from runtime values
+                pub fn create_context(
+                    context: ContextId,
+                    authority: AuthorityId,
+                    peer: AuthorityId,
+                    timestamp: TimeStamp,
+                ) -> EffectContext {
+                    EffectContext {
+                        context,
+                        authority,
+                        peer,
+                        timestamp,
+                    }
+                }
+
+                /// Execute effect commands through an interpreter
+                ///
+                /// This is the main integration point for the effect system.
+                /// It converts annotations to commands and executes them asynchronously.
+                pub async fn execute_commands<I: aura_core::effects::guard::EffectInterpreter>(
+                    interpreter: &I,
+                    ctx: &EffectContext,
+                    annotations: Vec<(String, String, String, u64)>,
+                ) -> Result<Vec<aura_core::effects::guard::EffectResult>, String> {
+                    use aura_core::effects::guard::EffectResult;
+
+                    let commands = annotations_to_commands(ctx, annotations);
+                    let mut results = Vec::with_capacity(commands.len());
+
+                    for cmd in commands {
+                        match interpreter.execute(cmd).await {
+                            Ok(result) => results.push(result),
+                            Err(e) => return Err(format!("Effect execution failed: {}", e)),
+                        }
+                    }
+
+                    Ok(results)
+                }
+            }
+
             #leakage_integration
         }
     }

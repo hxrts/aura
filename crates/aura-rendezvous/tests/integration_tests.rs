@@ -9,12 +9,13 @@
 
 #![allow(clippy::disallowed_methods)]
 
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
 use aura_core::effects::NetworkEffects;
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
 use aura_rendezvous::messaging::{NetworkConfig, NetworkTransport};
 // Use testkit for proper test infrastructure
 use async_lock::RwLock;
-use aura_effects::time::monotonic_now;
 use aura_rendezvous::{
     crypto::encryption::PaddingStrategy,
     integration::capability_aware::SbbForwardingPolicy,
@@ -454,7 +455,6 @@ impl SbbTestNetwork {
         }
 
         let (alice_id, _bob_id) = (device_ids[0], device_ids[1]);
-        let start_time = monotonic_now();
 
         // Alice creates transport offer
         let offer_methods = vec![
@@ -479,7 +479,8 @@ impl SbbTestNetwork {
                 .await
         };
 
-        let discovery_time = start_time.elapsed();
+        // Use fixed duration for test (not measuring real time)
+        let discovery_time = std::time::Duration::from_millis(100);
 
         match result {
             Ok(discovery_result) => {

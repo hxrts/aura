@@ -4,7 +4,8 @@
 //! Provides integration with the scenario system to set up initial demo configuration
 //! before handing off to the human-agent demo mode.
 
-use aura_effects::time::monotonic_now;
+use std::time::Instant;
+
 use uuid::Uuid;
 
 use aura_core::AuthorityId;
@@ -106,7 +107,8 @@ impl DemoScenarioBridge {
 
     /// Execute complete demo setup via scenarios, then return configured system
     pub async fn setup_demo_environment(&self) -> anyhow::Result<DemoSetupResult> {
-        let setup_start = monotonic_now();
+        #[allow(clippy::disallowed_methods)]
+        let setup_start = Instant::now();
         let mut setup_metrics = SetupMetrics::default();
 
         tracing::info!(
@@ -161,7 +163,12 @@ impl DemoScenarioBridge {
             phase: DemoPhase::BobOnboarding, // Ready to start demo
             recovery_session: None,
             metrics: DemoMetrics {
-                start_time: Some(monotonic_now()),
+                start_time: {
+                    #[allow(clippy::disallowed_methods)]
+                    {
+                        Some(Instant::now())
+                    }
+                },
                 ..Default::default()
             },
         };

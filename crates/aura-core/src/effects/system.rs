@@ -4,6 +4,16 @@
 //! for system-level operations including logging, monitoring, and configuration.
 //! This trait is part of the core effect system and provides foundational
 //! system operations used across all layers.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: System-level operations (logging, monitoring, configuration)
+//!
+//! This is an infrastructure effect providing generic OS-level system operations
+//! with no Aura-specific semantics. Implementations should provide stateless
+//! handlers for logging, configuration management, and system monitoring.
 
 use async_trait::async_trait;
 use std::collections::HashMap;

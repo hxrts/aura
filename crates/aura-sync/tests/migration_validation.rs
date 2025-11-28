@@ -6,7 +6,6 @@
 //! and behavioral equivalence during the refactoring process.
 
 use aura_core::{AuraError, DeviceId, SessionId};
-use aura_effects::time::monotonic_now;
 use aura_sync::core::{
     config::{RetryConfig, SyncConfig},
     errors::{
@@ -26,6 +25,7 @@ use aura_testkit::stateful_effects::random::MockRandomHandler;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 /// Generate a UUID from random bytes for testing
@@ -415,8 +415,7 @@ fn test_prometheus_export_format() {
 #[test]
 fn test_unified_session_management() {
     // Test session manager handles all sync session patterns
-    #[allow(clippy::disallowed_methods)]
-    let _now = monotonic_now();
+
     let config = SessionConfig::default();
     let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
@@ -471,8 +470,7 @@ fn test_unified_session_management() {
 #[test]
 fn test_session_failure_handling() {
     // Test session failure scenarios
-    #[allow(clippy::disallowed_methods)]
-    let _now = monotonic_now();
+
     let config = SessionConfig::default();
     let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
@@ -519,8 +517,7 @@ fn test_session_failure_handling() {
 #[test]
 fn test_session_resource_limits() {
     // Test session resource management
-    #[allow(clippy::disallowed_methods)]
-    let _now = monotonic_now();
+
     let config = SessionConfig {
         max_concurrent_sessions: 2,
         max_participants: 3,
@@ -561,8 +558,7 @@ fn test_session_resource_limits() {
 #[test]
 fn test_session_statistics() {
     // Test session statistics collection
-    #[allow(clippy::disallowed_methods)]
-    let _now = monotonic_now();
+
     let config = SessionConfig::default();
     let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
@@ -694,8 +690,7 @@ fn test_backwards_compatibility_surface() {
     let _metrics = MetricsCollector::new();
 
     // Basic session management
-    #[allow(clippy::disallowed_methods)]
-    let _now = monotonic_now();
+
     let _session_manager =
         SessionManager::<TestSyncProtocolState>::new(SessionConfig::default(), 1000000);
 

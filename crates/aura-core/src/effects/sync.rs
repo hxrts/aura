@@ -3,6 +3,17 @@
 //! This module defines effect traits for tree synchronization operations including
 //! anti-entropy (digest-based reconciliation) and eager broadcast of new operations.
 //!
+//! # Effect Classification
+//!
+//! - **Category**: Protocol Coordination Effect
+//! - **Implementation**: `aura-sync` or `aura-protocol` (Layer 4 or Layer 5)
+//! - **Usage**: Anti-entropy synchronization, digest exchange, OpLog reconciliation
+//!
+//! This is a protocol coordination effect for multi-party synchronization. Implements
+//! digest-based anti-entropy, pull-based operation reconciliation, and eager broadcast
+//! for distributed commitment tree synchronization. Handlers in `aura-sync` or
+//! `aura-protocol` coordinate sync protocols.
+//!
 //! ## Design Principles
 //!
 //! - **Digest Exchange**: Bloom filters or rolling hashes for efficient comparison

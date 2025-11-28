@@ -4,6 +4,17 @@
 //! hardware-backed security features like secure enclaves, TPMs, or hardware security modules.
 //! These operations provide stronger security guarantees than regular storage.
 //!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: Secure enclave/TPM/HSM integration for cryptographic material storage
+//!
+//! This is an infrastructure effect providing hardware security module interfaces
+//! with no Aura-specific semantics. Implementations should interface with platform
+//! secure storage APIs (Intel SGX, ARM TrustZone, Apple Secure Enclave, TPM) and
+//! provide software fallback for testing environments.
+//!
 //! ## Security Model
 //!
 //! Secure storage provides:

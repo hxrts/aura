@@ -24,7 +24,7 @@
 //! See [`docs/123_commitment_tree.md`](../../../docs/123_commitment_tree.md) - Commitments section.
 
 use super::{Epoch, NodeIndex, Policy, TreeCommitment, TreeHash32};
-use crate::hash;
+use crate::crypto::hash;
 
 /// Domain separation tag for branch commitments
 const BRANCH_TAG: &[u8] = b"BRANCH";

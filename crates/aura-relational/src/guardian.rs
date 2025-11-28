@@ -4,6 +4,7 @@
 //! and recovery operations in relational contexts.
 
 use aura_core::relational::ConsensusProof;
+use aura_core::time::TimeStamp;
 use aura_core::Hash32;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -12,7 +13,10 @@ use std::time::Duration;
 ///
 /// This binding establishes a guardian relationship that allows
 /// the guardian to participate in recovery operations.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+///
+/// Note: Does not derive Ord/PartialOrd because expiration time (TimeStamp)
+/// has domain-specific ordering semantics that require explicit policy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuardianBinding {
     /// Commitment hash of the account authority
     pub account_commitment: Hash32,
@@ -25,14 +29,17 @@ pub struct GuardianBinding {
 }
 
 /// Parameters for guardian relationships
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+///
+/// Note: Does not derive Ord/PartialOrd because expiration time (TimeStamp)
+/// has domain-specific ordering semantics that require explicit policy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GuardianParameters {
     /// Time delay required before recovery can be executed
     pub recovery_delay: Duration,
     /// Whether notification to the account is required
     pub notification_required: bool,
-    /// Optional expiration time for this binding
-    pub expiration: Option<chrono::DateTime<chrono::Utc>>,
+    /// Optional expiration time for this binding (using unified time system)
+    pub expiration: Option<TimeStamp>,
 }
 
 impl Default for GuardianParameters {
@@ -49,7 +56,7 @@ impl Default for GuardianParameters {
 ///
 /// This grant represents approval for a specific recovery operation
 /// and must be agreed upon through consensus.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RecoveryGrant {
     /// Previous commitment of the account being recovered
     pub account_old: Hash32,
@@ -64,7 +71,7 @@ pub struct RecoveryGrant {
 }
 
 /// Types of recovery operations
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RecoveryOp {
     /// Replace the entire commitment tree
     ReplaceTree {
@@ -152,8 +159,8 @@ impl GuardianBindingBuilder {
         self
     }
 
-    /// Set expiration time
-    pub fn expires_at(mut self, expiration: chrono::DateTime<chrono::Utc>) -> Self {
+    /// Set expiration time (using unified time system)
+    pub fn expires_at(mut self, expiration: TimeStamp) -> Self {
         self.parameters.expiration = Some(expiration);
         self
     }

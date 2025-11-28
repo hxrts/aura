@@ -1,7 +1,8 @@
 //! Effect System Trait for Guards
 //!
-//! Minimal interface guards need from an effect system without depending on the
-//! concrete AuraEffectSystem type.
+//! Compatibility shims for guard callers while migrating fully to the pure
+//! guard interpreter path (ADR-014). This module intentionally limits the
+//! surface area to authority/metadata access and trait object adapters.
 
 use crate::effects::AuraEffects;
 use crate::effects::JournalEffects;
@@ -13,36 +14,16 @@ use aura_core::effects::{
 };
 use aura_core::identifiers::AuthorityId;
 
-/// Minimal interface that guards need from an effect system
-pub trait GuardEffectSystem:
-    JournalEffects
-    + StorageEffects
-    + FlowBudgetEffects
-    + PhysicalTimeEffects
-    + RandomEffects
-    + AuthorizationEffects
-    + LeakageEffects
-    + Send
-    + Sync
-{
-    /// Get the authority ID for this effect system
-    fn authority_id(&self) -> AuthorityId;
-
-    /// Get the execution mode
-    fn execution_mode(&self) -> ExecutionMode;
-
-    /// Query metadata from the effect system
-    fn get_metadata(&self, key: &str) -> Option<String>;
-
-    /// Check if this effect system can perform a specific operation
-    fn can_perform_operation(&self, operation: &str) -> bool;
-}
-
-/// Compatibility shim for migrating to pure guard execution.
-/// Remove once all guard callers use GuardChainExecutor with GuardSnapshot/EffectCommand.
+/// Minimal context provider for guards (authority + metadata).
 pub trait GuardContextProvider {
     fn authority_id(&self) -> AuthorityId;
     fn get_metadata(&self, key: &str) -> Option<String>;
+    fn execution_mode(&self) -> ExecutionMode {
+        ExecutionMode::Production
+    }
+    fn can_perform_operation(&self, _operation: &str) -> bool {
+        true
+    }
 }
 
 /// Security context for guard operations
@@ -77,37 +58,18 @@ impl Default for SecurityContext {
     }
 }
 
-/// GuardEffectSystem for boxed AuraEffects
-impl GuardEffectSystem for Box<dyn AuraEffects> {
+impl GuardContextProvider for Box<dyn AuraEffects> {
     fn authority_id(&self) -> AuthorityId {
         // Fallback authority ID for boxed trait objects; production systems should pass concrete implementors.
         AuthorityId::new()
-    }
-
-    fn execution_mode(&self) -> ExecutionMode {
-        AuraEffects::execution_mode(self.as_ref())
     }
 
     fn get_metadata(&self, _key: &str) -> Option<String> {
         None
     }
 
-    fn can_perform_operation(&self, operation: &str) -> bool {
-        if let Some(allowed_ops) = GuardContextProvider::get_metadata(self, "allowed_operations") {
-            allowed_ops.split(',').any(|op| op.trim() == operation)
-        } else {
-            true
-        }
-    }
-}
-
-impl GuardContextProvider for Box<dyn AuraEffects> {
-    fn authority_id(&self) -> AuthorityId {
-        GuardEffectSystem::authority_id(self)
-    }
-
-    fn get_metadata(&self, key: &str) -> Option<String> {
-        GuardEffectSystem::get_metadata(self, key)
+    fn execution_mode(&self) -> ExecutionMode {
+        AuraEffects::execution_mode(self.as_ref())
     }
 }
 

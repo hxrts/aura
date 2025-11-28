@@ -3,9 +3,18 @@
 //! Provides capability-based authorization primitives for access control across
 //! the Aura system. These effects enable verification of permissions, delegation
 //! of authority, and enforcement of security policies.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Application Effect
+//! - **Implementation**: `aura-wot` / `aura-protocol` (Layer 2/4)
+//! - **Usage**: Biscuit token evaluation and capability-based authorization
+//!
+//! This is an application effect implemented in domain crates by composing
+//! infrastructure effects with authorization-specific logic.
 
-use crate::identifiers::AuthorityId;
-use crate::scope::ResourceScope;
+use crate::types::identifiers::AuthorityId;
+use crate::types::scope::ResourceScope;
 use crate::{AuraError, Cap};
 use async_trait::async_trait;
 

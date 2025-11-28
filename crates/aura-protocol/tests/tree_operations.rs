@@ -9,9 +9,9 @@
 //! - Invariant checking
 
 use aura_core::identifiers::DeviceId;
-use aura_core::tree::{AttestedOp, LeafId, LeafNode, NodeIndex, Policy, TreeOp, TreeOpKind};
 use aura_journal::commitment_tree::{
-    apply_verified_sync as apply_verified, reduce, validate_invariants,
+    apply_verified_sync as apply_verified, reduce, validate_invariants, AttestedOp, LeafId,
+    LeafNode, NodeIndex, Policy, TreeOp, TreeOpKind,
 };
 use aura_journal::semilattice::OpLog;
 use aura_macros::aura_test;

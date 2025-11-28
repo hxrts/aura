@@ -177,7 +177,8 @@
 //!     pub fn on_recv(&mut self, msg: StateMsg<S>) {
 //!         self.metrics.messages_received += 1;
 //!         self.metrics.join_operations += 1;
-//!         self.metrics.last_update = Some(monotonic_now());
+//!         // Note: In real implementation, time should be injected via PhysicalTimeEffects
+//!         // self.metrics.last_update = Some(Instant::now());
 //!
 //!         self.inner.on_recv(msg);
 //!     }

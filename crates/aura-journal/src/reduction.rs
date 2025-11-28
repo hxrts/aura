@@ -9,9 +9,9 @@ use crate::fact::{
 };
 use aura_core::{
     authority::TreeState,
+    epochs::Epoch,
     hash,
     identifiers::{AuthorityId, ChannelId, ContextId},
-    session_epochs::Epoch,
     time::OrderTime,
     tree::{commit_leaf, policy_hash, LeafId, Policy},
     Hash32,

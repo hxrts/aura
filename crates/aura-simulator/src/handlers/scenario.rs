@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use aura_core::effects::{TestingEffects, TestingError};
 use aura_core::frost::ThresholdSignature;
 use aura_core::{AuraError, AuthorityId};
-use aura_effects::time::monotonic_now;
 use aura_testkit::simulation::choreography::{test_threshold_group, ChoreographyTestHarness};
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
@@ -416,7 +415,7 @@ impl SimulationScenarioHandler {
 
         let injection = ActiveInjection {
             scenario_id: scenario_id.to_string(),
-            start_time: monotonic_now(),
+            start_time: Instant::now(),
             duration: scenario.duration,
             actions_applied: Vec::new(),
         };
@@ -437,7 +436,7 @@ impl SimulationScenarioHandler {
         let current_tick = state.current_tick;
         state.events.push(SimulationEvent {
             event_type: "wait_ticks".to_string(),
-            timestamp: monotonic_now(),
+            timestamp: Instant::now(),
             data: HashMap::from([
                 ("ticks".to_string(), ticks.to_string()),
                 ("current_tick".to_string(), current_tick.to_string()),
@@ -472,7 +471,7 @@ impl SimulationScenarioHandler {
 
         state.events.push(SimulationEvent {
             event_type: "network_condition".to_string(),
-            timestamp: monotonic_now(),
+            timestamp: Instant::now(),
             data: HashMap::from([
                 ("condition".to_string(), condition.to_string()),
                 ("participants".to_string(), format!("{:?}", participants)),
@@ -504,7 +503,7 @@ impl SimulationScenarioHandler {
         let checkpoint = ScenarioCheckpoint {
             id: checkpoint_id.clone(),
             label: label.to_string(),
-            timestamp: monotonic_now(),
+            timestamp: Instant::now(),
             state_snapshot: HashMap::new(),
         };
         state.checkpoints.insert(checkpoint_id.clone(), checkpoint);
@@ -1307,7 +1306,7 @@ impl SimulationScenarioHandler {
             TestingError::SystemError(aura_core::AuraError::internal(format!("Lock error: {}", e)))
         })?;
 
-        let now = monotonic_now();
+        let now = Instant::now();
         state.active_injections.retain(|injection| {
             match injection.duration {
                 Some(duration) => now.duration_since(injection.start_time) < duration,
@@ -1376,7 +1375,7 @@ impl SimulationScenarioHandler {
             name: group_name.to_string(),
             creator: creator.to_string(),
             members,
-            created_at: monotonic_now(),
+            created_at: Instant::now(),
         };
 
         state.chat_groups.insert(group_id.clone(), chat_group);
@@ -1422,7 +1421,7 @@ impl SimulationScenarioHandler {
             group_id: group_id.to_string(),
             sender: sender.to_string(),
             content: message.to_string(),
-            timestamp: monotonic_now(),
+            timestamp: Instant::now(),
         };
 
         #[allow(clippy::unwrap_used)]
@@ -1465,7 +1464,7 @@ impl SimulationScenarioHandler {
         let data_loss_info = DataLossInfo {
             participant: target_participant.to_string(),
             loss_type: loss_type.to_string(),
-            occurred_at: monotonic_now(),
+            occurred_at: Instant::now(),
             recovery_required,
             pre_loss_message_count: pre_loss_count,
         };
@@ -1544,7 +1543,7 @@ impl SimulationScenarioHandler {
             target: target.to_string(),
             guardians,
             threshold,
-            initiated_at: monotonic_now(),
+            initiated_at: Instant::now(),
             completed: false,
             validation_steps: Vec::new(),
         };
@@ -1640,7 +1639,7 @@ impl TestingEffects for SimulationScenarioHandler {
         let checkpoint = ScenarioCheckpoint {
             id: checkpoint_id.to_string(),
             label: label.to_string(),
-            timestamp: monotonic_now(),
+            timestamp: Instant::now(),
             state_snapshot: {
                 let mut snapshot = HashMap::new();
                 snapshot.insert("current_tick".to_string(), state.current_tick.to_string());
@@ -1814,7 +1813,7 @@ impl TestingEffects for SimulationScenarioHandler {
         let metric = MetricValue {
             value,
             unit: unit.to_string(),
-            timestamp: monotonic_now(),
+            timestamp: Instant::now(),
         };
 
         state.metrics.insert(metric_name.to_string(), metric);

@@ -5,8 +5,8 @@
 //! API surface for backward compatibility.
 
 use aura_core::{
+    epochs::Epoch,
     frost::{PublicKeyPackage, Share},
-    session_epochs::Epoch,
 };
 use aura_core::{relational::ConsensusProof, AuraError, AuthorityId, Prestate, Result};
 use aura_protocol::consensus::relational::{

@@ -347,18 +347,5 @@ impl SimulationObservationEffects for MockSimulationHandler {
     }
 }
 
-/// Stateless simulation handler for testing
-#[derive(Debug)]
-pub struct StatelessSimulationHandler;
-
-impl Default for StatelessSimulationHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl StatelessSimulationHandler {
-    pub fn new() -> Self {
-        Self
-    }
-}
+// StatelessSimulationHandler removed - use aura_effects::FallbackSimulationHandler instead
+// This was a duplicate that served no purpose since aura-effects provides the fallback

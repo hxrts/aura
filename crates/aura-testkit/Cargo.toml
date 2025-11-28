@@ -15,6 +15,7 @@ workspace = true
 aura-agent = { path = "../aura-agent" }
 aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
+aura-mpst = { path = "../aura-mpst" }
 aura-journal = { path = "../aura-journal" }
 aura-transport = { path = "../aura-transport" }
 aura-protocol = { path = "../aura-protocol" }

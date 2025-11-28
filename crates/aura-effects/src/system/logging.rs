@@ -424,6 +424,7 @@ impl SystemEffects for LoggingSystemHandler {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)] // Test code: expect() is acceptable for test assertions
 mod tests {
     use super::*;
     use serde_json::json;

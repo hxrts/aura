@@ -8,13 +8,12 @@
 //! 5. Return comprehensive execution results
 
 use super::{
-    deltas::apply_delta_facts, effect_system_trait::GuardEffectSystem,
-    privacy::track_leakage_consumption, BiscuitGuardEvaluator, ExecutionMetrics, GuardError,
-    GuardResult, GuardedExecutionResult, ProtocolGuard,
+    deltas::apply_delta_facts, effect_system_trait::GuardContextProvider,
+    privacy::track_leakage_consumption, BiscuitGuardEvaluator, ExecutionMetrics, GuardEffects,
+    GuardError, GuardResult, GuardedExecutionResult, ProtocolGuard,
 };
 use crate::authorization::BiscuitAuthorizationBridge;
-use aura_core::TimeEffects;
-use aura_core::{session_epochs::Epoch, AuraError, AuraResult, FlowBudget};
+use aura_core::{epochs::Epoch, AuraError, AuraResult, FlowBudget};
 use aura_wot::ResourceScope;
 use biscuit_auth::Biscuit;
 use std::future::Future;
@@ -24,13 +23,7 @@ use tracing::{debug, error, info, warn, Instrument};
 ///
 /// This function implements the `need(σ) ≤ C` checking from the formal model
 /// using Biscuit tokens for cryptographically verifiable authorization.
-pub async fn evaluate_guard<E>(
-    guard: &ProtocolGuard,
-    effect_system: &mut E,
-) -> Result<GuardEvaluationResult, AuraError>
-where
-    E: GuardEffectSystem,
-{
+pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResult, AuraError> {
     debug!(
         operation_id = %guard.operation_id,
         required_tokens = guard.required_tokens.len(),
@@ -175,7 +168,7 @@ fn parse_and_verify_biscuit_token(
     };
 
     // Use the evaluator to check the token against the requirement
-    let mut mock_budget = aura_core::FlowBudget::new(1000, aura_core::session_epochs::Epoch(0)); // High limit for testing
+    let mut mock_budget = aura_core::FlowBudget::new(1000, aura_core::epochs::Epoch(0)); // High limit for testing
 
     match evaluator.evaluate_guard_default_time(
         &token,
@@ -274,7 +267,7 @@ pub async fn execute_guarded_operation<E, T, F, Fut>(
     operation: F,
 ) -> AuraResult<GuardedExecutionResult<T>>
 where
-    E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+    E: GuardEffects + aura_core::TimeEffects + GuardContextProvider,
     F: FnOnce(&mut E) -> Fut,
     Fut: Future<Output = AuraResult<T>>,
 {
@@ -287,7 +280,7 @@ where
         // Phase 1: Evaluate capability guards (meet-guarded preconditions)
         let guard_start_time = effect_system.now_instant().await;
         // Evaluate capability guards using Biscuit authorization
-        let guard_result = evaluate_guard(guard, effect_system).await?;
+        let guard_result = evaluate_guard(guard).await?;
         let guard_eval_time = guard_start_time.elapsed();
 
         // Guard result now comes from actual Biscuit evaluation
@@ -416,7 +409,7 @@ pub async fn execute_guarded_sequence<E, T>(
     effect_system: &mut E,
 ) -> AuraResult<Vec<GuardedExecutionResult<T>>>
 where
-    E: GuardEffectSystem + aura_core::PhysicalTimeEffects,
+    E: GuardEffects + aura_core::TimeEffects + GuardContextProvider,
 {
     let sequence_start = effect_system.now_instant().await;
     let span = tracing::info_span!("guarded_sequence", operations = guards_and_operations.len());
@@ -431,7 +424,7 @@ where
         let mut all_guard_results = Vec::new();
         for (guard, _) in &guards_and_operations {
             // Evaluate guard using Biscuit integration
-            let guard_result = evaluate_guard(guard, effect_system).await?;
+            let guard_result = evaluate_guard(guard).await?;
             if !guard_result.passed {
                 warn!(
                     operation_id = %guard.operation_id,

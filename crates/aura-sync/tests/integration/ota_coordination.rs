@@ -5,12 +5,14 @@
 
 use super::test_utils::*;
 use aura_core::{AuraError, AuraResult, Hash32};
-use aura_effects::time::wallclock_ms;
 use aura_sync::protocols::{EpochConfirmation, OTAConfig, UpgradeKind, UpgradeProposal};
+use std::time::{Duration};
 use aura_testkit::simulation::network::NetworkCondition;
-use std::time::Duration;
 use tokio::time::timeout;
 use uuid::Uuid;
+
+// Test fixture: deterministic timestamp for reproducible tests
+const TEST_TIMESTAMP_MS: u64 = 1700000000000; // 2023-11-15 in milliseconds
 
 /// Test basic OTA upgrade coordination with threshold approval
 #[tokio::test]
@@ -206,7 +208,7 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
                 participant_id: device2,
                 current_epoch: 5,
                 ready_for_epoch: 6,
-                confirmation_timestamp_ms: wallclock_ms(),
+                confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
             };
 
             let conf3 = EpochConfirmation {
@@ -214,7 +216,7 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
                 participant_id: device3,
                 current_epoch: 4,
                 ready_for_epoch: 6, // Jumping to match others
-                confirmation_timestamp_ms: wallclock_ms(),
+                confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
             };
 
             coord1.process_confirmation(conf2)?;

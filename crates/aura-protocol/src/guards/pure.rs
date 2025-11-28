@@ -105,15 +105,15 @@ pub trait Guard: Send + Sync + Debug {
 #[derive(Debug)]
 pub struct CapabilityGuard;
 
-    impl Guard for CapabilityGuard {
-        fn evaluate(&self, snapshot: &GuardSnapshot, request: &GuardRequest) -> GuardOutcome {
-            // Basic check: if a capability is required, ensure the snapshot carries one.
-            let capability_ok = request.capability.is_empty()
-                || (!snapshot.caps.is_empty() && snapshot.caps == request.capability);
+impl Guard for CapabilityGuard {
+    fn evaluate(&self, snapshot: &GuardSnapshot, request: &GuardRequest) -> GuardOutcome {
+        // Basic check: if a capability is required, ensure the snapshot carries one.
+        let capability_ok = request.capability.is_empty()
+            || (!snapshot.caps.is_empty() && snapshot.caps == request.capability);
 
-            if !capability_ok {
-                return GuardOutcome::denied("Capability check failed");
-            }
+        if !capability_ok {
+            return GuardOutcome::denied("Capability check failed");
+        }
 
         GuardOutcome::authorized(vec![])
     }
@@ -161,7 +161,10 @@ impl Guard for JournalCouplingGuard {
         let mut fact = Fact::new();
         fact.insert(
             "operation_executed",
-            aura_core::journal::FactValue::String(format!("{}:{}", request.authority, request.operation))
+            aura_core::journal::FactValue::String(format!(
+                "{}:{}",
+                request.authority, request.operation
+            )),
         );
 
         let entry = JournalEntry {
@@ -269,7 +272,10 @@ impl Guard for GuardChain {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{effects::MetadataView, time::TimeStamp};
+    use aura_core::{
+        effects::{FlowBudgetView, MetadataView},
+        time::{PhysicalTime, TimeStamp},
+    };
     use std::collections::HashMap;
 
     fn test_snapshot() -> GuardSnapshot {
@@ -277,7 +283,7 @@ mod tests {
         budgets.insert((aura_core::ContextId::default(), AuthorityId::new()), 1000);
 
         GuardSnapshot {
-            now: TimeStamp::from_millis(1000),
+            now: TimeStamp::PhysicalClock(PhysicalTime { ts_ms: 1000, uncertainty: None }),
             caps: Cap::default(),
             budgets: FlowBudgetView::new(budgets),
             metadata: MetadataView::default(),
@@ -381,13 +387,16 @@ mod tests {
         let chain = GuardChain::standard();
         let mut snapshot = test_snapshot();
         let authority = AuthorityId::new();
+        let context = aura_core::ContextId::default();
 
         // Set up budget
         let mut budgets = HashMap::new();
-        budgets.insert(authority, 1000);
+        budgets.insert((context, authority), 1000);
         snapshot.budgets = FlowBudgetView::new(budgets);
 
-        let request = GuardRequest::new(authority, "test_op", 100).with_metadata_leakage(16);
+        let request = GuardRequest::new(authority, "test_op", 100)
+            .with_context_id(context)
+            .with_metadata_leakage(16);
 
         let outcome = chain.evaluate(&snapshot, &request);
         assert!(outcome.is_authorized());

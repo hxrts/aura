@@ -250,9 +250,9 @@ fn custom_protocol_example() -> Result<(), Box<dyn std::error::Error>> {
     println!("- JournalFactsEffect: Updates distributed journal state");
     println!("- LeakageBudgetEffect: Prevents information leakage");
 
-    println!("\nRuntime integration with aura-mpst:");
+    println!("\nRuntime integration with aura-agent:");
     println!("- ExtensionRegistry manages Aura-specific effects");
-    println!("- AuraRuntime provides session type execution");
+    println!("- AgentRuntime provides session type execution");
     println!("- Guard chains enforce security policies");
     println!("- Journal coupling maintains consistency");
 

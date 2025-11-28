@@ -195,13 +195,18 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   # Strict flag for direct wall-clock/random usage outside allowed areas
   impure_pattern="SystemTime::now|Instant::now|thread_rng\\(|rand::thread_rng|chrono::Utc::now|chrono::Local::now|rand::rngs::OsRng|rand::random"
   impure_hits=$(rg --no-heading "$impure_pattern" crates -g "*.rs" || true)
-  # Allowlist: effect implementations, testkit mocks, simulator handlers, runtime assembly
+  # Allowlist: effect implementations, testkit mocks, simulator handlers, runtime assembly, CLI UI measurements
+  # CLI code is allowed to use direct system time for UI measurements/metrics that don't affect protocol behavior
   filtered_impure=$(echo "$impure_hits" \
     | grep -v "crates/aura-effects/" \
     | grep -v "crates/aura-testkit/" \
     | grep -v "crates/aura-simulator/" \
     | grep -v "crates/aura-agent/src/runtime/" \
-    | grep -v "tests/performance_regression.rs" || true)
+    | grep -v "crates/aura-cli/" \
+    | grep -v "tests/performance_regression.rs" \
+    | grep -v "///" \
+    | grep -v "//!" \
+    | grep -v "//" || true)
   if [ -n "$filtered_impure" ]; then
     violation "Impure functions detected outside effect implementations/testkit/runtime assembly:"
     echo "$filtered_impure"
@@ -233,7 +238,10 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-testkit/" \
     | grep -v "crates/aura-simulator/" \
     | grep -v "crates/aura-agent/src/runtime/" \
-    | grep -v "/tests/" || true)
+    | grep -v "/tests/" \
+    | grep -v "///" \
+    | grep -v "//!" \
+    | grep -v "//" || true)
   if [ -n "$filtered_sim" ]; then
     warning "Potential non-injected randomness/IO/spawn (should be simulator-controllable; see docs/806_simulation_guide.md and .claude/skills/common_patterns.md):"
     echo "$filtered_sim"

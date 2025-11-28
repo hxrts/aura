@@ -560,8 +560,7 @@ fn get_tree_level(state: &TreeState, node: NodeIndex) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::tree::LeafNode;
-    use aura_core::{LeafId, NodeIndex, TreeOp};
+    use crate::commitment_tree::{LeafId, LeafNode, NodeIndex, TreeOp};
 
     fn create_test_op(parent_epoch: Epoch, leaf_id: u32) -> AttestedOp {
         AttestedOp {

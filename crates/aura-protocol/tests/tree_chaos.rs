@@ -9,7 +9,7 @@
 #![cfg(feature = "fixture_effects")]
 
 use aura_core::identifiers::DeviceId;
-use aura_core::tree::{
+use aura_journal::commitment_tree::{
     AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, Policy, TreeOp, TreeOpKind,
 };
 use std::collections::BTreeMap;
@@ -389,7 +389,7 @@ fn test_mixed_version_compatibility() {
 
 #[test]
 fn test_snapshot_forward_compatibility() {
-    use aura_core::tree::snapshot::Snapshot;
+    use aura_journal::commitment_tree::Snapshot;
 
     // Current version snapshot
     let v1_snapshot = Snapshot {

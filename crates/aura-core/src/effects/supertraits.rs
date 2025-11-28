@@ -2,6 +2,15 @@
 //!
 //! This module provides sealed supertraits that group commonly used effect trait
 //! combinations to improve type signature readability and maintainability.
+//!
+//! # Module Classification
+//!
+//! - **Category**: Composite Effect Traits
+//! - **Purpose**: Convenience wrappers combining multiple effect traits
+//!
+//! This module provides sealed supertraits (e.g., `SigningEffects`, `ChoreographyEffects`)
+//! that combine commonly-used effect trait combinations. These are blanket implementations
+//! that simplify type signatures. No handlers needed - these are pure trait composition.
 
 use super::{
     ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects,

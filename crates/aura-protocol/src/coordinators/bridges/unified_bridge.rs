@@ -14,7 +14,7 @@ use crate::coordinators::{
 };
 use crate::effects::*;
 use aura_core::hash::hash;
-use aura_core::LocalSessionType;
+use aura_mpst::LocalSessionType;
 
 /// Type-erased bridge for dynamic handler composition
 ///

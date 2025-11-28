@@ -10,18 +10,18 @@ use super::{
     types::{CommitFact, ConsensusConfig, ConsensusId},
     witness::{WitnessSet, WitnessTracker},
 };
+use async_lock::RwLock;
 use aura_core::{
     crypto::tree_signing::{frost_aggregate, frost_verify_aggregate, NonceToken},
     effects::{PhysicalTimeEffects, RandomEffects},
+    epochs::Epoch,
     frost::{NonceCommitment, PartialSignature, PublicKeyPackage, Share, ThresholdSignature},
-    session_epochs::Epoch,
     time::{PhysicalTime, ProvenancedTime, TimeStamp},
     AuraError, AuthorityId, Hash32, Result,
 };
 use rand::SeedableRng;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use async_lock::RwLock;
 use tracing::{debug, info, warn};
 
 /// FROST consensus orchestrator with pipelining support
@@ -298,8 +298,7 @@ impl FrostConsensusOrchestrator {
         // Aggregate signatures
         let participants = tracker.get_participants();
 
-        let threshold_signature =
-            self.aggregate_signatures(&tracker, &instance.operation_bytes)?;
+        let threshold_signature = self.aggregate_signatures(&tracker, &instance.operation_bytes)?;
 
         // Create commit fact
         let timestamp = ProvenancedTime {
@@ -380,12 +379,18 @@ impl FrostConsensusOrchestrator {
             .to_frost()
             .map_err(|e| AuraError::crypto(format!("Invalid signing share: {}", e)))?;
         let identifier = frost_ed25519::Identifier::try_from(share.identifier).map_err(|e| {
-            AuraError::crypto(format!("Invalid signer identifier {}: {}", share.identifier, e))
+            AuraError::crypto(format!(
+                "Invalid signer identifier {}: {}",
+                share.identifier, e
+            ))
         })?;
 
         // Convert group public key package
-        let frost_group_pkg: frost_ed25519::keys::PublicKeyPackage =
-            self.group_public_key.clone().try_into().map_err(|e: String| {
+        let frost_group_pkg: frost_ed25519::keys::PublicKeyPackage = self
+            .group_public_key
+            .clone()
+            .try_into()
+            .map_err(|e: String| {
                 AuraError::crypto(format!("Invalid group public key package: {}", e))
             })?;
 
@@ -406,7 +411,7 @@ impl FrostConsensusOrchestrator {
             identifier,
             signing_share,
             verifying_share,
-            frost_group_pkg.verifying_key().clone(),
+            *frost_group_pkg.verifying_key(),
             1, // placeholder min_signers until full FROST integration is wired
         );
 
@@ -440,8 +445,11 @@ impl FrostConsensusOrchestrator {
         message: &[u8],
     ) -> Result<ThresholdSignature> {
         // Convert group public key package
-        let frost_group_pkg: frost_ed25519::keys::PublicKeyPackage =
-            self.group_public_key.clone().try_into().map_err(|e: String| {
+        let frost_group_pkg: frost_ed25519::keys::PublicKeyPackage = self
+            .group_public_key
+            .clone()
+            .try_into()
+            .map_err(|e: String| {
                 AuraError::crypto(format!("Invalid group public key package: {}", e))
             })?;
 
@@ -524,7 +532,7 @@ pub fn verify_threshold_signature(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::session_epochs::Epoch;
+    use aura_core::epochs::Epoch;
 
     #[tokio::test]
     async fn test_orchestrator_creation() {

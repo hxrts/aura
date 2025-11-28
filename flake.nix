@@ -173,6 +173,7 @@
             # Development tools
             git
             jq
+            ripgrep
 
             # POSIX tools (for Justfile scripts)
             coreutils

@@ -147,33 +147,6 @@ impl BiscuitAuthorizationBridge {
                     .add_fact(fact!("storage_path({path_str})"))
                     .map_err(BiscuitError::BiscuitLib)?;
             }
-            #[allow(deprecated)]
-            ResourceScope::Recovery { recovery_type } => {
-                authorizer
-                    .add_fact(fact!("resource_type(\"recovery\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-                let recovery_str = recovery_type.clone();
-                authorizer
-                    .add_fact(fact!("recovery_type({recovery_str})"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-            }
-            #[allow(deprecated)]
-            ResourceScope::Journal {
-                account_id,
-                operation,
-            } => {
-                authorizer
-                    .add_fact(fact!("resource_type(\"journal\")"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-                let acc_id = account_id.clone();
-                authorizer
-                    .add_fact(fact!("account_id({acc_id})"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-                let op_str = operation.clone();
-                authorizer
-                    .add_fact(fact!("journal_operation({op_str})"))
-                    .map_err(BiscuitError::BiscuitLib)?;
-            }
         }
 
         // Phase 3: Add authorization policies for specific operations

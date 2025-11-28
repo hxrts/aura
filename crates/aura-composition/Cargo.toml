@@ -7,6 +7,7 @@ description = "Aura Layer 3: Handler composition and effect system assembly"
 [dependencies]
 aura-core = { path = "../aura-core" }
 aura-effects = { path = "../aura-effects" }
+aura-mpst = { path = "../aura-mpst" }
 async-trait = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }

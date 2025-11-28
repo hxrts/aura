@@ -11,7 +11,7 @@
 //! }
 //! ```
 
-use crate::identifiers::MessageContext;
+use crate::types::identifiers::MessageContext;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -445,7 +445,7 @@ impl MessageValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::identifiers::DeviceId;
+    use crate::types::identifiers::DeviceId;
 
     #[test]
     fn test_semantic_version_compatibility() {

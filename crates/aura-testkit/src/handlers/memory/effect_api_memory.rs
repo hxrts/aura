@@ -1,16 +1,18 @@
 //! Memory-based effect_api handler for testing
 
-use aura_core::effects::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
 use async_lock::Mutex;
 use async_trait::async_trait;
+use aura_core::effects::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
 use futures::channel::mpsc;
 use rand::{rngs::StdRng, Rng, RngCore, SeedableRng};
 use std::sync::Arc;
 
+type EventLog = Arc<Mutex<Vec<(u64, Vec<u8>)>>>;
+
 /// Memory-based effect_api handler for testing
 pub struct MemoryLedgerHandler {
-    events: Arc<Mutex<Vec<(u64, Vec<u8>)>>>,
+    events: EventLog,
     epoch: Arc<Mutex<u64>>,
     subscribers: Arc<Mutex<Vec<mpsc::UnboundedSender<EffectApiEvent>>>>,
     random: Arc<dyn RandomEffects>,

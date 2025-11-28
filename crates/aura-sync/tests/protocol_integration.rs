@@ -10,8 +10,9 @@ use aura_sync::protocols::{
     JournalSyncConfig, JournalSyncProtocol, OTAConfig, OTAProtocol, ReceiptVerificationConfig,
     ReceiptVerificationProtocol, SnapshotConfig, SnapshotProtocol,
 };
-// SystemTime not used in this file
-use aura_effects::time::wallclock_ms;
+
+// Test fixture: deterministic timestamp for reproducible tests
+const TEST_TIMESTAMP_MS: u64 = 1700000000000; // 2023-11-15 in milliseconds
 
 // =============================================================================
 // Anti-Entropy Protocol Tests
@@ -347,7 +348,7 @@ fn test_epoch_confirmation_processing() {
         participant_id: participant1,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp_ms: wallclock_ms(),
+        confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
     };
 
     let result = coordinator.process_confirmation(confirmation1);
@@ -359,7 +360,7 @@ fn test_epoch_confirmation_processing() {
         participant_id: participant2,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp_ms: wallclock_ms(),
+        confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
     };
 
     let result = coordinator.process_confirmation(confirmation2);
@@ -388,7 +389,7 @@ fn test_epoch_commit() {
             participant_id: participant,
             current_epoch: 0,
             ready_for_epoch: 1,
-            confirmation_timestamp_ms: wallclock_ms(),
+            confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
         };
         let _ = coordinator.process_confirmation(confirmation);
     }
@@ -423,7 +424,7 @@ fn test_epoch_rotation_cleanup() {
                 participant_id: participant,
                 current_epoch: i,
                 ready_for_epoch: i + 1,
-                confirmation_timestamp_ms: wallclock_ms(),
+                confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
             };
             let _ = coordinator.process_confirmation(confirmation);
         }
@@ -503,7 +504,7 @@ fn test_multi_device_protocol_scenarios() {
         participant_id: device2,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp_ms: wallclock_ms(),
+        confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
     };
 
     let conf3 = aura_sync::protocols::EpochConfirmation {
@@ -511,7 +512,7 @@ fn test_multi_device_protocol_scenarios() {
         participant_id: device3,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp_ms: wallclock_ms(),
+        confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
     };
 
     // Coordinator processes confirmations

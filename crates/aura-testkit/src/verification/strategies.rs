@@ -14,8 +14,10 @@ use proptest::prelude::*;
 // Re-export proptest for convenience
 pub use proptest;
 
-use aura_core::tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
 use aura_core::{AccountId, DeviceId, SessionId};
+use aura_journal::commitment_tree::{
+    AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
+};
 use aura_journal::semilattice::OpLog;
 use ed25519_dalek::{SigningKey, VerifyingKey};
 

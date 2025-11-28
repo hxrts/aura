@@ -86,7 +86,7 @@ pub enum AccessDecision {
 impl StorageAccessCoordinator {
     /// Create new storage access coordinator
     pub fn new() -> Self {
-        Self::default()
+        Self
     }
 
     /// Authorize a storage request using capability/Biscuit semantics.

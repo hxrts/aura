@@ -517,6 +517,8 @@ Implementation requires careful attention to cryptographic details, metadata han
 - [Relational Contexts](103_relational_contexts.md)
 - [Authorization](109_authorization.md)
 - [Identifiers and Boundaries](105_identifiers_and_boundaries.md)
+- [Transport and Information Flow](108_transport_and_information_flow.md) - Privacy-by-design patterns
+- [Privacy Checklist](privacy_checklist.md) - Development checklist for privacy-preserving code
 
 ## Implementation References
 
@@ -525,3 +527,4 @@ Implementation requires careful attention to cryptographic details, metadata han
 - **Context Isolation**: `crates/aura-relational/src/privacy/`
 - **Flow Budget System**: `crates/aura-protocol/src/flow_budget/`
 - **Privacy Testing**: `crates/aura-testkit/src/privacy/`
+- **Transport Privacy Patterns**: `crates/aura-transport/` (reference implementation)

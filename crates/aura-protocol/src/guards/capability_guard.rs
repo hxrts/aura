@@ -252,7 +252,7 @@ impl CapabilityGuardExt for CapabilityGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{identifiers::DeviceId, session_epochs::Epoch};
+    use aura_core::{epochs::Epoch, identifiers::DeviceId};
     use biscuit_auth::PublicKey;
 
     #[tokio::test]

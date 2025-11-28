@@ -58,90 +58,76 @@
 
 // === Core Modules ===
 
-/// Authority abstraction (new architecture)
-pub mod authority;
-/// Core consensus types and prestate management
-pub mod consensus;
-/// Content addressing and IPLD compatibility
-pub mod content;
-/// Context derivation for privacy partitions
-pub mod context_derivation;
-/// Type conversion utilities (internal helpers)
-#[doc(hidden)]
-pub mod conversions;
-/// Cryptographic domain types and utilities
+/// Domain-specific logic types (consensus, journal, content addressing)
+pub mod domain;
+/// Core domain types (identifiers, authority, scope, flow, epochs, sessions, relationships)
+pub mod types;
+/// Utility modules (serialization, conversions, context derivation, test utilities)
+pub mod util;
+
+/// Cryptographic primitives and utilities (hash, signing, FROST, merkle trees)
 pub mod crypto;
 /// Pure effect interfaces (no implementations)
 pub mod effects;
 /// Unified error handling
 pub mod errors;
-/// FlowBudget primitives
-pub mod flow;
-/// Pure synchronous hash trait for content addressing
-pub mod hash;
-/// Device, account, and context identifiers
-pub mod identifiers;
-/// Journal CRDT with facts (⊔) and capabilities (⊓)
-pub mod journal;
-/// Maintenance operation types
-pub mod maintenance;
 /// Core message envelopes and versioning
 pub mod messages;
-/// Protocol type definitions
-pub mod protocols;
 /// Relational domain types for cross-authority coordination
 pub mod relational;
-/// Relationship and web-of-trust types
-pub mod relationships;
-/// Resource scopes for authorization
-pub mod scope;
 /// Core algebraic types and semilattice laws
 pub mod semilattice;
-/// DAG-CBOR serialization (canonical format)
-pub mod serialization;
-/// Session epochs and participant management
-pub mod session_epochs;
-/// API stability annotations
-pub mod stability;
-/// Internal test utilities (Layer 1 - does not use aura-testkit to avoid circular dependencies)
-#[doc(hidden)]
-pub mod test_utils;
 /// Time semantics (Logical/Order/Physical/Range)
 pub mod time;
 /// Tree operation types
 pub mod tree;
+
+// === Backwards-Compatible Module Re-exports ===
+// These re-exports maintain compatibility with code using aura_core::identifiers::X pattern
+// The canonical location is now aura_core::types::*, but we re-export modules
+// to avoid breaking existing consumers.
+pub use crypto::hash;
+pub use domain::journal;
+pub use types::authority;
+pub use types::epochs;
+pub use types::flow;
+pub use types::identifiers;
+pub use types::relationships;
+pub use types::scope;
+pub use util::context as context_derivation;
+
 // === Public API Re-exports ===
 
 pub use time::TimeDomain;
 
 // Core algebraic types
 #[doc = "stable: Core journal types with semver guarantees"]
-pub use journal::{AuthLevel, Cap, Fact, FactValue, Journal};
+pub use domain::journal::{AuthLevel, Cap, Fact, FactValue, Journal};
 #[doc = "internal: Semilattice traits are implementation details, use Journal API instead"]
 pub use semilattice::{
     Bottom, CmState, CvState, DeltaState, JoinSemilattice, MeetSemiLattice, MvState, Top,
 };
 
 // Identifiers and contexts
-#[doc = "unstable: Context derivation system is under active development"]
-pub use context_derivation::{
-    ContextDerivationService, ContextParams, DkdContextDerivation, GroupConfiguration,
-    GroupContextDerivation, RelayContextDerivation,
-};
 #[doc = "stable: Core identifier types with semver guarantees"]
-pub use identifiers::{
+pub use types::identifiers::{
     AccountId, AuthorityId, ChannelId, ContextId, DataId, DeviceId, DkdContextId, EventId,
     EventNonce, GroupId, GuardianId, IndividualId, IndividualIdExt, MemberId, MessageContext,
     OperationId, RelayId, SessionId,
 };
+#[doc = "unstable: Context derivation system is under active development"]
+pub use util::context::{
+    ContextDerivationService, ContextParams, DkdContextDerivation, GroupConfiguration,
+    GroupContextDerivation, RelayContextDerivation,
+};
 
 // Authority abstraction (new architecture)
 #[doc = "unstable: Authority model is under active development - migration from AccountId ongoing"]
-pub use authority::{Authority, AuthorityRef, AuthorityState, TreeState};
+pub use types::authority::{Authority, AuthorityRef, AuthorityState, TreeState};
 
 // Consensus types
 #[doc = "stable: Core consensus types with semver guarantees"]
-pub use consensus::{Prestate, PrestateBuilder};
+pub use domain::consensus::{Prestate, PrestateBuilder};
 
 // Messages and versioning
 #[doc = "stable: Core message types with semver guarantees"]
@@ -167,7 +153,7 @@ pub use messages::{
     WIRE_FORMAT_VERSION,
 };
 #[doc = "stable: Canonical serialization with semver guarantees"]
-pub use serialization::{
+pub use util::serialization::{
     from_slice, hash_canonical, to_vec, SemanticVersion as SerVersion, SerializationError,
     VersionedMessage,
 };
@@ -233,7 +219,7 @@ pub use crypto::frost;
 
 // Time and content
 #[doc = "stable: Content addressing types with semver guarantees"]
-pub use content::{ChunkId, ContentId, ContentSize, Hash32};
+pub use domain::content::{ChunkId, ContentId, ContentSize, Hash32};
 #[doc = "stable: Time semantics with semver guarantees"]
 pub use time::{
     AttestationValidity, LogicalTime, OrderTime, OrderingPolicy, PhysicalTime, RangeTime,
@@ -241,35 +227,22 @@ pub use time::{
 };
 
 // Protocol and session types (temporary - will move to app layer)
-#[doc = "unstable: FlowBudget API is experimental and may change"]
-pub use flow::{FlowBudget, Receipt};
-#[doc = "internal: Protocol types are moving to higher layers"]
-#[deprecated(
-    note = "Protocol/session types now live in higher layers; prefer importing from the owning crate instead of aura_core::protocols"
-)]
-pub use protocols::*;
 #[doc = "stable: Core relational types for cross-authority coordination with semver guarantees"]
 pub use relational::*;
-#[doc = "unstable: Relationship types are under active development"]
-pub use relationships::*;
-#[doc = "stable: Resource scope types for authorization with semver guarantees"]
-pub use scope::{AuthorityOp, ContextOp, ResourceScope};
-#[doc = "internal: Session epoch management is moving to aura-agent"]
-pub use session_epochs::*;
-#[deprecated(
-    note = "Tree types moved to aura-journal::commitment_tree. Use `aura_journal::{AttestedOp, TreeOp, etc}` instead"
-)]
+#[doc = "stable: Tree types are foundational Layer 1 abstractions required by effect traits and FROST primitives"]
 pub use tree::{
     commit_branch, commit_leaf, compute_root_commitment, policy_hash, AttestedOp, BranchNode,
     Epoch, LeafId, LeafNode, LeafRole, NodeIndex, NodeKind, Policy, TreeCommitment, TreeOp,
     TreeOpKind,
 };
-
-// Maintenance events
-#[deprecated(
-    note = "Maintenance types moved to aura-agent::maintenance. Use `aura_agent::{AdminReplaced, MaintenanceEvent}` instead"
-)]
-pub use maintenance::{AdminReplaced, MaintenanceEvent};
+#[doc = "stable: Epoch counters and participant identifiers"]
+pub use types::epochs::*;
+#[doc = "unstable: FlowBudget API is experimental and may change"]
+pub use types::flow::{FlowBudget, Receipt};
+#[doc = "unstable: Relationship types are under active development"]
+pub use types::relationships::*;
+#[doc = "stable: Resource scope types for authorization with semver guarantees"]
+pub use types::scope::{AuthorityOp, ContextOp, ResourceScope};
 
 /// Standard result type for core operations
 pub type Result<T> = std::result::Result<T, AuraError>;

@@ -194,7 +194,7 @@ fn generate_adapter(spec: &AdapterSpec) -> Result<proc_macro2::TokenStream, syn:
 
             async fn execute_session(
                 &self,
-                _session: aura_core::LocalSessionType,
+                _session: aura_mpst::LocalSessionType,
                 _ctx: &AuraContext,
             ) -> Result<(), AuraHandlerError> {
                 Err(AuraHandlerError::UnsupportedOperation {

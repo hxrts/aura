@@ -2,8 +2,19 @@
 //!
 //! This trait defines the effect interface for authority management operations
 //! in the authority-centric model.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Application Effect
+//! - **Implementation**: `aura-protocol` or `aura-relational` (Layer 4 or Layer 5)
+//! - **Usage**: Authority management, relational context operations
+//!
+//! This is an application effect core to Aura's identity model. Manages opaque
+//! authorities (AuthorityId) and relational contexts (guardian bindings, recovery
+//! grants, rendezvous receipts). Handlers implement authority-centric operations
+//! in `aura-protocol` or `aura-relational`.
 
-use crate::identifiers::ContextId;
+use crate::types::identifiers::ContextId;
 use crate::{Authority, AuthorityId, Result};
 use async_trait::async_trait;
 use std::sync::Arc;

@@ -257,7 +257,7 @@ impl AntiEntropyProtocol {
                 operation: aura_core::scope::AuthorityOp::UpdateTree, // Sync requires authority access
             };
 
-            let mut flow_budget = FlowBudget::new(1000, aura_core::session_epochs::Epoch::new(0)); // Standard sync budget
+            let mut flow_budget = FlowBudget::new(1000, aura_core::epochs::Epoch::new(0)); // Standard sync budget
 
             match evaluator.evaluate_guard_default_time(
                 token,
@@ -990,7 +990,8 @@ pub fn compute_digest(journal: &Journal, operations: &[AttestedOp]) -> SyncResul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{journal::FactValue, TreeOp, TreeOpKind};
+    use aura_core::journal::FactValue;
+    use aura_journal::commitment_tree::{TreeOp, TreeOpKind};
 
     fn sample_journal() -> Journal {
         // Minimal journal for digest tests; facts/caps remain default

@@ -14,8 +14,9 @@
 //!
 //! See docs/123_commitment_tree.md - Deterministic Reduction section
 
-use aura_core::tree::{AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
-use aura_journal::commitment_tree::reduce;
+use aura_journal::commitment_tree::{
+    reduce, AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
+};
 use aura_journal::semilattice::{JoinSemilattice, OpLog};
 use proptest::prelude::*;
 

@@ -1,4 +1,13 @@
 //! Storage effects for key-value operations
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: All crates needing file I/O and persistent storage operations
+//!
+//! This is an infrastructure effect that must be implemented in `aura-effects`
+//! with stateless handlers. Domain crates should not implement this trait directly.
 
 use async_trait::async_trait;
 use std::collections::HashMap;

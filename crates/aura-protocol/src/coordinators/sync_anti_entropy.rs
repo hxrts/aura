@@ -29,10 +29,10 @@ impl AntiEntropyHandler {
         digest
             .filter
             .chunks_exact(32)
-            .filter_map(|chunk| {
+            .map(|chunk| {
                 let mut arr = [0u8; 32];
                 arr.copy_from_slice(chunk);
-                Some(Hash32::from(arr))
+                Hash32::from(arr)
             })
             .collect()
     }
@@ -94,7 +94,10 @@ impl AntiEntropyHandler {
     }
 
     /// Request digest from peer using guard chain
-    async fn request_digest_from_peer_with_guard_chain(&self, peer_id: Uuid) -> Result<BloomDigest, SyncError> {
+    async fn request_digest_from_peer_with_guard_chain(
+        &self,
+        peer_id: Uuid,
+    ) -> Result<BloomDigest, SyncError> {
         let _ = peer_id;
         Ok(BloomDigest::empty())
     }
@@ -200,7 +203,6 @@ impl SyncEffects for AntiEntropyHandler {
         self.compute_ops_to_push(&local_digest, remote_digest).await
     }
 
-
     async fn request_ops_from_peer(
         &self,
         peer_id: Uuid,
@@ -261,7 +263,7 @@ impl SyncEffects for AntiEntropyHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::tree::{TreeOp, TreeOpKind};
+    use aura_journal::commitment_tree::{TreeOp, TreeOpKind};
 
     fn create_test_op(commitment: Hash32) -> AttestedOp {
         AttestedOp {
@@ -269,14 +271,14 @@ mod tests {
                 parent_commitment: commitment.0,
                 parent_epoch: 1,
                 op: TreeOpKind::AddLeaf {
-                    leaf: aura_core::tree::LeafNode {
-                        leaf_id: aura_core::tree::LeafId(1),
+                    leaf: aura_journal::commitment_tree::LeafNode {
+                        leaf_id: aura_journal::commitment_tree::LeafId(1),
                         device_id: aura_core::identifiers::DeviceId::new(),
-                        role: aura_core::tree::LeafRole::Device,
+                        role: aura_journal::commitment_tree::LeafRole::Device,
                         public_key: vec![1, 2, 3],
                         meta: vec![],
                     },
-                    under: aura_core::tree::NodeIndex(0),
+                    under: aura_journal::commitment_tree::NodeIndex(0),
                 },
                 version: 1,
             },

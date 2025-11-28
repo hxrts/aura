@@ -75,6 +75,14 @@ impl DeviceTestFixture {
     }
 }
 
+/// Simple helper to create a deterministic test DeviceId from an index
+///
+/// This is a convenience function for tests that need quick DeviceId creation.
+/// For more complex device setup, use `DeviceTestFixture` instead.
+pub fn test_device_id(index: usize) -> DeviceId {
+    DeviceTestFixture::new(index).device_id()
+}
+
 /// Builder for creating multiple test devices with consistent configuration
 #[derive(Debug)]
 pub struct DeviceSetBuilder {

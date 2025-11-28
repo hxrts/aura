@@ -3,6 +3,15 @@
 //! This module defines the trait interface for transport layer operations that form the final
 //! step in the guard chain sequence. TransportEffects handles actual network packet emission
 //! after authorization, flow budget charging, leakage recording, and journal fact merging.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: Guard chain final step (actual network transmission after all checks pass)
+//!
+//! This is an infrastructure effect that must be implemented in `aura-effects`
+//! with stateless handlers. Integrates with guard chain in aura-protocol.
 
 use crate::{AuraError, AuthorityId, ContextId};
 use async_trait::async_trait;

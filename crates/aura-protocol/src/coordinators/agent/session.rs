@@ -14,8 +14,7 @@ use crate::effects::{
 use aura_core::{
     effects::agent::{ChoreographicMessage, ChoreographicRole, ChoreographyConfig},
     identifiers::{DeviceId, SessionId},
-    AuraResult as Result, PhysicalTimeEffects,
-    TimeEffects,
+    AuraResult as Result, PhysicalTimeEffects, TimeEffects,
 };
 
 // Session lifecycle choreography
@@ -131,7 +130,9 @@ pub struct MemorySessionHandler {
     device_id: DeviceId,
     sessions: Arc<RwLock<HashMap<SessionId, SessionData>>>,
     session_messages: Arc<RwLock<HashMap<SessionId, Vec<SessionMessage>>>>,
+    choreographic_messages: Arc<RwLock<HashMap<SessionId, Vec<ChoreographicMessage>>>>,
     choreography_state: Arc<RwLock<HashMap<SessionId, ChoreographySessionState>>>,
+    choreography_configs: Arc<RwLock<HashMap<SessionId, ChoreographyConfig>>>,
     time_effects: Arc<dyn PhysicalTimeEffects + Send + Sync>,
 }
 
@@ -175,7 +176,9 @@ impl MemorySessionHandler {
             device_id,
             sessions: Arc::new(RwLock::new(HashMap::new())),
             session_messages: Arc::new(RwLock::new(HashMap::new())),
+            choreographic_messages: Arc::new(RwLock::new(HashMap::new())),
             choreography_state: Arc::new(RwLock::new(HashMap::new())),
+            choreography_configs: Arc::new(RwLock::new(HashMap::new())),
             time_effects,
         }
     }
@@ -193,8 +196,14 @@ impl MemorySessionHandler {
         if let Some(mut messages) = self.session_messages.try_write() {
             messages.clear();
         }
+        if let Some(mut choreo_messages) = self.choreographic_messages.try_write() {
+            choreo_messages.clear();
+        }
         if let Some(mut choreo_state) = self.choreography_state.try_write() {
             choreo_state.clear();
+        }
+        if let Some(mut choreo_configs) = self.choreography_configs.try_write() {
+            choreo_configs.clear();
         }
     }
 
@@ -393,40 +402,6 @@ impl SessionManagementEffects for MemorySessionHandler {
         Ok(session.status.clone())
     }
 
-    async fn send_session_message(&self, session_id: SessionId, message: &[u8]) -> Result<()> {
-        // Check if session exists
-        {
-            let sessions = self.sessions.read().await;
-
-            if !sessions.contains_key(&session_id) {
-                return Err(aura_core::AuraError::not_found("Session not found"));
-            }
-        }
-
-        let session_message = SessionMessage {
-            from: self.device_id,
-            to: None, // Broadcast to all participants
-            timestamp: self.current_timestamp().await,
-            message_type: "application/octet-stream".to_string(),
-            payload: message.to_vec(),
-        };
-
-        let mut messages = self.session_messages.write().await;
-
-        messages
-            .entry(session_id)
-            .or_insert_with(Vec::new)
-            .push(session_message);
-
-        Ok(())
-    }
-
-    async fn receive_session_messages(&self, session_id: SessionId) -> Result<Vec<SessionMessage>> {
-        let messages = self.session_messages.read().await;
-
-        Ok(messages.get(&session_id).cloned().unwrap_or_default())
-    }
-
     // Choreographic session methods
     async fn create_choreographic_session(
         &self,
@@ -436,6 +411,16 @@ impl SessionManagementEffects for MemorySessionHandler {
     ) -> Result<SessionId> {
         let session_id = self.create_session(session_type).await?;
 
+        // Store choreography config
+        let mut configs = self.choreography_configs.write().await;
+        configs.insert(session_id, choreography_config.clone());
+        drop(configs);
+
+        // Initialize empty choreographic message list
+        let mut choreo_messages = self.choreographic_messages.write().await;
+        choreo_messages.insert(session_id, Vec::new());
+        drop(choreo_messages);
+
         // Record invited participants and initial choreography metadata
         let mut choreo_states = self.choreography_state.write().await;
         if let Some(state) = choreo_states.get_mut(&session_id) {
@@ -443,6 +428,7 @@ impl SessionManagementEffects for MemorySessionHandler {
             state.choreography_phase = SessionChoreographyPhase::ParticipantResponse;
             state.metadata = bincode::serialize(&choreography_config).unwrap_or_default();
         }
+        drop(choreo_states);
 
         // Add participants to session list
         let mut sessions = self.sessions.write().await;
@@ -492,23 +478,50 @@ impl SessionManagementEffects for MemorySessionHandler {
         payload: &[u8],
         target_role: Option<ChoreographicRole>,
     ) -> Result<()> {
-        // Determine recipient device
-        let target_device: Option<DeviceId> =
-            target_role.map(|r| aura_core::DeviceId::from_uuid(r.device_id));
+        // Get choreography config and state
+        let configs = self.choreography_configs.read().await;
+        let config = configs
+            .get(&session_id)
+            .ok_or_else(|| aura_core::AuraError::not_found("Choreography config not found"))?
+            .clone();
+        drop(configs);
 
-        let session_message = SessionMessage {
+        let states = self.choreography_state.read().await;
+        let state = states
+            .get(&session_id)
+            .ok_or_else(|| aura_core::AuraError::not_found("Choreography state not found"))?;
+
+        let phase = match &state.choreography_phase {
+            SessionChoreographyPhase::Invitation => "invitation",
+            SessionChoreographyPhase::ParticipantResponse => "participant_response",
+            SessionChoreographyPhase::Active => "active",
+            SessionChoreographyPhase::Ending => "ending",
+            SessionChoreographyPhase::Ended => "ended",
+        }
+        .to_string();
+        drop(states);
+
+        // Create choreographic message
+        let device_id_uuid: uuid::Uuid = self.device_id.into();
+        let choreographic_message = ChoreographicMessage {
             from: self.device_id,
-            to: target_device,
+            to: target_role.as_ref().map(|r| DeviceId::from(r.device_id)),
+            source_role: ChoreographicRole::new(device_id_uuid, 0),
+            target_role,
+            protocol_namespace: config.namespace.clone(),
+            phase,
             message_type: message_type.to_string(),
             payload: payload.to_vec(),
             timestamp: self.current_timestamp().await,
+            sequence_number: 0,
+            guard_capabilities: config.guard_capabilities.clone(),
         };
 
-        let mut messages = self.session_messages.write().await;
+        let mut messages = self.choreographic_messages.write().await;
         messages
             .entry(session_id)
             .or_default()
-            .push(session_message);
+            .push(choreographic_message);
         Ok(())
     }
 
@@ -517,51 +530,34 @@ impl SessionManagementEffects for MemorySessionHandler {
         session_id: SessionId,
         role_filter: Option<ChoreographicRole>,
     ) -> Result<Vec<ChoreographicMessage>> {
-        let messages = self.session_messages.read().await;
+        let messages = self.choreographic_messages.read().await;
         let session_messages = messages.get(&session_id).cloned().unwrap_or_default();
-        Ok(session_messages
-            .into_iter()
-            .filter(|msg| {
-                msg.message_type == "choreographic"
-                    && role_filter
+
+        // Filter by role if specified
+        if let Some(role) = role_filter {
+            Ok(session_messages
+                .into_iter()
+                .filter(|msg| {
+                    msg.target_role
                         .as_ref()
-                        .map(|role| msg.to.map(|d| d.0) == Some(role.device_id))
-                        .unwrap_or(true)
-            })
-            .map(|msg| ChoreographicMessage {
-                from: msg.from,
-                to: msg.to,
-                source_role: ChoreographicRole::new(msg.from.into(), 0),
-                target_role: msg.to.map(|d| ChoreographicRole::new(d.into(), 0)),
-                protocol_namespace: "session_lifecycle".to_string(),
-                phase: format!(
-                    "{:?}",
-                    self.get_choreography_phase(&session_id)
-                        .unwrap_or(SessionChoreographyPhase::Invitation)
-                ),
-                message_type: msg.message_type,
-                payload: msg.payload,
-                timestamp: msg.timestamp,
-                sequence_number: 0,
-                guard_capabilities: Vec::new(),
-            })
-            .collect())
+                        .map(|r| r.device_id == role.device_id && r.role_index == role.role_index)
+                        .unwrap_or(false)
+                })
+                .collect())
+        } else {
+            Ok(session_messages)
+        }
     }
 
-    async fn get_choreography_phase(
-        &self,
-        session_id: SessionId,
-    ) -> Result<Option<String>> {
+    async fn get_choreography_phase(&self, session_id: SessionId) -> Result<Option<String>> {
         let states = self.choreography_state.read().await;
-        let phase = states
-            .get(&session_id)
-            .map(|s| match s.choreography_phase {
-                SessionChoreographyPhase::Invitation => "Initial".to_string(),
-                SessionChoreographyPhase::ParticipantResponse => "Handshake".to_string(),
-                SessionChoreographyPhase::Active => "Active".to_string(),
-                SessionChoreographyPhase::Ending => "Ending".to_string(),
-                SessionChoreographyPhase::Ended => "Ended".to_string(),
-            });
+        let phase = states.get(&session_id).map(|s| match s.choreography_phase {
+            SessionChoreographyPhase::Invitation => "Initial".to_string(),
+            SessionChoreographyPhase::ParticipantResponse => "Handshake".to_string(),
+            SessionChoreographyPhase::Active => "Active".to_string(),
+            SessionChoreographyPhase::Ending => "Ending".to_string(),
+            SessionChoreographyPhase::Ended => "Ended".to_string(),
+        });
         Ok(phase)
     }
 
@@ -633,16 +629,15 @@ mod tests {
 
     #[async_trait::async_trait]
     impl aura_core::PhysicalTimeEffects for TestTimeEffects {
-        async fn current_timestamp(&self) -> u64 {
-            1234567890 // Fixed timestamp for testing
+        async fn physical_time(&self) -> std::result::Result<aura_core::time::PhysicalTime, aura_effects::TimeError> {
+            Ok(aura_core::time::PhysicalTime {
+                ts_ms: 1234567890000,
+                uncertainty: None,
+            })
         }
 
-        async fn current_timestamp_millis(&self) -> u64 {
-            1234567890000 // Fixed timestamp in millis
-        }
-
-        async fn sleep(&self, _duration: std::time::Duration) {
-            // No-op for tests
+        async fn sleep_ms(&self, _ms: u64) -> std::result::Result<(), aura_effects::TimeError> {
+            Ok(()) // No-op for tests
         }
     }
 
@@ -702,21 +697,43 @@ mod tests {
         let time_effects = Arc::new(TestTimeEffects);
         let handler = MemorySessionHandler::new(device_id, time_effects);
 
+        // Create choreographic session with config
+        let choreography_config = ChoreographyConfig {
+            namespace: "test_messaging".to_string(),
+            guard_capabilities: vec!["send_message".to_string()],
+            flow_budget: Some(1000),
+            journal_facts: vec!["message_sent".to_string()],
+            timeout_seconds: 60,
+            max_retries: 3,
+        };
+
         let session_id = handler
-            .create_session(SessionType::Coordination)
+            .create_choreographic_session(
+                SessionType::Coordination,
+                vec![],
+                choreography_config,
+            )
             .await
             .unwrap();
 
         let message_data = b"Hello, session!";
 
-        // Test send message
+        // Test send choreographic message
         handler
-            .send_session_message(session_id, message_data)
+            .send_choreographic_message(
+                session_id,
+                "test_message",
+                message_data,
+                None, // broadcast to all
+            )
             .await
             .unwrap();
 
-        // Test receive messages
-        let messages = handler.receive_session_messages(session_id).await.unwrap();
+        // Test receive choreographic messages
+        let messages = handler
+            .receive_choreographic_messages(session_id, None)
+            .await
+            .unwrap();
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].payload, message_data);
         assert_eq!(messages[0].from, device_id);

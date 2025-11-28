@@ -4,6 +4,16 @@
 //! These effects enable retry logic, circuit breaking, and graceful degradation
 //! while maintaining the stateless, composable nature of the effect system.
 //! Includes BackoffStrategy, RetryPolicy, and helper types for retry patterns.
+//!
+//! # Effect Classification
+//!
+//! - **Category**: Infrastructure Effect
+//! - **Implementation**: `aura-effects` (Layer 3)
+//! - **Usage**: Generic reliability patterns (retry, circuit breakers, rate limiting)
+//!
+//! This is an infrastructure effect providing generic reliability patterns used
+//! across distributed systems. No Aura-specific semantics. Implementations should
+//! be stateless and work through explicit dependency injection.
 
 use crate::effects::time::PhysicalTimeEffects;
 use crate::AuraError;
@@ -665,7 +675,7 @@ pub struct RateLimiter {
     global_limit: RateLimit,
 
     /// Per-peer rate limits (using DeviceId as key)
-    peer_limits: std::collections::HashMap<crate::identifiers::DeviceId, RateLimit>,
+    peer_limits: std::collections::HashMap<crate::types::identifiers::DeviceId, RateLimit>,
 
     /// Statistics
     stats: RateLimiterStatistics,
@@ -701,7 +711,7 @@ impl RateLimiter {
     /// - `RateLimitResult::Denied` if rate limit exceeded
     pub fn check_rate_limit(
         &mut self,
-        peer_id: crate::identifiers::DeviceId,
+        peer_id: crate::types::identifiers::DeviceId,
         cost: u32,
         now: std::time::Instant,
     ) -> RateLimitResult {
@@ -750,7 +760,11 @@ impl RateLimiter {
     }
 
     /// Check if operation would exceed rate limit without consuming tokens
-    pub fn would_exceed_limit(&self, peer_id: &crate::identifiers::DeviceId, cost: u32) -> bool {
+    pub fn would_exceed_limit(
+        &self,
+        peer_id: &crate::types::identifiers::DeviceId,
+        cost: u32,
+    ) -> bool {
         // Check global limit
         if self.global_limit.available_tokens() < cost {
             return true;
@@ -767,7 +781,7 @@ impl RateLimiter {
     }
 
     /// Get available tokens for a peer
-    pub fn available_tokens(&self, peer_id: &crate::identifiers::DeviceId) -> u32 {
+    pub fn available_tokens(&self, peer_id: &crate::types::identifiers::DeviceId) -> u32 {
         let global_tokens = self.global_limit.available_tokens();
 
         let peer_tokens = self
@@ -799,7 +813,7 @@ impl RateLimiter {
     }
 
     /// Remove rate limit for a peer
-    pub fn remove_peer(&mut self, peer_id: &crate::identifiers::DeviceId) {
+    pub fn remove_peer(&mut self, peer_id: &crate::types::identifiers::DeviceId) {
         self.peer_limits.remove(peer_id);
     }
 

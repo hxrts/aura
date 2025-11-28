@@ -37,6 +37,7 @@ aura-data/
 *.dat
 outcomes/
 *.txt
+leakage/
 
 # Nix
 result

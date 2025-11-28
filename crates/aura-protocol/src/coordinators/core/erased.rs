@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use crate::coordinators::{context_immutable::AuraContext, AuraHandlerError, EffectType};
 use aura_composition::registry::Handler;
 use aura_core::effects::ExecutionMode;
-use aura_core::LocalSessionType;
+use aura_mpst::LocalSessionType;
 
 /// Primary interface for all Aura handlers
 ///

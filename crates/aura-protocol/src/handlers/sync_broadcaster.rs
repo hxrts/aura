@@ -1,10 +1,10 @@
 use crate::effects::sync::{BloomDigest, SyncEffects, SyncError};
-use aura_core::identifiers::ContextId;
+use async_lock::RwLock;
 use async_trait::async_trait;
+use aura_core::identifiers::ContextId;
 use aura_core::{tree::AttestedOp, Hash32};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
-use async_lock::RwLock;
 use uuid::Uuid;
 
 /// Configuration for broadcast behavior
@@ -321,7 +321,9 @@ impl BroadcasterHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::tree::{LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind};
+    use aura_journal::commitment_tree::{
+        LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
+    };
 
     fn create_test_op(commitment: Hash32) -> AttestedOp {
         AttestedOp {

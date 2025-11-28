@@ -9,7 +9,7 @@
 //!
 //! Each observer tracks accumulated leakage across different privacy dimensions.
 
-use aura_core::tree::{AttestedOp, Epoch, LeafId};
+use aura_journal::commitment_tree::{AttestedOp, Epoch, LeafId};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;

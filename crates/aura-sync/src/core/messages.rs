@@ -406,7 +406,8 @@ impl ProgressMessage {
 #[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
-    use aura_core::test_utils::test_device_id;
+    use aura_testkit::builders::test_device_id;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn test_session_message() {
@@ -426,7 +427,8 @@ mod tests {
         assert_eq!(msg.age_seconds(msg.timestamp + 1), 1); // Age should be exactly 1 second
 
         let old_msg = TimestampedMessage::with_timestamp(0, "old".to_string());
-        let current_time = wallclock_secs();
+        // Use deterministic timestamp instead of SystemTime::now()
+        let current_time = 2000u64; // Fixed time in seconds
         assert!(old_msg.age_seconds(current_time) > 1000); // Very old
     }
 

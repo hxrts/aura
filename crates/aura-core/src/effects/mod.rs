@@ -4,12 +4,33 @@
 //! This module defines **what** effects can be performed; handlers define **how**.
 //! (per docs/106_effect_system_and_runtime.md)
 //!
-//! **Effect Classification**:
-//! - **Infrastructure Effects**: Core runtime (Time, Crypto, Network, Storage, Random).
-//!   Must implement in aura-effects (Layer 3); domain crates may not.
-//! - **Application Effects**: Domain-specific (Journal, Authorization, Capability).
-//!   Implemented in domain crates (aura-journal, aura-wot, aura-verify, etc.).
-//! - **Composite Effects**: Convenience traits combining infrastructure/application effects.
+//! # Effect Classification
+//!
+//! Effects are organized into four categories based on where they should be implemented:
+//!
+//! ## Infrastructure Effects (Layer 3: `aura-effects`)
+//! OS integration with no Aura-specific semantics:
+//! - **Time**, **Crypto**, **Network**, **Storage**, **Random**, **Console**, **Transport**
+//! - **Biometric**, **Bloom**, **Reliability**, **Secure**, **System**
+//!
+//! ## Application Effects (Layer 2-4: Domain crates)
+//! Aura-specific business logic:
+//! - **Journal** (`aura-journal`), **Authorization**, **Capability** (`aura-wot`)
+//! - **Agent** (`aura-agent`), **Authority** (`aura-protocol`/`aura-relational`)
+//! - **Guard** (`aura-protocol::guards`), **Ledger** (`aura-journal`/`aura-protocol`)
+//!
+//! ## Protocol Coordination Effects (Layer 4: `aura-protocol`)
+//! Multi-party protocol coordination:
+//! - **Choreographic** (`aura-protocol::choreography`)
+//! - **Sync** (`aura-sync` or `aura-protocol`)
+//!
+//! ## Testing/Simulation Effects (Layer 8: Test infrastructure)
+//! Testing and verification:
+//! - **Chaos**, **Simulation**, **Testing** (`aura-simulator`, `aura-testkit`)
+//! - **Quint** (`aura-quint`)
+//!
+//! ## Composite Effects (Layer 1: `aura-core`)
+//! Convenience supertraits combining other effects (no handlers needed)
 //!
 //! **Execution Modes** (per ExecutionMode enum):
 //! - **Testing**: Mock implementations, deterministic behavior
@@ -30,11 +51,11 @@ pub mod chaos;
 pub mod choreographic; // Multi-party protocol coordination
 pub mod console;
 pub mod crypto;
-pub mod event_sourcing; // Event sourcing and audit trails
 pub mod flow; // Flow budget management
-pub mod guard_effects; // Pure guard evaluation with effect commands
+pub mod guard; // Pure guard evaluation with effect commands
 pub mod journal;
 pub mod leakage; // Privacy leakage tracking
+pub mod ledger; // Event sourcing and audit trails
 pub mod network;
 pub mod quint;
 pub mod random;
@@ -48,7 +69,7 @@ pub mod system;
 pub mod testing;
 pub mod time;
 pub mod transport;
-pub mod tree_operations; // Commitment tree operations
+pub mod tree; // Commitment tree operations
 
 // Re-export core effect traits
 pub use agent::{
@@ -133,13 +154,13 @@ pub use choreographic::{
     ChoreographicEffects, ChoreographicRole, ChoreographyError, ChoreographyEvent,
     ChoreographyMetrics,
 };
-pub use event_sourcing::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
-pub use guard_effects::{
+pub use guard::{
     Decision, EffectCommand, EffectInterpreter, FlowBudgetView, GuardOutcome, GuardSnapshot,
     JournalEntry, MetadataView, SimulationEvent,
 };
+pub use ledger::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
 pub use sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
-pub use tree_operations::{Cut, Partial, ProposalId, Snapshot, TreeOperationEffects};
+pub use tree::{Cut, Partial, ProposalId, Snapshot, TreeOperationEffects};
 
 // Re-export unified error system
 pub use crate::AuraError;

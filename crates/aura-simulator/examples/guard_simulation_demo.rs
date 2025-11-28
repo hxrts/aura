@@ -5,8 +5,8 @@
 
 use aura_core::{
     effects::{
-        guard_effects::{
-            Decision, EffectCommand, EffectInterpreter, FlowBudgetView, GuardOutcome,
+        guard::{
+            EffectCommand, EffectInterpreter, FlowBudgetView, GuardOutcome,
             GuardSnapshot, JournalEntry, MetadataView, SimulationEvent,
         },
         NetworkAddress,
@@ -16,7 +16,6 @@ use aura_core::{
     time::TimeStamp,
 };
 use aura_simulator::effects::SimulationEffectInterpreter;
-use std::collections::HashMap;
 
 /// Example guard function that evaluates a request
 fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> GuardOutcome {
@@ -32,6 +31,7 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
     }
 
     // Check flow budget
+    let context = ContextId::new(); // Would come from request context
     let authority = AuthorityId::new(); // Would come from request
     let required_budget = match request_type {
         "read" => 10,
@@ -40,7 +40,7 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
         _ => 25,
     };
 
-    if !snapshot.budgets.has_budget(&authority, required_budget) {
+    if !snapshot.budgets.has_budget(&context, &authority, required_budget) {
         return GuardOutcome::denied("Insufficient flow budget");
     }
 
@@ -48,7 +48,9 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
     let mut effects = vec![
         // Charge flow budget
         EffectCommand::ChargeBudget {
+            context,
             authority,
+            peer: authority, // Peer would be the requesting authority
             amount: required_budget,
         },
         // Record metadata leakage (request type)
@@ -62,14 +64,14 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
                 entry: JournalEntry {
                     fact: Fact::default(), // Would contain actual write data
                     authority,
-                    timestamp: snapshot.now,
+                    timestamp: snapshot.now.clone(),
                 },
             });
         }
         "admin" => {
             effects.push(EffectCommand::StoreMetadata {
                 key: "last_admin_access".to_string(),
-                value: snapshot.now.to_string(),
+                value: format!("{:?}", snapshot.now),
             });
         }
         _ => {}
@@ -77,7 +79,7 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
 
     // Send response
     effects.push(EffectCommand::SendEnvelope {
-        to: NetworkAddress::from_parts("test", "client"),
+        to: NetworkAddress::new("test://client".to_string()),
         envelope: vec![1, 2, 3], // Mock response
     });
 
@@ -89,13 +91,17 @@ async fn main() {
     println!("=== Simulation Effect Interpreter Demo ===\n");
 
     // Initialize simulation
-    let initial_time = TimeStamp::now_physical();
+    use aura_core::time::PhysicalTime;
+    let initial_time = TimeStamp::PhysicalClock(PhysicalTime {
+        ts_ms: 1000,
+        uncertainty: None,
+    });
     let authority = AuthorityId::new();
     let interpreter = SimulationEffectInterpreter::new(
         42, // Deterministic seed
-        initial_time,
+        initial_time.clone(),
         authority,
-        NetworkAddress::from_parts("demo", "server"),
+        NetworkAddress::new("demo://server".to_string()),
     );
 
     // Set up initial state
@@ -127,10 +133,16 @@ async fn main() {
 
         // Create guard snapshot from current state
         let state = interpreter.snapshot_state();
+        // Convert flow_budgets to include context
+        let context = ContextId::new();
+        let budgets_with_context: std::collections::HashMap<(ContextId, AuthorityId), u32> =
+            state.flow_budgets.iter()
+                .map(|(auth, amount)| ((context, *auth), *amount))
+                .collect();
         let snapshot = GuardSnapshot {
             now: state.current_time,
             caps: Cap::new(),
-            budgets: FlowBudgetView::new(state.flow_budgets.clone()),
+            budgets: FlowBudgetView::new(budgets_with_context),
             metadata: MetadataView::new(state.metadata.clone()),
             rng_seed: [0; 32], // Would be properly initialized
         };
@@ -201,7 +213,7 @@ async fn main() {
         99, // Different seed
         initial_time,
         authority,
-        NetworkAddress::from_parts("demo", "replay"),
+        NetworkAddress::new("demo://replay".to_string()),
     );
 
     // Set same initial conditions

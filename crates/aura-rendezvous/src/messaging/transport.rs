@@ -4,14 +4,13 @@
 //! for actual message delivery across peer connections.
 
 use crate::sbb::{RendezvousEnvelope, SbbFlooding, SbbFloodingCoordinator};
+use async_lock::RwLock;
 use aura_core::effects::{NetworkEffects, NetworkError};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_protocol::effects::AuraEffects;
-use aura_protocol::guards::send_guard::create_send_guard;
-use aura_protocol::guards::GuardEffectSystem;
 use aura_protocol::guards::effect_system_trait::GuardContextProvider;
-use async_lock::RwLock;
+use aura_protocol::guards::send_guard::create_send_guard;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -52,9 +51,9 @@ impl NetworkTransport {
     /// Send data to a specific peer using guard chain and network effect system
     pub async fn send_with_guard_chain<
         E: aura_protocol::guards::GuardEffects
-            + aura_protocol::guards::GuardEffectSystem
             + GuardContextProvider
-            + aura_core::PhysicalTimeEffects,
+            + aura_core::PhysicalTimeEffects
+            + aura_core::TimeEffects,
     >(
         &self,
         recipient: &DeviceId,
@@ -186,9 +185,9 @@ impl NetworkTransport {
     /// Broadcast a message to all connected peers using guard chain
     pub async fn broadcast_with_guard_chain<
         E: aura_protocol::guards::GuardEffects
-            + aura_protocol::guards::GuardEffectSystem
             + GuardContextProvider
-            + aura_core::PhysicalTimeEffects,
+            + aura_core::PhysicalTimeEffects
+            + aura_core::TimeEffects,
     >(
         &self,
         data: Vec<u8>,
@@ -377,11 +376,8 @@ impl SbbTransportBridge {
             device_id,
             effects.clone(),
         )));
-        let sender = NetworkTransportSender::new(
-            transport,
-            effects.clone(),
-            AuthorityId::from(device_id.0),
-        );
+        let sender =
+            NetworkTransportSender::new(transport, effects.clone(), AuthorityId::from(device_id.0));
 
         Self {
             flooding_coordinator,
@@ -491,7 +487,7 @@ impl SbbTransportBridge {
         if self.should_respond_to_offer(&offer, &coordinator).await {
             drop(coordinator);
             let coordinator = self.flooding_coordinator.read().await;
-            self.create_and_send_transport_answer(&offer, &*coordinator)
+            self.create_and_send_transport_answer(&offer, &coordinator)
                 .await?;
         }
 
@@ -681,7 +677,10 @@ struct GuardEffectArc {
 
 impl GuardEffectArc {
     fn new(inner: Arc<dyn AuraEffects>, authority_id: AuthorityId) -> Self {
-        Self { inner, authority_id }
+        Self {
+            inner,
+            authority_id,
+        }
     }
 }
 
@@ -752,24 +751,6 @@ impl LeakageEffects for GuardEffectArc {
         self.inner
             .get_leakage_history(context_id, since_timestamp)
             .await
-    }
-}
-
-impl GuardEffectSystem for GuardEffectArc {
-    fn authority_id(&self) -> AuthorityId {
-        self.authority_id
-    }
-
-    fn execution_mode(&self) -> aura_core::effects::ExecutionMode {
-        AuraEffects::execution_mode(self.inner.as_ref())
-    }
-
-    fn get_metadata(&self, _key: &str) -> Option<String> {
-        None
-    }
-
-    fn can_perform_operation(&self, _operation: &str) -> bool {
-        true
     }
 }
 
@@ -973,9 +954,9 @@ impl NetworkTransportSender {
     /// Send message with guard chain enforcement
     pub async fn send_to_peer_with_guard_chain<
         E: aura_protocol::guards::GuardEffects
-            + aura_protocol::guards::GuardEffectSystem
             + GuardContextProvider
-            + aura_core::PhysicalTimeEffects,
+            + aura_core::PhysicalTimeEffects
+            + aura_core::TimeEffects,
     >(
         &self,
         peer: DeviceId,
@@ -1219,15 +1200,11 @@ mod tests {
         let system =
             Arc::new(aura_agent::AuraEffectSystem::testing(&config).expect("test effect system"));
         let effects = system.clone() as Arc<dyn NetworkEffects>;
-        let guard_effects = system.clone() as Arc<dyn AuraEffects>;
+        let guard = system.clone() as Arc<dyn AuraEffects>;
         let context_id = ContextId::new();
         let transport = NetworkTransport::new(device_id, effects, context_id);
 
-        let sender = NetworkTransportSender::new(
-            transport,
-            guard_effects,
-            AuthorityId::from(device_id.0),
-        );
+        let sender = NetworkTransportSender::new(transport, guard, AuthorityId::from(device_id.0));
 
         // Should create successfully
         let unreachable_peer = DeviceId::new();
@@ -1248,14 +1225,10 @@ mod tests {
         let system =
             Arc::new(aura_agent::AuraEffectSystem::testing(&config).expect("test effect system"));
         let network_effects = system.clone() as Arc<dyn NetworkEffects>;
-        let guard_effects = system.clone() as Arc<dyn AuraEffects>;
+        let guard = system.clone() as Arc<dyn AuraEffects>;
         let context_id = ContextId::new();
         let transport = NetworkTransport::new(device_id, network_effects, context_id);
-        let sender = NetworkTransportSender::new(
-            transport,
-            guard_effects,
-            AuthorityId::from(device_id.0),
-        );
+        let sender = NetworkTransportSender::new(transport, guard, AuthorityId::from(device_id.0));
 
         bridge.set_transport_sender(Box::new(sender));
 

@@ -1,7 +1,7 @@
 //! Journal-specific types for effect_api operations
 
 use super::intent::IntentId;
-use aura_core::tree::Epoch;
+use crate::commitment_tree::Epoch;
 use serde::{Deserialize, Serialize};
 
 /// Journal operation errors

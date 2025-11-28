@@ -1,64 +1,19 @@
 //! Leakage tracking handlers for testing
+//!
+//! **Note**: The production `ProductionLeakageHandler` now lives in `aura-effects`
+//! and composes `StorageEffects` for persistence. For testing, use:
+//!
+//! ```rust,ignore
+//! use aura_effects::leakage_handler::ProductionLeakageHandler;
+//! use aura_testkit::stateful_effects::MemoryStorageHandler;
+//! use std::sync::Arc;
+//!
+//! let storage = Arc::new(MemoryStorageHandler::new());
+//! let handler = ProductionLeakageHandler::with_storage(storage);
+//! ```
+//!
+//! This module is kept for backwards compatibility but the handlers have been
+//! removed as they were dead code that didn't implement `LeakageEffects`.
 
-use async_lock::RwLock;
-use aura_core::ContextId;
-use std::collections::HashMap;
-use std::sync::Arc;
-
-/// Leakage budget
-#[derive(Debug, Clone)]
-pub struct LeakageBudget {
-    pub remaining: u64,
-}
-
-/// Leakage event
-#[derive(Debug, Clone)]
-pub struct LeakageEvent {
-    pub context: ContextId,
-    pub amount: u64,
-    pub timestamp: u64,
-}
-
-/// Production leakage handler for testing
-#[derive(Debug)]
-pub struct ProductionLeakageHandler {
-    #[allow(dead_code)]
-    budgets: Arc<RwLock<HashMap<ContextId, LeakageBudget>>>,
-    #[allow(dead_code)]
-    history: Arc<RwLock<Vec<LeakageEvent>>>,
-}
-
-impl Default for ProductionLeakageHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ProductionLeakageHandler {
-    pub fn new() -> Self {
-        Self {
-            budgets: Arc::new(RwLock::new(HashMap::new())),
-            history: Arc::new(RwLock::new(Vec::new())),
-        }
-    }
-}
-
-/// Test leakage handler for testing
-#[derive(Debug)]
-pub struct TestLeakageHandler {
-    pub events: Arc<RwLock<Vec<LeakageEvent>>>,
-}
-
-impl Default for TestLeakageHandler {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl TestLeakageHandler {
-    pub fn new() -> Self {
-        Self {
-            events: Arc::new(RwLock::new(Vec::new())),
-        }
-    }
-}
+// Legacy types removed - use aura_effects::ProductionLeakageHandler<S> with
+// MemoryStorageHandler from this crate for testing purposes.

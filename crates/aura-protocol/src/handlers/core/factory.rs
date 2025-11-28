@@ -999,7 +999,7 @@ impl PlatformDetector {
     }
 
     /// Detect if secure enclave is available
-    fn detect_secure_enclave(storage: &dyn StorageEffects) -> bool {
+    fn detect_secure_enclave(_storage: &dyn StorageEffects) -> bool {
         // Platform-specific detection logic
         match std::env::consts::OS {
             "macos" => {
@@ -1015,18 +1015,12 @@ impl PlatformDetector {
                 // Check for Intel SGX or AMD SEV on Linux
                 std::path::Path::new("/dev/sgx_enclave").exists()
                     || std::path::Path::new("/dev/sgx/enclave").exists()
-                    || futures::executor::block_on(async {
-                        storage
-                            .retrieve("/proc/cpuinfo")
-                            .await
-                            .map(|content| {
-                                content
-                                    .map(|bytes| String::from_utf8_lossy(&bytes).to_lowercase())
-                                    .map(|cpuinfo| cpuinfo.contains("sgx") || cpuinfo.contains("sev"))
-                                    .unwrap_or(false)
-                            })
-                            .unwrap_or(false)
-                    })
+                    || std::fs::read_to_string("/proc/cpuinfo")
+                        .map(|cpuinfo| {
+                            let lower = cpuinfo.to_lowercase();
+                            lower.contains("sgx") || lower.contains("sev")
+                        })
+                        .unwrap_or(false)
             }
             "windows" => {
                 // Check for Intel SGX on Windows (conservative approach)

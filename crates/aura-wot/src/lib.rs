@@ -69,13 +69,12 @@ pub use aura_core::semilattice::{MeetSemiLattice, Top};
 
 // Re-export Biscuit types
 pub use biscuit_auth::{Biscuit, KeyPair, PublicKey};
-pub use biscuit_resources::{
-    AdminOperation, JournalOp, RecoveryType, ResourceScope as LegacyResourceScope, StorageCategory,
-};
 pub use biscuit_token::{AccountAuthority, BiscuitError, BiscuitTokenManager, SerializableBiscuit};
 pub use flow_budget::FlowBudgetHandler;
 
-// Re-export authority-based resource scopes from core (compatibility)
+// Re-export authority-based resource scopes from core
+// These replace the previous Biscuit-specific resource scopes (AdminOperation, JournalOp, etc.)
+// which were internal implementation details that have been migrated to the authority model
 pub use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
 
 // Re-export Biscuit authorization types (now consolidated in biscuit_authorization.rs)

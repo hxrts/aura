@@ -327,6 +327,7 @@ impl SystemEffects for MetricsSystemHandler {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)] // Test code: expect() is acceptable for test assertions
 mod tests {
     use super::*;
 

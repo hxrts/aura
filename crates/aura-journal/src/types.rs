@@ -1,6 +1,6 @@
 // Core types for the CRDT effect_api
 
-use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::time::TimeStamp;
 use aura_core::Ed25519VerifyingKey;
 use serde::{Deserialize, Serialize};
 
@@ -11,8 +11,8 @@ use aura_core::GuardianId;
 // Import authentication types (ThresholdSig is imported where needed)
 
 // Re-export consolidated types from aura-core
-pub use aura_core::{ParticipantId, ProtocolType, SessionId, SessionOutcome, SessionStatus};
-
+// ProtocolType has moved to aura-protocol (Layer 4)
+// SessionStatus and SessionOutcome are defined in aura-core
 // Use ContentId from aura-core
 
 // Display for AccountId is implemented in aura-core crate
@@ -66,121 +66,8 @@ impl Default for GuardianPolicy {
 // ProtocolType is now imported from aura-core
 
 // EventNonce is now imported from aura-core
-
-/// Session information
-///
-/// Represents an active or completed protocol session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Session {
-    /// Unique identifier for this session
-    pub session_id: SessionId,
-    /// Type of protocol being executed in this session
-    pub protocol_type: ProtocolType,
-    /// List of participants in this session
-    pub participants: Vec<ParticipantId>,
-    /// Time when session was started (using unified time system)
-    pub started_at: TimeStamp,
-    /// Time when session will expire (using unified time system)
-    pub expires_at: TimeStamp,
-    /// Current status of the session
-    pub status: SessionStatus,
-    /// Additional metadata stored with the session
-    pub metadata: std::collections::BTreeMap<String, String>,
-}
-
-impl Session {
-    /// Create a new session
-    ///
-    /// # Arguments
-    /// * `session_id` - Unique identifier for the session
-    /// * `protocol_type` - Type of protocol being executed
-    /// * `participants` - List of participating device IDs
-    /// * `started_at` - Time when session starts (using unified time system)
-    /// * `ttl_ms` - Time-to-live in milliseconds
-    pub fn new(
-        session_id: SessionId,
-        protocol_type: ProtocolType,
-        participants: Vec<ParticipantId>,
-        started_at: TimeStamp,
-        ttl_ms: u64,
-    ) -> Self {
-        // Calculate expiration time based on the type of timestamp
-        let expires_at = match &started_at {
-            TimeStamp::PhysicalClock(physical) => TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: physical.ts_ms + ttl_ms,
-                uncertainty: physical.uncertainty,
-            }),
-            // For non-physical timestamps, use the same timestamp type but with a deterministic offset
-            _ => started_at.clone(), // For simplicity, will implement proper offset later if needed
-        };
-
-        Self {
-            session_id,
-            protocol_type,
-            participants,
-            started_at,
-            expires_at,
-            status: SessionStatus::Active,
-            metadata: std::collections::BTreeMap::new(),
-        }
-    }
-
-    /// Update the session status
-    ///
-    /// # Arguments
-    /// * `status` - New status for the session
-    pub fn update_status(&mut self, status: SessionStatus) {
-        self.status = status;
-    }
-
-    /// Mark session as completed
-    ///
-    /// # Arguments
-    /// * `_outcome` - Protocol outcome (unused)
-    pub fn complete(&mut self, _outcome: SessionOutcome) {
-        self.update_status(SessionStatus::Completed);
-    }
-
-    /// Abort the session due to failure
-    ///
-    /// # Arguments
-    /// * `_reason` - Reason for abort (unused)
-    /// * `_blamed_party` - Party responsible for failure (unused)
-    pub fn abort(&mut self, _reason: &str, _blamed_party: Option<ParticipantId>) {
-        self.update_status(SessionStatus::Failed);
-    }
-
-    /// Check if session is in a terminal state
-    pub fn is_terminal(&self) -> bool {
-        matches!(
-            self.status,
-            SessionStatus::Completed
-                | SessionStatus::Failed
-                | SessionStatus::Expired
-                | SessionStatus::TimedOut
-        )
-    }
-
-    /// Check if session has timed out
-    ///
-    /// # Arguments
-    /// * `current_time` - Current time for comparison
-    pub fn is_timed_out(&self, current_time: &TimeStamp) -> bool {
-        use aura_core::time::{OrderingPolicy, TimeOrdering};
-        matches!(
-            current_time.compare(&self.expires_at, OrderingPolicy::DeterministicTieBreak),
-            TimeOrdering::After
-        )
-    }
-
-    /// Check if session has expired
-    ///
-    /// # Arguments
-    /// * `current_time` - Current time for comparison
-    pub fn is_expired(&self, current_time: &TimeStamp) -> bool {
-        self.is_timed_out(current_time)
-    }
-}
+//
+// Note: Session type was removed - session tracking now happens in aura-protocol (Layer 4)
 
 // SessionStatus is now imported from aura-core
 

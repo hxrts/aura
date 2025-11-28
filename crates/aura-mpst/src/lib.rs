@@ -71,19 +71,76 @@ pub use rumpsteak_aura_choreography;
 // Note: aura-macros generates code that uses aura-mpst types,
 // but we don't import aura-macros here to avoid circular dependency
 
-// Legacy MPST modules (preserved for compatibility)
+// ===== Current Modules (Actively Used) =====
+
+/// AST extraction and annotation parsing for Aura choreographies
+/// Used by: aura-macros (production), examples
 pub mod ast_extraction;
-pub mod context;
-pub mod extensions;
-pub mod guards;
+
+/// Journal annotation types for fact-based operations
+/// Used by: aura-protocol/guards/journal_coupler.rs
 pub mod journal;
-pub mod leakage;
+
+/// Session type system types (LocalSessionType)
+/// Recently migrated from aura-core
+pub mod session;
+
+// ===== Test/Example-Only Modules (Compatibility) =====
+
+/// Extension system integration (used in integration tests)
+/// Note: Extensions now handled by aura-macros; this is test compatibility
+pub mod extensions;
+
+/// Runtime factory and protocol requirements (used in integration tests)
+/// Note: Runtime composition now in aura-agent; this is test compatibility
 pub mod runtime;
 
-/// Initialize the Aura extension system
+// ===== Deprecated Modules (Scheduled for Removal in 1.0) =====
+
+/// Context isolation for choreographies
+/// **DEPRECATED**: Use aura-core::identifiers::ContextId and context derivation instead
+/// **Removal Timeline**: Version 1.0 (Q2 2026)
+#[deprecated(
+    since = "0.1.0",
+    note = "Use aura-core::identifiers::ContextId and aura-core::context_derivation instead"
+)]
+pub mod context;
+
+// guards module REMOVED - use aura-protocol::guards::{CapGuard, SendGuard} instead
+// See ADR-015 for migration guidance
+
+/// Leakage budget tracking for choreographies
+/// **DEPRECATED**: Use aura-protocol::guards::LeakageTracker and aura-core::effects::LeakageEffects instead
+/// **Removal Timeline**: Version 1.0 (Q2 2026)
+#[deprecated(
+    since = "0.1.0",
+    note = "Use aura-protocol::guards::LeakageTracker and aura-core::effects::LeakageEffects instead"
+)]
+pub mod leakage;
+
+/// Initialize the Aura extension system (external-demo pattern)
 ///
-/// This function creates an extension registry for compatibility.
-/// The actual Aura extensions are now implemented in aura-macros.
+/// Returns an empty extension registry following the "external-demo" pattern.
+/// Aura-specific choreography extensions (guard_capability, flow_cost, journal_facts,
+/// leak annotations) are now implemented in the [`aura-macros`](../aura_macros/index.html)
+/// crate via procedural macros that parse and extract annotations at compile-time.
+///
+/// This function exists for:
+/// 1. Compatibility with rumpsteak's extension system
+/// 2. Testing that the registry initialization works
+/// 3. Future extensibility if runtime extensions become needed
+///
+/// For actual Aura extensions, see:
+/// - [`aura_macros::choreography`](../aura_macros/attr.choreography.html) - Parse choreography annotations
+/// - [`aura_macros`](../aura_macros/index.html) - All Aura procedural macros
+///
+/// # External-Demo Pattern
+///
+/// The "external-demo" pattern means extensions are handled outside the core library
+/// (in aura-macros) rather than being registered at runtime. This provides:
+/// - Compile-time validation of annotations
+/// - Zero runtime overhead for extension processing
+/// - Better error messages via proc macros
 pub fn init_aura_extensions() -> rumpsteak_aura_choreography::extensions::ExtensionRegistry {
     // Create empty registry - extensions are now handled in aura-macros
     rumpsteak_aura_choreography::extensions::ExtensionRegistry::new()
@@ -137,12 +194,19 @@ pub use ast_extraction::{
 /// Generated code uses types from this crate.
 // Legacy API re-exports for compatibility
 pub use aura_core::{identifiers::DeviceId, AuraError, AuraResult, Cap, Journal, JournalEffects};
-pub use context::{ContextIsolation, ContextType};
-pub use guards::{CapabilityGuard, GuardSyntax};
+
+// Current API re-exports
 pub use journal::{JournalAnnotation, JournalCoupling};
+pub use session::LocalSessionType;
+
+// Deprecated re-exports (for backward compatibility until 1.0)
+#[allow(deprecated)]
+pub use context::{ContextIsolation, ContextType};
+// guards re-exports REMOVED - use aura-protocol::guards instead
+#[allow(deprecated)]
 pub use leakage::{LeakageBudget, LeakageTracker};
 pub use runtime::{
-    AuraEndpoint, AuraHandler, AuraRuntime, ConnectionState, ExecutionContext, ExecutionMode,
+    AuraEndpoint, AuraHandler, ConnectionState, ExecutionContext, ExecutionMode,
 };
 
 /// Standard result type for MPST operations
@@ -228,8 +292,7 @@ where
         + std::marker::Sync
         + 'static,
 {
-    // Validate runtime state before execution
-    handler.runtime().validate()?;
+    // Note: Runtime validation removed - use aura-protocol guards for validation
 
     // Execute the program through rumpsteak-aura interpreter
     rumpsteak_aura_choreography::effects::interpret_extensible(handler, endpoint, program)
@@ -245,6 +308,7 @@ where
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 

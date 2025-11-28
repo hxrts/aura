@@ -12,6 +12,7 @@
 //! - `network_partition`: Network partition behavior and recovery
 //! - `multi_device_scenarios`: Complex scenarios combining multiple protocols
 
+
 // Sub-modules containing specific test scenarios
 pub mod anti_entropy;
 pub mod journal_sync;
@@ -44,7 +45,8 @@ pub async fn setup_test_trio() -> (ChoreographyTestHarness, NetworkSimulator) {
 /// Create session manager for testing
 pub fn test_session_manager() -> SessionManager<()> {
     let config = aura_sync::core::session::SessionConfig::default();
-    let now = aura_effects::time::wallclock_secs();
+    // Use deterministic timestamp for reproducible tests
+    let now = 1700000000u64; // 2023-11-15 in seconds
     SessionManager::new(config, now)
 }
 

@@ -6,7 +6,7 @@
 //! - Epoch rotation behavior
 //! - No-Observable-Without-Charge invariant
 
-use aura_core::{flow::FlowBudget, semilattice::JoinSemilattice, session_epochs::Epoch};
+use aura_core::{epochs::Epoch, flow::FlowBudget, semilattice::JoinSemilattice};
 
 /// Test FlowBudget CRDT join operation is associative
 #[test]

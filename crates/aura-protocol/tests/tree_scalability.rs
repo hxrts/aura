@@ -12,11 +12,11 @@
 
 #![allow(clippy::disallowed_methods)]
 
-use aura_core::tree::{
-    snapshot::Snapshot, AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
-};
 use aura_core::{DeviceId, Hash32, JoinSemilattice};
-use aura_journal::commitment_tree::{compaction::compact, reduction::reduce};
+use aura_journal::commitment_tree::{
+    compaction::compact, reduction::reduce, AttestedOp, LeafId, LeafNode, LeafRole, NodeIndex,
+    Snapshot, TreeOp, TreeOpKind,
+};
 use aura_journal::semilattice::OpLog;
 use aura_protocol::sync::PeerView;
 use std::collections::BTreeMap;

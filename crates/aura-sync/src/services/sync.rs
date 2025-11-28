@@ -37,7 +37,7 @@ use super::{HealthCheck, HealthStatus, Service, ServiceMetrics, ServiceState};
 use crate::core::{sync_session_error, MetricsCollector, SessionManager, SyncResult};
 use crate::infrastructure::{PeerDiscoveryConfig, PeerManager, RateLimitConfig, RateLimiter};
 use crate::protocols::{JournalSyncConfig, JournalSyncProtocol};
-use aura_core::effects::{PhysicalTimeEffects, TimeError, TimeEffects};
+use aura_core::effects::{PhysicalTimeEffects, TimeEffects, TimeError};
 use aura_core::{AuraError, DeviceId};
 use aura_effects::time::PhysicalTimeHandler;
 
@@ -153,7 +153,7 @@ impl SyncService {
     pub async fn new(config: SyncServiceConfig) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
         let time_effects = PhysicalTimeHandler;
-        let now_instant = time_effects.now_instant().await;
+        let now_instant = Instant::now(); // Rate limiting uses monotonic time
         let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
         let now = time_effects
             .physical_time()
@@ -183,7 +183,7 @@ impl SyncService {
         time_effects: &T,
     ) -> SyncResult<Self> {
         let peer_manager = PeerManager::new(config.peer_discovery.clone());
-        let now_instant = time_effects.now_instant().await;
+        let now_instant = Instant::now();
         let rate_limiter = RateLimiter::new(config.rate_limit.clone(), now_instant);
         let now = time_effects
             .physical_time()
@@ -356,7 +356,7 @@ impl SyncService {
 
         // Check rate limits before proceeding
         tracing::debug!("Auto-sync tick at {}", tick_ts.ts_ms);
-        let now = time_effects.now_instant().await;
+        let now = Instant::now();
         {
             let mut limiter = rate_limiter.write();
             for peer in &peers {
@@ -425,8 +425,8 @@ impl SyncService {
     /// Check rate limits for peer sync operations
     async fn check_rate_limits(&self, peers: &[DeviceId]) -> SyncResult<Vec<DeviceId>> {
         let mut allowed_peers = Vec::new();
+        let now = Instant::now();
         let mut rate_limiter = self.rate_limiter.write();
-        let now = self.time_effects.now_instant().await;
 
         for &peer in peers {
             let result = rate_limiter.check_rate_limit(peer, 1, now);
@@ -584,13 +584,15 @@ impl SyncService {
     }
 
     /// Wait for active sessions to complete with timeout using PhysicalTimeEffects
-    async fn wait_for_sessions_to_complete_with_time_effects<T: PhysicalTimeEffects + TimeEffects>(
+    async fn wait_for_sessions_to_complete_with_time_effects<
+        T: PhysicalTimeEffects + TimeEffects,
+    >(
         &self,
         time_effects: &T,
     ) -> SyncResult<()> {
         let timeout = Duration::from_secs(30); // 30 second timeout
         let check_interval = Duration::from_millis(100);
-        let start = time_effects.now_instant().await;
+        let start = Instant::now();
 
         while start.elapsed() < timeout {
             let active_sessions = {
@@ -867,52 +869,50 @@ impl SyncServiceBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_io::block_on;
 
-    #[test]
-    fn test_sync_service_creation() {
+    #[tokio::test]
+    async fn test_sync_service_creation() {
         let config = SyncServiceConfig::default();
-        let service = block_on(SyncService::new(config)).unwrap();
+        let service = SyncService::new(config).await.unwrap();
 
         assert_eq!(service.name(), "SyncService");
         assert!(!service.is_running());
     }
 
-    #[test]
-    fn test_sync_service_builder() {
-        let service = block_on(
-            SyncService::builder()
+    #[tokio::test]
+    async fn test_sync_service_builder() {
+        let service = SyncService::builder()
             .with_auto_sync(true)
             .with_sync_interval(Duration::from_secs(30))
-            .build(),
-        )
-        .unwrap();
+            .build()
+            .await
+            .unwrap();
 
         assert!(service.config.auto_sync_enabled);
         assert_eq!(service.config.auto_sync_interval, Duration::from_secs(30));
     }
 
-    #[test]
-    fn test_sync_service_lifecycle() {
-        let service = block_on(SyncService::builder().build()).unwrap();
+    #[tokio::test]
+    async fn test_sync_service_lifecycle() {
+        let service = SyncService::builder().build().await.unwrap();
 
         assert!(!service.is_running());
 
-        let now = block_on(service.time_effects.now_instant());
-        block_on(service.start(now)).unwrap();
+        let now = std::time::Instant::now();
+        service.start(now).await.unwrap();
         assert!(service.is_running());
 
-        block_on(service.stop()).unwrap();
+        service.stop().await.unwrap();
         assert!(!service.is_running());
     }
 
-    #[test]
-    fn test_sync_service_health_check() {
-        let service = block_on(SyncService::builder().build()).unwrap();
-        let now = block_on(service.time_effects.now_instant());
-        block_on(service.start(now)).unwrap();
+    #[tokio::test]
+    async fn test_sync_service_health_check() {
+        let service = SyncService::builder().build().await.unwrap();
+        let now = std::time::Instant::now();
+        service.start(now).await.unwrap();
 
-        let health = block_on(service.health_check()).unwrap();
+        let health = service.health_check().await.unwrap();
         assert_eq!(health.status, HealthStatus::Healthy);
         assert!(health.details.contains_key("active_sessions"));
     }

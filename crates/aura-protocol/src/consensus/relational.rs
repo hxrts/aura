@@ -10,9 +10,9 @@ use super::{
 };
 use aura_core::{
     effects::{PhysicalTimeEffects, RandomEffects},
+    epochs::Epoch,
     frost::{PublicKeyPackage, Share},
     relational::ConsensusProof,
-    session_epochs::Epoch,
     AuraError, AuthorityId, Prestate, Result,
 };
 use aura_effects::random::RealRandomHandler;

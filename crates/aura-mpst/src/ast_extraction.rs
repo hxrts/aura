@@ -190,10 +190,28 @@ fn detect_annotations_in_text(
         }
 
         // Handle leak annotation: [leak: (External, Neighbor)]
-        if line.contains("leak:") {
+        if line.contains("leak:") || line.contains("leak =") {
             if let Some(observers) = extract_leakage_observers_from_line(line) {
                 effects.push(AuraEffect::Leakage {
                     observers,
+                    role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
+                });
+            }
+        }
+
+        // Handle journal_merge annotation: [journal_merge = true] or [journal_merge]
+        if line.contains("journal_merge") {
+            // Extract role and add JournalMerge effect
+            effects.push(AuraEffect::JournalMerge {
+                role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
+            });
+        }
+
+        // Handle audit_log annotation: [audit_log = "action_name"]
+        if line.contains("audit_log") {
+            if let Some(action) = extract_audit_log_from_line(line) {
+                effects.push(AuraEffect::AuditLog {
+                    action,
                     role: extract_role_from_line(line).unwrap_or_else(|| "UnknownRole".to_string()),
                 });
             }
@@ -269,34 +287,66 @@ fn extract_journal_facts_from_line(line: &str) -> Option<String> {
     None
 }
 
-/// Extract leakage observers from a line
-fn extract_leakage_observers_from_line(line: &str) -> Option<Vec<String>> {
-    // Look for pattern like "leak: (External, Neighbor)" or "leak: (External)"
-    if let Some(start) = line.find("leak:") {
-        let after_leak = &line[start + 5..];
-
-        // Find the parentheses
-        if let Some(paren_start) = after_leak.find('(') {
-            if let Some(paren_end) = after_leak.find(')') {
-                let observers_str = &after_leak[paren_start + 1..paren_end];
-
-                // Split by comma and trim
-                let observers: Vec<String> = observers_str
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-
-                if !observers.is_empty() {
-                    return Some(observers);
-                }
+/// Extract audit log action from a line
+fn extract_audit_log_from_line(line: &str) -> Option<String> {
+    // Extract action value from line like: audit_log = "action_name"
+    if let Some(start) = line.find("audit_log") {
+        if let Some(quote_start) = line[start..].find('"') {
+            let quote_start = start + quote_start + 1;
+            if let Some(quote_end) = line[quote_start..].find('"') {
+                return Some(line[quote_start..quote_start + quote_end].to_string());
             }
         }
     }
     None
 }
 
+/// Extract leakage observers from a line
+fn extract_leakage_observers_from_line(line: &str) -> Option<Vec<String>> {
+    // Look for pattern like "leak: (External, Neighbor)" or "leak = (External)" or "leak = \"External\""
+    let after_leak = if let Some(start) = line.find("leak:") {
+        &line[start + 5..]
+    } else if let Some(start) = line.find("leak =") {
+        &line[start + 6..]
+    } else if let Some(start) = line.find("leak=") {
+        &line[start + 5..]
+    } else {
+        return None;
+    };
+
+    // Find the parentheses
+    if let Some(paren_start) = after_leak.find('(') {
+        if let Some(paren_end) = after_leak.find(')') {
+            let observers_str = &after_leak[paren_start + 1..paren_end];
+
+            // Split by comma and trim
+            let observers: Vec<String> = observers_str
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            if !observers.is_empty() {
+                return Some(observers);
+            }
+        }
+    }
+
+    // Also handle quoted string format: leak = "External"
+    if let Some(quote_start) = after_leak.find('"') {
+        if let Some(quote_end) = after_leak[quote_start + 1..].find('"') {
+            let observer = after_leak[quote_start + 1..quote_start + 1 + quote_end].trim();
+            if !observer.is_empty() {
+                return Some(vec![observer.to_string()]);
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 
@@ -420,5 +470,66 @@ mod tests {
             !has_flow_cost,
             "Should not have flow cost when no annotation bracket present"
         );
+    }
+
+    #[test]
+    fn test_journal_merge_annotation() {
+        let choreography = r#"
+            Alice[journal_merge = true] -> Bob: MergeRequest;
+        "#;
+        let effects = extract_aura_annotations(choreography).unwrap();
+
+        let has_journal_merge = effects
+            .iter()
+            .any(|e| matches!(e, AuraEffect::JournalMerge { role } if role == "Alice"));
+
+        assert!(has_journal_merge, "Should extract journal_merge annotation");
+    }
+
+    #[test]
+    fn test_audit_log_annotation() {
+        let choreography = r#"
+            Alice[audit_log = "message_sent"] -> Bob: Message;
+        "#;
+        let effects = extract_aura_annotations(choreography).unwrap();
+
+        let has_audit_log = effects
+            .iter()
+            .any(|e| matches!(e, AuraEffect::AuditLog { action, role } if action == "message_sent" && role == "Alice"));
+
+        assert!(has_audit_log, "Should extract audit_log annotation");
+    }
+
+    #[test]
+    fn test_leak_annotation_parentheses() {
+        let choreography = r#"
+            Alice[leak: (External, Neighbor)] -> Bob: Message;
+        "#;
+        let effects = extract_aura_annotations(choreography).unwrap();
+
+        let has_leakage = effects.iter().any(|e| {
+            matches!(e, AuraEffect::Leakage { observers, role }
+                if observers.contains(&"External".to_string())
+                && observers.contains(&"Neighbor".to_string())
+                && role == "Alice")
+        });
+
+        assert!(has_leakage, "Should extract leak annotation with parentheses");
+    }
+
+    #[test]
+    fn test_leak_annotation_quoted() {
+        let choreography = r#"
+            Alice[leak = "External"] -> Bob: Message;
+        "#;
+        let effects = extract_aura_annotations(choreography).unwrap();
+
+        let has_leakage = effects.iter().any(|e| {
+            matches!(e, AuraEffect::Leakage { observers, role }
+                if observers.contains(&"External".to_string())
+                && role == "Alice")
+        });
+
+        assert!(has_leakage, "Should extract leak annotation with quoted string");
     }
 }
