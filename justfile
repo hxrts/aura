@@ -35,11 +35,8 @@ summary:
                 | awk '{for(i=1;i<=NF;i++){ $i=toupper(substr($i,1,1)) substr($i,2) }}1')"
         fi
 
-        # Indent two spaces per directory depth
-        depth="$(awk -F'/' '{print NF-1}' <<<"$rel")"
-        indent="$(printf '%*s' $((depth*2)) '')"
-
-        echo "${indent}- [$title](${rel})" >> "$out"
+        # All items at top level (no directory-based indentation)
+        echo "- [$title](${rel})" >> "$out"
     done < <(find "$docs" -type f -name '*.md' -not -name 'SUMMARY.md' -not -path "$build_dir/*" | LC_ALL=C sort)
 
     echo "Wrote $out"
