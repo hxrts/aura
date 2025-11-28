@@ -68,4 +68,4 @@ quint run <spec>.qnt
 
 - [Quint Documentation](https://quint-lang.org/docs)
 - [Choreographic Testing](https://quint-lang.org/choreo)
-- [Aura Architecture](../../docs/)
+- [Aura Architecture](../../docs/001_system_architecture.md)
