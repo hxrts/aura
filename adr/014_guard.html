@@ -1,0 +1,483 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>ADR-014: Pure Guard Evaluation with Asynchronous Effect Interpretation - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="adr-014-pure-guard-evaluation-with-asynchronous-effect-interpretation"><a class="header" href="#adr-014-pure-guard-evaluation-with-asynchronous-effect-interpretation"><strong>ADR-014: Pure Guard Evaluation with Asynchronous Effect Interpretation</strong></a></h1>
+<p><strong>Status</strong>: Proposed
+<strong>Date</strong>: 2024-12-03
+<strong>Author</strong>: Architecture Team</p>
+<hr />
+<h1 id="1-context"><a class="header" href="#1-context">1. Context</a></h1>
+<p>Aura’s current guard system mixes synchronous trait calls with asynchronous effectful operations:</p>
+<ul>
+<li>Guards run on hot paths (protocol handlers, ratchets, validation) and are inherently <strong>synchronous</strong> at call sites.</li>
+<li>Effect operations (storage access, network I/O, capability evaluation, budget charging) are <strong>asynchronous</strong> and may require I/O.</li>
+<li>Simulation requires <strong>deterministic</strong>, <strong>single-threaded</strong>, <strong>fully replayable</strong> execution.</li>
+<li>WASM targets disallow blocking, making <code>block_on</code> and <code>blocking_recv</code> unusable.</li>
+</ul>
+<p>This produces persistent friction:</p>
+<ol>
+<li><strong>Sync guards calling async effects</strong> → blocking → deadlocks in WASM or single-threaded runtimes.</li>
+<li><strong>Simulation/production divergence</strong> → cannot share guard logic.</li>
+<li><strong>Effects hidden inside guards</strong> → difficult to observe, record, replay, or test.</li>
+</ol>
+<p>At the architectural level, this contradicts Aura’s theoretical model:
+Effects should be <em>algebraic operations</em>, not imperative async calls.</p>
+<hr />
+<h1 id="2-decision"><a class="header" href="#2-decision">2. Decision</a></h1>
+<p><strong>Convert the entire guard system to a <em>pure</em> synchronous evaluation model, where guards do not execute effects.</strong></p>
+<p>Instead:</p>
+<ol>
+<li>
+<p>Guards take an immutable <strong>GuardSnapshot</strong>, representing all data they are allowed to inspect.</p>
+</li>
+<li>
+<p>Guard evaluation is a <strong>pure function</strong>:</p>
+<pre><code>(snapshot, request) → (decision, Vec&lt;EffectCommand&gt;)
+</code></pre>
+</li>
+<li>
+<p>An <strong>EffectInterpreter</strong> is responsible for executing the effect commands returned from guards:</p>
+<ul>
+<li>In production: async, real I/O.</li>
+<li>In simulation: deterministic, single-threaded, event-logged.</li>
+</ul>
+</li>
+<li>
+<p>No guard directly performs I/O.</p>
+</li>
+<li>
+<p>No blocking is needed anywhere.</p>
+</li>
+<li>
+<p>Simulation and production share the same guard logic.</p>
+</li>
+</ol>
+<p>This aligns the system with algebraic-effect best practices and Aura’s own architecture model.</p>
+<hr />
+<h1 id="3-architecture"><a class="header" href="#3-architecture">3. Architecture</a></h1>
+<h2 id="31-overview"><a class="header" href="#31-overview">3.1 Overview</a></h2>
+<pre><code>           ┌─────────────────────────────────────┐
+           │    Pure Guard Evaluation (sync)      │
+           │   (Snapshot + Request → Outcome)     │
+           └─────────────────────────────────────┘
+                        │ produces
+                        ▼
+           ┌─────────────────────────────────────┐
+           │         Effect Commands              │
+           │ (charge budget, append journal, ... )│
+           └─────────────────────────────────────┘
+                        │ interpreted by
+                        ▼
+    ┌────────────────────────────┐     ┌────────────────────────────┐
+    │ ProductionEffectInterpreter│     │ SimulationEffectInterpreter│
+    │  - async I/O               │     │  - deterministic            │
+    │  - storage, network, etc.  │     │  - event log                │
+    └────────────────────────────┘     └────────────────────────────┘
+</code></pre>
+<p>All complexity moves to the interpreters.
+Guards remain pure, simple, testable logic.</p>
+<hr />
+<h1 id="32-guardsnapshot"><a class="header" href="#32-guardsnapshot">3.2 GuardSnapshot</a></h1>
+<p>Prepared by the async environment <em>before</em> entering the guard chain.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct GuardSnapshot {
+    pub now: TimeStamp,
+    pub caps: Cap,                      // Derived capability set
+    pub budgets: FlowBudgetView,        // Current headroom
+    pub metadata: MetadataView,         // Key state for metadata rules
+    pub rng_seed: [u8; 32],             // Pre-allocated randomness
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This is a <strong>read-only view</strong>.
+Guards cannot mutate global state.</p>
+<hr />
+<h1 id="33-pure-guard-evaluation"><a class="header" href="#33-pure-guard-evaluation">3.3 Pure Guard Evaluation</a></h1>
+<p>The guard chain becomes:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct GuardOutcome {
+    pub decision: Decision,             // Authorized / Denied
+    pub effects: Vec&lt;EffectCommand&gt;,    // Budget charges, journal writes, etc.
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The guard chain implementation:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait Guard {
+    fn evaluate(
+        &amp;self,
+        snapshot: &amp;GuardSnapshot,
+        request: &amp;Request
+    ) -&gt; GuardOutcome;
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Guards <strong>never</strong> perform effects directly.</p>
+<p>They only describe what must happen <em>if</em> the guard manager accepts the request.</p>
+<hr />
+<h1 id="34-effect-commands"><a class="header" href="#34-effect-commands">3.4 Effect Commands</a></h1>
+<p>These are the <strong>primitive algebraic operations</strong> of the Aura runtime.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum EffectCommand {
+    ChargeBudget { authority: AuthorityId, amount: u32 },
+    AppendJournal { entry: JournalEntry },
+    RecordLeakage { bits: u32 },
+    StoreMetadata { key: String, value: String },
+    SendEnvelope { to: Address, envelope: Vec&lt;u8&gt; },
+    GenerateNonce { bytes: usize },
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Key principle:
+<strong>Only minimal, domain-agnostic primitives go here.</strong>
+No high-level guards, no policy evaluation.</p>
+<hr />
+<h1 id="35-effect-interpreters"><a class="header" href="#35-effect-interpreters">3.5 Effect Interpreters</a></h1>
+<h3 id="production-interpreter-async"><a class="header" href="#production-interpreter-async">Production Interpreter (async)</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait EffectInterpreter {
+    async fn exec(&amp;self, cmd: EffectCommand) -&gt; Result&lt;EffectResult&gt;;
+}
+<span class="boring">}</span></code></pre></pre>
+<ul>
+<li>Uses <code>aura-effects</code></li>
+<li>Performs real storage reads/writes</li>
+<li>Sends network envelopes</li>
+<li>Updates flow budgets</li>
+<li>Any batching/caching is local and transparent</li>
+</ul>
+<h3 id="simulation-interpreter-deterministic"><a class="header" href="#simulation-interpreter-deterministic">Simulation Interpreter (deterministic)</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct SimulationEffectInterpreter {
+    pub time: TimeStamp,
+    pub rng: StdRng,
+    pub events: Vec&lt;SimulationEvent&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Effects append events:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>self.events.push(SimulationEvent::BudgetCharged { ... });
+self.events.push(SimulationEvent::MessageQueued { ... });
+<span class="boring">}</span></code></pre></pre>
+<p>Everything is single-threaded, no locks, no non-determinism.</p>
+<hr />
+<h1 id="36-end-to-end-flow"><a class="header" href="#36-end-to-end-flow">3.6 End-to-end Flow</a></h1>
+<pre><code>async fn handle(request):
+    snapshot = prepare_snapshot().await      // async
+    outcome  = guards.evaluate(snapshot)     // pure, sync
+
+    if outcome.decision == Denied:
+        return Deny
+
+    for cmd in outcome.effects:              // async
+        interpreter.exec(cmd).await?
+</code></pre>
+<p>Guards remain fast and sync → Zero blocking risk.
+Interpreter is async and free to take time → proper I/O boundaries.</p>
+<hr />
+<h1 id="4-rationale"><a class="header" href="#4-rationale">4. Rationale</a></h1>
+<h3 id="why-purity"><a class="header" href="#why-purity">Why purity?</a></h3>
+<ul>
+<li>Perfect fit for algebraic effects
+(effects become data; interpreters do the work).</li>
+<li>Avoids mix of sync/async in guards.</li>
+<li>Works in WASM (no blocking).</li>
+<li>Enables deterministic simulation.</li>
+</ul>
+<h3 id="why-snapshots"><a class="header" href="#why-snapshots">Why snapshots?</a></h3>
+<ul>
+<li>Guards cannot accidentally perform I/O.</li>
+<li>Snapshot preparation is async and can involve batching.</li>
+<li>Guards become a pure decision system.</li>
+</ul>
+<h3 id="why-two-interpreters"><a class="header" href="#why-two-interpreters">Why two interpreters?</a></h3>
+<ul>
+<li>Production: real async I/O</li>
+<li>Simulation: reproducible deterministic behavior</li>
+</ul>
+<p>Shared guard logic, separate execution semantics.</p>
+<h3 id="why-not-sync-executor-with-channels"><a class="header" href="#why-not-sync-executor-with-channels">Why not sync executor with channels?</a></h3>
+<ul>
+<li>Any sync→async bridging requires blocking or thread-hopping.</li>
+<li>WASM and single-threaded runtimes cannot support this.</li>
+<li>Async effects become explicit and boundary-safe.</li>
+</ul>
+<hr />
+<h1 id="5-consequences"><a class="header" href="#5-consequences">5. Consequences</a></h1>
+<h3 id="positive"><a class="header" href="#positive">Positive</a></h3>
+<ul>
+<li>Guards are pure → easy to test, simulate, reason about.</li>
+<li>No blocking &amp; full WASM compatibility.</li>
+<li>Effects are observable and replayable.</li>
+<li>Deterministic simulation with full event logs.</li>
+<li>Clean separation of concerns.</li>
+</ul>
+<h3 id="negative"><a class="header" href="#negative">Negative</a></h3>
+<ul>
+<li>Requires rewriting some existing guard logic to remove embedded I/O.</li>
+<li>Requires an async snapshot preparation stage.</li>
+<li>More explicit API (commands returned instead of implicit actions).</li>
+</ul>
+<h3 id="neutral"><a class="header" href="#neutral">Neutral</a></h3>
+<ul>
+<li>Effect command vocabulary must stay minimal.</li>
+<li>Interpreters become the main place for complexity (good layering).</li>
+</ul>
+<hr />
+<h1 id="6-migration-strategy"><a class="header" href="#6-migration-strategy">6. Migration Strategy</a></h1>
+<h3 id="phase-1--introduce-new-primitives-12-weeks"><a class="header" href="#phase-1--introduce-new-primitives-12-weeks">Phase 1 — Introduce New Primitives (1–2 weeks)</a></h3>
+<ul>
+<li>Add <code>EffectCommand</code>, <code>EffectResult</code>, and <code>EffectInterpreter</code>.</li>
+<li>Add <code>GuardSnapshot</code>.</li>
+<li>Add pure guard evaluation API.</li>
+</ul>
+<h3 id="phase-2--dual-path-12-weeks"><a class="header" href="#phase-2--dual-path-12-weeks">Phase 2 — Dual Path (1–2 weeks)</a></h3>
+<ul>
+<li>Prepare snapshots in existing runtime.</li>
+<li>Migrate guards to pure evaluation, keep old system as fallback.</li>
+</ul>
+<h3 id="phase-3--interpreter-integration-1-week"><a class="header" href="#phase-3--interpreter-integration-1-week">Phase 3 — Interpreter Integration (1 week)</a></h3>
+<ul>
+<li>Production: integrate async interpreter.</li>
+<li>Simulation: integrate deterministic interpreter.</li>
+</ul>
+<h3 id="phase-4--remove-old-system-1-week"><a class="header" href="#phase-4--remove-old-system-1-week">Phase 4 — Remove Old System (1 week)</a></h3>
+<ul>
+<li>Delete <code>GuardEffectSystem</code>.</li>
+<li>Delete blocking sync/async bridges.</li>
+<li>Update documentation.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../999_project_structure.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../adr/015_choreography_first_guards.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../999_project_structure.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../adr/015_choreography_first_guards.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

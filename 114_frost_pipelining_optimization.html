@@ -1,0 +1,448 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>FROST Pipelined Commitment Optimization - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="frost-pipelined-commitment-optimization"><a class="header" href="#frost-pipelined-commitment-optimization">FROST Pipelined Commitment Optimization</a></h1>
+<p>This document describes the pipelined commitment optimization for FROST consensus that reduces steady-state consensus from 2 RTT (round-trip times) to 1 RTT.</p>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>The FROST pipelining optimization improves consensus performance by bundling next-round nonce commitments with current-round signature shares. This allows the coordinator to start the next consensus round immediately without waiting for a separate nonce commitment phase.</p>
+<h3 id="standard-frost-consensus-2-rtt"><a class="header" href="#standard-frost-consensus-2-rtt">Standard FROST Consensus (2 RTT)</a></h3>
+<p>In standard FROST consensus, each round requires:</p>
+<ol>
+<li><strong>Execute → NonceCommit</strong> (1 RTT): Coordinator sends execute request, witnesses respond with nonce commitments</li>
+<li><strong>SignRequest → SignShare</strong> (1 RTT): Coordinator sends aggregated nonces, witnesses respond with signature shares</li>
+</ol>
+<p>Total: <strong>2 RTT per consensus</strong></p>
+<h3 id="pipelined-frost-consensus-1-rtt"><a class="header" href="#pipelined-frost-consensus-1-rtt">Pipelined FROST Consensus (1 RTT)</a></h3>
+<p>With pipelining optimization:</p>
+<ol>
+<li><strong>Execute+SignRequest → SignShare+NextCommitment</strong> (1 RTT):
+<ul>
+<li>Coordinator sends execute request with cached commitments from previous round</li>
+<li>Witnesses respond with signature share AND next-round nonce commitment</li>
+</ul>
+</li>
+</ol>
+<p>Total: <strong>1 RTT per consensus</strong> (after warm-up)</p>
+<h2 id="architecture"><a class="header" href="#architecture">Architecture</a></h2>
+<h3 id="core-components"><a class="header" href="#core-components">Core Components</a></h3>
+<h4 id="witnessstate-consensuswitness_staters"><a class="header" href="#witnessstate-consensuswitness_staters">WitnessState (<code>consensus/witness_state.rs</code>)</a></h4>
+<p>Manages persistent nonce state for each witness:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct WitnessState {
+    /// Precomputed nonce for the next consensus round
+    next_nonce: Option&lt;(NonceCommitment, NonceToken)&gt;,
+    
+    /// Current epoch to detect when cached commitments become stale
+    epoch: Epoch,
+    
+    /// Witness identifier
+    witness_id: AuthorityId,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Key methods:</p>
+<ul>
+<li><code>get_next_commitment()</code>: Returns cached commitment if valid for current epoch</li>
+<li><code>take_nonce()</code>: Consumes cached nonce for use in current round</li>
+<li><code>set_next_nonce()</code>: Stores new nonce for future use</li>
+<li><code>invalidate()</code>: Clears cached state on epoch change</li>
+</ul>
+<h4 id="message-schema-updates-consensuschoreographyrs"><a class="header" href="#message-schema-updates-consensuschoreographyrs">Message Schema Updates (<code>consensus/choreography.rs</code>)</a></h4>
+<p>The <code>SignShare</code> message now includes optional next-round commitment:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>SignShare {
+    consensus_id: ConsensusId,
+    share: PartialSignature,
+    /// Optional commitment for the next consensus round (pipelining optimization)
+    next_commitment: Option&lt;NonceCommitment&gt;,
+    /// Epoch for commitment validation
+    epoch: Epoch,
+}
+<span class="boring">}</span></code></pre></pre>
+<h4 id="pipelinedconsensusorchestrator-consensusfrost_pipeliningrs"><a class="header" href="#pipelinedconsensusorchestrator-consensusfrost_pipeliningrs">PipelinedConsensusOrchestrator (<code>consensus/frost_pipelining.rs</code>)</a></h4>
+<p>Orchestrates the optimization logic:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct PipelinedConsensusOrchestrator {
+    /// Manager for witness nonce states
+    witness_states: WitnessStateManager,
+    
+    /// Current epoch
+    current_epoch: Epoch,
+    
+    /// Threshold required for consensus
+    threshold: u16,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Key methods:</p>
+<ul>
+<li><code>run_consensus()</code>: Determines fast path vs slow path based on cached commitments</li>
+<li><code>can_use_fast_path()</code>: Checks if sufficient cached commitments available</li>
+<li><code>handle_epoch_change()</code>: Invalidates all cached state on epoch rotation</li>
+</ul>
+<h2 id="epoch-safety"><a class="header" href="#epoch-safety">Epoch Safety</a></h2>
+<p>All cached commitments are bound to epochs to prevent replay attacks:</p>
+<ol>
+<li><strong>Epoch Binding</strong>: Each commitment is tied to a specific epoch</li>
+<li><strong>Automatic Invalidation</strong>: Epoch changes invalidate all cached commitments</li>
+<li><strong>Validation</strong>: Witnesses reject commitments from wrong epochs</li>
+</ol>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Epoch change invalidates all cached nonces
+if self.epoch != current_epoch {
+    self.next_nonce = None;
+    self.epoch = current_epoch;
+    return None;
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="fallback-handling"><a class="header" href="#fallback-handling">Fallback Handling</a></h2>
+<p>The system gracefully falls back to 2 RTT when:</p>
+<ol>
+<li><strong>Insufficient Cached Commitments</strong>: Less than threshold witnesses have cached nonces</li>
+<li><strong>Epoch Change</strong>: All cached commitments become invalid</li>
+<li><strong>Witness Failures</strong>: Missing or invalid next_commitment in responses</li>
+<li><strong>Initial Bootstrap</strong>: First round after startup (no cached state)</li>
+</ol>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>if has_quorum {
+    // Fast path: 1 RTT using cached commitments
+    self.run_fast_path(...)
+} else {
+    // Slow path: 2 RTT standard consensus
+    self.run_slow_path(...)
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="performance-impact"><a class="header" href="#performance-impact">Performance Impact</a></h2>
+<h3 id="latency-reduction"><a class="header" href="#latency-reduction">Latency Reduction</a></h3>
+<ul>
+<li><strong>Before</strong>: 2 RTT per consensus</li>
+<li><strong>After</strong>: 1 RTT per consensus (steady state)</li>
+<li><strong>Improvement</strong>: 50% latency reduction</li>
+</ul>
+<h3 id="message-count"><a class="header" href="#message-count">Message Count</a></h3>
+<ul>
+<li><strong>Before</strong>: 4 messages per witness (Execute, NonceCommit, SignRequest, SignShare)</li>
+<li><strong>After</strong>: 2 messages per witness (Execute+SignRequest, SignShare+NextCommitment)</li>
+<li><strong>Improvement</strong>: 50% message reduction</li>
+</ul>
+<h3 id="trade-offs"><a class="header" href="#trade-offs">Trade-offs</a></h3>
+<ul>
+<li><strong>Memory</strong>: Small overhead for caching one nonce per witness</li>
+<li><strong>Complexity</strong>: Additional state management and epoch tracking</li>
+<li><strong>Bootstrap</strong>: First round still requires 2 RTT</li>
+</ul>
+<h2 id="implementation-guidelines"><a class="header" href="#implementation-guidelines">Implementation Guidelines</a></h2>
+<h3 id="adding-pipelining-to-new-consensus-operations"><a class="header" href="#adding-pipelining-to-new-consensus-operations">Adding Pipelining to New Consensus Operations</a></h3>
+<ol>
+<li><strong>Update Message Schema</strong>: Add <code>next_commitment</code> and <code>epoch</code> fields to response messages</li>
+<li><strong>Generate Next Nonce</strong>: During signature generation, also generate next-round nonce</li>
+<li><strong>Cache Management</strong>: Store next nonce in <code>WitnessState</code> for future use</li>
+<li><strong>Epoch Handling</strong>: Always validate epoch before using cached commitments</li>
+</ol>
+<h3 id="example-witness-implementation"><a class="header" href="#example-witness-implementation">Example: Witness Implementation</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub async fn handle_sign_request&lt;R: RandomEffects + ?Sized&gt;(
+    &amp;mut self,
+    consensus_id: ConsensusId,
+    aggregated_nonces: Vec&lt;NonceCommitment&gt;,
+    current_epoch: Epoch,
+    random: &amp;R,
+) -&gt; Result&lt;ConsensusMessage&gt; {
+    // Generate signature share
+    let share = self.create_signature_share(consensus_id, aggregated_nonces)?;
+    
+    // Generate or retrieve next-round commitment
+    let next_commitment = if let Some((commitment, _)) = self.witness_state.take_nonce(current_epoch) {
+        // Use cached nonce
+        Some(commitment)
+    } else {
+        // Generate fresh nonce
+        let (nonces, commitment) = self.generate_nonce(random).await?;
+        let token = NonceToken::from(nonces);
+        
+        // Cache for future
+        self.witness_state.set_next_nonce(commitment.clone(), token, current_epoch);
+        
+        Some(commitment)
+    };
+    
+    Ok(ConsensusMessage::SignShare {
+        consensus_id,
+        share,
+        next_commitment,
+        epoch: current_epoch,
+    })
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h2>
+<ol>
+<li><strong>Nonce Reuse Prevention</strong>: Each nonce is used exactly once and tied to specific epoch</li>
+<li><strong>Epoch Isolation</strong>: Nonces from different epochs cannot be mixed</li>
+<li><strong>Forward Security</strong>: Epoch rotation provides natural forward security boundary</li>
+<li><strong>Availability</strong>: Fallback ensures consensus continues even without optimization</li>
+</ol>
+<h2 id="testing-strategy"><a class="header" href="#testing-strategy">Testing Strategy</a></h2>
+<h3 id="unit-tests"><a class="header" href="#unit-tests">Unit Tests</a></h3>
+<ul>
+<li>Epoch invalidation logic</li>
+<li>Nonce caching and retrieval</li>
+<li>Message serialization with new fields</li>
+</ul>
+<h3 id="integration-tests"><a class="header" href="#integration-tests">Integration Tests</a></h3>
+<ul>
+<li>Fast path vs slow path selection</li>
+<li>Epoch transition handling</li>
+<li>Performance measurement</li>
+</ul>
+<h3 id="simulation-tests"><a class="header" href="#simulation-tests">Simulation Tests</a></h3>
+<ul>
+<li>Network delay impact on 1 RTT vs 2 RTT</li>
+<li>Behavior under partial failures</li>
+<li>Convergence properties</li>
+</ul>
+<h2 id="future-enhancements"><a class="header" href="#future-enhancements">Future Enhancements</a></h2>
+<ol>
+<li><strong>Adaptive Thresholds</strong>: Dynamically adjust quorum requirements based on cached state</li>
+<li><strong>Predictive Caching</strong>: Pre-generate multiple rounds of nonces during idle time</li>
+<li><strong>Compression</strong>: Batch multiple commitments in single message</li>
+<li><strong>Cross-Context Optimization</strong>: Share cached state across related consensus contexts</li>
+</ol>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<ul>
+<li><a href="https://eprint.iacr.org/2020/852">FROST Paper</a>: Flexible Round-Optimized Schnorr Threshold Signatures</li>
+<li><a href="104_consensus.html"><code>docs/104_consensus.md</code></a>: Aura Consensus Protocol</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="112_amp.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="801_hello_world_guide.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="112_amp.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="801_hello_world_guide.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

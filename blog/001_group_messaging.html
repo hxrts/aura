@@ -1,0 +1,413 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Aura Messaging Protocol - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="aura-messaging-protocol"><a class="header" href="#aura-messaging-protocol">Aura Messaging Protocol</a></h1>
+<p>The Aura Messaging Protocol (AMP) provides secure asynchronous messaging for threshold identity systems. The protocol addresses a fundamental challenge in distributed cryptographic systems. Traditional messaging protocols assume that secrets are stored on specific devices. This assumption breaks down when identity is distributed across multiple devices using threshold cryptography.</p>
+<p>AMP builds on a novel foundation. Shared state in CRDT journals is canonical. Secrets are derived deterministically from this shared state. Ratchet operations remain fully recoverable. This design eliminates the traditional tension between post-compromise security and account recovery.</p>
+<h2 id="design-constraints"><a class="header" href="#design-constraints">Design Constraints</a></h2>
+<p>AMP operates under strict architectural constraints which arise from Aura's relational authority model. The protocol must support multi-device authorities where device membership changes over time. It must provide deterministic recovery after complete device loss. It must prevent head-of-line blocking in asynchronous group communication.</p>
+<p>The protocol requires that all ratchet state can be reconstructed from journal facts. No device may maintain ratchet state that cannot be recovered by other devices in the authority. This requirement stems from Aura's core principle that authorities are opaque. External parties cannot observe which specific devices are online or processing messages.</p>
+<p>Flow budgets and receipts must integrate with the ratchet mechanism. Every message send must charge monotone budgets before transmission. Receipts must prove that budget charges occurred. This integration ensures that privacy leakage and spam resistance use the same foundational mechanism.</p>
+<h2 id="commitment-tree-foundation"><a class="header" href="#commitment-tree-foundation">Commitment Tree Foundation</a></h2>
+<p>The commitment tree defines authority structure. Each authority maintains an internal tree with branch nodes and leaf nodes. Leaf nodes represent devices holding threshold signing shares. Branch nodes represent subpolicies expressed as m-of-n thresholds. The tree structure is hidden from external parties.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct TreeState {
+    pub epoch: Epoch,
+    pub root_commitment: Hash32,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The <code>TreeState</code> represents the reduced state of an account authority. The <code>epoch</code> field scopes all derived keys. The <code>root_commitment</code> field is a Merkle hash over the ordered tree structure. External parties see only these two values.</p>
+<p>Tree operations modify device membership and policies. The <code>AddLeaf</code> operation inserts a new device. The <code>RemoveLeaf</code> operation removes an existing device. The <code>ChangePolicy</code> operation updates threshold requirements. The <code>RotateEpoch</code> operation increments the epoch and invalidates all derived keys. Each operation appears in the journal as an attested operation signed by the required threshold of devices.</p>
+<p>The tree supports concurrent updates through deterministic conflict resolution. When multiple devices propose operations against the same parent commitment, the reduction function selects a single winner. The selection uses a total order based on operation hash. All replicas with the same fact set compute the same winning operation. Losing operations are discarded.</p>
+<pre class="mermaid">graph TD
+    A[Multiple Concurrent Ops] --&gt; B[Group by Parent Commitment]
+    B --&gt; C[Select Winner by Hash Order]
+    C --&gt; D[Apply in Epoch Order]
+    D --&gt; E[Single TreeState]
+</pre>
+<p>This diagram shows how the reduction algorithm processes concurrent tree operations. The algorithm groups operations by their parent commitment. It selects a deterministic winner from each group. It applies winners in epoch order to produce a single canonical tree state.</p>
+<p>The commitment tree integrates with AMP through key derivation. The channel base key for a given <code>ChannelId</code> and epoch is derived as <code>KDF(TreeRoot, ChannelId, epoch)</code>. All devices in the authority compute the same base key. This ensures that message encryption and decryption use consistent keys across all devices.</p>
+<h2 id="journal-and-crdt-state"><a class="header" href="#journal-and-crdt-state">Journal and CRDT State</a></h2>
+<p>Aura uses CRDT journals to store all authoritative state. Each authority and each relational context has its own journal namespace. Journals are join semilattices under set union where facts monotonically accumulate and deterministically reduce.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct Journal {
+    pub facts: BTreeSet&lt;Fact&gt;,
+}
+
+pub enum FactContent {
+    AttestedOp(AttestedOp),
+    Relational(RelationalFact),
+    Snapshot(SnapshotFact),
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The <code>Journal</code> type defines a fact set. The <code>FactContent</code> enum defines the types of facts that can appear. Attested operations represent signed tree updates. Relational facts represent cross-authority coordination. Snapshot facts summarize prior state for garbage collection.</p>
+<p>AMP stores channel checkpoints as relational facts in the context journal. Each checkpoint defines two overlapping skip windows that specify valid ratchet generations. The checkpoint includes the base generation, window size, and a commitment to the channel state. All participants in the relational context can see these checkpoints.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ChannelCheckpoint {
+    pub context: ContextId,
+    pub channel: ChannelId,
+    pub chan_epoch: u64,
+    pub base_gen: u64,
+    pub window: u32,
+    pub ck_commitment: Hash32,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This checkpoint structure anchors the ratchet state. The <code>chan_epoch</code> field identifies the current channel epoch. The <code>base_gen</code> field defines the anchor point for the dual windows. The <code>window</code> field defines the size of each window. The default window size is 1024 generations.</p>
+<p>Channel epoch bumps use consensus for strong agreement. A proposed bump is published as a relational fact. Witnesses verify that all authorities see the same prestate. The consensus protocol produces a threshold signature over the bump. The committed bump fact enters the journal. Reduction observes the committed bump and advances the channel to the new epoch.</p>
+<p>The journal reduction pipeline integrates with AMP at several points. Reduction produces the current channel epoch and checkpoint. This state determines which ratchet generations are valid. Reduction also verifies that flow budget charges occurred before message sends. This coupling ensures that the charge-before-send invariant is preserved.</p>
+<h2 id="channel-epoch-system"><a class="header" href="#channel-epoch-system">Channel Epoch System</a></h2>
+<p>Channel epochs provide the primary boundary for post-compromise security. Each epoch uses an independent base key derived from the tree root. Epoch rotation invalidates all keys from the previous epoch. The rotation is atomic. All devices observe the same epoch after merging journal facts.</p>
+<p>The epoch bump lifecycle has two states. The <code>Stable(e)</code> state indicates that epoch <code>e</code> is finalized. The <code>Pending(e → e+1)</code> state indicates that an optimistic bump has been proposed. No new bump can be proposed while a bump is pending. This single-pending-bump invariant ensures linear epoch progression.</p>
+<pre class="mermaid">sequenceDiagram
+    participant D as Device
+    participant J as Journal
+    participant C as Consensus
+    participant N as Network
+
+    D-&gt;&gt;J: Observe spacing rule satisfied
+    D-&gt;&gt;C: Propose epoch bump (e→e+1)
+    C-&gt;&gt;C: Run consensus with witnesses
+    C-&gt;&gt;J: Insert CommittedChannelEpochBump
+    J-&gt;&gt;J: Reduction advances epoch
+    D-&gt;&gt;D: Derive new base key for e+1
+    D-&gt;&gt;N: Send messages under epoch e+1
+</pre>
+<p>A device observes that the spacing rule is satisfied. The device proposes a bump to consensus. Consensus produces a threshold signature. The committed bump enters the journal. Reduction advances the epoch. Devices derive new keys and continue messaging.</p>
+<p>The spacing rule limits routine bump frequency. A routine bump from epoch <code>e</code> to <code>e+1</code> requires that <code>current_gen - base_gen &gt;= W/2</code>. With the default window size of 1024, this means at least 512 generations must have passed. This spacing ensures that dual windows provide complete coverage during transitions.</p>
+<p>In order to provide fast post-compromise recovery when needed, suspicious events such as repeated AEAD failures or conflicting ratchet commitments can trigger an emergency bump, bypassing the spacing rule. Emergency bumps rotate keys without waiting for generation advancement. The dual window mechanism absorbs the transition without message loss.</p>
+<h2 id="dual-window-ratchet-mechanism"><a class="header" href="#dual-window-ratchet-mechanism">Dual Window Ratchet Mechanism</a></h2>
+<p>AMP uses an always-dual window model. Every checkpoint implicitly defines two consecutive skip windows. This provides continuous coverage of <code>2W</code> ratchet generations. The model eliminates boundary conditions that would otherwise lead to queued or dropped messages.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Window layout for checkpoint at generation G with window W
+let window_a = G..(G + W);
+let window_b = (G + W + 1)..(G + 2*W);
+let valid_gen_set = window_a.union(window_b);
+<span class="boring">}</span></code></pre></pre>
+<p>This code shows the window computation. Window A covers generations from <code>G</code> to <code>G+W</code>. Window B covers generations from <code>G+W+1</code> to <code>G+2W</code>. The valid generation set is the union of both windows. Any message with a generation in this set can be decrypted.</p>
+<p>The dual window design solves the asynchronous delivery problem. Messages may arrive out of order by up to <code>W</code> generations. During epoch transitions, messages may be sent under either the old or new epoch. The overlapping windows ensure that all valid messages can be decrypted. No synchronization is required.</p>
+<p>Ratchet generation is not a local counter. It is always derived from reduced journal state. Devices compute the current generation by examining send and receive events in the reduced context state. This ensures that all devices converge to the same ratchet position. Offline devices catch up by reducing the merged journal.</p>
+<p>Message derivation uses a KDF chain, similar to <a href="https://signal.org/docs/specifications/doubleratchet/#kdf-chains">Signal's construction</a>, but distinct in a few ways. AMP derives all ratchet state deterministically from replicated journal facts rather than device-local databases. This enables complete recovery across multiple devices without coordination. The channel base key is derived from the tree root and channel epoch. The message key for generation <code>g</code> is derived as <code>KDF(base_key, g, direction)</code>. The <code>direction</code> parameter distinguishes send and receive chains. AEAD encryption uses the message key with the channel header as additional data.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct AmpHeader {
+    context: ContextId,
+    channel: ChannelId,
+    chan_epoch: u64,
+    ratchet_gen: u64,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The <code>AmpHeader</code> contains the routing and ratchet information. The <code>context</code> and <code>channel</code> fields identify the communication stream. The <code>chan_epoch</code> field identifies which base key to use. The <code>ratchet_gen</code> field identifies which generation key to derive. This header becomes the AEAD additional data.</p>
+<p>The reduce-before-send rule is critical. Before sending a message, a device must merge the latest journal facts. It must reduce the channel state to get the current epoch and generation. It must verify that the generation is within the valid window. Only then can it derive the message key and encrypt. This rule prevents devices from sending under stale epochs.</p>
+<h2 id="forward-secrecy-and-post-compromise-security"><a class="header" href="#forward-secrecy-and-post-compromise-security">Forward Secrecy and Post-Compromise Security</a></h2>
+<p>AMP provides bounded forward secrecy and strong post-compromise security. Forward secrecy is bounded by the skip window size. Within a single epoch, an attacker who compromises a device learns at most <code>W</code> future message keys. Older epochs use independent base keys. Compromise of epoch <code>e</code> reveals nothing about epoch <code>e-1</code>.</p>
+<p>Post-compromise security operates at two levels. Channel epoch bumps heal compromise of channel secret state. Context epoch bumps heal compromise of tree root material. Channel bumps are frequent and cheap. Context bumps are rare and expensive. The protocol allows applications to choose the appropriate healing granularity.</p>
+<p>The dual window mechanism provides continuous post-compromise healing. When an emergency bump occurs, the new epoch uses a fresh base key. Messages sent under the new epoch cannot be decrypted with the old base key. The overlapping windows ensure that honest messages in flight are not lost. Attacker messages from before the bump become invalid.</p>
+<p>Key rotation integrates with the commitment tree. When a tree epoch rotates, all derived channel base keys change. This is the strongest form of post-compromise security. It requires that all relational contexts re-derive their shared secrets. Applications trigger tree epoch rotation when device compromise is confirmed or when long-term key material may have been exposed.</p>
+<h2 id="distributed-systems-properties"><a class="header" href="#distributed-systems-properties">Distributed Systems Properties</a></h2>
+<p>AMP achieves several critical distributed systems properties. The protocol provides eventual consistency through CRDT journals. It provides deterministic recovery through fact-based state. It provides strong agreement where needed through Aura Consensus. It provides no head-of-line blocking through skip windows.</p>
+<p>Concurrent message sends are handled naturally. Multiple devices in an authority can send messages simultaneously. Each device advances its local generation counter. The messages arrive at receivers in arbitrary order. The dual window mechanism accepts all messages within the valid generation range. There is no requirement for devices to coordinate before sending.</p>
+<p>The protocol tolerates network partitions. Devices that are offline continue to accumulate journal facts when they reconnect. Reduction brings them to the current epoch and checkpoint. They can immediately decrypt messages sent during their absence. They can resume sending messages after reducing the current state. No manual recovery is required.</p>
+<pre class="mermaid">graph LR
+    A[Device Offline] --&gt; B[Reconnect]
+    B --&gt; C[Merge Journal Facts]
+    C --&gt; D[Reduce to Current State]
+    D --&gt; E[Resume Messaging]
+</pre>
+<p>This diagram shows the recovery flow for an offline device. The device reconnects to the network. It merges new facts from other devices. It reduces the journal to compute current state. It resumes normal messaging. The entire process is deterministic and automatic.</p>
+<p>Consensus integration provides the necessary synchronization primitive. Channel epoch bumps use consensus to ensure all devices agree on the epoch transition. The consensus protocol binds the bump to the current tree commitments of all participants. Witnesses verify the prestate before producing shares. This prevents fork attacks where different devices see different epoch histories.</p>
+<p>The fast path consensus optimization reduces latency. Standard consensus requires two round trips. The first round exchanges nonce commitments. The second round exchanges signature shares. Pipelined consensus bundles the next round's commitments with the current round's shares. This reduces steady-state consensus to one round trip.</p>
+<p>Garbage collection operates safely over the journal. Checkpoints define pruning boundaries. Facts older than the checkpoint can be removed. The pruning boundary is computed as <code>max_checkpoint_gen - 2*W - safety_margin</code>. This ensures that all messages within the dual window coverage can still be validated. Pruned facts are replaced by snapshot facts that summarize the state.</p>
+<h2 id="authorization-and-flow-control"><a class="header" href="#authorization-and-flow-control">Authorization and Flow Control</a></h2>
+<p>AMP integrates with Aura's guard chain for authorization and flow control. Every message send passes through <code>CapGuard</code>, <code>FlowGuard</code>, and <code>JournalCoupler</code> before reaching the transport. This ensures that unauthorized sends and over-budget sends produce no observable behavior.</p>
+<p>The guard chain uses Biscuit tokens for capability evaluation. Each authority holds a device token derived from its root keypair. The device token contains capabilities scoped to specific contexts. Sending a message requires the <code>send</code> capability for the target channel. The guard chain verifies the token signature and evaluates Datalog caveats.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Guard chain sequence
+let snapshot = prepare_guard_snapshot(context, peer).await;
+let cap_result = CapGuard::evaluate(&amp;snapshot, &amp;operation);
+let flow_result = FlowGuard::charge(&amp;snapshot, cost);
+let journal_result = JournalCoupler::commit(&amp;snapshot, facts);
+let transport_result = TransportEffects::send(&amp;encrypted_msg);
+<span class="boring">}</span></code></pre></pre>
+<p>This code shows the guard chain evaluation. The snapshot captures the current capability frontier and flow budget state. <code>CapGuard</code> evaluates the Biscuit token. <code>FlowGuard</code> charges the flow budget. <code>JournalCoupler</code> commits the charge as a fact. <code>TransportEffects</code> sends the message. Any failure returns locally without observable effects.</p>
+<p>Flow budgets are replicated as spent counters in the journal. The <code>spent</code> counter for a <code>(context, peer)</code> pair is a monotone fact. The <code>limit</code> is computed at runtime from Biscuit capabilities and sovereign policy. Before sending, <code>FlowGuard</code> checks that <code>spent + cost &lt;= limit</code>. If headroom exists, it emits a fact that increments <code>spent</code>.</p>
+<p>Receipts provide accountability for multi-hop forwarding. Each relay hop produces a receipt containing the <code>ContextId</code>, source, destination, epoch, cost, and signature. The receipt proves that the relay charged its budget before forwarding. Downstream parties verify receipts before accepting messages. This prevents budget bypass attacks.</p>
+<p>The charge-before-send invariant is enforced by the guard chain sequence. The journal fact for the budget charge must be committed before the transport send occurs. If journal commit fails, the send is aborted locally. This ensures that the monotone spent counter advances in lockstep with observable sends. No device can send without charging.</p>
+<h2 id="consensus-integration"><a class="header" href="#consensus-integration">Consensus Integration</a></h2>
+<p>Aura Consensus provides the synchronization primitive for channel epoch bumps. The protocol uses a witness set drawn from the participating authorities in the relational context. Witnesses may be the participants themselves or designated guardians. The witness set is configured per context.</p>
+<p>The consensus protocol binds operations to explicit prestates. The prestate hash commits to the current tree root of each authority and the current context state. Witnesses verify that their local state matches the prestate before producing signature shares. This prevents equivocation attacks where different witnesses see different prestates.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let prestate_hash = H(
+    C_auth1,
+    C_auth2,
+    C_context
+);
+let operation_hash = H(Op);
+let consensus_id = ConsensusId::new(
+    prestate_hash,
+    operation_hash,
+    nonce
+);
+<span class="boring">}</span></code></pre></pre>
+<p>This code shows prestate computation. The prestate hash commits to the tree commitment of each authority and the journal commitment of the context. The operation hash commits to the proposed bump. The consensus ID uniquely identifies this consensus instance. Witnesses use this ID to deduplicate shares.</p>
+<p>The fast path completes in one round trip when witnesses agree on prestate. The initiator broadcasts execute messages containing the prestate and operation. Witnesses verify the prestate, generate signature shares, and return them with their next-round nonce commitments. The initiator aggregates the shares into a threshold signature.</p>
+<p>The fallback path uses epidemic gossip when witnesses disagree or the initiator fails. Witnesses exchange share proposals through bounded fanout gossip. Any witness that assembles a valid threshold signature broadcasts the complete commit fact. Other witnesses observe the commit in the journal and abort their gossip. This provides liveness even when the initiator is offline.</p>
+<p>The committed bump fact includes the threshold signature and the list of participating authorities. The fact enters the relational context journal. Reduction observes the fact and advances the channel epoch. The new epoch becomes canonical. All future operations use the new base key derived from this epoch.</p>
+<h2 id="recovery-and-determinism"><a class="header" href="#recovery-and-determinism">Recovery and Determinism</a></h2>
+<p>Recovery in AMP is fully deterministic. A device that loses all local state can recover by loading the relational context journal. It reduces the journal to compute the current channel epoch and checkpoint. It derives the channel base key from the tree root and epoch. It derives ratchet state from the checkpoint windows.</p>
+<p>The recovery process requires no coordination. The device does not need to contact other participants. It does not need to request missing state. It only needs access to the journal facts. Once reduction completes, the device has the same view as all other participants. It can immediately decrypt incoming messages and send new messages.</p>
+<pre class="mermaid">graph TD
+    A[Load Journal Facts] --&gt; B[Reduce to TreeState]
+    B --&gt; C[Reduce to ChannelEpoch]
+    C --&gt; D[Compute Checkpoint]
+    D --&gt; E[Derive Base Key]
+    E --&gt; F[Ready to Message]
+</pre>
+<p>This diagram shows the recovery pipeline. The device loads all facts from the journal. It reduces the account journal to get the tree state. It reduces the context journal to get the channel epoch and checkpoint. It derives the base key from the tree root and epoch. It is now ready to send and receive messages.</p>
+<p>The deterministic recovery property distinguishes AMP from traditional messaging protocols. Signal Protocol and similar systems store ratchet state in local databases. Loss of the database means loss of message history and current ratchet position. AMP stores all ratchet state in the replicated journal. Loss of a device does not mean loss of messaging capability.</p>
+<p>This property enables true multi-device messaging. All devices in an authority see the same messages. All devices can send and receive without coordinating who is currently "active". All devices can recover independently after being offline. The authority appears as a single messaging entity to external parties.</p>
+<h2 id="conclusion"><a class="header" href="#conclusion">Conclusion</a></h2>
+<p>The Aura Messaging Protocol demonstrates that deterministic recovery and post-compromise security are compatible. The protocol achieves this through careful integration of commitment trees, CRDT journals, dual window ratchets, and consensus. Each component addresses a specific constraint imposed by the threshold identity model.</p>
+<p>The commitment tree provides the foundation for key derivation. The journal provides the substrate for deterministic state. The dual window ratchet provides asynchronous message delivery. The consensus protocol provides epoch synchronization. The guard chain provides authorization and flow control. These components compose to form a messaging system with strong security and recovery properties.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="../112_amp.html">Aura Messaging Protocol</a> - Complete protocol specification</li>
+<li><a href="../001_system_architecture.html">System Architecture</a> - Broader system context</li>
+<li><a href="../101_accounts_and_commitment_tree.html">Commitment Tree</a> - Tree operation details</li>
+<li><a href="../102_journal.html">Journal System</a> - CRDT journal mechanics</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../blog/000_beyond_local_first.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../blog/002_consensus.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../blog/000_beyond_local_first.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../blog/002_consensus.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

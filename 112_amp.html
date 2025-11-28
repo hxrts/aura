@@ -1,0 +1,543 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Aura Messaging Protocol (AMP) - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="aura-messaging-protocol-amp"><a class="header" href="#aura-messaging-protocol-amp">Aura Messaging Protocol (AMP)</a></h1>
+<h2 id="1-scope-and-goals"><a class="header" href="#1-scope-and-goals">1. Scope and Goals</a></h2>
+<p>AMP (Aura Messaging Protocol) is a secure asynchronous messaging protocol built specifically for Aura’s architecture. It assumes:</p>
+<ul>
+<li><strong>Shared state</strong> (facts in joint semilattice journals) is canonical.</li>
+<li><strong>Secrets</strong> are derived locally from shared state + authority keys.</li>
+<li>Ratchet operations must remain deterministic and recoverable.</li>
+<li>No head-of-line blocking.</li>
+<li>Strong PCS and bounded forward secrecy.</li>
+</ul>
+<p>AMP operates within a relational context (a group or relationship) and within a channel (a substream identified by <code>ChannelId</code>).</p>
+<h2 id="2-terminology-and-protocol-parameters"><a class="header" href="#2-terminology-and-protocol-parameters">2. Terminology and Protocol Parameters</a></h2>
+<h3 id="21-aura-terms"><a class="header" href="#21-aura-terms">2.1 Aura Terms</a></h3>
+<ul>
+<li><strong>Authority</strong> – Account authority with commitment tree &amp; FROST keys.</li>
+<li><strong>Relational Context</strong> – Shared state between authorities (<code>ContextId</code>).</li>
+<li><strong>Journal</strong> – CRDT OR-set of facts (monotone, merge via union, deterministic reduction).</li>
+</ul>
+<h3 id="22-amp-terms"><a class="header" href="#22-amp-terms">2.2 AMP Terms</a></h3>
+<ul>
+<li><strong>Channel</strong> – Messaging substream scoped to a relation context (<code>ChannelId</code>).</li>
+<li><strong>Channel Epoch (<code>chan_epoch</code>)</strong> – Per-channel PCS boundary; KDF base.</li>
+<li><strong>Ratchet Generation (<code>ratchet_gen</code>)</strong> – Monotone ratchet position.</li>
+<li><strong>Skip Window (<code>W</code>)</strong> – Out-of-order tolerance. Default: <strong>1024</strong>.</li>
+<li><strong>Checkpoint</strong> – Journal fact anchoring ratchet and defining valid windows.</li>
+<li><strong>Alternating Ratchet</strong> – Two overlapping windows active at a boundary.</li>
+<li><strong>Pending Bump</strong> – Proposed epoch bump awaiting consensus.</li>
+</ul>
+<h2 id="3-fact-structures"><a class="header" href="#3-fact-structures">3. Fact Structures</a></h2>
+<p>AMP uses facts inserted into the relational context journal. Facts are monotone. Reduction determines canonical state.</p>
+<h3 id="31-channel-checkpoint"><a class="header" href="#31-channel-checkpoint">3.1 Channel Checkpoint</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ChannelCheckpoint {
+    pub context: ContextId,
+    pub channel: ChannelId,
+    pub chan_epoch: u64,
+    pub base_gen: u64,
+    pub window: u32,
+    pub ck_commitment: Hash32,
+    pub skip_window_override: Option&lt;u32&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Semantics</strong>:</p>
+<ul>
+<li>Reduction chooses one canonical <code>ChannelCheckpoint</code> per <code>(context, channel, chan_epoch)</code>.</li>
+<li>The valid ratchet generation set is the union of window A and window B, where:
+<ul>
+<li>A = <code>[base_gen_a … base_gen_a + window_a]</code></li>
+<li>B = <code>[base_gen_b … base_gen_b + window_b]</code></li>
+<li><code>valid_gen_set = A ∪ B</code></li>
+</ul>
+</li>
+<li>A checkpoint always defines two windows. Checkpoints are enable deterministic recovery and serve as garbage collection anchors.</li>
+</ul>
+<h3 id="32-proposed-and-committed-channel-epoch-bumps"><a class="header" href="#32-proposed-and-committed-channel-epoch-bumps">3.2 Proposed and Committed Channel Epoch Bumps</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ProposedChannelEpochBump {
+    pub context: ContextId,
+    pub channel: ChannelId,
+    pub parent_epoch: u64,
+    pub new_epoch: u64,
+    pub bump_id: Hash32,
+}
+
+pub struct CommittedChannelEpochBump {
+    pub context: ContextId,
+    pub channel: ChannelId,
+    pub parent_epoch: u64,
+    pub new_epoch: u64,
+    pub chosen_bump_id: Hash32,
+    pub consensus_id: ConsensusId,
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Semantics</strong>:</p>
+<ul>
+<li>Proposed bumps: optimistic ratchet phase transitions.</li>
+<li>Committed bumps: finalized by Aura Consensus (2f+1 witnesses).</li>
+<li>New epoch = parent_epoch + 1, always.</li>
+<li>Only one committed bump per parent epoch.</li>
+</ul>
+<h2 id="4-derived-channel-state"><a class="header" href="#4-derived-channel-state">4. Derived Channel State</a></h2>
+<p>Reduction yields a <code>ChannelEpochState</code> struct containing the current epoch, an optional pending bump, the last checkpoint generation, the current generation, and the skip window size.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>struct ChannelEpochState {
+    chan_epoch: u64,
+    pending_bump: Option&lt;PendingBump&gt;,
+    last_checkpoint_gen: u64,
+    current_gen: u64,
+    skip_window: u32,
+}
+
+struct PendingBump {
+    parent_epoch: u64,
+    new_epoch: u64,
+    bump_id: Hash32,
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="41-skip-window-computation"><a class="header" href="#41-skip-window-computation">4.1 Skip Window Computation</a></h3>
+<p>The <code>skip_window</code> is computed as follows:</p>
+<ol>
+<li><code>checkpoint.skip_window_override</code>, else</li>
+<li>channel policy fact (if present), else</li>
+<li>default <strong>1024</strong>.</li>
+</ol>
+<h3 id="42-reduce-before-send-rule-critical"><a class="header" href="#42-reduce-before-send-rule-critical">4.2 Reduce-Before-Send Rule (Critical)</a></h3>
+<p>Before sending, a device must:</p>
+<ol>
+<li>Merge latest facts.</li>
+<li>Reduce channel state.</li>
+<li>Use updated <code>(chan_epoch, ratchet_gen, windows)</code> to derive keys.</li>
+</ol>
+<p>No device may send under stale epochs.</p>
+<h3 id="43-single-pending-bump-invariant"><a class="header" href="#43-single-pending-bump-invariant">4.3 Single Pending Bump Invariant</a></h3>
+<p>Only one bump <code>(e → e+1)</code> may be pending at a time.</p>
+<h3 id="44-monotone-epochs"><a class="header" href="#44-monotone-epochs">4.4 Monotone Epochs</a></h3>
+<p><code>new_epoch = parent_epoch + 1</code> always.</p>
+<h3 id="45-what-governs-ratchet-generation"><a class="header" href="#45-what-governs-ratchet-generation">4.5 What Governs Ratchet Generation</a></h3>
+<p><code>ratchet_gen</code> is <em>not</em> a local counter. It is always derived from reduced journal state, ensuring that all devices converge to the same ratchet position after merging facts. It advances only when send/receive events occur in a manner consistent with the latest checkpoint and dual-window rules. This guarantees deterministic recovery and prevents drift across devices, even when they reconnect after offline periods.</p>
+<p><code>new_epoch = parent_epoch + 1</code> always.</p>
+<h2 id="5-channel-epoch-bump-lifecycle"><a class="header" href="#5-channel-epoch-bump-lifecycle">5. Channel Epoch Bump Lifecycle</a></h2>
+<h3 id="51-states"><a class="header" href="#51-states">5.1 States</a></h3>
+<p>A channel has two states. The <code>Stable(e)</code> state indicates the epoch is finalized. The <code>Pending(e → e+1)</code> state indicates an optimistic bump has been issued and awaits commitment.</p>
+<h3 id="52-spacing-rule-for-routine-bumps"><a class="header" href="#52-spacing-rule-for-routine-bumps">5.2 Spacing Rule for Routine Bumps</a></h3>
+<p>AMP enforces a ratchet-generation spacing rule for routine channel epoch bumps and routine ratchet maintenance. This rule limits how frequently structural ratchet transitions occur, preventing rapid-fire bumps that could outrun dual-window coverage.</p>
+<p><em>Note: Emergency or suspicious-event bumps bypass this rule to ensure fast post-compromise recovery.</em></p>
+<p>Let:</p>
+<ul>
+<li><code>base_gen</code> be the anchor generation from the canonical <code>ChannelCheckpoint</code>,</li>
+<li><code>current_gen</code> be the current ratchet generation derived from reduced state,</li>
+<li><code>W</code> be the skip window (default <code>1024</code>).</li>
+</ul>
+<p>A routine bump from epoch e to e+1 is allowed only when <code>current_gen - base_gen &gt;= W / 2</code>. With default <code>W = 1024</code>, this means <code>current_gen - base_gen &gt;= 512</code>.</p>
+<p>This spacing ensures structural ratchet transitions do not occur too frequently. Alternating windows always provide complete transitional coverage. No device proposes a new bump before incorporating the previous one once committed. Offline devices remain within safe dual-window tolerance upon resynchronization.</p>
+<h3 id="53-emergency-bumps"><a class="header" href="#53-emergency-bumps">5.3 Emergency Bumps</a></h3>
+<p>When a potential compromise is detected, AMP permits immediate channel epoch bumps, ignoring the spacing rule entirely. Examples include:</p>
+<ul>
+<li>Multiple AEAD/MAC failures beyond threshold.</li>
+<li>Conflicting ratchet commitments.</li>
+<li>Unexpected message epochs or invalid generation jumps.</li>
+<li>Receipt anomalies suggesting tampering or relay misbehavior.</li>
+<li>Explicit device-compromise signals from the user or authority.</li>
+</ul>
+<p>In these cases, a device may emit:</p>
+<pre><code>ProposedChannelEpochBump { reason = SuspiciousActivity or ConfirmedCompromise }
+</code></pre>
+<p>without satisfying the spacing rule.</p>
+<p>This fast-path bump:</p>
+<ul>
+<li>Immediately rotates the channel’s KDF base.</li>
+<li>Utilizes dual windows to absorb transitional drift.</li>
+<li>Triggers consensus finalization to ensure global canonicality.</li>
+<li>Restores PCS without waiting for further ratchet advancement.</li>
+</ul>
+<p>Suspicious-event bumps may also escalate to context epoch bumps (strong PCS) if warranted.</p>
+<h3 id="combined-effect"><a class="header" href="#combined-effect">Combined Effect</a></h3>
+<p>The rules together ensure:</p>
+<ul>
+<li>Routine bumps occur in a controlled, stable pattern.</li>
+<li>Emergency bumps occur immediately and safely.</li>
+<li>Consensus gating still enforces that only one bump can be pending.</li>
+<li>Dual windows guarantee liveness and continuity across transitions.</li>
+<li>No head-of-line blocking, regardless of detection timing.</li>
+</ul>
+<h3 id="54-state-transitions"><a class="header" href="#54-state-transitions">5.4 State Transitions</a></h3>
+<p>In the <code>Stable(e)</code> state, if the spacing rule is satisfied, the device inserts a <code>ProposedChannelEpochBump(e→e+1)</code> and starts consensus to finalize. The device immediately enters the <code>Pending(e→e+1)</code> state and uses the new epoch e+1 with alternating windows.</p>
+<p>In the <code>Pending(e → e+1)</code> state, upon observing a <code>CommittedChannelEpochBump(e→e+1)</code>, the device sets <code>chan_epoch = e+1</code>. It clears the pending bump. It may emit a new checkpoint in epoch e+1. It returns to the <code>Stable(e+1)</code> state. No new bump is allowed during the pending state.</p>
+<h2 id="6-ratchet-windows"><a class="header" href="#6-ratchet-windows">6. Ratchet Windows</a></h2>
+<p>AMP uses an always-dual window model. Every checkpoint implicitly defines two consecutive skip windows, providing a continuous valid range of 2W ratchet generations.</p>
+<h3 id="61-checkpoint-defined-window-layout"><a class="header" href="#61-checkpoint-defined-window-layout">6.1 Checkpoint-Defined Window Layout</a></h3>
+<p>Given:</p>
+<ul>
+<li><code>base_gen</code> = anchor generation <code>G</code></li>
+<li><code>W</code> = skip window size (default 1024)</li>
+</ul>
+<p>We define two windows automatically:</p>
+<pre><code>Window A = [ G         … G + W     ]
+Window B = [ G + W + 1 … G + 2W    ]
+</code></pre>
+<p>Valid generation set for the checkpoint:</p>
+<pre><code>valid_gen_set = Window A ∪ Window B
+</code></pre>
+<p>A checkpoint always implies that both windows are active. This design eliminates boundary issues entirely. No mode switches are required between single and dual window states. The implementation and reasoning are simpler. It provides robust asynchronous tolerance with 2W coverage. It ensures smooth transitions across channel epoch bumps.</p>
+<h3 id="63-window-shifting"><a class="header" href="#63-window-shifting">6.3 Window Shifting</a></h3>
+<p>When a new checkpoint is issued:</p>
+<ul>
+<li>The new <code>base_gen</code> is chosen far enough ahead (per spacing rule).</li>
+<li>The dual-window layout guarantees overlap with prior windows.</li>
+<li>GC can safely prune older checkpoints when they no longer affect valid generation ranges.</li>
+</ul>
+<h2 id="7-sending-messages"><a class="header" href="#7-sending-messages">7. Sending Messages</a></h2>
+<h3 id="71-message-header"><a class="header" href="#71-message-header">7.1 Message Header</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>struct AmpHeader {
+    context: ContextId,
+    channel: ChannelId,
+    chan_epoch: u64,
+    ratchet_gen: u64,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>An <code>AmpHeader</code> contains the context identifier, channel identifier, current channel epoch, and current ratchet generation. These fields form the additional data for AEAD encryption.</p>
+<h3 id="72-send-procedure"><a class="header" href="#72-send-procedure">7.2 Send Procedure</a></h3>
+<p>Before sending, a device merges new facts and reduces the channel state. It asserts that the current generation is within the valid generation set and the channel epoch is current. If the spacing rule is satisfied and no bump is pending, the device proposes a new bump.</p>
+<p>The device derives the message key using a KDF with the channel base key, ratchet generation, and direction. It creates an <code>AmpHeader</code> with the context, channel, epoch, and generation. It encrypts the payload with AEAD using the message key and header as additional data. It performs the guard chain to enforce authorization and flow budgets. It advances the local ratchet generation.</p>
+<h2 id="8-receiving-messages"><a class="header" href="#8-receiving-messages">8. Receiving Messages</a></h2>
+<p>When receiving, a device merges new facts and reduces the channel state. It checks that the message's channel epoch is either the current epoch or the pending epoch. It checks that the message's ratchet generation is within the valid generation set.</p>
+<p>The device rederives the message key using the same KDF parameters. It decrypts the payload using AEAD decryption with the message key and header as additional data. It advances the local receive ratchet.</p>
+<p>Messages outside the valid windows or with epochs too old or no longer supported are rejected.</p>
+<h2 id="9-recovery-and-garbage-collection"><a class="header" href="#9-recovery-and-garbage-collection">9. Recovery and Garbage Collection</a></h2>
+<h3 id="91-recovery"><a class="header" href="#91-recovery">9.1 Recovery</a></h3>
+<p>To recover, a device loads the relational context journal. It reduces to the latest committed channel epoch, the latest checkpoint, and the skip window. It rederives channel base key from <code>(ContextRootKey, ChannelId, chan_epoch)</code>. It rederives ratchet state from the checkpoint and window generations.</p>
+<h3 id="92-garbage-collection"><a class="header" href="#92-garbage-collection">9.2 Garbage Collection</a></h3>
+<p>AMP garbage collection maintains protocol safety while reclaiming storage for obsolete facts. GC operates on three fact types: checkpoints, proposed bumps, and committed bumps.</p>
+<h4 id="safe-pruning-rules"><a class="header" href="#safe-pruning-rules">Safe Pruning Rules</a></h4>
+<p><strong>Checkpoints:</strong></p>
+<ul>
+<li>A checkpoint at generation <code>G</code> with window <code>W</code> can be pruned if and only if:
+<ul>
+<li>A newer checkpoint exists at generation <code>G'</code> where <code>G' &gt; G + 2W</code></li>
+<li>The newer checkpoint's dual-window coverage <code>[G' … G' + 2W]</code> does not overlap with <code>[G … G + 2W]</code></li>
+<li>All messages within the old checkpoint's window have been processed or are beyond the recovery horizon</li>
+</ul>
+</li>
+</ul>
+<p><strong>Proposed Bumps:</strong></p>
+<ul>
+<li>A <code>ProposedChannelEpochBump(e → e+1)</code> can be pruned when:
+<ul>
+<li>A <code>CommittedChannelEpochBump(e → e+1)</code> exists (superseded by finalized bump)</li>
+<li>OR epoch <code>e+2</code> is committed (proposal became stale)</li>
+</ul>
+</li>
+</ul>
+<p><strong>Committed Bumps:</strong></p>
+<ul>
+<li>Committed bumps are retained as consensus evidence</li>
+<li>Can be pruned only during full snapshot compaction when all devices have confirmed synchronization beyond that epoch</li>
+</ul>
+<h4 id="pruning-boundary-computation"><a class="header" href="#pruning-boundary-computation">Pruning Boundary Computation</a></h4>
+<p>The safe pruning boundary for checkpoints is computed as:</p>
+<pre><code>safe_prune_gen = max_checkpoint_gen - (2 * W) - SAFETY_MARGIN
+</code></pre>
+<p>Where:</p>
+<ul>
+<li><code>max_checkpoint_gen</code> is the highest generation with a checkpoint</li>
+<li><code>W</code> is the skip window size (default 1024)</li>
+<li><code>SAFETY_MARGIN</code> is an additional buffer (recommended: W/2 = 512 generations)</li>
+</ul>
+<p>Checkpoints at <code>base_gen &lt; safe_prune_gen</code> can be safely removed.</p>
+<h4 id="gc-triggers"><a class="header" href="#gc-triggers">GC Triggers</a></h4>
+<p>Garbage collection runs when:</p>
+<ul>
+<li>Journal size exceeds configured threshold</li>
+<li>Checkpoint count exceeds maximum (default: 10 active checkpoints per channel)</li>
+<li>Manual compaction requested</li>
+<li>Snapshot creation initiated</li>
+</ul>
+<h4 id="integration-with-aura-snapshot-gc"><a class="header" href="#integration-with-aura-snapshot-gc">Integration with Aura Snapshot GC</a></h4>
+<p>AMP GC coordinates with Aura's snapshot system:</p>
+<ul>
+<li>Checkpoints pruned before snapshot creation are not included in snapshot</li>
+<li>Snapshot restoration reconstructs only retained checkpoints</li>
+<li>Post-snapshot, older facts before the snapshot epoch can be pruned</li>
+<li>Cross-device coordination ensures no device relies on pruned state</li>
+</ul>
+<h2 id="10-security-properties"><a class="header" href="#10-security-properties">10. Security Properties</a></h2>
+<h3 id="101-forward-secrecy"><a class="header" href="#101-forward-secrecy">10.1 Forward Secrecy</a></h3>
+<p>Forward secrecy is bounded by the skip window size <code>W=1024</code> within each epoch. Older epochs use independent base keys.</p>
+<h3 id="102-post-compromise-security"><a class="header" href="#102-post-compromise-security">10.2 Post-Compromise Security</a></h3>
+<ul>
+<li>Channel epoch bumps ← healing compromise of channel secret state.</li>
+<li>Context epoch bumps ← healing compromise of context state (stronger PCS).</li>
+</ul>
+<h3 id="103-no-head-of-line-blocking"><a class="header" href="#103-no-head-of-line-blocking">10.3 No Head-of-Line Blocking</a></h3>
+<p>The protocol accepts out-of-order messages up to W generations. Dual windows absorb boundary drift.</p>
+<h3 id="104-no-ratchet-forks"><a class="header" href="#104-no-ratchet-forks">10.4 No Ratchet Forks</a></h3>
+<p>Consensus finalizes each epoch step. The epoch chain is always linear and monotone.</p>
+<h3 id="105-deterministic-recovery"><a class="header" href="#105-deterministic-recovery">10.5 Deterministic Recovery</a></h3>
+<p>Checkpoints anchor the ratchet. Facts represent all shared state. Keys are always rederived deterministically.</p>
+<h2 id="11-governance"><a class="header" href="#11-governance">11. Governance</a></h2>
+<p>The <code>skip_window</code> size <code>W</code> is governable via policy facts. Bump cadence and post-compromise security triggers can be governed by context policies.</p>
+<h2 id="12-failure-modes"><a class="header" href="#12-failure-modes">12. Failure Modes</a></h2>
+<p>AMP drops messages only when they fall outside the cryptographically safe envelope defined by epochs, windows, and integrity checks. These failures are intentional safeguards rather than protocol instability.</p>
+<h3 id="121-generation-out-of-window"><a class="header" href="#121-generation-out-of-window">12.1 Generation Out of Window</a></h3>
+<p>A message is dropped if its <code>ratchet_gen</code> lies outside the valid generation set defined by the active checkpoint:</p>
+<pre><code>valid_gen_set = [base_gen … base_gen + W] ∪ [base_gen + W + 1 … base_gen + 2W]
+</code></pre>
+<p>Causes include:</p>
+<ul>
+<li>Sender using stale or malformed ratchet state.</li>
+<li>Message so old that the checkpoint window has moved past it (post-GC aging).</li>
+<li>Attacker crafting invalid generations.</li>
+</ul>
+<h3 id="122-epoch-mismatch"><a class="header" href="#122-epoch-mismatch">12.2 Epoch Mismatch</a></h3>
+<p>Messages are rejected when <code>header.chan_epoch</code> is inconsistent with the locally reduced epoch state:</p>
+<ul>
+<li>Too old (below the earliest supported epoch).</li>
+<li>Unknown or non-linear epoch (does not match the canonical bump chain).</li>
+<li>Replay of ciphertext from a retired epoch.</li>
+</ul>
+<h3 id="123-aead-or-mac-failure"><a class="header" href="#123-aead-or-mac-failure">12.3 AEAD or MAC Failure</a></h3>
+<p>If AEAD decryption fails messages are dropped. Repeated failures contribute to suspicious-event classification and may trigger emergency PCS.</p>
+<h3 id="124-beyond-recovery-horizon"><a class="header" href="#124-beyond-recovery-horizon">12.4 Beyond Recovery Horizon</a></h3>
+<p>Messages older than the current checkpoint's 2W generation window cannot be decrypted because older checkpoints have been garbage collected. Local ratchet state cannot be reconstructed far enough back. This is an intentional forward secrecy and retention trade-off.</p>
+<h3 id="125-policy-enforced-invalidity"><a class="header" href="#125-policy-enforced-invalidity">12.5 Policy-Enforced Invalidity</a></h3>
+<p>After context epoch bumps or high-severity post-compromise security events, messages from previous context epochs are intentionally dropped to prevent replay or ambiguity.</p>
+<p>These are the only scenarios in which AMP rejects messages under correct operation. All other cases are absorbed by dual-window tolerance, consensus finality, and reduce-before-send guarantees.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="111_maintenance.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="114_frost_pipelining_optimization.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="111_maintenance.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="114_frost_pipelining_optimization.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

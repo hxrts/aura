@@ -1,0 +1,647 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Privacy and Information Flow - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="privacy-and-information-flow"><a class="header" href="#privacy-and-information-flow">Privacy and Information Flow</a></h1>
+<p>Aura's privacy model is consent-based and articulated as a unified information-flow system. Privacy boundaries align with social relationships rather than technical perimeters. Violations occur when information crosses trust boundaries without consent. Acceptable flows consume explicitly budgeted headroom.</p>
+<p>This document specifies Aura's privacy and information-flow model covering privacy leakage and spam as one regulatory system. It defines what information is visible to different observers, how properties degrade under attack, and how enforcement works via a monotone semilattice-based budget. Per-context per-peer flow headroom is charged before any transport side effect. See <a href="003_information_flow_contract.html#flow-budget-system-reference">Flow Budget System</a> for the full budget specification.</p>
+<h2 id="privacy-philosophy"><a class="header" href="#privacy-philosophy">Privacy Philosophy</a></h2>
+<p>Traditional privacy systems force users to choose between complete isolation and complete exposure. Aura recognizes that privacy is relational. Sharing information with trusted parties is not a privacy violation. It is the foundation of meaningful collaboration.</p>
+<p>The system implements three core principles. Consensual Disclosure means you consent to sharing certain information when you join a group or establish a relationship. This is the basis for coordination, not a privacy leak. Contextual Identity means through Deterministic Key Derivation you present different identities in different contexts. Only relationship parties can link these identities, preventing global identity correlation. Neighborhood Visibility means peer-to-peer gossip neighbors observe encrypted envelope metadata. This is acceptable because context isolation prevents linking across contexts and information-flow budgets hard-limit observable rate and volume per context.</p>
+<h2 id="unified-information-flow-budget"><a class="header" href="#unified-information-flow-budget">Unified Information-Flow Budget</a></h2>
+<p>Aura enforces privacy leakage limits and spam resistance with the same monotone mechanism. For each context and peer pair, the journal records charge facts that contribute to a conceptual budget:</p>
+<pre><code>FlowBudget {
+    limit: u64, // derived at runtime
+    spent: u64, // replicated fact (join = max)
+    epoch: Epoch, // replicated fact
+}
+</code></pre>
+<p>Only <code>spent</code> and <code>epoch</code> values appear as facts inside the journal. The <code>limit</code> field is computed at runtime by intersecting Biscuit-derived capabilities with sovereign policy; it is never stored in the journal. Before any transport effect, <code>FlowGuard</code> charges <code>cost</code> to the context and peer pair. Guard evaluation runs over a prepared snapshot and emits commands for an interpreter to execute, keeping the guard path pure. If <code>spent</code> plus <code>cost</code> exceeds the computed <code>limit</code>, the send is blocked locally with no observable behavior.</p>
+<p>For multi-hop forwarding, relays validate a signed per-hop receipt from the previous hop, then charge their own budget before forwarding. Limits update deterministically via the shared Biscuit/policy evaluation on every device, so replicas converge even though only <code>spent</code> charges are recorded. Guard evaluation follows the sequence described in <a href="109_authorization.html">Authorization</a>.</p>
+<h3 id="time-domain-semantics-and-leakage"><a class="header" href="#time-domain-semantics-and-leakage">Time Domain Semantics and Leakage</a></h3>
+<ul>
+<li><strong>PhysicalClock</strong> timestamps are used for guard-chain charging, receipts, and cooldowns. They are obtained exclusively through <code>PhysicalTimeEffects</code> implementations (production or simulator) and never via direct <code>SystemTime::now()</code>.</li>
+<li><strong>LogicalClock</strong> is used for CRDT causal delivery and journal conflict resolution; it does not leak wall-clock information.</li>
+<li><strong>OrderClock</strong> provides a privacy-preserving total order for cases where ordering is required without causal or wall-clock meaning.</li>
+<li><strong>Range</strong> expresses validity windows (e.g., dispute/cooldown periods) and is derived from physical time plus policy-defined uncertainty.</li>
+</ul>
+<p>Cross-domain comparisons are explicit via <code>TimeStamp::compare(policy)</code>; the system never infers ordering across domains implicitly. Facts store <code>TimeStamp</code> directly (legacy FactId removed), keeping time semantics auditable within the leakage model.</p>
+<h3 id="budget-formulas"><a class="header" href="#budget-formulas">Budget Formulas</a></h3>
+<p>The limit for a context and peer is computed as:</p>
+<pre><code>limit(ctx, peer) = base(ctx) ⊓ policy(ctx) ⊓ role(ctx, peer)
+                   ⊓ relay_factor(ctx) ⊓ peer_health(peer)
+</code></pre>
+<p>The <code>base(ctx)</code> is the context class default. The <code>policy(ctx)</code> is local sovereign policy set by the account. The <code>role(ctx, peer)</code> is the per-peer role within the context. The <code>relay_factor(ctx)</code> reduces limit for high-degree hubs to mitigate amplification. The <code>peer_health(peer)</code> term shrinks when an authority is marked unhealthy or overloaded.</p>
+<p>Each term is encoded as a lattice element. Merges occur via meet, ensuring convergence and preventing widening.</p>
+<h3 id="receipts-and-epochs"><a class="header" href="#receipts-and-epochs">Receipts and Epochs</a></h3>
+<p>Per-hop receipts are required for forwarding and bound to the epoch:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>Receipt {
+  ctx: ContextId,
+  src: AuthorityId,
+  dst: AuthorityId,
+  epoch: Epoch,
+  cost: u32,
+  nonce: u64,
+  prev: Hash32,
+  sig: Signature,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The acceptance window is the current epoch only. Rotation triggers when the journal fact <code>Epoch(ctx)</code> increments. On rotation, <code>spent(ctx, *)</code> resets and receipts cannot be reused across epochs.</p>
+<h3 id="fairness-and-liveness"><a class="header" href="#fairness-and-liveness">Fairness and Liveness</a></h3>
+<p>At most one outstanding reservation exists per context and device. Provide a minimum headroom floor for active relationships to prevent starvation. Optional jitter on sensitive protocols like guardian recovery reduces timing correlation without violating monotonicity.</p>
+<p>This unifies who may talk, how often, and with how much metadata leakage under the same laws as capabilities and facts. See <a href="003_information_flow_contract.html#flow-budget-system-reference">Flow Budget System</a> for implementation details.</p>
+<h2 id="privacy-boundaries"><a class="header" href="#privacy-boundaries">Privacy Boundaries</a></h2>
+<p>Aura defines four distinct privacy boundaries each with different visibility properties.</p>
+<h3 id="relationship-boundary"><a class="header" href="#relationship-boundary">Relationship Boundary</a></h3>
+<p>When you establish a direct relationship or join a group, you cross into the relationship boundary. Within this boundary, both parties have consented to share information necessary for coordination.</p>
+<p>Participants can see your context-specific identity, your online status, your participation in shared activities, and message content. This visibility is by design, enabling collaboration. Within a relationship, participants cannot link your identity across different contexts unless you explicitly share that information. Deterministic Key Derivation ensures each relationship gets a unique identity derived from account key, app ID, and context label.</p>
+<p>Each context and peer pair maintains a flow budget where only the <code>spent</code> charges are replicated. Every send charges <code>spent</code> before any transport effect. If <code>spent</code> plus <code>cost</code> exceeds the locally computed <code>limit</code>, the send is blocked with no observable behavior. This bounds metadata exposure and prevents spam by construction.</p>
+<h3 id="neighborhood-boundary"><a class="header" href="#neighborhood-boundary">Neighborhood Boundary</a></h3>
+<p>Your neighborhood consists of devices that forward gossip traffic for you. They see encrypted envelopes but cannot decrypt them.</p>
+<p>Neighbors observe that encrypted traffic passes through them. They see envelope sizes (which are fixed), rotating rtag identifiers, and timing patterns. Sophisticated adversaries might infer relationships through sustained observation. Neighbors cannot decrypt content, determine the ultimate sender or receiver, or link rtags to real identities.</p>
+<p>Forwarding uses per-hop receipts. A relay only forwards after validating the upstream receipt and charging its own budget. Receipt and counter state is scoped to the same context, preventing budget leakage to unrelated observers.</p>
+<h3 id="group-boundary"><a class="header" href="#group-boundary">Group Boundary</a></h3>
+<p>Group participants see group-scoped identities, content, and threshold operations. Leakage accounting uses the group dimension, constrained by <code>limit(ctx).group</code> where applicable.</p>
+<h3 id="external-boundary"><a class="header" href="#external-boundary">External Boundary</a></h3>
+<p>External observers have no relationship with you and are not part of your gossip neighborhood. External observers should learn nothing.</p>
+<p>With Tor integration, external observers see only encrypted Tor traffic. Without Tor, an ISP-level adversary observes only that you are connecting to known Aura nodes. Information-flow budgets reduce total emission opportunities, further limiting inference.</p>
+<p>External observers cannot determine which accounts exist, what relationships exist, what content you access, or even that you are using Aura. Fixed-size envelopes prevent size-based fingerprinting. The lack of a central directory means there is no global metadata to leak.</p>
+<h2 id="privacy-layers"><a class="header" href="#privacy-layers">Privacy Layers</a></h2>
+<p>Aura's privacy model operates across five distinct layers.</p>
+<h3 id="identity-privacy"><a class="header" href="#identity-privacy">Identity Privacy</a></h3>
+<p>Traditional systems leak identity through persistent identifiers. Aura eliminates this through context-specific identities.</p>
+<p>Deterministic Key Derivation derives context-specific keys using <code>derive(account_root, app_id, context_label)</code>. The derivation is deterministic but irreversible. Knowing the derived key for context A reveals nothing about context B. An adversary who observes you in multiple contexts cannot prove they are the same account without side-channel analysis.</p>
+<p>The testing metric <code>identity_linkability_score</code> measures the probability that an observer can link identities across contexts. It should remain below 0.05 (5% confidence) for any pair of contexts.</p>
+<h3 id="relationship-privacy"><a class="header" href="#relationship-privacy">Relationship Privacy</a></h3>
+<p>Your social graph reveals personal relationships and organizational structures. Aura keeps the relationship graph opaque to external observers while allowing consensual visibility within relationships.</p>
+<p>The existence of a relationship between two identities is only visible to the parties in the relationship and to parties both parties have explicitly disclosed the relationship to. Relationships are established through out-of-band key exchange or web-of-trust introductions. There is no central directory.</p>
+<p>External observers cannot determine that Alice and Bob have a relationship. A neighborhood adversary who controls gossip hops might correlate timing patterns but cover traffic and batching degrade this attack.</p>
+<p>The testing metric <code>relationship_inference_confidence</code> measures the probability that an observer can infer the existence of a relationship. It should remain below 0.10 for neighborhood adversaries and 0.01 for external observers.</p>
+<h3 id="group-privacy"><a class="header" href="#group-privacy">Group Privacy</a></h3>
+<p>Groups are micro-anonymity sets. Within a group, members are visible through consensual disclosure. Outside the group, membership is hidden.</p>
+<p>Group membership is only visible within the group. External observers cannot enumerate members or confirm a group's existence. Group communications are indistinguishable from person-to-person communications at the envelope level.</p>
+<p>Groups have their own Deterministic Key Derivation-derived identity independent of member identities. Members hold shares of the group's threshold key. For privacy-sensitive operations, groups can operate in anonymity mode where actions are attributed to the group rather than individuals.</p>
+<p>The testing metric <code>group_membership_inference</code> measures the probability of inferring membership through traffic analysis. It should remain below the k-anonymity bound where P(specific member | observation) is at most 1/k where k is group size.</p>
+<h3 id="content-privacy"><a class="header" href="#content-privacy">Content Privacy</a></h3>
+<p>All content is end-to-end encrypted. Only parties with the appropriate key material can decrypt.</p>
+<p>Message content, stored documents, and application data are encrypted such that only authorized parties can decrypt. Messages use authenticated encryption with AES-GCM with per-message keys derived from shared secrets. Stored content uses content-addressed encryption where the encryption key is derived from the content hash plus a secret salt. Session keys are ephemeral. Compromise of long-term identity keys does not compromise past session content.</p>
+<p>Content-level attacks reduce to brute force cryptanalysis or key material compromise. Aura uses well-studied primitives like AES-256-GCM, Ed25519, and HPKE that provide 128-bit security.</p>
+<h3 id="metadata-privacy"><a class="header" href="#metadata-privacy">Metadata Privacy</a></h3>
+<p>Content privacy is useless if metadata leaks communication patterns. Metadata includes timing, frequency, size, and participation.</p>
+<p>Aura employs multiple metadata privacy techniques. Per-context per-peer budgets bound observable rate and volume. All envelopes are padded to a standard size, preventing size-based fingerprinting. Outgoing messages are batched and sent at fixed intervals, obscuring precise timing. Routing tags rotate periodically, preventing longitudinal tracking. Envelopes are onion-routed through multiple hops, where each hop sees only the previous and next hop.</p>
+<p>Metadata privacy degrades gracefully under increasingly powerful adversaries. A passive neighborhood observer might infer that someone is communicating frequently but cannot identify specific parties. An active adversary controlling multiple gossip hops has better inference capability but faces computational challenges at scale. A global passive adversary can perform traffic analysis but faces challenges distinguishing real traffic from cover traffic.</p>
+<p>The testing metric <code>metadata_leakage</code> measures information leakage in bits. For timing, H(actual_send_time | observed_traffic) should exceed 4 bits. For participation, P(user active | observed_neighborhood_traffic) should be within 10% of base rate.</p>
+<h2 id="practical-leakage-tracking-examples"><a class="header" href="#practical-leakage-tracking-examples">Practical Leakage Tracking Examples</a></h2>
+<h3 id="basic-leakageeffects-usage"><a class="header" href="#basic-leakageeffects-usage">Basic LeakageEffects Usage</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::effects::LeakageEffects;
+use aura_core::{AuthorityId, ContextId, ObserverClass, LeakageEvent};
+
+async fn record_message_send(
+    leakage: &amp;impl LeakageEffects,
+    context: ContextId,
+    source: AuthorityId,
+    dest: AuthorityId,
+) -&gt; aura_core::Result&lt;()&gt; {
+    // Record that neighbors can observe encrypted envelope metadata
+    let event = LeakageEvent {
+        source,
+        destination: dest,
+        context_id: context,
+        leakage_amount: 1, // 1 message observed
+        observer_class: ObserverClass::Neighbor,
+        operation: "send_message".to_string(),
+        timestamp_ms: current_timestamp_ms(),
+    };
+
+    leakage.record_leakage(event).await?;
+
+    // Check if we're within budget before continuing
+    let within_budget = leakage.check_leakage_budget(
+        context,
+        ObserverClass::Neighbor,
+        10, // planning to send 10 more messages
+    ).await?;
+
+    if !within_budget {
+        return Err(aura_core::AuraError::privacy_budget_exceeded(
+            "Would exceed neighbor observation budget"
+        ));
+    }
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="leakagetracker-with-policy-settings"><a class="header" href="#leakagetracker-with-policy-settings">LeakageTracker with Policy Settings</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_mpst::{LeakageTracker, LeakageBudget, LeakageType, UndefinedBudgetPolicy};
+use aura_core::DeviceId;
+use chrono::Utc;
+
+// Secure default: deny undefined budgets
+async fn create_secure_tracker() -&gt; LeakageTracker {
+    let tracker = LeakageTracker::new(); // Uses UndefinedBudgetPolicy::Deny
+
+    // Any leakage without explicit budget will be denied
+    // This is the recommended approach for production
+    tracker
+}
+
+// Legacy permissive mode for backward compatibility
+async fn create_permissive_tracker() -&gt; LeakageTracker {
+    let tracker = LeakageTracker::legacy_permissive();
+
+    // Allows unlimited leakage when no budget is defined
+    // Only use during migration period
+    tracker
+}
+
+// Custom default budget for undefined observers
+async fn create_default_budget_tracker() -&gt; LeakageTracker {
+    let tracker = LeakageTracker::with_undefined_policy(
+        UndefinedBudgetPolicy::DefaultBudget(1000) // 1000 units default
+    );
+
+    // Falls back to 1000 unit budget when undefined
+    tracker
+}
+
+// Typical production setup with explicit budgets
+async fn create_production_tracker() -&gt; LeakageTracker {
+    let mut tracker = LeakageTracker::new();
+    let now = Utc::now();
+
+    // Define budgets for each observer class
+    let neighbor_device = DeviceId::new();
+
+    // Neighbor can observe 100 metadata events per hour
+    let neighbor_budget = LeakageBudget::with_refresh(
+        neighbor_device,
+        LeakageType::Metadata,
+        100,
+        chrono::Duration::hours(1),
+        now,
+    );
+    tracker.add_budget(neighbor_budget);
+
+    // Neighbor can observe 50 timing events per hour
+    let timing_budget = LeakageBudget::with_refresh(
+        neighbor_device,
+        LeakageType::Timing,
+        50,
+        chrono::Duration::hours(1),
+        now,
+    );
+    tracker.add_budget(timing_budget);
+
+    tracker
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="choreography-integration"><a class="header" href="#choreography-integration">Choreography Integration</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_mpst::{LeakageTracker, LeakageType};
+use aura_core::DeviceId;
+use chrono::Utc;
+
+async fn choreography_with_leakage_tracking(
+    tracker: &amp;mut LeakageTracker,
+    relay: DeviceId,
+) -&gt; aura_core::Result&lt;()&gt; {
+    let now = Utc::now();
+
+    // Before sending through relay, check budget
+    if !tracker.check_leakage(&amp;LeakageType::Metadata, 1, relay) {
+        return Err(aura_core::AuraError::privacy_budget_exceeded(
+            "Relay metadata budget exhausted"
+        ));
+    }
+
+    // Record the leakage
+    tracker.record_leakage(
+        LeakageType::Metadata,
+        1,
+        relay,
+        now,
+        "Message forwarded through relay - envelope metadata visible"
+    )?;
+
+    // Send actual message (budget already charged)
+    // ... transport operation ...
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="real-world-example-multi-hop-forwarding"><a class="header" href="#real-world-example-multi-hop-forwarding">Real-World Example: Multi-Hop Forwarding</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_mpst::{LeakageTracker, LeakageType, LeakageBudget};
+use aura_core::DeviceId;
+use chrono::Utc;
+
+struct RelayChain {
+    tracker: LeakageTracker,
+    relays: Vec&lt;DeviceId&gt;,
+}
+
+impl RelayChain {
+    fn new(relays: Vec&lt;DeviceId&gt;) -&gt; Self {
+        let mut tracker = LeakageTracker::new();
+        let now = Utc::now();
+
+        // Each relay gets limited metadata observation budget
+        for relay in &amp;relays {
+            let budget = LeakageBudget::with_refresh(
+                *relay,
+                LeakageType::Metadata,
+                100, // 100 envelopes per hour per relay
+                chrono::Duration::hours(1),
+                now,
+            );
+            tracker.add_budget(budget);
+        }
+
+        Self { tracker, relays }
+    }
+
+    async fn forward_message(&amp;mut self, message: Vec&lt;u8&gt;) -&gt; aura_core::Result&lt;()&gt; {
+        let now = Utc::now();
+
+        // Check budget for entire relay chain before sending
+        for relay in &amp;self.relays {
+            if !self.tracker.check_leakage(&amp;LeakageType::Metadata, 1, *relay) {
+                return Err(aura_core::AuraError::privacy_budget_exceeded(
+                    format!("Relay {} metadata budget exhausted", relay)
+                ));
+            }
+        }
+
+        // Forward through each hop, recording leakage
+        for relay in &amp;self.relays {
+            self.tracker.record_leakage(
+                LeakageType::Metadata,
+                1,
+                *relay,
+                now,
+                format!("Envelope forwarded through relay {}", relay)
+            )?;
+
+            // Actual network send would happen here
+            // send_to_relay(relay, &amp;message).await?;
+        }
+
+        Ok(())
+    }
+
+    fn get_relay_status(&amp;self) -&gt; Vec&lt;(DeviceId, Option&lt;u64&gt;)&gt; {
+        self.relays.iter().map(|relay| {
+            let remaining = self.tracker.remaining_budget(*relay, &amp;LeakageType::Metadata);
+            (*relay, remaining)
+        }).collect()
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="integration-with-effect-system"><a class="header" href="#integration-with-effect-system">Integration with Effect System</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::effects::{LeakageEffects, LeakageChoreographyExt};
+use aura_core::{AuthorityId, ContextId, ObserverClass};
+
+async fn protocol_step_with_leakage(
+    effects: &amp;impl LeakageEffects,
+    context: ContextId,
+    source: AuthorityId,
+    dest: AuthorityId,
+    flow_cost: u64,
+) -&gt; aura_core::Result&lt;()&gt; {
+    // Use extension trait for common patterns
+    effects.record_send_leakage(
+        source,
+        dest,
+        context,
+        flow_cost,
+        &amp;[ObserverClass::Neighbor, ObserverClass::InGroup],
+    ).await?;
+
+    // Query leakage history for debugging
+    let history = effects.get_leakage_history(context, None).await?;
+
+    for event in history.iter().take(5) {
+        tracing::debug!(
+            "Leakage: {} units to {:?} observer for {}",
+            event.leakage_amount,
+            event.observer_class,
+            event.operation
+        );
+    }
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="implementation-metrics"><a class="header" href="#implementation-metrics">Implementation Metrics</a></h2>
+<p>Aura 1.0 ties privacy guarantees to the FlowBudget system described in <a href="003_information_flow_contract.html#flow-budget-system-reference">Flow Budget System</a>.</p>
+<p>Per-context activity requires <code>spent(ctx)</code> not exceed <code>limit(ctx)</code> per epoch, enforced by FlowGuard charge before every transport call. Leakage per observer class requires <code>L(τ, class)</code> not exceed <code>Budget(class)</code>, enforced by <a href="109_authorization.html">guard mechanisms</a>. Timing dispersion requires high-sensitivity protocols add at least 2 seconds jitter via optional delay guard. Reservation fairness requires at most one outstanding FlowBudget reservation per context and authority.</p>
+<h2 id="flow-budget-system-reference"><a class="header" href="#flow-budget-system-reference">Flow Budget System Reference</a></h2>
+<p>The FlowBudget system enforces both spam resistance and privacy budgets by combining replicated <code>spent</code> counters with runtime-computed <code>limit</code> values:</p>
+<ul>
+<li><strong>Replicated facts</strong>: Each successful charge emits a <code>FlowBudgetFact</code> containing <code>(ContextId, peer, epoch, spent_delta)</code>. These facts merge via max, so replicas converge even under partition.</li>
+<li><strong>Runtime limits</strong>: Every authority recomputes <code>limit(ctx, peer)</code> from Biscuit tokens, sovereign policy, peer health, relay factors, and role metadata whenever a send/forward is attempted. Because all replicas apply the same meet-semilattice evaluation, they derive identical limits without storing them.</li>
+<li><strong>Epoch rotation</strong>: Journals carry <code>Epoch(ctx)</code> facts. When the epoch increments, transport handlers discard pending receipts and reset <code>spent</code> counters for the new epoch.</li>
+<li><strong>Receipts</strong>: Each send/forward that succeeds produces a Receipt fact scoped to <code>(context, epoch)</code> with chained hashes. Relays validate receipts before forwarding and record them as relational facts so downstream peers can audit budget usage.</li>
+<li><strong>Multi-hop enforcement</strong>: Every hop independently executes CapGuard → FlowGuard → JournalCoupler. Headroom must exist at each hop; failures block locally and leak no metadata. Because <code>spent</code> is monotone, convergence holds even if later hops fail.</li>
+<li><strong>Charge-before-send invariant</strong>: FlowGuard charges occur before any observable transport action. JournalCoupler atomically merges the charge fact and optional protocol deltas, ensuring the calculus guarantees from <code>docs/002_theoretical_model.md</code> hold in implementation.</li>
+</ul>
+<p>Together these rules ensure that spam limits, leakage budgets, and receipt accountability share the same semilattice foundation described throughout this document.</p>
+<h2 id="threat-model-by-adversary-position"><a class="header" href="#threat-model-by-adversary-position">Threat Model by Adversary Position</a></h2>
+<p>Privacy properties vary based on adversary capabilities and position in the network. Aura considers five adversary types.</p>
+<h3 id="individual-relationship-partner"><a class="header" href="#individual-relationship-partner">Individual Relationship Partner</a></h3>
+<p>An individual with a direct relationship with you sees everything within that relationship context. This is consensual disclosure. They cannot see your activity in other contexts, link your identity across contexts, or access content you have not granted them.</p>
+<p>The attack vector is social engineering or context correlation. Technical mechanisms cannot prevent social-layer correlation. User education and interface design mitigate this. The UI clearly indicates which context you operate in.</p>
+<h3 id="group-insider"><a class="header" href="#group-insider">Group Insider</a></h3>
+<p>A group member sees all group activity including member identities, group content, and participation patterns. They cannot determine members' identities outside the group, access other groups, or see person-to-person relationships not disclosed within the group.</p>
+<p>Groups enforce k-anonymity for sensitive operations. When anonymity is required at least k members participate in threshold signing and individual signers are not revealed. Signing rounds include random delays to prevent timing correlation.</p>
+<h3 id="gossip-neighborhood-participant"><a class="header" href="#gossip-neighborhood-participant">Gossip Neighborhood Participant</a></h3>
+<p>Devices in your gossip neighborhood forward encrypted envelopes and observe metadata like size (which is fixed), rotating rtags, timing, and frequency. With sustained observation, they might infer traffic patterns. They cannot decrypt content, determine ultimate sender or receiver due to onion routing, link rtags to real identities, or distinguish real traffic from cover traffic without statistical analysis.</p>
+<p>The primary attack is traffic correlation. Onion routing prevents single-hop correlation. Cover traffic obscures activity patterns. Batching and random delays break timing correlation.</p>
+<h3 id="network-level-observer"><a class="header" href="#network-level-observer">Network-Level Observer</a></h3>
+<p>An adversary who can observe network traffic like an ISP sees IP-level connections and packet timing. Without Tor, they can observe that you are connecting to known Aura nodes. With Tor, they see only that you are using Tor.</p>
+<p>Without Tor, confirmation attacks are possible. With Tor, correlation requires breaking Tor's anonymity properties, which is a hard problem. Even with Tor compromised, fixed-size envelopes and cover traffic prevent precise correlation.</p>
+<h3 id="compromised-device"><a class="header" href="#compromised-device">Compromised Device</a></h3>
+<p>If a single device in a multi-device account is compromised, an adversary gains access to that device's key share and the account's journal state as synced to that device. A single compromised device cannot perform threshold operations (which requires M of N devices), derive the account's root key, or access content not synced to that device.</p>
+<p>If the adversary compromises M of N devices, they gain full account control. Threshold cryptography limits single-device compromise impact. Users can revoke compromised devices through resharing, which requires M devices. Session epochs invalidate old credentials when compromise is detected.</p>
+<h2 id="hub-node-problem-and-mitigation"><a class="header" href="#hub-node-problem-and-mitigation">Hub Node Problem and Mitigation</a></h2>
+<p>Hub nodes with high connectivity forward traffic for many peers. While they cannot decrypt content, they observe envelope metadata for many relationships and might infer communication patterns.</p>
+<p>Aura employs several mitigation techniques. Routes are selected to minimize the fraction of a path observed by any single node. The system tracks node connectivity and identifies hubs. Users can choose to avoid routing through hubs if privacy is a higher priority than efficiency. The routing algorithm accepts a privacy parameter. Higher privacy settings avoid hubs even at the cost of longer routes.</p>
+<p>To prevent hubs from distinguishing real traffic from cover traffic, the protocol supports optional decoy envelopes. Fixed-size envelopes prevent size correlation. Rotating rtags limit tracking duration. Per-hop budgets bound the rate at which any hub can forward traffic for a given context.</p>
+<h2 id="cover-traffic-strategy"><a class="header" href="#cover-traffic-strategy">Cover Traffic Strategy</a></h2>
+<p>Cover traffic strengthens metadata privacy but is expensive if done naively, so Aura 1.0 treats it as an optional enhancement layered on top of the mandatory flow-budget enforcement. When enabled, cover traffic adapts to real usage patterns. If you typically send 20 messages per hour during work hours, the system maintains approximately that rate during idle periods. Rather than individual cover messages, the system leverages groups for efficient cover traffic. Groups naturally have steady traffic rates due to multiple members, obscuring individual patterns.</p>
+<p>Cover traffic sends at scheduled intervals. Real messages are inserted into scheduled slots, making them indistinguishable from cover traffic. Cover traffic envelopes are cryptographically indistinguishable from real envelopes. Only the recipient can determine that an envelope is cover traffic by attempting to decrypt. Effective deployments aim to keep the probability of distinguishing real from dummy traffic close to 0.5.</p>
+<h2 id="integration-with-rfc-130-testing-framework"><a class="header" href="#integration-with-rfc-130-testing-framework">Integration with RFC 130 Testing Framework</a></h2>
+<p>Each privacy or flow property translates to a test invariant. For example, identity unlinkability across contexts becomes <code>assert!(observer.identity_linkability_score(context_a, context_b) &lt; 0.05)</code>.</p>
+<p>Each adversary type is implemented as a test observer with specific capabilities. Tests instantiate observers with varying capabilities and measure what they can infer. Privacy properties are probabilistic. Tests measure inference confidence and verify it remains below specified bounds.</p>
+<p>Tests run in the simulation framework with deterministic time and network conditions. The simulation maintains a test-only ground truth oracle strictly isolated from adversary observers. Privacy tests are part of CI. Any change that degrades privacy properties beyond thresholds fails the test.</p>
+<h2 id="implementation-guidance"><a class="header" href="#implementation-guidance">Implementation Guidance</a></h2>
+<p>Key derivation must be cryptographically sound. Use HKDF with domain separation. Never reuse keys across contexts. The derivation path should include account root key, app_id, context_label, and a domain separator like <code>aura.key.derive.v1</code>.</p>
+<p>Envelopes must be fixed-size, encrypted, authenticated, and onion-routed. Padding must be non-distinguishable using random bytes. Rtags must rotate on a schedule negotiated in-band. Test that envelopes are indistinguishable at the byte level.</p>
+<p>All transport calls must pass through <code>FlowGuard</code> that charges the per-context per-peer budget before any network side effect. When charging fails, the choreography must branch locally with no packet emitted. For multi-hop forwarding, attach and validate per-hop receipts.</p>
+<p>The CRDT journal contains sensitive metadata about account structure. Journal events should be encrypted when synced across untrusted paths. Within a relationship or group, journal events can be plaintext through consensual disclosure.</p>
+<p>Capabilities grant access to resources. Ensure they do not leak information to unauthorized parties. A capability should be opaque. All network traffic should route through Tor by default with clear UI indication when Tor is disabled.</p>
+<p>Use platform-provided secure storage for key shares like Keychain on macOS or iOS, Secret Service on Linux, or Keystore on Android. Never store keys in plaintext files or standard databases.</p>
+<p>For security-critical operations like key derivation and threshold signing, maintain audit logs in the journal visible to all account devices. This enables detection of compromised devices.</p>
+<h2 id="conclusion"><a class="header" href="#conclusion">Conclusion</a></h2>
+<p>Aura's model is consent-based, context-specific, and relational expressed as a unified information-flow system. Privacy boundaries align with social relationships. Information shared within consensual relationships is not a leak. Protections focus on preventing information from crossing boundaries without consent and on bounding what observers can learn through rate and volume controls.</p>
+<p>The model recognizes that perfect privacy is impossible in a functional system. Instead, it provides tunable privacy properties that degrade gracefully under increasingly powerful adversaries. Measurement and testing ensure that privacy properties hold in practice.</p>
+<p>Implementation requires careful attention to cryptographic details, metadata handling, and adversary modeling. For 1.0, the information-flow budget is the primary enforcement surface. Optional mechanisms like Tor, onion routing, and cover traffic strengthen privacy further.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="002_theoretical_model.html">Theoretical Model</a></li>
+<li><a href="001_system_architecture.html">System Architecture</a></li>
+<li><a href="100_authority_and_identity.html">Authority and Identity</a></li>
+<li><a href="103_relational_contexts.html">Relational Contexts</a></li>
+<li><a href="109_authorization.html">Authorization</a></li>
+<li><a href="105_identifiers_and_boundaries.html">Identifiers and Boundaries</a></li>
+<li><a href="108_transport_and_information_flow.html">Transport and Information Flow</a> - Privacy-by-design patterns</li>
+<li><a href="privacy_checklist.html">Privacy Checklist</a> - Development checklist for privacy-preserving code</li>
+</ul>
+<h2 id="implementation-references"><a class="header" href="#implementation-references">Implementation References</a></h2>
+<ul>
+<li><strong>Guard Chain Implementation</strong>: <code>crates/aura-protocol/src/guards/</code> (see <a href="109_authorization.html">Authorization</a>)</li>
+<li><strong>Authority Privacy</strong>: <code>crates/aura-effects/src/authority/</code></li>
+<li><strong>Context Isolation</strong>: <code>crates/aura-relational/src/privacy/</code></li>
+<li><strong>Flow Budget System</strong>: <code>crates/aura-protocol/src/flow_budget/</code></li>
+<li><strong>Privacy Testing</strong>: <code>crates/aura-testkit/src/privacy/</code></li>
+<li><strong>Transport Privacy Patterns</strong>: <code>crates/aura-transport/</code> (reference implementation)</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="002_theoretical_model.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="004_distributed_systems_contract.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="002_theoretical_model.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="004_distributed_systems_contract.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

@@ -1,0 +1,347 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Project Overview - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="project-overview"><a class="header" href="#project-overview">Project Overview</a></h1>
+<p>This document provides an overview of Aura's architecture and goals.</p>
+<h2 id="project-goals"><a class="header" href="#project-goals">Project Goals</a></h2>
+<p>Aura aims to demonstrate that web-of-trust architectures can be practical and user-aligned. Instead of anchoring trust to a centralized service or a single device, Aura treats the social network as the platform. Identity is expressed through opaque authorities plus relational contexts. This keeps social relationships at the center of security decisions instead of infrastructure providers.</p>
+<p>The target is 20 close friends using the system twice weekly. This constraint forces delivery of something unique and valuable, not just technically interesting. Users must feel confident that their privacy expectations will not be violated, their data is durable, and the system is secure enough to trust with real relationships.</p>
+<h2 id="problem-statement"><a class="header" href="#problem-statement">Problem Statement</a></h2>
+<p>Most existing approaches cannot meet the requirements for a practical web-of-trust system. Centralized services violate peer-to-peer and alignment constraints. Eventually-consistent systems without strong semantics fail unpredictably during network partitions. Ad-hoc peer-to-peer protocols cannot safely evolve because protocol changes fragment the network.</p>
+<p>Aura's design solves these problems by combining threshold cryptography (FROST primitives in <code>aura-core::crypto::tree_signing</code>—the legacy <code>aura-frost</code> crate has been removed), <a href="107_mpst_and_choreography.html">choreographic protocols</a>, fact-based semilattices, <a href="107_mpst_and_choreography.html">session types</a>, <a href="109_authorization.html">guard-chain-enforced effects</a>, and deterministic simulation.</p>
+<h2 id="eight-constraints"><a class="header" href="#eight-constraints">Eight Constraints</a></h2>
+<p>Aura must meet eight constraints simultaneously. These constraints shape every architectural decision.</p>
+<p><strong>Network as platform:</strong> All coordination happens peer-to-peer through the social graph. There is no separate infrastructure layer.</p>
+<p><strong>Privacy by design:</strong> Information disclosure must be selective and consent-based.</p>
+<p><strong>Cross-platform deployment:</strong> The system must run on web (Chrome, Firefox, Safari via WebAssembly), mobile (iOS, Android), and desktop (macOS, Linux).</p>
+<p><strong>Social-graph-based coordination:</strong> Information flows through your social graph based on explicit choices. Peer discovery and storage are performed by your social network. The system has no servers, not even for peer discovery or bootstrapping.</p>
+<p><strong>Offline-first operation:</strong> Latency must not create friction during daily use. The app works in airplane mode and syncs seamlessly when connectivity returns.</p>
+<p><strong>Decentralized secret storage:</strong> Users must be able to store secrets without external backups. Most failure scenarios are recoverable through snapshots.</p>
+<p><strong>No single point of failure:</strong> The system must provide real security without depending on any single device or entity.</p>
+<p><strong>Version compatibility:</strong> Older clients must interact with newer ones within semantic version compatibility bounds.</p>
+<h2 id="architectural-solution"><a class="header" href="#architectural-solution">Architectural Solution</a></h2>
+<p>Aura's solution maps each constraint to a required capability and an architectural component.</p>
+<div class="table-wrapper"><table><thead><tr><th>Constraint</th><th>Required Capability</th><th>Solution</th></tr></thead><tbody>
+<tr><td>Cross-platform</td><td>Protocol abstraction</td><td>WebAssembly and typed messages</td></tr>
+<tr><td>Social-graph coordination</td><td>Peer discovery</td><td>Social Bulletin Board via web-of-trust</td></tr>
+<tr><td>Offline-first</td><td>Offline-first operations</td><td>CRDTs and local-first architecture</td></tr>
+<tr><td>Decentralized secrets</td><td>No single point of failure</td><td>Threshold cryptography M-of-N</td></tr>
+<tr><td>No single point of failure</td><td>Real security</td><td>Threshold cryptography across devices, friends, guardians</td></tr>
+<tr><td>Version compatibility</td><td>Safe evolution</td><td>Semantic versioning and types</td></tr>
+<tr><td>Privacy by design</td><td>Selective disclosure</td><td>Content-addressed invites</td></tr>
+<tr><td>Network as platform</td><td>Peer infrastructure</td><td>Peer-to-peer choreographic coordination</td></tr>
+</tbody></table>
+</div>
+<p>Aura uses social trust through M-of-N cryptographic guarantees across devices, friends, and chosen guardians. The same foundations enable collaborative editing, secure messaging, decentralized storage, and multi-party computation.</p>
+<h2 id="three-architectural-pillars"><a class="header" href="#three-architectural-pillars">Three Architectural Pillars</a></h2>
+<p>Aura's architecture rests on three pillars that work together to meet all constraints.</p>
+<p><strong>First pillar: Algebraic state management.</strong> The <a href="102_journal.html">Journal</a> is a fact-based CRDT that captures account and relational events. See <a href="002_theoretical_model.html">Theoretical Model</a> for mathematical foundations. Facts form a join-semilattice and merge via set union. Capability frontiers are evaluated at runtime as a meet-semilattice using Biscuit tokens plus sovereign policy. Flow budgets only replicate <code>spent</code> counters. Limits are derived deterministically from current tokens and policy. This design preserves atomic consistency without storing privileged state.</p>
+<p><strong>Second pillar: Protocol specification and safety.</strong> <a href="107_mpst_and_choreography.html">Multi-party session types (MPST)</a> specify distributed protocols from a global viewpoint. Automatic projection to local roles provides deadlock freedom and compile-time safety. Choreographic programming ensures that complex multi-party coordination is verifiable before deployment. Session types prevent entire classes of distributed protocol errors.</p>
+<p><strong>Third pillar: Stateless effect system composition.</strong> Effects are capabilities code can request without shared mutable state. See <a href="106_effect_system_and_runtime.html">Effect System and Runtime</a> for implementation details. Effect traits live in <code>aura-core</code>. Stateless production handlers are in <code>aura-effects</code>. Handler composition infrastructure is in <code>aura-composition</code>. Multi-party orchestrators are in <code>aura-protocol</code>. Mock and stateful test handlers are in <code>aura-testkit</code>. The guard chain is explicit and ordered: <code>AuthorizationEffects</code> (Biscuit/policy evaluation) flows to <code>FlowBudgetEffects</code> (charge-before-send) to <code>LeakageEffects</code> (observer-class budgets) to <code>JournalEffects</code> (fact commit) to <code>TransportEffects</code>. Guard evaluation is pure and synchronous over a prepared <code>GuardSnapshot</code>, emitting <code>EffectCommand</code> data that async interpreters execute in production or simulation. This sequencing eliminates deadlocks, enables deterministic testing, and keeps architectural boundaries clean.</p>
+<h2 id="implementation-architecture"><a class="header" href="#implementation-architecture">Implementation Architecture</a></h2>
+<p>These three pillars combine into an 8-layer architecture. The layers progress from interface definitions through user-facing applications. See <a href="001_system_architecture.html">System Architecture</a> for the complete layer breakdown.</p>
+<p>The layers are as follows:</p>
+<ol>
+<li>
+<p>Foundation (<code>aura-core</code>): Effect traits, domain types, cryptographic utilities, and error types.</p>
+</li>
+<li>
+<p>Specification (Domain crates and <code>aura-mpst</code>): CRDT domains, capability systems, transport semantics, and session type definitions.</p>
+</li>
+<li>
+<p>Implementation (<code>aura-effects</code> and <code>aura-composition</code>): Stateless production handlers and handler composition infrastructure.</p>
+</li>
+<li>
+<p>Orchestration (<code>aura-protocol</code>): Multi-party coordination, guard chain, and Aura Consensus runtime.</p>
+</li>
+<li>
+<p>Feature implementation: End-to-end protocol crates for authentication, secure messaging, recovery, relational contexts, rendezvous, and storage.</p>
+</li>
+<li>
+<p>Runtime composition (<code>aura-agent</code>, <code>aura-simulator</code>): Complete system assembly and deterministic simulation.</p>
+</li>
+<li>
+<p>User interface (<code>aura-cli</code>): CLI entry points.</p>
+</li>
+<li>
+<p>Testing and tools (<code>aura-testkit</code>, <code>aura-quint</code>): Test fixtures, mock effect handlers, and simulation harnesses.</p>
+</li>
+</ol>
+<h2 id="key-design-principles"><a class="header" href="#key-design-principles">Key Design Principles</a></h2>
+<p>These three pillars enable several key properties that solve the constraints.</p>
+<p><strong>Monotone journals prevent divergence:</strong> Facts merge via set union and never retract. Identical fact sets produce identical states across all replicas. This guarantees eventual consistency.</p>
+<p><strong>Charge-before-send prevents authorization violations:</strong> Every transport message is preceded by the guard chain. No packet is emitted without successful authorization, flow budget, and leakage checks. Fact commits are atomic.</p>
+<p><strong>Session types prevent deadlock:</strong> Multi-party session types ensure that distributed protocols cannot deadlock. Automatic projection provides compile-time safety.</p>
+<p><strong>Deterministic reduction enables testing:</strong> State reduction from fact journals is deterministic. Identical inputs produce identical outputs. This enables property-based testing and simulation.</p>
+<p><strong>No circular dependencies:</strong> Each architectural layer builds on lower layers without reaching back down. This enables independent testing, reusability, and clear responsibility boundaries. Layer 1 depends on nothing. Layer 2 depends only on Layer 1. This pattern continues through all 8 layers.</p>
+<p><strong>Architecture answers one question per layer:</strong> Foundation layer asks "what operations exist?" Specification layer asks "what does this mean?" Implementation layer asks "how do I implement and assemble effects?" Orchestration layer asks "how do I coordinate distributed protocols?" Each answer is independent and composable.</p>
+<p>For mathematical foundations see <a href="002_theoretical_model.html">Theoretical Model</a>. For safety and liveness guarantees see <a href="004_distributed_systems_contract.html">Distributed Systems Contract</a>. For crate details see <a href="999_project_structure.html">Project Structure</a>.</p>
+<h2 id="documentation-index"><a class="header" href="#documentation-index">Documentation Index</a></h2>
+<p>Additional documentation covers specific aspects of the system. The Foundation category covers mathematical and architectural foundations. The Core Systems category covers each major component. The Developer Guides category provides practical guides for implementation. The Project Meta category covers project structure.</p>
+<p><strong>Foundation</strong></p>
+<p><a href="002_theoretical_model.html">Theoretical Model</a> provides mathematical foundations including formal calculus, algebraic types, and semilattice semantics.</p>
+<p><a href="001_system_architecture.html">System Architecture</a> describes implementation architecture including effect system patterns, CRDT implementations, and choreographic protocols.</p>
+<p><a href="003_information_flow_contract.html">Privacy and Information Flow</a> documents the consent-based privacy framework with trust boundaries, flow budgets, and leakage tracking.</p>
+<p><a href="004_distributed_systems_contract.html">Distributed Systems Contract</a> specifies safety and liveness guarantees, the synchrony model, latency bounds, and adversarial assumptions.</p>
+<p><strong>Core Systems</strong></p>
+<p><a href="100_authority_and_identity.html">Authority and Identity</a> describes the authority-centric identity model with opaque authorities and relational contexts.</p>
+<p><a href="101_accounts_and_commitment_tree.html">Accounts and Commitment Tree</a> covers the commitment tree structure for threshold identity management.</p>
+<p><a href="102_journal.html">Journal System</a> documents the fact-based journal, validation rules, and deterministic reduction flows.</p>
+<p><a href="103_relational_contexts.html">Relational Contexts</a> covers guardian bindings, recovery grants, and context-scoped journals.</p>
+<p><a href="104_consensus.html">Consensus</a> describes the Aura Consensus protocol for strong agreement.</p>
+<p><a href="106_effect_system_and_runtime.html">Effect System and Runtime</a> covers effect system architecture and runtime composition.</p>
+<p><a href="107_mpst_and_choreography.html">MPST and Choreography</a> documents multi-party session types and choreographic programming.</p>
+<p><a href="108_transport_and_information_flow.html">Transport and Information Flow</a> covers guard chain enforcement, secure channel lifecycle, and FlowBudget receipts.</p>
+<p><a href="109_authorization.html">Authorization</a> describes the authorization flow from capabilities to Biscuit tokens.</p>
+<p><a href="110_rendezvous.html">Rendezvous Architecture</a> covers context-scoped rendezvous envelopes and channel establishment.</p>
+<p><a href="110_state_reduction.html">State Reduction</a> describes deterministic state reduction from fact journals to canonical state.</p>
+<p><a href="105_identifiers_and_boundaries.html">Identifiers and Boundaries</a> documents the identifier system and context isolation.</p>
+<p><a href="111_maintenance.html">Maintenance</a> covers the distributed maintenance stack including snapshots and garbage collection.</p>
+<p><a href="114_frost_pipelining_optimization.html">FROST Pipelining Optimization</a> describes the single-RTT consensus optimization that reduces latency by 50%.</p>
+<p><strong>Developer Guides</strong></p>
+<p><a href="801_hello_world_guide.html">Hello World Guide</a> provides a starting point for developers new to Aura.</p>
+<p><a href="802_core_systems_guide.html">Core Systems Guide</a> explains the core systems and how they work together.</p>
+<p><a href="803_coordination_guide.html">Coordination Guide</a> covers choreographic protocol design and implementation patterns.</p>
+<p><a href="804_advanced_coordination_guide.html">Advanced Coordination Guide</a> documents advanced techniques for distributed coordination.</p>
+<p><a href="805_development_patterns.html">Development Patterns and Workflows</a> covers practical patterns for developing Aura systems, including code location guidance and typical implementation workflows.</p>
+<p><a href="805_testing_guide.html">Testing Guide</a> describes property testing, simulation harnesses, and validation frameworks.</p>
+<p><a href="806_simulation_guide.html">Simulation Guide</a> covers deterministic simulation for verification and debugging.</p>
+<p><a href="807_maintenance_ota_guide.html">Maintenance and OTA Guide</a> explains distributed maintenance, snapshots, garbage collection, and over-the-air upgrade procedures.</p>
+<p><strong>Project Meta</strong></p>
+<p><a href="999_project_structure.html">Project Structure</a> provides a comprehensive crate structure overview with the dependency graph.</p>
+<p><a href="805_development_patterns.html">Development Patterns and Workflows</a> covers practical patterns for developing Aura systems, including code location guidance and typical implementation workflows.</p>
+<h2 id="system-features"><a class="header" href="#system-features">System Features</a></h2>
+<h3 id="maintenance-and-over-the-air-updates"><a class="header" href="#maintenance-and-over-the-air-updates">Maintenance and Over-the-Air Updates</a></h3>
+<p>Aura supports distributed maintenance and over-the-air updates through coordinated mechanisms.</p>
+<p>Garbage collection runs with statistics tracking and device state cleanup. Over-the-air updates detect soft and hard forks with epoch fence enforcement. Snapshot coordination handles coordinated state capture. Cache invalidation integrates with all layers to ensure consistency.</p>
+<h3 id="guardian-recovery"><a class="header" href="#guardian-recovery">Guardian Recovery</a></h3>
+<p>Guardian-based recovery implements a four-level dispute escalation system for account recovery scenarios. See <a href="103_relational_contexts.html">Relational Contexts</a> for guardian relationship management.</p>
+<p>Severity levels are Low, Medium, High, and Critical. Each level has different escalation policies and auto-cancel logic. A persistent recovery effect_api maintains audit trails of all recovery operations for transparency and accountability.</p>
+<p>Recovery operations can be visualized in the CLI with a recovery status dashboard that shows the current recovery state and evidence.</p>
+<h3 id="testing-framework"><a class="header" href="#testing-framework">Testing Framework</a></h3>
+<p>The testing framework provides comprehensive tools for verification and property-based validation.</p>
+<p>An integration test suite covers multi-device coordination scenarios. Property-based testing works across core systems to catch edge cases. Deterministic simulation enables chaos injection and property verification without real distributed systems complexity.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+                            <a rel="next prefetch" href="001_system_architecture.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+                    <a rel="next prefetch" href="001_system_architecture.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

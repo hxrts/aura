@@ -1,0 +1,312 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Distributed Systems Contract - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="distributed-systems-contract"><a class="header" href="#distributed-systems-contract">Distributed Systems Contract</a></h1>
+<p>This contract specifies Aura's distributed systems model. It defines the safety, liveness, and consistency guarantees provided by the architecture. It also documents the synchrony assumptions, latency expectations, and adversarial capabilities the system tolerates. This contract complements <a href="003_information_flow_contract.html">Privacy and Information Flow</a>, which focuses on metadata and privacy budgets. Together these contracts define the full set of invariants protocol authors must respect.</p>
+<h2 id="1-scope"><a class="header" href="#1-scope">1. Scope</a></h2>
+<p>The contract applies to the following aspects of the system.</p>
+<p>Effect handlers and protocols operate within the 8-layer architecture described in <a href="001_system_architecture.html">System Architecture</a>. Journals and reducers are covered by this contract. The journal specification appears in <a href="101_accounts_and_commitment_tree.html">Accounts and Commitment Tree</a> and <a href="102_journal.html">Journal System</a>. Aura Consensus is documented in <a href="104_consensus.html">Consensus</a>.</p>
+<p>Relational contexts and rendezvous flows fall under this contract. Relational contexts are specified in <a href="103_relational_contexts.html">Relational Contexts</a>. Transport semantics appear in <a href="108_transport_and_information_flow.html">Transport and Information Flow</a>. Rendezvous flows are detailed in <a href="110_rendezvous.html">Rendezvous Architecture</a>.</p>
+<h2 id="2-safety-guarantees"><a class="header" href="#2-safety-guarantees">2. Safety Guarantees</a></h2>
+<h3 id="journals-are-monotone"><a class="header" href="#journals-are-monotone">Journals are monotone</a></h3>
+<p>Facts merge via set union and never retract. See <a href="102_journal.html">Journal System</a> for details. Reduction is deterministic. Identical fact sets produce identical states.</p>
+<h3 id="charge-before-send"><a class="header" href="#charge-before-send">Charge-before-send</a></h3>
+<p>Every transport observable is preceded by <code>CapGuard</code>, <code>FlowGuard</code>, and <code>JournalCoupler</code>. See <a href="106_effect_system_and_runtime.html">Effect System and Runtime</a> and <a href="109_authorization.html">Authorization</a>. No packet is emitted without a successful charge. Guard evaluation is pure over a prepared snapshot and yields commands that an interpreter executes, so the chain never blocks on embedded I/O. This invariant is enforced by the <a href="109_authorization.html">guard chain</a>.</p>
+<h3 id="consensus-agreement"><a class="header" href="#consensus-agreement">Consensus agreement</a></h3>
+<p>For any pair <code>(cid, prestate_hash)</code> there is at most one commit fact. See <a href="104_consensus.html">Consensus</a>. Fallback gossip plus FROST signatures prevent divergent commits. Byzantine witnesses cannot force multiple commits for the same instance.</p>
+<h3 id="context-isolation"><a class="header" href="#context-isolation">Context isolation</a></h3>
+<p>Messages scoped to <code>ContextId</code> never leak into other contexts. Contexts may be explicitly bridged through typed protocols only. See <a href="002_theoretical_model.html">Theoretical Model</a>. Each authority maintains separate journals per context to enforce this isolation.</p>
+<h3 id="deterministic-reduction-order"><a class="header" href="#deterministic-reduction-order">Deterministic reduction order</a></h3>
+<p>Commitment tree operations resolve conflicts using the stable ordering described in <a href="101_accounts_and_commitment_tree.html">Accounts and Commitment Tree</a>. This ordering is derived from the cryptographic identifiers and facts stored in the journal. Conflicts are always resolved in the same way across all replicas.</p>
+<h3 id="receipt-chain"><a class="header" href="#receipt-chain">Receipt chain</a></h3>
+<p>Multi-hop forwarding requires signed receipts. Downstream peers reject messages lacking a chain rooted in their relational context. See <a href="108_transport_and_information_flow.html">Transport and Information Flow</a>. This prevents unauthorized message propagation.</p>
+<h2 id="3-liveness-guarantees"><a class="header" href="#3-liveness-guarantees">3. Liveness Guarantees</a></h2>
+<h3 id="fast-path-consensus"><a class="header" href="#fast-path-consensus">Fast-path consensus</a></h3>
+<p>Fast-path consensus completes in one round-trip time (RTT) when all witnesses are online. Responses are gathered synchronously before committing.</p>
+<h3 id="fallback-consensus"><a class="header" href="#fallback-consensus">Fallback consensus</a></h3>
+<p>Fallback consensus eventually completes under partial synchrony with bounded message delays. Gossip ensures progress if a majority of witnesses re-transmit proposals. See <a href="104_consensus.html">Consensus</a> for timeout configuration.</p>
+<h3 id="anti-entropy"><a class="header" href="#anti-entropy">Anti-entropy</a></h3>
+<p>Journals converge under eventual delivery. Periodic syncs or reorder-resistant CRDT merges reconcile fact sets even after partitions. Authorities exchange their complete fact journals with neighbors to ensure diverged state is healed.</p>
+<h3 id="rendezvous"><a class="header" href="#rendezvous">Rendezvous</a></h3>
+<p>Offer and answer envelopes flood gossip neighborhoods. Secure channels can be established as long as at least one bidirectional path remains between parties. See <a href="110_rendezvous.html">Rendezvous Architecture</a>.</p>
+<h3 id="flow-budgets"><a class="header" href="#flow-budgets">Flow budgets</a></h3>
+<p>Provided the limit is greater than zero, <code>FlowGuard</code> eventually grants headroom. Headroom is available once the epoch rotates or recipients replenish budgets. Budget exhaustion is temporary and recoverable.</p>
+<p>Liveness requires that each authority eventually receives messages from its immediate neighbors. This is the eventual delivery assumption. Liveness also requires that clocks do not drift unboundedly. This is necessary for epoch rotation and receipt expiry.</p>
+<h2 id="4-synchrony-and-timing-model"><a class="header" href="#4-synchrony-and-timing-model">4. Synchrony and Timing Model</a></h2>
+<p>Aura assumes partial synchrony. There exists a bound Δ on message delay and processing time once the network stabilizes. This bound is possibly unknown before stabilization occurs.</p>
+<p><code>T_fallback</code> in consensus is configured as 2 - 3 times Δ. Before stabilization, timeouts may be conservative. Gossip intervals target 250 to 500 milliseconds. Handlers must tolerate jitter but assume eventual delivery of periodic messages.</p>
+<p>Epoch rotation relies on loosely synchronized clocks. The journal serves as the source of truth. Authorities treat an epoch change as effective once they observe it in the journal. This design avoids hard synchronization requirements.</p>
+<h2 id="5-latency-expectations"><a class="header" href="#5-latency-expectations">5. Latency Expectations</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Operation</th><th>Typical Bound (Δ assumptions)</th></tr></thead><tbody>
+<tr><td>Threshold tree update (fast path)</td><td>≤ 2 × RTT of slowest witness</td></tr>
+<tr><td>Rendezvous offer propagation</td><td>O(log N) gossip hops</td></tr>
+<tr><td>FlowGuard charge</td><td>Single local transaction (&lt;10 ms)</td></tr>
+<tr><td>Anti-entropy reconciliation</td><td>k × gossip period (k depends on fanout)</td></tr>
+</tbody></table>
+</div>
+<h2 id="6-adversarial-model"><a class="header" href="#6-adversarial-model">6. Adversarial Model</a></h2>
+<h3 id="61-network-adversary"><a class="header" href="#61-network-adversary">6.1 Network Adversary</a></h3>
+<p>A network adversary controls a subset of transport links. It can delay or drop packets but cannot break cryptography. It cannot forge receipts without <code>FlowGuard</code> grants. Receipts are protected by signatures and epoch binding.</p>
+<p>The network adversary may simultaneously compromise up to <code>f &lt; t</code> authorities per consensus instance without violating safety. Here <code>t</code> is the consensus threshold. This is the standard Byzantine fault tolerance guarantee.</p>
+<h3 id="62-byzantine-witness"><a class="header" href="#62-byzantine-witness">6.2 Byzantine Witness</a></h3>
+<p>A Byzantine witness may equivocate during consensus. The system detects equivocation via the evidence CRDT. Types like <code>HasEquivocated</code> and <code>HasEquivocatedInSet</code> exclude conflicting shares from consensus. See <a href="104_consensus.html">Consensus</a>.</p>
+<p>A Byzantine witness cannot cause multiple commits. Threshold signature verification rejects tampered results. The <code>t</code> of <code>t</code>-of-<code>n</code> threshold signatures prevents this attack.</p>
+<h3 id="63-malicious-relay"><a class="header" href="#63-malicious-relay">6.3 Malicious Relay</a></h3>
+<p>A malicious relay may drop or delay envelopes. It cannot forge flow receipts because receipts require cryptographic signatures. It cannot read payloads because of context-specific encryption.</p>
+<p>Downstream peers detect misbehavior via missing receipts or inconsistent budget charges. The transport layer detects relay failures automatically.</p>
+<h3 id="64-device-compromise"><a class="header" href="#64-device-compromise">6.4 Device Compromise</a></h3>
+<p>A compromised device reveals its share and journal copy. It cannot reconstitute the account without meeting the branch policy. Recovery relies on relational contexts as described in <a href="103_relational_contexts.html">Relational Contexts</a>.</p>
+<p>Device compromise is recoverable because the threshold prevents a single device from acting unilaterally. Guardians can revoke the compromised device and issue a new one.</p>
+<h2 id="7-consistency-model"><a class="header" href="#7-consistency-model">7. Consistency Model</a></h2>
+<p>Journals eventually converge after replicas exchange all facts. This is eventual consistency. Authorities that have seen the same fact set arrive at identical states.</p>
+<p>Operations guarded by Aura Consensus achieve strong consistency. Once a commit fact is accepted, all honest replicas agree on the result. See <a href="104_consensus.html">Consensus</a>.</p>
+<p>Causal delivery is not enforced at the transport layer. Choreographies enforce ordering via session types instead. See <a href="107_mpst_and_choreography.html">MPST and Choreography</a>.</p>
+<p>Each authority's view of its own journal is monotone. Once it observes a fact locally, it will never un-see it. This is monotonic read-after-write consistency.</p>
+<h2 id="8-failure-handling"><a class="header" href="#8-failure-handling">8. Failure Handling</a></h2>
+<p>Timeouts trigger fallback consensus. See <a href="104_consensus.html">Consensus</a> for <code>T_fallback</code> guidelines. Fallback consensus allows the system to make progress during temporary network instability.</p>
+<p>Partition recovery relies on anti-entropy. Authorities merge fact sets when connectivity returns. The journal is the single source of truth for state.</p>
+<p>Budget exhaustion causes local blocking. Protocols must implement backoff or wait for epoch rotation. Budgets are described in <a href="003_information_flow_contract.html">Privacy and Information Flow</a>.</p>
+<p>Guard-chain failures return local errors. These errors include <code>AuthorizationDenied</code>, <code>InsufficientBudget</code>, and <code>JournalCommitFailed</code>. Protocol authors must handle these errors without leaking information. Proper error handling is critical for security.</p>
+<h2 id="9-deployment-guidance"><a class="header" href="#9-deployment-guidance">9. Deployment Guidance</a></h2>
+<p>Configure witness sets such that <code>t &gt; f</code>. Here <code>t</code> is the consensus threshold and <code>f</code> is the maximum number of Byzantine authorities tolerated. This is the standard Byzantine fault tolerance condition.</p>
+<p>Tune gossip fanout and timeout parameters based on observed round-trip times and network topology. Conservative parameters ensure liveness under poor conditions.</p>
+<p>Monitor receipt acceptance rates, consensus backlog, and budget utilization. See <a href="111_maintenance.html">Maintenance</a> for monitoring guidance. Early detection of synchrony violations prevents cascading failures.</p>
+<h2 id="10-references"><a class="header" href="#10-references">10. References</a></h2>
+<p><a href="001_system_architecture.html">System Architecture</a> describes runtime layering and the <a href="109_authorization.html">guard chain</a>.</p>
+<p><a href="002_theoretical_model.html">Theoretical Model</a> covers the formal calculus and semilattice laws.</p>
+<p><a href="101_accounts_and_commitment_tree.html">Accounts and Commitment Tree</a> documents reduction ordering.</p>
+<p><a href="102_journal.html">Journal System</a> and <a href="111_maintenance.html">Maintenance</a> cover fact storage and convergence.</p>
+<p><a href="103_relational_contexts.html">Relational Contexts</a> documents cross-authority state.</p>
+<p><a href="104_consensus.html">Consensus</a> describes fast path and fallback consensus.</p>
+<p><a href="108_transport_and_information_flow.html">Transport and Information Flow</a> documents transport semantics.</p>
+<p><a href="109_authorization.html">Authorization</a> covers <code>CapGuard</code> and <code>FlowGuard</code> sequencing.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="003_information_flow_contract.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="005_system_invariants.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="003_information_flow_contract.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="005_system_invariants.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

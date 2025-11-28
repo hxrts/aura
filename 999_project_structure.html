@@ -1,0 +1,1271 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Aura Crate Structure and Dependency Graph - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="aura-crate-structure-and-dependency-graph"><a class="header" href="#aura-crate-structure-and-dependency-graph">Aura Crate Structure and Dependency Graph</a></h1>
+<p>This document provides a comprehensive overview of the Aura project's crate organization and dependencies.</p>
+<h2 id="8-layer-architecture"><a class="header" href="#8-layer-architecture">8-Layer Architecture</a></h2>
+<p>Aura's codebase is organized into 8 clean architectural layers. Each layer builds on the layers below without circular dependencies.</p>
+<pre><code>┌─────────────────────────────────────────────┐
+│ Layer 8: Testing &amp; Development Tools        │
+│         (aura-testkit, aura-quint)          │
+├─────────────────────────────────────────────┤
+│ Layer 7: User Interface                     │
+│         (aura-cli)                          │
+├─────────────────────────────────────────────┤
+│ Layer 6: Runtime Composition                │
+│         (aura-agent, aura-simulator)        │
+├─────────────────────────────────────────────┤
+│ Layer 5: Feature/Protocol Implementation    │
+│    (aura-invitation, etc.)                  │
+├─────────────────────────────────────────────┤
+│ Layer 4: Orchestration                      │
+│         (aura-protocol)                     │
+├─────────────────────────────────────────────┤
+│ Layer 3: Implementation                     │
+│    (aura-effects + aura-composition)        │
+├─────────────────────────────────────────────┤
+│ Layer 2: Specification                      │
+│  (Domain crates + aura-mpst + aura-macros)  │
+├─────────────────────────────────────────────┤
+│ Layer 1: Foundation                         │
+│         (aura-core)                         │
+└─────────────────────────────────────────────┘
+</code></pre>
+<h2 id="layer-1-foundation--aura-core"><a class="header" href="#layer-1-foundation--aura-core">Layer 1: Foundation — <code>aura-core</code></a></h2>
+<p><strong>Purpose</strong>: Single source of truth for all domain concepts and interfaces.</p>
+<p><strong>Contains</strong>:</p>
+<ul>
+<li>Effect traits for core infrastructure, authentication, storage, network, cryptography, privacy, configuration, and testing</li>
+<li>Domain types: <code>AuthorityId</code>, <code>ContextId</code>, <code>SessionId</code>, <code>FlowBudget</code>, <code>ObserverClass</code>, <code>Capability</code></li>
+<li>Cryptographic utilities: key derivation, FROST types, merkle trees, Ed25519 helpers</li>
+<li>Semantic traits: <code>JoinSemilattice</code>, <code>MeetSemilattice</code>, <code>CvState</code>, <code>MvState</code></li>
+<li>Error types: <code>AuraError</code>, error codes, and guard metadata</li>
+<li>Configuration system with validation and multiple formats</li>
+<li>Causal context types for CRDT ordering</li>
+</ul>
+<p><strong>Key principle</strong>: Interfaces only, no implementations or business logic.</p>
+<p><strong>Exceptions</strong>:</p>
+<ol>
+<li>
+<p><strong>Extension traits</strong> providing convenience methods are allowed (e.g., <code>LeakageChoreographyExt</code>, <code>SimulationEffects</code>, <code>AuthorityRelationalEffects</code>). These blanket implementations extend existing effect traits with domain-specific convenience methods while maintaining interface-only semantics.</p>
+</li>
+<li>
+<p><strong>Arc<T> blanket implementations</strong> for effect traits are required in aura-core due to Rust's orphan rules. These are <em>not</em> "runtime instantiations" - they are purely mechanical delegations that enable <code>Arc&lt;AuraEffectSystem&gt;</code> to satisfy trait bounds. Example:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>impl&lt;T: CryptoEffects + ?Sized&gt; CryptoEffects for std::sync::Arc&lt;T&gt; {
+    async fn ed25519_sign(&amp;self, msg: &amp;[u8], key: &amp;[u8]) -&gt; Result&lt;Vec&lt;u8&gt;, CryptoError&gt; {
+        (**self).ed25519_sign(msg, key).await  // Pure delegation
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Why this is architecturally sound</strong>: <code>Arc</code> is a language-level primitive (like <code>Vec</code>, <code>Box</code>, or <code>&amp;</code>), not a "runtime" in the architectural sense. These implementations add no behavior or state - they simply say "if T can do X, then Arc<T> can too by asking T." Without these, any handler wrapped in <code>Arc</code> would fail to satisfy effect trait bounds, breaking the entire dependency injection pattern.</p>
+</li>
+</ol>
+<p><strong>Architectural Compliance</strong>: aura-core maintains strict interface-only semantics. Test utilities like MockEffects are provided in aura-testkit (Layer 8) where they architecturally belong.</p>
+<p><strong>Dependencies</strong>: None (foundation crate).</p>
+<h3 id="commitment-tree-types-and-functions"><a class="header" href="#commitment-tree-types-and-functions">Commitment Tree Types and Functions</a></h3>
+<p><strong>Location</strong>: <code>aura-core/src/tree/</code></p>
+<p><strong>Contains</strong>:</p>
+<ul>
+<li>Core tree types: <code>TreeOp</code>, <code>AttestedOp</code>, <code>Policy</code>, <code>LeafNode</code>, <code>BranchNode</code>, <code>TreeCommitment</code>, <code>Epoch</code></li>
+<li>Commitment functions: <code>commit_branch()</code>, <code>commit_leaf()</code>, <code>policy_hash()</code>, <code>compute_root_commitment()</code></li>
+<li>Policy meet-semilattice implementation for threshold refinement</li>
+<li>Snapshot types: <code>Snapshot</code>, <code>Cut</code>, <code>ProposalId</code>, <code>Partial</code></li>
+</ul>
+<p><strong>Why Layer 1?</strong></p>
+<p>Commitment tree types MUST remain in <code>aura-core</code> because:</p>
+<ol>
+<li><strong>Effect traits require them</strong>: <code>TreeEffects</code> and <code>SyncEffects</code> in <code>aura-core/src/effects/</code> use these types in their signatures</li>
+<li><strong>FROST primitives depend on them</strong>: <code>aura-core/src/crypto/tree_signing.rs</code> implements threshold signing over tree operations</li>
+<li><strong>Authority abstraction needs them</strong>: <code>aura-core/src/authority.rs</code> uses <code>Policy</code>, <code>AttestedOp</code>, and <code>TreeOpKind</code></li>
+<li><strong>Foundational cryptographic structures</strong>: Commitment trees are merkle trees with threshold policies - core cryptographic primitives, not domain logic</li>
+</ol>
+<p><strong>Layer 2 separation (<code>aura-journal</code>) contains</strong>:</p>
+<ul>
+<li>Tree state machine: <code>TreeState</code> with node storage and path validation</li>
+<li>Reduction logic: Deterministic state derivation from <code>OpLog&lt;AttestedOp&gt;</code></li>
+<li>Domain validation: Business rules for tree operations (e.g., policy monotonicity, leaf lifecycle)</li>
+<li>Application logic: <code>apply_verified()</code>, compaction, garbage collection</li>
+<li>Re-exports: <code>pub use aura_core::tree::*</code> for convenience via <code>aura_journal::commitment_tree</code></li>
+</ul>
+<p><strong>Key architectural distinction</strong>:</p>
+<ul>
+<li><strong>Layer 1 (<code>aura-core</code>)</strong>: Tree <em>types</em> and <em>cryptographic commitment functions</em> (pure primitives)</li>
+<li><strong>Layer 2 (<code>aura-journal</code>)</strong>: Tree <em>state machine</em>, <em>CRDT semantics</em>, and <em>validation rules</em> (domain implementation)</li>
+</ul>
+<p>This separation allows effect traits in Layer 1 to reference tree types without creating circular dependencies, while keeping the stateful CRDT logic in the appropriate domain crate.</p>
+<h2 id="layer-2-specification--domain-crates-and-choreography"><a class="header" href="#layer-2-specification--domain-crates-and-choreography">Layer 2: Specification — Domain Crates and Choreography</a></h2>
+<p><strong>Purpose</strong>: Define domain semantics and protocol specifications.</p>
+<h3 id="domain-crates"><a class="header" href="#domain-crates">Domain Crates</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Crate</th><th>Domain</th><th>Responsibility</th></tr></thead><tbody>
+<tr><td><code>aura-journal</code></td><td>Fact-based journal</td><td>CRDT semantics, tree state machine, reduction logic, validation (re-exports tree types from <code>aura-core</code>)</td></tr>
+<tr><td><code>aura-wot</code></td><td>Trust and authorization</td><td>Capability refinement, Biscuit token helpers</td></tr>
+<tr><td><code>aura-verify</code></td><td>Identity semantics</td><td>Signature verification, device lifecycle</td></tr>
+<tr><td><code>aura-store</code></td><td>Storage domain</td><td>Storage types, capabilities, domain logic</td></tr>
+<tr><td><code>aura-transport</code></td><td>Transport semantics</td><td>P2P communication abstractions</td></tr>
+</tbody></table>
+</div>
+<p><strong>Key characteristics</strong>: Implement domain logic without effect handlers or coordination.</p>
+<h3 id="choreography-specification"><a class="header" href="#choreography-specification">Choreography Specification</a></h3>
+<p><strong><code>aura-mpst</code></strong>: Runtime library providing semantic abstractions for choreographic features including <code>CapabilityGuard</code>, <code>JournalCoupling</code>, <code>LeakageBudget</code>, and <code>ContextIsolation</code> traits. Integrates with the guard chain and works with both macro-generated and hand-written protocols.</p>
+<p><strong><code>aura-macros</code></strong>: Compile-time DSL parser for choreographies with Aura-specific annotations. Parses <code>guard_capability</code>, <code>flow_cost</code>, <code>journal_facts</code> and generates type-safe Rust code.</p>
+<h2 id="layer-3-implementation--aura-effects-and-aura-composition"><a class="header" href="#layer-3-implementation--aura-effects-and-aura-composition">Layer 3: Implementation — <code>aura-effects</code> and <code>aura-composition</code></a></h2>
+<p><strong>Purpose</strong>: Effect implementation and handler composition.</p>
+<h3 id="aura-effects--stateless-effect-handlers"><a class="header" href="#aura-effects--stateless-effect-handlers"><code>aura-effects</code> — Stateless Effect Handlers</a></h3>
+<p><strong>Purpose</strong>: Stateless, single-party effect implementations. <strong>Architectural Decision</strong>: <code>aura-effects</code> is the designated singular point of interaction with non-deterministic operating system services (entropy, wall-clock time, network I/O, file system). This design choice makes the architectural boundary explicit and centralizes impure operations.</p>
+<p><strong>Contains</strong>:</p>
+<ul>
+<li><strong>Production handlers</strong>: <code>RealCryptoHandler</code>, <code>TcpNetworkHandler</code>, <code>FilesystemStorageHandler</code>, <code>RealTimeHandler</code></li>
+<li>OS integration adapters that delegate to system services</li>
+<li>Pure functions that transform inputs to outputs without state</li>
+</ul>
+<p><strong>What doesn't go here</strong>:</p>
+<ul>
+<li>Handler composition or registries</li>
+<li>Multi-handler coordination</li>
+<li>Stateful implementations</li>
+<li>Mock/test handlers</li>
+</ul>
+<p><strong>Key characteristics</strong>: Each handler should be independently testable and reusable. No handler should know about other handlers. This enables clean dependency injection and modular testing.</p>
+<p><strong>Dependencies</strong>: <code>aura-core</code> and external libraries.</p>
+<p><strong>Note</strong>: Mock and test handlers are located in <code>aura-testkit</code> (Layer 8) to maintain clean separation between production and testing concerns.</p>
+<h3 id="aura-composition--handler-composition"><a class="header" href="#aura-composition--handler-composition"><code>aura-composition</code> — Handler Composition</a></h3>
+<p><strong>Purpose</strong>: Assemble individual handlers into cohesive effect systems.</p>
+<p><strong>Contains</strong>:</p>
+<ul>
+<li>Effect registry and builder patterns</li>
+<li>Handler composition utilities</li>
+<li>Effect system configuration</li>
+<li>Handler lifecycle management (start/stop/configure)</li>
+</ul>
+<p><strong>What doesn't go here</strong>:</p>
+<ul>
+<li>Individual handler implementations</li>
+<li>Multi-party protocol logic</li>
+<li>Runtime-specific concerns</li>
+<li>Application lifecycle</li>
+</ul>
+<p><strong>Key characteristics</strong>: Feature crates need to compose handlers without pulling in full runtime infrastructure. This is about "how do I assemble handlers?" not "how do I coordinate distributed protocols?"</p>
+<p><strong>Dependencies</strong>: <code>aura-core</code>, <code>aura-effects</code>.</p>
+<h2 id="layer-4-orchestration--aura-protocol"><a class="header" href="#layer-4-orchestration--aura-protocol">Layer 4: Orchestration — <code>aura-protocol</code></a></h2>
+<p><strong>Purpose</strong>: Multi-party coordination and distributed protocol orchestration.</p>
+<p><strong>Contains</strong>:</p>
+<ul>
+<li>Guard chain coordination (<code>CapGuard → FlowGuard → JournalCoupler</code>)</li>
+<li>Multi-party protocol orchestration (consensus, anti-entropy)</li>
+<li>Cross-handler coordination logic (<code>TransportCoordinator</code>, <code>StorageCoordinator</code>, etc.)</li>
+<li>Distributed state management</li>
+<li>Protocol-specific bridges and adapters</li>
+<li>Stateful coordinators for multi-party protocols</li>
+</ul>
+<p><strong>What doesn't go here</strong>:</p>
+<ul>
+<li>Effect trait definitions (all traits belong in <code>aura-core</code>)</li>
+<li>Handler composition infrastructure (belongs in <code>aura-composition</code>)</li>
+<li>Single-party effect implementations (belongs in <code>aura-effects</code>)</li>
+<li>Test/mock handlers (belong in <code>aura-testkit</code>)</li>
+<li>Runtime assembly (belongs in <code>aura-agent</code>)</li>
+<li>Application-specific business logic (belongs in domain crates)</li>
+</ul>
+<p><strong>Key characteristics</strong>: This layer coordinates multiple handlers working together across network boundaries. It implements the "choreography conductor" pattern, ensuring distributed protocols execute correctly with proper authorization, flow control, and state consistency. All handlers here manage multi-party coordination, not single-party operations.</p>
+<p><strong>Dependencies</strong>: <code>aura-core</code>, <code>aura-effects</code>, <code>aura-composition</code>, <code>aura-mpst</code>, domain crates. Performance-critical protocol operations may require carefully documented exceptions for direct cryptographic library usage.</p>
+<h2 id="layer-5-featureprotocol-implementation"><a class="header" href="#layer-5-featureprotocol-implementation">Layer 5: Feature/Protocol Implementation</a></h2>
+<p><strong>Purpose</strong>: Complete end-to-end protocol implementations.</p>
+<p><strong>Crates</strong>:</p>
+<div class="table-wrapper"><table><thead><tr><th>Crate</th><th>Protocol</th><th>Purpose</th></tr></thead><tbody>
+<tr><td><code>aura-authenticate</code></td><td>Authentication</td><td>Device, threshold, and guardian auth flows</td></tr>
+<tr><td><code>aura-chat</code></td><td>Secure messaging</td><td>Group chat with AMP transport integration</td></tr>
+<tr><td><code>aura-recovery</code></td><td>Guardian recovery</td><td>Recovery grants and dispute escalation</td></tr>
+<tr><td><code>aura-relational</code></td><td>Cross-authority relationships</td><td>RelationalContext protocols (domain types in aura-core)</td></tr>
+<tr><td><code>aura-rendezvous</code></td><td>Peer discovery</td><td>Context-scoped rendezvous and routing</td></tr>
+<tr><td><code>aura-sync</code></td><td>Synchronization</td><td>Journal sync and anti-entropy protocols</td></tr>
+</tbody></table>
+</div>
+<p><strong>Key characteristics</strong>: Reusable building blocks with no UI or binary entry points.</p>
+<p><strong>Dependencies</strong>: <code>aura-core</code>, <code>aura-effects</code>, <code>aura-composition</code>, <code>aura-protocol</code>, <code>aura-mpst</code>.</p>
+<h2 id="layer-6-runtime-composition--aura-agent-and-aura-simulator"><a class="header" href="#layer-6-runtime-composition--aura-agent-and-aura-simulator">Layer 6: Runtime Composition — <code>aura-agent</code> and <code>aura-simulator</code></a></h2>
+<p><strong>Purpose</strong>: Assemble complete running systems for production deployment.</p>
+<p><strong><code>aura-agent</code></strong>: Production runtime for deployment with application lifecycle management, runtime-specific configuration, production deployment concerns, and system integration.</p>
+<p><strong><code>aura-simulator</code></strong>: Deterministic simulation runtime with virtual time, transport shims, and failure injection.</p>
+<p><strong>Contains</strong>:</p>
+<ul>
+<li>Application lifecycle management (startup, shutdown, signals)</li>
+<li>Runtime-specific configuration and policies</li>
+<li>Production deployment concerns</li>
+<li>System integration and monitoring hooks</li>
+</ul>
+<p><strong>What doesn't go here</strong>:</p>
+<ul>
+<li>Effect handler implementations</li>
+<li>Handler composition utilities</li>
+<li>Protocol coordination logic</li>
+<li>CLI or UI concerns</li>
+</ul>
+<p><strong>Key characteristics</strong>: This is about "how do I deploy and run this as a production system?" It's the bridge between composed handlers/protocols and actual running applications.</p>
+<p><strong>Dependencies</strong>: All domain crates, <code>aura-effects</code>, <code>aura-composition</code>, <code>aura-protocol</code>.</p>
+<h2 id="layer-7-user-interface"><a class="header" href="#layer-7-user-interface">Layer 7: User Interface</a></h2>
+<p><strong>Purpose</strong>: User-facing applications with main entry points.</p>
+<p><strong><code>aura-cli</code></strong>: Command-line tools for account and device management, recovery status visualization, and scenario execution.</p>
+<p><strong>Key characteristic</strong>: Contains <code>main()</code> entry point that users run directly.</p>
+<p><strong>Dependencies</strong>: <code>aura-agent</code>, <code>aura-protocol</code>, <code>aura-core</code>, <code>aura-recovery</code>.</p>
+<h2 id="layer-8-testing-and-development-tools"><a class="header" href="#layer-8-testing-and-development-tools">Layer 8: Testing and Development Tools</a></h2>
+<p><strong>Purpose</strong>: Cross-cutting test utilities and formal verification bridges.</p>
+<p><strong><code>aura-testkit</code></strong>: Comprehensive testing infrastructure including:</p>
+<ul>
+<li>Shared test fixtures and scenario builders</li>
+<li>Property test helpers and deterministic utilities</li>
+<li><strong>Mock effect handlers</strong>: <code>MockCryptoHandler</code>, <code>MockTimeHandler</code>, <code>InMemoryStorageHandler</code>, etc.</li>
+<li>Stateful test handlers that maintain controllable state for deterministic testing</li>
+</ul>
+<p><strong><code>aura-quint</code></strong>: Formal verification bridge to Quint model checker.</p>
+<p><strong>Key characteristics</strong>: Mock handlers in <code>aura-testkit</code> are allowed to be stateful (using <code>Arc&lt;Mutex&lt;&gt;&gt;</code>, etc.) since they need controllable, deterministic state for testing. This maintains the stateless principle for production handlers in <code>aura-effects</code> while enabling comprehensive testing.</p>
+<p><strong>Dependencies</strong>: <code>aura-agent</code>, <code>aura-composition</code>, <code>aura-journal</code>, <code>aura-transport</code>, <code>aura-core</code>, <code>aura-protocol</code>.</p>
+<h2 id="workspace-structure"><a class="header" href="#workspace-structure">Workspace Structure</a></h2>
+<pre><code>crates/
+├── aura-agent           Runtime composition and agent lifecycle
+├── aura-authenticate    Authentication protocols
+├── aura-chat            Secure group messaging protocols
+├── aura-cli             Command-line interface
+├── aura-composition     Handler composition and effect system assembly
+├── aura-core            Foundation types and effect traits
+├── aura-effects         Effect handler implementations
+├── aura-frost (removed)  FROST ceremonies (use core primitives)
+├── aura-invitation      Invitation choreographies
+├── aura-journal         Fact-based journal domain
+├── aura-macros          Choreography DSL compiler
+├── aura-mpst            Session types and choreography specs
+├── aura-protocol        Orchestration and coordination
+├── aura-quint       Quint formal verification
+├── aura-recovery        Guardian recovery protocols
+├── aura-relational      Cross-authority relationships
+├── aura-rendezvous      Peer discovery and routing
+├── aura-simulator       Deterministic simulation engine
+├── aura-store           Storage domain types
+├── aura-sync            Synchronization protocols
+├── aura-testkit         Testing utilities and fixtures
+├── aura-transport       P2P communication layer
+├── aura-verify          Identity verification
+└── aura-wot             Web-of-trust authorization
+</code></pre>
+<h2 id="dependency-graph"><a class="header" href="#dependency-graph">Dependency Graph</a></h2>
+<pre class="mermaid">graph TD
+    %% Foundation Layer
+    types[aura-core]
+
+    %% Specification Layer
+    verify[aura-verify]
+    journal[aura-journal]
+    wot[aura-wot]
+    store[aura-store]
+    transport[aura-transport]
+    mpst[aura-mpst]
+    macros[aura-macros]
+
+    %% Implementation Layer
+    effects[aura-effects]
+
+    %% Handler Composition Layer
+    composition[aura-composition]
+
+    %% Orchestration Layer
+    protocol[aura-protocol]
+
+    %% Feature Layer
+    auth[aura-authenticate]
+    chat[aura-chat]
+    recovery[aura-recovery]
+    invitation[aura-invitation]
+    frost[aura-core]
+    relational[aura-relational]
+    rendezvous[aura-rendezvous]
+    sync[aura-sync]
+    store[aura-store]
+
+    %% Runtime Layer
+    agent[aura-agent]
+    simulator[aura-simulator]
+
+    %% Application Layer
+    cli[aura-cli]
+
+    %% Testing Layer
+    testkit[aura-testkit]
+    quint[aura-quint]
+
+    %% Dependencies
+    verify --&gt; types
+    effects --&gt; types
+    composition --&gt; types
+    composition --&gt; effects
+    mpst --&gt; types
+    macros --&gt; types
+    journal --&gt; types
+    transport --&gt; types
+    wot --&gt; types
+    store --&gt; types
+    protocol --&gt; types
+    protocol --&gt; journal
+    protocol --&gt; verify
+    protocol --&gt; wot
+    protocol --&gt; effects
+    protocol --&gt; composition
+    protocol --&gt; mpst
+    auth --&gt; types
+    auth --&gt; mpst
+    auth --&gt; verify
+    auth --&gt; wot
+    auth --&gt; composition
+    chat --&gt; types
+    chat --&gt; transport
+    chat --&gt; composition
+    chat --&gt; mpst
+    recovery --&gt; auth
+    recovery --&gt; verify
+    recovery --&gt; wot
+    recovery --&gt; mpst
+    recovery --&gt; protocol
+    recovery --&gt; journal
+    recovery --&gt; relational
+    recovery --&gt; composition
+    invitation --&gt; auth
+    invitation --&gt; wot
+    invitation --&gt; mpst
+    invitation --&gt; transport
+    invitation --&gt; composition
+    frost --&gt; types
+    frost --&gt; journal
+    frost --&gt; mpst
+    frost --&gt; composition
+    relational --&gt; types
+    relational --&gt; journal
+    relational --&gt; protocol
+    relational --&gt; composition
+    rendezvous --&gt; transport
+    rendezvous --&gt; wot
+    rendezvous --&gt; mpst
+    rendezvous --&gt; composition
+    sync --&gt; types
+    sync --&gt; mpst
+    sync --&gt; journal
+    sync --&gt; composition
+    store --&gt; types
+    store --&gt; journal
+    store --&gt; composition
+    agent --&gt; types
+    agent --&gt; protocol
+    agent --&gt; journal
+    agent --&gt; transport
+    agent --&gt; store
+    agent --&gt; verify
+    agent --&gt; wot
+    agent --&gt; sync
+    agent --&gt; recovery
+    agent --&gt; invitation
+    agent --&gt; effects
+    agent --&gt; composition
+    cli --&gt; agent
+    cli --&gt; protocol
+    cli --&gt; types
+    cli --&gt; recovery
+    simulator --&gt; agent
+    simulator --&gt; journal
+    simulator --&gt; transport
+    simulator --&gt; protocol
+    simulator --&gt; types
+    simulator --&gt; composition
+    simulator --&gt; quint
+    testkit --&gt; agent
+    testkit --&gt; composition
+    testkit --&gt; journal
+    testkit --&gt; transport
+    testkit --&gt; types
+    testkit --&gt; protocol
+
+    %% Styling
+    classDef foundation fill:#e1f5fe
+    classDef spec fill:#f3e5f5
+    classDef effects fill:#e8f5e9
+    classDef composition fill:#e3f2fd
+    classDef protocol fill:#fff3e0
+    classDef feature fill:#fce4ec
+    classDef runtime fill:#f1f8e9
+    classDef app fill:#e0f2f1
+    classDef test fill:#f3e5f5
+
+    class types foundation
+    class verify,journal,wot,store,transport,mpst,macros spec
+    class effects effects
+    class composition composition
+    class protocol protocol
+    class auth,chat,recovery,invitation,frost,relational,rendezvous,sync,store feature
+    class agent,simulator runtime
+    class cli app
+    class testkit,quint test
+</pre>
+<h2 id="effect-trait-classification"><a class="header" href="#effect-trait-classification">Effect Trait Classification</a></h2>
+<p>Not all effect traits are created equal. Aura organizes effect traits into three categories that determine where their implementations should live:</p>
+<p><strong>Fundamental Principle</strong>: All effect trait definitions belong in <code>aura-core</code> (Layer 1) to maintain a single source of truth for interfaces. This includes infrastructure effects (OS integration), application effects (domain-specific), and protocol coordination effects (multi-party orchestration).</p>
+<h3 id="infrastructure-effects-implemented-in-aura-effects"><a class="header" href="#infrastructure-effects-implemented-in-aura-effects">Infrastructure Effects (Implemented in aura-effects)</a></h3>
+<p>Infrastructure effects are truly foundational capabilities that every Aura system needs. These traits define OS-level operations that are universal across all Aura use cases.</p>
+<p><strong>Characteristics</strong>:</p>
+<ul>
+<li>OS integration (file system, network, cryptographic primitives)</li>
+<li>No Aura-specific semantics</li>
+<li>Reusable across any distributed system</li>
+<li>Required for basic system operation</li>
+</ul>
+<p><strong>Examples</strong>:</p>
+<ul>
+<li><code>CryptoEffects</code>: Ed25519 signing, key generation, hashing</li>
+<li><code>NetworkEffects</code>: TCP connections, message sending/receiving</li>
+<li><code>StorageEffects</code>: File read/write, directory operations</li>
+<li><code>PhysicalTimeEffects</code>, <code>LogicalClockEffects</code>, <code>OrderClockEffects</code>: Unified time system</li>
+<li><code>RandomEffects</code>: Cryptographically secure random generation</li>
+<li><code>ConfigurationEffects</code>: Configuration file parsing</li>
+<li><code>ConsoleEffects</code>: Terminal input/output</li>
+</ul>
+<p><strong>Implementation Location</strong>: These traits have stateless handlers in <code>aura-effects</code> that delegate to OS services.</p>
+<h3 id="application-effects-implemented-in-domain-crates"><a class="header" href="#application-effects-implemented-in-domain-crates">Application Effects (Implemented in Domain Crates)</a></h3>
+<p>Application effects encode Aura-specific abstractions and business logic. These traits capture domain concepts that are meaningful only within Aura's architecture.</p>
+<p><strong>Characteristics</strong>:</p>
+<ul>
+<li>Aura-specific semantics and domain knowledge</li>
+<li>Built on top of infrastructure effects</li>
+<li>Implement business logic and domain rules</li>
+<li>May have multiple implementations for different contexts</li>
+</ul>
+<p><strong>Examples</strong>:</p>
+<ul>
+<li><code>JournalEffects</code>: Fact-based journal operations, specific to Aura's CRDT design</li>
+<li><code>AuthorityEffects</code>: Authority-specific operations, central to Aura's identity model</li>
+<li><code>FlowBudgetEffects</code>: Privacy budget management, unique to Aura's information flow control</li>
+<li><code>LeakageEffects</code>: Metadata leakage tracking, specific to Aura's privacy model</li>
+<li><code>AuthorizationEffects</code>: Biscuit token evaluation, tied to Aura's capability system</li>
+<li><code>RelationalContextEffects</code>: Cross-authority relationship management</li>
+<li><code>GuardianEffects</code>: Recovery protocol operations</li>
+</ul>
+<p><strong>Protocol Coordination Effects</strong> (new category):</p>
+<ul>
+<li><code>ChoreographicEffects</code>: Multi-party protocol coordination</li>
+<li><code>EffectApiEffects</code>: Event sourcing and audit for protocols</li>
+<li><code>SyncEffects</code>: Anti-entropy synchronization operations</li>
+</ul>
+<p><strong>Implementation Location</strong>: Application effects are implemented in their respective domain crates (<code>aura-journal</code>, <code>aura-wot</code>, etc.). Protocol coordination effects are implemented in <code>aura-protocol</code> as they manage multi-party state.</p>
+<p><strong>Why Not in aura-effects?</strong>: Moving these to <code>aura-effects</code> would create circular dependencies. Domain crates need to implement these effects using their own domain logic, but <code>aura-effects</code> cannot depend on domain crates due to the layered architecture.</p>
+<p><strong>Implementation Pattern</strong>: Domain crates implement application effects by creating domain-specific handler structs that compose infrastructure effects for OS operations while encoding Aura-specific business logic.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Example: aura-journal implements JournalEffects
+pub struct JournalHandler&lt;C: CryptoEffects, S: StorageEffects&gt; {
+    crypto: C,
+    storage: S,
+    // Domain-specific state
+}
+
+impl&lt;C: CryptoEffects, S: StorageEffects&gt; JournalEffects for JournalHandler&lt;C, S&gt; {
+    async fn append_fact(&amp;self, fact: Fact) -&gt; Result&lt;(), AuraError&gt; {
+        // 1. Domain validation using Aura-specific rules
+        self.validate_fact_semantics(&amp;fact)?;
+        
+        // 2. Cryptographic operations via infrastructure effects
+        let signature = self.crypto.sign(&amp;fact.hash()).await?;
+        
+        // 3. Storage operations via infrastructure effects  
+        let entry = JournalEntry { fact, signature };
+        self.storage.write_chunk(&amp;entry.id(), &amp;entry.encode()).await?;
+        
+        // 4. Domain-specific post-processing
+        self.update_fact_indices(&amp;fact).await?;
+        Ok(())
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="common-effect-placement-mistakes"><a class="header" href="#common-effect-placement-mistakes">Common Effect Placement Mistakes</a></h3>
+<p>Here are examples of incorrect effect placement and how to fix them:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ❌ WRONG: Domain handler using OS operations directly
+// File: aura-journal/src/effects.rs
+impl JournalEffects for BadJournalHandler {
+    async fn read_facts(&amp;self, namespace: Namespace) -&gt; Vec&lt;Fact&gt; {
+        // VIOLATION: Direct file system access in domain handler
+        let data = std::fs::read("journal.dat")?;
+        serde_json::from_slice(&amp;data)?
+    }
+}
+
+// ✅ CORRECT: Inject StorageEffects for OS operations
+impl&lt;S: StorageEffects&gt; JournalEffects for GoodJournalHandler&lt;S&gt; {
+    async fn read_facts(&amp;self, namespace: Namespace) -&gt; Vec&lt;Fact&gt; {
+        // Use injected storage effects
+        let data = self.storage.read_chunk(&amp;namespace.to_path()).await?;
+        self.deserialize_facts(data)
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ❌ WRONG: Application effect implementation in aura-effects
+// File: aura-effects/src/journal_handler.rs
+pub struct JournalHandler { }
+
+impl JournalEffects for JournalHandler {
+    // VIOLATION: Domain logic in infrastructure crate
+    async fn validate_fact(&amp;self, fact: &amp;Fact) -&gt; bool {
+        match fact {
+            Fact::TreeOp(op) =&gt; self.validate_tree_semantics(op),
+            Fact::Commit(c) =&gt; self.validate_commit_rules(c),
+        }
+    }
+}
+
+// ✅ CORRECT: Application effects belong in domain crates
+// File: aura-journal/src/effects.rs
+impl&lt;C, S&gt; JournalEffects for JournalHandler&lt;C, S&gt; {
+    // Domain validation logic belongs here
+}
+<span class="boring">}</span></code></pre></pre>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ❌ WRONG: Infrastructure effect in domain crate
+// File: aura-journal/src/network_handler.rs
+pub struct CustomNetworkHandler { }
+
+impl NetworkEffects for CustomNetworkHandler {
+    // VIOLATION: OS-level networking in domain crate
+    async fn connect(&amp;self, addr: &amp;str) -&gt; TcpStream {
+        TcpStream::connect(addr).await?
+    }
+}
+
+// ✅ CORRECT: Use existing NetworkEffects from aura-effects
+impl&lt;N: NetworkEffects&gt; MyDomainHandler&lt;N&gt; {
+    async fn send_fact(&amp;self, fact: Fact) -&gt; Result&lt;()&gt; {
+        // Compose with injected network effects
+        self.network.send(fact.encode()).await
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Key principles for domain effect implementations</strong>:</p>
+<ul>
+<li><strong>Domain logic first</strong>: Encode business rules and validation specific to the domain</li>
+<li><strong>Infrastructure composition</strong>: Use infrastructure effects for OS operations, never direct syscalls</li>
+<li><strong>Clean separation</strong>: Domain handlers should not contain OS integration code</li>
+<li><strong>Testability</strong>: Mock infrastructure effects for unit testing domain logic</li>
+</ul>
+<h3 id="fallback-handlers-and-the-null-object-pattern"><a class="header" href="#fallback-handlers-and-the-null-object-pattern">Fallback Handlers and the Null Object Pattern</a></h3>
+<p>Infrastructure effects sometimes require <strong>fallback implementations</strong> for platforms or environments where the underlying capability is unavailable (e.g., biometric hardware on servers, secure enclaves in CI, HSMs in development).</p>
+<p><strong>When fallback handlers are appropriate</strong>:</p>
+<ul>
+<li>The effect trait represents optional hardware/OS capabilities</li>
+<li>Code must run on platforms without the capability</li>
+<li>Graceful degradation is preferable to compile-time feature flags everywhere</li>
+</ul>
+<p><strong>Naming conventions</strong>:</p>
+<ul>
+<li>✅ <code>FallbackBiometricHandler</code>, <code>NoOpSecureEnclaveHandler</code>, <code>UnsupportedHsmHandler</code></li>
+<li>❌ <code>RealBiometricHandler</code> (misleading - implies real implementation)</li>
+</ul>
+<p><strong>Fallback handler behavior</strong>:</p>
+<ul>
+<li>Return <code>false</code> for capability checks (<code>is_available()</code>, <code>supports_feature()</code>)</li>
+<li>Return descriptive errors for operations (<code>Err(NotSupported)</code>)</li>
+<li>Never panic or silently succeed when the capability is unavailable</li>
+</ul>
+<p><strong>Before removing a "stub" handler</strong>:</p>
+<ol>
+<li>Check if the trait is used anywhere in the codebase</li>
+<li>If <strong>trait is unused</strong>: Remove both the trait (aura-core) AND implementation (aura-effects)</li>
+<li>If <strong>trait is used</strong>: Keep a properly-named fallback handler in aura-effects</li>
+</ol>
+<p><strong>Why this matters</strong>: A fallback handler is not dead code if its trait is actively used. It's the Null Object Pattern providing safe defaults. The architectural violation is a misleading name, not the existence of the fallback.</p>
+<h3 id="composite-effects-convenience-extensions"><a class="header" href="#composite-effects-convenience-extensions">Composite Effects (Convenience Extensions)</a></h3>
+<p>Composite effects provide convenience methods that combine multiple lower-level operations. These are typically extension traits that add domain-specific convenience to infrastructure effects.</p>
+<p><strong>Characteristics</strong>:</p>
+<ul>
+<li>Convenience wrappers around other effects</li>
+<li>Domain-specific combinations of operations</li>
+<li>Often implemented as blanket implementations</li>
+<li>Improve developer ergonomics</li>
+</ul>
+<p><strong>Examples</strong>:</p>
+<ul>
+<li><code>TreeEffects</code>: Combines <code>CryptoEffects</code> and <code>StorageEffects</code> for merkle tree operations</li>
+<li><code>SimulationEffects</code>: Testing-specific combinations for deterministic simulation</li>
+<li><code>LeakageChoreographyExt</code>: Combines leakage tracking with choreography operations</li>
+</ul>
+<p><strong>Implementation Location</strong>: Usually implemented as extension traits in <code>aura-core</code> or as blanket implementations in domain crates.</p>
+<h3 id="classification-decision-framework"><a class="header" href="#classification-decision-framework">Classification Decision Framework</a></h3>
+<p>When deciding which category an effect trait belongs to:</p>
+<ol>
+<li><strong>Does it require OS integration?</strong> → Infrastructure Effect (aura-effects)</li>
+<li><strong>Does it encode Aura-specific domain knowledge?</strong> → Application Effect (domain crate)</li>
+<li><strong>Is it a convenience wrapper?</strong> → Composite Effect (extension trait)</li>
+</ol>
+<h3 id="effect-placement-decision-matrix"><a class="header" href="#effect-placement-decision-matrix">Effect Placement Decision Matrix</a></h3>
+<p>Use this matrix to determine where to implement an effect:</p>
+<div class="table-wrapper"><table><thead><tr><th>Question</th><th>Infrastructure Effect</th><th>Application Effect</th></tr></thead><tbody>
+<tr><td><strong>OS integration needed?</strong></td><td>✓ Yes (implement in aura-effects)</td><td>✗ No (inject infrastructure effects)</td></tr>
+<tr><td><strong>Contains domain semantics?</strong></td><td>✗ No (too generic)</td><td>✓ Yes (implement in domain crate)</td></tr>
+<tr><td><strong>Aura-specific logic?</strong></td><td>✗ No (universal capability)</td><td>✓ Yes (Aura concepts)</td></tr>
+<tr><td><strong>Multiple implementations likely?</strong></td><td>Maybe (OS variations)</td><td>Usually (different strategies)</td></tr>
+<tr><td><strong>Reusable outside Aura?</strong></td><td>✓ Yes (generic operations)</td><td>✗ No (Aura-specific)</td></tr>
+<tr><td><strong>Example operations</strong></td><td>read(), write(), connect()</td><td>validate_fact(), reduce_state()</td></tr>
+</tbody></table>
+</div>
+<p><strong>Examples applying the matrix:</strong></p>
+<ul>
+<li><strong>CryptoEffects</strong> → Infrastructure (OS crypto, no Aura semantics, reusable)</li>
+<li><strong>JournalEffects</strong> → Application (Aura facts, domain validation, not reusable)</li>
+<li><strong>NetworkEffects</strong> → Infrastructure (TCP/UDP, no domain logic, reusable)</li>
+<li><strong>FlowBudgetEffects</strong> → Application (Aura privacy model, domain rules)</li>
+</ul>
+<p>This classification ensures that:</p>
+<ul>
+<li>Infrastructure effects have reliable, stateless implementations available in <code>aura-effects</code></li>
+<li>Application effects can evolve with their domain logic in domain crates</li>
+<li>Composite effects provide ergonomic interfaces without architectural violations</li>
+<li>The dependency graph remains acyclic</li>
+<li>Domain knowledge stays in domain crates, OS knowledge stays in infrastructure</li>
+<li>Clean composition enables testing domain logic independently of OS integration</li>
+</ul>
+<h2 id="architecture-principles"><a class="header" href="#architecture-principles">Architecture Principles</a></h2>
+<h3 id="no-circular-dependencies"><a class="header" href="#no-circular-dependencies">No Circular Dependencies</a></h3>
+<p>Each layer builds on lower layers without reaching back down. This enables independent testing, reusability, and clear responsibility boundaries.</p>
+<p>The layered architecture means that Layer 1 has no dependencies on any other Aura crate. Layer 2 depends only on Layer 1. Layer 3 depends on Layers 1 and 2. This pattern continues through all 8 layers.</p>
+<h3 id="code-location-guidance"><a class="header" href="#code-location-guidance">Code Location Guidance</a></h3>
+<p>Use these principles to classify code and determine the correct crate.</p>
+<p><strong>Single-Party Operations</strong> (Layer 3: <code>aura-effects</code>):</p>
+<ul>
+<li>Stateless, context-free implementations</li>
+<li>Examples: <code>sign(key, msg) → Signature</code>, <code>store_chunk(id, data) → Ok(())</code>, <code>RealCryptoHandler</code></li>
+<li>Each handler implements one effect trait independently</li>
+<li>Reusable in any context (unit tests, integration tests, production)</li>
+</ul>
+<p><strong>Handler Composition</strong> (Layer 3: <code>aura-composition</code>):</p>
+<ul>
+<li>Assemble individual handlers into cohesive systems</li>
+<li>Examples: <code>EffectRegistry</code>, <code>HandlerBuilder</code>, effect system configuration</li>
+<li>About "how do I assemble handlers?" not "how do I coordinate protocols?"</li>
+<li>Enables feature crates to compose handlers without runtime overhead</li>
+</ul>
+<p><strong>Multi-Party Coordination</strong> (Layer 4: <code>aura-protocol</code>):</p>
+<ul>
+<li>Stateful, context-specific orchestration</li>
+<li>Examples: <code>execute_anti_entropy(...)</code>, <code>CrdtCoordinator</code>, <code>GuardChain</code></li>
+<li>Manages multiple handlers working together across network boundaries</li>
+<li>The "choreography conductor" that ensures distributed protocols execute correctly</li>
+</ul>
+<p>The distinctions are critical for understanding where code belongs. Single-party operations and handler composition both belong in Layer 3. Multi-party coordination goes in <code>aura-protocol</code>.</p>
+<h3 id="composition-vs-orchestration"><a class="header" href="#composition-vs-orchestration">Composition vs. Orchestration</a></h3>
+<p>A common source of confusion is distinguishing <strong>composition</strong> (Layer 3) from <strong>orchestration</strong> (Layer 4). The key distinction is whether code makes <strong>cross-handler coordination decisions</strong>.</p>
+<div class="table-wrapper"><table><thead><tr><th>Pattern</th><th>Layer</th><th>Characteristics</th></tr></thead><tbody>
+<tr><td><strong>Composition</strong></td><td>Layer 3</td><td>Handler implements one trait, takes other effects as generics, each operation dispatches to one handler</td></tr>
+<tr><td><strong>Orchestration</strong></td><td>Layer 4</td><td>Coordinator makes cross-handler decisions, manages multi-party protocols, handles rollback/compensation</td></tr>
+</tbody></table>
+</div>
+<p><strong>Composition example</strong> (Layer 3 - correct):</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Takes multiple effects but each command dispatches to ONE handler
+pub struct EffectInterpreter&lt;J: JournalEffects, S: StorageEffects&gt; {
+    journal: Arc&lt;J&gt;,
+    storage: Arc&lt;S&gt;,
+}
+
+async fn execute(&amp;self, cmd: Command) -&gt; Result&lt;()&gt; {
+    match cmd {
+        Command::AppendFact(f) =&gt; self.journal.append(f).await,  // One handler
+        Command::Store(k, v) =&gt; self.storage.store(k, v).await,  // One handler
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Orchestration example</strong> (Layer 4 - requires coordination):</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Makes cross-handler decisions with compensation logic
+async fn transfer(&amp;self, from: Account, to: Account, amount: u64) -&gt; Result&lt;()&gt; {
+    let receipt = self.budget.charge(from, amount).await?;
+
+    if let Err(e) = self.ledger.credit(to, amount).await {
+        self.budget.refund(receipt).await?;  // Cross-handler compensation
+        return Err(e);
+    }
+
+    self.journal.record_transfer(from, to, amount).await  // Coordination
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Rule of thumb</strong>: If removing one effect handler would require changing the logic of how other handlers are called (not just removing calls), it's orchestration.</p>
+<h3 id="pure-mathematical-utilities"><a class="header" href="#pure-mathematical-utilities">Pure Mathematical Utilities</a></h3>
+<p>Some effect traits in aura-core (e.g., <code>BloomEffects</code>) represent pure mathematical operations without OS integration. These follow the standard trait/handler pattern for consistency, but are technically not "effects" in the algebraic sense (no side effects).</p>
+<p>This is acceptable technical debt - the pattern consistency outweighs the semantic impurity. Future refactoring may move pure math to methods on types in aura-core.</p>
+<p>For detailed guidance on code location decisions, see <a href="805_development_patterns.html">Development Patterns and Workflows</a>.</p>
+<h3 id="architectural-compliance-checking"><a class="header" href="#architectural-compliance-checking">Architectural Compliance Checking</a></h3>
+<p>The project includes an automated architectural compliance checker to enforce these layering principles:</p>
+<p><strong>Command</strong>: <code>just check-arch</code><br />
+<strong>Script</strong>: <code>scripts/arch-check.sh</code></p>
+<p><strong>What it validates</strong>:</p>
+<ul>
+<li>Layer boundary violations (no upward dependencies)</li>
+<li>Effect trait classification and placement</li>
+<li>Domain effect implementation patterns</li>
+<li>Stateless handler requirements in <code>aura-effects</code></li>
+<li>Mock handler location in <code>aura-testkit</code></li>
+<li>Extension trait vs. business logic detection</li>
+<li>Expected crate content and dependency structure</li>
+</ul>
+<p>The checker reports violations that must be fixed and warnings for review. Run it before submitting changes to ensure architectural compliance.</p>
+<h2 id="effect-system-and-impure-function-guidelines"><a class="header" href="#effect-system-and-impure-function-guidelines">Effect System and Impure Function Guidelines</a></h2>
+<h3 id="core-principle-deterministic-simulation"><a class="header" href="#core-principle-deterministic-simulation">Core Principle: Deterministic Simulation</a></h3>
+<p>Aura's effect system ensures <strong>fully deterministic simulation</strong> by requiring all impure operations (time, randomness, filesystem, network) to flow through effect traits. This enables:</p>
+<ul>
+<li><strong>Predictable testing</strong>: Mock all external dependencies for unit tests</li>
+<li><strong>WASM compatibility</strong>: No blocking operations or OS thread assumptions</li>
+<li><strong>Cross-platform support</strong>: Same code runs in browsers and native environments</li>
+<li><strong>Simulation fidelity</strong>: Virtual time and controlled randomness for property testing</li>
+</ul>
+<h3 id="impure-function-classification"><a class="header" href="#impure-function-classification">Impure Function Classification</a></h3>
+<p><strong>🚫 FORBIDDEN: Direct impure function usage</strong></p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ❌ VIOLATION: Direct system calls
+let now = SystemTime::now();
+let random = thread_rng().gen::&lt;u64&gt;();
+let file = File::open("data.txt")?;
+let socket = TcpStream::connect("127.0.0.1:8080").await?;
+
+// ❌ VIOLATION: Global state
+static CACHE: Mutex&lt;HashMap&lt;String, String&gt;&gt; = Mutex::new(HashMap::new());
+<span class="boring">}</span></code></pre></pre>
+<p><strong>✅ REQUIRED: Effect trait usage</strong></p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ✅ CORRECT: Via effect traits with explicit context
+async fn my_operation&lt;T: TimeEffects + RandomEffects + StorageEffects&gt;(
+    ctx: &amp;EffectContext,
+    effects: &amp;T,
+) -&gt; Result&lt;ProcessedData&gt; {
+    let timestamp = effects.current_time().await;
+    let nonce = effects.random_bytes(32).await?;
+    let data = effects.read_chunk(&amp;chunk_id).await?;
+    
+    // ... business logic with pure functions
+    Ok(ProcessedData { timestamp, nonce, data })
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="legitimate-effect-injection-sites"><a class="header" href="#legitimate-effect-injection-sites">Legitimate Effect Injection Sites</a></h3>
+<p>The architectural compliance checker <strong>ONLY</strong> allows direct impure function usage in these specific locations:</p>
+<h4 id="1-effect-handler-implementations-aura-effects"><a class="header" href="#1-effect-handler-implementations-aura-effects">1. Effect Handler Implementations (<code>aura-effects</code>)</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ✅ ALLOWED: Production effect implementations
+impl TimeEffects for RealTimeHandler {
+    async fn current_time(&amp;self) -&gt; SystemTime {
+        SystemTime::now() // OK: This IS the effect implementation
+    }
+}
+
+impl RandomEffects for RealRandomHandler {
+    async fn random_bytes(&amp;self, len: usize) -&gt; Vec&lt;u8&gt; {
+        let mut rng = OsRng;  // OK: Legitimate OS randomness source
+        (0..len).map(|_| rng.gen()).collect()
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h4 id="2-runtime-effect-assembly-runtimeeffectsrs"><a class="header" href="#2-runtime-effect-assembly-runtimeeffectsrs">2. Runtime Effect Assembly (<code>runtime/effects.rs</code>)</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ✅ ALLOWED: Effect system bootstrapping
+pub fn create_production_effects() -&gt; AuraEffectSystem {
+    AuraEffectSystemBuilder::new()
+        .with_handler(Arc::new(RealTimeHandler::new()))
+        .with_handler(Arc::new(OsRandomHandler::new())) // OK: Assembly point
+        .build()
+}
+<span class="boring">}</span></code></pre></pre>
+<h4 id="3-pure-functions-aura-corehash"><a class="header" href="#3-pure-functions-aura-corehash">3. Pure Functions (<code>aura-core::hash</code>)</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ✅ ALLOWED: Deterministic, pure operations
+pub fn hash(data: &amp;[u8]) -&gt; [u8; 32] {
+    blake3::hash(data).into()  // OK: Pure function, no external state
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="exemption-rationale"><a class="header" href="#exemption-rationale">Exemption Rationale</a></h3>
+<p><strong>Why these exemptions are architecturally sound</strong>:</p>
+<ol>
+<li><strong>Effect implementations</strong> MUST access the actual system - that's their purpose</li>
+<li><strong>Runtime assembly</strong> is the controlled injection point where production vs. mock effects are chosen</li>
+<li><strong>Pure functions</strong> are deterministic regardless of when/where they're called</li>
+</ol>
+<p><strong>Why broad exemptions are dangerous</strong>:</p>
+<ul>
+<li>Crate-level exemptions (<code>aura-agent</code>, <code>aura-protocol</code>) would allow business logic to bypass effects</li>
+<li>This breaks simulation determinism and WASM compatibility</li>
+<li>Makes testing unreliable by introducing hidden external dependencies</li>
+</ul>
+<h3 id="effect-system-usage-patterns"><a class="header" href="#effect-system-usage-patterns">Effect System Usage Patterns</a></h3>
+<h4 id="-correct-infrastructure-effects-in-aura-effects"><a class="header" href="#-correct-infrastructure-effects-in-aura-effects">✅ Correct: Infrastructure Effects in aura-effects</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// File: crates/aura-effects/src/network.rs
+pub struct TcpNetworkHandler;
+
+impl NetworkEffects for TcpNetworkHandler {
+    async fn send(&amp;self, endpoint: &amp;Endpoint, data: Vec&lt;u8&gt;) -&gt; Result&lt;()&gt; {
+        let stream = TcpStream::connect(&amp;endpoint.address).await?; // OK: Implementation
+        stream.write_all(&amp;data).await?;
+        Ok(())
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h4 id="-correct-domain-effects-in-domain-crates"><a class="header" href="#-correct-domain-effects-in-domain-crates">✅ Correct: Domain Effects in Domain Crates</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// File: crates/aura-journal/src/effects.rs
+pub struct JournalHandler&lt;C: CryptoEffects, S: StorageEffects&gt; {
+    crypto: C,
+    storage: S,
+}
+
+impl&lt;C: CryptoEffects, S: StorageEffects&gt; JournalEffects for JournalHandler&lt;C, S&gt; {
+    async fn append_fact(&amp;self, ctx: &amp;EffectContext, fact: Fact) -&gt; Result&lt;()&gt; {
+        // Domain validation (pure)
+        self.validate_fact_semantics(&amp;fact)?;
+        
+        // Infrastructure effects for impure operations
+        let signature = self.crypto.sign(&amp;fact.hash()).await?;
+        self.storage.write_chunk(&amp;entry.id(), &amp;entry.encode()).await?;
+        
+        Ok(())
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h4 id="-violation-direct-impure-access-in-domain-logic"><a class="header" href="#-violation-direct-impure-access-in-domain-logic">❌ Violation: Direct impure access in domain logic</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// File: crates/aura-core/src/crypto/tree_signing.rs  
+pub async fn start_frost_ceremony() -&gt; Result&lt;()&gt; {
+    let start_time = SystemTime::now(); // ❌ VIOLATION: Should use TimeEffects
+    let session_id = Uuid::new_v4();    // ❌ VIOLATION: Should use RandomEffects
+    
+    // This breaks deterministic simulation!
+    ceremony_with_timing(start_time, session_id).await
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="context-propagation-requirements"><a class="header" href="#context-propagation-requirements">Context Propagation Requirements</a></h3>
+<p><strong>All async operations must propagate EffectContext</strong>:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ✅ CORRECT: Explicit context propagation
+async fn process_request&lt;T: AllEffects&gt;(
+    ctx: &amp;EffectContext,  // Required for tracing/correlation
+    effects: &amp;T,
+    request: Request,
+) -&gt; Result&lt;Response&gt; {
+    let start = effects.current_time().await;
+    
+    // Context flows through the call chain
+    let result = process_business_logic(ctx, effects, request.data).await?;
+    
+    let duration = effects.current_time().await.duration_since(start)?;
+    tracing::info!(
+        request_id = %ctx.request_id,
+        duration_ms = duration.as_millis(),
+        "Request processed"
+    );
+    
+    Ok(result)
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="mock-testing-pattern"><a class="header" href="#mock-testing-pattern">Mock Testing Pattern</a></h3>
+<p><strong>Tests use controllable mock effects</strong>:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// File: tests/integration/frost_test.rs
+#[tokio::test]
+async fn test_frost_ceremony_timing() {
+    // Controllable time for deterministic tests
+    let mock_time = MockTimeHandler::new();
+    mock_time.set_time(SystemTime::UNIX_EPOCH + Duration::from_secs(1000));
+    
+    let effects = TestEffectSystem::new()
+        .with_time(mock_time)
+        .with_random(MockRandomHandler::deterministic())
+        .build();
+    
+    let ctx = EffectContext::test();
+    
+    // Test runs deterministically regardless of wall-clock time
+    let result = start_frost_ceremony(&amp;ctx, &amp;effects).await;
+    assert!(result.is_ok());
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="wasm-compatibility-guidelines"><a class="header" href="#wasm-compatibility-guidelines">WASM Compatibility Guidelines</a></h3>
+<p><strong>Forbidden in all crates (except effect implementations)</strong>:</p>
+<ul>
+<li><code>std::thread</code> - No OS threads in WASM</li>
+<li><code>std::fs</code> - No filesystem in browsers</li>
+<li><code>SystemTime::now()</code> - Time must be injected</li>
+<li><code>rand::thread_rng()</code> - Randomness must be controllable</li>
+<li>Blocking operations - Everything must be async</li>
+</ul>
+<p><strong>Required patterns</strong>:</p>
+<ul>
+<li>Async/await for all I/O operations</li>
+<li>Effect trait injection for all impure operations</li>
+<li>Explicit context propagation through call chains</li>
+<li>Builder patterns for initialization with async setup</li>
+</ul>
+<h3 id="compliance-checking"><a class="header" href="#compliance-checking">Compliance Checking</a></h3>
+<p>The <code>just check-arch</code> command validates these principles by:</p>
+<ol>
+<li><strong>Scanning for direct impure usage</strong>: Detects <code>SystemTime::now</code>, <code>thread_rng()</code>, <code>std::fs::</code>, etc.</li>
+<li><strong>Enforcing precise exemptions</strong>: Only allows usage in <code>impl.*Effects</code>, <code>runtime/effects.rs</code></li>
+<li><strong>Context propagation validation</strong>: Warns about async functions without <code>EffectContext</code></li>
+<li><strong>Global state detection</strong>: Catches <code>lazy_static</code>, <code>Mutex&lt;static&gt;</code> anti-patterns</li>
+</ol>
+<p>Run before every commit to maintain architectural compliance and simulation determinism.</p>
+<h2 id="task-oriented-crate-selection"><a class="header" href="#task-oriented-crate-selection">Task-Oriented Crate Selection</a></h2>
+<h3 id="im-implementing"><a class="header" href="#im-implementing">"I'm implementing..."</a></h3>
+<ul>
+<li><strong>A new hash function</strong> → <code>aura-core</code> (pure function) + <code>aura-effects</code> (if OS integration needed)</li>
+<li><strong>FROST ceremony logic</strong> → use core primitives or colocate with callers (aura-frost removed)</li>
+<li><strong>Tree types or commitment functions</strong> → <code>aura-core/src/tree/</code> (types and cryptographic primitives)</li>
+<li><strong>Tree state machine or reduction logic</strong> → <code>aura-journal/src/commitment_tree/</code> (CRDT semantics)</li>
+<li><strong>Guardian recovery flow</strong> → <code>aura-recovery</code></li>
+<li><strong>Journal fact validation</strong> → <code>aura-journal</code></li>
+<li><strong>Network transport</strong> → <code>aura-transport</code> (abstractions) + <code>aura-effects</code> (TCP implementation)</li>
+<li><strong>CLI command</strong> → <code>aura-cli</code></li>
+<li><strong>Test scenario</strong> → <code>aura-testkit</code></li>
+<li><strong>Choreography protocol</strong> → Feature crate + <code>aura-mpst</code></li>
+<li><strong>Authorization logic</strong> → <code>aura-wot</code></li>
+<li><strong>Consensus protocol</strong> → <code>aura-protocol</code> (orchestration) + domain crates (state)</li>
+<li><strong>Effect handler</strong> → <code>aura-effects</code> (infrastructure) or domain crate (application logic)</li>
+</ul>
+<h3 id="i-need-to-understand"><a class="header" href="#i-need-to-understand">"I need to understand..."</a></h3>
+<ul>
+<li><strong>How authorities work</strong> → <code>docs/100_authority_and_identity.md</code></li>
+<li><strong>How consensus works</strong> → <code>docs/104_consensus.md</code></li>
+<li><strong>How effects compose</strong> → <code>docs/106_effect_system_and_runtime.md</code></li>
+<li><strong>How protocols are designed</strong> → <code>docs/107_mpst_and_choreography.md</code></li>
+<li><strong>How the guard chain works</strong> → <code>docs/001_system_architecture.md</code> (sections 2.1-2.3)</li>
+<li><strong>How journals work</strong> → <code>docs/102_journal.md</code></li>
+<li><strong>How testing works</strong> → <code>docs/805_testing_guide.md</code> + <code>docs/806_simulation_guide.md</code></li>
+<li><strong>How to write tests</strong> → <code>docs/805_testing_guide.md</code></li>
+<li><strong>How privacy and flow budgets work</strong> → <code>docs/003_information_flow_contract.md</code></li>
+<li><strong>How distributed system guarantees work</strong> → <code>docs/004_distributed_systems_contract.md</code></li>
+<li><strong>How commitment trees work</strong> → <code>docs/101_accounts_and_commitment_tree.md</code></li>
+<li><strong>How relational contexts work</strong> → <code>docs/103_relational_contexts.md</code></li>
+<li><strong>How transport and receipts work</strong> → <code>docs/108_transport_and_information_flow.md</code></li>
+<li><strong>How rendezvous and peer discovery work</strong> → <code>docs/110_rendezvous.md</code></li>
+<li><strong>How state reduction works</strong> → <code>docs/110_state_reduction.md</code></li>
+<li><strong>How the mathematical model works</strong> → <code>docs/002_theoretical_model.md</code></li>
+<li><strong>How identifiers and boundaries work</strong> → <code>docs/105_identifiers_and_boundaries.md</code></li>
+<li><strong>How authorization and capabilities work</strong> → <code>docs/109_authorization.md</code></li>
+<li><strong>How Biscuit tokens work</strong> → <code>docs/109_authorization.md</code> + <code>aura-wot/src/biscuit/</code></li>
+<li><strong>How to get started as a new developer</strong> → <code>docs/801_hello_world_guide.md</code></li>
+<li><strong>How core systems work together</strong> → <code>docs/802_core_systems_guide.md</code></li>
+<li><strong>How to design advanced protocols</strong> → <code>docs/804_advanced_coordination_guide.md</code></li>
+<li><strong>How simulation works</strong> → <code>docs/806_simulation_guide.md</code></li>
+<li><strong>How maintenance and OTA updates work</strong> → <code>docs/807_maintenance_ota_guide.md</code> + <code>docs/111_maintenance.md</code></li>
+<li><strong>How development patterns work</strong> → <code>docs/805_development_patterns.md</code></li>
+<li><strong>The project's goals and constraints</strong> → <code>docs/000_project_overview.md</code></li>
+<li><strong>How to debug architecture</strong> → <code>just check-arch</code> + this document</li>
+</ul>
+<h3 id="layer-based-development-workflow"><a class="header" href="#layer-based-development-workflow">Layer-Based Development Workflow</a></h3>
+<p><strong>Working on Layer 1 (Foundation)?</strong> Read: <code>docs/106_effect_system_and_runtime.md</code><br />
+<strong>Working on Layer 2 (Domains)?</strong> Read: Domain-specific docs (<code>docs/100-112</code>)<br />
+<strong>Working on Layer 3 (Effects)?</strong> Read: <code>docs/805_development_patterns.md</code><br />
+<strong>Working on Layer 4 (Protocols)?</strong> Read: <code>docs/107_mpst_and_choreography.md</code><br />
+<strong>Working on Layer 5 (Features)?</strong> Read: <code>docs/803_coordination_guide.md</code><br />
+<strong>Working on Layer 6 (Runtime)?</strong> Read: <code>aura-agent/</code> and <code>aura-simulator/</code><br />
+<strong>Working on Layer 7 (CLI)?</strong> Read: <code>aura-cli/</code> + scenario docs<br />
+<strong>Working on Layer 8 (Testing)?</strong> Read: <code>docs/805_testing_guide.md</code></p>
+<h2 id="crate-summary"><a class="header" href="#crate-summary">Crate Summary</a></h2>
+<h3 id="aura-core"><a class="header" href="#aura-core">aura-core</a></h3>
+<p>Foundation types and effect traits. Single source of truth for <code>AuthorityId</code>, <code>ContextId</code>, <code>SessionId</code>, <code>FlowBudget</code>, error types, configuration, and <strong>commitment tree types</strong> (<code>TreeOp</code>, <code>AttestedOp</code>, <code>Policy</code>, commitment functions).</p>
+<h3 id="aura-verify"><a class="header" href="#aura-verify">aura-verify</a></h3>
+<p>Signature verification and identity validation interfaces.</p>
+<h3 id="aura-journal"><a class="header" href="#aura-journal">aura-journal</a></h3>
+<p>CRDT semantics for fact-based journals and commitment trees. Implements tree state machine, deterministic reduction, and domain validation. Re-exports tree types from <code>aura-core</code> for convenience.</p>
+<h3 id="aura-relational"><a class="header" href="#aura-relational">aura-relational</a></h3>
+<p>Cross-authority relationships, including Guardian relationship protocols with cross-authority consensus coordination and relational state management.</p>
+<h3 id="aura-wot"><a class="header" href="#aura-wot">aura-wot</a></h3>
+<p>Meet-semilattice capability system with policy evaluation and authorization.</p>
+<h3 id="aura-store"><a class="header" href="#aura-store">aura-store</a></h3>
+<p>Storage domain types with capability-based access control.</p>
+<h3 id="aura-transport"><a class="header" href="#aura-transport">aura-transport</a></h3>
+<p>P2P communication abstractions and network addressing.</p>
+<h3 id="aura-mpst"><a class="header" href="#aura-mpst">aura-mpst</a></h3>
+<p>Session types and choreography runtime for distributed protocols.</p>
+<h3 id="aura-macros"><a class="header" href="#aura-macros">aura-macros</a></h3>
+<p>DSL compiler for choreographies with Aura-specific annotations.</p>
+<h3 id="aura-effects"><a class="header" href="#aura-effects">aura-effects</a></h3>
+<p>Production-grade stateless effect handlers that delegate to OS services for crypto, network, storage, and time operations.</p>
+<h3 id="aura-composition"><a class="header" href="#aura-composition">aura-composition</a></h3>
+<p>Effect handler composition, registry, and builder infrastructure for assembling handlers into cohesive effect systems.</p>
+<h3 id="aura-protocol"><a class="header" href="#aura-protocol">aura-protocol</a></h3>
+<p>Multi-party coordination and distributed protocol orchestration including guard chain and CRDT coordination.</p>
+<h3 id="aura-authenticate"><a class="header" href="#aura-authenticate">aura-authenticate</a></h3>
+<p>Device, threshold, and guardian authentication protocols.</p>
+<h3 id="aura-chat"><a class="header" href="#aura-chat">aura-chat</a></h3>
+<p>Secure group messaging with authority-first design and AMP transport integration.</p>
+<h3 id="frost-placement"><a class="header" href="#frost-placement">FROST placement</a></h3>
+<p>Core FROST primitives (key packages, signing, verification, binding) live in <code>aura-core::crypto::tree_signing</code>. Higher-level ceremonies should be colocated with their callers or folded into core adapters. Consensus and journal consume primitives via adapters/effects.</p>
+<h3 id="aura-invitation"><a class="header" href="#aura-invitation">aura-invitation</a></h3>
+<p>Peer onboarding and relationship formation choreographies.</p>
+<h3 id="aura-recovery"><a class="header" href="#aura-recovery">aura-recovery</a></h3>
+<p>Guardian-based recovery with dispute escalation and audit trails.</p>
+<h3 id="aura-rendezvous"><a class="header" href="#aura-rendezvous">aura-rendezvous</a></h3>
+<p>Social Bulletin Board peer discovery with relationship-based routing.</p>
+<h3 id="aura-sync"><a class="header" href="#aura-sync">aura-sync</a></h3>
+<p>Journal synchronization and anti-entropy protocols.</p>
+<h3 id="aura-agent"><a class="header" href="#aura-agent">aura-agent</a></h3>
+<p>Production runtime assembling handlers and protocols into executable systems.</p>
+<h3 id="aura-simulator"><a class="header" href="#aura-simulator">aura-simulator</a></h3>
+<p>Deterministic simulation with chaos injection and property verification.</p>
+<h3 id="aura-cli"><a class="header" href="#aura-cli">aura-cli</a></h3>
+<p>Command-line interface for account management and recovery visualization.</p>
+<h3 id="aura-testkit"><a class="header" href="#aura-testkit">aura-testkit</a></h3>
+<p>Comprehensive testing infrastructure including test fixtures, scenario builders, property test helpers, and mock effect handlers with controllable stateful behavior for deterministic testing.</p>
+<h3 id="aura-quint"><a class="header" href="#aura-quint">aura-quint</a></h3>
+<p>Formal verification integration for protocol specifications.</p>
+<h2 id="documents-that-reference-this-guide"><a class="header" href="#documents-that-reference-this-guide">Documents That Reference This Guide</a></h2>
+<ul>
+<li><a href="001_system_architecture.html">System Architecture</a> - References the 8-layer architecture defined here</li>
+<li><a href="805_development_patterns.html">Development Patterns and Workflows</a> - Uses crate organization patterns from this guide</li>
+<li><a href="106_effect_system_and_runtime.html">Effect System and Runtime</a> - Implements the effect system architecture described here</li>
+<li><a href="805_testing_guide.html">Testing Guide</a> - Uses the testing infrastructure organization from this guide</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="807_maintenance_ota_guide.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="adr/014_guard.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="807_maintenance_ota_guide.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="adr/014_guard.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

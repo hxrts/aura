@@ -1,0 +1,381 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Journal - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="journal"><a class="header" href="#journal">Journal</a></h1>
+<p>This document describes the journal architecture and state reduction system in Aura. It explains how journals implement CRDT semantics, how facts are structured, and how reduction produces deterministic state for account authorities and relational contexts. It describes integration with the effect_api layer and defines the invariants that ensure correctness. See <a href="111_maintenance.html">Maintenance</a> for the end-to-end snapshot and garbage collection pipeline.</p>
+<h2 id="1-journal-namespaces"><a class="header" href="#1-journal-namespaces">1. Journal Namespaces</a></h2>
+<p>Aura maintains a separate journal namespace for each authority and each <a href="103_relational_contexts.html">relational context</a>. A journal namespace stores all facts relevant to the entity it represents. A namespace is identified by an <code>AuthorityId</code> (see <a href="100_authority_and_identity.html">Authority and Identity</a>) or a <code>ContextId</code>. No namespace shares state with another. Identifier definitions appear in <a href="105_identifiers_and_boundaries.html">Identifiers and Boundaries</a>.</p>
+<p>A journal namespace evolves through fact insertion. Facts accumulate monotonically. No fact is removed except through garbage collection rules that preserve logical meaning.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct Journal {
+    pub facts: BTreeSet&lt;Fact&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This type defines a journal as a set of facts. The journal is a join semilattice under set union. Merging two journals produces a new journal containing all facts from both inputs.</p>
+<h2 id="2-fact-model"><a class="header" href="#2-fact-model">2. Fact Model</a></h2>
+<p>Facts represent immutable events or operations that contribute to the state of a namespace. Facts have identifiers and content. Facts do not contain device identifiers or timestamps used for correctness.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct Fact {
+    pub order: OrderTime,
+    pub content: FactContent,
+}
+
+pub enum FactContent {
+    AttestedOp(AttestedOp),
+    Relational(RelationalFact),
+    Snapshot(SnapshotFact),
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This model supports account operations, relational context operations, and snapshots. Each fact is self contained. Facts are validated before insertion into a namespace.</p>
+<h2 id="3-semilattice-structure"><a class="header" href="#3-semilattice-structure">3. Semilattice Structure</a></h2>
+<p>Journals use a join semilattice. The semilattice uses set union as the join operator. The partial order is defined by subset inclusion. The journal never removes facts during merge. Every merge operation increases or preserves the fact set.</p>
+<p>The join semilattice ensures convergence across replicas. Any two replicas that exchange facts eventually converge to identical fact sets. All replicas reduce the same fact set to the same state.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>impl Journal {
+    pub fn merge(&amp;self, other: &amp;Journal) -&gt; Journal {
+        Journal { facts: self.facts.union(&amp;other.facts).cloned().collect() }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This merge function demonstrates set union across two fact sets. The result is monotonic and convergent.</p>
+<h2 id="4-account-journal-reduction"><a class="header" href="#4-account-journal-reduction">4. Account Journal Reduction</a></h2>
+<p>Account journals store attested operations for commitment tree updates. Reduction computes a <code>TreeState</code> from the fact set. Reduction applies only valid operations and resolves conflicts deterministically.</p>
+<p>Reduction follows these steps.</p>
+<ol>
+<li>Identify all <code>AttestedOp</code> facts.</li>
+<li>Group operations by their referenced parent state.</li>
+<li>Select a winning operation for each parent using a deterministic ordering.</li>
+<li>Apply winners in parent order.</li>
+<li>Compute commitments after each operation.</li>
+</ol>
+<p>The result is a single <code>TreeState</code> for the account.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub fn reduce_account(facts: &amp;BTreeSet&lt;Fact&gt;) -&gt; TreeState {
+    // Reduction logic applies attested operations deterministically
+    TreeState::default()
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This function signature illustrates how reduction produces deterministic state. Implementations must follow defined rules for conflict resolution and validation.</p>
+<h2 id="5-relationalcontext-journal-reduction"><a class="header" href="#5-relationalcontext-journal-reduction">5. RelationalContext Journal Reduction</a></h2>
+<p>Relational contexts store relational facts. These facts reference authority commitments. Reduction produces a <code>RelationalState</code> that captures the current relationship between authorities.</p>
+<p>Reduction applies relational facts in the order defined by their dependencies. Aura Consensus may produce commit facts that include thresholds and signatures. Reduction verifies that relational facts reference current authority states.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub fn reduce_context(facts: &amp;BTreeSet&lt;Fact&gt;) -&gt; RelationalState {
+    // Reduction logic processes relational facts
+    RelationalState::default()
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This function signature shows how a relational state is derived. Implementations must ensure that relational facts reference valid authority commitments.</p>
+<h2 id="6-snapshots-and-garbage-collection"><a class="header" href="#6-snapshots-and-garbage-collection">6. Snapshots and Garbage Collection</a></h2>
+<p>Snapshots summarize all prior facts. A snapshot fact contains a digest of the fact set at the time of creation. A snapshot establishes a high water mark. Facts older than the snapshot can be pruned.</p>
+<p>Garbage collection removes pruned facts while preserving logical meaning. Pruning does not change the result of reduction. Pruning reduces storage requirements.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct SnapshotFact {
+    pub digest: Hash32,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure defines a snapshot. The digest represents a summary of the fact set below the snapshot.</p>
+<h2 id="7-ledger-integration"><a class="header" href="#7-ledger-integration">7. Ledger Integration</a></h2>
+<p>The effect_api layer stores facts durably. The effect_api exposes minimal operations such as append and read. The effect_api does not define logical meaning. The journal and reduction logic provide semantics.</p>
+<p>The effect_api writes facts to persistent storage. Replica synchronization loads facts from the effect_api into journal memory. The effect_api guarantees durability but does not affect CRDT merge semantics.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait LedgerEffects {
+    async fn append_fact(&amp;self, fact: Fact) -&gt; Result&lt;OrderTime&gt;;
+    async fn read_facts(&amp;self, namespace: &amp;str) -&gt; Result&lt;Vec&lt;Fact&gt;&gt;;
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This trait defines minimal storage operations. The journal uses these operations to persist and retrieve facts.</p>
+<h2 id="8-invariants"><a class="header" href="#8-invariants">8. Invariants</a></h2>
+<p>The journal and reduction architecture satisfy several invariants. Convergence ensures all replicas reach the same state when they have the same facts. Idempotence ensures that repeated merges or reductions do not change state. Determinism ensures that reduction produces the same output for all replicas.</p>
+<p>These invariants guarantee correct distributed behavior. They also support offline operation with eventual consistency. They form the foundation for Aura's account and relational context state machines.</p>
+<h2 id="9-fact-validation-pipeline"><a class="header" href="#9-fact-validation-pipeline">9. Fact Validation Pipeline</a></h2>
+<p>Every fact inserted into a journal must be validated before merge. The following steps outline the required checks and the effect traits responsible for each fact type:</p>
+<h3 id="91-attestedop-facts"><a class="header" href="#91-attestedop-facts">9.1 AttestedOp Facts</a></h3>
+<p><strong>Checks</strong></p>
+<ul>
+<li>Verify the threshold signature (<code>agg_sig</code>) against the parent commitment and epoch.</li>
+<li>Ensure the referenced parent state exists locally; otherwise request missing facts.</li>
+<li>Confirm the operation is well-formed (e.g., <code>AddLeaf</code> indexes a valid parent node).</li>
+</ul>
+<p><strong>Responsible Effects</strong></p>
+<ul>
+<li><code>CryptoEffects</code> for signature verification.</li>
+<li><code>JournalEffects</code> for parent lookup and conflict detection.</li>
+<li><code>LedgerEffects</code> to persist the fact once validated.</li>
+</ul>
+<h3 id="92-relational-facts"><a class="header" href="#92-relational-facts">9.2 Relational Facts</a></h3>
+<p><strong>Checks</strong></p>
+<ul>
+<li>Validate that each authority commitment referenced in the fact matches the current reduced state (<code>AuthorityState::root_commitment</code>).</li>
+<li>Verify Aura Consensus proofs if present (guardian bindings, recovery grants).</li>
+<li>Enforce application-specific invariants (e.g., no duplicate guardian bindings).</li>
+</ul>
+<p><strong>Responsible Effects</strong></p>
+<ul>
+<li><code>AuthorizationEffects</code> / <code>RelationalEffects</code> for context membership checks.</li>
+<li><code>CryptoEffects</code> for consensus proof verification.</li>
+<li><code>JournalEffects</code> for context-specific merge.</li>
+</ul>
+<h3 id="93-flowbudget-facts"><a class="header" href="#93-flowbudget-facts">9.3 FlowBudget Facts</a></h3>
+<p><strong>Checks</strong></p>
+<ul>
+<li>Ensure <code>spent</code> deltas are non-negative and reference the active epoch for the <code>(ContextId, peer)</code> pair.</li>
+<li>Reject facts that would decrease the recorded <code>spent</code> (monotone requirement).</li>
+<li>Validate receipt signatures associated with the charge (see <code>108_transport_and_information_flow.md</code>).</li>
+</ul>
+<p><strong>Responsible Effects</strong></p>
+<ul>
+<li><code>FlowBudgetEffects</code> (or FlowGuard) produce the fact and enforce monotonicity before inserting.</li>
+<li><code>JournalEffects</code> gate insertion to prevent stale epochs from updating headroom.</li>
+</ul>
+<h3 id="94-snapshot-facts"><a class="header" href="#94-snapshot-facts">9.4 Snapshot Facts</a></h3>
+<p><strong>Checks</strong></p>
+<ul>
+<li>Confirm the snapshot digest matches the hash of all facts below the snapshot.</li>
+<li>Ensure no newer snapshot already exists for the namespace.</li>
+<li>Verify that pruning according to the snapshot does not remove facts still referenced by receipts or pending consensus operations.</li>
+</ul>
+<p><strong>Responsible Effects</strong></p>
+<ul>
+<li><code>JournalEffects</code> compute and validate snapshot digests.</li>
+<li><code>LedgerEffects</code> persist the snapshot atomically with pruning metadata.</li>
+</ul>
+<p>By clearly separating validation responsibilities, runtime authors know which effect handlers must participate before a fact mutation is committed. This structure keeps fact semantics consistent across authorities and contexts.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="101_accounts_and_commitment_tree.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="103_relational_contexts.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="101_accounts_and_commitment_tree.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="103_relational_contexts.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

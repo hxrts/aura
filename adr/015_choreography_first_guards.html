@@ -1,0 +1,382 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>ADR-015: Choreography-First Guard Architecture - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="adr-015-choreography-first-guard-architecture"><a class="header" href="#adr-015-choreography-first-guard-architecture"><strong>ADR-015: Choreography-First Guard Architecture</strong></a></h1>
+<p><strong>Status</strong>: Accepted
+<strong>Date</strong>: 2024-12-XX
+<strong>Author</strong>: Architecture Team</p>
+<hr />
+<h1 id="1-context"><a class="header" href="#1-context">1. Context</a></h1>
+<p>Aura's guard system has evolved through multiple iterations. ADR-014 established pure guard evaluation with async effect interpretation. However, guard requirements were scattered across multiple locations:</p>
+<ul>
+<li><strong>aura-mpst</strong>: Had its own <code>guards.rs</code> (291 lines), <code>leakage.rs</code> (495 lines), and <code>runtime.rs</code> (1428 lines) with duplicated implementations</li>
+<li><strong>aura-core</strong>: Defined effect traits (<code>EffectCommand</code>, <code>EffectInterpreter</code>, <code>GuardOutcome</code>)</li>
+<li><strong>aura-protocol</strong>: Had the canonical guard chain (<code>CapGuard</code>, <code>FlowGuard</code>, <code>JournalCoupler</code>)</li>
+<li><strong>choreography! macro</strong>: Generated wrapper code but required manual effect wiring</li>
+</ul>
+<p>This produced:</p>
+<ol>
+<li><strong>Duplicated implementations</strong> - Similar guard logic in multiple crates</li>
+<li><strong>Disconnected specifications</strong> - Choreographic annotations weren't automatically enforced</li>
+<li><strong>Manual wiring</strong> - Protocol authors had to manually connect annotations to effects</li>
+<li><strong>Maintenance burden</strong> - Changes required updates in multiple locations</li>
+</ol>
+<hr />
+<h1 id="2-decision"><a class="header" href="#2-decision">2. Decision</a></h1>
+<p><strong>Make choreographic annotations the canonical source of truth for guard requirements.</strong></p>
+<p>The <code>choreography!</code> macro now:</p>
+<ol>
+<li>Parses guard annotations (<code>guard_capability</code>, <code>flow_cost</code>, <code>journal_facts</code>, <code>leak</code>, etc.)</li>
+<li>Generates <code>EffectCommand</code> sequences from these annotations</li>
+<li>Provides an <code>effect_bridge</code> module for runtime execution</li>
+</ol>
+<p>Guard effects originate from two unified sources:</p>
+<ol>
+<li><strong>Choreographic Annotations</strong> (compile-time): Macro-generated <code>EffectCommand</code> sequences from DSL annotations</li>
+<li><strong>Runtime Guard Chain</strong> (send-site): Pure guards evaluating against <code>GuardSnapshot</code> at each send</li>
+</ol>
+<p>Both produce <code>Vec&lt;EffectCommand&gt;</code> executed through the same <code>EffectInterpreter</code> infrastructure.</p>
+<hr />
+<h1 id="3-architecture"><a class="header" href="#3-architecture">3. Architecture</a></h1>
+<h2 id="effect-command-flow"><a class="header" href="#effect-command-flow">Effect Command Flow</a></h2>
+<pre><code>┌─────────────────────────────────────────────────────────────────────┐
+│ choreography! {                                                      │
+│   Client[guard_capability = "send", flow_cost = 200]                │
+│   -&gt; Server: Request;                                               │
+│ }                                                                    │
+└───────────────────────────┬─────────────────────────────────────────┘
+                            │ generates
+                            ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ effect_bridge::annotation_to_commands()                              │
+│ → Vec&lt;EffectCommand&gt; {                                               │
+│     ChargeBudget { ... amount: 200 },                                │
+│     StoreMetadata { key: "guard_validated", value: "send" },         │
+│   }                                                                  │
+└───────────────────────────┬─────────────────────────────────────────┘
+                            │ + runtime guards
+                            ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ EffectInterpreter::execute()                                         │
+│ → Production / Simulation / Test                                     │
+└─────────────────────────────────────────────────────────────────────┘
+</code></pre>
+<h2 id="supported-annotations"><a class="header" href="#supported-annotations">Supported Annotations</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Annotation</th><th>Description</th><th>Generated Effect</th></tr></thead><tbody>
+<tr><td><code>guard_capability = "cap"</code></td><td>Capability requirement</td><td><code>StoreMetadata</code> (audit trail)</td></tr>
+<tr><td><code>flow_cost = N</code></td><td>Flow budget charge</td><td><code>ChargeBudget</code></td></tr>
+<tr><td><code>journal_facts = "fact"</code></td><td>Journal fact recording</td><td><code>StoreMetadata</code> (fact key)</td></tr>
+<tr><td><code>journal_merge = true</code></td><td>Request journal merge</td><td><code>StoreMetadata</code> (merge flag)</td></tr>
+<tr><td><code>audit_log = "event"</code></td><td>Audit trail entry</td><td><code>StoreMetadata</code> (audit key)</td></tr>
+<tr><td><code>leak = "External"</code></td><td>Leakage tracking</td><td><code>RecordLeakage</code></td></tr>
+</tbody></table>
+</div>
+<h2 id="layer-responsibilities"><a class="header" href="#layer-responsibilities">Layer Responsibilities</a></h2>
+<div class="table-wrapper"><table><thead><tr><th>Layer</th><th>Crate</th><th>Responsibility</th></tr></thead><tbody>
+<tr><td>1</td><td>aura-core</td><td><code>EffectCommand</code>, <code>EffectInterpreter</code>, <code>GuardOutcome</code> types</td></tr>
+<tr><td>2</td><td>aura-mpst</td><td>Session type runtime (deprecated guard implementations)</td></tr>
+<tr><td>2</td><td>aura-macros</td><td>Annotation parsing, <code>effect_bridge</code> generation</td></tr>
+<tr><td>3</td><td>aura-effects</td><td><code>ProductionEffectInterpreter</code> implementation</td></tr>
+<tr><td>4</td><td>aura-protocol</td><td>Guard chain orchestration, <code>execute_guarded_choreography()</code></td></tr>
+<tr><td>6</td><td>aura-simulator</td><td><code>SimulationEffectInterpreter</code> implementation</td></tr>
+</tbody></table>
+</div>
+<hr />
+<h1 id="4-consequences"><a class="header" href="#4-consequences">4. Consequences</a></h1>
+<h2 id="positive"><a class="header" href="#positive">Positive</a></h2>
+<ul>
+<li><strong>Single source of truth</strong>: Guard requirements defined in choreography DSL</li>
+<li><strong>Automatic enforcement</strong>: Annotations generate executable effect commands</li>
+<li><strong>Unified execution</strong>: Same <code>EffectCommand</code> types across macro and runtime guards</li>
+<li><strong>Testing parity</strong>: Same effect model in production, simulation, and tests</li>
+<li><strong>Reduced duplication</strong>: ~1000+ lines removed from aura-mpst</li>
+</ul>
+<h2 id="negative"><a class="header" href="#negative">Negative</a></h2>
+<ul>
+<li><strong>Migration required</strong>: Existing code using aura-mpst guard types must migrate</li>
+<li><strong>Learning curve</strong>: Developers must understand both annotation and runtime guard sources</li>
+</ul>
+<h2 id="neutral"><a class="header" href="#neutral">Neutral</a></h2>
+<ul>
+<li><strong>aura-mpst simplification</strong>: Module reduced to session type runtime semantics only</li>
+<li><strong>Deprecation timeline</strong>: Old APIs deprecated but kept for compatibility until v1.0</li>
+</ul>
+<hr />
+<h1 id="5-implementation"><a class="header" href="#5-implementation">5. Implementation</a></h1>
+<h2 id="phase-1-consolidate-effect-types-"><a class="header" href="#phase-1-consolidate-effect-types-">Phase 1: Consolidate Effect Types ✓</a></h2>
+<ul>
+<li>Removed <code>aura-mpst::guards</code> module</li>
+<li>Added deprecation markers to <code>aura-mpst::runtime</code></li>
+<li>Verified single source of <code>EffectCommand</code> in aura-core</li>
+</ul>
+<h2 id="phase-2-macro-code-generation-"><a class="header" href="#phase-2-macro-code-generation-">Phase 2: Macro Code Generation ✓</a></h2>
+<ul>
+<li>Enhanced annotation parsing (journal_merge, audit_log, leak variants)</li>
+<li>Generated <code>effect_bridge</code> module with <code>annotation_to_commands()</code></li>
+<li>Added <code>execute_commands()</code> for interpreter integration</li>
+</ul>
+<h2 id="phase-3-effect-interpreters-"><a class="header" href="#phase-3-effect-interpreters-">Phase 3: Effect Interpreters ✓</a></h2>
+<ul>
+<li><code>ProductionEffectInterpreter</code> handles all 6 command types</li>
+<li><code>SimulationEffectInterpreter</code> provides deterministic execution</li>
+<li><code>BorrowedEffectInterpreter</code> for protocol-layer integration</li>
+</ul>
+<h2 id="phase-4-protocol-layer-"><a class="header" href="#phase-4-protocol-layer-">Phase 4: Protocol Layer ✓</a></h2>
+<ul>
+<li>Added <code>execute_effect_commands()</code> helper</li>
+<li>Added <code>execute_guarded_choreography()</code> for combined execution</li>
+<li>Updated guards module documentation</li>
+</ul>
+<h2 id="phase-5-documentation-"><a class="header" href="#phase-5-documentation-">Phase 5: Documentation ✓</a></h2>
+<ul>
+<li>Updated docs/107_mpst_and_choreography.md</li>
+<li>Created ADR-015 (this document)</li>
+</ul>
+<h2 id="phase-6-migration-and-cleanup-"><a class="header" href="#phase-6-migration-and-cleanup-">Phase 6: Migration and Cleanup ✓</a></h2>
+<ul>
+<li>Fixed test compilation errors in aura-protocol</li>
+<li>Updated PhysicalTimeEffects trait implementations</li>
+<li>Fixed TimeStamp and FlowBudgetView API usage</li>
+<li>Updated test macros to use tokio::test</li>
+<li>Verified core crates build successfully</li>
+<li>Created comprehensive integration tests (choreography_guards_integration.rs, 9 tests)</li>
+<li>Note: Deprecated code removal scheduled for v1.0</li>
+</ul>
+<hr />
+<h1 id="6-references"><a class="header" href="#6-references">6. References</a></h1>
+<ul>
+<li>ADR-014: Pure Guard Evaluation with Asynchronous Effect Interpretation</li>
+<li>docs/107_mpst_and_choreography.md: Multi-party Session Types and Choreography</li>
+<li>docs/003_information_flow_contract.md: Information Flow Contract</li>
+<li>docs/106_effect_system_and_runtime.md: Effect System and Runtime</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../adr/014_guard.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../blog/000_beyond_local_first.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../adr/014_guard.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../blog/000_beyond_local_first.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

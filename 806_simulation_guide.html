@@ -1,0 +1,691 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Simulation Guide - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="simulation-guide"><a class="header" href="#simulation-guide">Simulation Guide</a></h1>
+<p>This guide covers Aura's simulation engine built on the effect system architecture. The simulation provides deterministic, reproducible testing of distributed protocols through effect handlers, fault injection, and middleware-based architecture.</p>
+<h2 id="core-simulation-philosophy"><a class="header" href="#core-simulation-philosophy">Core Simulation Philosophy</a></h2>
+<p>Aura's simulation approach is built on four key principles:</p>
+<ol>
+<li><strong>Production Code Testing</strong> - Run actual protocol implementations through real effect handlers</li>
+<li><strong>Effect System Control</strong> - All impure operations (time, randomness, I/O) controlled via effect traits</li>
+<li><strong>Middleware Pattern</strong> - Fault injection and monitoring via middleware layer</li>
+<li><strong>Deterministic Execution</strong> - Controlled effects enable fully reproducible simulations</li>
+</ol>
+<p><strong>Critical</strong>: Simulation determinism depends on <a href="106_effect_system_and_runtime.html">effect system</a> compliance. Protocol code must use effect traits (<code>TimeEffects</code>, <code>RandomEffects</code>, etc.) instead of direct system calls (<code>SystemTime::now()</code>, <code>thread_rng()</code>, etc.). This enables controlled time, seeded randomness, and predictable I/O for reliable simulation results.</p>
+<p>The simulation system leverages Aura's stateless effect architecture, providing simulation capabilities through specialized handlers rather than a separate simulation runtime.</p>
+<h2 id="effect-system-foundation"><a class="header" href="#effect-system-foundation">Effect System Foundation</a></h2>
+<p>Simulation determinism requires that all simulated code uses effect traits instead of direct system calls:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ✅ CORRECT: Protocol code using effects (simulatable)
+async fn protocol_step&lt;T: TimeEffects + RandomEffects&gt;(
+    ctx: &amp;EffectContext,
+    effects: &amp;T,
+) -&gt; Result&lt;ProtocolMessage&gt; {
+    let timestamp = effects.current_time().await;     // Controllable time
+    let nonce = effects.random_bytes(32).await?;      // Seeded randomness
+    
+    ProtocolMessage { timestamp, nonce, /* ... */ }
+}
+
+// ❌ FORBIDDEN: Direct system calls (breaks simulation)
+async fn broken_protocol_step() -&gt; Result&lt;ProtocolMessage&gt; {
+    let timestamp = SystemTime::now();                // ❌ Uncontrolled time
+    let nonce = thread_rng().gen::&lt;[u8; 32]&gt;();      // ❌ Uncontrolled randomness
+    
+    ProtocolMessage { timestamp, nonce, /* ... */ }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>When protocol code follows effect system guidelines, simulation handlers can control all impure operations for deterministic execution.</p>
+<h3 id="simulation-controlled-surfaces-must-be-injected"><a class="header" href="#simulation-controlled-surfaces-must-be-injected">Simulation-Controlled Surfaces (must be injected)</a></h3>
+<p>To keep the simulator in control, code must avoid direct use of:</p>
+<ul>
+<li>Time: <code>SystemTime::now()</code>, <code>Instant::now()</code>, <code>tokio::time::sleep</code>, <code>std::thread::sleep</code></li>
+<li>Randomness: <code>rand::random</code>, <code>thread_rng()</code>, <code>OsRng</code></li>
+<li>IO/user input: <code>stdin().read_line</code>, direct blocking reads</li>
+<li>Thread/process spawn: <code>std::thread::spawn</code> in protocol/domain layers</li>
+</ul>
+<p>Use the effect traits instead:</p>
+<ul>
+<li><code>PhysicalTimeEffects::sleep_ms/current_time</code> (simulated by <code>SimulationTimeHandler</code>)</li>
+<li><code>RandomEffects</code> (seeded in simulation)</li>
+<li><code>ConsoleEffects</code>/test harnesses for input/output</li>
+<li><code>TestingEffects</code>/scenario hooks for concurrency control</li>
+</ul>
+<p>When adding retries/backoff, pass the simulator’s <code>SimulationTimeHandler</code> into retry helpers so delays advance simulated time rather than wall-clock.</p>
+<h2 id="simulation-infrastructure"><a class="header" href="#simulation-infrastructure">Simulation Infrastructure</a></h2>
+<p>Aura's simulation system is built on handler composition and middleware interception.</p>
+<h3 id="core-components"><a class="header" href="#core-components">Core Components</a></h3>
+<p>The simulator consists of several key components:</p>
+<ol>
+<li><strong>Simulation Handlers</strong> - Specialized effect handlers for simulation (time control, fault injection, etc.)</li>
+<li><strong>Middleware System</strong> - Intercept and modify effect calls</li>
+<li><strong>Effect Composer</strong> - Compose simulation handlers into complete environment</li>
+<li><strong>Scenario System</strong> - Define and execute test scenarios</li>
+</ol>
+<h3 id="handler-based-architecture"><a class="header" href="#handler-based-architecture">Handler-Based Architecture</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_simulator::handlers::{
+    SimulationTimeHandler,
+    SimulationFaultHandler,
+    SimulationScenarioHandler,
+    SimulationEffectComposer,
+};
+use aura_core::DeviceId;
+
+// Create simulation environment using handler composition
+let device_id = DeviceId::new();
+
+// Compose simulation handlers
+let composer = SimulationEffectComposer::for_testing(device_id)?;
+
+// Or build custom simulation environment
+let environment = composer
+    .with_time_control()
+    .with_fault_injection()
+    .with_scenario_support()
+    .build()?;
+<span class="boring">}</span></code></pre></pre>
+<h2 id="simulation-handlers"><a class="header" href="#simulation-handlers">Simulation Handlers</a></h2>
+<h3 id="time-control-handler"><a class="header" href="#time-control-handler">Time Control Handler</a></h3>
+<p>The <code>SimulationTimeHandler</code> provides deterministic time control:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_simulator::handlers::SimulationTimeHandler;
+use aura_core::effects::TimeEffects;
+use std::time::Duration;
+
+#[tokio::test]
+async fn test_with_time_control() {
+    let time_handler = SimulationTimeHandler::new();
+
+    // Get current simulated time
+    let now = time_handler.current_timestamp().await.unwrap();
+
+    // Advance simulated time
+    time_handler.advance(Duration::from_secs(10));
+
+    let later = time_handler.current_timestamp().await.unwrap();
+    assert_eq!(later - now, 10_000); // 10 seconds in milliseconds
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="fault-injection-handler"><a class="header" href="#fault-injection-handler">Fault Injection Handler</a></h3>
+<p>The <code>SimulationFaultHandler</code> enables Byzantine behavior and network faults:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_simulator::handlers::SimulationFaultHandler;
+use aura_simulator::middleware::FaultType;
+
+#[tokio::test]
+async fn test_with_fault_injection() {
+    let mut fault_handler = SimulationFaultHandler::new();
+
+    // Configure fault injection
+    fault_handler.inject_fault(FaultType::NetworkDelay {
+        min_ms: 100,
+        max_ms: 500,
+    });
+
+    fault_handler.inject_fault(FaultType::PacketDrop {
+        probability: 0.1, // 10% packet loss
+    });
+
+    // Execute protocol with faults
+    // Faults will be applied through middleware
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="scenario-handler"><a class="header" href="#scenario-handler">Scenario Handler</a></h3>
+<p>The <code>SimulationScenarioHandler</code> manages test scenarios:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_simulator::handlers::{
+    SimulationScenarioHandler,
+    ScenarioDefinition,
+    TriggerCondition,
+    InjectionAction,
+};
+
+#[tokio::test]
+async fn test_with_scenario() {
+    let mut scenario_handler = SimulationScenarioHandler::new();
+
+    // Define scenario
+    let scenario = ScenarioDefinition {
+        name: "network_partition".to_string(),
+        trigger: TriggerCondition::AfterTime(Duration::from_secs(5)),
+        action: InjectionAction::PartitionNetwork {
+            group_a: vec![device1, device2],
+            group_b: vec![device3, device4],
+        },
+    };
+
+    scenario_handler.add_scenario(scenario);
+
+    // Scenario will trigger during protocol execution
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="middleware-system"><a class="header" href="#middleware-system">Middleware System</a></h2>
+<p>The middleware system intercepts effect calls for monitoring and modification.</p>
+<h3 id="using-middleware"><a class="header" href="#using-middleware">Using Middleware</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_simulator::middleware::{
+    SimulatorMiddleware,
+    SimulatorConfig,
+    NetworkConfig,
+};
+use aura_core::DeviceId;
+
+#[tokio::test]
+async fn test_with_middleware() {
+    let device_id = DeviceId::new();
+
+    // Create middleware with configuration
+    let config = SimulatorConfig {
+        device_id,
+        network: NetworkConfig {
+            latency_ms: (10, 100), // 10-100ms latency range
+            packet_loss_rate: 0.02, // 2% packet loss
+            bandwidth_limit: Some(1_000_000), // 1MB/s
+        },
+        enable_fault_injection: true,
+        deterministic_time: true,
+    };
+
+    let middleware = SimulatorMiddleware::new(config)?;
+
+    // Use middleware to wrap effect handlers
+    // (middleware intercepts calls to inject faults, delays, etc.)
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="middleware-configuration"><a class="header" href="#middleware-configuration">Middleware Configuration</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_simulator::middleware::{NetworkConfig, TimeConfig};
+
+// Configure network conditions
+let network_config = NetworkConfig {
+    latency_ms: (20, 200),
+    packet_loss_rate: 0.01,
+    bandwidth_limit: Some(10_000_000),
+};
+
+// Configure time behavior
+let time_config = TimeConfig {
+    start_time: 0,
+    time_scale: 1.0, // Real-time
+    deterministic: true,
+};
+<span class="boring">}</span></code></pre></pre>
+<h2 id="complete-simulation-examples"><a class="header" href="#complete-simulation-examples">Complete Simulation Examples</a></h2>
+<h3 id="basic-protocol-simulation"><a class="header" href="#basic-protocol-simulation">Basic Protocol Simulation</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_macros::aura_test;
+use aura_simulator::handlers::SimulationEffectComposer;
+use aura_simulator::middleware::FaultType;
+use aura_core::DeviceId;
+
+#[aura_test]
+async fn simulate_basic_protocol() -&gt; aura_core::AuraResult&lt;()&gt; {
+    // Setup participants
+    let device1 = DeviceId::new();
+    let device2 = DeviceId::new();
+
+    // Create simulation environments
+    let env1 = SimulationEffectComposer::for_testing(device1)?;
+    let env2 = SimulationEffectComposer::for_testing(device2)?;
+
+    // Execute protocol
+    // (protocol uses effect handlers from simulation environments)
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="network-fault-simulation"><a class="header" href="#network-fault-simulation">Network Fault Simulation</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_simulator::middleware::{SimulatorConfig, NetworkConfig};
+
+#[aura_test]
+async fn simulate_with_network_faults() -&gt; aura_core::AuraResult&lt;()&gt; {
+    let device_id = DeviceId::new();
+
+    // Configure realistic WAN conditions
+    let config = SimulatorConfig {
+        device_id,
+        network: NetworkConfig {
+            latency_ms: (50, 150), // 50-150ms latency
+            packet_loss_rate: 0.02, // 2% packet loss
+            bandwidth_limit: Some(5_000_000), // 5MB/s
+        },
+        enable_fault_injection: true,
+        deterministic_time: true,
+    };
+
+    // Create simulation with network faults
+    // ...
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="time-based-scenario-testing"><a class="header" href="#time-based-scenario-testing">Time-Based Scenario Testing</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_simulator::handlers::{
+    SimulationTimeHandler,
+    SimulationScenarioHandler,
+    ScenarioDefinition,
+    TriggerCondition,
+    InjectionAction,
+};
+
+#[aura_test]
+async fn simulate_time_based_scenario() -&gt; aura_core::AuraResult&lt;()&gt; {
+    let time_handler = SimulationTimeHandler::new();
+    let mut scenario_handler = SimulationScenarioHandler::new();
+
+    // Define delayed fault injection
+    let scenario = ScenarioDefinition {
+        name: "delayed_partition".to_string(),
+        trigger: TriggerCondition::AfterTime(Duration::from_secs(10)),
+        action: InjectionAction::Custom("partition_network".to_string()),
+    };
+
+    scenario_handler.add_scenario(scenario);
+
+    // Start time at 0
+    let start = time_handler.current_timestamp().await?;
+
+    // Advance time to trigger scenario
+    time_handler.advance(Duration::from_secs(15));
+
+    // Scenario should have triggered at t=10s
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="testkit-integration"><a class="header" href="#testkit-integration">Testkit Integration</a></h2>
+<p>The simulator integrates with aura-testkit through the testkit bridge:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_simulator::testkit_bridge::{
+    TestkitSimulatorBridge,
+    MiddlewareConfig,
+};
+use aura_testkit::*;
+
+#[aura_test]
+async fn test_with_simulator_bridge() -&gt; aura_core::AuraResult&lt;()&gt; {
+    let fixture = create_test_fixture().await?;
+
+    // Bridge simulator with testkit
+    let middleware_config = MiddlewareConfig {
+        fault_injection: true,
+        network_simulation: true,
+        time_control: true,
+    };
+
+    let bridge = TestkitSimulatorBridge::new(middleware_config);
+
+    // Use bridge to coordinate simulation with test fixture
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="quint-integration"><a class="header" href="#quint-integration">Quint Integration</a></h2>
+<p>The simulator includes integration with Quint for formal verification:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_simulator::quint::cli_runner::QuintCliRunner;
+use aura_simulator::quint::bridge::QuintAuraBridge;
+
+#[tokio::test]
+async fn test_with_quint_verification() {
+    let runner = QuintCliRunner::new("path/to/quint/spec.qnt");
+
+    // Run Quint verification
+    let traces = runner.generate_traces(100).await.unwrap();
+
+    // Convert Quint traces to Aura execution
+    let bridge = QuintAuraBridge::new();
+
+    for trace in traces {
+        let aura_scenario = bridge.convert_trace(&amp;trace).unwrap();
+
+        // Execute scenario in simulator
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="simulation-best-practices"><a class="header" href="#simulation-best-practices">Simulation Best Practices</a></h2>
+<h3 id="start-simple"><a class="header" href="#start-simple">Start Simple</a></h3>
+<p>Begin with basic handler composition before adding fault injection:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[aura_test]
+async fn test_simple_simulation() -&gt; aura_core::AuraResult&lt;()&gt; {
+    // Start with just time control
+    let time_handler = SimulationTimeHandler::new();
+
+    // Execute protocol
+    // ...
+
+    // Add faults incrementally in later tests
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="use-deterministic-configuration"><a class="header" href="#use-deterministic-configuration">Use Deterministic Configuration</a></h3>
+<p>Always use deterministic settings for debugging:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let config = SimulatorConfig {
+    device_id: DeviceId::new(),
+    network: NetworkConfig::default(),
+    enable_fault_injection: false,
+    deterministic_time: true, // Critical for reproducibility
+};
+<span class="boring">}</span></code></pre></pre>
+<h3 id="validate-effect-system-compliance"><a class="header" href="#validate-effect-system-compliance">Validate Effect System Compliance</a></h3>
+<p>Before running simulations, ensure protocol code follows effect guidelines:</p>
+<pre><code class="language-bash"># Run architectural compliance checker
+just check-arch
+
+# Look for effect system violations
+# - Direct time usage: SystemTime::now, Instant::now
+# - Direct randomness: thread_rng(), rand::random()
+# - Direct I/O: File::open(), std::net::TcpStream
+</code></pre>
+<p>Non-compliant code will break simulation determinism and should be refactored to use effect traits.</p>
+<h3 id="monitor-simulation-state"><a class="header" href="#monitor-simulation-state">Monitor Simulation State</a></h3>
+<p>Track simulation progress for debugging:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_simulator::middleware::PerformanceMetrics;
+
+let metrics = middleware.get_metrics();
+
+println!("Messages sent: {}", metrics.messages_sent);
+println!("Faults injected: {}", metrics.faults_injected);
+println!("Simulation time: {:?}", metrics.simulation_duration);
+<span class="boring">}</span></code></pre></pre>
+<h2 id="limitations-and-architecture-notes"><a class="header" href="#limitations-and-architecture-notes">Limitations and Architecture Notes</a></h2>
+<h3 id="current-architecture"><a class="header" href="#current-architecture">Current Architecture</a></h3>
+<p>The Aura simulator uses a <strong>handler/middleware pattern</strong> rather than a monolithic simulation engine. This means:</p>
+<ol>
+<li><strong>No Central Simulation Engine</strong>: Unlike some frameworks, there's no single <code>Simulator</code> object that owns all state</li>
+<li><strong>Distributed Handler Model</strong>: Each participant uses their own effect handlers</li>
+<li><strong>Middleware for Coordination</strong>: Cross-cutting concerns (network simulation, fault injection) are handled via middleware</li>
+</ol>
+<h3 id="differences-from-documented-examples"><a class="header" href="#differences-from-documented-examples">Differences from Documented Examples</a></h3>
+<p>Previous documentation described an <code>AsyncSimulationEngine</code> API with methods like:</p>
+<ul>
+<li><code>add_participants(count)</code> - Not implemented</li>
+<li><code>add_byzantine_participant(interceptor)</code> - Use <code>SimulationFaultHandler</code> instead</li>
+<li><code>run_until_idle()</code> - Not available; tests control execution explicitly</li>
+</ul>
+<h3 id="current-best-practices"><a class="header" href="#current-best-practices">Current Best Practices</a></h3>
+<p>Instead of a simulation engine, use handler composition:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Instead of: sim.add_participants(5)
+// Use:
+let participants: Vec&lt;_&gt; = (0..5)
+    .map(|_| {
+        let device_id = DeviceId::new();
+        SimulationEffectComposer::for_testing(device_id).unwrap()
+    })
+    .collect();
+
+// Instead of: sim.add_byzantine_participant(interceptor)
+// Use:
+let mut fault_handler = SimulationFaultHandler::new();
+fault_handler.inject_fault(FaultType::ByzantineBehavior {
+    corruption_rate: 0.5,
+});
+
+// Instead of: sim.run_until_idle()
+// Use explicit protocol execution:
+execute_protocol(&amp;participants).await?;
+<span class="boring">}</span></code></pre></pre>
+<h2 id="summary"><a class="header" href="#summary">Summary</a></h2>
+<p>Aura's simulation infrastructure provides:</p>
+<ul>
+<li><strong>Handler-Based Architecture</strong> - Simulation through composable effect handlers</li>
+<li><strong>Middleware System</strong> - Fault injection and monitoring via middleware</li>
+<li><strong>Deterministic Execution</strong> - Controlled time and seeded randomness</li>
+<li><strong>Quint Integration</strong> - Formal verification support</li>
+<li><strong>Testkit Bridge</strong> - Integration with test infrastructure</li>
+</ul>
+<p>The simulation emphasizes composition and explicit control rather than implicit coordination. This aligns with Aura's stateless effect architecture and provides flexibility for different testing scenarios.</p>
+<p>For testing infrastructure that complements simulation, see <a href="805_testing_guide.html">Testing Guide</a>. Learn about the <a href="106_effect_system_and_runtime.html">effect system</a> and <a href="001_system_architecture.html">architectural patterns</a>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="805_testing_guide.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="807_maintenance_ota_guide.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="805_testing_guide.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="807_maintenance_ota_guide.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

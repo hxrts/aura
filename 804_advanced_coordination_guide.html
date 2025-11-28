@@ -1,0 +1,1111 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Advanced Choreography Guide - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="advanced-choreography-guide"><a class="header" href="#advanced-choreography-guide">Advanced Choreography Guide</a></h1>
+<p>This guide covers sophisticated choreographic programming patterns using rumpsteak-aura. You will learn comprehensive DSL syntax, projection patterns, effect handlers, extension systems, and composition techniques for building complex distributed protocols.</p>
+<h2 id="comprehensive-dsl-syntax"><a class="header" href="#comprehensive-dsl-syntax">Comprehensive DSL Syntax</a></h2>
+<p>Rumpsteak-aura provides a rich choreographic DSL for specifying distributed protocols. The parser supports protocol definitions, role declarations, message passing, choice constructs, loops, parallel composition, and comprehensive annotation systems.</p>
+<h3 id="protocol-namespacing"><a class="header" href="#protocol-namespacing">Protocol Namespacing</a></h3>
+<p>Aura supports protocol namespacing through the <code>choreography!</code> macro for module organization and conflict prevention:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_macros::choreography;
+
+choreography! {
+    #[namespace = "admin_operations"]
+    protocol AdminOperations {
+        roles: Admin, Moderator, User;
+        
+        Admin -&gt; Moderator: GrantPermissions;
+        Moderator -&gt; User: ModerationAction;
+    }
+}
+
+choreography! {
+    #[namespace = "user_management"]
+    protocol UserRegistration {
+        roles: NewUser, Validator, Admin;
+        
+        NewUser -&gt; Validator: RegistrationRequest;
+        Validator -&gt; Admin: ValidationResult;
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Namespaces generate separate module structures in code generation. Protocol names remain isolated within their namespace scope. Multiple choreographies can define similar role or message names without conflicts.</p>
+<h3 id="message-types-and-type-annotations"><a class="header" href="#message-types-and-type-annotations">Message Types and Type Annotations</a></h3>
+<p>Rumpsteak-aura supports rich message type specifications with optional type annotations:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let protocol_with_types = r#"
+    choreography TypedMessages {
+        roles: Client, Server;
+        
+        Client -&gt; Server: Request&lt;String&gt;;
+        Server -&gt; Client: Response&lt;i32&gt;;
+        Client -&gt; Server: Data&lt;Vec&lt;String&gt;, HashMap&lt;String, i32&gt;&gt;;
+    }
+"#;
+
+let advanced_types = r#"
+    choreography AdvancedTypes {
+        roles: A, B;
+        
+        A -&gt; B: Container&lt;std::vec::Vec&lt;String&gt;&gt;;
+        B -&gt; A: Result&lt;i32, CustomError&gt;;
+        A -&gt; B: Request&lt;String&gt;(payload_data);
+    }
+"#;
+<span class="boring">}</span></code></pre></pre>
+<p>Message type annotations provide strong typing for protocol data. Generic types and nested generics are fully supported. Path types enable fully qualified type specifications.</p>
+<h3 id="dynamic-role-count-support"><a class="header" href="#dynamic-role-count-support">Dynamic Role Count Support</a></h3>
+<p>Rumpsteak-aura provides comprehensive support for protocols with variable participant counts determined at runtime:</p>
+<h4 id="runtime-determined-participants"><a class="header" href="#runtime-determined-participants">Runtime-Determined Participants</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let threshold_protocol = r#"
+    choreography ThresholdProtocol {
+        roles: Coordinator, Signers[*];
+        
+        Coordinator -&gt; Signers[*]: Request;
+        Signers[0..threshold] -&gt; Coordinator: Response;
+    }
+"#;
+
+let consensus_protocol = r#"
+    choreography ConsensusProtocol {
+        roles: Leader, Followers[N];
+        
+        Leader -&gt; Followers[*]: Proposal;
+        Followers[i] -&gt; Leader: Vote;
+    }
+"#;
+<span class="boring">}</span></code></pre></pre>
+<p>Wildcard syntax <code>[*]</code> indicates runtime-determined counts. Symbolic parameters <code>[N]</code> provide compile-time flexibility. Range expressions <code>[0..threshold]</code> target subsets of participants.</p>
+<h4 id="fixed-count-dynamic-roles"><a class="header" href="#fixed-count-dynamic-roles">Fixed-Count Dynamic Roles</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let static_roles = r#"
+    choreography StaticWorkers {
+        roles: Master, Worker[3];
+        
+        Master -&gt; Worker[0]: Task1;
+        Master -&gt; Worker[1]: Task2;
+        Worker[0] -&gt; Master: Result1;
+    }
+"#;
+
+<span class="boring">}</span></code></pre></pre>
+<p>Static role arrays define exactly three worker instances. Individual workers are addressed using index notation. The protocol specifies explicit interactions with each worker instance.</p>
+<h4 id="runtime-role-binding"><a class="header" href="#runtime-role-binding">Runtime Role Binding</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use rumpsteak_aura_choreography::compiler::codegen::generate_choreography_code_with_dynamic_roles;
+
+let consensus_protocol = r#"
+    choreography ConsensusProtocol {
+        roles: Leader, Followers[N];
+        
+        Leader -&gt; Followers[*]: Proposal;
+        Followers[i] -&gt; Leader: Vote;
+    }
+"#;
+
+let choreo = parse_choreography_str(consensus_protocol)?;
+let code = generate_choreography_code_with_dynamic_roles(&amp;choreo, &amp;local_types);
+
+// Runtime binding
+let mut runtime = ConsensusRuntime::new();
+runtime.bind_role_count("Followers", 5)?;
+runtime.map_followers_instances(vec!["alice", "bob", "charlie", "dave", "eve"])?;
+<span class="boring">}</span></code></pre></pre>
+<p>Symbolic parameters <code>[N]</code> enable compile-time role count flexibility. Runtime binding maps symbolic counts to concrete participant numbers. Instance mapping assigns specific identities to role positions.</p>
+<h3 id="choice-constructs-and-branching"><a class="header" href="#choice-constructs-and-branching">Choice Constructs and Branching</a></h3>
+<p>Rumpsteak-aura supports rich choice constructs with guards and multi-way branching:</p>
+<h4 id="basic-choice"><a class="header" href="#basic-choice">Basic Choice</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let negotiation_protocol = r#"
+    choreography Negotiation {
+        roles: Buyer, Seller;
+        
+        Buyer -&gt; Seller: Offer;
+        
+        choice Seller {
+            accept: {
+                Seller -&gt; Buyer: Accept;
+            }
+            reject: {
+                Seller -&gt; Buyer: Reject;
+            }
+        }
+    }
+"#;
+<span class="boring">}</span></code></pre></pre>
+<p>Choice constructs enable protocol branching based on role decisions. Each branch defines continuation behavior. Label matching ensures type-safe branch selection.</p>
+<h4 id="guarded-choice"><a class="header" href="#guarded-choice">Guarded Choice</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let conditional_protocol = r#"
+    choreography ConditionalProtocol {
+        roles: Client, Server;
+        
+        choice Client {
+            buy when (balance &gt; price): {
+                Client -&gt; Server: Purchase;
+            }
+            cancel: {
+                Client -&gt; Server: Cancel;
+            }
+        }
+    }
+"#;
+<span class="boring">}</span></code></pre></pre>
+<p>Guarded choices add conditional logic to branch selection. Guard expressions use valid Rust boolean syntax. Guards enable protocol behavior based on runtime conditions.</p>
+<h3 id="loop-constructs"><a class="header" href="#loop-constructs">Loop Constructs</a></h3>
+<p>Rumpsteak-aura supports various loop patterns for iterative protocols:</p>
+<h4 id="fixed-iteration-count"><a class="header" href="#fixed-iteration-count">Fixed Iteration Count</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let loop_protocol = r#"
+    choreography LoopProtocol {
+        roles: A, B;
+        
+        loop (count: 5) {
+            A -&gt; B: Request;
+            B -&gt; A: Response;
+        }
+    }
+"#;
+<span class="boring">}</span></code></pre></pre>
+<p>Fixed count loops execute the body a specified number of times. Loop bodies can contain arbitrary protocol operations. Nested loops are supported for complex iteration patterns.</p>
+<h4 id="role-controlled-loops"><a class="header" href="#role-controlled-loops">Role-Controlled Loops</a></h4>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let decision_loop = r#"
+    choreography DecisionLoop {
+        roles: Client, Server;
+        
+        loop (decides: Client) {
+            Client -&gt; Server: Request;
+            Server -&gt; Client: Response;
+        }
+    }
+"#;
+<span class="boring">}</span></code></pre></pre>
+<p>Role-controlled loops allow participants to decide when to continue or exit. The deciding role controls loop termination. This enables adaptive protocol behavior based on runtime conditions.</p>
+<h2 id="aura-specific-extensions"><a class="header" href="#aura-specific-extensions">Aura-Specific Extensions</a></h2>
+<p>Aura extends rumpsteak-aura with domain-specific annotations for security, performance, and state management. These extensions integrate with <a href="107_mpst_and_choreography.html">aura-mpst</a> for runtime enforcement and verification.</p>
+<h3 id="guard-capabilities"><a class="header" href="#guard-capabilities">Guard Capabilities</a></h3>
+<p>Guard capabilities provide authorization control for protocol operations:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_macros::choreography;
+
+choreography! {
+    #[namespace = "secure_protocol"]
+    protocol SecureProtocol {
+        roles: Client, Server;
+        
+        Client[guard_capability = "send_request"]
+        -&gt; Server: Request(RequestData);
+        
+        Server[guard_capability = "process_request"]
+        -&gt; Client: Response(ResponseData);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Guard capabilities specify required permissions for protocol operations. The <code>guard_capability</code> annotation compiles to <code>CapabilityGuardEffect</code> instances that integrate with rumpsteak-aura's extension system. The <code>AuraHandler</code> validates capabilities through registered extension handlers before executing protocol steps. Failed capability checks prevent unauthorized operations and return appropriate error responses.</p>
+<h3 id="flow-cost-control"><a class="header" href="#flow-cost-control">Flow Cost Control</a></h3>
+<p>Flow costs control privacy budget usage and rate limiting:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>choreography! {
+    #[namespace = "budgeted_protocol"]
+    protocol BudgetedProtocol {
+        roles: Sender, Receiver;
+        
+        Sender[flow_cost = 200]
+        -&gt; Receiver: HighCostMessage(LargeData);
+        
+        Receiver[flow_cost = 50]
+        -&gt; Sender: LowCostAck(AckData);
+        
+        // Messages with annotations but no flow_cost get default of 100
+        Sender[guard_capability = "send_data"]
+        -&gt; Receiver: DefaultCostMessage(Data);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Flow costs specify budget consumption per protocol operation. Higher costs indicate more expensive operations in terms of privacy or resources. Budget enforcement prevents excessive resource usage.</p>
+<p>When a message has role annotations (brackets with any Aura-specific attributes) but no explicit <code>flow_cost</code> specified, a default value of 100 is automatically applied. This ensures all annotated protocol operations have flow budget tracking without requiring explicit cost specification for every message.</p>
+<h3 id="journal-facts"><a class="header" href="#journal-facts">Journal Facts</a></h3>
+<p>Journal facts enable distributed state tracking and auditability:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>choreography! {
+    #[namespace = "auditable_protocol"]
+    protocol AuditableProtocol {
+        roles: Coordinator, Participant;
+        
+        Coordinator[journal_facts = "operation_initiated"]
+        -&gt; Participant: InitiateOperation(OperationData);
+        
+        Participant[journal_facts = "operation_completed"]
+        -&gt; Coordinator: OperationResult(ResultData);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Journal facts record protocol events in distributed state. Facts enable protocol auditing and state reconstruction. Multiple facts use comma separation for complex state tracking.</p>
+<h3 id="combined-annotations"><a class="header" href="#combined-annotations">Combined Annotations</a></h3>
+<p>Annotations combine for comprehensive protocol control:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>choreography! {
+    #[namespace = "comprehensive_protocol"]
+    protocol ComprehensiveProtocol {
+        roles: Admin, User;
+        
+        Admin[guard_capability = "admin_access",
+              flow_cost = 200,
+              journal_facts = "admin_action_logged"]
+        -&gt; User: AdminCommand(CommandData);
+        
+        User[guard_capability = "respond_to_admin",
+             flow_cost = 100,
+             journal_facts = "user_response_recorded"]
+        -&gt; Admin: UserResponse(ResponseData);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Combined annotations compile to multiple extension effects that execute in sequence during protocol operations. Guard capabilities ensure authorization through <code>CapabilityGuardEffect</code>. Flow costs control resource usage through <code>FlowCostEffect</code>. Journal facts enable auditability through <code>JournalFactsEffect</code>. All effects are registered in the <code>ExtensionRegistry</code> and execute automatically during choreographic message operations.</p>
+<h2 id="effect-system-integration"><a class="header" href="#effect-system-integration">Effect System Integration</a></h2>
+<p>Rumpsteak-aura protocols integrate with algebraic effect systems for runtime execution. Effect programs provide composable protocol building blocks for complex distributed systems.</p>
+<h3 id="effect-programs"><a class="header" href="#effect-programs">Effect Programs</a></h3>
+<p>Aura choreographies generate session types that integrate with rumpsteak-aura's effect system:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_protocol::choreography::AuraHandlerAdapter;
+
+let mut handler = AuraHandlerAdapter::for_testing(device_id)?;
+let mut endpoint = AuraEndpoint::new(context_id);
+
+// Execute choreography-generated protocol
+let result = execute_alice_role(&amp;mut handler, &amp;mut endpoint).await?;
+<span class="boring">}</span></code></pre></pre>
+<p>Generated protocols execute through rumpsteak-aura's <code>interpret_extensible</code> function using the <code>AuraHandler</code>. Extension effects execute automatically for annotated messages, providing capability guards, flow budgets, and journal coupling. Results contain received values and execution state with Aura-specific metadata from extension effect execution.</p>
+<h3 id="handler-abstraction"><a class="header" href="#handler-abstraction">Handler Abstraction</a></h3>
+<p>Aura provides specialized handlers that implement rumpsteak-aura's <code>ChoreoHandler</code> trait:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_protocol::choreography::AuraHandlerAdapter;
+
+// Testing handler with in-memory effects
+let test_handler = AuraHandlerAdapter::for_testing(device_id)?;
+
+// Production handler with real network and storage
+let prod_handler = AuraHandlerAdapter::for_production(device_id)?;
+
+// Simulation handler with fault injection
+let sim_handler = AuraHandlerAdapter::for_simulation(device_id, config)?;
+<span class="boring">}</span></code></pre></pre>
+<p>Different handler modes provide testing capabilities, production deployment, and simulation environments. Each handler implements both <code>ChoreoHandler</code> and <code>ExtensibleHandler</code> traits with appropriate extension registries for that execution mode. The <code>AuraHandler</code> integrates with Aura's effect system through registered extension effects that execute during protocol operations. Handler selection enables flexible protocol execution environments while maintaining consistent choreographic interfaces.</p>
+<h3 id="protocol-composition"><a class="header" href="#protocol-composition">Protocol Composition</a></h3>
+<p>Effect programs enable protocol composition and reuse:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let handshake = Program::new()
+    .send(Role::Bob, Message("hello"))
+    .recv::&lt;Message&gt;(Role::Bob)
+    .end();
+
+let data_transfer = Program::new()
+    .send(Role::Bob, Data(vec![1, 2, 3]))
+    .recv::&lt;Ack&gt;(Role::Bob)
+    .end();
+
+let composed_protocol = Program::new()
+    .then(handshake)
+    .then(data_transfer)
+    .end();
+<span class="boring">}</span></code></pre></pre>
+<p>Protocol composition uses the <code>then</code> method for sequential execution. Complex protocols build from simpler components. Composition maintains type safety and session properties.</p>
+<h2 id="integration-with-aura-systems"><a class="header" href="#integration-with-aura-systems">Integration with Aura Systems</a></h2>
+<p>Choreographic protocols integrate with broader <a href="001_system_architecture.html">Aura infrastructure</a> through standardized interfaces. Protocol execution uses effect handlers from aura-effects and coordination primitives from aura-protocol. Guard capabilities integrate with the web of trust system.</p>
+<p>Choreographies compose with CRDT programming patterns for state consistency. Flow budget enforcement prevents excessive resource usage. Journal facts enable distributed auditability across protocol execution.</p>
+<p>For foundational concepts, see <a href="803_coordination_guide.html">Coordination Systems Guide</a>. For theoretical foundations, see <a href="002_theoretical_model.html">Theoretical Model</a>. For testing approaches, see <a href="805_testing_guide.html">Testing Guide</a> and <a href="806_simulation_guide.html">Simulation Guide</a>.</p>
+<p>Ring protocols ensure ordered processing across participants. Token passing accumulates state changes. Each node contributes to the final decision. Journal merging synchronizes accumulated state.</p>
+<h3 id="hierarchical-coordination"><a class="header" href="#hierarchical-coordination">Hierarchical Coordination</a></h3>
+<p>Structure protocols with coordinator hierarchies:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>choreography! {
+    #[namespace = "hierarchical_consensus"]
+    protocol HierarchicalConsensus {
+        roles: TopCoordinator, SubCoordinator1, SubCoordinator2, 
+               Worker1, Worker2, Worker3, Worker4;
+        
+        // Top-level coordination
+        TopCoordinator[guard_capability = "coordinate_top_level",
+                       flow_cost = 300,
+                       journal_facts = "top_coordination_started"]
+        -&gt; SubCoordinator1: CoordinationRequest(TopLevelRequest);
+        
+        TopCoordinator[guard_capability = "coordinate_top_level",
+                       flow_cost = 300]
+        -&gt; SubCoordinator2: CoordinationRequest(TopLevelRequest);
+        
+        // Sub-level worker coordination
+        SubCoordinator1[guard_capability = "coordinate_workers",
+                        flow_cost = 150,
+                        journal_facts = "worker_coordination_started"]
+        -&gt; Worker1: WorkerRequest(WorkerTask);
+        
+        SubCoordinator1[guard_capability = "coordinate_workers",
+                        flow_cost = 150]
+        -&gt; Worker2: WorkerRequest(WorkerTask);
+        
+        SubCoordinator2[guard_capability = "coordinate_workers",
+                        flow_cost = 150]
+        -&gt; Worker3: WorkerRequest(WorkerTask);
+        
+        SubCoordinator2[guard_capability = "coordinate_workers",
+                        flow_cost = 150]
+        -&gt; Worker4: WorkerRequest(WorkerTask);
+        
+        // Result aggregation up the hierarchy
+        Worker1[guard_capability = "submit_result",
+                flow_cost = 80,
+                journal_facts = "work_completed"]
+        -&gt; SubCoordinator1: WorkerResult(ResultData);
+        
+        SubCoordinator1[guard_capability = "aggregate_results",
+                        flow_cost = 200,
+                        journal_facts = "sub_results_aggregated",
+                        journal_merge = true]
+        -&gt; TopCoordinator: SubCoordinatorResult(AggregatedResult);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Hierarchical protocols scale to large participant counts. Sub-coordinators manage worker groups. Results aggregate up through coordinator levels. This pattern enables efficient resource utilization.</p>
+<h2 id="protocol-composition-and-layering"><a class="header" href="#protocol-composition-and-layering">Protocol Composition and Layering</a></h2>
+<p>Complex applications require composing multiple protocols and layering different coordination mechanisms. Composition patterns enable building sophisticated distributed systems.</p>
+<h3 id="sequential-protocol-composition"><a class="header" href="#sequential-protocol-composition">Sequential Protocol Composition</a></h3>
+<p>Chain protocols to create multi-phase workflows:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct SequentialProtocolRunner&lt;E: Effects&gt; {
+    effects: E,
+    device_id: aura_core::DeviceId,
+}
+
+impl&lt;E: Effects&gt; SequentialProtocolRunner&lt;E&gt; {
+    pub async fn execute_authentication_flow(
+        &amp;self,
+        target_device: aura_core::DeviceId,
+    ) -&gt; Result&lt;AuthenticationResult, ProtocolError&gt; {
+        // Phase 1: Identity exchange
+        let identity_result = self.execute_identity_exchange(target_device).await?;
+        
+        // Phase 2: Capability negotiation
+        let capability_result = self.execute_capability_negotiation(
+            target_device,
+            &amp;identity_result
+        ).await?;
+        
+        // Phase 3: Session establishment
+        let session_result = self.execute_session_establishment(
+            target_device,
+            &amp;capability_result
+        ).await?;
+        
+        Ok(AuthenticationResult {
+            identity: identity_result,
+            capabilities: capability_result,
+            session: session_result,
+        })
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Sequential composition executes protocols in dependency order. Each phase uses results from previous phases. Failed phases abort the entire workflow. State accumulates across phase boundaries.</p>
+<h3 id="parallel-protocol-execution"><a class="header" href="#parallel-protocol-execution">Parallel Protocol Execution</a></h3>
+<p>Execute multiple protocols concurrently with synchronization points:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ParallelProtocolCoordinator&lt;E: Effects&gt; {
+    effects: E,
+    coordination_config: CoordinationConfig,
+}
+
+impl&lt;E: Effects&gt; ParallelProtocolCoordinator&lt;E&gt; {
+    pub async fn execute_distributed_computation(
+        &amp;self,
+        computation_request: ComputationRequest,
+        worker_devices: Vec&lt;aura_core::DeviceId&gt;,
+    ) -&gt; Result&lt;ComputationResult, ProtocolError&gt; {
+        // Launch parallel worker protocols
+        let worker_futures = worker_devices.into_iter().map(|device| {
+            self.execute_worker_protocol(device, computation_request.clone())
+        });
+        
+        // Wait for all workers with timeout
+        let worker_results = tokio::time::timeout(
+            self.coordination_config.worker_timeout,
+            futures::future::try_join_all(worker_futures)
+        ).await??;
+        
+        // Aggregate results from all workers
+        let aggregated_result = self.aggregate_worker_results(worker_results).await?;
+        
+        // Broadcast final result to all workers
+        let broadcast_futures = worker_devices.into_iter().map(|device| {
+            self.broadcast_final_result(device, &amp;aggregated_result)
+        });
+        
+        futures::future::try_join_all(broadcast_futures).await?;
+        
+        Ok(aggregated_result)
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Parallel execution maximizes resource utilization. Synchronization points coordinate distributed phases. Timeout handling manages unresponsive participants. Result aggregation combines parallel outputs.</p>
+<h3 id="protocol-adaptation-layers"><a class="header" href="#protocol-adaptation-layers">Protocol Adaptation Layers</a></h3>
+<p>Adapt between different protocol interfaces:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ProtocolAdapter&lt;E: Effects&gt; {
+    effects: E,
+    adaptation_config: AdaptationConfig,
+}
+
+impl&lt;E: Effects&gt; ProtocolAdapter&lt;E&gt; {
+    pub async fn adapt_legacy_to_modern(
+        &amp;self,
+        legacy_request: LegacyProtocolRequest,
+    ) -&gt; Result&lt;ModernProtocolResult, AdaptationError&gt; {
+        // Convert legacy request format
+        let modern_request = self.convert_request_format(legacy_request)?;
+        
+        // Execute modern protocol
+        let modern_result = self.execute_modern_protocol(modern_request).await?;
+        
+        // Convert result back to legacy format if needed
+        let adapted_result = self.convert_result_format(modern_result)?;
+        
+        Ok(adapted_result)
+    }
+    
+    async fn execute_capability_bridging(
+        &amp;self,
+        source_capabilities: CapabilitySet,
+        target_protocol: ProtocolType,
+    ) -&gt; Result&lt;BridgedCapabilities, AdaptationError&gt; {
+        // Map capabilities between different systems
+        let mapped_capabilities = self.map_capability_semantics(
+            source_capabilities,
+            target_protocol
+        )?;
+        
+        // Verify capability compatibility
+        self.verify_capability_compatibility(&amp;mapped_capabilities, target_protocol).await?;
+        
+        Ok(BridgedCapabilities {
+            original: source_capabilities,
+            mapped: mapped_capabilities,
+            protocol: target_protocol,
+        })
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Adaptation layers bridge different protocol generations. Format conversion handles message compatibility. Capability mapping preserves security properties across protocol boundaries.</p>
+<h2 id="error-handling-and-resilience"><a class="header" href="#error-handling-and-resilience">Error Handling and Resilience</a></h2>
+<p>Production choreographic protocols require comprehensive error handling and resilience mechanisms. These patterns ensure graceful degradation under adverse conditions.</p>
+<h3 id="timeout-and-retry-patterns"><a class="header" href="#timeout-and-retry-patterns">Timeout and Retry Patterns</a></h3>
+<p>Implement robust timeout handling with exponential backoff:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ResilientProtocolExecutor&lt;E: Effects&gt; {
+    effects: E,
+    retry_config: RetryConfig,
+}
+
+impl&lt;E: Effects&gt; ResilientProtocolExecutor&lt;E&gt; {
+    pub async fn execute_with_resilience&lt;T&gt;(
+        &amp;self,
+        protocol_fn: impl Fn() -&gt; Pin&lt;Box&lt;dyn Future&lt;Output = Result&lt;T, ProtocolError&gt;&gt; + Send&gt;&gt;,
+        operation_name: &amp;str,
+    ) -&gt; Result&lt;T, ProtocolError&gt; {
+        let mut attempt = 0;
+        let mut last_error = None;
+        
+        while attempt &lt; self.retry_config.max_attempts {
+            match tokio::time::timeout(
+                self.retry_config.operation_timeout,
+                protocol_fn()
+            ).await {
+                Ok(Ok(result)) =&gt; {
+                    if attempt &gt; 0 {
+                        self.effects.log_info(&amp;format!(
+                            "Protocol {} succeeded on attempt {}",
+                            operation_name, attempt + 1
+                        )).await;
+                    }
+                    return Ok(result);
+                }
+                Ok(Err(e)) =&gt; {
+                    last_error = Some(e.clone());
+                    
+                    if !e.is_retryable() || attempt &gt;= self.retry_config.max_attempts - 1 {
+                        break;
+                    }
+                    
+                    self.effects.log_warn(&amp;format!(
+                        "Protocol {} attempt {} failed: {}, retrying...",
+                        operation_name, attempt + 1, e
+                    )).await;
+                }
+                Err(_) =&gt; {
+                    let timeout_error = ProtocolError::Timeout {
+                        operation: operation_name.to_string(),
+                        timeout: self.retry_config.operation_timeout,
+                    };
+                    last_error = Some(timeout_error);
+                    
+                    if attempt &gt;= self.retry_config.max_attempts - 1 {
+                        break;
+                    }
+                }
+            }
+            
+            // Exponential backoff with jitter
+            let delay = self.retry_config.base_delay * 2_u32.pow(attempt);
+            let jittered_delay = self.add_jitter(delay);
+            tokio::time::sleep(jittered_delay).await;
+            
+            attempt += 1;
+        }
+        
+        Err(last_error.unwrap_or_else(|| ProtocolError::UnknownFailure))
+    }
+    
+    fn add_jitter(&amp;self, delay: Duration) -&gt; Duration {
+        let jitter_range = delay / 4; // 25% jitter
+        let jitter_ms = fastrand::u64(0..jitter_range.as_millis() as u64);
+        delay + Duration::from_millis(jitter_ms)
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Resilient execution handles transient failures automatically. Exponential backoff prevents overwhelming failed services. Jitter reduces thundering herd effects. Retry limits prevent infinite loops.</p>
+<h3 id="compensation-and-rollback"><a class="header" href="#compensation-and-rollback">Compensation and Rollback</a></h3>
+<p>Implement compensation logic for failed multi-phase protocols:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct CompensatingProtocolManager&lt;E: Effects&gt; {
+    effects: E,
+    compensation_log: CompensationLog,
+}
+
+impl&lt;E: Effects&gt; CompensatingProtocolManager&lt;E&gt; {
+    pub async fn execute_compensating_transaction(
+        &amp;self,
+        transaction: CompensatingTransaction,
+    ) -&gt; Result&lt;TransactionResult, TransactionError&gt; {
+        let mut completed_operations = Vec::new();
+        
+        // Execute forward operations
+        for operation in &amp;transaction.operations {
+            match self.execute_operation(operation).await {
+                Ok(result) =&gt; {
+                    completed_operations.push((operation.clone(), result));
+                    self.compensation_log.record_operation(operation).await?;
+                }
+                Err(e) =&gt; {
+                    // Compensation required
+                    self.effects.log_error(&amp;format!(
+                        "Operation {} failed: {}, starting compensation",
+                        operation.operation_id, e
+                    )).await;
+                    
+                    self.execute_compensation(&amp;completed_operations).await?;
+                    
+                    return Err(TransactionError::OperationFailed {
+                        failed_operation: operation.clone(),
+                        cause: e,
+                        compensated: true,
+                    });
+                }
+            }
+        }
+        
+        // All operations succeeded
+        self.compensation_log.mark_transaction_complete(&amp;transaction.transaction_id).await?;
+        
+        Ok(TransactionResult {
+            transaction_id: transaction.transaction_id,
+            completed_operations,
+            status: TransactionStatus::Committed,
+        })
+    }
+    
+    async fn execute_compensation(
+        &amp;self,
+        completed_operations: &amp;[(Operation, OperationResult)],
+    ) -&gt; Result&lt;(), CompensationError&gt; {
+        // Execute compensations in reverse order
+        for (operation, _result) in completed_operations.iter().rev() {
+            match self.execute_compensation_for_operation(operation).await {
+                Ok(_) =&gt; {
+                    self.compensation_log.record_compensation(operation).await?;
+                }
+                Err(e) =&gt; {
+                    self.effects.log_error(&amp;format!(
+                        "Compensation failed for operation {}: {}",
+                        operation.operation_id, e
+                    )).await;
+                    
+                    // Log compensation failure but continue with other compensations
+                    self.compensation_log.record_compensation_failure(operation, e).await?;
+                }
+            }
+        }
+        
+        Ok(())
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Compensation protocols ensure consistency despite partial failures. Operations execute in forward order. Compensations execute in reverse order. Compensation logging provides audit trails.</p>
+<h3 id="fault-isolation-and-circuit-breakers"><a class="header" href="#fault-isolation-and-circuit-breakers">Fault Isolation and Circuit Breakers</a></h3>
+<p>Implement circuit breaker patterns for fault isolation:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct CircuitBreakerProtocolWrapper&lt;E: Effects&gt; {
+    effects: E,
+    circuit_state: Arc&lt;Mutex&lt;CircuitState&gt;&gt;,
+    config: CircuitBreakerConfig,
+}
+
+#[derive(Clone)]
+pub enum CircuitState {
+    Closed { failure_count: usize },
+    Open { opened_at: Instant },
+    HalfOpen { test_requests: usize },
+}
+
+impl&lt;E: Effects&gt; CircuitBreakerProtocolWrapper&lt;E&gt; {
+    pub async fn execute_with_circuit_breaker&lt;T&gt;(
+        &amp;self,
+        protocol_fn: impl Fn() -&gt; Pin&lt;Box&lt;dyn Future&lt;Output = Result&lt;T, ProtocolError&gt;&gt; + Send&gt;&gt;,
+        service_name: &amp;str,
+    ) -&gt; Result&lt;T, ProtocolError&gt; {
+        // Check circuit state
+        let should_execute = {
+            let mut state = self.circuit_state.lock().unwrap();
+            match &amp;*state {
+                CircuitState::Closed { failure_count } =&gt; {
+                    *failure_count &lt; self.config.failure_threshold
+                }
+                CircuitState::Open { opened_at } =&gt; {
+                    let elapsed = opened_at.elapsed();
+                    if elapsed &gt;= self.config.recovery_timeout {
+                        *state = CircuitState::HalfOpen { test_requests: 0 };
+                        true
+                    } else {
+                        false
+                    }
+                }
+                CircuitState::HalfOpen { test_requests } =&gt; {
+                    *test_requests &lt; self.config.test_request_threshold
+                }
+            }
+        };
+        
+        if !should_execute {
+            return Err(ProtocolError::CircuitBreakerOpen {
+                service: service_name.to_string(),
+            });
+        }
+        
+        // Execute protocol
+        match protocol_fn().await {
+            Ok(result) =&gt; {
+                self.record_success().await;
+                Ok(result)
+            }
+            Err(e) =&gt; {
+                self.record_failure(&amp;e).await;
+                Err(e)
+            }
+        }
+    }
+    
+    async fn record_success(&amp;self) {
+        let mut state = self.circuit_state.lock().unwrap();
+        *state = CircuitState::Closed { failure_count: 0 };
+        
+        self.effects.log_debug("Circuit breaker reset to closed state").await;
+    }
+    
+    async fn record_failure(&amp;self, error: &amp;ProtocolError) {
+        let mut state = self.circuit_state.lock().unwrap();
+        
+        match &amp;*state {
+            CircuitState::Closed { failure_count } =&gt; {
+                let new_count = failure_count + 1;
+                if new_count &gt;= self.config.failure_threshold {
+                    *state = CircuitState::Open { opened_at: Instant::now() };
+                    
+                    self.effects.log_warn(&amp;format!(
+                        "Circuit breaker opened due to {} failures",
+                        new_count
+                    )).await;
+                } else {
+                    *state = CircuitState::Closed { failure_count: new_count };
+                }
+            }
+            CircuitState::HalfOpen { test_requests } =&gt; {
+                *state = CircuitState::Open { opened_at: Instant::now() };
+                
+                self.effects.log_warn("Circuit breaker reopened during half-open test").await;
+            }
+            CircuitState::Open { .. } =&gt; {
+                // Already open, no state change needed
+            }
+        }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Circuit breakers prevent cascading failures across distributed systems. Failure thresholds trigger circuit opening. Recovery timeouts enable gradual service restoration. Half-open states test service health carefully.</p>
+<h2 id="system-layering-techniques"><a class="header" href="#system-layering-techniques">System Layering Techniques</a></h2>
+<p>Advanced choreographic applications layer multiple coordination mechanisms. Layering enables separation of concerns and modular system design.</p>
+<h3 id="capability-layer-integration"><a class="header" href="#capability-layer-integration">Capability Layer Integration</a></h3>
+<p>Layer capability checking across protocol boundaries:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct LayeredCapabilityManager&lt;E: Effects&gt; {
+    effects: E,
+    capability_layers: Vec&lt;CapabilityLayer&gt;,
+}
+
+impl&lt;E: Effects&gt; LayeredCapabilityManager&lt;E&gt; {
+    pub async fn evaluate_layered_capabilities(
+        &amp;self,
+        request: LayeredCapabilityRequest,
+    ) -&gt; Result&lt;LayeredCapabilityGrant, CapabilityError&gt; {
+        let mut capability_context = request.initial_context;
+        let mut layer_grants = Vec::new();
+        
+        for (layer_index, layer) in self.capability_layers.iter().enumerate() {
+            let layer_request = CapabilityRequest {
+                requesting_device: request.requesting_device,
+                operation: request.operation.clone(),
+                context: capability_context.clone(),
+                layer_index,
+            };
+            
+            match layer.evaluate_capabilities(&amp;layer_request).await {
+                Ok(grant) =&gt; {
+                    capability_context = grant.refined_context.clone();
+                    layer_grants.push(grant);
+                }
+                Err(e) =&gt; {
+                    return Err(CapabilityError::LayerDenied {
+                        layer_index,
+                        layer_name: layer.name().to_string(),
+                        denial_reason: e.to_string(),
+                    });
+                }
+            }
+        }
+        
+        Ok(LayeredCapabilityGrant {
+            final_context: capability_context,
+            layer_grants,
+            overall_authorization: AuthorizationLevel::Granted,
+        })
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Capability layers refine authorization progressively. Each layer applies additional constraints. Layer failures deny the entire request. Context refinement accumulates across layers.</p>
+<h3 id="privacy-budget-layering"><a class="header" href="#privacy-budget-layering">Privacy Budget Layering</a></h3>
+<p>Layer privacy budget enforcement across protocol hierarchies:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct LayeredPrivacyManager&lt;E: Effects&gt; {
+    effects: E,
+    privacy_layers: BTreeMap&lt;PrivacyLayer, PrivacyBudgetManager&gt;,
+}
+
+impl&lt;E: Effects&gt; LayeredPrivacyManager&lt;E&gt; {
+    pub async fn charge_layered_privacy_cost(
+        &amp;self,
+        operation: &amp;PrivacyOperation,
+        context: &amp;PrivacyContext,
+    ) -&gt; Result&lt;LayeredPrivacyReceipt, PrivacyError&gt; {
+        let mut layer_receipts = Vec::new();
+        let base_cost = operation.calculate_base_cost();
+        
+        for (layer, budget_manager) in &amp;self.privacy_layers {
+            let layer_cost = layer.calculate_layer_cost(&amp;base_cost, context);
+            
+            match budget_manager.charge_budget(context, layer_cost).await {
+                Ok(receipt) =&gt; {
+                    layer_receipts.push(LayerReceipt {
+                        layer: layer.clone(),
+                        cost_charged: layer_cost,
+                        receipt,
+                    });
+                }
+                Err(e) =&gt; {
+                    // Rollback previous charges
+                    self.rollback_privacy_charges(&amp;layer_receipts).await?;
+                    
+                    return Err(PrivacyError::BudgetExhausted {
+                        layer: layer.clone(),
+                        required_cost: layer_cost,
+                        cause: e,
+                    });
+                }
+            }
+        }
+        
+        Ok(LayeredPrivacyReceipt {
+            operation_id: operation.operation_id,
+            total_cost: base_cost,
+            layer_receipts,
+            timestamp: self.effects.current_timestamp().await,
+        })
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Privacy budget layering enables fine-grained leakage control. Different layers track different privacy concerns. Budget exhaustion at any layer denies operations. Rollback mechanisms ensure consistency.</p>
+<p>Advanced choreographic programming enables building sophisticated distributed systems with strong security and privacy guarantees. These patterns provide the foundation for complex real-world applications.</p>
+<p>Continue with <a href="805_testing_guide.html">Testing Guide</a> and <a href="806_simulation_guide.html">Simulation Guide</a> for comprehensive protocol testing approaches using Aura's simulation infrastructure.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="803_coordination_guide.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="805_development_patterns.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="803_coordination_guide.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="805_development_patterns.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

@@ -1,0 +1,861 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Quint + Choreo - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="quint--choreo"><a class="header" href="#quint--choreo">Quint + Choreo</a></h1>
+<h2 id="0-what-quint-is-and-isnt"><a class="header" href="#0-what-quint-is-and-isnt">0) What Quint is (and isn’t)</a></h2>
+<p>Quint is a typed specification language for describing <strong>state machines</strong> (transition systems) and <strong>properties</strong> (mostly invariants) you can check by simulation or model checking. When a property doesn’t hold, Quint produces a <strong>counter-example trace</strong> showing exactly how to reproduce the bug—no “false positives.” See <a href="https://quint-lang.org/docs/why">Why Quint</a>.</p>
+<p>You typically:</p>
+<ol>
+<li>model states and step transitions,</li>
+<li>write invariants (and sometimes temporal properties),</li>
+<li>run <code>quint run</code> (simulator) for fast feedback, or <code>quint verify</code> (Apalache) for formal checking.</li>
+</ol>
+<h2 id="1-core-mental-model"><a class="header" href="#1-core-mental-model">1) Core mental model</a></h2>
+<p>A Quint spec is a <strong>module</strong> with:</p>
+<ul>
+<li><strong>constants</strong> and <strong>state variables</strong> (typed),</li>
+<li><strong>actions</strong> that update state using the prime operator (<code>x'</code> = value “in next state”),</li>
+<li><strong>runs</strong> (structured sequences of actions) and <strong>temporal formulas</strong> (optional),</li>
+<li><strong>invariants</strong> you check against all reachable states.</li>
+</ul>
+<h3 id="modes-semantic-strata"><a class="header" href="#modes-semantic-strata">Modes (semantic strata)</a></h3>
+<p>Quint makes the “levels” explicit via <strong>modes</strong> (stateless, state, nondeterminism, action, run). Write expressions in the right mode (e.g., <code>action</code> definitions in action mode; invariants are boolean/state-mode). This clarity removes common confusion found in unstratified notations.</p>
+<h2 id="2-types--data"><a class="header" href="#2-types--data">2) Types &amp; data</a></h2>
+<p>Quint is <strong>typed</strong>. You annotate variables/constants and may rely on inference for many other definitions. Core types: <code>bool</code>, <code>int</code>, <code>str</code>, sets, lists, tuples, records, maps (functions), sum types, arrows (<code>T1 -&gt; T2</code> for functions; <code>(T1,…,Tn) =&gt; R</code> for operators), and polymorphic aliases via <code>type</code>. Example: <code>type Option[a] = Some(a) | None</code>.</p>
+<p>Everyday data you’ll use a lot:</p>
+<ul>
+<li><strong>Sets</strong>: <code>Set[T]</code> with <code>map</code>, <code>filter</code>, <code>forall</code>, <code>exists</code>, <code>union</code>, <code>intersect</code>, <code>subseteq</code>, etc.</li>
+<li><strong>Maps (functions)</strong>: <code>Map(k -&gt; v, …)</code>, <code>get</code>, <code>put</code>, <code>keys</code>, <code>mapBy</code>, <code>setOfMaps</code>.</li>
+<li><strong>Lists</strong>: <code>List[T]</code>, <code>length</code>, <code>slice</code>, <code>foldl</code>, <code>head</code>, <code>tail</code>.</li>
+</ul>
+<blockquote>
+<p>Tip: prefer Sets when order doesn’t matter, Lists when it does.</p>
+</blockquote>
+<h2 id="3-modules-imports-instances"><a class="header" href="#3-modules-imports-instances">3) Modules, imports, instances</a></h2>
+<ul>
+<li>Define with <code>module M { … }</code>.</li>
+<li>Import everything: <code>import A.* from "A"</code>, or as a namespace: <code>import A as a from "A"</code>.</li>
+<li><strong>Module instances</strong> let you parameterize modules (e.g., <code>import A(N = 3) as a3</code> then call <code>a3::init</code>).</li>
+<li>Namespaces may use <code>::</code> to qualify references.</li>
+</ul>
+<h2 id="4-state-actions-and-next-state-updates"><a class="header" href="#4-state-actions-and-next-state-updates">4) State, actions, and next-state updates</a></h2>
+<p>Declare <strong>state variables</strong> with <code>var x: int</code>.
+Write <strong>actions</strong> as boolean formulas about current/next state, e.g.:</p>
+<pre><code class="language-quint">var x: int
+
+action init = x' = 1
+
+action step = all {
+  x &lt; 5,
+  x' = x + 1
+}
+</code></pre>
+<p>Read as: <code>init</code> sets the next‐state value of <code>x</code> to 1. <code>step</code> requires <code>x &lt; 5</code> and increments.</p>
+<p>In the REPL, applying an action evaluates to <code>true</code> (took the step) or <code>false</code> (guard failed).</p>
+<h3 id="nondeterminism--control-flow"><a class="header" href="#nondeterminism--control-flow">Nondeterminism &amp; control flow</a></h3>
+<p>Quint provides structured composition (<code>all { … }</code>, disjunctions, non-det choice) and “flow” operators to combine action fragments, plus <code>any</code>/<code>nondet</code> patterns used by the simulator/REPL examples.</p>
+<h2 id="5-runs--temporal"><a class="header" href="#5-runs--temporal">5) Runs &amp; temporal</a></h2>
+<p>You can compose steps into <strong>runs</strong> and use <strong>temporal operators</strong> like <code>always</code>, <code>eventually</code>, <code>next</code>, fairness hints, etc. In practice, <strong>invariants</strong> cover most work; temporal properties are more advanced and partially supported (simulator doesn’t check temporal). Use Apalache via <code>quint verify</code> for temporal when needed.</p>
+<h2 id="6-properties-that-matter"><a class="header" href="#6-properties-that-matter">6) Properties that matter</a></h2>
+<p>Start with <strong>safety invariants</strong>—boolean expressions that must hold in <strong>every</strong> state (e.g., balances never negative). Liveness often needs temporal reasoning and fairness; if you just need “good things happen sometimes,” use <strong>witnesses</strong> in the simulator to count traces where a condition becomes true.</p>
+<p>Examples:</p>
+<ul>
+<li>Invariant: <code>val no_negatives = ADDRESSES.forall(a =&gt; balances.get(a) &gt;= 0)</code></li>
+<li>Witness counting: <code>quint run ... --witnesses=alice_more_than_bob</code></li>
+<li>Negated-invariant trick to <strong>show</strong> a witnessing trace: <code>--invariant="not(alice_more_than_bob)"</code>.</li>
+</ul>
+<h3 id="inductive-invariants-advanced-but-powerful"><a class="header" href="#inductive-invariants-advanced-but-powerful">Inductive invariants (advanced but powerful)</a></h3>
+<p>Use <code>--inductive-invariant</code> to prove an invariant <strong>without</strong> exploring all states: prove base + step + implication. <code>quint verify</code> orchestrates the Apalache calls that check these proof obligations.</p>
+<h2 id="7-tooling-complete-catalog"><a class="header" href="#7-tooling-complete-catalog">7) Tooling (complete catalog)</a></h2>
+<p>This section consolidates all day-to-day tools and how to use them, aligned with the official docs.</p>
+<h3 id="71-simulator--quint-run-docs"><a class="header" href="#71-simulator--quint-run-docs">7.1 Simulator — <code>quint run</code> (<a href="https://quint-lang.org/docs/simulator">docs</a>)</a></h3>
+<p><strong>Purpose.</strong> Generate sample executions (traces) and check <strong>invariants</strong> on every state. Useful for fast feedback and finding <strong>short counter-examples</strong>.</p>
+<p><strong>Basics</strong></p>
+<ul>
+<li><code>quint run spec.qnt [--module M] --invariant inv</code></li>
+<li><code>--invariants inv1 inv2 ...</code> to check multiple values that evaluate to <code>bool</code>.</li>
+<li><code>--max-steps N</code> bound on each execution length.</li>
+<li><code>--seed S</code> to make runs reproducible.</li>
+<li><code>--out-itf trace.itf.json</code> to save a trace in ITF (Interchange Trace Format).</li>
+<li>Witnesses: <code>--witnesses name1 name2</code> to <strong>count</strong> how many runs satisfy those boolean values at least once.</li>
+</ul>
+<p><strong>Notes</strong></p>
+<ul>
+<li>The simulator <strong>does not</strong> check temporal formulas; use a model checker for that.</li>
+<li>Output is either: a violation trace (counter-example) or the longest sample explored for your settings.</li>
+</ul>
+<h3 id="72-model-checking--quint-verify-apalache-checking-properties-model-checkers"><a class="header" href="#72-model-checking--quint-verify-apalache-checking-properties-model-checkers">7.2 Model Checking — <code>quint verify</code> (Apalache) (<a href="https://quint-lang.org/docs/checking-properties">Checking properties</a>, <a href="https://quint-lang.org/docs/model-checkers">Model checkers</a>)</a></h3>
+<p><strong>Purpose.</strong> Bounded model checking over steps. Formally verifies that your properties hold up to a bound; if not, returns a counter-example.</p>
+<p><strong>Basics</strong></p>
+<ul>
+<li><code>quint verify spec.qnt [--module M] --invariant inv</code></li>
+<li>Multi: <code>--invariants inv1 inv2 ...</code></li>
+<li>Temporal: <code>--temporal prop1 prop2</code> (checked by the model checker, not by the simulator).</li>
+<li>Inductive: <code>--inductive-invariant inv</code> to prove base/step obligations.</li>
+<li>Bounds: <code>--max-steps N</code>.</li>
+</ul>
+<p><strong>Requirements</strong></p>
+<ul>
+<li>JDK ≥ 17 installed (Apalache is fetched/invoked under the hood).</li>
+</ul>
+<h3 id="73-repl--interactive-exploration-docs"><a class="header" href="#73-repl--interactive-exploration-docs">7.3 REPL — interactive exploration (<a href="https://quint-lang.org/docs/repl">docs</a>)</a></h3>
+<p><strong>Purpose.</strong> Evaluate expressions, build/step actions, and run short executions interactively; great for sketching specs and sanity checks.</p>
+<p><strong>Basics</strong></p>
+<ul>
+<li>Start: <code>quint</code></li>
+<li>Load a module: <code>quint -r file.qnt::ModuleName</code> (then use names unqualified inside the REPL).</li>
+<li>Evaluate: <code>&gt;&gt;&gt; Set(1,2).map(x =&gt; x + 1)</code></li>
+<li>Define/step: you can define actions and apply them; the REPL returns whether the action was enabled and shows updated state when stepping.</li>
+<li>Explore traces produced by the simulator inside the REPL when loaded with a run.</li>
+</ul>
+<h3 id="74-literate-specifications--weave-markdown--quint-docs"><a class="header" href="#74-literate-specifications--weave-markdown--quint-docs">7.4 Literate specifications — weave Markdown &amp; Quint (<a href="https://quint-lang.org/docs/literate">docs</a>)</a></h3>
+<p><strong>Purpose.</strong> Keep prose and code together; extract <code>.qnt</code> files from Markdown.</p>
+<p><strong>Basics</strong></p>
+<ul>
+<li>
+<p>Write Markdown with fenced code blocks labeled <code>quint</code> and a <strong>target file</strong> plus an <strong>append operator</strong>:</p>
+<pre><code>```quint myspec.qnt +=
+module Counter {
+  var n: int
+  // ...
+}
+</code></pre>
+<pre><code></code></pre>
+</li>
+<li>
+<p>Each <code>quint</code> code block declares: (1) language <code>quint</code>, (2) target file (e.g., <code>myspec.qnt</code>), and (3) the <code>+=</code> append directive. Multiple blocks to the same file are concatenated in order.</p>
+</li>
+</ul>
+<h3 id="75-modelbased-testing-mbt-docs"><a class="header" href="#75-modelbased-testing-mbt-docs">7.5 Model‑Based Testing (MBT) (<a href="https://quint-lang.org/docs/model-based-testing">docs</a>)</a></h3>
+<p><strong>Purpose.</strong> Generate <strong>many</strong> concrete scenarios from one model and drive a system‑under‑test (SUT) via a thin test harness.</p>
+<p><strong>Workflow</strong></p>
+<ul>
+<li>Encode actions as SUT calls (driver) and use the simulator to generate action sequences.</li>
+<li>Use witnesses/invariants to assert end‑to‑end properties across generated runs.</li>
+<li>Practical pattern: export ITF traces from <code>quint run</code> and replay them in your test harness.</li>
+</ul>
+<h3 id="76-model-checkers--the-landscape"><a class="header" href="#76-model-checkers--the-landscape">7.6 Model checkers — the landscape</a></h3>
+<p><strong>Purpose.</strong> Understand what engines exist and how Quint integrates.</p>
+<ul>
+<li><strong>Apalache</strong> (primary): translates Quint to TLA+/SMT constraints and checks safety/temporal within a bound; returns counter‑examples on failure.</li>
+<li>Simulator vs. model checker: simulator is fast sampling; model checker gives formal guarantees (within bounds) and can prove inductive invariants.</li>
+</ul>
+<h3 id="77-cli-grabbag"><a class="header" href="#77-cli-grabbag">7.7 CLI grab‑bag</a></h3>
+<ul>
+<li>Parse/Typecheck: <code>quint parse spec.qnt</code>, <code>quint typecheck spec.qnt</code> (emit JSON IR and type/effect info).</li>
+<li>Tests: <code>quint test</code> (randomized tests over values/operators).</li>
+<li>Common flags: <code>--verbosity</code>, <code>--seed</code>, <code>--out</code>, <code>--out-itf</code>.</li>
+</ul>
+<hr />
+<h2 id="7a-choreo-tooling--workflow-see-choreo-tutorial"><a class="header" href="#7a-choreo-tooling--workflow-see-choreo-tutorial">7A) Choreo tooling &amp; workflow (see <a href="https://quint-lang.org/choreo/tutorial">Choreo tutorial</a>)</a></h2>
+<p><strong>Getting the library files</strong></p>
+<ul>
+<li>From the tutorial: download <code>choreo.qnt</code>, <code>template.qnt</code>, and the <code>spells/</code> files (e.g., via <code>curl</code>) into your project.</li>
+</ul>
+<p><strong>Core development loop</strong></p>
+<ol>
+<li>Define types (<code>Node</code>, <code>Message</code>, <code>StateFields</code>, and optional <code>CustomEffects</code>, <code>Event</code>, <code>Extensions</code>).</li>
+<li>Implement transitions and <strong>listeners</strong> using the <code>cue</code> pattern.</li>
+<li>Simulate with <code>quint run</code> and add invariants/witnesses.</li>
+<li>Verify with <code>quint verify</code> where needed.</li>
+</ol>
+<p><strong>The <code>cue</code> pattern</strong></p>
+<ul>
+<li>Compose listeners that <strong>detect</strong> relevant messages and <strong>emit</strong> transitions. Keeps routing/filtering centralized and logic composable.</li>
+</ul>
+<p><strong>Custom effects &amp; environment extensions</strong></p>
+<ul>
+<li>Declare new effect variants and specify how the environment interprets them (e.g., delivery, delays, faults). Useful for adversarial or lossy networks.</li>
+</ul>
+<p><strong><code>step_micro</code></strong></p>
+<ul>
+<li>Switch stepping strategy to process <strong>one message at a time</strong>, exposing fine‑grained interleavings for deeper exploration/proofs.</li>
+</ul>
+<hr />
+<h2 id="8-language-staples-quick-reference"><a class="header" href="#8-language-staples-quick-reference">8) Language staples (quick reference)</a></h2>
+<ul>
+<li><strong>Comments</strong>: <code>//</code> and <code>/* ... */</code>.</li>
+<li><strong>Lambdas</strong>: <code>x =&gt; expr</code>.</li>
+<li><strong>Records</strong>: <code>{ name: "TLA+", age: 33 }</code>, field update <code>{ ...r, name: "Quint" }</code>.</li>
+<li><strong>Sum types</strong>: <code>type Message = Commit | Abort | Prepared(Node)</code> with pattern-matching via <code>match</code>.</li>
+<li><strong>Sets/Maps/Lists</strong>: see operations in the cheatsheet; sets are the backbone of many models.</li>
+<li><strong>No recursive operators</strong> (design choice). Work with folds/iteration over finite data and explicit runs instead.</li>
+</ul>
+<p>For an authoritative list of <strong>built-in operators</strong> (arithmetic, logic, set/map/list ops, temporal, run/action helpers), consult the Language Manual and built-ins reference in <a href="https://quint-lang.org/docs/lang">docs/lang</a>.</p>
+<hr />
+<h2 id="9-syntax-reference-from-lessons--booleans-integers-sets-coin"><a class="header" href="#9-syntax-reference-from-lessons--booleans-integers-sets-coin">9) Syntax reference from lessons — <a href="https://quint-lang.org/docs/lessons/booleans">Booleans</a>, <a href="https://quint-lang.org/docs/lessons/integers">Integers</a>, <a href="https://quint-lang.org/docs/lessons/sets">Sets</a>, <a href="https://quint-lang.org/docs/lessons/coin">Coin</a></a></h2>
+<p>The following is an exhaustive syntax/ops digest pulled from the official lessons you referenced. It’s organized by topic with the concrete spellings, method forms, and sugar.</p>
+<h3 id="booleans"><a class="header" href="#booleans">Booleans</a></h3>
+<p><strong>Literals</strong></p>
+<ul>
+<li><code>true</code>, <code>false</code> (strict: no implicit conversions)</li>
+</ul>
+<p><strong>Unary/binary ops (function + dot forms)</strong></p>
+<ul>
+<li>Negation: <code>not(x)</code> ⇔ <code>x.not()</code></li>
+<li>Conjunction (and): <code>x and y</code> ⇔ <code>and(x, y, …)</code> ⇔ <code>x.and(y)</code> and block form <code>and { e1, e2, e3 }</code></li>
+<li>Disjunction (or): <code>x or y</code> ⇔ <code>or(x, y, …)</code> ⇔ <code>x.or(y)</code> and block form <code>or { e1, e2, e3 }</code></li>
+<li>Implication: <code>x implies y</code> ⇔ <code>x.implies(y)</code> (equivalent to <code>not(x) or y</code>)</li>
+<li>Equivalence: <code>x iff y</code> ⇔ <code>x.iff(y)</code> (boolean-only equality)</li>
+<li>Equality/inequality: <code>x == y</code>, <code>x != y</code> (args must have same type)</li>
+</ul>
+<p><strong>Notes</strong></p>
+<ul>
+<li>Most operators have an n‑ary variant (e.g., <code>and(x,y,z)</code>) and an OOP/dot variant (<code>x.and(y)</code>).</li>
+<li>Avoid <code>false.not</code> (without <code>()</code>), which is parsed as record-field access.</li>
+</ul>
+<h3 id="integers"><a class="header" href="#integers">Integers</a></h3>
+<p><strong>Literals</strong></p>
+<ul>
+<li>Decimal literals, including negatives: <code>0</code>, <code>2</code>, <code>-3</code>, … (arbitrary‑precision/big integers)</li>
+</ul>
+<p><strong>Arithmetic</strong></p>
+<ul>
+<li>Exponentiation: <code>i ^ j</code></li>
+<li>Addition/subtraction: <code>i + j</code>, <code>i - j</code> (same precedence; left‑to‑right)</li>
+<li>Multiplication: <code>i * j</code></li>
+<li>Division/remainder: <code>i / j</code>, <code>i % j</code> with the law <code>i == (i / j) * j + (i % j)</code> (for <code>j != 0</code>)</li>
+<li>Unary minus (negation): <code>-i</code></li>
+</ul>
+<p><strong>Comparison</strong></p>
+<ul>
+<li><code>i &lt; j</code>, <code>i &lt;= j</code>, <code>i &gt; j</code>, <code>i &gt;= j</code>, <code>i == j</code>, <code>i != j</code></li>
+</ul>
+<p><strong>Ranges that produce sets (used often with nondet/tests)</strong></p>
+<ul>
+<li><code>a.to(b)</code> produces the set <code>{a, a+1, …, b}</code> when <code>a &lt;= b</code> (commonly seen as <code>0.to(N)</code>), then you can call <code>.oneOf()</code> (see <strong>Coin</strong> below).</li>
+</ul>
+<h3 id="sets-and-tuples-used-within"><a class="header" href="#sets-and-tuples-used-within">Sets (and tuples used within)</a></h3>
+<p><strong>Tuple syntax &amp; projection</strong></p>
+<ul>
+<li>Construct: <code>(x, y, z)</code></li>
+<li>Access: <code>t._1</code>, <code>t._2</code>, …</li>
+</ul>
+<p><strong>Set literals &amp; membership</strong></p>
+<ul>
+<li>
+<p>Construct: <code>Set(e1, e2, …)</code> (duplicates removed)</p>
+</li>
+<li>
+<p>Membership (two equivalent forms):</p>
+<ul>
+<li>Element‑in‑set: <code>e.in(S)</code></li>
+<li>Set contains element: <code>S.contains(e)</code></li>
+</ul>
+</li>
+</ul>
+<p><strong>Quantifiers on sets</strong></p>
+<ul>
+<li>Existence: <code>S.exists(x =&gt; P(x))</code></li>
+<li>Universality: <code>S.forall(x =&gt; P(x))</code></li>
+</ul>
+<p><strong>Core higher‑order ops</strong></p>
+<ul>
+<li>Map: <code>S.map(x =&gt; f(x))</code></li>
+<li>Filter: <code>S.filter(x =&gt; P(x))</code></li>
+<li>Size: <code>S.size()</code> → <code>int</code></li>
+<li>Flatten (for set‑of‑sets): <code>S.flatten()</code> → union of direct elements</li>
+<li>(Common additional set ops used broadly in specs though not emphasized in the lesson): <code>S.union(T)</code>, <code>S.intersect(T)</code>, <code>S.diff(T)</code>, <code>S.subseteq(T)</code></li>
+</ul>
+<p><strong>Reachability &amp; folds (patterns showcased in the lesson)</strong></p>
+<ul>
+<li>Progressive construction using maps/filters and checks with <code>exists/forall</code>.</li>
+<li>Folding patterns over sets (e.g., accumulating reachability or computing derived properties) via <code>fold</code> operators.</li>
+<li>Powersets: use the powerset operator/util to enumerate subsets (commonly written via <code>powerset(S)</code> in examples; pair with <code>filter</code>/<code>exists</code> to search).</li>
+</ul>
+<h3 id="coin--protocol-anatomy-syntax-highlights"><a class="header" href="#coin--protocol-anatomy-syntax-highlights">Coin / Protocol anatomy (syntax highlights)</a></h3>
+<p><strong>Module &amp; types</strong></p>
+<ul>
+<li>Module: <code>module coin { ... }</code></li>
+<li>Type aliases: <code>type Addr = str</code>, <code>type UInt = int</code> (and custom invariants/predicates like <code>isUInt</code>)</li>
+</ul>
+<p><strong>State &amp; constants</strong></p>
+<ul>
+<li>Constants: <code>const ADDR: Set[Addr]</code></li>
+<li>State vars: <code>var balances: Map[Addr, UInt]</code>, <code>var minter: Addr</code></li>
+</ul>
+<p><strong>Initializer &amp; actions</strong></p>
+<ul>
+<li>
+<p>Prime updates in an action/initializer block:</p>
+<pre><code class="language-quint">action init = all {
+  // nondet choice (see below) then assignments
+  minter' = sender,
+  balances' = ADDR.mapBy(a =&gt; 0)
+}
+</code></pre>
+</li>
+<li>
+<p>Guarded action with locals and <code>require</code> checks:</p>
+<pre><code class="language-quint">action mint(sender: Addr, receiver: Addr, amount: UInt): bool = all {
+  require(sender == minter),
+  val newBal = balances.get(receiver) + amount,
+  all {
+    require(isUInt(newBal)),
+    balances' = balances.set(receiver, newBal),
+    minter' = minter
+  }
+}
+</code></pre>
+</li>
+</ul>
+<p><strong>Nondeterministic choice</strong></p>
+<ul>
+<li>From a set literal/range: <code>nondet x = 0.to(MAX_UINT).oneOf()</code></li>
+<li>From an existing set: <code>nondet sender = oneOf(ADDR)</code> or <code>ADDR.oneOf()</code></li>
+</ul>
+<p><strong>Sequencing runs in REPL/tests</strong></p>
+<ul>
+<li>Compose steps: <code>init.then(mint(minter, "bob", 5)).then(send("bob", "eve", 3))</code></li>
+<li>Conditional action in a run: <code>if (cond) action1 else action2</code></li>
+</ul>
+<p><strong>Map helpers (commonly used with state)</strong></p>
+<ul>
+<li>Build map by domain: <code>ADDR.mapBy(a =&gt; 0)</code></li>
+<li>Read/write entries: <code>m.get(k)</code>, <code>m.set(k, v)</code> (aka <code>put</code> in some references)</li>
+</ul>
+<p><strong>Testing hooks</strong></p>
+<ul>
+<li><code>run</code> blocks with nondet inputs and fixed sequences; invariants expressed as values and passed to <code>quint run</code>/<code>verify</code>.</li>
+</ul>
+<hr />
+<blockquote>
+<p>With these lesson-derived primitives consolidated here, the guide now doubles as a syntax crib sheet you can use while modeling.</p>
+</blockquote>
+<hr />
+<h1 id="choreo-a-batteries-included-framework-for-distributed-protocols"><a class="header" href="#choreo-a-batteries-included-framework-for-distributed-protocols">Choreo: a "batteries-included" framework for distributed protocols</a></h1>
+<p>Choreo is a Quint library + methodology that hands you the best-known modeling techniques for message-passing protocols, so you focus on <strong>protocol logic</strong> instead of boilerplate. It adopts the <strong>message soup</strong> technique for efficiency, separates <strong>local state</strong> from <strong>environment</strong>, and treats <strong>timeouts as internal events</strong>.</p>
+<h2 id="important-note-on-choreographic-programming-in-quint"><a class="header" href="#important-note-on-choreographic-programming-in-quint">Important Note on Choreographic Programming in Quint</a></h2>
+<p>While the name "Choreo" suggests choreographic programming, Quint's effect system makes it difficult to implement true choreographic patterns where:</p>
+<ul>
+<li>A global viewpoint describes message flows between participants</li>
+<li>Local projections are automatically derived</li>
+<li>Session types enforce protocol correctness</li>
+</ul>
+<p>The limitations include:</p>
+<ul>
+<li>Match expressions cannot mix pure and action branches</li>
+<li>Actions cannot be used inside higher-order functions like <code>exists</code>, <code>forall</code>, or <code>fold</code></li>
+<li>Complex message routing patterns become cumbersome to express</li>
+</ul>
+<p>For true choreographic programming with session types, consider:</p>
+<ol>
+<li>Using dedicated choreographic languages (e.g., Scribble, Choral)</li>
+<li>Using the Choreo library patterns shown below, which provide good abstractions for distributed protocols</li>
+<li>Writing simpler message-passing specifications without choreographic patterns</li>
+</ol>
+<h2 id="1-how-you-use-it"><a class="header" href="#1-how-you-use-it">1) How you use it</a></h2>
+<p>Add:</p>
+<pre><code class="language-quint">import choreo(processes = NODES) as choreo from "./choreo"
+</code></pre>
+<p>Then you define:</p>
+<ul>
+<li><strong>types</strong>: <code>Node</code>, <code>Message</code>, <code>StateFields</code>, and any protocol enums (e.g., <code>Role</code>, <code>Stage</code>);</li>
+<li><strong>listeners</strong> using cues that react to relevant messages;</li>
+<li><strong>transitions</strong> that return <code>{ post_state: ..., effects: Set(...) }</code>.
+The framework supplies <strong>built-in effects</strong> like <code>choreo::Broadcast(msg)</code>.</li>
+</ul>
+<h3 id="a-listener-via-cue"><a class="header" href="#a-listener-via-cue">A listener via <code>cue</code></a></h3>
+<pre><code class="language-quint">pure def listen_proposal_in_propose(ctx: LocalContext): Set[ProposeMsg] = { ... }
+
+pure def broadcast_prevote_for_proposal(ctx: LocalContext, p: ProposeMsg): Transition = {
+  { post_state: { ...ctx.state, stage: PreVoteStage },
+    effects: Set(choreo::Broadcast(PreVote(message))) }
+}
+
+pure def main_listener(ctx: LocalContext): Set[Transition] = Set(
+  choreo::cue(ctx, listen_proposal_in_propose, broadcast_prevote_for_proposal)
+)
+</code></pre>
+<p>Here the <code>cue</code> wires “what to listen for” to “how to react,” producing protocol transitions.</p>
+<h3 id="transition-shape"><a class="header" href="#transition-shape">Transition shape</a></h3>
+<pre><code class="language-quint">{
+  post_state: { ...s, stage: PreVoteStage },
+  effects: Set(choreo::Broadcast(PreVote(message)))
+}
+</code></pre>
+<p>Choreo handles delivery semantics for built-in effects; you can add <strong>custom effects</strong> with handlers too.</p>
+<h2 id="2-tutorial-blueprint-two-phase-commit-choreo-tutorial"><a class="header" href="#2-tutorial-blueprint-two-phase-commit-choreo-tutorial">2) Tutorial blueprint: Two-Phase Commit (<a href="https://quint-lang.org/choreo/tutorial">Choreo tutorial</a>)</a></h2>
+<p>The tutorial walks you from a <strong>template</strong> to a full 2PC spec:</p>
+<ul>
+<li>define roles &amp; stages:
+<code>type Role = Coordinator | Participant</code>
+<code>type Stage = Working | Prepared | Committed | Aborted</code></li>
+<li>messages: <code>CoordinatorAbort | CoordinatorCommit | ParticipantPrepared(Node)</code></li>
+<li>state fields: <code>{ role: Role, stage: Stage }</code></li>
+<li>helper: <code>get_prepared_msgs</code></li>
+<li>participant transitions: spontaneous prepare/abort, follow coordinator</li>
+<li>coordinator transitions: decide commit when all prepared; abort anytime</li>
+<li>wire with listeners; add properties/tests; simulate/verify.</li>
+</ul>
+<h2 id="3-cue-pattern-deep-dive-custom-effects-micro-steps-cue-pattern-custom-effects--extensions-step_micro"><a class="header" href="#3-cue-pattern-deep-dive-custom-effects-micro-steps-cue-pattern-custom-effects--extensions-step_micro">3) cue-pattern deep-dive, custom effects, micro-steps (<a href="https://quint-lang.org/choreo/cue-pattern">Cue pattern</a>, <a href="https://quint-lang.org/choreo/custom-effects-extensions">Custom effects &amp; extensions</a>, <a href="https://quint-lang.org/choreo/step-micro"><code>step_micro</code></a>)</a></h2>
+<ul>
+<li><strong>cue-pattern</strong>: A composable way to declare listeners → reactions, keeping routing/filtering centralized and <strong>protocol logic</strong> clean.</li>
+<li><strong>Custom effects &amp; environment extensions</strong>: Define your own effect types and specify how the environment interprets them (e.g., network adversary models, delays, loss, Byzantine).</li>
+<li><strong><code>step_micro</code></strong>: Switch the stepping strategy to process <strong>one message at a time</strong> (fine-grained interleavings) when you need per-message scheduling control for exploration or proofs.</li>
+</ul>
+<h2 id="4-why-choreo-tends-to-win"><a class="header" href="#4-why-choreo-tends-to-win">4) Why Choreo tends to win</a></h2>
+<p>Compared to hand-rolled, Choreo:</p>
+<ul>
+<li>encodes “message soup” efficiently,</li>
+<li>enforces a clean separation between local logic and environment,</li>
+<li>makes timeouts just another internal event,</li>
+<li>comes with examples (Two-Phase Commit, Tendermint, Alpenglow, Monad BFT).</li>
+</ul>
+<hr />
+<h1 id="patterns--practices"><a class="header" href="#patterns--practices">Patterns &amp; Practices</a></h1>
+<ul>
+<li><strong>Model first, shrink the state space</strong>: prefer small domains, bounded integers, constrained nondet choices; Apalache is bounded by <code>--max-steps</code>.</li>
+<li><strong>Invariants first</strong>: start with safety; add witnesses for “sometimes” behavior; only reach for temporal once necessary.</li>
+<li><strong>Shortest counter-example</strong>: simulator tries to give you the shortest failing trace—useful for debugging quickly.</li>
+<li><strong>Use the REPL to sketch</strong>: define state/actions interactively, sanity-check expressions, and iterate.</li>
+<li><strong>Prefer sets/maps idioms</strong>: they compose well with quantifiers (<code>forall</code>, <code>exists</code>) and folds.</li>
+<li><strong>No recursion</strong>: rewrite as folds or bounded loops (via step composition).</li>
+<li><strong>Export ITF traces</strong> for tooling or CI visualization.</li>
+</ul>
+<hr />
+<h1 id="minimal-starter-template-plain-quint"><a class="header" href="#minimal-starter-template-plain-quint">Minimal “starter” template (plain Quint)</a></h1>
+<pre><code class="language-quint">module bank {
+  // --- domain
+  type Address = str
+  const ADDRESSES: Set[Address]
+
+  // --- state
+  var balances: Map[Address, int]
+
+  // --- init
+  action init = all {
+    balances' = ADDRESSES.setToMap(_ =&gt; 0)
+  }
+
+  // --- a transfer step (one possibility)
+  action step = any {
+    // nondeterministically pick src/dst and amount within bounds (sketch)
+    exists(src in ADDRESSES, dst in ADDRESSES, amount in 0.to(10)) {
+      all {
+        src != dst,
+        balances.get(src) &gt;= amount,
+        balances' = balances
+          .put(src, balances.get(src) - amount)
+          .put(dst, balances.get(dst) + amount)
+      }
+    }
+  }
+
+  // --- properties
+  val total = ADDRESSES.map(a =&gt; balances.get(a)).sum()
+  val total_nonnegative = total &gt;= 0
+  val no_negatives = ADDRESSES.forall(a =&gt; balances.get(a) &gt;= 0)
+}
+</code></pre>
+<p>Simulate and check:</p>
+<pre><code>quint run bank.qnt --invariants total_nonnegative no_negatives --max-steps=20
+</code></pre>
+<p>Then verify (bounded) with Apalache:</p>
+<pre><code>quint verify bank.qnt --invariants total_nonnegative no_negatives --max-steps=10
+</code></pre>
+<hr />
+<h2 id="10-comprehensive-syntax-catalog-crossreferenced-with-the-language-manual"><a class="header" href="#10-comprehensive-syntax-catalog-crossreferenced-with-the-language-manual">10) Comprehensive syntax catalog (cross‑referenced with the Language Manual)</a></h2>
+<blockquote>
+<p>This section consolidates <em>all</em> surface syntax you’ll commonly use, aligned with the Language Manual at <a href="https://quint-lang.org/docs/lang">quint-lang.org/docs/lang</a>. If something here ever drifts, prefer the manual.</p>
+</blockquote>
+<h3 id="101-literals-identifiers-comments"><a class="header" href="#101-literals-identifiers-comments">10.1 Literals, identifiers, comments</a></h3>
+<ul>
+<li><strong>Identifiers</strong>: <code>[a-zA-Z_][a-zA-Z0-9_]*</code></li>
+<li><strong>String literals</strong>: <code>"hello"</code></li>
+<li><strong>Boolean literals</strong>: <code>true</code>, <code>false</code></li>
+<li><strong>Integer literals</strong>: <code>0</code>, <code>-1</code>, <code>314159...</code> (arbitrary precision)</li>
+<li><strong>Comments</strong>: <code>// line</code>, <code>/* block */</code></li>
+</ul>
+<h3 id="102-types"><a class="header" href="#102-types">10.2 Types</a></h3>
+<ul>
+<li><strong>Base</strong>: <code>bool</code>, <code>int</code>, <code>str</code></li>
+<li><strong>Uninterpreted</strong>: <code>TYPE_NAME</code> (caps)</li>
+<li><strong>Type vars</strong>: <code>a</code>, <code>b</code>, ...</li>
+<li><strong>Constructors</strong>: <code>Set[T]</code>, <code>List[T]</code>, tuples <code>(T1, T2, ...)</code>, records <code>{ f1: T1, f2: T2 }</code>, function <code>T1 -&gt; T2</code>, operator <code>(A1, ..., An) =&gt; R</code></li>
+<li><strong>Sum types (algebraic)</strong>: <code>type T = L1(T1) | L2(T2) | ...</code>
+<ul>
+<li>Variants take positional parameters, not named fields</li>
+<li>For named fields, use record types as parameters: <code>type Msg = Send({from: str, to: str})</code></li>
+<li>Match expressions: <code>match expr { | Variant(x) =&gt; ... | _ =&gt; ... }</code></li>
+</ul>
+</li>
+<li><strong>Type aliases</strong>: <code>type Temperature = int</code></li>
+<li><strong>Polymorphic aliases</strong>: <code>type Option[a] = Some(a) | None</code></li>
+</ul>
+<h3 id="103-modules--toplevel-definitions"><a class="header" href="#103-modules--toplevel-definitions">10.3 Modules &amp; top‑level definitions</a></h3>
+<ul>
+<li>
+<p><strong>Module</strong>:</p>
+<pre><code class="language-quint">module M { /* definitions */ }
+</code></pre>
+</li>
+<li>
+<p><strong>Constants</strong>: <code>const N: int</code></p>
+</li>
+<li>
+<p><strong>Assumptions</strong>: <code>assume Name = &lt;expr&gt;</code> (or anonymous: <code>assume _ = &lt;expr&gt;</code>) — stateless</p>
+</li>
+<li>
+<p><strong>State vars</strong>: <code>var x: T</code> — state mode</p>
+</li>
+<li>
+<p><strong>Values/operators</strong>:</p>
+<ul>
+<li>Stateless values: <code>pure val X: T = &lt;expr&gt;</code></li>
+<li>Stateful values: <code>val Y = &lt;expr&gt;</code> (may depend on state)</li>
+<li>Stateless ops: <code>pure def f(a: A): B = &lt;expr&gt;</code></li>
+<li>Stateful ops: <code>def g(a: A): B = &lt;expr&gt;</code></li>
+</ul>
+</li>
+<li>
+<p><strong>Type aliases</strong>: <code>type NAME = &lt;type&gt;</code> (or polymorphic)</p>
+</li>
+<li>
+<p><strong>Imports / namespaces</strong>:</p>
+<ul>
+<li><code>import A.* from "A"</code></li>
+<li><code>import A as a from "A"</code></li>
+<li>Qualify with <code>A::foo</code> or <code>a::foo</code></li>
+</ul>
+</li>
+<li>
+<p><strong>Module instances</strong> (parameterized imports): <code>import Counter(N = 5) as c5</code></p>
+</li>
+</ul>
+<h3 id="104-modes-where-an-expression-is-allowed"><a class="header" href="#104-modes-where-an-expression-is-allowed">10.4 Modes (where an expression is allowed)</a></h3>
+<ul>
+<li>Stateless, State, Non‑determinism, Action, Run, Temporal</li>
+<li>Subsumption highlights: Action ⟂ Temporal (not mixed); Run ≥ {Stateless, State, Action}</li>
+</ul>
+<h3 id="105-expressions--control"><a class="header" href="#105-expressions--control">10.5 Expressions &amp; control</a></h3>
+<ul>
+<li><strong>If‑then‑else</strong>: <code>if (p) e1 else e2</code></li>
+<li><strong>Let‑style via vals inside defs</strong>: <code>val x = ...; &lt;expr using x&gt;</code> (use inside <code>def</code> bodies)</li>
+<li><strong>Equality</strong>: <code>==</code>, <code>!=</code> (same‑type)</li>
+<li><strong>Boolean ops</strong>: <code>not(x)</code> / <code>x.not()</code>, <code>x and y</code> / <code>x.and(y)</code> / <code>and{...}</code>, <code>x or y</code> / <code>x.or(y)</code>, <code>x implies y</code>, <code>x iff y</code></li>
+<li><strong>Arithmetic</strong>: <code>^</code>, <code>*</code>, <code>/</code>, <code>%</code>, <code>+</code>, <code>-</code>, unary <code>-</code></li>
+<li><strong>Comparison</strong>: <code>&lt;</code>, <code>&lt;=</code>, <code>&gt;</code>, <code>&gt;=</code></li>
+<li><strong>Match expressions and effect system</strong>: Match expressions cannot mix pure and action branches. If one branch returns an action, all branches must be actions. Extract pure computations before match expressions when used in actions.</li>
+</ul>
+<h3 id="106-tuples--records"><a class="header" href="#106-tuples--records">10.6 Tuples &amp; records</a></h3>
+<ul>
+<li><strong>Tuple</strong>: <code>(e1, e2, ...)</code>; projection: <code>t._1</code>, <code>t._2</code>, ...</li>
+<li><strong>Record</strong>: <code>{ f: e, g: e2 }</code>; update/extend: <code>{ ...r, f: eNew }</code></li>
+</ul>
+<h3 id="107-sets"><a class="header" href="#107-sets">10.7 Sets</a></h3>
+<ul>
+<li><strong>Literal</strong>: <code>Set(e1, e2, ...)</code></li>
+<li><strong>Membership</strong>: <code>e.in(S)</code> ⇔ <code>S.contains(e)</code></li>
+<li><strong>Combinators</strong>: <code>map</code>, <code>filter</code>, <code>size</code>, <code>flatten</code></li>
+<li><strong>Predicates/quantifiers</strong>: <code>exists</code>, <code>forall</code>, <code>subseteq</code></li>
+<li><strong>Binary ops</strong>: <code>union</code>, <code>intersect</code>, <code>diff</code></li>
+<li><strong>Ranges</strong>: <code>a.to(b)</code> → <code>Set[int]</code></li>
+<li><strong>Choice</strong>: <code>S.oneOf()</code> (used with <code>nondet</code>)</li>
+</ul>
+<h3 id="108-maps-finite-functions"><a class="header" href="#108-maps-finite-functions">10.8 Maps (finite functions)</a></h3>
+<ul>
+<li><strong>Construct/derive</strong>: <code>D.setToMap(k =&gt; v)</code> / <code>D.mapBy(k =&gt; v)</code></li>
+<li><strong>Access/update</strong>: <code>m.get(k)</code>, <code>m.set(k, v)</code> (<strong>alias:</strong> <code>m.put(k, v)</code>)</li>
+<li><strong>Keys</strong>: <code>m.keys()</code>; mapping: <code>m.map((k,v) =&gt; ...)</code></li>
+</ul>
+<h3 id="109-lists-sequences"><a class="header" href="#109-lists-sequences">10.9 Lists (sequences)</a></h3>
+<ul>
+<li><strong>Type</strong>: <code>List[T]</code>; common ops: <code>length</code>, <code>head</code>, <code>tail</code>, <code>slice</code>, <code>select</code>, <code>foldl</code></li>
+</ul>
+<h3 id="1010-quantifiers-bounded--unbounded"><a class="header" href="#1010-quantifiers-bounded--unbounded">10.10 Quantifiers (bounded &amp; unbounded)</a></h3>
+<ul>
+<li><strong>Over sets</strong>: <code>S.exists(x =&gt; P)</code>, <code>S.forall(x =&gt; P)</code></li>
+<li><strong>Unbounded</strong>: integer domain quantifiers (use carefully; see manual’s “Unbounded quantifiers”)</li>
+</ul>
+<h3 id="1011-actions-nextstate-logic"><a class="header" href="#1011-actions-nextstate-logic">10.11 Actions (next‑state logic)</a></h3>
+<ul>
+<li>
+<p><strong>Prime</strong>: <code>x' = e</code> (assign next value of state var <code>x</code>)</p>
+</li>
+<li>
+<p><strong>Choreographic programming limitation</strong>: Quint's effect system makes it difficult to implement true choreographic programming patterns. Actions cannot be used inside higher-order functions like <code>exists</code>, <code>forall</code>, or <code>fold</code>. Consider using the Choreo library instead for distributed protocol specifications.</p>
+</li>
+<li>
+<p><strong>Conjunction blocks</strong>: <code>all { e1, e2, ... }</code> (must all hold)</p>
+</li>
+<li>
+<p><strong>Disjunction blocks</strong>: <code>any { e1, e2, ... }</code> (non‑deterministic choice among branches)</p>
+</li>
+<li>
+<p><strong>Preconditions / assertions</strong>: <code>require(p)</code> to guard; <code>assert(p)</code> for diagnostic checks</p>
+</li>
+<li>
+<p><strong>Delayed assignment</strong> (define first, assign later within <code>all { ... }</code> semantics)</p>
+</li>
+<li>
+<p><strong>Non‑deterministic choice</strong>:</p>
+<pre><code class="language-quint">nondet k = S.oneOf()   // or 0.to(N).oneOf()
+</code></pre>
+</li>
+<li>
+<p><strong>Assert inside actions</strong>: <code>assert(&lt;bool&gt;)</code> (debug/diagnostics)</p>
+</li>
+</ul>
+<h3 id="1012-runs-finite-executions"><a class="header" href="#1012-runs-finite-executions">10.12 Runs (finite executions)</a></h3>
+<ul>
+<li><strong>Run expression</strong>: sequences of actions producing executions</li>
+<li><strong>Then</strong>: <code>A.then(B)</code></li>
+<li><strong>Reps</strong>: <code>A.reps(n)</code> (repeat up to <code>n</code>)</li>
+<li><strong>Example/Expect/Fail</strong>: helpers for REPL/tests</li>
+</ul>
+<h3 id="1013-temporal-operators"><a class="header" href="#1013-temporal-operators">10.13 Temporal operators</a></h3>
+<ul>
+<li><strong>Always / Eventually / Next</strong>: <code>always(P)</code>, <code>eventually(P)</code>, <code>next(P)</code></li>
+<li><strong>OrKeep</strong> (TLA+ <code>[A]_x</code>): <code>orKeep(A, x)</code> / <code>A.orKeep(x)</code></li>
+<li><strong>MustChange</strong> (TLA+ <code>&lt;A&gt;_x</code>): <code>mustChange(A, x)</code> / <code>A.mustChange(x)</code></li>
+<li><strong>Enabled</strong> (TLA+ <code>ENABLED A</code>): <code>enabled(A)</code> / <code>A.enabled</code></li>
+<li><strong>Fairness</strong>: <code>weakFair(A, x)</code> / <code>A.weakFair(x)</code>; <code>strongFair(A, x)</code> / <code>A.strongFair(x)</code></li>
+<li><strong>Guarantees</strong>: <code>guarantees(P, Q)</code> / <code>P.guarantees(Q)</code></li>
+</ul>
+<h3 id="1014-instances--imports-advanced"><a class="header" href="#1014-instances--imports-advanced">10.14 Instances &amp; imports (advanced)</a></h3>
+<ul>
+<li><strong>Common</strong>: <code>import Mod as m from "Mod"</code>; use <code>m::name</code></li>
+<li><strong>Anonymous/parameterized instances</strong>: <code>import M(N = 3) as m3</code></li>
+</ul>
+<hr />
+<h1 id="appendix"><a class="header" href="#appendix">Appendix</a></h1>
+<ul>
+<li><strong>Language Manual</strong> — <a href="https://quint-lang.org/docs/lang">docs/lang</a></li>
+<li><strong>Checking properties</strong> — <a href="https://quint-lang.org/docs/checking-properties">docs/checking-properties</a></li>
+<li><strong>REPL tutorial</strong> — <a href="https://quint-lang.org/docs/repl">docs/repl</a></li>
+<li><strong>Literate Quint</strong> — <a href="https://quint-lang.org/docs/literate">docs/literate</a></li>
+<li><strong>Model‑based testing</strong> — <a href="https://quint-lang.org/docs/model-based-testing">docs/model-based-testing</a></li>
+<li><strong>Model checkers</strong> — <a href="https://quint-lang.org/docs/model-checkers">docs/model-checkers</a></li>
+<li><strong>Simulator details</strong> — <a href="https://quint-lang.org/docs/simulator">docs/simulator</a></li>
+<li><strong>What Quint does / Why Quint</strong> — <a href="https://quint-lang.org/docs/why">docs/why</a></li>
+<li><strong>Choreo tutorial</strong> — <a href="https://quint-lang.org/choreo/tutorial">choreo/tutorial</a></li>
+<li><strong>Cue pattern</strong> — <a href="https://quint-lang.org/choreo/cue-pattern">choreo/cue-pattern</a></li>
+<li><strong>Custom effects &amp; extensions</strong> — <a href="https://quint-lang.org/choreo/custom-effects-extensions">choreo/custom-effects-extensions</a></li>
+<li><strong>Micro‑steps (<code>step_micro</code>)</strong> — <a href="https://quint-lang.org/choreo/step-micro">choreo/step-micro</a></li>
+<li><strong>Lessons</strong> — <a href="https://quint-lang.org/docs/lessons/booleans">Booleans</a>, <a href="https://quint-lang.org/docs/lessons/integers">Integers</a>, <a href="https://quint-lang.org/docs/lessons/sets">Sets</a>, <a href="https://quint-lang.org/docs/lessons/coin">Coin</a></li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../privacy_checklist.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../privacy_checklist.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

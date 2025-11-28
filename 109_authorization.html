@@ -1,0 +1,397 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Authorization - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="authorization"><a class="header" href="#authorization">Authorization</a></h1>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>Aura authorizes every observable action through Biscuit capability evaluation combined with sovereign policy and <a href="108_transport_and_information_flow.html">flow budgets</a>. The authorization pipeline spans <code>AuthorizationEffects</code>, the guard chain, and receipt accounting. This document describes the data flow and integration points so that all crates implement the same procedure.</p>
+<h2 id="biscuit-capability-model"><a class="header" href="#biscuit-capability-model">Biscuit Capability Model</a></h2>
+<p>Biscuit tokens encode attenuation chains. Each attenuation step applies additional caveats that shrink authority through meet composition. Aura stores Biscuit material outside the replicated CRDT. Local runtimes evaluate tokens at send time and cache the resulting lattice element for the active <code>ContextId</code>.</p>
+<p>Cached entries expire on epoch change or when policy revokes a capability. Policy data always participates in the meet. A token can only reduce authority relative to local policy.</p>
+<pre><code class="language-text">Evaluation(frontier, token):
+1. Parse token and verify signature chain against authority public key.
+2. Apply each caveat in order and intersect the result with `frontier`.
+3. Intersect the result with sovereign policy for the target context.
+4. Return the resulting `Cap` element for guard evaluation.
+</code></pre>
+<p>This algorithm produces a meet-monotone capability frontier. Step 1 ensures provenance. Steps 2 and 3 ensure evaluation never widens authority. Step 4 feeds the guard chain with a cached outcome.</p>
+<h2 id="guard-chain"><a class="header" href="#guard-chain">Guard Chain</a></h2>
+<p>Authorization evaluation feeds the transport guard chain. All documents reference this section to avoid divergence.</p>
+<pre class="mermaid">flowchart LR
+    A[Send request] --&gt; B[CapGuard&lt;br/&gt;Biscuit evaluation];
+    B --&gt; C[FlowGuard&lt;br/&gt;budget charge];
+    C --&gt; D[JournalCoupler&lt;br/&gt;fact commit];
+    D --&gt; E[Transport send];
+</pre>
+<p>Guard evaluation is pure and synchronous over a prepared <code>GuardSnapshot</code>. CapGuard reads the cached frontier and any inline Biscuit token already present in the snapshot. FlowGuard and JournalCoupler emit <code>EffectCommand</code> items (charges, receipts, fact commits, transport intents) rather than executing I/O directly. An async interpreter executes those commands in production or simulation.</p>
+<p>Only after all guards pass does transport emit a packet. Any failure returns locally and leaves no observable side effect.</p>
+<h2 id="failure-handling-and-caching"><a class="header" href="#failure-handling-and-caching">Failure Handling and Caching</a></h2>
+<p>Runtimes cache evaluated capability frontiers per <code>(ContextId, CapabilityPredicate)</code> with an epoch tag. Cache entries invalidate when journal policy facts change or when the epoch rotates.</p>
+<p>CapGuard failures return <code>AuthorizationError::Denied</code> without charging flow or touching the journal. FlowGuard failures return <code>FlowError::InsufficientBudget</code> without emitting transport traffic. JournalCoupler failures surface as <code>JournalError::CommitAborted</code>. This error instructs the protocol to retry after reconciling journal state.</p>
+<p>This isolation keeps the guard chain deterministic and side-channel free.</p>
+<h2 id="biscuit-token-authorization"><a class="header" href="#biscuit-token-authorization">Biscuit Token Authorization</a></h2>
+<p>Aura implements cryptographically secure authorization using Biscuit tokens. This unified approach provides strong security through cryptographic verification while maintaining efficient authority-centric authorization.</p>
+<h3 id="biscuit-token-implementation"><a class="header" href="#biscuit-token-implementation">Biscuit Token Implementation</a></h3>
+<p>Biscuit tokens provide cryptographically verifiable, attenuated delegation chains. The following code shows a typical implementation workflow:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_wot::{AccountAuthority, BiscuitTokenManager, ResourceScope, AuthorityOp};
+use aura_protocol::authorization::BiscuitAuthorizationBridge;
+use biscuit_auth::{Biscuit, Authorizer, macros::*};
+use aura_core::{AuthorityId, DeviceId};
+
+// 1. Create root authority
+let authority = AccountAuthority::new(account_id);
+
+// 2. Issue device token
+let device_token = authority.create_device_token(device_id)?;
+// Contains: account({id}), device({id}), role("owner"), capability("read"), ...
+
+// 3. Attenuate for delegation
+let manager = BiscuitTokenManager::new(device_id, device_token);
+let read_only_token = manager.attenuate_read("storage/public/*")?;
+// Adds: check if operation("read"), check if resource($res), $res.starts_with("storage/public/")
+
+// 4. Authorization via Bridge
+let bridge = BiscuitAuthorizationBridge::new(authority.root_public_key(), device_id);
+let resource_scope = ResourceScope::Storage {
+    authority_id: AuthorityId::new(),
+    path: "public/file.txt".to_string(),
+};
+
+let result = bridge.authorize(&amp;read_only_token, "read", &amp;resource_scope)?;
+if result.authorized {
+    // Cryptographically verified authorization with delegation depth tracking
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Tokens follow an attenuation chain where each block adds restrictions. The sequence is:</p>
+<pre><code class="language-text">Root Authority Token
+       ↓ (append block with caveats)
+Device Token (capability="read", capability="write")
+       ↓ (append check if operation("read"))
+Read-Only Token
+       ↓ (append check if resource starts_with("public/"))
+Public Read-Only Token
+</code></pre>
+<p>Biscuit tokens have the following characteristics:</p>
+<ul>
+<li>Secure: Cryptographic signature chain prevents forgery</li>
+<li>Delegatable: Attenuation preserves signature chain</li>
+<li>Offline: Recipients verify without contacting issuer</li>
+<li>Non-Repudiable: Signatures prove token lineage</li>
+<li>Revocable: Epoch rotation invalidates old tokens</li>
+</ul>
+<p>Typical use cases for Biscuit tokens include cross-authority delegation where one authority delegates to another. API access tokens can be issued to applications with specific scopes. Guardian authorization uses tokens to prove recovery permissions. Capability forwarding passes attenuated tokens to other parties. Audit trails are built from token usage logs and verification records.</p>
+<h3 id="guard-chain-integration"><a class="header" href="#guard-chain-integration">Guard Chain Integration</a></h3>
+<p>Biscuit authorization integrates seamlessly with the guard chain:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>async fn authorize_and_send(
+    bridge: &amp;BiscuitAuthorizationBridge,
+    interpreter: &amp;dyn EffectInterpreter,
+    guards: &amp;GuardChain,
+    ctx: ContextId,
+    peer: AuthorityId,
+    token: &amp;Biscuit, // Required Biscuit token
+    operation: Operation,
+    resource_scope: &amp;ResourceScope,
+) -&gt; Result&lt;()&gt; {
+    // Phase 1: Cryptographic token verification and Datalog evaluation
+    let auth_result = bridge.authorize(token, operation.name(), resource_scope)?;
+    if !auth_result.authorized {
+        return Err(AuraError::permission_denied("Token authorization failed"));
+    }
+
+    // Phase 2: Prepare snapshot (async) and evaluate guards (sync)
+    let snapshot = prepare_guard_snapshot(ctx, peer, &amp;auth_result.cap_frontier).await?;
+    let outcome = guards.evaluate(&amp;snapshot, &amp;operation.request());
+    if outcome.decision.is_denied() {
+        return Err(AuraError::permission_denied("Guard evaluation denied"));
+    }
+
+    // Phase 3: Execute effect commands (async)
+    for cmd in outcome.effects {
+        interpreter.exec(cmd).await?;
+    }
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="authorization-scenarios"><a class="header" href="#authorization-scenarios">Authorization Scenarios</a></h3>
+<p>Biscuit tokens handle all authorization scenarios through cryptographic verification:</p>
+<div class="table-wrapper"><table><thead><tr><th>Scenario</th><th>Implementation</th></tr></thead><tbody>
+<tr><td>Local device operations</td><td>Device tokens with full capabilities</td></tr>
+<tr><td>Cross-authority delegation</td><td>Attenuated tokens with resource restrictions</td></tr>
+<tr><td>Policy enforcement</td><td>Sovereign policy integrated into Datalog evaluation</td></tr>
+<tr><td>API access control</td><td>Scoped tokens with operation restrictions</td></tr>
+<tr><td>Guardian recovery</td><td>Guardian tokens with recovery capabilities</td></tr>
+<tr><td>Storage operations</td><td>Storage-scoped tokens with path restrictions</td></tr>
+<tr><td>Relaying/forwarding</td><td>Context tokens with relay permissions</td></tr>
+<tr><td>Offline verification</td><td>Self-contained cryptographic verification</td></tr>
+</tbody></table>
+</div>
+<h3 id="performance-characteristics"><a class="header" href="#performance-characteristics">Performance Characteristics</a></h3>
+<p>Biscuit token authorization has predictable performance characteristics across all operations. Signature verification requires O(chain length) cryptographic operations proportional to the attenuation depth. Authorization evaluation takes O(facts × rules) time for Datalog evaluation over ambient and token facts. Attenuation is efficient at O(1) cost to append blocks to the token. Verification uses cryptographic proofs with embedded public keys for offline checking. Token results are cacheable with epoch-based invalidation to avoid repeated evaluation. Delegation depth is efficiently tracked via block count for security monitoring.</p>
+<h3 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h3>
+<p>Biscuit Token Management requires careful attention to several factors. Minimize attenuation chain length because each block adds verification cost. Use Datalog checks for complex resource constraints. Include authority_id fact in root authority block to ensure proper scoping. Rotate tokens on epoch change to maintain security and prevent stale tokens. Store only serialized tokens and never persist sensitive key material. Cache authorization results with epoch-based invalidation to improve performance.</p>
+<p>Resource Scope Design should follow authority-centric patterns. Use authority-centric ResourceScope for clear ownership and prevent confusion about who controls resources. Structure paths hierarchically for efficient pattern matching in Datalog evaluation. Separate Authority operations from Context operations to maintain clear boundaries. Design resource patterns for effective attenuation so that scope restrictions are easy to verify.</p>
+<p>Authorization Pipeline implementation must follow a strict sequence:</p>
+<ol>
+<li>Always verify tokens cryptographically before capability checks</li>
+<li>Integrate sovereign policy into Datalog evaluation</li>
+<li>Cache authorization results per (AuthorityId, TokenHash, ResourceScope)</li>
+<li>Invalidate cache on epoch rotation or policy update</li>
+<li>Track delegation depth for security monitoring</li>
+<li>Log all authorization decisions for audit trails</li>
+</ol>
+<h3 id="security-considerations"><a class="header" href="#security-considerations">Security Considerations</a></h3>
+<p>Biscuit Token Security:</p>
+<p>Forgery Protection: Cryptographic signature verification prevents token forgery.</p>
+<p>Replay Mitigation: Epoch scoping limits token lifetime and replay attacks.</p>
+<p>Delegation Chains: Attenuation preserves security while growing verification cost.</p>
+<p>Root Key Security: Root key compromise invalidates all derived tokens. Secure storage is critical.</p>
+<p>Revocation: Handled through epoch rotation. No individual token revocation exists.</p>
+<p>Offline Verification: Self-contained tokens enable secure offline authorization.</p>
+<p>Authority-Centric Security:</p>
+<p>Resource Isolation: Authority-based ResourceScope prevents cross-authority access.</p>
+<p>Sovereign Policy: Local policy integration provides additional security layer.</p>
+<p>Delegation Depth: Monitored to prevent excessive delegation chains.</p>
+<p>Epoch Invalidation: Global token invalidation occurs on epoch rotation.</p>
+<p>Guard Chain Isolation: Authorization failures leak no sensitive information.</p>
+<p>Audit Trail: All authorization decisions are logged for security monitoring.</p>
+<h3 id="implementation-references"><a class="header" href="#implementation-references">Implementation References</a></h3>
+<p>Biscuit Authorization Bridge: <code>aura-protocol/src/authorization/biscuit_bridge.rs</code> contains <code>BiscuitAuthorizationBridge</code>.</p>
+<p>Biscuit Token Management: <code>aura-wot/src/biscuit_token.rs</code> contains <code>AccountAuthority</code>, <code>BiscuitTokenManager</code>, and attenuation logic.</p>
+<p>Biscuit Authorization: <code>aura-wot/src/biscuit_authorization.rs</code> contains <code>BiscuitAuthorizationBridge</code> and <code>AuthorizationResult</code>.</p>
+<p>Authority-Based Resources: <code>aura-wot/src/resource_scope.rs</code> contains <code>ResourceScope</code>, <code>AuthorityOp</code>, and <code>ContextOp</code>.</p>
+<p>Guard Chain: <code>aura-protocol/src/guards/capability_guard.rs</code> contains <code>CapabilityGuard</code> for Biscuit integration.</p>
+<p>Storage Authorization: <code>aura-wot/src/storage_authorization.rs</code> contains storage-specific Biscuit authorization (moved from aura-store).</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="108_transport_and_information_flow.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="110_rendezvous.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="108_transport_and_information_flow.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="110_rendezvous.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

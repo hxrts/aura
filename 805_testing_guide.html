@@ -1,0 +1,687 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Testing Guide - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="testing-guide"><a class="header" href="#testing-guide">Testing Guide</a></h1>
+<p>This guide covers Aura's testing infrastructure built on the stateless effect system architecture. Testing validates protocol correctness through property-based testing, integration testing, and provides async testing support with the <code>#[aura_test]</code> macro.</p>
+<h2 id="core-testing-philosophy"><a class="header" href="#core-testing-philosophy">Core Testing Philosophy</a></h2>
+<p>Aura's testing approach is built on four key principles:</p>
+<ol>
+<li><strong>Async-Native Testing</strong> - The <code>#[aura_test]</code> macro provides automatic tracing setup and timeout handling</li>
+<li><strong>Effect System Compliance</strong> - Tests MUST use <a href="106_effect_system_and_runtime.html">effect traits</a>, never direct impure function access</li>
+<li><strong>Protocol Fidelity</strong> - Tests run actual protocol logic through real effect implementations</li>
+<li><strong>Deterministic Execution</strong> - Controlled effects enable reproducible test environments</li>
+</ol>
+<p><strong>Critical</strong>: Tests must follow the same <a href="106_effect_system_and_runtime.html">effect system</a> guidelines as production code. Direct usage of <code>SystemTime::now()</code>, <code>thread_rng()</code>, <code>File::open()</code>, or other impure functions is forbidden. All impure operations must flow through effect traits to ensure deterministic simulation and WASM compatibility.</p>
+<p>This approach eliminates boilerplate while providing testing capabilities through automatic tracing, timeout protection, and reusable test fixtures.</p>
+<h2 id="the-aura_test-macro"><a class="header" href="#the-aura_test-macro">The #[aura_test] Macro</a></h2>
+<p>The <code>#[aura_test]</code> macro is a lightweight wrapper around <code>#[tokio::test]</code> that provides:</p>
+<ul>
+<li>Automatic tracing initialization for test output</li>
+<li>Default 30-second timeout protection</li>
+<li>Proper async test setup</li>
+</ul>
+<h3 id="basic-usage"><a class="header" href="#basic-usage">Basic Usage</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_macros::aura_test;
+use aura_testkit::*;
+
+#[aura_test]
+async fn test_basic_protocol() -&gt; aura_core::AuraResult&lt;()&gt; {
+    // Tracing automatically initialized
+    // 30s timeout automatically applied
+
+    let fixture = create_test_fixture().await?;
+
+    // Test logic here
+    assert!(true);
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="what-aura_test-provides"><a class="header" href="#what-aura_test-provides">What #[aura_test] Provides</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// This macro transforms:
+#[aura_test]
+async fn my_test() -&gt; aura_core::AuraResult&lt;()&gt; {
+    // test body
+}
+
+// Into approximately:
+#[tokio::test]
+async fn my_test() -&gt; aura_core::AuraResult&lt;()&gt; {
+    let _guard = aura_testkit::init_test_tracing();
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        async move {
+            // test body
+        }
+    ).await.expect("Test timed out after 30 seconds")
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Note</strong>: Unlike some testing frameworks, <code>#[aura_test]</code> does NOT provide:</p>
+<ul>
+<li>Automatic effect system initialization (you create this explicitly)</li>
+<li>Test context injection (you create fixtures explicitly)</li>
+<li>Custom timeout configuration (always 30s)</li>
+<li>Time control functions (not currently implemented)</li>
+</ul>
+<h2 id="test-fixtures"><a class="header" href="#test-fixtures">Test Fixtures</a></h2>
+<p>The <code>TestFixture</code> type provides a reusable test environment with consistent configuration.</p>
+<h3 id="creating-test-fixtures"><a class="header" href="#creating-test-fixtures">Creating Test Fixtures</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_macros::aura_test;
+use aura_testkit::*;
+
+#[aura_test]
+async fn test_with_fixture() -&gt; aura_core::AuraResult&lt;()&gt; {
+    // Create default fixture
+    let fixture = create_test_fixture().await?;
+
+    // Get device IDs for testing
+    let device_id = fixture.device_id();
+    let another_device = fixture.create_device_id();
+
+    // Access the test context
+    let context = fixture.context();
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="custom-fixture-configuration"><a class="header" href="#custom-fixture-configuration">Custom Fixture Configuration</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_testkit::infrastructure::harness::{TestFixture, TestConfig};
+
+#[aura_test]
+async fn test_with_custom_config() -&gt; aura_core::AuraResult&lt;()&gt; {
+    let config = TestConfig {
+        name: "custom_test".to_string(),
+        deterministic_time: true,
+        capture_effects: false,
+        timeout: Some(std::time::Duration::from_secs(60)),
+    };
+
+    let fixture = TestFixture::with_config(config).await?;
+
+    // Use fixture
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="effect-system-compliance-in-tests"><a class="header" href="#effect-system-compliance-in-tests">Effect System Compliance in Tests</a></h3>
+<p><strong>Tests must use <a href="106_effect_system_and_runtime.html">effect traits</a> for all impure operations</strong>:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AgentConfig;
+use aura_core::effects::{TimeEffects, RandomEffects, StorageEffects};
+
+#[aura_test]
+async fn test_with_effects() -&gt; aura_core::AuraResult&lt;()&gt; {
+    let fixture = create_test_fixture().await?;
+
+    // Create effect system - uses real handlers with in-memory storage
+    let effects = AuraEffectSystem::testing(&amp;AgentConfig::default());
+    let ctx = fixture.context();
+
+    // ✅ CORRECT: Use effect traits
+    let timestamp = effects.current_time().await;
+    let nonce = effects.random_bytes(32).await?;
+    let data = effects.read_chunk(&amp;chunk_id).await?;
+
+    // ❌ FORBIDDEN in tests (just like production code):
+    // let now = SystemTime::now();
+    // let random = thread_rng().gen::&lt;u64&gt;();
+    // let file = File::open("test_data.txt")?;
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Why effect compliance matters in tests</strong>:</p>
+<ul>
+<li><strong>Deterministic execution</strong>: Tests produce consistent results</li>
+<li><strong>WASM compatibility</strong>: Test code can run in browsers</li>
+<li><strong>Simulation fidelity</strong>: Same constraints as production code</li>
+</ul>
+<h2 id="integration-testing"><a class="header" href="#integration-testing">Integration Testing</a></h2>
+<p>Integration testing validates complete system behavior across multiple protocol layers.</p>
+<h3 id="end-to-end-protocol-testing"><a class="header" href="#end-to-end-protocol-testing">End-to-End Protocol Testing</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_macros::aura_test;
+use aura_testkit::*;
+use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AgentConfig;
+
+#[aura_test]
+async fn test_threshold_signing_workflow() -&gt; aura_core::AuraResult&lt;()&gt; {
+    let fixture = create_test_fixture().await?;
+
+    // Create multiple devices for threshold protocol
+    let device_ids: Vec&lt;_&gt; = (0..5).map(|_| fixture.create_device_id()).collect();
+
+    // Create effect systems for each participant
+    let effect_systems: Vec&lt;_&gt; = (0..5)
+        .map(|_| AuraEffectSystem::testing(&amp;AgentConfig::default()))
+        .collect();
+
+    // Phase 1: Initialize threshold ceremony
+    let message = b"integration test message";
+    let threshold = 3;
+
+    // Execute protocol phases
+    // (actual protocol implementation depends on your choreography)
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="testing-with-real-handlers"><a class="header" href="#testing-with-real-handlers">Testing with Real Handlers</a></h3>
+<p>Aura uses real effect handlers in tests, not mocks:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_effects::crypto::RealCryptoHandler;
+use aura_effects::storage::MemoryStorageHandler;
+use aura_core::effects::{CryptoEffects, StorageEffects};
+
+#[aura_test]
+async fn test_with_real_handlers() -&gt; aura_core::AuraResult&lt;()&gt; {
+    // Create real handlers
+    let crypto = RealCryptoHandler::new();
+    let storage = MemoryStorageHandler::new();
+
+    // Use handlers directly
+    let key_pair = crypto.generate_signing_key().await?;
+
+    let data = b"test data";
+    storage.store(b"key", data).await?;
+    let retrieved = storage.load(b"key").await?;
+
+    assert_eq!(retrieved.as_deref(), Some(&amp;data[..]));
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="property-based-testing"><a class="header" href="#property-based-testing">Property-Based Testing</a></h2>
+<p>Property-based testing validates protocol invariants across diverse input spaces using proptest.</p>
+<h3 id="basic-property-testing"><a class="header" href="#basic-property-testing">Basic Property Testing</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use proptest::prelude::*;
+use aura_macros::aura_test;
+
+// Define property strategies
+fn arbitrary_message() -&gt; impl Strategy&lt;Value = Vec&lt;u8&gt;&gt; {
+    prop::collection::vec(any::&lt;u8&gt;(), 1..=1024)
+}
+
+proptest! {
+    #[test]
+    fn protocol_maintains_invariant(message in arbitrary_message()) {
+        // Property test - runs synchronously
+        assert!(message.len() &gt; 0);
+        assert!(message.len() &lt;= 1024);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="async-property-testing"><a class="header" href="#async-property-testing">Async Property Testing</a></h3>
+<p>For async property tests, use tokio runtime explicitly:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use proptest::prelude::*;
+
+proptest! {
+    #[test]
+    fn async_protocol_property(data in arbitrary_message()) {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let fixture = create_test_fixture().await.unwrap();
+
+            // Test property with async code
+            let result = some_async_operation(&amp;fixture, data).await;
+
+            assert!(result.is_ok());
+        });
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="testing-best-practices"><a class="header" href="#testing-best-practices">Testing Best Practices</a></h2>
+<h3 id="structure-tests-with-fixtures"><a class="header" href="#structure-tests-with-fixtures">Structure Tests with Fixtures</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_macros::aura_test;
+use aura_testkit::*;
+use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AgentConfig;
+
+#[aura_test]
+async fn test_structured_protocol() -&gt; aura_core::AuraResult&lt;()&gt; {
+    // Setup
+    let fixture = create_test_fixture().await?;
+    let effects = AuraEffectSystem::testing(&amp;AgentConfig::default());
+
+    // Execute
+    let result = execute_protocol(&amp;effects).await?;
+
+    // Verify
+    assert!(result.is_valid());
+    assert_eq!(result.participant_count(), 3);
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="use-test-builders-for-complex-setup"><a class="header" href="#use-test-builders-for-complex-setup">Use Test Builders for Complex Setup</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_testkit::builders::*;
+
+#[aura_test]
+async fn test_with_builder() -&gt; aura_core::AuraResult&lt;()&gt; {
+    // Use builder pattern for complex test setup
+    let account = test_account_with_seed(42).await;
+    let key_pair = test_key_pair(1337);
+
+    // Build test state
+    let fixture = create_test_fixture().await?;
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="testing-error-conditions"><a class="header" href="#testing-error-conditions">Testing Error Conditions</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[aura_test]
+async fn test_error_handling() -&gt; aura_core::AuraResult&lt;()&gt; {
+    let fixture = create_test_fixture().await?;
+
+    // Test expected failures
+    let result = invalid_operation(&amp;fixture).await;
+
+    assert!(result.is_err());
+
+    match result {
+        Err(aura_core::AuraError::InvalidInput { .. }) =&gt; {
+            // Expected error type
+        }
+        _ =&gt; panic!("Expected InvalidInput error"),
+    }
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="module-organization"><a class="header" href="#module-organization">Module Organization</a></h2>
+<p>Organize tests by functionality:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[cfg(test)]
+mod tests {
+    use super::*;
+    use aura_macros::aura_test;
+    use aura_testkit::*;
+
+    mod unit {
+        use super::*;
+
+        #[aura_test]
+        async fn test_single_function() -&gt; aura_core::AuraResult&lt;()&gt; {
+            // Unit test
+            Ok(())
+        }
+    }
+
+    mod integration {
+        use super::*;
+
+        #[aura_test]
+        async fn test_full_workflow() -&gt; aura_core::AuraResult&lt;()&gt; {
+            // Integration test
+            Ok(())
+        }
+    }
+
+    mod properties {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #[test]
+            fn invariant_holds(input in any::&lt;u64&gt;()) {
+                // Property test
+                assert!(input == input);
+            }
+        }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="available-test-utilities"><a class="header" href="#available-test-utilities">Available Test Utilities</a></h2>
+<p>The <code>aura-testkit</code> crate provides several utilities:</p>
+<h3 id="foundation-utilities"><a class="header" href="#foundation-utilities">Foundation Utilities</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_testkit::foundation::*;
+
+// Create mock test context
+let context = create_mock_test_context()?;
+
+// Get device ID from context
+let device_id = context.device_id();
+<span class="boring">}</span></code></pre></pre>
+<h3 id="builder-functions"><a class="header" href="#builder-functions">Builder Functions</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_testkit::builders::*;
+
+// Create test accounts with deterministic seeds
+let account = test_account_with_seed(42).await;
+
+// Create test key pairs
+let (signing_key, verifying_key) = test_key_pair(1337);
+<span class="boring">}</span></code></pre></pre>
+<h3 id="verification-utilities"><a class="header" href="#verification-utilities">Verification Utilities</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_testkit::verification::*;
+
+// Assertion helpers for common patterns
+// (specific utilities depend on your test needs)
+<span class="boring">}</span></code></pre></pre>
+<h2 id="limitations-and-future-work"><a class="header" href="#limitations-and-future-work">Limitations and Future Work</a></h2>
+<h3 id="current-limitations"><a class="header" href="#current-limitations">Current Limitations</a></h3>
+<ol>
+<li>
+<p><strong>No Time Control</strong>: The guide previously documented <code>freeze_time()</code> and <code>advance_time_by()</code> functions, but these are not currently implemented. Use actual async delays for time-dependent tests.</p>
+</li>
+<li>
+<p><strong>No Automatic Context Injection</strong>: Unlike some frameworks, <code>#[aura_test]</code> doesn't inject a <code>ctx</code> parameter. You must create fixtures explicitly.</p>
+</li>
+<li>
+<p><strong>No Performance Monitoring</strong>: Built-in performance monitoring (<code>PerformanceMonitor</code>, <code>AllocationTracker</code>) is not currently available. Use external profiling tools.</p>
+</li>
+<li>
+<p><strong>No Network Simulation in Testkit</strong>: For network simulation, use the <code>aura-simulator</code> crate (see <a href="806_simulation_guide.html">Simulation Guide</a>).</p>
+</li>
+</ol>
+<h3 id="recommended-patterns"><a class="header" href="#recommended-patterns">Recommended Patterns</a></h3>
+<p>For features not in testkit, use these patterns:</p>
+<p><strong>Time-dependent tests</strong> - Use effect traits for time operations:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::effects::TimeEffects;
+
+#[aura_test]
+async fn test_with_delay() -&gt; aura_core::AuraResult&lt;()&gt; {
+    let fixture = create_test_fixture().await?;
+    let effects = AuraEffectSystem::testing(&amp;AgentConfig::default());
+    
+    // ✅ CORRECT: Use TimeEffects
+    let start = effects.current_time().await;
+    
+    // For delays in tests, use tokio::time::sleep (acceptable in tests)
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    
+    let end = effects.current_time().await;
+    let elapsed = end.duration_since(start)?;
+    assert!(elapsed &gt;= std::time::Duration::from_millis(100));
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Note</strong>: <code>tokio::time::sleep</code> is acceptable in test code for coordination, but time measurement must use <code>TimeEffects</code> for consistency with production patterns.</p>
+<p><strong>Performance testing</strong> - Use criterion for benchmarks:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use criterion::{black_box, criterion_group, criterion_main, Criterion};
+
+fn benchmark_operation(c: &amp;mut Criterion) {
+    c.bench_function("operation", |b| {
+        b.iter(|| {
+            black_box(expensive_operation())
+        });
+    });
+}
+
+criterion_group!(benches, benchmark_operation);
+criterion_main!(benches);
+<span class="boring">}</span></code></pre></pre>
+<h2 id="summary"><a class="header" href="#summary">Summary</a></h2>
+<p>Aura's testing infrastructure provides:</p>
+<ul>
+<li><strong><code>#[aura_test]</code> Macro</strong> - Automatic tracing and timeout for async tests</li>
+<li><strong>TestFixture</strong> - Reusable test environment with consistent setup</li>
+<li><strong>Real Effect Handlers</strong> - Tests use actual implementations, not mocks</li>
+<li><strong>Property Testing</strong> - Validate invariants with proptest</li>
+<li><strong>Integration Testing</strong> - End-to-end protocol validation</li>
+</ul>
+<p>The testing approach emphasizes simplicity and fidelity to production code. Tests use the same stateless effect handlers as production, ensuring high confidence in test results.</p>
+<p>For simulation capabilities that enable fault injection and network modeling, see <a href="806_simulation_guide.html">Simulation Guide</a>. Learn about the effect system in <a href="106_effect_system_and_runtime.html">Effect System Guide</a>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="805_development_patterns.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="806_simulation_guide.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="805_development_patterns.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="806_simulation_guide.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

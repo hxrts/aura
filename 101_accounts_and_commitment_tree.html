@@ -1,0 +1,442 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Accounts and Commitment Tree - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="accounts-and-commitment-tree"><a class="header" href="#accounts-and-commitment-tree">Accounts and Commitment Tree</a></h1>
+<p>This document specifies the internal state machine of an account authority. It defines the commitment tree structure, available operations, reduction model, epoch semantics, and security properties. It describes when Aura Consensus is required and how the account state interacts with deterministic key derivation.</p>
+<h2 id="1-account-state-machine"><a class="header" href="#1-account-state-machine">1. Account State Machine</a></h2>
+<p>An account authority maintains its internal state through a commitment tree and an account journal. The commitment tree defines device membership and threshold policies. The journal stores facts that represent signed tree operations. The reduction function reconstructs the canonical tree state from the accumulated fact set.</p>
+<p>An account authority exposes a single public key. This public key is derived from the commitment tree root. The authority never exposes device structure. The account state changes only when an attested operation appears in the journal.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct TreeState {
+    pub epoch: Epoch,
+    pub root_commitment: Hash32,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure represents the reduced state of an account. The <code>epoch</code> and <code>root_commitment</code> are derived from the fact set. External parties reference only these values.</p>
+<h2 id="2-commitment-tree-structure"><a class="header" href="#2-commitment-tree-structure">2. Commitment Tree Structure</a></h2>
+<p>A commitment tree contains branch nodes and leaf nodes. A leaf node represents a device inside the account. A branch node represents a subpolicy. Each node has an index and a commitment. The root node defines the account-level threshold policy.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum NodeKind {
+    Leaf(LeafNode),
+    Branch(BranchNode),
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This type defines leaf and branch variants. Leaf nodes store device information required for threshold signing. Branch nodes store policy data. Each node contributes to the total commitment.</p>
+<p>The commitment tree is ordered by node index. Children of a branch are ordered consistently. The ordering appears in the commitment calculation. This ensures identical structure across replicas.</p>
+<h2 id="3-policies"><a class="header" href="#3-policies">3. Policies</a></h2>
+<p>A branch node contains a threshold policy. A policy describes the number of required signatures for authorization. Aura defines three policy forms.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum Policy {
+    Any,
+    Threshold { m: u16, n: u16 },
+    All,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This enum expresses the allowed policies. The <code>Any</code> policy accepts one signature from any device under that branch. The <code>Threshold</code> policy requires <code>m</code> signatures out of <code>n</code> devices. The <code>All</code> policy requires all devices under the branch. Policies form a meet semilattice. The meet selects the stricter of two policies.</p>
+<h2 id="4-tree-operations"><a class="header" href="#4-tree-operations">4. Tree Operations</a></h2>
+<p>Tree operations modify the commitment tree. Each operation references a parent epoch and parent commitment. Each operation is signed through threshold signing.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum TreeOpKind {
+    AddLeaf { leaf: LeafNode, under: NodeIndex },
+    RemoveLeaf { leaf: LeafId, reason: u8 },
+    ChangePolicy { node: NodeIndex, new_policy: Policy },
+    RotateEpoch { affected: Vec&lt;NodeIndex&gt; },
+}
+<span class="boring">}</span></code></pre></pre>
+<p>These four operations modify device membership, branch policy, or epoch. The <code>AddLeaf</code> operation inserts a new leaf. The <code>RemoveLeaf</code> operation removes an existing leaf. The <code>ChangePolicy</code> operation updates the policy of a branch. The <code>RotateEpoch</code> operation increments the epoch for a set of nodes. Epoch rotation invalidates derived context keys.</p>
+<p>Each operation appears in the journal as an attested operation.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct AttestedOp {
+    pub op: TreeOp,
+    pub agg_sig: Vec&lt;u8&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The <code>agg_sig</code> field stores the threshold signature produced by devices. The signature validates under the parent root commitment. Devices refuse to sign if the local tree state does not match.</p>
+<h2 id="5-semilattice-model"><a class="header" href="#5-semilattice-model">5. Semilattice Model</a></h2>
+<p>The account journal is a join semilattice. It stores <code>AttestedOp</code> facts. All replicas merge fact sets using set union. The commitment tree state is recovered using deterministic reduction.</p>
+<p>Reduction applies the following rules.</p>
+<ol>
+<li>Identify operations that reference the same parent state.</li>
+<li>Select a single winner using a deterministic ordering:
+<ul>
+<li>Sort candidates by <code>(parent_commitment, op_hash)</code> where <code>op_hash = H(op_bytes || agg_sig)</code>.</li>
+<li>If hashes match, break ties with the lexicographic ordering of <code>(agg_sig, op_bytes)</code>.</li>
+</ul>
+</li>
+<li>Discard superseded operations.</li>
+<li>Apply winners in parent order.</li>
+</ol>
+<p>This process yields a single tree state for any given fact set. All replicas with the same facts compute the same result.</p>
+<h2 id="6-conflict-resolution"><a class="header" href="#6-conflict-resolution">6. Conflict Resolution</a></h2>
+<p>Conflicts arise when multiple operations reference the same parent epoch and commitment. The reduction algorithm resolves these conflicts using a total order on operations. The order is based on a stable hash. The winning operation applies. The losing operations are ignored for state calculation.</p>
+<p>Conflict resolution ensures convergence. It also ensures that replicas remain consistent under concurrent updates.</p>
+<h3 id="61-pseudocode"><a class="header" href="#61-pseudocode">6.1 Pseudocode</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn reduce_account(facts: &amp;[AttestedOp]) -&gt; TreeState {
+    // Group ops by parent commitment + epoch
+    let mut buckets: BTreeMap&lt;ParentState, Vec&lt;&amp;AttestedOp&gt;&gt; = BTreeMap::new();
+    for op in facts {
+        let key = ParentState {
+            commitment: op.op.parent_commitment,
+            epoch: op.op.parent_epoch,
+        };
+        buckets.entry(key).or_default().push(op);
+    }
+
+    // Deterministic winner selection
+    let mut winners: Vec&lt;&amp;AttestedOp&gt; = Vec::new();
+    for (_, ops) in buckets {
+        let winner = ops.into_iter().max_by_key(|op| {
+            let op_hash = hash(op);
+            (op.op.parent_commitment, op_hash, op.agg_sig.clone(), op.op.clone())
+        }).expect("non-empty bucket");
+        winners.push(winner);
+    }
+
+    // Apply in parent order
+    winners.sort_by_key(|op| op.op.parent_epoch);
+    let mut state = TreeState::default();
+    for op in winners {
+        state = state.apply(op);
+    }
+    state
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The implementation must follow this ordering so every replica reaches the same root commitment.</p>
+<h2 id="7-epochs"><a class="header" href="#7-epochs">7. Epochs</a></h2>
+<p>The epoch is an integer stored in the tree state. The epoch scopes deterministic key derivation. Derived keys depend on the current epoch. Rotation invalidates previous derived keys. The <code>RotateEpoch</code> operation updates the epoch for selected subtrees.</p>
+<p>Epochs also scope flow budgets and context presence tickets. All context identities must refresh when the epoch changes.</p>
+<h2 id="8-derived-context-keys"><a class="header" href="#8-derived-context-keys">8. Derived Context Keys</a></h2>
+<p>Derived context keys bind relationship data to the account state. The deterministic key derivation function uses the commitment tree root commitment and epoch. This ensures that all devices compute the same context keys.</p>
+<p>Derived keys do not modify the tree state. They depend solely on reduced account state.</p>
+<h2 id="9-interaction-with-consensus"><a class="header" href="#9-interaction-with-consensus">9. Interaction with Consensus</a></h2>
+<p>Consensus is used when a tree operation must have strong agreement across a committee. Consensus produces a commit fact containing a threshold signature. This fact becomes an attested operation in the journal.</p>
+<p>Consensus is used when multiple devices must agree on the same prestate. Simple device initiated changes may use local threshold signing. The account journal treats both cases identically.</p>
+<p>Consensus references the root commitment and epoch of the account. This binds the commit fact to the current state.</p>
+<h2 id="10-security-properties"><a class="header" href="#10-security-properties">10. Security Properties</a></h2>
+<p>The commitment tree provides fork resistance. Devices refuse to sign under mismatched parent commitments. The reduction function ensures that all replicas converge. Structural opacity hides device membership from external parties.</p>
+<p>The threshold signature scheme prevents unauthorized updates. All operations must be signed by the required number of devices. An attacker cannot forge signatures or bypass policies.</p>
+<p>The tree design ensures that no external party can identify device structure. The only visible values are the epoch and the root commitment.</p>
+<h2 id="11-implementation-architecture"><a class="header" href="#11-implementation-architecture">11. Implementation Architecture</a></h2>
+<h3 id="core-architecture-diagram"><a class="header" href="#core-architecture-diagram">Core Architecture Diagram</a></h3>
+<pre class="mermaid">graph LR
+    OpLog[&quot;OpLog&lt;br/&gt;(CRDT OR-set of AttestedOp)&quot;]
+    Reduce[&quot;reduce()&quot;]
+    TreeState[&quot;TreeState&lt;br/&gt;(derived, materialized on-demand)&lt;br/&gt;- epoch: u64&lt;br/&gt;- root_commitment: Hash32&lt;br/&gt;- nodes: BTreeMap&lt;br/&gt;- leaves: BTreeMap&quot;]
+    
+    OpLog --&gt;|reduce| Reduce
+    Reduce --&gt;|derives| TreeState
+</pre>
+<h3 id="critical-invariants"><a class="header" href="#critical-invariants">Critical Invariants</a></h3>
+<p>The implementation enforces these fundamental rules:</p>
+<ol>
+<li><strong>TreeState is NEVER stored in the journal</strong> - It is always derived on-demand via reduction</li>
+<li><strong>OpLog is the ONLY persisted tree data</strong> - All tree state can be recovered from the operation log</li>
+<li><strong>Reduction is DETERMINISTIC across all replicas</strong> - Same OpLog always produces same TreeState</li>
+<li><strong>DeviceId is authority-internal only</strong> - Never exposed in public APIs (see <code>local_types.rs</code>)</li>
+</ol>
+<h3 id="data-flow"><a class="header" href="#data-flow">Data Flow</a></h3>
+<pre class="mermaid">graph TD
+    A[&quot;1. Tree Operation Initiated&quot;]
+    B[&quot;2. operations.rs&lt;br/&gt;TreeOperationProcessor validates&quot;]
+    C[&quot;3. attested_ops.rs&lt;br/&gt;Convert to AttestedOp fact&quot;]
+    D[&quot;4. Journal stores fact&lt;br/&gt;CRDT OR-set&quot;]
+    E[&quot;5. reduction.rs&lt;br/&gt;reduce processes all facts&quot;]
+    F[&quot;6. application.rs&lt;br/&gt;apply_verified builds TreeState&quot;]
+    G[&quot;7. state.rs&lt;br/&gt;TreeState materialized&quot;]
+    H[&quot;8. authority_state.rs&lt;br/&gt;Internal device view updated&quot;]
+    
+    A --&gt; B
+    B --&gt; C
+    C --&gt; D
+    D --&gt; E
+    E --&gt; F
+    F --&gt; G
+    G --&gt; H
+</pre>
+<h3 id="merkle-commitment-layout"><a class="header" href="#merkle-commitment-layout">Merkle Commitment Layout</a></h3>
+<p>The commitment tree commitment is a Merkle-style hash over ordered children; leaves represent device shares, branches represent threshold policies, and the root commitment is the public authority commitment.</p>
+<pre class="mermaid">graph TD
+    subgraph Authority State
+    R[&quot;Root&lt;br/&gt;Commitment&lt;br/&gt;(policy)&quot;]
+    L1[&quot;Branch&lt;br/&gt;(threshold)&quot;]
+    L2[&quot;Branch&lt;br/&gt;(threshold)&quot;]
+    A[&quot;Leaf A&lt;br/&gt;(device share)&quot;]
+    B[&quot;Leaf B&lt;br/&gt;(device share)&quot;]
+    C[&quot;Leaf C&lt;br/&gt;(device share)&quot;]
+    D[&quot;Leaf D&lt;br/&gt;(device share)&quot;]
+    end
+
+    R --&gt;|hash(children + policy)| L1
+    R --&gt;|hash(children + policy)| L2
+    L1 --&gt;|hash(leaf commitment)| A
+    L1 --&gt;|hash(leaf commitment)| B
+    L2 --&gt;|hash(leaf commitment)| C
+    L2 --&gt;|hash(leaf commitment)| D
+</pre>
+<p>Each node commitment is computed over its ordered children plus its policy metadata; the root commitment is the exported authority commitment used in key derivation and verification.</p>
+<h3 id="reduction-algorithm-reductionrs"><a class="header" href="#reduction-algorithm-reductionrs">Reduction Algorithm (reduction.rs)</a></h3>
+<p>The reduction function implements the deterministic conflict resolution described in §6:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn reduce(facts: &amp;[AttestedOp]) -&gt; TreeState {
+    // 1. Group ops by parent commitment + epoch
+    // 2. Deterministic winner selection via H(op) ordering
+    // 3. Apply winners in topological (parent) order
+    // 4. Return materialized TreeState
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="operation-processing-operationsrs"><a class="header" href="#operation-processing-operationsrs">Operation Processing (operations.rs)</a></h3>
+<p>Three key abstractions for operation handling:</p>
+<ul>
+<li><strong>TreeOperationProcessor</strong>: Validates and processes individual operations</li>
+<li><strong>BatchProcessor</strong>: Efficient bulk operation processing</li>
+<li><strong>TreeStateQuery</strong>: Query interface for derived tree state</li>
+</ul>
+<h3 id="compaction-compactionrs"><a class="header" href="#compaction-compactionrs">Compaction (compaction.rs)</a></h3>
+<p>Periodic garbage collection removes superseded operations:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>fn compact(op_log: &amp;[AttestedOp]) -&gt; Vec&lt;AttestedOp&gt; {
+    // 1. Reduce to current TreeState
+    // 2. Identify superseded operations
+    // 3. Return minimal op set that produces same state
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Compaction reduces storage and speeds up reduction while preserving correctness.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="100_authority_and_identity.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="102_journal.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="100_authority_and_identity.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="102_journal.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

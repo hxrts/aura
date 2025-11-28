@@ -1,0 +1,411 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Effect System and Runtime - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="effect-system-and-runtime"><a class="header" href="#effect-system-and-runtime">Effect System and Runtime</a></h1>
+<p>This document describes the effect system and runtime architecture in Aura. It defines effect traits, handler design, context propagation, lifecycle management, and integration across crates. It also describes testing modes and performance considerations.</p>
+<h2 id="1-effect-traits-and-categories"><a class="header" href="#1-effect-traits-and-categories">1. Effect Traits and Categories</a></h2>
+<p>Aura defines effect traits as abstract interfaces for system capabilities. Core traits expose essential functionality. Extended traits expose coordinated or system-wide behaviors. Each trait is independent and does not assume global state.</p>
+<p>Core traits include <code>CryptoEffects</code>, <code>NetworkEffects</code>, <code>StorageEffects</code>, time domain traits (<code>PhysicalTimeEffects</code>, <code>LogicalClockEffects</code>, <code>OrderClockEffects</code>, <code>TimeAttestationEffects</code>), <code>RandomEffects</code>, and <code>JournalEffects</code>. Extended traits include <code>SystemEffects</code>, <code>LedgerEffects</code>, <code>ChoreographicEffects</code>, and <code>AgentEffects</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait CryptoEffects {
+    async fn hash(&amp;self, data: &amp;[u8]) -&gt; [u8; 32];
+    async fn hmac(&amp;self, key: &amp;[u8], data: &amp;[u8]) -&gt; [u8; 32];
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This example shows a core effect trait. Implementations provide cryptographic operations. Traits contain async methods for compatibility with async runtimes.</p>
+<h3 id="11-unified-time-traits"><a class="header" href="#11-unified-time-traits">1.1 Unified Time Traits</a></h3>
+<p>The legacy monolithic <code>TimeEffects</code> trait is replaced by domain-specific traits:</p>
+<ul>
+<li><code>PhysicalTimeEffects</code> – returns <code>PhysicalTime { ts_ms, uncertainty }</code> and <code>sleep_ms</code> for wall-clock operations.</li>
+<li><code>LogicalClockEffects</code> – advances and reads causal vector clocks and Lamport scalars.</li>
+<li><code>OrderClockEffects</code> – produces opaque, privacy-preserving total order tokens without temporal meaning.</li>
+<li><code>TimeAttestationEffects</code> – wraps physical claims in provenance proofs when consensus/peer attestation is required.</li>
+</ul>
+<p>Callers select the domain appropriate to their semantics (guards/transport use physical, CRDT uses logical, privacy-preserving ordering uses order tokens). Cross-domain comparisons are explicit via <code>TimeStamp::compare(policy)</code>. Direct <code>SystemTime::now()</code> or chrono usage is forbidden outside effect implementations; testkit and simulator provide deterministic handlers for all four traits.</p>
+<h3 id="12-when-to-create-effect-traits"><a class="header" href="#12-when-to-create-effect-traits">1.2 When to Create Effect Traits</a></h3>
+<p>Create new effect traits when:</p>
+<ul>
+<li>Abstracting OS or external system integration (files, network, time)</li>
+<li>Defining domain-specific operations that multiple implementations might provide</li>
+<li>Isolating side effects for testing and simulation</li>
+<li>Enabling deterministic simulation of complex behaviors</li>
+</ul>
+<h3 id="13-when-not-to-create-effect-traits"><a class="header" href="#13-when-not-to-create-effect-traits">1.3 When NOT to Create Effect Traits</a></h3>
+<p>Follow YAGNI (You Aren't Gonna Need It) principles:</p>
+<p><strong>Defer abstraction when:</strong></p>
+<ul>
+<li>Only one implementation exists and will likely remain single</li>
+<li>The abstraction adds complexity without clear benefit</li>
+<li>You're abstracting "just in case" without concrete need</li>
+<li>Testing can be achieved through higher-level mocking</li>
+</ul>
+<p><strong>Example: Threshold Signatures</strong></p>
+<p>Aura uses FROST directly without a <code>ThresholdSigEffects</code> trait because:</p>
+<ul>
+<li>Only FROST is needed currently</li>
+<li>No plans for alternative threshold signature schemes</li>
+<li>Direct usage is simpler and clearer</li>
+<li>Testing happens at the consensus level, not crypto level</li>
+</ul>
+<p>See <code>crates/aura-core/src/crypto/README.md</code> for the detailed threshold signature deferral decision. We maintain a clear YAGNI gate: introduce the trait only when a second scheme is required or FROST needs replacement.</p>
+<h2 id="2-handler-design"><a class="header" href="#2-handler-design">2. Handler Design</a></h2>
+<p>Effect handlers implement effect traits. Stateless handlers execute operations without internal state. Stateful handlers coordinate multiple effects or maintain internal caches.</p>
+<p>Typed handlers implement concrete effect traits. Type-erased handlers allow dynamic dispatch through the effect executor. Both designs share the same execution interface.</p>
+<p>Handlers do not store global state. All required inputs flow through method parameters. This avoids hidden dependencies.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct RealCryptoHandler;
+
+#[async_trait]
+impl CryptoEffects for RealCryptoHandler {
+    async fn hash(&amp;self, data: &amp;[u8]) -&gt; [u8; 32] {
+        aura_core::hash::hash(data)
+    }
+
+    async fn hmac(&amp;self, key: &amp;[u8], data: &amp;[u8]) -&gt; [u8; 32] {
+        // HMAC implementation
+        unimplemented!()
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This code block defines a stateless handler. It uses synchronous hashing from <code>aura_core::hash</code> for deterministic behavior.</p>
+<h2 id="3-context-model"><a class="header" href="#3-context-model">3. Context Model</a></h2>
+<p>The effect system propagates an <code>EffectContext</code> through async tasks. The context carries tracing data, flow budget, metadata, and deadlines. The context is explicit. No ambient state exists.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct EffectContext {
+    pub request_id: Uuid,
+    pub flow_budget: FlowBudget,
+    pub deadline: Option&lt;Instant&gt;,
+    pub metadata: HashMap&lt;String, String&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure defines the effect context. The context flows through all effect calls. Tracing integrates with this structure. Flow budget enforcement uses the context values.</p>
+<p>Context propagation uses scoped execution. A task local stores the current context. Nested tasks inherit the context. This ensures consistent behavior across async boundaries.</p>
+<h2 id="4-lifecycle-management"><a class="header" href="#4-lifecycle-management">4. Lifecycle Management</a></h2>
+<p>Aura defines a lifecycle manager for initialization and shutdown. Each handler may perform startup tasks. Each handler may also perform cleanup on shutdown.</p>
+<p>Handlers register with a lifecycle manager. The lifecycle manager executes initialization in order. The lifecycle manager executes shutdown in reverse order.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct LifecycleManager {
+    state: Arc&lt;AtomicU8&gt;,
+    components: Arc&lt;RwLock&lt;Vec&lt;Arc&lt;dyn LifecycleAware&gt;&gt;&gt;&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This type defines the lifecycle manager. It tracks registered components. It provides explicit methods for transitioning between lifecycle phases.</p>
+<p>Lifecycle phases include initialization, ready, shutting down, and shutdown. Health checks monitor handler availability.</p>
+<h2 id="5-layers-and-crates"><a class="header" href="#5-layers-and-crates">5. Layers and Crates</a></h2>
+<p>The effect system spans several crates. Each crate defines a specific role in the architecture. These crates maintain strict dependency boundaries.</p>
+<p><code>aura-core</code> defines effect traits, identifiers, and core data structures. It contains no implementations.</p>
+<p><code>aura-effects</code> contains stateless and single-party effect handlers. It provides default implementations for cryptography, storage, networking, and randomness.</p>
+<p><code>aura-protocol</code> contains orchestrated and multi-party behavior. It bridges session types to effect calls. It implements the <a href="109_authorization.html">guard chain</a>, journal coupling, and consensus integrations.</p>
+<p><code>aura-agent</code> assembles handlers into runnable systems. It configures effect pipelines for production environments.</p>
+<p><code>aura-simulator</code> provides deterministic execution. It implements simulated time, simulated networking, and controlled failure injection.</p>
+<h2 id="6-testing-and-simulation"><a class="header" href="#6-testing-and-simulation">6. Testing and Simulation</a></h2>
+<p>The effect system supports deterministic testing. Mock handlers implement predictable behavior. A simulated runtime provides control over time and network behavior. The simulator exposes primitives to inject delays or failures.</p>
+<p>Tests use deterministic time control. Tests use in-memory storage. Tests use mock network. These components allow protocol execution without side effects.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let system = TestRuntime::new()
+    .with_mock_crypto()
+    .with_deterministic_time()
+    .build();
+<span class="boring">}</span></code></pre></pre>
+<p>This snippet creates a test runtime. The runtime uses mock handlers for all effects. It provides deterministic time and network control.</p>
+<h2 id="7-performance-considerations"><a class="header" href="#7-performance-considerations">7. Performance Considerations</a></h2>
+<p>Aura includes several performance optimizations. Parallel initialization reduces startup time. Caching handlers reduce repeated computation. Buffer pools reduce memory allocation.</p>
+<p>The effect system avoids OS threads for WASM compatibility. It uses async tasks and cooperative scheduling. Lazy initialization creates handlers on first use.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let builder = EffectSystemBuilder::new()
+    .with_handler(Arc::new(RealCryptoHandler))
+    .with_parallel_init();
+<span class="boring">}</span></code></pre></pre>
+<p>This snippet shows parallel initialization of handlers. Parallel initialization increases startup throughput.</p>
+<h2 id="8-guard-chain-and-leakage-integration"><a class="header" href="#8-guard-chain-and-leakage-integration">8. Guard Chain and Leakage Integration</a></h2>
+<p>The effect runtime enforces the guard-chain sequencing defined in <a href="109_authorization.html">Authorization</a> and the leakage contract from <a href="003_information_flow_contract.html">Privacy and Information Flow</a> using pure guard evaluation plus asynchronous interpretation. Each projected choreography message expands to:</p>
+<ol>
+<li><strong>Snapshot preparation (async)</strong> – gather capability frontier, budget headroom, leakage metadata, and randomness into a <code>GuardSnapshot</code> via <code>AuthorizationEffects</code>, <code>FlowBudgetEffects</code>, and cache state.</li>
+<li><strong>Pure guard evaluation (sync)</strong> – <code>CapGuard → FlowGuard → JournalCoupler</code> runs over the snapshot and request, producing a <code>Vec&lt;EffectCommand&gt;</code> that describes the required charges, leakage records, journal writes, and transport sends.</li>
+<li><strong>Command interpretation (async)</strong> – an <code>EffectInterpreter</code> executes each <code>EffectCommand</code> using <code>FlowBudgetEffects</code>, <code>LeakageEffects</code>, <code>JournalEffects</code>, and <code>TransportEffects</code>, preserving charge-before-send.</li>
+</ol>
+<p>Handlers that implement <code>LeakageEffects</code> must surface both production-grade implementations (wired into the agent runtime) and deterministic versions for the simulator so privacy tests can assert leakage bounds. Because the executor orchestrates snapshots, pure evaluation, and interpretation explicitly, no transport observable can occur unless the preceding guards succeed, preserving the semantics laid out in the theoretical model.</p>
+<h2 id="9-session-management-and-choreography-execution"><a class="header" href="#9-session-management-and-choreography-execution">9. Session Management and Choreography Execution</a></h2>
+<p>The effect system provides the framework for managing the lifecycle of distributed protocols. Choreographies define the logic of a protocol, while a <strong>session</strong> represents a single, stateful execution of that choreography. The runtime uses the effect system to create, manage, and execute these sessions.</p>
+<h3 id="91-the-session-management-interface"><a class="header" href="#91-the-session-management-interface">9.1. The Session Management Interface</a></h3>
+<p>The abstract interface for all session-related operations is the <code>SessionManagementEffects</code> trait defined in <code>aura-core</code>. This trait provides the API for creating sessions, joining them, sending and receiving messages within a session's context, and querying their status.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Defined in aura-core::effects::agent
+pub trait SessionManagementEffects: Send + Sync {
+    /// Create new choreographic session with participants and roles
+    async fn create_choreographic_session(
+        &amp;self,
+        session_type: SessionType,
+        participants: Vec&lt;ParticipantInfo&gt;,
+    ) -&gt; Result&lt;SessionId&gt;;
+
+    /// Send choreographic message within a session context
+    async fn send_choreographic_message(
+        &amp;self,
+        session_id: SessionId,
+        message: Vec&lt;u8&gt;,
+    ) -&gt; Result&lt;()&gt;;
+
+    // ... other methods for joining, leaving, and status checks
+}
+<span class="boring">}</span></code></pre></pre>
+<p>By abstracting session management into an effect, the application logic remains decoupled from the underlying implementation (e.g., in-memory vs. persistent session state).</p>
+<h3 id="92-session-handlers-and-state"><a class="header" href="#92-session-handlers-and-state">9.2. Session Handlers and State</a></h3>
+<p>Concrete implementations of <code>SessionManagementEffects</code>, such as the <code>MemorySessionHandler</code> in <code>aura-protocol</code>, act as the engine for the session system. This handler maintains the state of all active sessions, including:</p>
+<ul>
+<li><strong><code>SessionId</code></strong>: A unique identifier for the session instance.</li>
+<li><strong><code>SessionStatus</code></strong>: The current phase of the session's lifecycle (e.g., <code>Initializing</code>, <code>Active</code>, <code>Completed</code>).</li>
+<li><strong><code>SessionEpoch</code></strong>: A version number for the session's state. It is incremented to coordinate significant state changes and invalidate old credentials or messages, which is critical for security and preventing replay attacks.</li>
+<li><strong>Participants</strong>: The list of devices involved in the choreography.</li>
+</ul>
+<p>The creation and lifecycle of sessions are themselves managed as a choreographic protocol (<code>SessionLifecycleChoreography</code> in <code>aura-protocol</code>) to ensure consistency across all participants.</p>
+<h3 id="93-execution-flow"><a class="header" href="#93-execution-flow">9.3. Execution Flow</a></h3>
+<p>The relationship between the runtime, effects, sessions, and choreographies is as follows:</p>
+<ol>
+<li><strong>Request</strong>: An event triggers the need to execute a distributed protocol (e.g., FROST signing).</li>
+<li><strong>Session Creation</strong>: The <code>aura-agent</code> runtime calls <code>create_choreographic_session</code> via the effect system. The handler creates a new session instance with a unique <code>SessionId</code> and an initial <code>SessionEpoch</code>.</li>
+<li><strong>Execution</strong>: The session becomes the stateful context for executing the choreography. The agent uses the <code>SessionId</code> to route messages and drive the protocol's state machine as defined by its session type.</li>
+<li><strong>State Management</strong>: The handler updates the <code>SessionStatus</code> as the choreography progresses. If the protocol requires it, the <code>SessionEpoch</code> can be incremented to securely evolve the session state.</li>
+<li><strong>Completion</strong>: Once the choreography finishes, the handler transitions the session to a terminal state (<code>Completed</code> or <code>Failed</code>), and resources are cleaned up.</li>
+</ol>
+<p>In essence, the session system is the generic, stateful <strong>executor</strong>, and a choreography is the specific, verifiable <strong>script</strong> that the executor runs.</p>
+<h2 id="10-summary"><a class="header" href="#10-summary">10. Summary</a></h2>
+<p>The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior. Performance optimizations improve scalability and responsiveness.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="105_identifiers_and_boundaries.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="107_mpst_and_choreography.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="105_identifiers_and_boundaries.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="107_mpst_and_choreography.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

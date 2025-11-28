@@ -1,0 +1,388 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Multi-party Session Types and Choreography - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="multi-party-session-types-and-choreography"><a class="header" href="#multi-party-session-types-and-choreography">Multi-party Session Types and Choreography</a></h1>
+<p>This document describes the architecture of choreographic protocols in Aura. It explains how global protocols are defined, projected, and executed. It defines the structure of local session types, the integration with the <a href="106_effect_system_and_runtime.html">effect system</a>, and the use of <a href="109_authorization.html">guard chains</a> and journal coupling.</p>
+<h2 id="1-dsl-and-projection"><a class="header" href="#1-dsl-and-projection">1. DSL and Projection</a></h2>
+<p>Aura defines global protocols using the <code>choreography!</code> macro. The macro parses a global specification into an abstract syntax tree. The macro produces code that represents the protocol as a choreographic structure.</p>
+<p>Projection converts the global protocol into per-role local session types. Each local session type defines the exact sequence of sends and receives for a single role. Projection eliminates deadlocks and ensures that communication structure is correct.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>choreography! {
+    #[namespace = "example"]
+    protocol Example {
+        roles: A, B;
+        A -&gt; B: Msg(data: Vec&lt;u8&gt;);
+        B -&gt; A: Ack(code: u32);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This snippet defines a global protocol with two roles. Projection produces a local type for <code>A</code> and a local type for <code>B</code>. Each local type enforces the required ordering at compile time.</p>
+<h2 id="2-local-session-types"><a class="header" href="#2-local-session-types">2. Local Session Types</a></h2>
+<p>Local session types describe the allowed actions for a role. Each send and receive is represented as a typed operation. Local types prevent protocol misuse by ensuring that nodes follow the projected sequence.</p>
+<p>Local session types embed type-level guarantees. These guarantees prevent message ordering errors. They prevent unmatched sends or receives. Each protocol execution must satisfy the session type.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>type A_Local = Send&lt;B, Msg, Receive&lt;B, Ack, End&gt;&gt;;
+<span class="boring">}</span></code></pre></pre>
+<p>This example shows the projected type for role <code>A</code>. The type describes that <code>A</code> must send <code>Msg</code> to <code>B</code> and then receive <code>Ack</code>.</p>
+<h2 id="3-runtime-integration"><a class="header" href="#3-runtime-integration">3. Runtime Integration</a></h2>
+<p>Aura integrates session types with the effect system through <code>ChoreoHandler</code>. A handler executes sends and receives using effect traits. The handler manages serialization and deserialization of messages.</p>
+<p><code>AuraHandler</code> implements <code>ChoreoHandler</code> for Aura runtimes. It maps session operations to effect calls using <code>NetworkEffects</code>, <code>JournalEffects</code>, and other traits. A handler must be initialized with role mappings and context identifiers.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait ChoreoHandler {
+    async fn send&lt;M&gt;(&amp;mut self, msg: &amp;M) -&gt; Result&lt;()&gt; where M: Serialize;
+    async fn recv&lt;M&gt;(&amp;mut self) -&gt; Result&lt;M&gt; where M: DeserializeOwned;
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This trait defines the interface for session type execution. Implementations call the underlying effects. They also apply guard chains and journal updates.</p>
+<h2 id="4-choreography-annotations-and-effect-commands"><a class="header" href="#4-choreography-annotations-and-effect-commands">4. Choreography Annotations and Effect Commands</a></h2>
+<p>Choreographies support annotations that modify runtime behavior. The <code>choreography!</code> macro extracts these annotations and generates <code>EffectCommand</code> sequences. This is the <strong>choreography-first architecture</strong>: choreographic annotations are the canonical source of truth for guard requirements.</p>
+<h3 id="supported-annotations"><a class="header" href="#supported-annotations">Supported Annotations</a></h3>
+<div class="table-wrapper"><table><thead><tr><th>Annotation</th><th>Description</th><th>Generated Effect</th></tr></thead><tbody>
+<tr><td><code>guard_capability = "cap"</code></td><td>Capability requirement</td><td><code>StoreMetadata</code> (audit trail)</td></tr>
+<tr><td><code>flow_cost = N</code></td><td>Flow budget charge</td><td><code>ChargeBudget</code></td></tr>
+<tr><td><code>journal_facts = "fact"</code></td><td>Journal fact recording</td><td><code>StoreMetadata</code> (fact key)</td></tr>
+<tr><td><code>journal_merge = true</code></td><td>Request journal merge</td><td><code>StoreMetadata</code> (merge flag)</td></tr>
+<tr><td><code>audit_log = "event"</code></td><td>Audit trail entry</td><td><code>StoreMetadata</code> (audit key)</td></tr>
+<tr><td><code>leak = "External"</code></td><td>Leakage tracking</td><td><code>RecordLeakage</code></td></tr>
+</tbody></table>
+</div>
+<h3 id="annotation-syntax"><a class="header" href="#annotation-syntax">Annotation Syntax</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Single annotation
+A[guard_capability = "sync"] -&gt; B: SyncMsg;
+
+// Multiple annotations
+A[guard_capability = "sync", flow_cost = 10, journal_facts = "sync_started"] -&gt; B: SyncMsg;
+
+// Leakage annotation (multiple syntaxes supported)
+A[leak = "External,Neighbor"] -&gt; B: PublicMsg;
+A[leak: External] -&gt; B: PublicMsg;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="effect-command-generation"><a class="header" href="#effect-command-generation">Effect Command Generation</a></h3>
+<p>The macro generates an <code>effect_bridge</code> module containing:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub mod effect_bridge {
+    use aura_core::effects::guard::{EffectCommand, EffectInterpreter};
+
+    /// Convert annotations to effect commands
+    pub fn annotation_to_commands(ctx: &amp;EffectContext, annotation: ...) -&gt; Vec&lt;EffectCommand&gt;;
+
+    /// Execute commands through interpreter
+    pub async fn execute_commands&lt;I: EffectInterpreter&gt;(
+        interpreter: &amp;I,
+        ctx: &amp;EffectContext,
+        annotations: Vec&lt;...&gt;,
+    ) -&gt; Result&lt;Vec&lt;EffectResult&gt;, String&gt;;
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="integration-with-effect-interpreters"><a class="header" href="#integration-with-effect-interpreters">Integration with Effect Interpreters</a></h3>
+<p>Generated <code>EffectCommand</code> sequences execute through:</p>
+<ul>
+<li><strong>Production</strong>: <code>ProductionEffectInterpreter</code> (aura-effects)</li>
+<li><strong>Simulation</strong>: <code>SimulationEffectInterpreter</code> (aura-simulator)</li>
+<li><strong>Testing</strong>: <code>BorrowedEffectInterpreter</code> / mock interpreters</li>
+</ul>
+<p>This unified approach ensures consistent guard behavior across all execution environments.</p>
+<h2 id="5-guard-chain-integration"><a class="header" href="#5-guard-chain-integration">5. Guard Chain Integration</a></h2>
+<p>Guard effects originate from two sources that share the same <code>EffectCommand</code> system:</p>
+<ol>
+<li>
+<p><strong>Choreographic Annotations</strong> (compile-time): The <code>choreography!</code> macro generates <code>EffectCommand</code> sequences from annotations. These represent per-message guard requirements.</p>
+</li>
+<li>
+<p><strong>Runtime Guard Chain</strong> (send-site): The <code>GuardChain::standard()</code> evaluates pure guards against a <code>GuardSnapshot</code> at each protocol send site. This enforces invariants like charge-before-send.</p>
+</li>
+</ol>
+<h3 id="guard-chain-sequence"><a class="header" href="#guard-chain-sequence">Guard Chain Sequence</a></h3>
+<p>The runtime guard chain contains <code>CapGuard</code>, <code>FlowGuard</code>, <code>JournalCoupler</code>, and <code>LeakageTracker</code>. These guards enforce authorization and budget constraints:</p>
+<ul>
+<li><code>CapGuard</code> checks that the active capabilities satisfy the message requirements</li>
+<li><code>FlowGuard</code> checks that flow budget is available for the context and peer</li>
+<li><code>JournalCoupler</code> synchronizes journal updates with protocol execution</li>
+<li><code>LeakageTracker</code> records metadata leakage per observer class</li>
+</ul>
+<p>Guard evaluation is synchronous over a prepared <code>GuardSnapshot</code> and yields <code>EffectCommand</code> items. An async interpreter executes those commands, keeping guard logic pure while preserving charge-before-send.</p>
+<pre class="mermaid">graph TD
+    S[Send] --&gt; A[Annotation Effects];
+    A --&gt; C[CapGuard];
+    C --&gt; F[FlowGuard];
+    F --&gt; J[JournalCoupler];
+    J --&gt; L[LeakageTracker];
+    L --&gt; N[Network Send];
+</pre>
+<p>This diagram shows the combined guard sequence. Annotation-derived effects execute first, then runtime guards validate and charge budgets before the send.</p>
+<h3 id="combined-execution"><a class="header" href="#combined-execution">Combined Execution</a></h3>
+<p>Use <code>execute_guarded_choreography()</code> from <code>aura_protocol::guards</code> to execute both annotation-derived commands and runtime guards atomically:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_protocol::guards::{execute_guarded_choreography, GuardChain};
+
+let result = execute_guarded_choreography(
+    &amp;effect_system,
+    &amp;request,
+    annotation_commands,  // From choreography macro
+    interpreter,
+).await?;
+<span class="boring">}</span></code></pre></pre>
+<h2 id="6-execution-modes"><a class="header" href="#6-execution-modes">6. Execution Modes</a></h2>
+<p>Aura supports multiple execution modes for choreographies. In-memory execution uses mock handlers. Production execution uses real network and storage effects. Simulation execution uses deterministic time and fault injection.</p>
+<p>Each mode implements the same handler interface. This ensures that protocol behavior remains consistent across environments. Testing uses deterministic handlers. Production uses optimized handlers.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let handler = AuraHandler::new_in_memory();
+<span class="boring">}</span></code></pre></pre>
+<p>This example shows the creation of an in-memory handler for testing.</p>
+<h2 id="7-example-protocols"><a class="header" href="#7-example-protocols">7. Example Protocols</a></h2>
+<p>Anti-entropy protocols synchronize CRDT state. They run as choreographies that exchange state deltas. Session types ensure that the exchange pattern follows causal and structural rules.</p>
+<p>FROST ceremonies use choreographies to coordinate threshold signing. These ceremonies use the guard chain to enforce authorization rules.</p>
+<p>Aura Consensus uses choreographic notation for fast path and fallback flows. Consensus choreographies define execute, witness, and commit messages. Session types ensure evidence propagation and correctness.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>choreography! {
+    #[namespace = "sync"]
+    protocol AntiEntropy {
+        roles: A, B;
+        A -&gt; B: Delta(data: Vec&lt;u8&gt;);
+        B -&gt; A: Ack(data: Vec&lt;u8&gt;);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This anti-entropy example illustrates a minimal synchronization protocol.</p>
+<h2 id="8-summary"><a class="header" href="#8-summary">8. Summary</a></h2>
+<p>Aura uses choreographic programming to define global protocols. Projection produces local session types. Session types enforce structured communication. Handlers execute protocol steps using effect traits. Extension effects provide authorization, budgeting, and journal updates. Execution modes support testing, simulation, and production. Choreographies define distributed coordination for CRDT sync, FROST signing, and consensus.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="106_effect_system_and_runtime.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="108_transport_and_information_flow.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="106_effect_system_and_runtime.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="108_transport_and_information_flow.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

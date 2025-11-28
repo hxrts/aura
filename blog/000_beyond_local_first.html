@@ -1,0 +1,264 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Beyond Local First - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "../";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "../searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="beyond-local-first"><a class="header" href="#beyond-local-first">Beyond Local First</a></h1>
+<p><strong>How Aura Extends the Local-First Vision</strong></p>
+<p>The Local-First movement reframed collaboration by proving that real-time, multi-device software does not have to rely on centralized servers. Its core insight is that data should live primarily on the user’s own devices, with the network acting as a helper rather than a gatekeeper. CRDTs, offline-first UX, and user agency over data push us toward a healthier relationship with our tools.</p>
+<p>Aura builds on the same dissatisfaction with cloud dependency, but arrives at a different destination. Where Local-First keeps authority on the device, Aura treats the social graph as the computational substrate. The device loses its status as the privileged anchor of truth. Instead, identity, state, and availability emerge from a network of peers who collectively maintain each other’s presence and continuity.</p>
+<p>Rather than asking “How can a device own its data?”, Aura asks a deeper question: Who is the user in a world where people span many devices, trust relationships, and shared spaces?</p>
+<h2 id="identity-beyond-the-device"><a class="header" href="#identity-beyond-the-device">Identity Beyond the Device</a></h2>
+<p>Local-First assumes each device holds the primary state for a user. Aura discards this assumption. An Aura identity is an opaque authority built from a threshold of devices or guardians. No single device holds the full key; no single loss event destroys the identity. The user’s long-term presence is maintained cryptographically rather than physically. CRDT-like convergence still matters, but it is layered beneath a stronger guarantee: an attacker cannot impersonate you by compromising a device, and you cannot “lose yourself” if hardware fails.</p>
+<p>This shifts us from personal device autonomy to relational identity continuity. The identity is durable because it is distributed.</p>
+<h2 id="collective-resources-instead-of-local-silos"><a class="header" href="#collective-resources-instead-of-local-silos">Collective Resources Instead of Local Silos</a></h2>
+<p>Local-First architectures preserve local ownership while enabling sync, but they stop at the boundary of the individual. Every user is their own island, occasionally exchanging state with others. Aura breaks that boundary cleanly.</p>
+<p>In Aura, relationships, groups, and shared contexts are first-class state machines backed by consensus and semilattice facts. Every shared context—friendship, project, group chat, recovery relationship—has a dedicated journal and its own cryptographic root. Participants jointly maintain the space. No server arbitrates; no user acts as host. The context is the unit of collaboration.</p>
+<p>This allows the system to support resources that belong to relationships, not devices: shared storage, shared budgets, shared state transitions, and shared coordination protocols. Collaboration is no longer “merge my edits with yours,” but “we jointly enact changes to a shared state machine.”</p>
+<h2 id="consent-as-a-primitive-not-a-policy"><a class="header" href="#consent-as-a-primitive-not-a-policy">Consent as a Primitive, Not a Policy</a></h2>
+<p>Local-First aims for privacy through local storage and controlled replication. Aura requires stronger guarantees because the social graph is the network. Data, metadata, and protocol steps flow through people’s devices. This requires a discipline that goes beyond access control.</p>
+<p>Aura makes consent a technical primitive. Every action that produces a network-visible effect must pass a guard chain: capabilities (Biscuit), flow budgets, leakage budgets, and journal coupling. A message cannot be sent—literally cannot be emitted on the wire—unless all parties have cryptographically granted the necessary permissions. This ensures that participation, disclosure, and coordination are always intentional.</p>
+<p>Local-First keeps data on your device. Aura ensures that every observable effect results from consent—whether the data lives locally or within a shared context.</p>
+<h2 id="coordination-without-a-server"><a class="header" href="#coordination-without-a-server">Coordination Without a Server</a></h2>
+<p>Local-First reduces dependence on servers, but often expects them for discovery, presence, or convenience. Aura removes them from the critical path entirely. Rendezvous happens through encrypted gossip within a context. Secure channels form through threshold-derived keys. Consensus is single-shot and scoped to specific contexts. Everything is routed through the peers who already have a reason to know each other.</p>
+<p>The result is a network that resembles a living mesh: small, intimate, and shaped exactly like your social world. Instead of a cloud that intermediates collaboration, coordination arises from the relationships themselves.</p>
+<h2 id="a-philosophical-progression"><a class="header" href="#a-philosophical-progression">A Philosophical Progression</a></h2>
+<p>Local-First was a necessary corrective to the server-centric era. It restored autonomy, durability, and respect for the user. But it retains an implicit assumption: the device is the primary actor.</p>
+<p>Aura moves past that. It treats identity as relational, data as shared between peers who trust each other, and action as something that only occurs with explicit consent. Devices come and go. Servers are optional. What persists are relationships, commitments, and the cryptographic structures that encode them.</p>
+<p>In this sense, Aura is not only Local-First. It is Network-Native, where the network is not an infrastructure provider but the set of people you trust. It is a world where collaboration is not a feature but the substrate—and where autonomy is guaranteed not by ownership of hardware, but by the sovereignty of the user within their social graph.</p>
+<p>This is what lies beyond Local-First: a system where data is local, relationships are global, and neither depends on the cloud to survive.</p>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<ul>
+<li><a href="../100_authority_and_identity.html">Authority and Identity</a> - Relational identity model and contextual isolation</li>
+<li><a href="../103_relational_contexts.html">Relational Contexts</a> - Shared state machines and collective resources</li>
+<li><a href="../109_authorization.html">Authorization</a> - Consent primitives and capability attenuation</li>
+<li><a href="../110_rendezvous.html">Rendezvous</a> - Peer discovery without servers</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../adr/015_choreography_first_guards.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../blog/001_group_messaging.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../adr/015_choreography_first_guards.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../blog/001_group_messaging.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="../mermaid.min.js"></script>
+        <script src="../mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

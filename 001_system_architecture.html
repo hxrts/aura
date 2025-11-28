@@ -1,0 +1,556 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Aura System Architecture - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="aura-system-architecture"><a class="header" href="#aura-system-architecture">Aura System Architecture</a></h1>
+<p>This document describes Aura's system architecture and implementation patterns. It covers the async effect system, authority and relational identity model, guard chain enforcement, flow budget system, choreographic protocol design, consensus integration, and crate organization principles.</p>
+<p>Formal definitions live in <a href="002_theoretical_model.html">Theoretical Model</a> and the specifications for relational identity, commitment tree semilattice, journal system, and Aura Consensus.</p>
+<h2 id="overview"><a class="header" href="#overview">Overview</a></h2>
+<p>Aura's system architecture implements the mathematical foundations through practical patterns that avoid deadlocks and ensure distributed correctness. The architecture centers on authorities and their commitment tree-based internal state, journals as CRDT fact stores per authority and per relational context, relational contexts for cross-authority relationships, and Aura Consensus for single-operation strong agreement where CRDT alone is insufficient.</p>
+<p>The architecture consists of five integrated systems. The async effect system provides isolated services and deadlock-free execution. The authority and relational identity system manages contextual identities and cross-authority relationships. The guard chain and flow budget system enforces authorization and privacy constraints. The choreographic protocol system enables session-typed distributed coordination. The crate organization maintains clean layering and zero circular dependencies.</p>
+<h2 id="1-authority-and-relational-identity-system"><a class="header" href="#1-authority-and-relational-identity-system">1. Authority and Relational Identity System</a></h2>
+<h3 id="11-authority-model"><a class="header" href="#11-authority-model">1.1 Authority Model</a></h3>
+<p>An authority is a cryptographic actor represented by a public key that hides its internal structure. An authority may contain one or more devices but never exposes information about its devices or operators. The authority derives its state from deterministic reduction of facts in its journal namespace.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct AuthorityId(Uuid);
+<span class="boring">}</span></code></pre></pre>
+<p>This identifier selects the journal namespace associated with the authority. The identifier does not encode structure or membership. The authority publishes its current public key and root commitment inside its own journal.</p>
+<p>Authorities interact with other authorities through relational contexts. These interactions do not change the authority's internal structure. The authority remains isolated except where relational state is explicitly shared.</p>
+<h3 id="12-account-authority-structure"><a class="header" href="#12-account-authority-structure">1.2 Account Authority Structure</a></h3>
+<p>An account authority maintains internal state through a <a href="101_accounts_and_commitment_tree.html">commitment tree</a> and an account journal. The commitment tree defines device membership and threshold policies. The journal stores facts that represent signed tree operations. The reduction function reconstructs canonical tree state from accumulated facts.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct AccountAuthority {
+    account_id: AccountId,
+    root_keypair: KeyPair,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure represents the account authority with its unique account identifier and root keypair for creating device tokens. The root keypair enables creation of Biscuit tokens for device authentication. The account authority does not reveal device structure to external parties.</p>
+<p>Account authorities use deterministic key derivation to create context-specific identities. These derived authorities represent application-scoped identities without exposing the structure of the account authority.</p>
+<h3 id="13-relational-context-architecture"><a class="header" href="#13-relational-context-architecture">1.3 Relational Context Architecture</a></h3>
+<p>A relational context is shared state linking two or more authorities. Each relational context has its own journal namespace containing only the facts that participating authorities choose to share. Context identifiers are opaque and do not encode participant information.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ContextId(Uuid);
+<span class="boring">}</span></code></pre></pre>
+<p>This identifier selects the journal namespace for a relational context. Only participating authorities know how the context is used. Participation is expressed by writing relational facts to the context journal.</p>
+<p>Relational contexts support guardian configuration, recovery operations, and application-specific collaboration. Each context defines its own interpretation rules without affecting authority internal structure.</p>
+<h3 id="14-contextual-identity-properties"><a class="header" href="#14-contextual-identity-properties">1.4 Contextual Identity Properties</a></h3>
+<p>Identity in Aura is contextual and relational rather than global. Authorities derive context-specific keys using <code>derive(account_root, app_id, context_label)</code>. The derivation is deterministic but irreversible. Knowing the derived key for one context reveals nothing about other contexts.</p>
+<p>Profile data shared inside a context stays local to that context. Display names and contact attributes do not leave the context journal. Each context forms a separate identity boundary. Authorities can maintain many unrelated relationships without cross-linking.</p>
+<h2 id="2-guard-chain-and-flow-budget-system"><a class="header" href="#2-guard-chain-and-flow-budget-system">2. Guard Chain and Flow Budget System</a></h2>
+<h3 id="21-guard-chain-architecture"><a class="header" href="#21-guard-chain-architecture">2.1 Guard Chain Architecture</a></h3>
+<p>All transport sends pass through a guard chain that enforces authorization, flow budgets, and journal updates. The guard chain executes in strict sequence to ensure no observable behavior occurs without proper authorization and charging.</p>
+<pre class="mermaid">flowchart LR
+    A[Send Request] --&gt; B[CapGuard&lt;br/&gt;Authorization];
+    B --&gt; C[FlowGuard&lt;br/&gt;Budget Charge];
+    C --&gt; D[JournalCoupler&lt;br/&gt;Fact Commit];
+    D --&gt; E[TransportEffects&lt;br/&gt;Network Send];
+</pre>
+<p>Each guard must succeed before the next guard executes. Any failure returns locally and produces no observable side effect. This design ensures that unauthorized or over-budget sends do not create side channels.</p>
+<p>The <code>CapGuard</code> evaluates Biscuit capabilities and sovereign policy to derive the capability frontier for the context and peer pair. The <code>FlowGuard</code> charges the replicated spent counter and produces a signed receipt if headroom exists. The <code>JournalCoupler</code> merges protocol facts together with budget charges to preserve charge-before-send invariants. See <a href="108_transport_and_information_flow.html">Transport and Information Flow</a> for detailed implementation.</p>
+<p>Guard evaluation is pure and synchronous over a prepared <code>GuardSnapshot</code>. The evaluation returns <code>EffectCommand</code> data that an async interpreter executes (production or simulation). No guard performs I/O directly.</p>
+<h3 id="22-flow-budget-system"><a class="header" href="#22-flow-budget-system">2.2 Flow Budget System</a></h3>
+<p>Flow budgets limit the rate and volume of messages an authority may send within a context. The system unifies spam resistance and privacy leakage control through the same monotone mechanism.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct FlowBudget {
+    limit: u64, // derived at runtime from capabilities
+    spent: u64, // replicated fact (join = max)
+    epoch: Epoch, // replicated fact
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Only <code>spent</code> and <code>epoch</code> values appear as facts inside the journal. The <code>limit</code> field is computed at runtime by intersecting Biscuit-derived capabilities with sovereign policy. Before any transport effect, <code>FlowGuard</code> charges cost to the context and peer pair.</p>
+<p>Budget charges are atomic with journal updates. If <code>spent</code> plus <code>cost</code> exceeds the computed <code>limit</code>, the send is blocked locally with no observable behavior. For multi-hop forwarding, relays validate signed receipts from previous hops and charge their own budgets before forwarding.</p>
+<h3 id="23-receipts-and-accountability"><a class="header" href="#23-receipts-and-accountability">2.3 Receipts and Accountability</a></h3>
+<p>Per-hop receipts provide accountability for multi-hop forwarding and are bound to epochs to prevent replay.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct Receipt {
+    pub context: ContextId,
+    pub src: AuthorityId,
+    pub dst: AuthorityId,
+    pub epoch: Epoch,
+    pub cost: u32,
+    pub nonce: u64,
+    pub prev: Hash32,
+    pub sig: Signature,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Receipts chain together to form an audit trail of budget charges across relay hops. The acceptance window is the current epoch only. Epoch rotation triggers when the journal fact <code>Epoch(context)</code> increments, resetting spent counters and invalidating old receipts.</p>
+<h2 id="3-async-effect-system-architecture"><a class="header" href="#3-async-effect-system-architecture">3. Async Effect System Architecture</a></h2>
+<h3 id="31-core-principles"><a class="header" href="#31-core-principles">3.1 Core Principles</a></h3>
+<p>Aura implements an async-first effect system that supports both native and WASM targets while avoiding deadlocks through explicit context propagation and isolated state services. The system uses builder-based initialization, assumes no OS threads, and provides explicit lifecycle management.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait CryptoEffects {
+    async fn hash(&amp;self, data: &amp;[u8]) -&gt; [u8; 32];
+    async fn hmac(&amp;self, key: &amp;[u8], data: &amp;[u8]) -&gt; [u8; 32];
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Effect traits define abstract capabilities without exposing implementation details. Handlers provide implementations for specific environments. The effect system ensures operations remain async-native and context-explicit.</p>
+<h3 id="32-effect-trait-classification"><a class="header" href="#32-effect-trait-classification">3.2 Effect Trait Classification</a></h3>
+<p>Effect traits are organized into three categories that determine implementation location and usage patterns.</p>
+<p>Infrastructure effects are foundational capabilities that every Aura system needs. These traits define OS-level operations that are universal across all use cases. Examples include <code>CryptoEffects</code>, <code>NetworkEffects</code>, <code>StorageEffects</code>, the time domain traits (<code>PhysicalTimeEffects</code>, <code>LogicalClockEffects</code>, <code>OrderClockEffects</code>, <code>TimeAttestationEffects</code>), and <code>RandomEffects</code>. These traits must have corresponding handlers in <code>aura-effects</code>. See <a href="106_effect_system_and_runtime.html">Effect System and Runtime</a> for implementation details.</p>
+<p>Application effects encode Aura-specific abstractions and business logic. These traits capture domain concepts meaningful only within Aura's architecture. Examples include <code>JournalEffects</code> (see <a href="102_journal.html">Journal System</a>), <code>AuthorityEffects</code> (see <a href="100_authority_and_identity.html">Authority and Identity</a>), <code>FlowBudgetEffects</code>, <code>LeakageEffects</code> (see <a href="003_information_flow_contract.html">Privacy and Information Flow</a>), and <code>AuthorizationEffects</code> (see <a href="109_authorization.html">Authorization</a>). These traits are implemented in their respective domain crates.</p>
+<p>Composite effects provide convenience methods that combine multiple lower-level operations. These are typically extension traits that add domain-specific convenience to infrastructure effects. Examples include <code>TreeEffects</code> and <code>LeakageChoreographyExt</code>.</p>
+<h3 id="33-handler-registration-and-interoperability-system"><a class="header" href="#33-handler-registration-and-interoperability-system">3.3 Handler Registration and Interoperability System</a></h3>
+<p>The handler registration system enables clean composition across crate boundaries without circular dependencies through a specialized 3-layer pattern within Layer 3 Implementation.</p>
+<h4 id="331-split-layer-3-architecture"><a class="header" href="#331-split-layer-3-architecture">3.3.1 Split Layer 3 Architecture</a></h4>
+<p><strong><code>aura-effects</code></strong> - Stateless Effect Implementations:</p>
+<ul>
+<li>Production handlers: <code>RealCryptoHandler</code>, <code>TcpNetworkHandler</code>, <code>FilesystemStorageHandler</code></li>
+<li>Each implements exactly one effect trait independently</li>
+<li>Pure input→output transformations with no internal state</li>
+<li>Reusable across any context (unit tests, integration tests, production)</li>
+</ul>
+<p><strong><code>aura-composition</code></strong> - Handler Assembly Infrastructure:</p>
+<ul>
+<li><code>EffectRegistry</code> and builder patterns for handler composition</li>
+<li>Handler lifecycle management (start/stop/configure)</li>
+<li>Bridges individual handlers into cohesive effect systems</li>
+<li>Focuses on "How do I assemble handlers?" not "How do I coordinate protocols?"</li>
+</ul>
+<h4 id="332-registration-flow-across-layers"><a class="header" href="#332-registration-flow-across-layers">3.3.2 Registration Flow Across Layers</a></h4>
+<p>The registration system enables composition without runtime overhead:</p>
+<pre><code>Layer 3 → Layer 4 → Layer 5 → Layer 6
+</code></pre>
+<ol>
+<li><strong>aura-effects</strong> provides stateless, single-party handlers</li>
+<li><strong>aura-composition</strong> assembles them via <code>EffectRegistry</code> and builder patterns</li>
+<li><strong>aura-protocol</strong> orchestrates multi-party coordination using assembled systems</li>
+<li><strong>Feature crates</strong> (Layer 5) compose handlers without pulling in runtime infrastructure</li>
+<li><strong>aura-agent</strong> (Layer 6) provides final runtime assembly for production deployment</li>
+</ol>
+<h4 id="333-effect-category-registration"><a class="header" href="#333-effect-category-registration">3.3.3 Effect Category Registration</a></h4>
+<p>The registration system handles the three effect categories differently:</p>
+<ul>
+<li><strong>Infrastructure Effects</strong>: Must have implementations in <code>aura-effects</code> (e.g., <code>CryptoEffects</code>, <code>NetworkEffects</code>)</li>
+<li><strong>Application Effects</strong>: Implemented in domain crates using composition of infrastructure effects (e.g., <code>JournalEffects</code>, <code>AuthorityEffects</code>)</li>
+<li><strong>Composite Effects</strong>: Often implemented as blanket implementations or extension traits</li>
+</ul>
+<h4 id="334-interoperability-benefits"><a class="header" href="#334-interoperability-benefits">3.3.4 Interoperability Benefits</a></h4>
+<p>This registration architecture provides:</p>
+<ul>
+<li><strong>Clean composition</strong>: Feature crates can assemble handlers without runtime dependencies</li>
+<li><strong>Zero circular dependencies</strong>: Strict layered dependency flow prevents architectural violations</li>
+<li><strong>Controlled assembly point</strong>: <code>aura-composition</code> acts as the bridge between stateless handlers and stateful coordination</li>
+<li><strong>Testing isolation</strong>: Mock handlers live in <code>aura-testkit</code>, maintaining clean separation from production code</li>
+<li><strong>Deployment flexibility</strong>: Production vs. simulation handler selection happens at runtime assembly</li>
+</ul>
+<h3 id="34-unified-time-system"><a class="header" href="#34-unified-time-system">3.4 Unified Time System</a></h3>
+<p>Aura consolidates time handling into a single <code>TimeStamp</code> enum with four domains:</p>
+<ul>
+<li><strong>PhysicalClock</strong>: milliseconds since UNIX epoch plus optional uncertainty, provided by <code>PhysicalTimeEffects</code>.</li>
+<li><strong>LogicalClock</strong>: vector clock plus Lamport scalar for causal ordering, advanced via <code>LogicalClockEffects</code>.</li>
+<li><strong>OrderClock</strong>: opaque, privacy-preserving total order token with no temporal meaning, produced by <code>OrderClockEffects</code>.</li>
+<li><strong>Range</strong>: validity window for constraints; composed with other domains where needed.</li>
+</ul>
+<p>An orthogonal provenance wrapper (<code>ProvenancedTime</code>) adds attestation proofs when consensus or multi-party validation is required via <code>TimeAttestationEffects</code>.</p>
+<p>Ordering across domains is explicit—call <code>TimeStamp::compare(policy)</code> for native partial ordering or deterministic tie-breaks. Facts store <code>TimeStamp</code> directly (legacy FactId removed), and guard/journal logic uses domain-appropriate timestamps:</p>
+<ul>
+<li>Transport/guards charge and log with <code>PhysicalClock</code>.</li>
+<li>CRDT coordination uses <code>LogicalClock</code>.</li>
+<li>Privacy-preserving ordering (e.g., gossip shuffles) uses <code>OrderClock</code>.</li>
+<li>Validity windows use <code>Range</code>.</li>
+</ul>
+<p>Effect handlers expose time through domain-specific traits; no direct <code>SystemTime::now()</code> calls are permitted outside effect implementations. Simulator/testkit provide deterministic implementations for all domains so simulations stay reproducible.</p>
+<h3 id="35-context-propagation-and-guard-integration"><a class="header" href="#35-context-propagation-and-guard-integration">3.5 Context Propagation and Guard Integration</a></h3>
+<p>The effect system propagates <code>EffectContext</code> through async tasks. The context carries authority identification, optional session context, and metadata without ambient state.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct EffectContext {
+    /// Authority performing the operation
+    pub authority_id: AuthorityId,
+
+    /// Session context (if any)
+    pub session_id: Option&lt;SessionId&gt;,
+
+    /// Additional metadata
+    pub metadata: HashMap&lt;String, String&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Context flows through all effect calls to enable authority identification and session tracking. The guard chain uses context values to enforce authorization and flow constraints before network operations.</p>
+<p>The effect runtime prepares a <code>GuardSnapshot</code> asynchronously, evaluates the guard chain synchronously to produce <code>EffectCommand</code> items, then interprets those commands asynchronously. Each choreography message expands to snapshot preparation, pure guard evaluation, command interpretation (charge, leak, journal), and transport sending. This ensures no observable behavior occurs without proper authorization and accounting.</p>
+<h3 id="35-impure-function-control"><a class="header" href="#35-impure-function-control">3.5 Impure Function Control</a></h3>
+<p>Aura ensures fully deterministic simulation by requiring all impure operations to flow through effect traits. Direct system calls are forbidden except in effect implementations, runtime assembly, and pure functions in <code>aura-core</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Forbidden: Direct impure function usage
+let now = SystemTime::now(); // Violation
+let random = thread_rng().gen::&lt;u64&gt;(); // Violation
+
+// Required: Effect trait usage with explicit context
+async fn my_operation&lt;T: TimeEffects + RandomEffects&gt;(
+    ctx: &amp;EffectContext,
+    effects: &amp;T,
+) -&gt; Result&lt;Data&gt; {
+    let timestamp = effects.current_time().await;
+    let nonce = effects.random_bytes(32).await?;
+    Ok(Data { timestamp, nonce })
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This ensures WASM compatibility, predictable testing, and simulation determinism. The architectural compliance checker validates these constraints across the codebase.</p>
+<h2 id="4-choreographic-protocol-system"><a class="header" href="#4-choreographic-protocol-system">4. Choreographic Protocol System</a></h2>
+<h3 id="41-global-protocol-specification"><a class="header" href="#41-global-protocol-specification">4.1 Global Protocol Specification</a></h3>
+<p>Choreographies define global interaction patterns from a bird's eye view. Aura extends <a href="107_mpst_and_choreography.html">multi-party session types</a> with capability guards, journal coupling, and leakage budgets.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>choreography! {
+    #[namespace = "ping_pong"]
+    protocol PingPong {
+        roles: Alice, Bob;
+        Alice[guard_capability = "send_ping", flow_cost = 5] -&gt; Bob: Ping(data: Vec&lt;u8&gt;);
+        Bob[guard_capability = "send_pong", flow_cost = 5] -&gt; Alice: Pong(response: Vec&lt;u8&gt;);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Global protocols are projected to local session types for each role. Projection ensures deadlock freedom and communication safety. Annotations specify capability requirements and flow costs that the guard chain enforces.</p>
+<h3 id="42-session-type-integration"><a class="header" href="#42-session-type-integration">4.2 Session Type Integration</a></h3>
+<p>Projection converts global choreographies into local session types that enforce structured communication patterns. Each local session type defines the exact sequence of sends and receives for a single role.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>#[async_trait]
+pub trait ChoreoHandler {
+    async fn send&lt;M&gt;(&amp;mut self, msg: &amp;M) -&gt; Result&lt;()&gt; where M: Serialize;
+    async fn recv&lt;M&gt;(&amp;mut self) -&gt; Result&lt;M&gt; where M: DeserializeOwned;
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The <code>AuraHandler</code> implements <code>ChoreoHandler</code> by mapping session operations to effect calls through <code>NetworkEffects</code>, <code>JournalEffects</code>, and other traits. Each send operation triggers the guard chain before actual transport.</p>
+<h3 id="43-extension-effects-and-annotations"><a class="header" href="#43-extension-effects-and-annotations">4.3 Extension Effects and Annotations</a></h3>
+<p>Choreographies support annotations that modify runtime behavior through extension effects. Capability annotations attach required capabilities to messages. Flow cost annotations specify budget costs. Journal annotations define facts to insert.</p>
+<p>Extension effects interpret these annotations to enforce authorization and accounting rules. Guard chains apply before each send based on the annotation requirements. This allows choreographies to express security policies declaratively.</p>
+<h2 id="5-consensus-integration-architecture"><a class="header" href="#5-consensus-integration-architecture">5. Consensus Integration Architecture</a></h2>
+<h3 id="51-single-shot-agreement-model"><a class="header" href="#51-single-shot-agreement-model">5.1 Single-Shot Agreement Model</a></h3>
+<p>Aura Consensus provides single-shot agreement for operations that cannot be expressed as monotone growth. Consensus produces a commit fact that is inserted into journals and drives deterministic reduction. The system does not maintain global logs.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct CommitFact {
+    /// Unique identifier for this consensus instance
+    pub consensus_id: ConsensusId,
+
+    /// Hash of the prestate this operation was bound to
+    pub prestate_hash: Hash32,
+
+    /// Hash of the operation that was agreed upon
+    pub operation_hash: Hash32,
+
+    /// The actual operation (serialized)
+    pub operation_bytes: Vec&lt;u8&gt;,
+
+    /// Threshold signature from witnesses
+    pub threshold_signature: ThresholdSignature,
+
+    /// List of authorities that participated
+    pub participants: Vec&lt;AuthorityId&gt;,
+
+    /// Threshold that was required
+    pub threshold: u16,
+
+    /// Timestamp of consensus completion (milliseconds since epoch)
+    pub timestamp_ms: u64,
+
+    /// Whether fast path was used
+    pub fast_path: bool,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Consensus instances use context-scoped committees with witnesses selected by authorities or relational contexts. Committee members may be offline. The protocol completes even under partitions through fast path and fallback mechanisms.</p>
+<h3 id="52-fast-path-and-fallback-protocol"><a class="header" href="#52-fast-path-and-fallback-protocol">5.2 Fast Path and Fallback Protocol</a></h3>
+<p>The fast path completes in one round trip when witnesses agree on prestate. The initiator broadcasts execute messages. Witnesses compute shares and return them. The initiator aggregates shares into threshold signatures.</p>
+<p>The fallback path uses epidemic gossip when witnesses disagree or initiators stall. Witnesses exchange share proposals through bounded fanout gossip. Any witness assembling valid threshold signatures broadcasts complete commit facts.</p>
+<h3 id="53-prestate-binding-and-integration"><a class="header" href="#53-prestate-binding-and-integration">5.3 Prestate Binding and Integration</a></h3>
+<p>Consensus binds operations to explicit prestates through hash commitments. The prestate hash commits to current reduced state of all participants. Witnesses verify local state matches prestate hash to prevent forks.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let prestate_hash = H(C_auth1, C_auth2, C_context);
+let operation_hash = H(Op);
+let consensus_id = ConsensusId::new(prestate_hash, operation_hash, nonce);
+<span class="boring">}</span></code></pre></pre>
+<p>The consensus identifier binds operations to prestates through the hash commitment. Witnesses treat matching consensus identifiers as belonging to the same consensus instance. This integration ensures consensus operations reference current authority and context state.</p>
+<h2 id="6-8-layer-crate-architecture"><a class="header" href="#6-8-layer-crate-architecture">6. 8-Layer Crate Architecture</a></h2>
+<h3 id="61-architectural-layering"><a class="header" href="#61-architectural-layering">6.1 Architectural Layering</a></h3>
+<p>The codebase follows strict 8-layer architecture with zero circular dependencies. Each layer builds on lower layers without reaching back down. This enables independent testing, reusability, and clear responsibility boundaries.</p>
+<p>Layer 1 Foundation contains <code>aura-core</code> with effect traits, domain types, cryptographic utilities (including FROST primitives in <code>crypto::tree_signing</code>), semilattice traits, and unified errors. Layer 2 Specification contains domain crates, <code>aura-mpst</code>, and <code>aura-macros</code> that define semantics without implementations. Layer 3 Implementation contains <code>aura-effects</code> and <code>aura-composition</code> for stateless handlers and composition infrastructure. The legacy <code>aura-frost</code> crate has been removed; higher-level ceremonies should be colocated with their callers and use the core primitives via adapters/effects.</p>
+<p>Layer 4 Orchestration contains <code>aura-protocol</code> for multi-party coordination and guard infrastructure. Layer 5 Feature contains protocol crates for authentication, recovery, rendezvous, and storage. Layer 6 Runtime contains <code>aura-agent</code> and <code>aura-simulator</code> for system assembly. Layer 7 Interface contains <code>aura-cli</code> for user applications. Layer 8 Testing contains <code>aura-testkit</code> and <code>aura-quint</code> for shared fixtures and verification.</p>
+<h3 id="62-code-location-decision-framework"><a class="header" href="#62-code-location-decision-framework">6.2 Code Location Decision Framework</a></h3>
+<p>Single-party operations belong in <code>aura-effects</code>. These are stateless, context-free implementations like <code>sign(key, msg)</code> or <code>store_chunk(id, data)</code>. Each handler implements one effect trait independently. Operations are reusable in any context.</p>
+<p>Handler composition belongs in <code>aura-composition</code>. This includes assembling individual handlers into cohesive systems through registries and builders. The focus is on handler assembly rather than protocol coordination.</p>
+<p>Multi-party coordination belongs in <code>aura-protocol</code>. These are stateful, context-specific orchestrations like <code>execute_anti_entropy</code> or <code>CrdtCoordinator</code>. Operations manage multiple handlers working together across network boundaries.</p>
+<h3 id="63-dependency-management"><a class="header" href="#63-dependency-management">6.3 Dependency Management</a></h3>
+<p>Dependencies flow downward through layers without cycles. <code>aura-core</code> has no dependencies on other Aura crates. Domain crates depend only on <code>aura-core</code>. Implementation crates depend on foundation and specification layers.</p>
+<p>Effect trait implementations follow the classification system. Infrastructure effects are implemented in <code>aura-effects</code>. Application effects are implemented in domain crates that encode business logic. Composite effects are implemented as extension traits.</p>
+<h2 id="7-implementation-guidelines"><a class="header" href="#7-implementation-guidelines">7. Implementation Guidelines</a></h2>
+<h3 id="71-effect-handler-development"><a class="header" href="#71-effect-handler-development">7.1 Effect Handler Development</a></h3>
+<p>New effect traits go into <code>aura-core</code> as interface definitions. Infrastructure effect implementations belong in <code>aura-effects</code> if they are stateless and single-party. Application effect implementations belong in domain crates if they encode Aura-specific business logic.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Infrastructure effect in aura-effects
+impl CryptoEffects for RealCryptoHandler {
+    async fn hash(&amp;self, data: &amp;[u8]) -&gt; [u8; 32] {
+        aura_core::hash::hash(data) // Pure function call
+    }
+}
+
+// Application effect in domain crate
+impl&lt;C: CryptoEffects, S: StorageEffects&gt; JournalEffects for JournalHandler&lt;C, S&gt; {
+    async fn append_fact(&amp;self, fact: Fact) -&gt; Result&lt;OrderTime&gt; {
+        self.validate_fact_semantics(&amp;fact)?; // Domain validation
+        let signature = self.crypto.sign(&amp;fact.hash()).await?;
+        self.storage.write_chunk(&amp;entry.id(), &amp;entry.encode()).await?;
+        Ok(entry.id())
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The distinction maintains clean separation between OS integration and domain logic. Infrastructure handlers provide universal capabilities. Domain handlers encode business rules specific to Aura.</p>
+<h3 id="72-protocol-design-patterns"><a class="header" href="#72-protocol-design-patterns">7.2 Protocol Design Patterns</a></h3>
+<p>Protocols should use choreographic specification where possible. Global types define complete interaction patterns. Projection generates local session types with compile-time safety guarantees.</p>
+<p>Guard chain integration happens through annotations rather than manual calls. Capability requirements, flow costs, and journal facts are declared in choreography specifications. The runtime enforces these automatically during projection.</p>
+<p>Context isolation is maintained through explicit <code>ContextId</code> scoping. Messages and capabilities are scoped to contexts. Budget charges and receipts reference context identifiers. No information flows across context boundaries without explicit bridges.</p>
+<h3 id="73-testing-and-simulation"><a class="header" href="#73-testing-and-simulation">7.3 Testing and Simulation</a></h3>
+<p>Testing uses mock effect handlers from <code>aura-testkit</code>. Mock handlers provide controllable, deterministic behavior for testing business logic. Production handlers are replaced with mocks that maintain testable state.</p>
+<p>Simulation uses <code>aura-simulator</code> for deterministic execution with virtual time and controlled failures. The simulator provides the same effect interfaces as production but with complete determinism for property testing.</p>
+<p>Both testing and simulation maintain the same architectural patterns as production. Effect traits provide abstraction boundaries. Guard chains enforce the same constraints. Context isolation remains intact.</p>
+<h2 id="documents-that-reference-this-guide"><a class="header" href="#documents-that-reference-this-guide">Documents That Reference This Guide</a></h2>
+<ul>
+<li><a href="106_effect_system_and_runtime.html">Effect System and Runtime</a> - Implementation details for the effect system architecture</li>
+<li><a href="805_development_patterns.html">Development Patterns and Workflows</a> - Practical application of architectural principles</li>
+<li><a href="999_project_structure.html">Project Structure</a> - Crate organization that implements this architecture</li>
+<li><a href="803_coordination_guide.html">Coordination Guide</a> - Protocol design patterns using these architectural components</li>
+<li><a href="107_mpst_and_choreography.html">MPST and Choreography</a> - Choreographic protocol design within this architecture</li>
+<li><a href="805_testing_guide.html">Testing Guide</a> - Testing patterns that leverage architectural boundaries</li>
+</ul>
+<h2 id="see-also"><a class="header" href="#see-also">See Also</a></h2>
+<p>Core documentation covers foundational concepts and formal models. <a href="002_theoretical_model.html">Theoretical Model</a> provides mathematical foundations. <a href="003_information_flow_contract.html">Privacy and Information Flow</a> documents the privacy framework. <a href="004_distributed_systems_contract.html">Distributed Systems Contract</a> specifies safety and liveness guarantees. <a href="005_system_invariants.html">System Invariants</a> indexes critical properties that must always hold.</p>
+<p>System documentation covers major components. <a href="100_authority_and_identity.html">Authority and Identity</a> describes the authority model. <a href="102_journal.html">Journal System</a> documents fact storage and reduction. <a href="103_relational_contexts.html">Relational Contexts</a> covers cross-authority relationships. <a href="104_consensus.html">Consensus</a> describes the agreement protocol.</p>
+<p>Implementation documentation covers practical patterns. <a href="106_effect_system_and_runtime.html">Effect System and Runtime</a> details effect implementation. <a href="107_mpst_and_choreography.html">MPST and Choreography</a> covers protocol design. <a href="109_authorization.html">Authorization</a> describes capability evaluation. <a href="999_project_structure.html">Project Structure</a> provides comprehensive crate organization.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="000_project_overview.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="002_theoretical_model.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="000_project_overview.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="002_theoretical_model.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

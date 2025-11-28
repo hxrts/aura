@@ -1,0 +1,724 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Coordination Systems Guide - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="coordination-systems-guide"><a class="header" href="#coordination-systems-guide">Coordination Systems Guide</a></h1>
+<p>This guide covers distributed coordination and privacy systems in Aura. You will learn CRDT programming patterns, commitment tree operations, web of trust relationships, flow budget management, session types, and basic choreographic programming.</p>
+<h2 id="crdt-programming"><a class="header" href="#crdt-programming">CRDT Programming</a></h2>
+<p>Conflict-free Replicated Data Types enable distributed applications to handle concurrent updates without coordination protocols. CRDTs use mathematical semilattice properties to ensure eventual consistency.</p>
+<p>Aura provides builder patterns for easy CRDT setup:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_protocol::effects::semilattice::CrdtCoordinator;
+
+// Simple state-based CRDT
+let coordinator = CrdtCoordinator::with_cv_state(device_id, initial_journal);
+
+// Delta CRDT with compaction threshold
+let coordinator = CrdtCoordinator::with_delta_threshold(device_id, 100);
+
+// Meet-semilattice for constraints
+let coordinator = CrdtCoordinator::with_mv_state(device_id, capability_set);
+<span class="boring">}</span></code></pre></pre>
+<p>The builder pattern eliminates manual handler registration. Each method creates appropriate handler types with sensible defaults. Coordinators integrate directly with choreographic protocols.</p>
+<h3 id="join-semilattices"><a class="header" href="#join-semilattices">Join Semilattices</a></h3>
+<p>Join semilattices accumulate knowledge through union operations:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_journal::semilattice::{Join, GCounterState};
+
+impl Join for GCounterState {
+    fn join(&amp;self, other: &amp;Self) -&gt; Self {
+        let mut merged_counts = self.device_counts.clone();
+
+        for (device_id, count) in &amp;other.device_counts {
+            let current_count = merged_counts.get(device_id).copied().unwrap_or(0);
+            merged_counts.insert(*device_id, current_count.max(*count));
+        }
+
+        GCounterState { device_counts: merged_counts }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Join operations merge device-specific contributions by taking maximum values. This ensures increments from all devices are preserved. The operation is associative, commutative, and idempotent.</p>
+<h3 id="meet-semilattices"><a class="header" href="#meet-semilattices">Meet Semilattices</a></h3>
+<p>Meet semilattices refine authority through intersection operations:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_wot::CapabilitySet;
+
+impl Meet for CapabilitySet {
+    fn meet(&amp;self, other: &amp;Self) -&gt; Self {
+        let intersection = self.capabilities.intersection(&amp;other.capabilities).cloned().collect();
+
+        CapabilitySet { capabilities: intersection }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Meet operations produce capability sets that are subsets of both inputs. This ensures conservative security where operations require explicit authorization from all sources.</p>
+<h3 id="crdt-integration"><a class="header" href="#crdt-integration">CRDT Integration</a></h3>
+<p>Integrate CRDTs with choreographic protocols:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::choreography::anti_entropy::execute_as_requester;
+
+let coordinator = CrdtCoordinator::with_cv_state(device_id, journal_state);
+
+let (result, updated_coordinator) = execute_anti_entropy(
+    device_id,
+    config,
+    is_requester,
+    &amp;effect_system,
+    coordinator,
+).await?;
+
+let synchronized_state = updated_coordinator.cv_handler().get_state();
+<span class="boring">}</span></code></pre></pre>
+<p>Protocols consume and return coordinators with updated state. This enables immutable data flow patterns where protocol execution produces new state versions.</p>
+<h2 id="commitment-tree-operations"><a class="header" href="#commitment-tree-operations">Commitment Tree Operations</a></h2>
+<p><a href="101_accounts_and_commitment_tree.html">Commitment trees</a> provide forward secrecy for group communication. The tree structure enables efficient key updates when group membership changes.</p>
+<h3 id="tree-structure"><a class="header" href="#tree-structure">Tree Structure</a></h3>
+<p>Commitment trees organize group members in a binary tree:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_journal::commitment_tree::{CommitmentTree, TreePosition};
+
+pub struct GroupCommitmentTree {
+    tree: CommitmentTree,
+    device_id: aura_core::DeviceId,
+    position: TreePosition,
+}
+
+impl GroupCommitmentTree {
+    pub fn add_member(&amp;mut self, new_member: aura_core::DeviceId) -&gt; Result&lt;TreeUpdate, RatchetError&gt; {
+        let new_position = self.tree.find_empty_leaf()?;
+        let update = self.tree.insert_member(new_position, new_member)?;
+
+        self.update_path_keys(&amp;update)?;
+
+        Ok(update)
+    }
+
+    pub fn remove_member(&amp;mut self, member: aura_core::DeviceId) -&gt; Result&lt;TreeUpdate, RatchetError&gt; {
+        let position = self.tree.find_member_position(member)?;
+        let update = self.tree.remove_member(position)?;
+
+        self.update_path_keys(&amp;update)?;
+
+        Ok(update)
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Member addition inserts devices at empty leaf positions. Member removal clears the device position and updates affected key paths. Tree updates maintain forward secrecy properties.</p>
+<h3 id="group-key-derivation"><a class="header" href="#group-key-derivation">Group Key Derivation</a></h3>
+<p>Derive group encryption keys from tree state:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::DerivedKeyContext;
+
+impl GroupCommitmentTree {
+    pub async fn derive_group_key&lt;E: CryptoEffects&gt;(
+        &amp;self,
+        effects: &amp;E,
+        epoch: u64,
+    ) -&gt; Result&lt;GroupKey, RatchetError&gt; {
+        let root_secret = self.tree.compute_root_secret()?;
+
+        let context = DerivedKeyContext {
+            app_id: "group_messaging".to_string(),
+            context: format!("epoch_{}", epoch),
+            derivation_path: vec![epoch],
+        };
+
+        let key_material = effects.derive_key(&amp;root_secret, &amp;context).await?;
+
+        Ok(GroupKey::from_material(key_material))
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Key derivation uses tree root secrets and epoch information. Each epoch produces different keys even with the same tree structure. This provides forward secrecy across time periods.</p>
+<h3 id="tree-synchronization"><a class="header" href="#tree-synchronization">Tree Synchronization</a></h3>
+<p>Synchronize tree state across group members:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_journal::commitment_tree::TreeOperation;
+
+pub async fn synchronize_commitment_tree&lt;E: NetworkEffects + CryptoEffects&gt;(
+    effects: &amp;E,
+    local_tree: &amp;mut GroupCommitmentTree,
+    peers: Vec&lt;aura_core::DeviceId&gt;,
+) -&gt; Result&lt;(), SynchronizationError&gt; {
+    let tree_state = local_tree.export_state();
+    let state_hash = effects.hash(&amp;tree_state.serialize()?).await?;
+
+    for peer in peers {
+        let sync_request = TreeSyncRequest {
+            state_hash: state_hash.clone(),
+            requesting_device: local_tree.device_id,
+        };
+
+        let request_bytes = bincode::serialize(&amp;sync_request)?;
+        effects.send_to_peer(peer.into(), request_bytes).await?;
+    }
+
+    let responses = collect_sync_responses(effects, peers.len()).await?;
+    let merged_operations = merge_tree_operations(responses)?;
+
+    for operation in merged_operations {
+        local_tree.apply_operation(operation)?;
+    }
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Tree synchronization exchanges state hashes to detect differences. Devices with different hashes exchange tree operations. Operations apply in causal order to maintain consistency.</p>
+<h2 id="web-of-trust"><a class="header" href="#web-of-trust">Web of Trust</a></h2>
+<p>Web of trust systems model relationships between devices for authorization decisions. Trust relationships enable capability delegation and reputation-based access control.</p>
+<h3 id="relationship-formation"><a class="header" href="#relationship-formation">Relationship Formation</a></h3>
+<p>Establish trust relationships through invitation protocols:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_invitation::relationship_formation::{RelationshipFormationConfig, execute_relationship_formation};
+
+pub async fn form_trust_relationship&lt;E: RelationshipFormationEffects&gt;(
+    effects: &amp;E,
+    config: RelationshipFormationConfig,
+) -&gt; Result&lt;TrustRelationship, RelationshipError&gt; {
+    let relationship = execute_relationship_formation(
+        config.initiator_id,
+        config.responder_id,
+        config,
+        effects,
+    ).await?;
+
+    Ok(relationship)
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Relationship formation requires mutual consent from both devices. The protocol establishes shared cryptographic material and initial trust levels. Successful formation creates bidirectional trust records.</p>
+<h3 id="trust-computation"><a class="header" href="#trust-computation">Trust Computation</a></h3>
+<p>Compute trust levels using direct and transitive relationships:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_wot::{TrustGraph, TrustLevel};
+
+pub struct DeviceTrustGraph {
+    relationships: BTreeMap&lt;(aura_core::DeviceId, aura_core::DeviceId), TrustLevel&gt;,
+}
+
+impl DeviceTrustGraph {
+    pub fn compute_trust_path(
+        &amp;self,
+        source: aura_core::DeviceId,
+        target: aura_core::DeviceId,
+        max_hops: usize,
+    ) -&gt; Option&lt;TrustLevel&gt; {
+        if source == target {
+            return Some(TrustLevel::Complete);
+        }
+
+        if let Some(direct_trust) = self.relationships.get(&amp;(source, target)) {
+            return Some(*direct_trust);
+        }
+
+        self.find_transitive_path(source, target, max_hops, &amp;mut BTreeSet::new())
+    }
+
+    fn find_transitive_path(
+        &amp;self,
+        current: aura_core::DeviceId,
+        target: aura_core::DeviceId,
+        remaining_hops: usize,
+        visited: &amp;mut BTreeSet&lt;aura_core::DeviceId&gt;,
+    ) -&gt; Option&lt;TrustLevel&gt; {
+        if remaining_hops == 0 || visited.contains(&amp;current) {
+            return None;
+        }
+
+        visited.insert(current);
+
+        let mut best_trust = None;
+
+        for ((source, intermediate), trust_level) in &amp;self.relationships {
+            if *source == current &amp;&amp; !visited.contains(intermediate) {
+                let onward_trust = self.find_transitive_path(*intermediate, target, remaining_hops - 1, visited);
+
+                if let Some(onward) = onward_trust {
+                    let path_trust = trust_level.attenuate(onward);
+
+                    best_trust = match best_trust {
+                        Some(current_best) =&gt; Some(current_best.max(path_trust)),
+                        None =&gt; Some(path_trust),
+                    };
+                }
+            }
+        }
+
+        visited.remove(&amp;current);
+        best_trust
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Trust computation considers both direct relationships and transitive paths. Transitive trust attenuates based on path length and intermediate trust levels. Maximum hop limits prevent infinite path exploration.</p>
+<h3 id="trust-based-authorization"><a class="header" href="#trust-based-authorization">Trust-Based Authorization</a></h3>
+<p>Use trust levels for authorization decisions:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_wot::{AuthorizationRequest, AuthorizationDecision};
+
+pub fn evaluate_trust_authorization(
+    request: &amp;AuthorizationRequest,
+    trust_graph: &amp;DeviceTrustGraph,
+    required_trust: TrustLevel,
+) -&gt; AuthorizationDecision {
+    let computed_trust = trust_graph.compute_trust_path(
+        request.requesting_device,
+        request.resource_owner,
+        MAX_TRUST_HOPS,
+    );
+
+    match computed_trust {
+        Some(trust_level) if trust_level &gt;= required_trust =&gt; {
+            AuthorizationDecision::Allow {
+                trust_level,
+                delegation_path: trust_graph.get_path(request.requesting_device, request.resource_owner),
+            }
+        }
+        Some(trust_level) =&gt; {
+            AuthorizationDecision::Deny {
+                reason: format!("Insufficient trust: {} &lt; {}", trust_level, required_trust),
+                computed_trust: trust_level,
+            }
+        }
+        None =&gt; {
+            AuthorizationDecision::Deny {
+                reason: "No trust path found".to_string(),
+                computed_trust: TrustLevel::None,
+            }
+        }
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Authorization evaluation computes trust paths between devices. Requests require minimum trust levels for approval. Authorization decisions include trust evidence for auditing.</p>
+<h2 id="flow-budget-management"><a class="header" href="#flow-budget-management">Flow Budget Management</a></h2>
+<p>Flow budgets control communication rates and privacy leakage. Budgets prevent spam attacks and limit metadata disclosure through traffic analysis. See <a href="108_transport_and_information_flow.html">Transport and Information Flow</a> for detailed implementation.</p>
+<h3 id="budget-structure"><a class="header" href="#budget-structure">Budget Structure</a></h3>
+<p>Flow budgets track spending per context and peer:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::{FlowBudget, ContextId};
+
+pub struct DeviceFlowBudgets {
+    budgets: BTreeMap&lt;(ContextId, aura_core::DeviceId), FlowBudget&gt;,
+    epoch: u64,
+}
+
+impl DeviceFlowBudgets {
+    pub fn charge_budget(
+        &amp;mut self,
+        context: &amp;ContextId,
+        peer: &amp;aura_core::DeviceId,
+        cost: u32,
+    ) -&gt; Result&lt;FlowBudget, BudgetError&gt; {
+        let key = (*context, *peer);
+        let budget = self.budgets.get_mut(&amp;key)
+            .ok_or(BudgetError::BudgetNotFound)?;
+
+        if budget.remaining() &lt; cost {
+            return Err(BudgetError::InsufficientBudget {
+                required: cost,
+                available: budget.remaining(),
+            });
+        }
+
+        budget.spend(cost);
+        Ok(*budget)
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Budget charging occurs before message transmission. Failed charges prevent unauthorized communication. Budget state persists across device restarts for consistency.</p>
+<h3 id="epoch-management"><a class="header" href="#epoch-management">Epoch Management</a></h3>
+<p>Epochs control budget replenishment periods:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>impl DeviceFlowBudgets {
+    pub fn advance_epoch(&amp;mut self, new_epoch: u64) -&gt; Result&lt;(), BudgetError&gt; {
+        if new_epoch &lt;= self.epoch {
+            return Ok(()); // Epoch already advanced
+        }
+
+        for budget in self.budgets.values_mut() {
+            budget.replenish_for_epoch(new_epoch);
+        }
+
+        self.epoch = new_epoch;
+        Ok(())
+    }
+
+    pub fn merge_epoch_updates(&amp;mut self, peer_epochs: Vec&lt;(aura_core::DeviceId, u64)&gt;) -&gt; Result&lt;(), BudgetError&gt; {
+        let max_peer_epoch = peer_epochs.iter().map(|(_, epoch)| *epoch).max().unwrap_or(self.epoch);
+
+        if max_peer_epoch &gt; self.epoch {
+            self.advance_epoch(max_peer_epoch)?;
+        }
+
+        Ok(())
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Epoch advancement replenishes budget limits. Devices synchronize epochs through peer communication. The highest observed epoch becomes the new local epoch for convergence.</p>
+<h3 id="privacy-leakage-control"><a class="header" href="#privacy-leakage-control">Privacy Leakage Control</a></h3>
+<p>Flow budgets limit privacy leakage through communication patterns:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_mpst::LeakageBudget;
+
+pub fn evaluate_privacy_cost(
+    message: &amp;ProtocolMessage,
+    context: &amp;ContextId,
+    recipient: &amp;aura_core::DeviceId,
+) -&gt; LeakageBudget {
+    let message_size = message.serialized_size();
+    let timing_leakage = calculate_timing_leakage(&amp;message.message_type);
+    let metadata_leakage = calculate_metadata_leakage(context, recipient);
+
+    LeakageBudget {
+        external_leakage: metadata_leakage,
+        neighbor_leakage: timing_leakage,
+        group_leakage: message_size / 1024, // Size-based group leakage
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Privacy costs depend on message content, timing patterns, and recipient relationships. Different context types have different leakage sensitivities. Budget enforcement prevents excessive information disclosure.</p>
+<h2 id="session-types-and-choreographic-programming"><a class="header" href="#session-types-and-choreographic-programming">Session Types and Choreographic Programming</a></h2>
+<p><a href="107_mpst_and_choreography.html">Choreographic programming</a> enables writing distributed protocols from a global perspective. Automatic projection generates local session types for each participant. For theoretical foundations, see <a href="002_theoretical_model.html">Theoretical Model</a>. This ensures protocol compliance and prevents communication errors.</p>
+<h3 id="rumpsteak-aura-integration"><a class="header" href="#rumpsteak-aura-integration">Rumpsteak-Aura Integration</a></h3>
+<p>Aura uses rumpsteak-aura for choreographic protocol implementation. The framework provides DSL parsing, projection, and effect-based execution. Protocol definitions compile to type-safe Rust implementations through <code>aura-macros</code>.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_macros::choreography;
+
+choreography! {
+    #[namespace = "simple_ping_pong"]
+    protocol PingPong {
+        roles: Alice, Bob;
+        Alice -&gt; Bob: Ping;
+        Bob -&gt; Alice: Pong;
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The <code>choreography!</code> macro extracts Aura-specific annotations, then uses rumpsteak-aura's <code>parse_choreography_str</code> for parsing and projection. Generated code creates extension effects for each annotation and integrates with rumpsteak-aura's session types. Protocol execution occurs through <code>AuraHandler</code> which implements <code>ChoreoHandler</code> and bridges to the Aura effect system.</p>
+<h3 id="session-types-from-choreographies"><a class="header" href="#session-types-from-choreographies">Session Types from Choreographies</a></h3>
+<p>Projection transforms global protocols into local session types automatically. The <code>aura-macros</code> crate generates role-specific session types using rumpsteak-aura's projection algorithms.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Generated code for each role
+type Alice_PingPong = Send&lt;Bob, Ping, Receive&lt;Bob, Pong, End&gt;&gt;;
+type Bob_PingPong = Receive&lt;Alice, Ping, Send&lt;Alice, Pong, End&gt;&gt;;
+<span class="boring">}</span></code></pre></pre>
+<p>Alice's projected type shows send then receive. Bob's projected type shows receive then send. Each role gets their specific protocol view with compile-time type safety.</p>
+<h3 id="effect-based-execution"><a class="header" href="#effect-based-execution">Effect-Based Execution</a></h3>
+<p>Protocols execute through rumpsteak-aura's interpreter using <code>AuraHandler</code>:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_mpst::{AuraHandler, AuraEndpoint};
+use rumpsteak_aura_choreography::effects::interpret_extensible;
+
+let mut handler = AuraHandler::for_testing(device_id)?;
+let mut endpoint = AuraEndpoint::new(context_id);
+
+// Execute protocol through rumpsteak-aura interpreter
+let result = interpret_extensible(&amp;mut handler, &amp;mut endpoint, program).await?;
+<span class="boring">}</span></code></pre></pre>
+<p>The <code>AuraHandler</code> implements <code>ChoreoHandler</code> and <code>ExtensibleHandler</code> to bridge rumpsteak-aura session types with Aura's effect system. Extension effects execute automatically for annotated messages, including capability guards, flow budgets, and journal coupling.</p>
+<h3 id="aura-choreography-extensions"><a class="header" href="#aura-choreography-extensions">Aura Choreography Extensions</a></h3>
+<p>Aura extends rumpsteak-aura with domain-specific annotations for security and performance:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_macros::choreography;
+
+choreography! {
+    #[namespace = "secure_request"]
+    protocol SecureRequest {
+        roles: Client, Server;
+
+        Client[guard_capability = "send_request", flow_cost = 50]
+        -&gt; Server: SendRequest(RequestData);
+
+        Server[guard_capability = "send_response", flow_cost = 30, journal_facts = "response_sent"]
+        -&gt; Client: SendResponse(ResponseData);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Annotations compile to extension effects that execute during protocol operations. The <code>guard_capability</code> annotation creates <code>CapabilityGuardEffect</code> instances that verify authorization before sending messages. The <code>flow_cost</code> annotation creates <code>FlowCostEffect</code> instances that charge privacy budgets. The <code>journal_facts</code> annotation creates <code>JournalFactsEffect</code> instances that update distributed state. All effects integrate seamlessly with rumpsteak-aura's extension system and execute automatically during choreographic operations.</p>
+<h3 id="protocol-composition"><a class="header" href="#protocol-composition">Protocol Composition</a></h3>
+<p>Choreographies compose through effect programs:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::choreography::anti_entropy::execute_as_requester;
+// TODO: Move threshold ceremony into core-aligned primitives; aura-frost is deprecated
+// use aura_frost::threshold_ceremony::execute_threshold_ceremony;
+
+let composed_protocol = Program::new()
+    .ext(ValidateCapability {
+        capability: "coordinate".into(),
+        role: Coordinator
+    })
+    .then(anti_entropy_program)
+    .then(threshold_ceremony_program)
+    .ext(LogEvent {
+        event: "protocols_complete".into()
+    })
+    .end();
+<span class="boring">}</span></code></pre></pre>
+<p>Protocol composition enables building complex distributed operations. Extensions provide cross-cutting concerns like validation and logging.</p>
+<h2 id="integration-patterns"><a class="header" href="#integration-patterns">Integration Patterns</a></h2>
+<p>Coordination systems integrate to provide comprehensive distributed functionality. CRDTs handle state consistency. Commitment trees provide forward secrecy. Web of trust enables authorization. Flow budgets control privacy and performance.</p>
+<p>Combine these systems for robust distributed applications:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_agent::AuraAgent;
+
+pub async fn create_coordinated_application(
+    device_id: aura_core::DeviceId,
+    config: CoordinationConfig,
+) -&gt; Result&lt;CoordinatedApp, ApplicationError&gt; {
+    let agent = AuraAgent::for_production(device_id)?;
+    agent.initialize().await?;
+
+    let coordination_systems = CoordinationSystems::new(agent, config)?;
+    let app = CoordinatedApp::new(coordination_systems);
+
+    Ok(app)
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Integrated coordination provides security, consistency, and privacy guarantees. Applications build on proven distributed systems patterns. See <a href="001_system_architecture.html">System Architecture</a> for complete system integration.</p>
+<p>Continue with <a href="804_advanced_coordination_guide.html">Advanced Choreography Guide</a> for sophisticated protocol development. Learn comprehensive testing in <a href="805_testing_guide.html">Testing Guide</a> and <a href="806_simulation_guide.html">Simulation Guide</a>.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="802_core_systems_guide.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="804_advanced_coordination_guide.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="802_core_systems_guide.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="804_advanced_coordination_guide.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

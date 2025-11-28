@@ -1,0 +1,621 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Relational Contexts - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="relational-contexts"><a class="header" href="#relational-contexts">Relational Contexts</a></h1>
+<p>This document describes the architecture of relational contexts in Aura. It explains how cross-authority relationships are represented using dedicated context namespaces. It defines the structure of relational facts and the role of <a href="104_consensus.html">Aura Consensus</a> in producing agreed relational state. It also describes privacy boundaries and the interpretation of relational data by participating authorities.</p>
+<h2 id="1-relationalcontext-abstraction"><a class="header" href="#1-relationalcontext-abstraction">1. RelationalContext Abstraction</a></h2>
+<p>A relational context is shared state linking two or more authorities. A relational context has its own <a href="102_journal.html">journal</a> namespace. A relational context does not expose internal authority structure. A relational context contains only the facts that the participating authorities choose to share.</p>
+<p>A relational context is identified by a <code>ContextId</code>. Authorities publish relational facts inside the context journal. The context journal is a join semilattice under set union. Reduction produces a deterministic relational state.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ContextId(Uuid);
+<span class="boring">}</span></code></pre></pre>
+<p>This identifier selects the journal namespace for a relational context. It does not encode participant information. It does not reveal the type of relationship. Only the participants know how the context is used.</p>
+<h2 id="2-participants-and-fact-store"><a class="header" href="#2-participants-and-fact-store">2. Participants and Fact Store</a></h2>
+<p>A relational context has a defined set of participating authorities. This set is not encoded in the <code>ContextId</code>. Participation is expressed by writing relational facts to the context journal. Each fact references the commitments of the participating authorities.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub enum RelationalFact {
+    GuardianBinding { account_commitment: Hash32, guardian_commitment: Hash32, parameters: Vec&lt;u8&gt; },
+    RecoveryGrant { account_commitment_old: Hash32, account_commitment_new: Hash32, guardian_commitment: Hash32, operation: Vec&lt;u8&gt; },
+    Generic { payload: Vec&lt;u8&gt;, bindings: Vec&lt;Hash32&gt; },
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This fact model covers guardian configuration, recovery, and general relational operations. Each fact is self contained. Each fact carries enough information for reduction to produce relational state.</p>
+<p>The <code>Generic</code> variant is the extensible pattern for new fact types. Applications should use <code>Generic</code> to define context specific bindings. Do not add new enum variants to <code>RelationalFact</code> for each use case. Instead encode the operation type and schema information in the <code>payload</code> field. This design supports unbounded application extensibility without modifying the core fact model.</p>
+<h2 id="3-prestate-model"><a class="header" href="#3-prestate-model">3. Prestate Model</a></h2>
+<p>Relational context operations use a prestate model. Aura Consensus verifies that all witnesses see the same authority states. The prestate hash binds the relational fact to current authority states.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let prestate_hash = H(C_auth1, C_auth2, C_context);
+<span class="boring">}</span></code></pre></pre>
+<p>This hash represents the commitments of the authorities and the current context. Aura Consensus witnesses check this hash before producing shares. The final commit fact includes a threshold signature over the relational operation.</p>
+<h2 id="4-types-of-relational-contexts"><a class="header" href="#4-types-of-relational-contexts">4. Types of Relational Contexts</a></h2>
+<p>Several categories of relational contexts appear in Aura. Each fact type carries a well-defined schema to ensure deterministic reduction.</p>
+<h3 id="guardianconfigcontext"><a class="header" href="#guardianconfigcontext">GuardianConfigContext</a></h3>
+<p>Stores <code>GuardianBinding</code> facts:</p>
+<pre><code class="language-json">{
+  "type": "GuardianBinding",
+  "account_commitment": "Hash32",
+  "guardian_commitment": "Hash32",
+  "parameters": {
+    "recovery_delay_secs": 86400,
+    "notification_required": true
+  },
+  "consensus_commitment": "Hash32",
+  "consensus_proof": "ThresholdSignature"
+}
+</code></pre>
+<ul>
+<li><code>account_commitment</code>: reduced commitment of the protected authority.</li>
+<li><code>guardian_commitment</code>: reduced commitment of the guardian authority.</li>
+<li><code>parameters</code>: serialized GuardianParameters (delay, notification policy, etc.).</li>
+<li><code>consensus_commitment</code>: commitment hash of the Aura Consensus instance that approved the binding.</li>
+<li><code>consensus_proof</code>: aggregated signature from the witness set.</li>
+</ul>
+<h3 id="guardianrecoverycontext"><a class="header" href="#guardianrecoverycontext">GuardianRecoveryContext</a></h3>
+<p>Stores <code>RecoveryGrant</code> facts:</p>
+<pre><code class="language-json">{
+  "type": "RecoveryGrant",
+  "account_commitment_old": "Hash32",
+  "account_commitment_new": "Hash32",
+  "guardian_commitment": "Hash32",
+  "operation": {
+    "kind": "ReplaceTree",
+    "payload": "Base64(TreeOp)"
+  },
+  "consensus_commitment": "Hash32",
+  "consensus_proof": "ThresholdSignature"
+}
+</code></pre>
+<ul>
+<li><code>account_commitment_old/new</code>: before/after commitments for the account authority.</li>
+<li><code>guardian_commitment</code>: guardian authority that approved the grant.</li>
+<li><code>operation</code>: serialized recovery operation (matches TreeOp schema).</li>
+<li><code>consensus_*</code>: Aura Consensus identifiers tying the grant to witness approvals.</li>
+</ul>
+<h3 id="generic--application-contexts"><a class="header" href="#generic--application-contexts">Generic / Application Contexts</a></h3>
+<p>Shared group or project contexts can store application-defined facts:</p>
+<pre><code class="language-json">{
+  "type": "Generic",
+  "payload": "Base64(opaque application data)",
+  "bindings": ["Hash32 commitment of participant A", "Hash32 commitment of participant B"],
+  "labels": ["project:alpha", "role:reviewer"]
+}
+</code></pre>
+<p>Generic facts should include enough metadata (<code>bindings</code>, optional labels) for interpreters to apply context-specific rules.</p>
+<h2 id="5-relational-facts"><a class="header" href="#5-relational-facts">5. Relational Facts</a></h2>
+<p>Relational facts express specific cross-authority operations. A <code>GuardianBinding</code> fact defines the guardian authority for an account. A <code>RecoveryGrant</code> fact defines an allowed update to the account state. A <code>Generic</code> fact covers application defined interactions. Consensus-backed facts include the <code>consensus_commitment</code> and aggregated signature so reducers can verify provenance even after witnesses rotate.</p>
+<p>Reduction applies all relational facts to produce relational state. Reduction verifies that authority commitments in each fact match the current reduced state of each authority.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct RelationalState {
+    pub bindings: Vec&lt;RelationalFact&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure represents the reduced relational state. It contains the relational facts relevant to the context. Reduction removes superseded relational facts when necessary.</p>
+<h2 id="6-aura-consensus-in-relational-contexts"><a class="header" href="#6-aura-consensus-in-relational-contexts">6. Aura Consensus in Relational Contexts</a></h2>
+<p>Some relational operations require strong agreement. <a href="104_consensus.html">Aura Consensus</a> produces these operations. Aura Consensus uses a witness set drawn from participating authorities. Witnesses compute shares after verifying the prestate hash.</p>
+<p>Commit facts contain threshold signatures. Each commit fact is inserted into the relational context journal. Reduction interprets the commit fact as a confirmed relational operation.</p>
+<p>Aura Consensus binds relational operations to authority state. After consensus completes, the initiator inserts a <code>CommitFact</code> into the relational context journal that includes:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct RelationalCommitFact {
+    pub context_id: ContextId,
+    pub consensus_commitment: Hash32, // H(Op, prestate)
+    pub fact: RelationalFact,         // GuardianBinding, RecoveryGrant, etc.
+    pub aggregated_signature: ThresholdSignature,
+    pub attesters: BTreeSet&lt;AuthorityId&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Reducers validate <code>aggregated_signature</code> before accepting the embedded <code>RelationalFact</code>. This mirrors the account-level process but scoped to the context namespace.</p>
+<h2 id="7-interpretation-of-relational-state"><a class="header" href="#7-interpretation-of-relational-state">7. Interpretation of Relational State</a></h2>
+<p>Authorities interpret relational state by reading the relational context journal. An account reads <code>GuardianBinding</code> facts to determine its guardian authority. A guardian authority reads the same facts to determine which accounts it protects.</p>
+<p>Other relational contexts follow similar patterns. Each context defines its own interpretation rules. No context affects authority internal structure. Context rules remain confined to the specific relationship.</p>
+<h2 id="8-privacy-and-isolation"><a class="header" href="#8-privacy-and-isolation">8. Privacy and Isolation</a></h2>
+<p>A relational context does not reveal its participants. The <code>ContextId</code> is opaque. Only participating authorities know the relationship. No external party can infer connections between authorities based on context identifiers.</p>
+<p>Profile information shared inside a context stays local to that context. Display names and contact attributes do not leave the context journal. Each context forms a separate identity boundary. Authorities can maintain many unrelated relationships without cross linking.</p>
+<h2 id="9-implementation-patterns"><a class="header" href="#9-implementation-patterns">9. Implementation Patterns</a></h2>
+<p>The implementation in <code>aura-relational</code> provides concrete patterns for working with relational contexts.</p>
+<h3 id="creating-and-managing-contexts"><a class="header" href="#creating-and-managing-contexts">Creating and Managing Contexts</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::relational::RelationalFact;
+use aura_core::{AuthorityId, ContextId};
+use aura_relational::RelationalContext;
+
+// Create a new guardian-account relational context
+let account_authority = AuthorityId::new();
+let guardian_authority = AuthorityId::new();
+
+let context = RelationalContext::new(vec![account_authority, guardian_authority]);
+
+// Or use a specific context ID
+let context_id = ContextId::new();
+let context = RelationalContext::with_id(
+    context_id,
+    vec![account_authority, guardian_authority],
+);
+
+// Check participation
+assert!(context.is_participant(&amp;account_authority));
+assert!(context.is_participant(&amp;guardian_authority));
+<span class="boring">}</span></code></pre></pre>
+<h3 id="guardian-binding-pattern"><a class="header" href="#guardian-binding-pattern">Guardian Binding Pattern</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::relational::{GuardianBinding, GuardianParameters};
+use std::time::Duration;
+use chrono::Utc;
+
+// Pattern 1: Using the builder (recommended)
+let binding = GuardianBindingBuilder::new()
+    .account(account_commitment)
+    .guardian(guardian_commitment)
+    .recovery_delay(Duration::from_secs(24 * 60 * 60)) // 24 hours
+    .notification_required(true)
+    .expires_at(Utc::now() + chrono::Duration::days(365))
+    .build()?;
+
+// Add to context
+context.add_fact(RelationalFact::GuardianBinding(binding))?;
+
+// Pattern 2: Direct construction
+let params = GuardianParameters {
+    recovery_delay: Duration::from_secs(86400),
+    notification_required: true,
+    expiration: Some(Utc::now() + chrono::Duration::days(365)),
+};
+
+let binding = GuardianBinding::new(
+    Hash32::from_bytes(&amp;account_authority.to_bytes()),
+    Hash32::from_bytes(&amp;guardian_authority.to_bytes()),
+    params,
+);
+
+context.add_fact(RelationalFact::GuardianBinding(binding))?;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="recovery-grant-pattern"><a class="header" href="#recovery-grant-pattern">Recovery Grant Pattern</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::relational::{RecoveryGrant, RecoveryOp, ConsensusProof};
+
+// Construct a recovery operation
+let recovery_op = RecoveryOp::AddDevice {
+    device_public_key: new_device_pubkey.to_bytes(),
+};
+
+// Create recovery grant (requires consensus proof)
+let grant = RecoveryGrant {
+    account_old: old_tree_commitment,
+    account_new: new_tree_commitment,
+    guardian: guardian_commitment,
+    operation: recovery_op,
+    consensus_proof: consensus_result.proof, // From Aura Consensus
+};
+
+// Add to recovery context
+recovery_context.add_fact(RelationalFact::RecoveryGrant(grant))?;
+
+// Check operation type
+if grant.operation.is_emergency() {
+    // Handle emergency operations immediately
+    execute_emergency_recovery(&amp;grant)?;
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="query-patterns"><a class="header" href="#query-patterns">Query Patterns</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Query guardian bindings
+let bindings = context.guardian_bindings();
+for binding in bindings {
+    println!("Guardian: {:?}", binding.guardian_commitment);
+    println!("Recovery delay: {:?}", binding.parameters.recovery_delay);
+
+    if let Some(expiration) = binding.parameters.expiration {
+        if expiration &lt; Utc::now() {
+            // Binding has expired
+        }
+    }
+}
+
+// Find specific guardian binding
+if let Some(binding) = context.get_guardian_binding(account_authority) {
+    // Found guardian for this account
+    let guardian_id = binding.guardian_commitment;
+}
+
+// Query recovery grants
+let grants = context.recovery_grants();
+for grant in grants {
+    println!("Operation: {}", grant.operation.description());
+    println!("From: {:?} -&gt; To: {:?}", grant.account_old, grant.account_new);
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="generic-binding-pattern"><a class="header" href="#generic-binding-pattern">Generic Binding Pattern</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::relational::{GenericBinding, RelationalFact};
+
+// Application-specific binding (e.g., project collaboration)
+let binding_data = serde_json::to_vec(&amp;ProjectMetadata {
+    name: "Alpha Project",
+    role: "Reviewer",
+    permissions: vec!["read", "comment"],
+})?;
+
+let generic = GenericBinding {
+    binding_type: "project_collaboration".to_string(),
+    binding_data,
+    consensus_proof: None,
+};
+
+context.add_fact(RelationalFact::Generic(generic))?;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="prestate-computation-pattern"><a class="header" href="#prestate-computation-pattern">Prestate Computation Pattern</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::Prestate;
+
+// Collect current authority commitments
+let authority_commitments = vec![
+    (account_authority, account_tree_commitment),
+    (guardian_authority, guardian_tree_commitment),
+];
+
+// Compute prestate for consensus
+let prestate = context.compute_prestate(authority_commitments);
+
+// Use prestate in consensus protocol
+let consensus_result = run_consensus(
+    prestate,
+    operation_data,
+    witness_set,
+).await?;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="journal-commitment-pattern"><a class="header" href="#journal-commitment-pattern">Journal Commitment Pattern</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Get deterministic commitment of current relational state
+let commitment = context.journal.compute_commitment();
+
+// Commitment is deterministic - all replicas compute same value
+// Used for:
+// - Prestate computation in consensus
+// - Context verification
+// - Anti-entropy sync checkpoints
+<span class="boring">}</span></code></pre></pre>
+<h3 id="integration-with-aura-consensus"><a class="header" href="#integration-with-aura-consensus">Integration with Aura Consensus</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::relational::ConsensusProof;
+use aura_relational::run_consensus;
+
+// 1. Prepare operation requiring consensus
+let binding = GuardianBindingBuilder::new()
+    .account(account_commitment)
+    .guardian(guardian_commitment)
+    .build()?;
+
+// 2. Compute prestate
+let prestate = context.compute_prestate(authority_commitments);
+
+// 3. Run consensus
+let consensus_proof = run_consensus(
+    prestate,
+    serde_json::to_vec(&amp;binding)?,
+    witness_set,
+).await?;
+
+// 4. Attach proof to fact
+let binding_with_proof = GuardianBinding {
+    consensus_proof: Some(consensus_proof),
+    ..binding
+};
+
+// 5. Add to context
+context.add_fact(RelationalFact::GuardianBinding(binding_with_proof))?;
+<span class="boring">}</span></code></pre></pre>
+<h3 id="recovery-operation-selection"><a class="header" href="#recovery-operation-selection">Recovery Operation Selection</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_core::relational::RecoveryOp;
+
+// Select appropriate recovery operation
+let recovery_op = match recovery_scenario {
+    RecoveryScenario::LostAllDevices =&gt; RecoveryOp::ReplaceTree {
+        new_tree_root: new_tree_commitment,
+    },
+    RecoveryScenario::AddNewDevice =&gt; RecoveryOp::AddDevice {
+        device_public_key: device_key.to_bytes(),
+    },
+    RecoveryScenario::RemoveCompromised =&gt; RecoveryOp::RemoveDevice {
+        leaf_index: compromised_device_index,
+    },
+    RecoveryScenario::ChangeThreshold =&gt; RecoveryOp::UpdatePolicy {
+        new_threshold: new_m_of_n.0,
+    },
+    RecoveryScenario::EmergencyCompromise =&gt; RecoveryOp::EmergencyRotation {
+        new_epoch: current_epoch + 1,
+    },
+};
+
+// Emergency operations bypass delay
+if recovery_op.is_emergency() {
+    // No recovery_delay applied
+} else {
+    // Wait for binding.parameters.recovery_delay
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="best-practices"><a class="header" href="#best-practices">Best Practices</a></h3>
+<p><strong>Guardian Configuration:</strong></p>
+<ul>
+<li>Use 24-hour minimum recovery delay for security</li>
+<li>Always require notification unless emergency scenario</li>
+<li>Set expiration for temporary guardian relationships</li>
+<li>Rotate guardian bindings periodically</li>
+</ul>
+<p><strong>Recovery Grants:</strong></p>
+<ul>
+<li>Always require consensus proof for recovery operations</li>
+<li>Validate prestate commitments before accepting grants</li>
+<li>Log all recovery operations for audit trail</li>
+<li>Emergency operations should be rare and logged prominently</li>
+</ul>
+<p><strong>Generic Bindings:</strong></p>
+<ul>
+<li>Document binding_type schema externally</li>
+<li>Version your binding_data format</li>
+<li>Include consensus_proof for critical application bindings</li>
+<li>Keep binding_data size reasonable for sync performance</li>
+</ul>
+<p><strong>Context Management:</strong></p>
+<ul>
+<li>Use opaque ContextId - never encode participant info</li>
+<li>Limit participants to 2-10 authorities for efficiency</li>
+<li>Separate contexts for different relationship types</li>
+<li>Garbage collect expired bindings periodically</li>
+</ul>
+<h2 id="10-summary"><a class="header" href="#10-summary">10. Summary</a></h2>
+<p>Relational contexts represent cross-authority relationships in Aura. They provide shared state without revealing authority structure. They support guardian configuration, recovery, and application specific collaboration. Aura Consensus ensures strong agreement where needed. Deterministic reduction ensures consistent relational state. Privacy boundaries isolate each relationship from all others.</p>
+<p>The implementation provides concrete types (<code>RelationalContext</code>, <code>GuardianBinding</code>, <code>RecoveryGrant</code>) with builder patterns, query methods, and consensus integration. All relational facts are stored in a CRDT journal with deterministic commitment computation.</p>
+<h2 id="11-implementation-references"><a class="header" href="#11-implementation-references">11. Implementation References</a></h2>
+<ul>
+<li><strong>Core Types</strong>: <code>aura-core/src/relational/</code> - RelationalFact, GuardianBinding, RecoveryGrant, ConsensusProof domain types</li>
+<li><strong>Context Management</strong>: <code>aura-relational/src/lib.rs</code> - RelationalContext, RelationalJournal protocols</li>
+<li><strong>Consensus Integration</strong>: <code>aura-protocol/src/consensus/relational_consensus.rs</code> - consensus implementation</li>
+<li><strong>Consensus Adapter</strong>: <code>aura-relational/src/consensus_adapter.rs</code> - thin consensus delegation layer</li>
+<li><strong>Prestate Computation</strong>: <code>aura-core/src/lib.rs</code> - Prestate struct and methods</li>
+<li><strong>Protocol Usage</strong>: <code>aura-authenticate/src/guardian_auth_relational.rs</code> - Guardian authentication</li>
+<li><strong>Recovery Flows</strong>: <code>aura-recovery/src/</code> - Guardian recovery choreographies</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="102_journal.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="104_consensus.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="102_journal.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="104_consensus.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

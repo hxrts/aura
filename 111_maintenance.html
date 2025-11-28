@@ -1,0 +1,270 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Maintenance Guidelines - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="maintenance-guidelines"><a class="header" href="#maintenance-guidelines">Maintenance Guidelines</a></h1>
+<p>This document captures the operational practices required to keep Aura deployments healthy. It complements the architecture docs by explaining when to rotate epochs, prune journals, refresh capabilities, and upgrade handlers. The procedures below reference the canonical specs inside <code>docs/</code>.</p>
+<h2 id="journal-hygiene"><a class="header" href="#journal-hygiene">Journal Hygiene</a></h2>
+<ul>
+<li><strong>Snapshots and pruning</strong>: Follow the rules in <code>102_journal.md</code> and ``. Create <code>SnapshotFact</code> entries once the fact set grows beyond local thresholds, then garbage collect any fact dominated by the snapshot digest. Always keep the most recent two epochs of <code>FlowBudget</code> facts so charge reconciliation can survive transient partitions.</li>
+<li><strong>Receipts</strong>: Receipts described in <code>003_information_flow_contract.md</code> and <code>108_transport_and_information_flow.md</code> must be retained for at least one epoch after issuance so downstream auditors can validate relay behavior. When pruning, ensure that any receipt referenced by an in-progress recovery or rendezvous flow remains available.</li>
+</ul>
+<h2 id="epoch-and-key-rotation"><a class="header" href="#epoch-and-key-rotation">Epoch and Key Rotation</a></h2>
+<ul>
+<li><strong>Account epochs</strong>: As defined in <code>101_accounts_and_commitment tree.md</code>, rotate the commitment tree epoch whenever device membership changes, recovery completes, or stale capability exposure is suspected. Rotation invalidates derived context keys and forces FlowBudget counters to reset.</li>
+<li><strong>Context epochs</strong>: Relational contexts from <code>103_relational_contexts.md</code> should bump epochs when guardian membership changes or when rendezvous descriptors leak. All participants must renegotiate secure channels after the bump.</li>
+</ul>
+<h2 id="capability-and-budget-refresh"><a class="header" href="#capability-and-budget-refresh">Capability and Budget Refresh</a></h2>
+<ul>
+<li><strong>Biscuit cache invalidation</strong>: CapGuard implementations (<code>109_authorization.md</code>) must flush cached capability frontiers when journal policy facts change, when Biscuit revocation lists update, or when the authority rotates its root commitment.</li>
+<li><strong>Flow budget floors</strong>: Periodically recompute policy-derived <code>limit</code> values for dormant peers to ensure they never drop below the minimum floor required for liveness. Any manual overrides should be committed as new policy facts rather than local configuration.</li>
+</ul>
+<h2 id="relational-context-care"><a class="header" href="#relational-context-care">Relational Context Care</a></h2>
+<ul>
+<li><strong>Guardian bindings</strong>: Regularly audit <code>GuardianBinding</code> and <code>RecoveryGrant</code> facts per <code>103_relational_contexts.md</code> to confirm that guardian authorities remain reachable and that consensus proofs are still valid under the latest authority commitments.</li>
+<li><strong>Consensus transcripts</strong>: Aura Consensus commits described in <code>104_consensus.md</code> should be archived along with their evidence deltas. Before deleting old commit facts, confirm that every dependent reducer (account or context) has applied the commit and that no pending recovery references it.</li>
+</ul>
+<h2 id="runtime-and-handler-upgrades"><a class="header" href="#runtime-and-handler-upgrades">Runtime and Handler Upgrades</a></h2>
+<ul>
+<li><strong>Effect handlers</strong>: When upgrading handler crates referenced in <code>106_effect_system_and_runtime.md</code>, follow the lifecycle protocol—enter <code>shutting_down</code>, drain inflight work, apply the upgrade, then re-enter <code>ready</code>. This prevents dangling FlowGuard reservations.</li>
+<li><strong>Transport services</strong>: Rendezvous and guard-chain components (<code>108_transport_and_information_flow.md</code>, <code>108_rendezvous.md</code>) must be upgraded in lockstep so that new receipt formats or flow-cost policies remain consistent across peers. Always rotate rendezvous descriptors after a transport upgrade.</li>
+</ul>
+<h2 id="monitoring-checklist"><a class="header" href="#monitoring-checklist">Monitoring Checklist</a></h2>
+<p>Operators should monitor the following indicators:</p>
+<ol>
+<li><strong>Journal growth rate</strong> – ensure snapshots keep storage usage bounded.</li>
+<li><strong>FlowBudget spend vs limit</strong> – detect stuck contexts before budgets exhaust.</li>
+<li><strong>Consensus backlog</strong> – unexpected growth indicates witness or transport failure.</li>
+<li><strong>Receipt validation errors</strong> – may point to relay misbehavior or epoch drift.</li>
+<li><strong>Capability cache hit rate</strong> – excessively low values suggest churning policy facts.</li>
+</ol>
+<p>Keeping these maintenance routines in place ensures the architecture described throughout <code>docs/</code> remains reliable in production deployments.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="110_state_reduction.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="112_amp.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="110_state_reduction.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="112_amp.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

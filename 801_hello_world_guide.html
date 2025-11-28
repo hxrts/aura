@@ -1,0 +1,390 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Hello World Guide - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="hello-world-guide"><a class="header" href="#hello-world-guide">Hello World Guide</a></h1>
+<p>This guide gets you running with Aura in 15 minutes. You will build a simple ping-pong protocol, deploy it locally, and interact with it using the CLI.</p>
+<h2 id="setup"><a class="header" href="#setup">Setup</a></h2>
+<p>Aura uses Nix for reproducible builds. Install Nix with flakes support.</p>
+<p>Enter the development environment:</p>
+<pre><code class="language-bash">nix develop
+</code></pre>
+<p>This command activates all required tools and dependencies. The environment includes Rust, development tools, and build scripts.</p>
+<p>Build the project:</p>
+<pre><code class="language-bash">just build
+</code></pre>
+<p>The build compiles all Aura components and generates the CLI binary. This takes a few minutes on the first run.</p>
+<h2 id="hello-world-protocol"><a class="header" href="#hello-world-protocol">Hello World Protocol</a></h2>
+<p>Create a simple ping-pong choreography. This protocol demonstrates basic message exchange between two devices.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_macros::choreography;
+use aura_core::effects::{ConsoleEffects, NetworkEffects, TimeEffects};
+use serde::{Serialize, Deserialize};
+
+/// Sealed supertrait for ping-pong effects
+pub trait PingPongEffects: ConsoleEffects + NetworkEffects + TimeEffects {}
+impl&lt;T&gt; PingPongEffects for T where T: ConsoleEffects + NetworkEffects + TimeEffects {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ping {
+    pub message: String,
+    pub timestamp: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pong {
+    pub response: String,
+    pub timestamp: u64,
+}
+
+choreography! {
+    #[namespace = "hello_world"]
+    protocol HelloWorld {
+        roles: Alice, Bob;
+
+        Alice[guard_capability = "send_ping", flow_cost = 10]
+        -&gt; Bob: SendPing(Ping);
+
+        Bob[guard_capability = "send_pong", flow_cost = 10, journal_facts = "pong_sent"]
+        -&gt; Alice: SendPong(Pong);
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The choreography defines a global protocol. Alice sends a ping to Bob. Bob responds with a pong. <a href="109_authorization.html">Guard capabilities</a> control access and flow costs manage rate limiting.</p>
+<p>Implement the Alice session:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub async fn execute_alice_session&lt;E: PingPongEffects&gt;(
+    effects: &amp;E,
+    ping_message: String,
+    bob_device: aura_core::DeviceId,
+) -&gt; Result&lt;Pong, HelloWorldError&gt; {
+    let ping = Ping {
+        message: ping_message,
+        timestamp: effects.current_timestamp().await,
+    };
+
+    let ping_bytes = serde_json::to_vec(&amp;ping)?;
+    effects.send_to_peer(bob_device.into(), ping_bytes).await?;
+
+    let (peer_id, pong_bytes) = effects.receive().await?;
+    let pong: Pong = serde_json::from_slice(&amp;pong_bytes)?;
+
+    Ok(pong)
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Alice serializes the ping message and sends it to Bob. She then waits for Bob's response and deserializes the pong message. See <a href="106_effect_system_and_runtime.html">Effect System and Runtime</a> for details on effect-based execution.</p>
+<h2 id="local-deployment"><a class="header" href="#local-deployment">Local Deployment</a></h2>
+<p>Initialize a local Aura account:</p>
+<pre><code class="language-bash">just init-account
+</code></pre>
+<p>This command creates a 2-of-3 threshold account configuration. The account uses three virtual devices with a threshold of two signatures for operations.</p>
+<p>Check account status:</p>
+<pre><code class="language-bash">just status
+</code></pre>
+<p>The status command shows account health, device connectivity, and threshold configuration. All virtual devices should show as connected.</p>
+<p>Test key derivation:</p>
+<pre><code class="language-bash">just test-dkd my_app signing_context
+</code></pre>
+<p>This command tests the Distributed Key Derivation (DKD) protocol. The protocol derives cryptographic keys across multiple devices without revealing private key shares.</p>
+<h2 id="cli-interaction"><a class="header" href="#cli-interaction">CLI Interaction</a></h2>
+<p>The Aura CLI provides commands for account management and protocol testing. These commands demonstrate core functionality.</p>
+<p>View account information:</p>
+<pre><code class="language-bash">aura status --verbose
+</code></pre>
+<p>This shows detailed account state including journal facts, capability sets, and trust relationships. The journal contains all distributed state updates.</p>
+<p>Run a threshold signature test:</p>
+<pre><code class="language-bash">aura threshold-test --message "hello world" --threshold 2
+</code></pre>
+<p>The threshold test coordinates signature generation across virtual devices. Two devices must participate to create a valid signature.</p>
+<p>View recent protocol activity:</p>
+<pre><code class="language-bash">aura journal-query --limit 10
+</code></pre>
+<p>This command shows recent journal entries created by protocol execution. Each entry represents a state change with cryptographic verification.</p>
+<h2 id="testing-your-protocol"><a class="header" href="#testing-your-protocol">Testing Your Protocol</a></h2>
+<p>Create a test script for the hello world protocol:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_macros::aura_test;
+use aura_testkit::*;
+use aura_agent::runtime::AuraEffectSystem;
+use aura_agent::AgentConfig;
+
+#[aura_test]
+async fn test_hello_world_protocol() -&gt; aura_core::AuraResult&lt;()&gt; {
+    // Create test fixture with automatic tracing
+    let fixture = create_test_fixture().await?;
+
+    // Create simple effect systems for testing
+    let alice_effects = AuraEffectSystem::testing(&amp;AgentConfig::default());
+    let bob_effects = AuraEffectSystem::testing(&amp;AgentConfig::default());
+
+    // Get device IDs for routing
+    let alice_device = fixture.create_device_id();
+    let bob_device = fixture.create_device_id();
+
+    let ping_message = "Hello Bob!".to_string();
+
+    // Run protocol sessions concurrently
+    let (alice_result, bob_result) = tokio::join!(
+        execute_alice_session(&amp;alice_effects, ping_message.clone(), bob_device),
+        execute_bob_session(&amp;bob_effects, ping_message.clone())
+    );
+
+    assert!(alice_result.is_ok(), "Alice session failed");
+    assert!(bob_result.is_ok(), "Bob session failed");
+
+    let pong = alice_result?;
+    assert!(pong.response.contains(&amp;ping_message));
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This test creates stateless effect systems for Alice and Bob using testing configuration. The systems are context-free and provide deterministic behavior for testing protocol logic. For comprehensive testing approaches, see <a href="805_testing_guide.html">Testing Guide</a>.</p>
+<p>Run the test:</p>
+<pre><code class="language-bash">cargo test test_hello_world_protocol
+</code></pre>
+<p>The test validates protocol correctness without requiring network infrastructure. Mock handlers provide deterministic behavior for testing.</p>
+<h2 id="understanding-system-invariants"><a class="header" href="#understanding-system-invariants">Understanding System Invariants</a></h2>
+<p>As you develop protocols, be aware of Aura's system invariants - properties that must always hold true:</p>
+<ul>
+<li><strong>Charge-Before-Send</strong>: All messages pass through the guard chain before network transmission</li>
+<li><strong>CRDT Convergence</strong>: Identical facts always produce identical state</li>
+<li><strong>Context Isolation</strong>: Information stays within relational context boundaries</li>
+<li><strong>Secure Channel Lifecycle</strong>: Channels are epoch-bound and follow strict state transitions</li>
+</ul>
+<p>See <a href="005_system_invariants.html">System Invariants</a> for details. When developing, ensure your protocols respect these invariants to maintain system integrity.</p>
+<h2 id="next-steps"><a class="header" href="#next-steps">Next Steps</a></h2>
+<p>You now have a working Aura development environment. The hello world protocol demonstrates basic choreographic programming concepts.</p>
+<p>Continue with <a href="802_core_systems_guide.html">Core Systems Guide</a> to learn about effect systems, authentication, and capabilities. Learn advanced coordination patterns in <a href="803_coordination_guide.html">Coordination Systems Guide</a>. For detailed protocol development, see <a href="107_mpst_and_choreography.html">MPST and Choreography</a>.</p>
+<p>Explore the simulation system in <a href="805_testing_guide.html">Testing Guide</a> and <a href="806_simulation_guide.html">Simulation Guide</a> for comprehensive protocol testing approaches.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="114_frost_pipelining_optimization.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="802_core_systems_guide.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="114_frost_pipelining_optimization.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="802_core_systems_guide.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

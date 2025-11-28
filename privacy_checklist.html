@@ -1,0 +1,500 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Privacy-by-Design Checklist - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="privacy-by-design-checklist"><a class="header" href="#privacy-by-design-checklist">Privacy-by-Design Checklist</a></h1>
+<p>This checklist helps developers ensure that new transport and communication code follows Aura's privacy-by-design principles.</p>
+<h2 id="pre-development"><a class="header" href="#pre-development">Pre-Development</a></h2>
+<p>Before writing new transport-related code, review:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<a href="003_information_flow_contract.html">Information Flow Contract</a> - Privacy guarantees and leakage budgets</li>
+<li><input disabled="" type="checkbox"/>
+<a href="108_transport_and_information_flow.html">Transport and Information Flow</a> - Privacy patterns and guard chain integration</li>
+<li><input disabled="" type="checkbox"/>
+<a href="103_relational_contexts.html">Context Isolation</a> - Relationship and context boundaries</li>
+<li><input disabled="" type="checkbox"/>
+<code>crates/aura-transport/src/</code> - Reference implementation with privacy-by-design</li>
+</ul>
+<h2 id="design-phase"><a class="header" href="#design-phase">Design Phase</a></h2>
+<h3 id="message-envelope-design"><a class="header" href="#message-envelope-design">Message Envelope Design</a></h3>
+<p>When designing message formats:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<strong>Context Scoping</strong>: Every message has explicit <code>ContextId</code> or <code>RelationshipId</code></li>
+<li><input disabled="" type="checkbox"/>
+<strong>Privacy Level</strong>: Message specifies privacy level (<code>Clear</code>, <code>Blinded</code>, <code>RelationshipScoped</code>)</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Minimal Headers</strong>: Only essential routing metadata in frame headers</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Capability Blinding</strong>: Capability requirements blinded before network transmission</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Fixed Sizes</strong>: Consider padding to prevent size-based correlation</li>
+</ul>
+<h3 id="peer-selection"><a class="header" href="#peer-selection">Peer Selection</a></h3>
+<p>When implementing peer selection:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<strong>Criteria Blinding</strong>: Selection criteria never exposed in clear text</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Privacy-Preserving Scoring</strong>: Scoring algorithm doesn't leak weights or thresholds</li>
+<li><input disabled="" type="checkbox"/>
+<strong>No Rejection Logging</strong>: Rejected candidates not logged or exposed</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Generic Reasons</strong>: Selection reasons use categories, not specific requirements</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Relationship Scoping</strong>: Selection restricted to appropriate relationship context</li>
+</ul>
+<h3 id="connection-management"><a class="header" href="#connection-management">Connection Management</a></h3>
+<p>When managing connections:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<strong>Context Binding</strong>: One connection per <code>(ContextId, peer)</code> pair</li>
+<li><input disabled="" type="checkbox"/>
+<strong>No Cross-Context</strong>: Connection state never shared between contexts</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Epoch Awareness</strong>: Connections torn down on context epoch changes</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Re-keying</strong>: Fresh key derivation after epoch rotation</li>
+<li><input disabled="" type="checkbox"/>
+<strong>State Isolation</strong>: No correlation between connections in different contexts</li>
+</ul>
+<h2 id="implementation-phase"><a class="header" href="#implementation-phase">Implementation Phase</a></h2>
+<h3 id="code-review"><a class="header" href="#code-review">Code Review</a></h3>
+<p>Before submitting code:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<strong>No Plaintext Capabilities</strong>: Capability names never sent unencrypted</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Generic Errors</strong>: Error messages don't reveal relationship structure</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Blinded Hints</strong>: All capability/requirement hints blinded</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Budget Compliance</strong>: All sends go through FlowGuard</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Leakage Tracking</strong>: Metadata exposure accounted in LeakageTracker</li>
+</ul>
+<h3 id="privacy-pitfalls"><a class="header" href="#privacy-pitfalls">Privacy Pitfalls</a></h3>
+<p>Verify you are NOT doing these:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+❌ Logging detailed capability requirements</li>
+<li><input disabled="" type="checkbox"/>
+❌ Exposing relationship membership in errors or logs</li>
+<li><input disabled="" type="checkbox"/>
+❌ Reusing connection IDs across contexts</li>
+<li><input disabled="" type="checkbox"/>
+❌ Sending capability names in clear text</li>
+<li><input disabled="" type="checkbox"/>
+❌ Creating timing side channels (e.g., different failure modes)</li>
+<li><input disabled="" type="checkbox"/>
+❌ Logging rejected peers or selection scores</li>
+<li><input disabled="" type="checkbox"/>
+❌ Correlating message sizes with content types</li>
+<li><input disabled="" type="checkbox"/>
+❌ Revealing context membership through observable behavior</li>
+</ul>
+<h3 id="privacy-best-practices"><a class="header" href="#privacy-best-practices">Privacy Best Practices</a></h3>
+<p>Verify you ARE doing these:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+✅ Using <code>Envelope::new_scoped()</code> for relationship messages</li>
+<li><input disabled="" type="checkbox"/>
+✅ Generic error messages ("authorization failed" not "missing: admin")</li>
+<li><input disabled="" type="checkbox"/>
+✅ Padding messages to fixed sizes where possible</li>
+<li><input disabled="" type="checkbox"/>
+✅ Rotating connection identifiers on epoch changes</li>
+<li><input disabled="" type="checkbox"/>
+✅ Blinding all capability hints before transmission</li>
+<li><input disabled="" type="checkbox"/>
+✅ Privacy-preserving peer selection scoring</li>
+<li><input disabled="" type="checkbox"/>
+✅ Context isolation in all state management</li>
+<li><input disabled="" type="checkbox"/>
+✅ No observable behavior differences between privacy levels</li>
+</ul>
+<h2 id="testing-phase"><a class="header" href="#testing-phase">Testing Phase</a></h2>
+<h3 id="unit-tests"><a class="header" href="#unit-tests">Unit Tests</a></h3>
+<p>Add tests for:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<strong>Context Isolation</strong>: Messages in context A not visible in context B</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Metadata Minimization</strong>: Only essential headers present</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Selection Privacy</strong>: Peer selection doesn't leak criteria</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Re-keying</strong>: Epoch changes trigger connection teardown</li>
+<li><input disabled="" type="checkbox"/>
+<strong>No Side Channels</strong>: Timing/size/errors don't leak information</li>
+</ul>
+<h3 id="integration-tests"><a class="header" href="#integration-tests">Integration Tests</a></h3>
+<p>Verify:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<strong>Guard Chain Integration</strong>: Sends go through CapGuard → FlowGuard → LeakageTracker → JournalCoupler</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Budget Enforcement</strong>: Over-budget sends blocked before network transmission</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Unauthorized Sends</strong>: Failed authorization produces no network traffic</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Context Boundaries</strong>: Cross-context sends rejected</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Receipt Generation</strong>: FlowBudget receipts created on successful sends</li>
+</ul>
+<h3 id="privacy-property-tests"><a class="header" href="#privacy-property-tests">Privacy Property Tests</a></h3>
+<p>Test privacy properties:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<strong>Unlinkability</strong>: Messages in different contexts computationally indistinguishable</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Metadata Leakage</strong>: Leakage within budget bounds</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Observability</strong>: No observable difference between authorization failure modes</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Correlation Resistance</strong>: Cannot correlate messages across contexts</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Forward Secrecy</strong>: Epoch rotation invalidates old keys</li>
+</ul>
+<p>See <code>crates/aura-transport/src/types/tests.rs</code> for example tests.</p>
+<h2 id="documentation-phase"><a class="header" href="#documentation-phase">Documentation Phase</a></h2>
+<h3 id="code-documentation"><a class="header" href="#code-documentation">Code Documentation</a></h3>
+<p>Document:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<strong>Privacy Level</strong>: Specify privacy level of each message type</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Context Scoping</strong>: Explain context boundaries and isolation</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Metadata Exposure</strong>: Document what metadata is exposed and why</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Leakage Budget</strong>: Note leakage cost of each operation</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Failure Modes</strong>: Explain failure modes and side-channel prevention</li>
+</ul>
+<h3 id="architecture-documentation"><a class="header" href="#architecture-documentation">Architecture Documentation</a></h3>
+<p>Update relevant docs:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<a href="108_transport_and_information_flow.html">Transport and Information Flow</a> - If adding new patterns</li>
+<li><input disabled="" type="checkbox"/>
+<a href="003_information_flow_contract.html">Information Flow Contract</a> - If changing leakage accounting</li>
+<li><input disabled="" type="checkbox"/>
+<a href="109_authorization.html">Authorization</a> - If modifying guard chain</li>
+<li><input disabled="" type="checkbox"/>
+<a href="103_relational_contexts.html">Relational Contexts</a> - If affecting context isolation</li>
+</ul>
+<h2 id="deployment-checklist"><a class="header" href="#deployment-checklist">Deployment Checklist</a></h2>
+<p>Before deploying privacy-sensitive code:</p>
+<ul>
+<li><input disabled="" type="checkbox"/>
+<strong>Privacy Audit</strong>: Code reviewed by privacy-focused reviewer</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Leakage Analysis</strong>: All metadata exposure documented and budgeted</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Side Channel Review</strong>: Timing/size/error channels analyzed</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Context Isolation Verified</strong>: Cross-context isolation tested</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Guard Chain Tested</strong>: All sends go through complete guard chain</li>
+<li><input disabled="" type="checkbox"/>
+<strong>Observability Review</strong>: Logs/metrics don't leak sensitive information</li>
+</ul>
+<h2 id="common-patterns"><a class="header" href="#common-patterns">Common Patterns</a></h2>
+<h3 id="pattern-privacy-aware-error-handling"><a class="header" href="#pattern-privacy-aware-error-handling">Pattern: Privacy-Aware Error Handling</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ❌ Bad: Reveals specific capability
+return Err(AuraError::authorization_failed(
+    "Missing capability: admin_access"
+));
+
+// ✅ Good: Generic error
+return Err(AuraError::authorization_failed(
+    "Insufficient authorization"
+));
+<span class="boring">}</span></code></pre></pre>
+<h3 id="pattern-context-scoped-messaging"><a class="header" href="#pattern-context-scoped-messaging">Pattern: Context-Scoped Messaging</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ❌ Bad: No context scoping
+let envelope = Envelope::new(payload);
+
+// ✅ Good: Explicit relationship scoping
+let envelope = Envelope::new_scoped(
+    payload,
+    relationship_id,
+    None, // Blinded capability hint
+);
+<span class="boring">}</span></code></pre></pre>
+<h3 id="pattern-privacy-preserving-selection"><a class="header" href="#pattern-privacy-preserving-selection">Pattern: Privacy-Preserving Selection</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ❌ Bad: Exposes detailed requirements
+let criteria = SelectionCriteria {
+    required_capabilities: vec!["admin", "threshold_signing"],
+    min_reputation: 0.9,
+};
+
+// ✅ Good: Blinded criteria
+let criteria = PrivacyAwareSelectionCriteria::for_relationship(rel_id)
+    .require_capability("threshold_signing") // Will be blinded
+    .min_reliability(ReliabilityLevel::High)
+    .prefer_privacy_features(true);
+<span class="boring">}</span></code></pre></pre>
+<h3 id="pattern-no-side-channel-failures"><a class="header" href="#pattern-no-side-channel-failures">Pattern: No Side-Channel Failures</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// ❌ Bad: Different failure paths leak information
+if !has_capability {
+    return Err(quick_error()); // Fast path
+}
+if over_budget {
+    check_budget().await?; // Slow path - timing side channel!
+}
+
+// ✅ Good: Uniform failure handling
+let guard_result = evaluate_all_guards(&amp;snapshot); // Uniform evaluation
+if guard_result.is_err() {
+    return Err(generic_error()); // Same code path
+}
+<span class="boring">}</span></code></pre></pre>
+<h2 id="references"><a class="header" href="#references">References</a></h2>
+<ul>
+<li><a href="003_information_flow_contract.html">Information Flow Contract</a></li>
+<li><a href="108_transport_and_information_flow.html">Transport and Information Flow</a></li>
+<li><a href="109_authorization.html">Authorization</a></li>
+<li><a href="103_relational_contexts.html">Relational Contexts</a></li>
+<li><code>crates/aura-transport/</code> - Reference implementation</li>
+<li><code>crates/aura-protocol/src/guards/</code> - Guard chain implementation</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="demo/cli_recovery.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="quint/language_guide.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="demo/cli_recovery.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="quint/language_guide.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

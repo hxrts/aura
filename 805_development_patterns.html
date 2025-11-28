@@ -1,0 +1,442 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Development Patterns and Workflows - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="development-patterns-and-workflows"><a class="header" href="#development-patterns-and-workflows">Development Patterns and Workflows</a></h1>
+<p>This document covers practical patterns and workflows for developing Aura systems.</p>
+<h2 id="effects-vs-coordination"><a class="header" href="#effects-vs-coordination">Effects vs Coordination</a></h2>
+<p>A critical distinction guides where code belongs in the architecture.</p>
+<h3 id="single-party-operations"><a class="header" href="#single-party-operations">Single-Party Operations</a></h3>
+<p><code>aura-effects</code> implements single-party operations that are stateless and context-free. Each operation takes input and produces output without maintaining state or coordinating with other handlers.</p>
+<p>Examples:</p>
+<ul>
+<li><code>sign(key, msg) → Signature</code> - One device, one cryptographic operation</li>
+<li><code>store_chunk(id, data) → Ok(())</code> - One device, one write</li>
+<li><code>RealCryptoHandler</code> - Self-contained cryptographic operations</li>
+<li><code>MockNetworkHandler</code> - Simulated peer communication for testing</li>
+</ul>
+<p>Single-party operations are reusable in any context. They work in unit tests, integration tests, and production equally well.</p>
+<h3 id="multi-party-coordination"><a class="header" href="#multi-party-coordination">Multi-Party Coordination</a></h3>
+<p><code>aura-protocol</code> implements multi-party coordination where multiple handlers orchestrate together. Operations are stateful and context-specific.</p>
+<p>Examples:</p>
+<ul>
+<li><code>execute_anti_entropy(...)</code> - Orchestrates sync across multiple parties</li>
+<li><code>CrdtCoordinator</code> - Manages state of multiple CRDT handlers</li>
+<li><code>GuardChain</code> - Coordinates authorization checks across sequential operations</li>
+</ul>
+<p>Multi-party coordination requires a context. It assumes multiple handlers are involved and state is maintained across operations.</p>
+<p>The distinction is critical for understanding where code belongs. Single-party operations go in <code>aura-effects</code>. Multi-party coordination goes in <code>aura-protocol</code>.</p>
+<h2 id="code-location-decision-matrix"><a class="header" href="#code-location-decision-matrix">Code Location Decision Matrix</a></h2>
+<p>Use these questions to classify code and determine the correct crate.</p>
+<div class="table-wrapper"><table><thead><tr><th>Pattern</th><th>Answer</th><th>Location</th></tr></thead><tbody>
+<tr><td>Implements single effect trait method</td><td>Stateless and single operation</td><td><code>aura-effects</code></td></tr>
+<tr><td>Coordinates multiple effects or handlers</td><td>Stateful and multi-handler</td><td><code>aura-protocol</code></td></tr>
+<tr><td>Multi-party coordination logic</td><td>Distributed state and orchestration</td><td><code>aura-protocol</code></td></tr>
+<tr><td>Domain-specific types and semantics</td><td>Pure logic without handlers</td><td>Domain crate or <code>aura-mpst</code></td></tr>
+<tr><td>Complete reusable protocol</td><td>End-to-end without UI</td><td>Feature/protocol crate</td></tr>
+<tr><td>Assembles handlers and protocols</td><td>Runtime composition</td><td><code>aura-agent</code> or <code>aura-simulator</code></td></tr>
+<tr><td>User-facing application</td><td>Has main() entry point</td><td><code>aura-cli</code> or <code>app-*</code></td></tr>
+</tbody></table>
+</div>
+<h3 id="boundary-questions-for-edge-cases"><a class="header" href="#boundary-questions-for-edge-cases">Boundary Questions for Edge Cases</a></h3>
+<p><strong>Is it stateless or stateful?</strong></p>
+<p>Stateless and single operation go in <code>aura-effects</code>. Stateful and coordinating go in <code>aura-protocol</code>.</p>
+<p><strong>Does it work for one party or multiple?</strong></p>
+<p>Single-party code goes in <code>aura-effects</code>. Multi-party code goes in <code>aura-protocol</code>.</p>
+<p><strong>Is it context-free or context-specific?</strong></p>
+<p>Context-free code (works anywhere) goes in <code>aura-effects</code>. Context-specific code (requires orchestration) goes in <code>aura-protocol</code>.</p>
+<p><strong>Does it coordinate multiple handlers?</strong></p>
+<p>No coordination goes in <code>aura-effects</code>. Multiple handlers being orchestrated goes in <code>aura-protocol</code>.</p>
+<h2 id="typical-workflows"><a class="header" href="#typical-workflows">Typical Workflows</a></h2>
+<h3 id="adding-a-new-cryptographic-primitive"><a class="header" href="#adding-a-new-cryptographic-primitive">Adding a New Cryptographic Primitive</a></h3>
+<ol>
+<li>Define the type in <code>aura-core</code> crypto module</li>
+<li>Implement <code>aura-core</code> traits for the type's semantics</li>
+<li>Add a single-operation handler in <code>aura-effects</code> that implements the primitive</li>
+<li>Use the handler in feature crates or protocols through the effect system</li>
+</ol>
+<h3 id="adding-a-new-distributed-protocol"><a class="header" href="#adding-a-new-distributed-protocol">Adding a New Distributed Protocol</a></h3>
+<ol>
+<li>Write the choreography in <code>aura-mpst</code> using session types or DSL syntax with <code>aura-macros</code></li>
+<li>Use annotation syntax for security: <code>Role[guard_capability = "...", flow_cost = N] -&gt; Target: Message</code></li>
+<li>Create the protocol implementation in <code>aura-protocol</code> or a feature crate</li>
+<li>Implement the coordination logic using handlers from <code>aura-effects</code></li>
+<li>Wire the protocol into <code>aura-agent</code> runtime with appropriate leakage budget policies</li>
+<li>Expose the protocol through CLI or application interfaces</li>
+</ol>
+<h3 id="writing-a-new-test"><a class="header" href="#writing-a-new-test">Writing a New Test</a></h3>
+<ol>
+<li>Create test fixtures in <code>aura-testkit</code></li>
+<li>Use mock handlers from <code>aura-effects</code> for reproducibility</li>
+<li>Configure appropriate leakage budget policies for the test scenarios</li>
+<li>Drive the agent from the test harness</li>
+<li>Compose protocols using <code>aura-simulator</code> for deterministic execution</li>
+</ol>
+<h2 id="type-consolidation-and-single-source-of-truth"><a class="header" href="#type-consolidation-and-single-source-of-truth">Type Consolidation and Single Source of Truth</a></h2>
+<h3 id="protocoltype"><a class="header" href="#protocoltype">ProtocolType</a></h3>
+<p>The canonical definition of <code>ProtocolType</code> lives in <code>aura-core</code>. All other crates re-export and use this canonical definition.</p>
+<p>Variants:</p>
+<ul>
+<li><code>Dkd</code> - Deterministic Key Derivation</li>
+<li><code>Counter</code> - Counter reservation protocol</li>
+<li><code>Resharing</code> - Key resharing for threshold updates</li>
+<li><code>Locking</code> - Resource locking protocol</li>
+<li><code>Recovery</code> - Account recovery protocol</li>
+<li><code>Compaction</code> - Ledger compaction protocol</li>
+</ul>
+<p>Usage is consistent across <code>aura-protocol</code> and <code>aura-simulator</code>.</p>
+<h3 id="sessionstatus"><a class="header" href="#sessionstatus">SessionStatus</a></h3>
+<p>The canonical definition of <code>SessionStatus</code> lives in <code>aura-core</code>. Variants represent the session lifecycle.</p>
+<p>Lifecycle order:</p>
+<ol>
+<li><code>Initializing</code> - Session initializing before execution</li>
+<li><code>Active</code> - Session currently executing</li>
+<li><code>Waiting</code> - Session waiting for participant responses</li>
+<li><code>Completed</code> - Session completed successfully</li>
+<li><code>Failed</code> - Session failed with error</li>
+<li><code>Expired</code> - Session expired due to timeout</li>
+<li><code>TimedOut</code> - Session timed out during execution</li>
+<li><code>Cancelled</code> - Session was cancelled</li>
+</ol>
+<p>All crates that track session state use the canonical definition from <code>aura-core</code>.</p>
+<h3 id="capability-system-layering"><a class="header" href="#capability-system-layering">Capability System Layering</a></h3>
+<p>The capability system intentionally uses multiple architectural layers. Each layer serves legitimate purposes.</p>
+<ul>
+<li><strong>Canonical types</strong> in <code>aura-core</code> provide lightweight references</li>
+<li><strong>Authorization layer</strong> (<code>aura-wot</code>) adds policy enforcement features</li>
+<li><strong>Storage layer</strong> (<code>aura-store</code>) implements capability-based access control</li>
+</ul>
+<p>Clear conversion paths enable inter-layer communication without confusion.</p>
+<h2 id="effect-handler-patterns"><a class="header" href="#effect-handler-patterns">Effect Handler Patterns</a></h2>
+<h3 id="stateless-handler-pattern"><a class="header" href="#stateless-handler-pattern">Stateless Handler Pattern</a></h3>
+<p>Effect handlers follow a consistent pattern. Each handler implements one or more effect traits from <code>aura-core</code>.</p>
+<p>A handler is stateless. It receives input, performs a single operation, and returns output. No state is maintained between calls.</p>
+<p>Example:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct RealCryptoHandler;
+
+impl CryptoEffects for RealCryptoHandler {
+    async fn sign(&amp;self, key: &amp;SecretKey, msg: &amp;[u8]) -&gt; Signature {
+        // Single operation: sign the message
+    }
+    
+    async fn verify(&amp;self, key: &amp;PublicKey, msg: &amp;[u8], sig: &amp;Signature) -&gt; bool {
+        // Single operation: verify the signature
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Mock handlers follow the same pattern but use deterministic or simulated implementations:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct MockCryptoHandler;
+
+impl CryptoEffects for MockCryptoHandler {
+    async fn sign(&amp;self, key: &amp;SecretKey, msg: &amp;[u8]) -&gt; Signature {
+        // Deterministic mock signature for testing
+    }
+    
+    async fn verify(&amp;self, key: &amp;PublicKey, msg: &amp;[u8], sig: &amp;Signature) -&gt; bool {
+        // Always returns true in testing mode
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<h3 id="multi-party-coordination-pattern"><a class="header" href="#multi-party-coordination-pattern">Multi-Party Coordination Pattern</a></h3>
+<p>Coordination logic in <code>aura-protocol</code> manages multiple handlers working together.</p>
+<p>Coordination functions are async and stateful. They orchestrate handlers to accomplish multi-party goals.</p>
+<p>Example:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub async fn execute_anti_entropy(
+    coordinator: CrdtCoordinator,      // Coordinates multiple CRDT handlers
+    adapter: AuraHandlerAdapter,       // Coordinates choreography and effects
+    guards: GuardChain,                // Coordinates authorization
+) -&gt; Result&lt;SyncResult&gt; {
+    // Orchestrates distributed sync across parties
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Coordination functions typically accept multiple handlers or a composed system. They maintain state across multiple operations. They coordinate between different concerns like authorization, storage, and transport. They return results that depend on the combined state.</p>
+<h3 id="guard-chain-execution-pattern"><a class="header" href="#guard-chain-execution-pattern">Guard Chain Execution Pattern</a></h3>
+<p>The guard chain coordinates authorization, flow budgets, and journal effects in strict sequence. Guards themselves are pure: evaluation runs synchronously over a prepared <code>GuardSnapshot</code> and yields <code>EffectCommand</code> items that an async interpreter executes. This keeps guard logic deterministic and prevents observable side effects from failed authorization attempts.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>async fn send_storage_put(
+    bridge: &amp;BiscuitAuthorizationBridge,
+    guards: &amp;GuardChain,
+    interpreter: &amp;dyn EffectInterpreter,
+    ctx: ContextId,
+    peer: AuthorityId,
+    token: Biscuit,
+    payload: PutRequest,
+) -&gt; Result&lt;()&gt; {
+    // Phase 1: Authorization via Biscuit + policy (async, cached)
+    let auth_result = bridge.authorize(&amp;token, "storage_write", &amp;payload.scope())?;
+    if !auth_result.authorized {
+        return Err(AuraError::permission_denied("Token authorization failed"));
+    }
+
+    // Phase 2: Prepare snapshot (async) and evaluate guards (sync)
+    let snapshot = prepare_guard_snapshot(ctx, peer, &amp;auth_result.cap_frontier).await?;
+    let outcome = guards.evaluate(&amp;snapshot, &amp;payload.guard_request());
+    if outcome.decision.is_denied() {
+        return Err(AuraError::permission_denied("Guard evaluation denied"));
+    }
+
+    // Phase 3: Execute commands (async) - charge, record leakage, commit journal, send transport
+    for cmd in outcome.effects {
+        interpreter.exec(cmd).await?;
+    }
+
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This pattern implements the guard chain guarantee: snapshot preparation happens before synchronous guard evaluation, and no transport observable occurs until the interpreter executes the resulting commands in order.</p>
+<h2 id="security-first-design-philosophy"><a class="header" href="#security-first-design-philosophy">Security-First Design Philosophy</a></h2>
+<h3 id="privacy-budget-enforcement"><a class="header" href="#privacy-budget-enforcement">Privacy Budget Enforcement</a></h3>
+<p>The leakage tracking system implements security by default with backward compatibility.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Secure by default - denies undefined budgets
+let tracker = LeakageTracker::new(); // UndefinedBudgetPolicy::Deny
+
+// Legacy compatibility mode
+let tracker = LeakageTracker::legacy_permissive(); // UndefinedBudgetPolicy::Allow
+
+// Configurable policy
+let tracker = LeakageTracker::with_undefined_policy(
+    UndefinedBudgetPolicy::DefaultBudget(1000)
+);
+<span class="boring">}</span></code></pre></pre>
+<p>The default policy is to deny access to undefined budgets. This prevents accidental privacy violations. Legacy mode is available for existing code that needs to operate without strict budget enforcement.</p>
+<h3 id="annotation-parsing"><a class="header" href="#annotation-parsing">Annotation Parsing</a></h3>
+<p>Robust syn-based validation prevents malformed choreographies from compiling. Proper error messages guide developers toward secure patterns. All placeholders have been replaced with complete implementations for deployment readiness.</p>
+<p>The choreography compiler validates annotations at compile time. Invalid or missing annotations are rejected with helpful error messages that explain the requirement.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="804_advanced_coordination_guide.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="805_testing_guide.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="804_advanced_coordination_guide.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="805_testing_guide.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

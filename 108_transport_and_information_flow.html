@@ -1,0 +1,436 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Transport and Information Flow - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="transport-and-information-flow"><a class="header" href="#transport-and-information-flow">Transport and Information Flow</a></h1>
+<p>This document describes the architecture of transport, guard chains, flow budgets, receipts, and information flow in Aura. It defines the secure channel abstraction and the enforcement mechanisms that regulate message transmission. It explains how context boundaries scope capabilities and budgets.</p>
+<h2 id="1-transport-abstraction"><a class="header" href="#1-transport-abstraction">1. Transport Abstraction</a></h2>
+<p>Aura provides a transport layer that delivers encrypted messages between authorities. Each transport connection is represented as a <code>SecureChannel</code>. A secure channel binds a pair of authorities and a context identifier. A secure channel maintains isolation across contexts.</p>
+<p>A secure channel exposes a send operation and a receive operation. The channel manages replay protection and handles connection teardown on epoch changes.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct SecureChannel {
+    pub context: ContextId,
+    pub peer: AuthorityId,
+    pub channel_id: Uuid,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure identifies a single secure channel. One channel exists per <code>(ContextId, peer)</code> pair. Channel metadata binds the channel to a specific context epoch.</p>
+<h2 id="2-guard-chain"><a class="header" href="#2-guard-chain">2. Guard Chain</a></h2>
+<p>All transport sends pass through the guard chain defined in <a href="109_authorization.html">Authorization</a>. CapGuard evaluates Biscuit capabilities and sovereign policy. FlowGuard charges the per-context flow budget and produces a receipt. JournalCoupler records the accompanying facts atomically. Each stage must succeed before the next stage executes. Guard evaluation runs synchronously over a prepared <code>GuardSnapshot</code> and returns <code>EffectCommand</code> data; an async interpreter executes those commands so guards never perform I/O directly.</p>
+<h2 id="3-flow-budget-and-receipts"><a class="header" href="#3-flow-budget-and-receipts">3. Flow Budget and Receipts</a></h2>
+<p>Flow budgets limit the amount of data that an authority may send within a context. The flow budget model defines a quota for each <code>(ContextId, peer)</code> pair. A reservation system protects against race conditions.</p>
+<p>An authority must reserve budget before sending. A reservation locks a portion of the available budget. The actual charge occurs during the guard chain. If the guard chain succeeds, a receipt is created.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct Receipt {
+    pub context: ContextId,
+    pub from: AuthorityId,
+    pub to: AuthorityId,
+    pub epoch: u64,
+    pub cost: u32,
+    pub signature: Vec&lt;u8&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure defines a receipt. A receipt binds a cost to a specific context and epoch. The sender signs the receipt. The recipient verifies it. Receipts support accountability in multi-hop routing.</p>
+<h2 id="4-information-flow-budgets"><a class="header" href="#4-information-flow-budgets">4. Information Flow Budgets</a></h2>
+<p>Information flow budgets define limits on metadata leakage. Budgets exist for external leakage, neighbor leakage, and group leakage. Each protocol message carries leakage annotations. These annotations specify the cost for each leakage dimension.</p>
+<p>Leakage budgets determine if a message can be sent. If the leakage cost exceeds the remaining budget, the message is denied. Enforcement uses padding and batching strategies. Padding hides message size. Batching hides message frequency.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct LeakageCost {
+    pub external: u32,
+    pub neighbor: u32,
+    pub group: u32,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure defines the leakage cost of a message. Leakage costs reduce the corresponding budget on successful send.</p>
+<h2 id="5-context-integration"><a class="header" href="#5-context-integration">5. Context Integration</a></h2>
+<p>Capabilities and flow budgets are scoped to a <code>ContextId</code>. Each secure channel associates all guard decisions with its context. A capability is valid only for the context in which it was issued. A flow budget applies only within the same context.</p>
+<p>Derived context keys bind communication identities to the current epoch. When the account epoch changes, all context identities must refresh. All secure channels for the context must be renegotiated.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ChannelContext {
+    pub context: ContextId,
+    pub epoch: u64,
+    pub caps: Vec&lt;Capability&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure defines the active context state for a channel. All guard chain checks use these values.</p>
+<h2 id="6-failure-modes-and-observability"><a class="header" href="#6-failure-modes-and-observability">6. Failure Modes and Observability</a></h2>
+<p>The guard chain defines three categories of failure. A denial failure occurs when capability requirements are not met. A block failure occurs when a flow budget check fails. A commit failure occurs when journal coupling fails.</p>
+<p>Denial failures produce no observable behavior. Block failures also produce no observable behavior. Commit failures prevent sending and produce local error logs. None of these failures result in network traffic.</p>
+<p>This design ensures that unauthorized or over-budget sends do not produce side channels.</p>
+<h2 id="7-security-properties"><a class="header" href="#7-security-properties">7. Security Properties</a></h2>
+<p>Aura enforces no observable behavior without charge. A message cannot be sent unless flow budget is charged first. Capability gated sends ensure that each message satisfies authorization rules. Receipts provide accountability for multi-hop forwarding.</p>
+<p>The network layer does not reveal authority structure. Context identifiers do not reveal membership. All metadata is scoped to individual relationships.</p>
+<h2 id="8-secure-channel-lifecycle"><a class="header" href="#8-secure-channel-lifecycle">8. Secure Channel Lifecycle</a></h2>
+<p>Secure channels follow a lifecycle aligned with rendezvous and epoch semantics:</p>
+<ol>
+<li>
+<p><strong>Establishment</strong>:</p>
+<ul>
+<li>Ranch rendezvous per <a href="110_rendezvous.html">Rendezvous Architecture</a> to exchange descriptors inside the <a href="103_relational_contexts.html">relational context</a> journal.</li>
+<li>Each descriptor contains transport hints, a handshake PSK derived from the context key, and a <code>punch_nonce</code>.</li>
+<li>Once both parties receive offer/answer envelopes, they perform Noise IKpsk2 using the context-derived keys and establish a QUIC or relay-backed channel bound to <code>(ContextId, peer)</code>.</li>
+</ul>
+</li>
+<li>
+<p><strong>Steady state</strong>:</p>
+<ul>
+<li>Guard chain enforces CapGuard → FlowGuard → JournalCoupler for every send.</li>
+<li>FlowBudget receipts created on each hop are inserted into the <a href="103_relational_contexts.html">relational context</a> journal so downstream peers can audit path compliance.</li>
+</ul>
+</li>
+<li>
+<p><strong>Re-keying on epoch change</strong>:</p>
+<ul>
+<li>When the account or context epoch changes (as recorded in <code>101_accounts_and_commitment_tree.md</code> / <code>103_relational_contexts.md</code>), the channel detects the mismatch, tears down the existing Noise session, and triggers rendezvous to derive fresh keys.</li>
+<li>Existing receipts are marked invalid for the new epoch, preventing replay.</li>
+</ul>
+</li>
+<li>
+<p><strong>Teardown</strong>:</p>
+<ul>
+<li>Channels close explicitly when contexts end or when FlowGuard hits the configured budget limit.</li>
+<li>Receipts emitted during teardown propagate through the relational context journal so guardians or auditors can verify all hops charged their budgets up to the final packet.</li>
+</ul>
+</li>
+</ol>
+<p>By tying establishment and teardown to relational context journals, receipts become part of the same fact set tracked in <code>111_maintenance.md</code>, ensuring long-term accountability.</p>
+<h2 id="8-privacy-by-design-patterns"><a class="header" href="#8-privacy-by-design-patterns">8. Privacy-by-Design Patterns</a></h2>
+<p>The <code>aura-transport</code> crate demonstrates privacy-by-design principles where privacy mechanisms are integrated into core types rather than added as external concerns. This section extracts key patterns from <code>aura-transport</code> for use across the codebase.</p>
+<h3 id="81-core-principles"><a class="header" href="#81-core-principles">8.1 Core Principles</a></h3>
+<p><strong>Privacy-by-Design Integration</strong>:</p>
+<ul>
+<li>Privacy mechanisms built into core types (Envelope, FrameHeader, TransportConfig)</li>
+<li>Privacy levels as first-class configuration, not bolt-on features</li>
+<li>Relationship scoping embedded in message routing</li>
+<li>Capability blinding at the envelope level</li>
+</ul>
+<p><strong>Minimal Metadata Exposure</strong>:</p>
+<ul>
+<li>Frame headers contain only essential routing information</li>
+<li>Capability hints are blinded before transmission</li>
+<li>Selection criteria hide detailed capability requirements</li>
+<li>Peer selection uses privacy-preserving scoring</li>
+</ul>
+<p><strong>Context Isolation</strong>:</p>
+<ul>
+<li>All messages scoped to RelationshipId or ContextId</li>
+<li>No cross-context message routing</li>
+<li>Connection state partitioned by context</li>
+<li>Context changes trigger re-keying</li>
+</ul>
+<h3 id="82-privacy-aware-envelope-usage"><a class="header" href="#82-privacy-aware-envelope-usage">8.2 Privacy-Aware Envelope Usage</a></h3>
+<p>The <code>Envelope</code> type provides three privacy levels:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>// Clear transmission (no privacy protection)
+let envelope = Envelope::new(payload);
+
+// Relationship-scoped transmission
+let envelope = Envelope::new_scoped(
+    payload,
+    relationship_id,
+    None, // Optional capability hint
+);
+
+// Fully blinded transmission
+let envelope = Envelope::new_blinded(
+    payload,
+    blinded_metadata,
+);
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Pattern</strong>: Always use <code>new_scoped()</code> for relationship communication. Only use <code>new()</code> for public announcements. Use <code>new_blinded()</code> when metadata exposure must be minimized.</p>
+<h3 id="83-privacy-preserving-peer-selection"><a class="header" href="#83-privacy-preserving-peer-selection">8.3 Privacy-Preserving Peer Selection</a></h3>
+<p>Peer selection must not reveal capability requirements or relationship structure:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let criteria = PrivacyAwareSelectionCriteria::for_relationship(relationship_id)
+    .require_capability("threshold_signing") // Will be blinded
+    .min_reliability(ReliabilityLevel::High)
+    .prefer_privacy_features(true);
+
+let selection = criteria.select_peers(&amp;available_peers);
+<span class="boring">}</span></code></pre></pre>
+<p><strong>Pattern</strong>:</p>
+<ul>
+<li>Selection criteria blinded before network transmission</li>
+<li>Selection scores computed without revealing weights</li>
+<li>Rejected candidates not logged or exposed</li>
+<li>Selection reasons use generic categories, not specific capabilities</li>
+</ul>
+<h3 id="84-common-privacy-pitfalls"><a class="header" href="#84-common-privacy-pitfalls">8.4 Common Privacy Pitfalls</a></h3>
+<p><strong>❌ Avoid</strong>:</p>
+<ul>
+<li>Logging detailed capability requirements</li>
+<li>Exposing relationship membership in error messages</li>
+<li>Reusing connection state across contexts</li>
+<li>Sending capability names in clear text</li>
+<li>Correlating message sizes with content types</li>
+</ul>
+<p><strong>✅ Do</strong>:</p>
+<ul>
+<li>Use generic error messages ("authorization failed" not "missing capability: admin")</li>
+<li>Pad messages to fixed sizes when possible</li>
+<li>Rotate connection identifiers on epoch changes</li>
+<li>Blind capability hints before network transmission</li>
+<li>Use privacy-preserving selection scoring</li>
+</ul>
+<h3 id="85-testing-privacy-properties"><a class="header" href="#85-testing-privacy-properties">8.5 Testing Privacy Properties</a></h3>
+<p>When testing transport code, verify:</p>
+<ol>
+<li><strong>Context Isolation</strong>: Messages sent in context A cannot be received in context B</li>
+<li><strong>Metadata Minimization</strong>: Only essential headers exposed, no capability details</li>
+<li><strong>Selection Privacy</strong>: Peer selection does not leak candidate set or ranking criteria</li>
+<li><strong>Re-keying</strong>: Context epoch changes trigger channel teardown and fresh establishment</li>
+<li><strong>No Side Channels</strong>: Timing, message size, error messages do not leak sensitive information</li>
+</ol>
+<p>See <code>crates/aura-transport/src/types/tests.rs</code> and <code>crates/aura-transport/src/peers/tests.rs</code> for examples.</p>
+<h3 id="86-integration-with-guard-chain"><a class="header" href="#86-integration-with-guard-chain">8.6 Integration with Guard Chain</a></h3>
+<p>Transport privacy integrates with the guard chain:</p>
+<ol>
+<li><strong>CapGuard</strong>: Evaluates blinded capability hints without exposing requirements</li>
+<li><strong>FlowGuard</strong>: Charges budget before transmission (no side channels on failure)</li>
+<li><strong>LeakageTracker</strong>: Accounts for metadata exposure in frame headers</li>
+<li><strong>JournalCoupler</strong>: Records minimal send facts (no capability details)</li>
+</ol>
+<p>The combination ensures that:</p>
+<ul>
+<li>Unauthorized sends produce no network traffic</li>
+<li>Over-budget sends fail silently (no timing side channel)</li>
+<li>Metadata leakage tracked against context budget</li>
+<li>Fact commits reveal only necessary information</li>
+</ul>
+<h2 id="9-summary"><a class="header" href="#9-summary">9. Summary</a></h2>
+<p>The transport, guard chain, and information flow architecture enforces strict control over message transmission. Secure channels bind communication to contexts. Guard chains enforce authorization, budget, and journal updates. Flow budgets and receipts regulate data usage. Leakage budgets reduce metadata exposure. Privacy-by-design patterns ensure minimal metadata exposure and context isolation. All operations remain private to the context and reveal no structural information.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="107_mpst_and_choreography.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="109_authorization.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="107_mpst_and_choreography.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="109_authorization.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

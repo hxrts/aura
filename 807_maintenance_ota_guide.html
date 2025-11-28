@@ -1,0 +1,684 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Maintenance and OTA Guide - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="maintenance-and-ota-guide"><a class="header" href="#maintenance-and-ota-guide">Maintenance and OTA Guide</a></h1>
+<p>This guide covers the Maintenance and OTA (Over-the-Air) update system in Aura. The system provides coordinated maintenance operations including snapshots, cache invalidation, and distributed upgrades using threshold approval.</p>
+<h2 id="core-maintenance-philosophy"><a class="header" href="#core-maintenance-philosophy">Core Maintenance Philosophy</a></h2>
+<p>The maintenance system is built on three key principles:</p>
+<ol>
+<li><strong>Coordinated Operations</strong> - All maintenance actions require threshold approval from M-of-N devices</li>
+<li><strong>Epoch Fencing</strong> - Hard fork upgrades are gated by identity epochs for safe coordination</li>
+<li><strong>Journal-Based Facts</strong> - All maintenance events are replicated through the journal CRDT</li>
+</ol>
+<p>The system supports snapshots for garbage collection, cache management, and both soft and hard fork upgrades.</p>
+<h2 id="maintenance-events"><a class="header" href="#maintenance-events">Maintenance Events</a></h2>
+<p>The maintenance service publishes events to the journal as facts. These events are replicated across all replicas and interpreted deterministically.</p>
+<h3 id="event-types"><a class="header" href="#event-types">Event Types</a></h3>
+<p>The system defines five event types:</p>
+<p><strong>SnapshotProposed</strong> marks the beginning of a snapshot operation. It contains the proposal identifier, proposer device, target epoch, and state digest of the candidate snapshot.</p>
+<p><strong>SnapshotCompleted</strong> records a successful snapshot. It includes the accepted proposal identifier, finalized snapshot payload, participating devices, and threshold signature attesting to the snapshot.</p>
+<p><strong>CacheInvalidated</strong> signals cache invalidation. It specifies which cache keys must be refreshed and the earliest identity epoch the cache entry remains valid for.</p>
+<p><strong>UpgradeActivated</strong> announces an activated upgrade. It contains the package identifier, target version, and identity epoch fence where the upgrade becomes mandatory.</p>
+<p><strong>AdminReplaced</strong> announces an administrator change. This allows users to fork away from a malicious admin by tracking previous and new administrators with activation epoch.</p>
+<h2 id="snapshot-protocol"><a class="header" href="#snapshot-protocol">Snapshot Protocol</a></h2>
+<p>The snapshot protocol coordinates garbage collection with threshold approval. It implements writer fencing to ensure consistent snapshot capture across all devices.</p>
+<h3 id="snapshot-workflow"><a class="header" href="#snapshot-workflow">Snapshot Workflow</a></h3>
+<p>The snapshot process follows five steps:</p>
+<ol>
+<li>Propose snapshot at target epoch with state digest</li>
+<li>Activate writer fence to block concurrent writes</li>
+<li>Capture state and verify digest</li>
+<li>Collect M-of-N threshold approvals</li>
+<li>Commit snapshot and clean obsolete facts</li>
+</ol>
+<h3 id="basic-snapshot-operation"><a class="header" href="#basic-snapshot-operation">Basic Snapshot Operation</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::{MaintenanceService, MaintenanceServiceConfig};
+use aura_core::{Epoch, Hash32};
+
+async fn propose_snapshot(
+    service: &amp;MaintenanceService,
+    target_epoch: Epoch,
+    state_digest: Hash32,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // Propose snapshot at target epoch
+    service.propose_snapshot(target_epoch, state_digest).await?;
+    
+    // Writer fence is now active - all concurrent writes blocked
+    // Collect approvals from M-of-N devices
+    
+    // Once threshold reached, commit
+    service.commit_snapshot().await?;
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Snapshots provide deterministic checkpoints of authority state at specific epochs. This enables garbage collection of obsolete facts while maintaining verifiable state recovery.</p>
+<h3 id="snapshot-proposal"><a class="header" href="#snapshot-proposal">Snapshot Proposal</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::MaintenanceService;
+use aura_core::{Epoch, Hash32, DeviceId};
+
+async fn snapshot_workflow(
+    service: &amp;MaintenanceService,
+    device_id: DeviceId,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // Determine target epoch and compute state digest
+    let target_epoch = 100;
+    let current_state = service.get_current_state().await?;
+    let state_digest = current_state.compute_digest();
+    
+    // Propose snapshot
+    service.propose_snapshot(target_epoch, state_digest).await?;
+    
+    // Wait for other devices to activate fence
+    // and collect approvals
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Proposals include the proposer device identifier, unique proposal ID, target epoch, and canonical state digest. All devices must agree on the digest before committing.</p>
+<h3 id="writer-fence"><a class="header" href="#writer-fence">Writer Fence</a></h3>
+<p>The writer fence blocks all writes during snapshot capture. This prevents concurrent modifications that could invalidate the snapshot digest.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::MaintenanceService;
+
+async fn capture_with_fence(
+    service: &amp;MaintenanceService,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // Writer fence is automatically activated by snapshot proposal
+    // All write operations will be blocked or queued
+    
+    // Capture state atomically
+    let snapshot = service.capture_snapshot().await?;
+    
+    // Once snapshot is committed, fence is released
+    service.commit_snapshot().await?;
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Fence enforcement is implicit in snapshot proposal. The protocol guarantees no conflicting writes occur during snapshot capture.</p>
+<h3 id="approval-collection"><a class="header" href="#approval-collection">Approval Collection</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::MaintenanceService;
+use aura_core::DeviceId;
+
+async fn collect_approvals(
+    service: &amp;MaintenanceService,
+    threshold: usize,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // Get pending snapshot proposals
+    let proposals = service.pending_snapshots().await?;
+    
+    for proposal in proposals {
+        // Verify state digest
+        let current_state = service.get_current_state().await?;
+        let digest = current_state.compute_digest();
+        
+        if digest == proposal.state_digest {
+            // Approve the snapshot
+            service.approve_snapshot(&amp;proposal.proposal_id).await?;
+        }
+    }
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Each device verifies the state digest independently and approves if correct. The system collects approvals until threshold is reached.</p>
+<h3 id="snapshot-commitment"><a class="header" href="#snapshot-commitment">Snapshot Commitment</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::MaintenanceService;
+
+async fn finalize_snapshot(
+    service: &amp;MaintenanceService,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // Commit snapshot once threshold reached
+    service.commit_snapshot().await?;
+    
+    // This records SnapshotCompleted fact to journal
+    // All devices deterministically reduce this fact
+    // Obsolete facts before this epoch can be garbage collected
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Commitment publishes <code>SnapshotCompleted</code> fact to the journal. All devices deterministically reduce this fact to the same relational state. Facts older than the snapshot epoch can then be safely discarded.</p>
+<h2 id="ota-over-the-air-upgrade-protocol"><a class="header" href="#ota-over-the-air-upgrade-protocol">OTA (Over-the-Air) Upgrade Protocol</a></h2>
+<p>The OTA protocol coordinates distributed upgrades with support for both soft and hard forks. Soft forks are backward compatible and require only majority device readiness. Hard forks require coordinated activation at a specific identity epoch.</p>
+<h3 id="upgrade-types"><a class="header" href="#upgrade-types">Upgrade Types</a></h3>
+<p><strong>Soft Fork</strong> upgrades are backward compatible. Old and new code can interoperate. Soft forks activate immediately once threshold devices are ready.</p>
+<p><strong>Hard Fork</strong> upgrades are incompatible. All devices must upgrade by the activation epoch. Hard forks are gated by identity epoch fences to ensure coordinated activation.</p>
+<h3 id="basic-upgrade-operation"><a class="header" href="#basic-upgrade-operation">Basic Upgrade Operation</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::{MaintenanceService, MaintenanceServiceConfig};
+use aura_sync::protocols::UpgradeKind;
+use aura_core::SemanticVersion;
+use uuid::Uuid;
+
+async fn propose_soft_fork(
+    service: &amp;MaintenanceService,
+    package_id: Uuid,
+    version: SemanticVersion,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // Propose soft fork upgrade
+    let proposal = service.propose_upgrade(
+        package_id,
+        version.clone(),
+        UpgradeKind::SoftFork,
+        None,  // No activation fence for soft fork
+    ).await?;
+    
+    // Collect readiness declarations from devices
+    // Soft fork activates when threshold devices are ready
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Soft forks are simpler than hard forks. They activate immediately when enough devices report readiness.</p>
+<h3 id="soft-fork-workflow"><a class="header" href="#soft-fork-workflow">Soft Fork Workflow</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::MaintenanceService;
+use aura_sync::protocols::{ReadinessStatus, UpgradeKind};
+
+async fn soft_fork_workflow(
+    service: &amp;MaintenanceService,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // Receive upgrade proposal (soft fork)
+    let proposal = service.pending_upgrades().await?
+        .into_iter()
+        .find(|p| p.kind == UpgradeKind::SoftFork)
+        .unwrap();
+    
+    // Check readiness locally
+    if service.is_ready_for_upgrade(&amp;proposal).await? {
+        // Declare readiness
+        service.declare_readiness(
+            &amp;proposal.proposal_id,
+            ReadinessStatus::Ready,
+        ).await?;
+    }
+    
+    // Once threshold devices are ready, upgrade activates
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Each device independently evaluates readiness and declares status. The protocol activates the upgrade once M-of-N devices are ready.</p>
+<h3 id="hard-fork-workflow"><a class="header" href="#hard-fork-workflow">Hard Fork Workflow</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::{MaintenanceService, MaintenanceServiceConfig};
+use aura_sync::protocols::UpgradeKind;
+use aura_core::{SemanticVersion, Epoch, AccountId};
+use uuid::Uuid;
+
+async fn propose_hard_fork(
+    service: &amp;MaintenanceService,
+    package_id: Uuid,
+    version: SemanticVersion,
+    activation_epoch: Epoch,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // Propose hard fork with epoch fence
+    let proposal = service.propose_upgrade(
+        package_id,
+        version,
+        UpgradeKind::HardFork,
+        Some(activation_epoch),
+    ).await?;
+    
+    // All devices must upgrade by activation epoch
+    // Protocol enforces fence at epoch boundary
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Hard forks require an identity epoch fence. The upgrade becomes mandatory at the specified epoch. This ensures all devices coordinate activation at a specific point in time.</p>
+<h3 id="activation-fence"><a class="header" href="#activation-fence">Activation Fence</a></h3>
+<p>The activation fence gates hard fork upgrades. It specifies the account and identity epoch where the upgrade becomes mandatory.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::MaintenanceService;
+use aura_sync::services::IdentityEpochFence;
+use aura_core::{Epoch, AccountId};
+
+async fn enforce_hard_fork(
+    service: &amp;MaintenanceService,
+    account_id: AccountId,
+    upgrade_epoch: Epoch,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // Create epoch fence for upgrade
+    let fence = IdentityEpochFence::new(account_id, upgrade_epoch);
+    
+    // All operations after upgrade_epoch must use new protocol version
+    // Old version is no longer accepted
+    
+    // If device hasn't upgraded by epoch, it cannot participate
+    if service.current_epoch() &gt;= upgrade_epoch {
+        if !service.has_upgraded().await? {
+            // Cannot continue - must upgrade
+            service.enforce_upgrade().await?;
+        }
+    }
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Epoch fences are enforced at epoch boundaries. Devices that have not upgraded by the fence epoch are blocked from participating.</p>
+<h3 id="readiness-declarations"><a class="header" href="#readiness-declarations">Readiness Declarations</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::MaintenanceService;
+use aura_sync::protocols::ReadinessStatus;
+
+async fn declare_upgrade_readiness(
+    service: &amp;MaintenanceService,
+    proposal_id: &amp;str,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // Check if upgrade artifacts are available
+    let artifacts = service.fetch_upgrade_artifacts(proposal_id).await?;
+    
+    // Verify artifact hash
+    if !service.verify_artifact(&amp;artifacts).await? {
+        service.declare_readiness(
+            proposal_id,
+            ReadinessStatus::Rejected {
+                reason: "Invalid artifact hash".to_string(),
+            },
+        ).await?;
+        return Ok(());
+    }
+    
+    // Check if local system can support upgrade
+    if service.supports_upgrade(&amp;artifacts).await? {
+        service.declare_readiness(
+            proposal_id,
+            ReadinessStatus::Ready,
+        ).await?;
+    } else {
+        service.declare_readiness(
+            proposal_id,
+            ReadinessStatus::NotReady {
+                reason: "Insufficient resources".to_string(),
+            },
+        ).await?;
+    }
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Readiness declarations are self-contained. Each device verifies artifacts and evaluates its own readiness. The protocol does not require coordination for readiness checks.</p>
+<h2 id="cache-management"><a class="header" href="#cache-management">Cache Management</a></h2>
+<p>The maintenance system coordinates cache invalidation across all devices. Cache invalidation facts specify which keys must be refreshed and the epoch where the cache entry is no longer valid.</p>
+<h3 id="cache-invalidation"><a class="header" href="#cache-invalidation">Cache Invalidation</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::MaintenanceService;
+use aura_core::Epoch;
+
+async fn invalidate_cache(
+    service: &amp;MaintenanceService,
+    keys: Vec&lt;String&gt;,
+    epoch_floor: Epoch,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    // Publish cache invalidation fact
+    service.invalidate_cache_keys(keys, epoch_floor).await?;
+    
+    // All devices receive fact through journal
+    // Each device deterministically invalidates matching keys
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Cache invalidation facts are replicated through the journal. All devices apply the invalidation deterministically based on epoch and key matching.</p>
+<h3 id="cache-query-patterns"><a class="header" href="#cache-query-patterns">Cache Query Patterns</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::MaintenanceService;
+use aura_core::Epoch;
+
+async fn query_cache(
+    service: &amp;MaintenanceService,
+    key: &amp;str,
+    epoch: Epoch,
+) -&gt; Result&lt;Option&lt;Vec&lt;u8&gt;&gt;, Box&lt;dyn std::error::Error&gt;&gt; {
+    // Check if cache entry is valid at epoch
+    if service.is_cache_valid(key, epoch).await? {
+        service.get_cached(key).await
+    } else {
+        // Cache invalidated - fetch fresh
+        let value = service.fetch_fresh(key).await?;
+        service.cache_set(key, value.clone(), epoch).await?;
+        Ok(Some(value))
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Cache validity is epoch-based. Entries are valid up to their invalidation epoch. After that, fresh data must be fetched and cached at the new epoch.</p>
+<h2 id="configuration-and-best-practices"><a class="header" href="#configuration-and-best-practices">Configuration and Best Practices</a></h2>
+<h3 id="service-configuration"><a class="header" href="#service-configuration">Service Configuration</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::{MaintenanceService, MaintenanceServiceConfig};
+use aura_sync::protocols::{SnapshotConfig, OTAConfig};
+use std::time::Duration;
+
+fn create_maintenance_service() -&gt; Result&lt;MaintenanceService, Box&lt;dyn std::error::Error&gt;&gt; {
+    let config = MaintenanceServiceConfig {
+        snapshot: SnapshotConfig {
+            proposal_timeout: Duration::from_secs(300),
+            approval_timeout: Duration::from_secs(600),
+            max_proposals: 10,
+        },
+        ota: OTAConfig {
+            readiness_timeout: Duration::from_secs(3600),
+            max_pending: 5,
+            soft_fork_auto_activate: true,
+        },
+        cache: Default::default(),
+    };
+    
+    Ok(MaintenanceService::new(config)?)
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Configuration controls timeouts, limits, and behavior. Snapshot timeouts should be shorter than OTA timeouts since snapshots are more frequent.</p>
+<h3 id="snapshot-best-practices"><a class="header" href="#snapshot-best-practices">Snapshot Best Practices</a></h3>
+<p>Keep snapshots frequent but not excessive. Snapshot every 100-500 epochs depending on journal size. Too frequent snapshots create overhead. Too infrequent snapshots reduce garbage collection effectiveness.</p>
+<p>Always verify state digest before approving. Use canonical serialization for digest computation. Record all snapshots in the journal for audit trail.</p>
+<h3 id="upgrade-best-practices"><a class="header" href="#upgrade-best-practices">Upgrade Best Practices</a></h3>
+<p>Plan upgrades carefully. Soft forks can be deployed flexibly. Hard forks require scheduling and announcement.</p>
+<p>Always test upgrades in simulation before deployment. Use epoch fences with sufficient advance notice (at least 7 days for production).</p>
+<p>Include rollback procedures for hard forks. Document migration paths for state format changes.</p>
+<h3 id="cache-best-practices"><a class="header" href="#cache-best-practices">Cache Best Practices</a></h3>
+<p>Invalidate cache conservatively. Over-invalidation reduces performance. Under-invalidation risks stale data.</p>
+<p>Use epoch floors to scope invalidation. Invalidate only keys that actually changed at that epoch.</p>
+<p>Monitor cache hit rates. Low hit rates indicate invalidation is too aggressive.</p>
+<h2 id="monitoring-and-debugging"><a class="header" href="#monitoring-and-debugging">Monitoring and Debugging</a></h2>
+<h3 id="snapshot-status"><a class="header" href="#snapshot-status">Snapshot Status</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::MaintenanceService;
+
+async fn monitor_snapshots(
+    service: &amp;MaintenanceService,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let status = service.snapshot_status().await?;
+    
+    println!("Last snapshot: epoch {}", status.last_snapshot_epoch);
+    println!("Pending proposals: {}", status.pending_proposals);
+    println!("Writer fence active: {}", status.fence_active);
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Check snapshot status regularly to ensure the snapshot cycle is healthy. Long intervals between snapshots may indicate approval delays.</p>
+<h3 id="upgrade-status"><a class="header" href="#upgrade-status">Upgrade Status</a></h3>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>use aura_sync::services::MaintenanceService;
+
+async fn monitor_upgrades(
+    service: &amp;MaintenanceService,
+) -&gt; Result&lt;(), Box&lt;dyn std::error::Error&gt;&gt; {
+    let status = service.upgrade_status().await?;
+    
+    for upgrade in status.active_upgrades {
+        println!("Upgrade: version {}", upgrade.version);
+        println!("  Ready devices: {}/{}", upgrade.ready_count, upgrade.total_devices);
+        println!("  Threshold: {}", upgrade.threshold);
+    }
+    
+    Ok(())
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Monitor upgrade progress to catch devices that are not ready. Missing devices may need manual intervention.</p>
+<h2 id="integration-with-choreography"><a class="header" href="#integration-with-choreography">Integration with Choreography</a></h2>
+<p>The maintenance system integrates with the choreography runtime for threshold approval ceremonies. Snapshot and upgrade proposals are published to the journal where choreography protocols can coordinate approval.</p>
+<p>The maintenance service publishes events as facts. Choreography protocols subscribe to these facts and coordinate the necessary approvals through their own message flows.</p>
+<h2 id="summary"><a class="header" href="#summary">Summary</a></h2>
+<p>The Maintenance and OTA system provides coordinated maintenance operations with threshold approval and epoch fencing. Snapshots enable garbage collection with writer fencing. Soft forks activate flexibly while hard forks coordinate activation at specific epochs. Cache invalidation is replicated through the journal for consistency.</p>
+<p>Use snapshots regularly for garbage collection. Plan upgrades carefully with sufficient notice for hard forks. Test all upgrades in simulation. Monitor snapshot and upgrade cycles to ensure system health.</p>
+<h2 id="implementation-references"><a class="header" href="#implementation-references">Implementation References</a></h2>
+<ul>
+<li><strong>Maintenance Service</strong>: <code>aura-sync/src/services/maintenance.rs</code></li>
+<li><strong>Snapshot Protocol</strong>: <code>aura-sync/src/protocols/snapshots.rs</code></li>
+<li><strong>OTA Protocol</strong>: <code>aura-sync/src/protocols/ota.rs</code></li>
+<li><strong>Cache Management</strong>: <code>aura-sync/src/infrastructure/cache_manager.rs</code></li>
+<li><strong>Integration Examples</strong>: <code>aura-agent/src/handlers/maintenance.rs</code></li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="806_simulation_guide.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="999_project_structure.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="806_simulation_guide.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="999_project_structure.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

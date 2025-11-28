@@ -1,0 +1,346 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Rendezvous Architecture - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="rendezvous-architecture"><a class="header" href="#rendezvous-architecture">Rendezvous Architecture</a></h1>
+<p>This document describes the rendezvous architecture in Aura. It explains peer discovery, envelope propagation, transport selection, and channel establishment. It aligns with the current authority and context model. It removes device identifiers from public structures. It scopes all rendezvous behavior to relational contexts.</p>
+<h2 id="1-overview"><a class="header" href="#1-overview">1. Overview</a></h2>
+<p>Rendezvous establishes secure channels between authorities. Each authority uses a rendezvous manager that exposes <code>establish_channel(ContextId)</code>. The manager returns a handle implementing <code>TransportEffects</code>. Rendezvous operates inside a relational context and uses the context key for encryption. Envelopes appear as facts in the context journal. Flooding uses the same gossip loop that synchronizes journals.</p>
+<p>Rendezvous does not establish global identity. All operations are scoped to a <code>ContextId</code>. A context defines which authorities may see envelopes. Only participating authorities have the keys required to decrypt descriptors.</p>
+<h2 id="2-transport-strategy"><a class="header" href="#2-transport-strategy">2. Transport Strategy</a></h2>
+<p>The transport layer uses a priority sequence of connection attempts. Direct QUIC is attempted first. QUIC using reflexive addresses via STUN is attempted next. WebSocket relay is attempted last. The first successful connection is used.</p>
+<p>Aura uses relay-first fallback. Relays use guardians or designated peers. Relay traffic uses end-to-end encryption. Relay capabilities must be valid for the context.</p>
+<p>STUN discovery identifies the external address of each participant. Devices query STUN servers periodically. The reflexive address appears in rendezvous descriptors as a transport hint. STUN failure does not prevent rendezvous because relay is always available.</p>
+<p>Hole punching uses simultaneous UDP packets. Each peer includes a <code>punch_nonce</code> in its descriptor. Both peers send packets containing the nonce and ephemeral keys. NATs allow these packets to establish bidirectional mappings. QUIC completes the handshake after mappings appear.</p>
+<h2 id="3-data-structures"><a class="header" href="#3-data-structures">3. Data Structures</a></h2>
+<p>Rendezvous uses two fact types in the relational context journal. The envelope contains routing metadata. The descriptor contains transport information and handshake parameters. Payloads are encrypted using the context-derived key.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct RendezvousEnvelope {
+    pub context: ContextId,
+    pub role: OfferOrAnswer,
+    pub epoch: u64,
+    pub counter: u32,
+    pub flow_cost: u32,
+    pub payload_cid: Cid,
+    pub signature: Vec&lt;u8&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure defines an envelope stored in the context journal. The envelope header is visible for gossip. The payload is encrypted. The <code>flow_cost</code> field expresses the cost to forward the envelope.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct RendezvousDescriptor {
+    pub context: ContextId,
+    pub transport_hints: Vec&lt;TransportHint&gt;,
+    pub punch_nonce: Option&lt;[u8; 32]&gt;,
+    pub handshake_psk: [u8; 32],
+    pub validity: Interval,
+    pub signature: Vec&lt;u8&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure defines a descriptor encrypted in the payload. The descriptor lists transport hints and handshake parameters. The <code>handshake_psk</code> binds Noise IKpsk2 to the context.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>enum TransportHint {
+    QuicDirect { addr: SocketAddr },
+    QuicReflexive { addr: SocketAddr },
+    WebSocketRelay { relay: AuthorityId },
+    WebSocketDirect { url: String },
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This enum defines transport options. Relay hints require valid relay capabilities.</p>
+<h2 id="4-envelope-propagation"><a class="header" href="#4-envelope-propagation">4. Envelope Propagation</a></h2>
+<p>Envelopes propagate using the gossip loop. Each participant floods new envelopes to its neighbors. Neighbors forward envelopes if they have flow budget and if the envelope is new. Duplicate envelopes are ignored.</p>
+<p>Encrypted payloads are stored in a content store keyed by <code>payload_cid</code>. Authorities decrypt payloads using the context key. Only participants in the relational context have the required keys.</p>
+<p>Flow budget is charged before forwarding. Each hop charges its local flow budget for the <code>(context, neighbor)</code> pair. Flow failures prevent forwarding but do not reveal failures to the network.</p>
+<p>Receipts document successful forwarding. Receipts allow downstream authorities to prove that upstream hops charged their budgets.</p>
+<h2 id="5-protocol-flow"><a class="header" href="#5-protocol-flow">5. Protocol Flow</a></h2>
+<p>The rendezvous sequence uses the context between two authorities. Each authority derives a per-context key used for encryption and handshake.</p>
+<pre class="mermaid">sequenceDiagram
+    participant A as Authority A
+    participant R as Relay
+    participant B as Authority B
+
+    A-&gt;&gt;A: Create descriptor
+    A-&gt;&gt;A: Encrypt descriptor
+    A-&gt;&gt;A: Create envelope
+    A-&gt;&gt;R: Flood envelope
+    R-&gt;&gt;B: Forward envelope
+    B-&gt;&gt;B: Decrypt payload
+    B-&gt;&gt;B: Create response descriptor
+    B-&gt;&gt;R: Flood response
+    R-&gt;&gt;A: Forward response
+    A-&gt;&gt;A: Decrypt response
+    A-&gt;&gt;B: Establish transport
+</pre>
+<p>A constructs a descriptor. A encrypts it with the context key. A publishes an envelope fact. Neighbors forward the envelope. B decrypts the descriptor and publishes a response. A receives the response and selects a transport. A completes a Noise IKpsk2 handshake with B.</p>
+<h2 id="6-flow-budget-integration"><a class="header" href="#6-flow-budget-integration">6. Flow Budget Integration</a></h2>
+<p>Flow budgets limit the rate of envelope propagation. Each envelope includes a cost. The rendezvous manager charges this cost before sending or forwarding. Cost is scoped to <code>(ContextId, neighbor_authority)</code>.</p>
+<p>The budget charge uses the guard chain. <code>CapGuard</code> ensures authorization for propagation. <code>FlowGuard</code> charges the budget. <code>JournalCoupler</code> inserts forwarding receipts into the journal.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct Receipt {
+    pub context: ContextId,
+    pub from: AuthorityId,
+    pub to: AuthorityId,
+    pub epoch: u64,
+    pub cost: u32,
+    pub signature: Vec&lt;u8&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure defines per-hop receipts. Receipts verify that forwarding charged budget correctly.</p>
+<h2 id="7-secure-channel-establishment"><a class="header" href="#7-secure-channel-establishment">7. Secure Channel Establishment</a></h2>
+<p>After receiving a valid descriptor, the initiator selects a transport. Both sides run Noise IKpsk2 using the descriptor handshake key. Successful handshake yields a <code>SecureChannel</code>. The channel binds the authorities and context.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct SecureChannel {
+    pub context: ContextId,
+    pub peer: AuthorityId,
+    pub channel_id: Uuid,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This structure represents a live channel. Channel failure triggers re-establishment. Channel keys refresh when epochs change.</p>
+<h2 id="8-failure-modes-and-privacy"><a class="header" href="#8-failure-modes-and-privacy">8. Failure Modes and Privacy</a></h2>
+<p>Failures occur during budget charging, decryption, or transport establishment. These failures are local. No network packets reveal capability or budget failures.</p>
+<p>Context isolation prevents unauthorized authorities from reading envelopes. Transport hints do not reveal authority structure. Relay identifiers reveal only the relay authority. Payload contents remain private.</p>
+<h2 id="9-interfaces"><a class="header" href="#9-interfaces">9. Interfaces</a></h2>
+<p>The rendezvous manager exposes a publication function and a channel establishment function. The publication function creates updated descriptors. The establishment function drives the rendezvous process.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub trait RendezvousEffects {
+    async fn publish_descriptor(&amp;self, context: ContextId) -&gt; Result&lt;()&gt;;
+    async fn establish_channel(&amp;self, context: ContextId) -&gt; Result&lt;SecureChannel&gt;;
+}
+<span class="boring">}</span></code></pre></pre>
+<p>This trait defines rendezvous behavior. Implementations manage envelopes, flow budgets, decryption, and transport negotiation.</p>
+<h2 id="10-summary"><a class="header" href="#10-summary">10. Summary</a></h2>
+<p>Rendezvous provides encrypted peer discovery and channel establishment scoped to relational contexts. Envelopes propagate through context-aware gossip with flow budget enforcement. Secure channels use Noise IKpsk2 and QUIC. All behavior remains private to the context and reveals no structural information.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="109_authorization.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="110_state_reduction.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="109_authorization.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="110_state_reduction.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>

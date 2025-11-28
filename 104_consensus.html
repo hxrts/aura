@@ -1,0 +1,555 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Consensus - Aura</title>
+
+
+        <!-- Custom HTML head -->
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" id="highlight-css" href="highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+
+        <!-- Provide site root and default themes to javascript -->
+        <script>
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
+            window.path_to_searchindex_js = "searchindex.js";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="toc.js"></script>
+    </head>
+    <body>
+    <div id="mdbook-help-container">
+        <div id="mdbook-help-popup">
+            <h2 class="mdbook-help-title">Keyboard shortcuts</h2>
+            <div>
+                <p>Press <kbd>←</kbd> or <kbd>→</kbd> to navigate between chapters</p>
+                <p>Press <kbd>S</kbd> or <kbd>/</kbd> to search in the book</p>
+                <p>Press <kbd>?</kbd> to show this help</p>
+                <p>Press <kbd>Esc</kbd> to hide this help</p>
+            </div>
+        </div>
+    </div>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+                sidebar_toggle.checked = false;
+            }
+            if (sidebar === 'visible') {
+                sidebar_toggle.checked = true;
+            } else {
+                html.classList.remove('sidebar-visible');
+            }
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search (`/`)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="/ s" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">Aura</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <div class="search-wrapper">
+                            <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                            <div class="spinner-wrapper">
+                                <i class="fa fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css">
+<h1 id="consensus"><a class="header" href="#consensus">Consensus</a></h1>
+<p>This document describes the architecture of Aura Consensus. It defines the problem model, protocol phases, data structures, and integration with <a href="102_journal.html">journals</a>. It explains how consensus provides single-shot agreement for non-monotone operations such as account updates or relational context operations.</p>
+<h2 id="1-problem-model"><a class="header" href="#1-problem-model">1. Problem Model</a></h2>
+<p>Aura uses consensus only for operations that cannot be expressed as monotone growth. Consensus produces a commit fact. The commit fact is inserted into one or more <a href="102_journal.html">journals</a> and drives deterministic reduction. Aura does not maintain a global log. Consensus operates in the scope of an authority or a relational context.</p>
+<p>Consensus is single-shot. It agrees on a single operation and a single prestate. Commit facts are immutable and merge by join in journal namespaces.</p>
+<p>A consensus instance uses a context-scoped committee. The committee contains witnesses selected by the authority or relational context. Committee members may be offline. The protocol completes even under partitions.</p>
+<h2 id="2-core-protocol"><a class="header" href="#2-core-protocol">2. Core Protocol</a></h2>
+<p>Aura Consensus has two paths. The fast path completes in one round trip. The fallback path uses epidemic gossip and a threshold race. Both paths produce the same commit fact once enough matching witness shares exist.</p>
+<p>The fast path uses direct communication. The initiator broadcasts an execute message. Witnesses run the operation against the prestate. Witnesses return FROST shares. The initiator aggregates shares and produces a threshold signature (via core FROST primitives in <code>aura-core::crypto::tree_signing</code>; consensus calls a thin adapter—<code>aura-frost</code> is deprecated).</p>
+<p>The fallback path triggers when witnesses disagree or when the initiator stalls. Witnesses exchange share proposals using bounded fanout gossip. Any witness that assembles a valid threshold signature broadcasts a complete commit fact.</p>
+<h2 id="3-common-structures-and-notation"><a class="header" href="#3-common-structures-and-notation">3. Common Structures and Notation</a></h2>
+<p>Consensus uses the following core concepts and notation throughout the protocol.</p>
+<h3 id="core-variables"><a class="header" href="#core-variables">Core Variables</a></h3>
+<ul>
+<li><code>cid : ConsensusId</code> - consensus instance identifier</li>
+<li><code>Op</code> - operation being agreed on (application-defined)</li>
+<li><code>prestate</code> - local pre-state for this instance (e.g., journal snapshot)</li>
+<li><code>prestate_hash = H(prestate)</code> - hash of prestate</li>
+<li><code>rid = H(Op, prestate)</code> - result identifier</li>
+<li><code>t</code> - threshold; adversary controls <code>&lt; t</code> key shares</li>
+<li><code>W</code> - finite set of witnesses for this consensus instance</li>
+</ul>
+<h3 id="per-instance-tracking"><a class="header" href="#per-instance-tracking">Per-Instance Tracking</a></h3>
+<p>Each consensus participant maintains per-<code>cid</code> state. The <code>decided</code> flags prevent double-voting. Proposals are keyed by <code>(rid, prestate_hash)</code> to group matching shares.</p>
+<h3 id="equivocation-detection"><a class="header" href="#equivocation-detection">Equivocation Detection</a></h3>
+<p>Equivocation occurs when the same witness signs two different <code>rid</code> values under the same <code>(cid, prestate_hash)</code>. This violates safety. The protocol detects and excludes equivocating shares.</p>
+<h2 id="4-data-structures"><a class="header" href="#4-data-structures">4. Data Structures</a></h2>
+<p>Consensus instances use identifiers for operations and results.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct ConsensusId(Uuid);
+pub struct ResultId(Hash32);
+<span class="boring">}</span></code></pre></pre>
+<p>These structures identify consensus instances and their results.</p>
+<p>A commit fact contains the consensus identifier, result identifier, threshold signature, and the attester set. Attesters are recorded as <code>AuthorityId</code> values to preserve device privacy.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct CommitFact {
+    cid: ConsensusId,
+    rid: ResultId,                 // H(Op, prestate)
+    threshold_signature: ThresholdSignature,
+    attester_set: BTreeSet&lt;AuthorityId&gt;,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>The commit fact is the output of consensus. Every peer merges <code>CommitFact</code> into its journal CRDT. A peer finalizes <code>(cid, rid)</code> when it accepts a valid threshold signature and inserts the corresponding <code>CommitFact</code>.</p>
+<p>The commit fact is inserted into the appropriate journal namespace. This includes account journals for account updates and relational context journals for cross-authority operations.</p>
+<h2 id="5-prestate-model"><a class="header" href="#5-prestate-model">5. Prestate Model</a></h2>
+<p>Consensus binds operations to explicit prestates. A prestate hash commits to the current reduced state of all participants.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let prestate_hash = H(C_auth1, C_auth2, C_context);
+<span class="boring">}</span></code></pre></pre>
+<p>This value includes root commitments of participating authorities. It may also include the current relational context commitment. Witnesses verify that their local reduced state matches the prestate hash. This prevents forks.</p>
+<p>The result identifier binds the operation to the prestate.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>let rid = H(Op, prestate);
+<span class="boring">}</span></code></pre></pre>
+<p>Witnesses treat matching <code>(rid, prestate_hash)</code> pairs as belonging to the same bucket. The protocol groups shares by these pairs to detect agreement.</p>
+<h2 id="6-fast-path-protocol"><a class="header" href="#6-fast-path-protocol">6. Fast Path Protocol</a></h2>
+<p>The fast path optimistically assumes agreement. It completes in one round trip when all participants share the same prestate.</p>
+<h3 id="messages"><a class="header" href="#messages">Messages</a></h3>
+<ul>
+<li><code>Execute(cid, Op, prestate_hash, evidΔ)</code> - initiator requests operation execution</li>
+<li><code>WitnessShare(cid, rid, share, prestate_hash, evidΔ)</code> - witness returns threshold share</li>
+<li><code>Commit(cid, rid, sig, attesters, evidΔ)</code> - initiator broadcasts commit fact</li>
+<li><code>StateMismatch(cid, expected_pre_hash, actual_pre_hash, evidΔ)</code> - optional debugging signal</li>
+</ul>
+<p>Each message carries evidence delta <code>evidΔ</code> for the consensus instance. Evidence propagates along with protocol messages.</p>
+<h3 id="initiator-protocol"><a class="header" href="#initiator-protocol">Initiator Protocol</a></h3>
+<p>The initiator <code>i</code> coordinates the fast path.</p>
+<pre><code>State at initiator i:
+    cid       : ConsensusId       // fresh per instance
+    Op        : Operation
+    shares    : Map[WitnessId -&gt; (rid, share, prestate_hash)]
+    decided   : Map[ConsensusId -&gt; Bool]   // initially decided[cid] = false
+    W         : Set[WitnessId]
+    t         : Nat
+</code></pre>
+<p>The initiator maintains per-witness shares and tracks decision status.</p>
+<h4 id="start-operation"><a class="header" href="#start-operation">Start Operation</a></h4>
+<pre><code>Start(cid, Op):
+    prestate       := ReadState()
+    prestate_hash  := H(prestate)
+    decided[cid]   := false
+    shares         := {}
+
+    For all w in W:
+        Send Execute(cid, Op, prestate_hash, EvidenceDelta(cid)) to w
+</code></pre>
+<p>The initiator reads local state and broadcasts the operation to all witnesses.</p>
+<h4 id="process-witness-shares"><a class="header" href="#process-witness-shares">Process Witness Shares</a></h4>
+<pre><code>On WitnessShare(cid, rid, share, prestate_hash, evidΔ) from w:
+    MergeEvidence(cid, evidΔ)
+
+    If decided[cid] = false and w not in shares:
+        shares[w] := (rid, share, prestate_hash)
+
+        // collect all shares for this specific (rid, prestate_hash)
+        Hset := { (w', s') in shares | s'.rid = rid
+                                     ∧ s'.prestate_hash = prestate_hash }
+
+        If |Hset| ≥ t:
+            sig := CombineShares( { s'.share | (_, s') in Hset } )
+            attesters := { w' | (w', _) in Hset }
+
+            CommitFact(cid, rid, sig, attesters)
+            For all v in W:
+                Send Commit(cid, rid, sig, attesters, EvidenceDelta(cid)) to v
+
+            decided[cid] := true
+</code></pre>
+<p>The initiator collects shares. When <code>t</code> shares agree on <code>(rid, prestate_hash)</code>, it combines them into a threshold signature.</p>
+<h3 id="witness-protocol"><a class="header" href="#witness-protocol">Witness Protocol</a></h3>
+<p>Each witness <code>w</code> responds to execute requests.</p>
+<pre><code>State at witness w:
+    proposals : Map[(rid, prestate_hash) -&gt; Set[(WitnessId, Share)]]
+    decided   : Map[ConsensusId -&gt; Bool]
+    timers    : Map[ConsensusId -&gt; TimerHandle]
+    W         : Set[WitnessId]
+    t         : Nat
+</code></pre>
+<p>Witnesses maintain proposals and fallback timers.</p>
+<h4 id="process-execute-request"><a class="header" href="#process-execute-request">Process Execute Request</a></h4>
+<pre><code>On Execute(cid, Op, prestate_hash, evidΔ) from i:
+    MergeEvidence(cid, evidΔ)
+
+    if decided.get(cid, false) = true:
+        return
+
+    prestate := ReadState()
+    if H(prestate) != prestate_hash:
+        Send StateMismatch(cid, prestate_hash, H(prestate), EvidenceDelta(cid)) to i
+        StartTimer(cid, T_fallback)
+        return
+
+    rid   := H(Op, prestate)
+    share := ProduceShare(cid, rid)
+
+    proposals[(rid, prestate_hash)] := { (w, share) }
+
+    Send WitnessShare(cid, rid, share, prestate_hash, EvidenceDelta(cid)) to i
+
+    StartTimer(cid, T_fallback)
+</code></pre>
+<p>Witnesses verify prestate agreement before computing shares. Mismatches trigger fallback timers.</p>
+<h4 id="process-commit"><a class="header" href="#process-commit">Process Commit</a></h4>
+<pre><code>On Commit(cid, rid, sig, attesters, evidΔ) from any v:
+    if decided.get(cid, false) = false
+       and VerifyThresholdSig(rid, sig, attesters):
+
+        MergeEvidence(cid, evidΔ)
+        CommitFact(cid, rid, sig, attesters)
+        decided[cid] := true
+        StopTimer(cid)
+</code></pre>
+<p>Witnesses accept valid commit facts from any source.</p>
+<h2 id="7-evidence-propagation"><a class="header" href="#7-evidence-propagation">7. Evidence Propagation</a></h2>
+<p>Evidence is a CRDT keyed by <code>cid</code>. It monotonically accumulates attestations and signatures.</p>
+<p>Evidence properties:</p>
+<ul>
+<li>Monotonicity: threshold signatures for <code>(cid, rid)</code> never conflict</li>
+<li>Idempotence: merging the same evidence multiple times is safe</li>
+<li>Convergence: all peers exchanging deltas converge to the same evidence</li>
+</ul>
+<p>Abstract interface:</p>
+<pre><code>EvidenceDelta(cid):
+    // Return a delta for the evidence CRDT for this cid
+    return CRDT_Delta_for(cid)
+
+MergeEvidence(cid, evidΔ):
+    // Merge a delta into local evidence
+    CRDT_Merge(cid, evidΔ)
+</code></pre>
+<p>Every protocol message carries <code>evidΔ</code>. This ensures evidence spreads with the protocol. Late-joining peers catch up by merging CRDT state.</p>
+<h2 id="8-fallback-protocol"><a class="header" href="#8-fallback-protocol">8. Fallback Protocol</a></h2>
+<p>Fallback activates when the fast path stalls. Triggers include witness disagreement or initiator failure. Fallback uses leaderless gossip to complete consensus.</p>
+<h3 id="messages-1"><a class="header" href="#messages-1">Messages</a></h3>
+<ul>
+<li><code>Conflict(cid, conflicts, evidΔ)</code> - initiator seeds fallback with known conflicts</li>
+<li><code>AggregateShare(cid, proposals, evidΔ)</code> - witnesses exchange proposal sets</li>
+<li><code>ThresholdComplete(cid, rid, sig, attesters, evidΔ)</code> - any witness broadcasts completion</li>
+</ul>
+<h3 id="equivocation-detection-1"><a class="header" href="#equivocation-detection-1">Equivocation Detection</a></h3>
+<p>Equivocation means signing two different <code>rid</code> values under the same <code>(cid, prestate_hash)</code>.</p>
+<pre><code>HasEquivocated(proposals, witness, cid, pre_hash, new_rid):
+    For each ((rid, ph), S) in proposals:
+        if ph = pre_hash
+           and rid ≠ new_rid
+           and witness ∈ { w' | (w', _) in S }:
+            return true
+    return false
+</code></pre>
+<p>The protocol excludes equivocating shares from threshold computation.</p>
+<h3 id="fallback-gossip"><a class="header" href="#fallback-gossip">Fallback Gossip</a></h3>
+<p>Witnesses periodically exchange proposals with random peers.</p>
+<pre><code>OnPeriodic(cid) for fallback gossip when decided[cid] = false:
+    peers := SampleRandomSubset(W \ {w}, k)
+
+    For each p in peers:
+        Send AggregateShare(cid, proposals, EvidenceDelta(cid)) to p
+</code></pre>
+<p>Gossip fanout <code>k</code> controls redundancy. Typical values are 3-5.</p>
+<h3 id="threshold-checking"><a class="header" href="#threshold-checking">Threshold Checking</a></h3>
+<p>Witnesses check for threshold completion after each update.</p>
+<pre><code>CheckThreshold(cid):
+    if decided.get(cid, false) = true:
+        return
+
+    For each ((rid, pre_hash), S) in proposals:
+        if |S| ≥ t:
+            sig := CombineShares({ sh | (_, sh) in S })
+
+            if VerifyThresholdSig(rid, sig):
+                attesters := { w' | (w', _) in S }
+
+                CommitFact(cid, rid, sig, attesters)
+
+                For all v in W:
+                    Send ThresholdComplete(cid, rid, sig, attesters, EvidenceDelta(cid)) to v
+
+                decided[cid] := true
+                return
+</code></pre>
+<p>Any witness reaching threshold broadcasts the commit fact. The first valid threshold signature wins.</p>
+<h2 id="9-integration-with-journals"><a class="header" href="#9-integration-with-journals">9. Integration with Journals</a></h2>
+<p>Consensus emits commit facts. Journals merge commit facts using set union. Reduction interprets commit facts as confirmed non-monotone events.</p>
+<p>Account journals integrate commit facts that represent tree operations. <a href="103_relational_contexts.html">Relational context</a> journals integrate commit facts that represent guardian bindings or recovery grants.</p>
+<p>Reduction remains deterministic. Commit facts simply appear as additional facts in the semilattice.</p>
+<p>A commit fact is monotone even when the event it represents is non-monotone. This supports convergence.</p>
+<h2 id="10-integration-points"><a class="header" href="#10-integration-points">10. Integration Points</a></h2>
+<p>Consensus is used for account tree operations that require strong agreement. Examples include membership changes and policy changes when local signing is insufficient.</p>
+<p>Consensus is also used for relational context operations. Guardian bindings use consensus to bind authority state. Recovery grants use consensus to approve account modifications. Application specific relational contexts may also use consensus.</p>
+<h2 id="11-frost-threshold-signatures"><a class="header" href="#11-frost-threshold-signatures">11. FROST Threshold Signatures</a></h2>
+<p>Consensus uses FROST to produce threshold signatures. Each witness holds a secret share. Witnesses compute partial signatures. The initiator or fallback proposer aggregates the shares. The final signature verifies under the group public key.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">#![allow(unused)]
+</span><span class="boring">fn main() {
+</span>pub struct WitnessShare {
+    pub cid: ConsensusId,
+    pub rid: ResultId,
+    pub share: Vec&lt;u8&gt;,
+    pub prestate_hash: Hash32,
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Witness shares validate only for the current consensus instance. They cannot be replayed. Witnesses generate only one share per <code>(cid, prestate_hash)</code>.</p>
+<p>The attester set in the commit fact contains only devices that contributed signing shares. This provides cryptographic proof of participation.</p>
+<h2 id="12-fallback-protocol-details"><a class="header" href="#12-fallback-protocol-details">12. Fallback Protocol Details</a></h2>
+<h3 id="fallback-trigger"><a class="header" href="#fallback-trigger">Fallback Trigger</a></h3>
+<p>The initiator can proactively trigger fallback when it detects conflicts.</p>
+<pre><code>Fallback_Trigger_Initiator(cid):
+    // Extract conflicts from shares (same prestate_hash, different rid)
+    conflicts := Map[(rid, prestate_hash) -&gt; Set[(w, share)]]
+
+    For each (w, (rid, share, prestate_hash)) in shares:
+        conflicts[(rid, prestate_hash)] :=
+            conflicts.get((rid, prestate_hash), ∅) ∪ { (w, share) }
+
+    For all w in W:
+        Send Conflict(cid, conflicts, EvidenceDelta(cid)) to w
+</code></pre>
+<p>This optimization seeds fallback with known conflicts. Witnesses also start fallback independently on timeout.</p>
+<h3 id="fallback-message-handlers"><a class="header" href="#fallback-message-handlers">Fallback Message Handlers</a></h3>
+<p>Witnesses process fallback messages to accumulate shares.</p>
+<pre><code>On Conflict(cid, conflicts, evidΔ) from any peer:
+    MergeEvidence(cid, evidΔ)
+
+    For each ((rid, pre_hash), S) in conflicts:
+        if not HasEquivocatedInSet(proposals, S, pre_hash):
+            proposals[(rid, pre_hash)] :=
+                proposals.get((rid, pre_hash), ∅) ∪ S
+
+    CheckThreshold(cid)
+    Fallback_Start(cid)
+</code></pre>
+<p>Conflict messages bootstrap the fallback phase. The witness merges non-equivocating shares.</p>
+<pre><code>On AggregateShare(cid, proposals', evidΔ) from any peer:
+    MergeEvidence(cid, evidΔ)
+
+    For each ((rid, pre_hash), S') in proposals':
+        For each (w', sh') in S':
+            if not HasEquivocated(proposals, w', cid, pre_hash, rid):
+                proposals[(rid, pre_hash)] :=
+                    proposals.get((rid, pre_hash), ∅) ∪ { (w', sh') }
+
+    CheckThreshold(cid)
+</code></pre>
+<p>Aggregate shares spread proposal sets through gossip. Each witness checks for threshold after updates. Threshold-complete messages carry the final aggregated signature; once validated, the witness commits and stops its timers.</p>
+<h2 id="13-safety-guarantees"><a class="header" href="#13-safety-guarantees">13. Safety Guarantees</a></h2>
+<p>Consensus satisfies agreement. At most one commit fact forms for a given <code>(cid, prestate_hash)</code>. The threshold signature ensures authenticity. No attacker can forge a threshold signature without the required number of shares.</p>
+<p>Consensus satisfies validity. A commit fact references a result computed from the agreed prestate. All honest witnesses compute identical results. Malformed shares are rejected.</p>
+<p>Consensus satisfies deterministic convergence. Evidence merges through CRDT join. All nodes accept the same commit fact.</p>
+<h2 id="14-liveness-guarantees"><a class="header" href="#14-liveness-guarantees">14. Liveness Guarantees</a></h2>
+<p>The fast path completes in one round trip when the initiator and witnesses are online. The fallback path provides eventual completion under asynchrony. Gossip ensures that share proposals propagate across partitions.</p>
+<p>The protocol does not rely on stable leaders. No global epoch boundaries exist. Witnesses can rejoin by merging the journal fact set.</p>
+<h3 id="fallback-state-diagram"><a class="header" href="#fallback-state-diagram">Fallback State Diagram</a></h3>
+<pre class="mermaid">stateDiagram-v2
+    [*] --&gt; FastPath
+    FastPath --&gt; FallbackPending: timeout or conflict
+    FallbackPending --&gt; FallbackGossip: send Conflict/AggregateShare
+    FallbackGossip --&gt; Completed: threshold signature assembled
+    FastPath --&gt; Completed: Commit broadcast
+    Completed --&gt; [*]
+</pre>
+<ul>
+<li><strong>FastPath</strong>: initiator collecting shares.</li>
+<li><strong>FallbackPending</strong>: timer expired or conflicting <code>(rid, prestate_hash)</code> observed.</li>
+<li><strong>FallbackGossip</strong>: witnesses exchange proposal sets until <code>CheckThreshold</code> succeeds.</li>
+<li><strong>Completed</strong>: commit fact accepted and timers stopped.</li>
+</ul>
+<h3 id="parameter-guidance"><a class="header" href="#parameter-guidance">Parameter Guidance</a></h3>
+<ul>
+<li><code>T_fallback</code>: set to roughly <code>2–3 ×</code> the median witness RTT. Too aggressive causes unnecessary fallback; too lax delays recovery when an initiator stalls.</li>
+<li>Gossip fanout <code>k</code>: use 3–5 peers per round for WAN deployments. Lower values reduce bandwidth but increase convergence time; higher values increase robustness at the cost of traffic.</li>
+<li>Gossip interval: 250–500 ms is a good default. Ensure at least a few gossip rounds occur before timers retrigger, giving the network time to converge.</li>
+</ul>
+<p>These parameters should be tuned per deployment, but the ranges above keep fallback responsive without overwhelming the network.</p>
+<h2 id="15-relation-to-frost"><a class="header" href="#15-relation-to-frost">15. Relation to FROST</a></h2>
+<p>Consensus uses FROST as the final stage of agreement. FROST ensures that only one threshold signature exists per result. FROST signatures provide strong cryptographic proof.</p>
+<p>Consensus and FROST remain separate. Consensus orchestrates communication. FROST proves final agreement. Combining the two yields a single commit fact.</p>
+<h2 id="16-summary"><a class="header" href="#16-summary">16. Summary</a></h2>
+<p>Aura Consensus produces monotone commit facts that represent non-monotone operations. It integrates with journals through set union. It uses FROST threshold signatures and CRDT evidence structures. It provides agreement, validity, and liveness. It supports authority updates and relational operations. It requires no global log and no central coordinator.
+The helper <code>HasEquivocatedInSet</code> excludes conflict batches that contain conflicting signatures from the same witness. <code>Fallback_Start</code> transitions the local state machine into fallback mode and arms gossip timers. Implementations must provide these utilities alongside the timers described earlier.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="103_relational_contexts.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="105_identifiers_and_boundaries.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="103_relational_contexts.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="105_identifiers_and_boundaries.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+        <script src="mermaid.min.js"></script>
+        <script src="mermaid-init.js"></script>
+
+
+
+    </div>
+    </body>
+</html>
