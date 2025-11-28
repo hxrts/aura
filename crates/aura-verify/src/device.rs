@@ -77,6 +77,7 @@ pub fn verify_signature(
 // Tests commented out due to missing crypto functions in current aura_crypto API
 /*
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // Test code uses Uuid::new_v4() for test data generation
 mod tests {
     use super::*;
     use aura_core::Effects;

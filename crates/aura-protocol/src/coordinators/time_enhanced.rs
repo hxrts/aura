@@ -329,6 +329,7 @@ impl Default for EnhancedTimeHandler {
 }
 
 #[cfg(test)]
+#[allow(clippy::disallowed_methods)] // Test code uses Uuid::new_v4() for test data generation
 mod tests {
     use super::*;
 
