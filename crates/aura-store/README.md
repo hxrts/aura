@@ -155,8 +155,6 @@ let capability = StorageCapability {
 
 ## Documentation
 
-- [Storage Domain Spec](../../docs/storage_spec.md) - Detailed storage semantics
-- [Content Addressing](../../docs/content_addressing.md) - Hash-based storage
 - [Authorization](../../docs/109_authorization.md) - Biscuit token system (in aura-wot)
 - [Architecture](../../docs/001_system_architecture.md) - Layer 2 domain patterns
 

@@ -118,4 +118,4 @@ cargo test -p aura-core context_isolation
 cargo test -p aura-journal namespace_separation  
 ```
 
-See also: [docs/103_relational_contexts.md](../../../../../docs/103_relational_contexts.md) for architectural details.
+See also: [docs/103_relational_contexts.md](../../../../docs/103_relational_contexts.md) for architectural details.
