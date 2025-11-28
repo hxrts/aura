@@ -295,46 +295,57 @@ Context isolation prevents cross-context flow. If two contexts $`\text{Ctx}_1 \n
 
 The global choreography type describes the entire protocol from a bird's-eye view. Aura extends vanilla MPST with capability guards, journal coupling, and leakage budgets:
 
-```math
+$$
 G ::= r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G \quad \text{(Point-to-point send)}
-```
-```math
-\mid r \to * : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G \quad \text{(Broadcast)}
-```
-```math
-\mid G \parallel G \quad \text{(Parallel composition)}
-```
-```math
-\mid r \triangleright \{ \ell_i : G_i \}_{i \in I} \quad \text{(Choice)}
-```
-```math
-\mid \mu X.\ G \quad \text{(Recursion)}
-```
-```math
-\mid X \quad \text{(Recursion variable)}
-```
-```math
-\mid \text{end} \quad \text{(Termination)}
-```
+$$
 
-```math
+$$
+\mid r \to * : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G \quad \text{(Broadcast)}
+$$
+
+$$
+\mid G \parallel G \quad \text{(Parallel composition)}
+$$
+
+$$
+\mid r \triangleright \{ \ell_i : G_i \}_{i \in I} \quad \text{(Choice)}
+$$
+
+$$
+\mid \mu X.\ G \quad \text{(Recursion)}
+$$
+
+$$
+\mid X \quad \text{(Recursion variable)}
+$$
+
+$$
+\mid \text{end} \quad \text{(Termination)}
+$$
+
+$$
 T ::= \text{Unit} \mid \text{Bool} \mid \text{Int} \mid \text{String} \mid \ldots \quad \text{(Message types)}
-```
-```math
+$$
+
+$$
 r ::= \text{Role identifiers (Alice, Bob, } \ldots \text{)}
-```
-```math
+$$
+
+$$
 \ell ::= \text{Label identifiers (accept, reject, } \ldots \text{)}
-```
-```math
+$$
+
+$$
 \Gamma ::= \text{meet-closed predicate}\ \text{need}(m) \leq \text{caps}_r(\text{ctx})
-```
-```math
+$$
+
+$$
 \Delta ::= \text{journal delta (facts) merged around the message}
-```
-```math
+$$
+
+$$
 L ::= \text{leakage tuple}\ (\ell_{\text{ext}}, \ell_{\text{ngh}}, \ell_{\text{grp}})
-```
+$$
 
 Conventions:
 - $`r_1 \to r_2 : T\ [\text{guard}: \Gamma,\ \triangleright \Delta,\ \text{leak}: L]\ .\ G`$ means "role $`r_1`$ checks $`\Gamma`$, applies $`\Delta`$, records leakage $`L`$, sends $`T`$ to $`r_2`$, then continues with $`G`$."
@@ -351,34 +362,41 @@ Note on $`\Gamma`$: `check_caps` and `refine_caps` are implemented via `Authoriz
 
 After projection, each role executes a local session type (binary protocol) augmented with effect sequencing:
 
-```math
+$$
 L ::= \text{do}\ E\ .\ L \quad \text{(Perform effect)}
-```
-```math
-\mid !T\ .\ L \quad \text{(Send)}
-```
-```math
-\mid ?T\ .\ L \quad \text{(Receive)}
-```
-```math
-\mid \oplus \{ \ell_i : L_i \}_{i \in I} \quad \text{(Internal choice)}
-```
-```math
-\mid \mathbin{\&} \{ \ell_i : L_i \}_{i \in I} \quad \text{(External choice)}
-```
-```math
-\mid \mu X.\ L \quad \text{(Recursion)}
-```
-```math
-\mid X \quad \text{(Recursion variable)}
-```
-```math
-\mid \text{end} \quad \text{(Termination)}
-```
+$$
 
-```math
+$$
+\mid !T\ .\ L \quad \text{(Send)}
+$$
+
+$$
+\mid ?T\ .\ L \quad \text{(Receive)}
+$$
+
+$$
+\mid \oplus \{ \ell_i : L_i \}_{i \in I} \quad \text{(Internal choice)}
+$$
+
+$$
+\mid \mathbin{\&} \{ \ell_i : L_i \}_{i \in I} \quad \text{(External choice)}
+$$
+
+$$
+\mid \mu X.\ L \quad \text{(Recursion)}
+$$
+
+$$
+\mid X \quad \text{(Recursion variable)}
+$$
+
+$$
+\mid \text{end} \quad \text{(Termination)}
+$$
+
+$$
 E ::= \text{merge}(\Delta) \mid \text{check\_caps}(\Gamma) \mid \text{refine\_caps}(\Gamma) \mid \text{record\_leak}(L) \mid \text{noop}
-```
+$$
 
 ### 3.3 Projection Function ($`\pi`$)
 
@@ -399,9 +417,9 @@ By convention, an annotation $`\triangleright \Delta`$ at a global step induces 
 
 **Parallel composition:**
 
-```math
+$$
 \pi_r(G_1 \parallel G_2) = \pi_r(G_1) \odot \pi_r(G_2)
-```
+$$
 
 where $`\odot`$ is the merge operator (sequential interleaving if no conflicts)
 
@@ -417,45 +435,45 @@ where $`\odot`$ is the merge operator (sequential interleaving if no conflicts)
 
 **Base cases:**
 
-```math
+$$
 \pi_r(X) = X
-```
+$$
 
-```math
+$$
 \pi_r(\text{end}) = \text{end}
-```
+$$
 
 ### 3.4 Duality and Safety
 
 For binary session types, duality ensures complementary behavior:
 
-```math
+$$
 \text{dual}(!T\ .\ L) = ?T\ .\ \text{dual}(L)
-```
+$$
 
-```math
+$$
 \text{dual}(?T\ .\ L) = !T\ .\ \text{dual}(L)
-```
+$$
 
-```math
+$$
 \text{dual}(\oplus \{ \ell_i : L_i \}) = \mathbin{\&} \{ \ell_i : \text{dual}(L_i) \}
-```
+$$
 
-```math
+$$
 \text{dual}(\mathbin{\&} \{ \ell_i : L_i \}) = \oplus \{ \ell_i : \text{dual}(L_i) \}
-```
+$$
 
-```math
+$$
 \text{dual}(\mu X.\ L) = \mu X.\ \text{dual}(L)
-```
+$$
 
-```math
+$$
 \text{dual}(X) = X
-```
+$$
 
-```math
+$$
 \text{dual}(\text{end}) = \text{end}
-```
+$$
 
 Property: If Alice's local type is $`L`$, then Bob's local type is $`\text{dual}(L)`$ for their communication to be type-safe.
 
@@ -682,9 +700,9 @@ $$
 
 When executed, each role $`\rho`$ instantiates a handler:
 
-```math
+$$
 \text{handle protocol}(G, \rho)\ \text{with}\ \{\text{on\_send}, \text{on\_recv}, \text{on\_merge}, \text{on\_refine}\}
-```
+$$
 
 Handlers compose algebraically over $`(F, C)`$ by distributing operations over semilattice state transitions. This yields an *effect runtime* capable of:
 
