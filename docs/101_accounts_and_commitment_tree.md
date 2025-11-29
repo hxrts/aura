@@ -208,7 +208,6 @@ The commitment tree commitment is a Merkle-style hash over ordered children; lea
 
 ```mermaid
 graph TD
-    subgraph Authority State
     R["Root<br/>Commitment<br/>(policy)"]
     L1["Branch<br/>(threshold)"]
     L2["Branch<br/>(threshold)"]
@@ -216,14 +215,13 @@ graph TD
     B["Leaf B<br/>(device share)"]
     C["Leaf C<br/>(device share)"]
     D["Leaf D<br/>(device share)"]
-    end
 
-    R -->|hash(children + policy)| L1
-    R -->|hash(children + policy)| L2
-    L1 -->|hash(leaf commitment)| A
-    L1 -->|hash(leaf commitment)| B
-    L2 -->|hash(leaf commitment)| C
-    L2 -->|hash(leaf commitment)| D
+    R -->|"hash(children + policy)"| L1
+    R -->|"hash(children + policy)"| L2
+    L1 -->|"hash(leaf commitment)"| A
+    L1 -->|"hash(leaf commitment)"| B
+    L2 -->|"hash(leaf commitment)"| C
+    L2 -->|"hash(leaf commitment)"| D
 ```
 
 Each node commitment is computed over its ordered children plus its policy metadata; the root commitment is the exported authority commitment used in key derivation and verification.
