@@ -51,6 +51,9 @@ pub mod commitment_integration;
 pub mod fact;
 pub mod reduction;
 
+// Domain-specific fact schemas (Phase 2.3)
+pub mod facts;
+
 // Authority state derivation (Phase 5)
 pub mod authority_state;
 
@@ -118,5 +121,13 @@ pub use types::GuardianMetadata;
 
 // Event type re-exports
 pub use events::{AdminReplaced, MaintenanceEvent};
+
+// Social fact schema re-exports (Phase 2.3)
+pub use facts::{
+    AdjacencyFact, BlockConfigFact, BlockFact, BlockId, BlockMemberFact, BlockMessageMemberFact,
+    BlockStorageBudget, NeighborhoodFact, NeighborhoodId, PinnedContentFact, ResidentFact,
+    SocialFactError, StewardCapabilities, StewardFact, TraversalAllowedFact, TraversalDepth,
+    TraversalPosition,
+};
 
 // See docs/100_authority_and_identity.md for migration guidance

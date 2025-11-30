@@ -12,7 +12,7 @@
 //! entry point (first guard in chain); enables delegation without trusted intermediaries.
 
 use crate::{BiscuitError, ResourceScope};
-use aura_core::identifiers::DeviceId;
+use aura_core::identifiers::AuthorityId;
 use biscuit_auth::{macros::*, Biscuit, PublicKey};
 
 // ============================================================================
@@ -22,14 +22,14 @@ use biscuit_auth::{macros::*, Biscuit, PublicKey};
 #[derive(Clone, Debug)]
 pub struct BiscuitAuthorizationBridge {
     _root_public_key: PublicKey,
-    device_id: DeviceId,
+    authority_id: AuthorityId,
 }
 
 impl BiscuitAuthorizationBridge {
-    pub fn new(root_public_key: PublicKey, device_id: DeviceId) -> Self {
+    pub fn new(root_public_key: PublicKey, authority_id: AuthorityId) -> Self {
         Self {
             _root_public_key: root_public_key,
-            device_id,
+            authority_id,
         }
     }
 
@@ -40,7 +40,7 @@ impl BiscuitAuthorizationBridge {
         let keypair = KeyPair::new();
         Self {
             _root_public_key: keypair.public(),
-            device_id: DeviceId::new(),
+            authority_id: AuthorityId::new(),
         }
     }
 
@@ -51,7 +51,7 @@ impl BiscuitAuthorizationBridge {
         let keypair = KeyPair::new();
         Self {
             _root_public_key: keypair.public(),
-            device_id: DeviceId::new(),
+            authority_id: AuthorityId::new(),
         }
     }
 
@@ -84,9 +84,9 @@ impl BiscuitAuthorizationBridge {
             .add_fact(fact!("operation({operation})"))
             .map_err(BiscuitError::BiscuitLib)?;
 
-        let device = self.device_id.to_string();
+        let authority = self.authority_id.to_string();
         authorizer
-            .add_fact(fact!("device({device})"))
+            .add_fact(fact!("authority({authority})"))
             .map_err(BiscuitError::BiscuitLib)?;
 
         let time = current_time_seconds.map(|t| t as i64).unwrap_or(0);
@@ -222,9 +222,9 @@ impl BiscuitAuthorizationBridge {
         let mut authorizer = token.authorizer().map_err(BiscuitError::BiscuitLib)?;
 
         // Add ambient facts for capability check
-        let device = self.device_id.to_string();
+        let authority = self.authority_id.to_string();
         authorizer
-            .add_fact(fact!("device({device})"))
+            .add_fact(fact!("authority({authority})"))
             .map_err(BiscuitError::BiscuitLib)?;
 
         let time = current_time_seconds.map(|t| t as i64).unwrap_or(0);
@@ -265,7 +265,7 @@ impl BiscuitAuthorizationBridge {
         let mut facts = Vec::new();
 
         // Add basic verification metadata
-        facts.push(format!("device(\"{}\")", self.device_id));
+        facts.push(format!("authority(\"{}\")", self.authority_id));
         let now = 0u64;
         facts.push(format!("verified_at({})", now));
 

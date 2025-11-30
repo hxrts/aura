@@ -7,13 +7,13 @@
 //! # Architecture Constraints
 //!
 //! **Layer 2 depends only on aura-core** (foundation).
-//! - ✅ Storage domain types and semantics
-//! - ✅ Capability-based access control logic
-//! - ✅ Content-addressed storage abstraction
-//! - ✅ Pure functions for storage operations
-//! - ❌ NO effect handler implementations (use StorageEffects from aura-effects)
-//! - ❌ NO handler composition (that's aura-composition)
-//! - ❌ NO multi-party protocol logic (that's aura-protocol)
+//! - YES Storage domain types and semantics
+//! - YES Capability-based access control logic
+//! - YES Content-addressed storage abstraction
+//! - YES Pure functions for storage operations
+//! - NO effect handler implementations (use StorageEffects from aura-effects)
+//! - NO handler composition (that's aura-composition)
+//! - NO multi-party protocol logic (that's aura-protocol)
 //!
 //! ## Core Concepts
 //!
@@ -47,6 +47,9 @@ pub mod crdt;
 /// Unified storage error types
 pub mod errors;
 
+/// Encrypted local storage for CLI/TUI preferences
+pub mod local;
+
 // Biscuit-based storage authorization moved to aura-wot (proper domain)
 
 // Re-export core types from aura-core
@@ -57,6 +60,9 @@ pub use capabilities::{AccessDecision, StorageCapability, StoragePermission, Sto
 pub use chunk::{compute_chunk_layout, ChunkLayout, ChunkManifest, ContentManifest, ErasureConfig};
 pub use crdt::{StorageIndex, StorageOpLog, StorageState};
 pub use errors::StorageError;
+pub use local::{
+    ContactCache, LocalData, LocalStore, LocalStoreConfig, LocalStoreError, ThemePreference,
+};
 pub use search::{SearchIndexEntry, SearchQuery, SearchResults, SearchScope};
 
 // Biscuit authorization APIs now available from aura-wot

@@ -132,8 +132,8 @@ impl LogicalClockEffects for ControllableTimeSource {
             }
         }
 
-        // Increment local counter using placeholder device id for tests
-        let test_device = DeviceId::new(); // Create new device ID for testing
+        // Increment local counter using a deterministic test device id
+        let test_device = DeviceId::deterministic_test_id();
         let current = clock.get(&test_device).copied().unwrap_or(0);
         clock.insert(test_device, current + 1);
         let lamport = clock.iter().map(|(_, counter)| *counter).max().unwrap_or(0);
@@ -212,7 +212,7 @@ impl TimeScenarioBuilder {
         self
     }
 
-    /// Configure devices for logical clock testing (placeholder)
+    /// Configure devices for logical clock testing
     pub fn with_devices(self, _devices: &[DeviceId]) -> Self {
         // In practice, would configure device-specific logical clocks
         self

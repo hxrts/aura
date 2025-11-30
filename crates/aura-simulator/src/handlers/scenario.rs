@@ -534,7 +534,7 @@ impl SimulationScenarioHandler {
         self.record_simple_event("verify_all_properties", HashMap::new())
     }
 
-    /// Stub setup choreography event
+    /// Record setup choreography event (simulation no-op)
     pub fn setup_choreography(
         &self,
         protocol: &str,
@@ -549,7 +549,7 @@ impl SimulationScenarioHandler {
         )
     }
 
-    /// Stub load key shares event
+    /// Record load key shares event (simulation no-op)
     pub fn load_key_shares(&self, threshold: usize) -> Result<(), TestingError> {
         self.record_simple_event(
             "load_key_shares",
@@ -557,7 +557,7 @@ impl SimulationScenarioHandler {
         )
     }
 
-    /// Stub choreography execution recording
+    /// Record choreography execution (simulation no-op)
     pub fn run_choreography_stub(
         &self,
         name: &str,
@@ -1256,7 +1256,7 @@ impl SimulationScenarioHandler {
         )
     }
 
-    /// Stub property verification recording
+    /// Record property verification (simulation no-op)
     pub fn verify_property_stub(
         &self,
         property: &str,

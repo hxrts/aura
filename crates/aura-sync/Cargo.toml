@@ -27,20 +27,16 @@ uuid = { workspace = true }
 futures = { workspace = true }
 tokio = { workspace = true }
 async-lock = "3"
-blake3 = { workspace = true }
 bincode = { workspace = true }
 parking_lot = { workspace = true }
 rand = { workspace = true }
 biscuit-auth = { workspace = true }
-chrono = { version = "0.4", features = ["serde"] }
 hex = "0.4"
 
 [dev-dependencies]
 # Testing infrastructure (Layer 5 can use testkit)
 aura-testkit = { path = "../aura-testkit" }
 tokio = { workspace = true }
-criterion = { version = "0.5", features = ["html_reports"] }
-chrono = { version = "0.4", features = ["serde"] }
 
 
 

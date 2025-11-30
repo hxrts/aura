@@ -413,6 +413,87 @@ Simulation uses `aura-simulator` for deterministic execution with virtual time a
 
 Both testing and simulation maintain the same architectural patterns as production. Effect traits provide abstraction boundaries. Guard chains enforce the same constraints. Context isolation remains intact.
 
+## 8. Database System
+
+### 8.1 Database-as-Journal Equivalence
+
+The journal is the database. Biscuit is the query engine. CRDTs are the replication layer. This equivalence maps traditional database concepts to existing Aura components.
+
+A database table corresponds to a journal reduction view. A database row corresponds to a fact implementing `JoinSemilattice`. Query execution uses Biscuit's Datalog engine. Replication uses `CrdtCoordinator` with delta sync.
+
+### 8.2 Query Architecture
+
+The `AuraQuery` wrapper loads facts from the journal into Biscuit's authorizer. Query scoping uses the existing `ResourceScope` type. Authorization happens via the guard chain before query execution.
+
+```rust
+pub struct ScopedQuery {
+    scope: ResourceScope,
+    query: String,
+}
+```
+
+The scoped query combines a resource scope with a Datalog query string. Execution filters facts to the requested scope before loading into the query engine.
+
+### 8.3 Indexing Layer
+
+The indexing layer provides efficient fact lookup beyond linear scan. Bloom filters provide fast membership tests. B-tree indexes provide ordered lookups for predicate, authority, and time queries. Merkle trees provide integrity verification.
+
+Indexes update on fact commit. Performance target is less than 10ms for 10k facts. See [Database Architecture](113_database.md) for implementation details.
+
+## 9. Urban Social Topology
+
+### 9.1 Three-Tier Structure
+
+Aura's social organization uses a digital urban metaphor with three tiers. Messages are communication contexts. Blocks are semi-public communities. Neighborhoods are collections of blocks connected via adjacency.
+
+Direct messages are private relational contexts. Block messages are semi-public messaging for block residents with historical sync. Blocks have a 10 MB storage allocation. Neighborhoods receive 1 MB donated per member block.
+
+### 9.2 Position and Traversal
+
+Traversal works like walking through a city. Position tracks neighborhood, block, traversal depth, capabilities, and entry time. Movement requires Biscuit capability authorization and adjacency edge existence.
+
+```rust
+pub enum TraversalDepth {
+    Street,
+    Frontage,
+    Interior,
+}
+```
+
+Street depth allows seeing frontage. Frontage depth allows limited interaction. Interior depth provides full resident-level access. See [Urban Social Topology](115_urban_social_topology.md) for the complete model.
+
+### 9.3 Storage Constraints
+
+Blocks have fixed 10 MB total size. Resident storage is 200 KB each with maximum 8 residents. Neighborhood donation is 1 MB each with maximum 4 neighborhoods. These constraints create natural scarcity and meaningful trade-offs.
+
+Storage constraints are enforced via the flow budget system. Spent counters are persisted as journal facts. Limits are derived at runtime from block policy and Biscuit capabilities.
+
+## 10. Terminal User Interface
+
+### 10.1 Architecture Principles
+
+The TUI is stateless between sessions. All state derives from the effect system and local store. The architecture uses real effects throughout for end-to-end testing fidelity.
+
+Query subscriptions use existing journal and CRDT infrastructure. Conditional compilation excludes simulator and demo code from production builds. The architecture uses Biscuit for queries and the guard chain for authorization.
+
+### 10.2 Reactive System
+
+The `Dynamic<T>` type represents observable values. Subscribers receive updates when values change. Query types generate Biscuit Datalog strings for execution.
+
+```rust
+pub struct Dynamic<T> {
+    inner: Arc<DynamicInner<T>>,
+}
+```
+
+View types aggregate reactive state for screens. Views subscribe to journal facts via database effects. Delta streaming provides efficient updates for lists.
+
+### 10.3 Effect Bridge
+
+The effect bridge connects the TUI to the real effect system. Commands dispatch asynchronously. Results return via channel. Events stream from the effect system to the TUI.
+
+Demo mode compiles only with the development feature flag. The simulator automates Alice and Charlie while Bob is human-controlled. Production builds exclude simulator dependencies. See [Terminal User Interface](115_tui.md) for component details.
+
 ## Documents That Reference This Guide
 
 - [Effect System and Runtime](106_effect_system_and_runtime.md) - Implementation details for the effect system architecture
@@ -426,6 +507,6 @@ Both testing and simulation maintain the same architectural patterns as producti
 
 Core documentation covers foundational concepts and formal models. [Theoretical Model](002_theoretical_model.md) provides mathematical foundations. [Privacy and Information Flow](003_information_flow_contract.md) documents the privacy framework. [Distributed Systems Contract](004_distributed_systems_contract.md) specifies safety and liveness guarantees. [System Invariants](005_system_invariants.md) indexes critical properties that must always hold.
 
-System documentation covers major components. [Authority and Identity](100_authority_and_identity.md) describes the authority model. [Journal System](102_journal.md) documents fact storage and reduction. [Relational Contexts](103_relational_contexts.md) covers cross-authority relationships. [Consensus](104_consensus.md) describes the agreement protocol.
+System documentation covers major components. [Authority and Identity](100_authority_and_identity.md) describes the authority model. [Journal System](102_journal.md) documents fact storage and reduction. [Relational Contexts](103_relational_contexts.md) covers cross-authority relationships. [Consensus](104_consensus.md) describes the agreement protocol. [Database Architecture](113_database.md) covers query and indexing systems. [Social Architecture](114_social_architecture.md) defines blocks and neighborhoods.
 
-Implementation documentation covers practical patterns. [Effect System and Runtime](106_effect_system_and_runtime.md) details effect implementation. [MPST and Choreography](107_mpst_and_choreography.md) covers protocol design. [Authorization](109_authorization.md) describes capability evaluation. [Project Structure](999_project_structure.md) provides comprehensive crate organization.
+Implementation documentation covers practical patterns. [Effect System and Runtime](106_effect_system_and_runtime.md) details effect implementation. [MPST and Choreography](107_mpst_and_choreography.md) covers protocol design. [Authorization](109_authorization.md) describes capability evaluation. [Terminal User Interface](115_tui.md) specifies the TUI architecture. [Project Structure](999_project_structure.md) provides comprehensive crate organization.

@@ -14,8 +14,6 @@ async-trait = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-chrono = { workspace = true }
-blake3 = { workspace = true }
 hex = { workspace = true }
 uuid = { workspace = true }
 biscuit-auth = { workspace = true }
@@ -23,6 +21,5 @@ bincode = { workspace = true }
 
 # For property-based testing of semilattice laws
 [dev-dependencies]
-proptest = { workspace = true }
 # quickcheck = { workspace = true } # removed - unused
 # tokio-test = { workspace = true } # removed - unused

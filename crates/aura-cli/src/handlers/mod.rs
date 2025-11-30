@@ -10,9 +10,12 @@
 //! - Status monitoring (status, version, node, threshold, init)
 
 use crate::{
-    AdminAction, AmpAction, AuthorityCommands, ChatCommands, ContextAction, DemoCommands,
-    InvitationAction, OtaAction, RecoveryAction, ScenarioAction, SnapshotAction,
+    AdminAction, AmpAction, AuthorityCommands, ChatCommands, ContextAction, InvitationAction,
+    OtaAction, RecoveryAction, SnapshotAction,
 };
+
+#[cfg(feature = "development")]
+use crate::{DemoCommands, ScenarioAction};
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_core::identifiers::DeviceId;
@@ -24,17 +27,21 @@ pub mod amp;
 pub mod authority;
 pub mod chat;
 pub mod context;
-pub mod demo;
 pub mod init;
 pub mod invite;
 pub mod node;
 pub mod ota;
 pub mod recovery;
-pub mod scenarios;
 pub mod snapshot;
 pub mod status;
 pub mod threshold;
 pub mod version;
+
+// Demo and scenarios modules require simulator - only available with development feature
+#[cfg(feature = "development")]
+pub mod demo;
+#[cfg(feature = "development")]
+pub mod scenarios;
 
 /// Main CLI handler that coordinates all operations through effects
 pub struct CliHandler {
@@ -111,7 +118,8 @@ impl CliHandler {
         .await
     }
 
-    /// Handle scenarios command through effects
+    /// Handle scenarios command through effects (requires development feature)
+    #[cfg(feature = "development")]
     pub async fn handle_scenarios(&self, action: &ScenarioAction) -> Result<()> {
         scenarios::handle_scenarios(&self.effect_context, self.effect_system.clone(), action).await
     }
@@ -166,7 +174,8 @@ impl CliHandler {
         chat::handle_chat(&self.effect_context, &self.effect_system, command).await
     }
 
-    /// Handle demo commands
+    /// Handle demo commands (requires development feature)
+    #[cfg(feature = "development")]
     pub async fn handle_demo(&self, command: &DemoCommands) -> Result<()> {
         demo::DemoHandler::handle_demo_command(command.clone())
             .await

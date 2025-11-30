@@ -165,10 +165,60 @@ This snippet shows parallel initialization of handlers. Parallel initialization 
 The effect runtime enforces the guard-chain sequencing defined in [Authorization](109_authorization.md) and the leakage contract from [Privacy and Information Flow](003_information_flow_contract.md) using pure guard evaluation plus asynchronous interpretation. Each projected choreography message expands to:
 
 1. **Snapshot preparation (async)** – gather capability frontier, budget headroom, leakage metadata, and randomness into a `GuardSnapshot` via `AuthorizationEffects`, `FlowBudgetEffects`, and cache state.
-2. **Pure guard evaluation (sync)** – `CapGuard → FlowGuard → JournalCoupler` runs over the snapshot and request, producing a `Vec<EffectCommand>` that describes the required charges, leakage records, journal writes, and transport sends.
+2. **Pure guard evaluation (sync)** – `CapGuard → FlowGuard → JournalCoupler` runs over the snapshot and request, producing a `GuardOutcome` that describes the authorization decision plus the `Vec<EffectCommand>` commands that need to execute next.
 3. **Command interpretation (async)** – an `EffectInterpreter` executes each `EffectCommand` using `FlowBudgetEffects`, `LeakageEffects`, `JournalEffects`, and `TransportEffects`, preserving charge-before-send.
 
 Handlers that implement `LeakageEffects` must surface both production-grade implementations (wired into the agent runtime) and deterministic versions for the simulator so privacy tests can assert leakage bounds. Because the executor orchestrates snapshots, pure evaluation, and interpretation explicitly, no transport observable can occur unless the preceding guards succeed, preserving the semantics laid out in the theoretical model.
+
+### 8.1 GuardSnapshot
+
+The runtime prepares a `GuardSnapshot` immediately before entering the guard chain. It contains every stable datum a guard may inspect while remaining read-only.
+
+```rust
+pub struct GuardSnapshot {
+    pub now: TimeStamp,
+    pub caps: Cap,
+    pub budgets: FlowBudgetView,
+    pub metadata: MetadataView,
+    pub rng_seed: [u8; 32],
+}
+```
+
+Guards evaluate synchronously against this snapshot and the incoming request. They cannot mutate state or perform I/O. That keeps guard evaluation deterministic, replayable, and WASM-compatible.
+
+### 8.2 EffectCommands
+
+Guards do not execute side effects directly. Instead, they return `EffectCommand` items for the interpreter to run. Each command is a minimal, domain-agnostic description of work such as charging budgets or appending facts:
+
+```rust
+pub enum EffectCommand {
+    ChargeBudget { authority: AuthorityId, amount: u32 },
+    AppendJournal { entry: JournalEntry },
+    RecordLeakage { bits: u32 },
+    StoreMetadata { key: String, value: String },
+    SendEnvelope { to: Address, envelope: Vec<u8> },
+    GenerateNonce { bytes: usize },
+}
+```
+
+This vocabulary keeps the guard interface simple: commands describe *what* happened, not *how*. Interpreters can batch, cache, or reorder commands so long as the semantics remain intact.
+
+### 8.3 EffectInterpreter
+
+The `EffectInterpreter` trait encapsulates the async execution of commands. Production runtimes hook it to `aura-effects` handlers, while the simulator or tests hook deterministic interpreters that record events instead of hitting the network.
+
+```rust
+#[async_trait]
+pub trait EffectInterpreter {
+    async fn exec(&self, cmd: EffectCommand) -> Result<EffectResult>;
+}
+```
+
+`ProductionEffectInterpreter` performs real I/O (storage, transport, journal) and keeps connection to the handler registry. `SimulationEffectInterpreter` records deterministic `SimulationEvent`s, consumes simulated time, and replays guard commands during tests. Borrowed or mock interpreters simplify protocol-level unit testing.
+
+### 8.4 Why This Matters
+
+Pure guard evaluation over `GuardSnapshot` avoids blocking sync/async bridges, prevents WASM deadlocks, and ensures simulation/production share identical logic. Effects become algebraic data, making them observable, testable, and replayable across deterministic runs. This design lets the guard chain enforce authorization, flow budgets, leakage budgets, and journal coupling without leaking implementation details into protocol handlers.
 
 ## 9. Session Management and Choreography Execution
 

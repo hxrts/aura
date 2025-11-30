@@ -4,16 +4,24 @@
 //! Target: <120 lines (minimal scoping implementation).
 
 use aura_core::{
+    hash::{hash as core_hash, hasher},
     identifiers::DeviceId,
-    time::{PhysicalTime, TimeStamp},
+    time::{OrderTime, PhysicalTime, TimeStamp},
     RelationshipId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
 
 use super::envelope::PrivacyLevel;
+
+static CONNECTION_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn order_from_bytes(seed: &[u8]) -> OrderTime {
+    OrderTime(core_hash(seed))
+}
 
 /// Simple identifier with privacy-preserving properties
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -127,9 +135,14 @@ impl ConnectionId {
     /// Generate a deterministic connection UUID
     /// This avoids direct UUID generation while providing uniqueness
     fn generate_connection_uuid() -> Uuid {
-        // Use deterministic approach for connections
-        // In production this would use a deterministic algorithm
-        Uuid::nil() // Placeholder
+        let counter = CONNECTION_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let mut h = hasher();
+        h.update(b"aura-connection-id");
+        h.update(&counter.to_le_bytes());
+        let digest = h.finalize();
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&digest[..16]);
+        Uuid::from_bytes(uuid_bytes)
     }
 }
 
@@ -173,10 +186,7 @@ impl ConnectionInfo {
         Self::new_with_timestamp(
             peer_id,
             privacy_level,
-            TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            }),
+            TimeStamp::OrderClock(OrderTime(core_hash(peer_id.0.as_bytes()))),
         )
     }
 
@@ -208,15 +218,8 @@ impl ConnectionInfo {
         relationship_id: RelationshipId,
         privacy_level: PrivacyLevel,
     ) -> Self {
-        Self::new_scoped_with_timestamp(
-            peer_id,
-            relationship_id,
-            privacy_level,
-            TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            }),
-        )
+        let timestamp = TimeStamp::OrderClock(order_from_bytes(relationship_id.as_bytes()));
+        Self::new_scoped_with_timestamp(peer_id, relationship_id, privacy_level, timestamp)
     }
 
     /// Create relationship-scoped connection with specific timestamp
@@ -260,29 +263,44 @@ impl ConnectionInfo {
     }
 
     /// Get connection age relative to specified current time
-    /// Note: In production, duration calculation should use PhysicalTimeEffects
-    pub fn age_relative_to(&self, _current_time: TimeStamp) -> Duration {
-        // For now, return a default duration since TimeStamp comparison needs proper implementation
-        // This would need PhysicalTimeEffects to calculate actual duration
-        Duration::from_secs(0)
+    pub fn age_relative_to(&self, current_time: TimeStamp) -> Duration {
+        let start_ts = match &self.state {
+            ConnectionState::Connecting { started_at, .. } => started_at.clone(),
+            ConnectionState::Established { established_at, .. } => established_at.clone(),
+            ConnectionState::Closing { closing_at, .. } => closing_at.clone(),
+            ConnectionState::Closed { closed_at, .. } => closed_at.clone(),
+        };
+
+        fn ts_to_ms(ts: &TimeStamp) -> u128 {
+            match ts {
+                TimeStamp::PhysicalClock(p) => p.ts_ms as u128,
+                TimeStamp::OrderClock(o) => {
+                    let mut buf = [0u8; 16];
+                    buf.copy_from_slice(&o.0[..16]);
+                    u128::from_le_bytes(buf)
+                }
+                _ => 0,
+            }
+        }
+
+        let start = ts_to_ms(&start_ts);
+        let end = ts_to_ms(&current_time);
+        let diff = end.saturating_sub(start);
+        Duration::from_millis(diff as u64)
     }
 
     /// Get connection age (uses epoch as baseline for determinism)
     pub fn age(&self) -> Duration {
-        self.age_relative_to(TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 0,
-            uncertainty: None,
-        }))
+        let uuid = self.connection_id.as_uuid();
+        let seed = uuid.as_bytes();
+        self.age_relative_to(TimeStamp::OrderClock(order_from_bytes(seed)))
     }
 }
 
 impl ConnectionMetrics {
     /// Create new metrics
     pub fn new() -> Self {
-        Self::new_with_timestamp(TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 0,
-            uncertainty: None,
-        }))
+        Self::new_with_timestamp(TimeStamp::OrderClock(order_from_bytes(&[1u8; 1])))
     }
 
     /// Create new metrics with specific timestamp
@@ -300,10 +318,7 @@ impl ConnectionMetrics {
     pub fn record_sent(&mut self, bytes: u64) {
         self.record_sent_with_timestamp(
             bytes,
-            TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            }),
+            TimeStamp::OrderClock(order_from_bytes(&bytes.to_le_bytes())),
         )
     }
 
@@ -318,10 +333,7 @@ impl ConnectionMetrics {
     pub fn record_received(&mut self, bytes: u64) {
         self.record_received_with_timestamp(
             bytes,
-            TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            }),
+            TimeStamp::OrderClock(order_from_bytes(&bytes.to_le_bytes())),
         )
     }
 

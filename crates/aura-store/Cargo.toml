@@ -23,12 +23,13 @@ serde_json = { workspace = true }
 
 # Utilities
 thiserror = { workspace = true }
-blake3 = { workspace = true }
 hex = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
-proptest = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros"] }
+async-trait = { workspace = true }
+uuid = { workspace = true }
 
 [features]
 default = []

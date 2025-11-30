@@ -174,20 +174,24 @@ Garbage collection operates safely over the journal. Checkpoints define pruning 
 
 ## Authorization and Flow Control
 
-AMP integrates with Aura's guard chain for authorization and flow control. Every message send passes through `CapGuard`, `FlowGuard`, and `JournalCoupler` before reaching the transport. This ensures that unauthorized sends and over-budget sends produce no observable behavior.
+AMP integrates with Aura's guard chain for authorization and flow control. Every message send passes through `CapGuard`, `FlowGuard`, and `JournalCoupler` before reaching the transport. Guard evaluation runs over a prepared `GuardSnapshot` and produces `EffectCommand` items that point to charging, journal, leakage, or transport work; an async interpreter executes those commands only after the entire guard chain succeeds, so unauthorized or over-budget sends never touch the network.
 
 The guard chain uses Biscuit tokens for capability evaluation. Each authority holds a device token derived from its root keypair. The device token contains capabilities scoped to specific contexts. Sending a message requires the `send` capability for the target channel. The guard chain verifies the token signature and evaluates Datalog caveats.
 
 ```rust
-// Guard chain sequence
 let snapshot = prepare_guard_snapshot(context, peer).await;
-let cap_result = CapGuard::evaluate(&snapshot, &operation);
-let flow_result = FlowGuard::charge(&snapshot, cost);
-let journal_result = JournalCoupler::commit(&snapshot, facts);
-let transport_result = TransportEffects::send(&encrypted_msg);
+let outcome = guard_chain.evaluate(&snapshot, &operation);
+
+if outcome.decision.is_denied() {
+    return Err(AuraError::authorization_failed("Guard evaluation denied"));
+}
+
+for cmd in outcome.effects {
+    interpreter.exec(cmd).await?;
+}
 ```
 
-This code shows the guard chain evaluation. The snapshot captures the current capability frontier and flow budget state. `CapGuard` evaluates the Biscuit token. `FlowGuard` charges the flow budget. `JournalCoupler` commits the charge as a fact. `TransportEffects` sends the message. Any failure returns locally without observable effects.
+This code shows the guard chain evaluation. The snapshot captures the current capability frontier and flow budget state. `CapGuard`, `FlowGuard`, and `JournalCoupler` emit `EffectCommand` items instead of performing I/O. The interpreter then executes the resulting commands (charge, journal, transport, etc.) in production or simulation. Any failure returns locally without observable effects.
 
 Flow budgets are replicated as spent counters in the journal. The `spent` counter for a `(context, peer)` pair is a monotone fact. The `limit` is computed at runtime from Biscuit capabilities and sovereign policy. Before sending, `FlowGuard` checks that `spent + cost <= limit`. If headroom exists, it emits a fact that increments `spent`.
 

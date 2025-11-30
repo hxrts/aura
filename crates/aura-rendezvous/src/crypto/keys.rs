@@ -6,42 +6,31 @@
 
 use aura_core::hash;
 use aura_core::{IdentityKeyContext, KeyDerivationSpec};
-// Remove aura_effects dependency - use aura_core crypto functions instead
 use aura_core::{AuraError, AuraResult, DeviceId};
+use hkdf::Hkdf;
+use sha2::Sha256;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// 32-byte relationship encryption key
 pub type RelationshipKey = [u8; 32];
 
-/// Derive a relationship encryption key using simple key derivation
-///
-/// This is a placeholder implementation using hash-based key derivation.
-/// In production, would use proper HKDF or similar.
+/// Derive a relationship encryption key using HKDF-SHA256
 fn derive_relationship_key(
     root_key: &[u8; 32],
     spec: &KeyDerivationSpec,
 ) -> Result<RelationshipKey, String> {
-    // Create derivation material by combining root key with spec context
-    let mut derivation_input = Vec::new();
-    derivation_input.extend_from_slice(root_key);
+    let relationship_id = match &spec.identity_context {
+        IdentityKeyContext::RelationshipKeys { relationship_id } => relationship_id.clone(),
+        _ => b"default_context".to_vec(),
+    };
 
-    // Add identity context
-    match &spec.identity_context {
-        IdentityKeyContext::RelationshipKeys { relationship_id } => {
-            derivation_input.extend_from_slice(relationship_id);
-        }
-        _ => {
-            derivation_input.extend_from_slice(b"default_context");
-        }
-    }
-
-    // Add key version
-    derivation_input.extend_from_slice(&spec.key_version.to_le_bytes());
-
-    // Hash to derive key
-    let hash_result = hash::hash(&derivation_input);
-    Ok(hash_result)
+    let salt = b"aura-sbb-relationship-v1";
+    let hk = Hkdf::<Sha256>::new(Some(salt), root_key);
+    let mut okm = [0u8; 32];
+    hk.expand(&[relationship_id, spec.key_version.to_le_bytes().to_vec()].concat(), &mut okm)
+        .map_err(|_| "HKDF expand failed".to_string())?;
+    Ok(okm)
 }
 
 /// Relationship key context for deterministic derivation
@@ -62,7 +51,7 @@ pub struct RelationshipContext {
 pub struct RelationshipKeyManager {
     /// This device's ID
     device_id: DeviceId,
-    /// Root key material for derivation (would come from DKD)
+    /// Root key material for derivation (provided by the DKD pipeline/caller)
     root_key: [u8; 32],
     /// Cached relationship keys
     key_cache: HashMap<RelationshipContext, RelationshipKey>,
@@ -206,7 +195,7 @@ impl RelationshipKeyManager {
 }
 
 /// Generate deterministic root key from device ID for testing
-/// In production, this would come from the distributed DKD protocol
+/// Production code should supply root keys obtained from the distributed DKD pipeline.
 pub fn derive_test_root_key(device_id: DeviceId) -> [u8; 32] {
     use aura_core::hash;
 

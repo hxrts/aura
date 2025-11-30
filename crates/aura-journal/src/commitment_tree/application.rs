@@ -226,23 +226,30 @@ async fn verify_aggregate_signature(
     // Extract the signature from the attested operation
     let signature = &attested.agg_sig;
 
-    // Verify signature count meets threshold requirement
-    // signature is Vec<u8>, so get signer count from AttetsedOp
-    let required_threshold = 1; // Placeholder - should come from tree policy
-    if attested.signer_count < required_threshold {
+    // Determine which node's signing key should authorize this op
+    let signing_node = match &attested.op.op {
+        TreeOpKind::AddLeaf { under, .. } => *under,
+        TreeOpKind::RemoveLeaf { leaf, .. } => state.get_leaf_parent(*leaf).unwrap_or(NodeIndex(0)),
+        TreeOpKind::ChangePolicy { node, .. } => *node,
+        TreeOpKind::RotateEpoch { affected } => affected.first().copied().unwrap_or(NodeIndex(0)),
+    };
+
+    let witness = state
+        .signing_witness(&signing_node)
+        .ok_or_else(|| ApplicationError::verification_failed(format!("missing signing key for node {:?}", signing_node)))?;
+
+    if attested.signer_count < witness.threshold {
         return Err(ApplicationError::verification_failed(format!(
             "Insufficient signers: got {}, need {}",
-            attested.signer_count, required_threshold
+            attested.signer_count, witness.threshold
         )));
     }
 
-    // Extract group public key from tree state for the signing node
-    // Skip group public key extraction for now since AttestedOp doesn't have node_id
-    // In the real implementation, we'd derive this from the tree operation context
-    let group_public_key = vec![0u8; 32]; // Placeholder
+    // Group public key bound to this node
+    let group_public_key = witness.group_public_key;
 
     // Compute binding message: H("TREE_OP_SIG" || node_id || epoch || policy_hash || op_bytes)
-    let binding_message = tree_op_binding_message(attested, state.current_epoch());
+    let binding_message = tree_op_binding_message(attested, state.current_epoch(), &group_public_key);
 
     // Verify aggregate signature using effect-based verification
     verify_threshold_signature(
@@ -256,20 +263,38 @@ async fn verify_aggregate_signature(
     Ok(())
 }
 
+/// Derive a deterministic group public key from leaf public keys (fallback when signing key missing)
+fn derive_group_public_key_from_leaves(state: &TreeState) -> ApplicationResult<[u8; 32]> {
+    let mut ids = state.list_leaf_ids();
+    ids.sort_by_key(|id| id.0);
+    let mut hasher = hash::hasher();
+    for id in ids {
+        if let Some(leaf) = state.get_leaf(&id) {
+            hasher.update(&leaf.public_key);
+        }
+    }
+    Ok(hasher.finalize())
+}
+
 /// Extract group public key from tree state for a specific node
 #[allow(dead_code)]
 fn extract_group_public_key(state: &TreeState, node_id: &NodeIndex) -> ApplicationResult<Vec<u8>> {
-    // Look up the node in the tree state
-    // TreeState doesn't have a nodes field, using branches instead
-    let _node = state.branches.get(node_id).ok_or_else(|| {
-        ApplicationError::verification_failed(format!("Node not found: {}", node_id))
-    })?;
+    // Derive a deterministic aggregated key by hashing leaf public keys under this branch.
+    let mut hasher = hash::hasher();
 
-    // Extract the group public key from the node
-    // BranchNode doesn't store public keys directly - in a real implementation,
-    // we'd derive the group key from the aggregated leaf keys under this branch
-    // For now, return a placeholder
-    Ok(vec![0u8; 32])
+    // Traverse leaves that descend from this branch
+    for (leaf_id, leaf) in state.leaves.iter() {
+        if let Some(parent) = state.get_leaf_parent(*leaf_id) {
+            // include leaf if it is under the requested branch
+            let path = state.get_leaf_path_to_root(*leaf_id);
+            if path.contains(node_id) || parent == *node_id {
+                hasher.update(&leaf.public_key);
+            }
+        }
+    }
+
+    let digest = hasher.finalize();
+    Ok(digest.to_vec())
 }
 
 /// Verify threshold signature via CryptoEffects

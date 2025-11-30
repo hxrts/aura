@@ -14,7 +14,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 // Public type aliases for authority operations
 pub type Ed25519VerifyingKey = ed25519_dalek::VerifyingKey;
@@ -25,25 +25,6 @@ pub type Ed25519SigningKey = ed25519_dalek::SigningKey;
 type PublicKey = Ed25519VerifyingKey;
 type Signature = Ed25519Signature;
 type SigningKey = Ed25519SigningKey;
-
-/// Fallback public key for placeholder tree state
-///
-/// This is a known valid Ed25519 public key used as a fallback when
-/// key derivation from commitment bytes fails. This is temporary code
-/// until proper tree-based key derivation is implemented.
-#[allow(clippy::incompatible_msrv)] // LazyLock is fine for this temporary fallback code
-#[allow(clippy::expect_used)] // Hard-coded valid key - expect is safe here
-#[allow(dead_code)] // Reserved for future use in authority validation
-static FALLBACK_PUBLIC_KEY: LazyLock<PublicKey> = LazyLock::new(|| {
-    // Using Ed25519 basepoint as a valid public key
-    const VALID_PUBKEY_BYTES: [u8; 32] = [
-        0x58, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-        0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66, 0x66,
-        0x66, 0x66,
-    ];
-    PublicKey::from_bytes(&VALID_PUBKEY_BYTES)
-        .expect("Hard-coded valid Ed25519 public key should parse successfully")
-});
 
 /// Authority trait representing an opaque cryptographic actor
 ///

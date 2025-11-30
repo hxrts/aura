@@ -339,8 +339,8 @@ impl GuardianAuthHandler {
                 // Check if recovery delay has passed
                 let recovery_delay = binding.parameters.recovery_delay;
 
-                // Determine the latest recovery request timestamp for this guardian
-                let latest_request_time = self
+                // Determine the latest recovery request for this guardian
+                let latest_request = self
                     .context
                     .get_facts()
                     .iter()
@@ -354,9 +354,9 @@ impl GuardianAuthHandler {
                         _ => None,
                     })
                     .filter(|record| record.guardian_id == guardian_id)
-                    .map(|record| record.requested_at)
-                    .max()
-                    .unwrap_or(0);
+                    .max_by_key(|record| record.requested_at);
+
+                let latest_request_time = latest_request.as_ref().map(|r| r.requested_at).unwrap_or(0);
 
                 let now = time_effects
                     .physical_time()
@@ -370,8 +370,11 @@ impl GuardianAuthHandler {
 
                 // Check if notification was required
                 if binding.parameters.notification_required {
-                    // In production, verify notification was sent and acknowledged
-                    // This would be tracked as a fact in the relational context
+                    if let Some(ref req) = latest_request {
+                        if !self.guardian_notification_recorded(guardian_id, req.account_id) {
+                            return Ok(false);
+                        }
+                    }
                 }
 
                 // For now, approve if binding exists and has reasonable parameters
@@ -408,4 +411,29 @@ impl GuardianAuthHandler {
             }
         }
     }
+
+    fn guardian_notification_recorded(
+        &self,
+        guardian_id: AuthorityId,
+        account_id: AuthorityId,
+    ) -> bool {
+        self.context
+            .get_facts()
+            .iter()
+            .any(|fact| match fact {
+                RelationalFact::Generic(binding) if binding.binding_type == "guardian_notification" => {
+                    serde_json::from_slice::<GuardianNotificationRecord>(&binding.binding_data)
+                        .map(|record| record.guardian_id == guardian_id && record.account_id == account_id)
+                        .unwrap_or(false)
+                }
+                _ => false,
+            })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct GuardianNotificationRecord {
+    guardian_id: AuthorityId,
+    account_id: AuthorityId,
+    sent_at: u64,
 }

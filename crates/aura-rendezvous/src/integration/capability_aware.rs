@@ -48,6 +48,8 @@ pub struct CapabilityAwareSbbCoordinator {
     seen_envelopes: std::collections::HashSet<[u8; 32]>,
     /// Envelope cache with expiration
     envelope_cache: HashMap<[u8; 32], (RendezvousEnvelope, u64)>,
+    /// Pending deliveries captured for deterministic replay/inspection
+    deliveries: HashMap<DeviceId, Vec<RendezvousEnvelope>>,
 }
 
 /// SBB forwarding policy based on trust and capabilities
@@ -208,6 +210,7 @@ impl CapabilityAwareSbbCoordinator {
             relationships: HashMap::new(),
             seen_envelopes: std::collections::HashSet::new(),
             envelope_cache: HashMap::new(),
+            deliveries: HashMap::new(),
         }
     }
 
@@ -498,16 +501,13 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
     ) -> AuraResult<()> {
         // Extract envelope ID before moving envelope
         let envelope_id = envelope.id;
+        let deliver_envelope = envelope.clone();
 
         // Create SBB message for transport layer
         let _sbb_message = crate::messaging::SbbMessageType::RendezvousFlood {
             envelope,
             from_peer: Some(self.device_id),
         };
-
-        // Use transport sender if available via effect system or direct integration
-        // For now, we'll use a simplified approach - in production this would
-        // integrate with the actual transport layer through dependency injection
 
         // Check if peer relationship exists and validate forwarding capability
         if let Some(relationship) = self.relationships.get(&peer) {
@@ -525,8 +525,13 @@ impl SbbFlooding for CapabilityAwareSbbCoordinator {
             )));
         }
 
-        // Simulate transport send - in real implementation would use:
-        // self.transport_sender.send_to_peer(peer, sbb_message).await
+        // Deterministically enqueue delivery so tests and simulators can
+        // observe forwarding without relying on external transport plumbing.
+        self.deliveries
+            .entry(peer)
+            .or_default()
+            .push(deliver_envelope);
+
         tracing::debug!(
             peer_id = %peer.0,
             envelope_id = %hex::encode(envelope_id),

@@ -73,6 +73,8 @@ pub mod effects;
 pub mod errors;
 /// Core message envelopes and versioning
 pub mod messages;
+/// Reactive primitives for TUI and database subscriptions
+pub mod reactive;
 /// Relational domain types for cross-authority coordination
 pub mod relational;
 /// Core algebraic types and semilattice laws
@@ -177,8 +179,13 @@ pub use effects::{
     // Core effect system types
     EffectType,
     ExecutionMode,
+    // Indexed journal types (B-tree, Bloom, Merkle)
+    FactId,
     FlowBudgetEffects,
     FlowHint,
+    IndexStats,
+    IndexedFact,
+    IndexedJournalEffects,
     JournalEffects,
     LogicalClockEffects,
     MinimalEffects,
@@ -226,7 +233,7 @@ pub use time::{
     TimeConfidence, TimeMetadata, TimeOrdering, TimeProof, TimeStamp,
 };
 
-// Protocol and session types (temporary - will move to app layer)
+// Protocol and session types (compat shim; slated for app-layer relocation)
 #[doc = "stable: Core relational types for cross-authority coordination with semver guarantees"]
 pub use relational::*;
 #[doc = "stable: Tree types are foundational Layer 1 abstractions required by effect traits and FROST primitives"]

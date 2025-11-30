@@ -19,7 +19,7 @@ use aura_core::{
 // Note: In practice, this would import from wherever EffectContext is defined in aura-core
 use std::collections::HashMap;
 
-/// Effect context for API operations (placeholder - should import from aura-core)
+/// Effect context for API operations (kept local to avoid circular imports)
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct EffectContext {

@@ -53,6 +53,7 @@ pub mod console;
 pub mod crypto;
 pub mod flow; // Flow budget management
 pub mod guard; // Pure guard evaluation with effect commands
+pub mod indexed_journal; // Indexed journal lookups (B-tree, Bloom, Merkle)
 pub mod journal;
 pub mod leakage; // Privacy leakage tracking
 pub mod ledger; // Event sourcing and audit trails
@@ -97,6 +98,7 @@ pub use chaos::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, Resourc
 pub use console::ConsoleEffects;
 pub use crypto::{CryptoEffects, CryptoError};
 pub use flow::{FlowBudgetEffects, FlowHint};
+pub use indexed_journal::{FactId, IndexStats, IndexedFact, IndexedJournalEffects};
 pub use journal::JournalEffects;
 pub use leakage::{
     LeakageBudget, LeakageChoreographyExt, LeakageEffects, LeakageEvent, ObserverClass,

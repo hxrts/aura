@@ -76,7 +76,7 @@ where
     T: Send + Sync,
 {
     async fn execute_with_context(&self, _context: &EffectContext) -> ContextResult {
-        // Stub implementation
+        // Default no-op execution; wrappers can override to inject behavior.
         ContextResult::Success
     }
 }

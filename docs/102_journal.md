@@ -132,13 +132,17 @@ Every fact inserted into a journal must be validated before merge. The following
 ### 9.1 AttestedOp Facts
 
 **Checks**
-- Verify the threshold signature (`agg_sig`) against the parent commitment and epoch.
+- Verify the threshold signature (`agg_sig`) using the two-phase verification model from `aura-core::tree::verification`:
+  - `verify_attested_op()`: Cryptographic signature check against `BranchSigningKey` stored in TreeState
+  - `check_attested_op()`: Full verification plus state consistency (epoch, parent commitment)
 - Ensure the referenced parent state exists locally; otherwise request missing facts.
 - Confirm the operation is well-formed (e.g., `AddLeaf` indexes a valid parent node).
 
+See [Tree Operation Verification](101_accounts_and_commitment_tree.md#41-tree-operation-verification) for details on the verify/check model and binding message security.
+
 **Responsible Effects**
-- `CryptoEffects` for signature verification.
-- `JournalEffects` for parent lookup and conflict detection.
+- `CryptoEffects` for FROST signature verification via `verify_attested_op()`.
+- `JournalEffects` for parent lookup, state consistency via `check_attested_op()`, and conflict detection.
 - `LedgerEffects` to persist the fact once validated.
 
 ### 9.2 Relational Facts

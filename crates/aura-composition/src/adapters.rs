@@ -605,10 +605,15 @@ impl RegistrableHandler for TransportHandlerAdapter {
                 Ok(Vec::new()) // broadcast returns void
             }
             "receive" => {
-                // Placeholder: transport handler expects a TcpStream; receiving without context is unsupported
-                Err(HandlerError::UnknownOperation {
+                let received = NetworkEffects::receive(&self.handler)
+                    .await
+                    .map_err(|e| HandlerError::ExecutionFailed {
+                        source: Box::new(e),
+                    })?;
+                bincode::serialize(&received).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),
+                    source: Box::new(e),
                 })
             }
             _ => Err(HandlerError::UnknownOperation {
@@ -620,7 +625,11 @@ impl RegistrableHandler for TransportHandlerAdapter {
 
     fn supported_operations(&self, effect_type: EffectType) -> Vec<String> {
         if effect_type == EffectType::Network {
-            vec!["send_to_peer".to_string(), "broadcast".to_string()]
+            vec![
+                "send_to_peer".to_string(),
+                "broadcast".to_string(),
+                "receive".to_string(),
+            ]
         } else {
             Vec::new()
         }

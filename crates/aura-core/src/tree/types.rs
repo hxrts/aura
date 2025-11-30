@@ -224,6 +224,45 @@ pub struct TreeOp {
     pub version: u16,
 }
 
+/// Signing key configuration for a branch node.
+///
+/// Stores the group public key established via DKG for verifying aggregate
+/// signatures on operations at this branch. The threshold is derived from
+/// the branch's Policy, not stored redundantly here.
+///
+/// **Lifecycle**: Updated when:
+/// - Branch is created (initial DKG)
+/// - Membership changes under the branch (new DKG)
+/// - Policy change affects signing group
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BranchSigningKey {
+    /// Group public key for aggregate signature verification (32 bytes for Ed25519)
+    pub group_public_key: [u8; 32],
+
+    /// Epoch when this key was established via DKG
+    pub key_epoch: Epoch,
+}
+
+impl BranchSigningKey {
+    /// Create a new branch signing key
+    pub fn new(group_public_key: [u8; 32], key_epoch: Epoch) -> Self {
+        Self {
+            group_public_key,
+            key_epoch,
+        }
+    }
+
+    /// Get the group public key bytes
+    pub fn group_key(&self) -> &[u8; 32] {
+        &self.group_public_key
+    }
+
+    /// Get the epoch when this key was established
+    pub fn epoch(&self) -> Epoch {
+        self.key_epoch
+    }
+}
+
 /// Tree operation with threshold signature attestation.
 ///
 /// This is the only form of tree operation stored in the journal.
@@ -233,6 +272,9 @@ pub struct TreeOp {
 /// **Privacy**: The journal stores only the signer count, not individual
 /// signer identities. The aggregate signature is verifiable against the
 /// group public key committed in the parent tree state.
+///
+/// **Security**: The binding message includes the group public key to prevent
+/// signature reuse across different signing groups.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AttestedOp {
     /// The tree operation

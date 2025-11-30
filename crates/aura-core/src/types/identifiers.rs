@@ -284,9 +284,12 @@ impl DeviceId {
         Self(Uuid::new_v4())
     }
 
-    /// Create a placeholder device ID for temporary use
-    pub fn placeholder() -> Self {
-        Self(Uuid::nil())
+    /// Create a deterministic DeviceId for testing (sentinel, non-nil)
+    pub fn deterministic_test_id() -> Self {
+        let hash = hash::hash(b"aura-deterministic-test-device");
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&hash[..16]);
+        Self(Uuid::from_bytes(uuid_bytes))
     }
 
     /// Create from a UUID

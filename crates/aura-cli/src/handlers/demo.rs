@@ -7,11 +7,17 @@ use std::path::PathBuf;
 use aura_core::AuraError;
 
 use crate::{
-    commands::demo::DemoCommands,
+    commands::demo::{DemoCommands, DemoScenarioArg},
     create_cli_handler,
     demo::{
         setup_and_run_human_agent_demo, DemoOrchestratorCli, DemoOrchestratorConfig,
         DemoScenarioBridge, DemoSetupConfig, HumanAgentDemoConfig,
+    },
+    tui::{
+        app::TuiApp,
+        context::TuiContext,
+        demo::{DemoScenario, DemoTipProvider},
+        effects::EffectBridge,
     },
     ScenarioAction,
 };
@@ -77,6 +83,8 @@ impl DemoHandler {
                 seed,
                 detailed_report,
             } => Self::handle_recovery_workflow(directory, seed, detailed_report).await,
+
+            DemoCommands::Tui { scenario } => Self::handle_tui_demo(scenario).await,
         }
     }
 
@@ -280,5 +288,42 @@ impl DemoHandler {
             })
             .await
             .map_err(|e| AuraError::internal(format!("Recovery workflow failed: {}", e)))
+    }
+
+    /// Handle TUI demo command
+    async fn handle_tui_demo(scenario_arg: DemoScenarioArg) -> Result<(), AuraError> {
+        // Convert CLI enum to internal enum
+        let scenario = match scenario_arg {
+            DemoScenarioArg::HappyPath => DemoScenario::HappyPath,
+            DemoScenarioArg::SlowGuardian => DemoScenario::SlowGuardian,
+            DemoScenarioArg::FailedRecovery => DemoScenario::FailedRecovery,
+            DemoScenarioArg::Interactive => DemoScenario::Interactive,
+        };
+
+        println!("Starting TUI Demo");
+        println!("=================");
+        println!("Scenario: {}", scenario.description());
+        println!("Loading demo data...");
+
+        // Create the effect bridge (uses stub implementations for demo)
+        let bridge = EffectBridge::new();
+
+        // Create the tip provider for contextual hints
+        let tip_provider = DemoTipProvider::new();
+
+        // Create context with demo mode enabled
+        let ctx = TuiContext::with_demo(bridge, tip_provider);
+
+        // Load demo data into the views (Bob, Alice, Charlie, sample messages)
+        ctx.load_demo_data().await;
+
+        println!("Demo ready! Launching TUI...");
+        println!();
+
+        // Create and run the TUI app
+        let mut app = TuiApp::with_context(ctx);
+        app.run()
+            .await
+            .map_err(|e| AuraError::internal(format!("TUI demo failed: {}", e)))
     }
 }

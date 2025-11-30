@@ -5,12 +5,17 @@
 pub mod human_agent;
 pub mod orchestration;
 pub mod scenario_bridge;
+
+// Simulator integration only available with development feature
+#[cfg(feature = "development")]
 pub mod simulator_integration;
 
 pub use human_agent::{
     DemoMetrics, DemoPhase, DemoState, HumanAgentDemo, HumanAgentDemoBuilder, HumanAgentDemoConfig,
 };
 
+// Simulator integration exports only available with development feature
+#[cfg(feature = "development")]
 pub use simulator_integration::{
     GuardianAgentConfig, GuardianAgentFactory, GuardianAgentState, GuardianAgentStatistics,
     SimulatedGuardianAgent,

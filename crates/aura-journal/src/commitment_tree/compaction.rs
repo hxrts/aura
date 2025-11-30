@@ -67,8 +67,9 @@ fn create_snapshot_fact_operation(
     snapshot: &Snapshot,
     cut_epoch: Epoch,
 ) -> Result<AttestedOp, CompactionError> {
-    // Create a special tree operation that represents the snapshot fact
-    // For now, use RotateEpoch as a placeholder since SnapshotFact doesn't exist
+    // Represent the snapshot as a RotateEpoch fence; downstream reducers treat this
+    // as an epoch boundary for compaction. Replace with a dedicated SnapshotFact
+    // once the type is introduced.
     let snapshot_op = TreeOpKind::RotateEpoch {
         affected: snapshot
             .roster

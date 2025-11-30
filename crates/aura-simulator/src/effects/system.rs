@@ -43,7 +43,7 @@ pub enum FaultType {
     DelayedMessage { delay_ms: u64 },
     /// Corrupted data
     CorruptedData,
-    /// Temporary storage failure
+    /// Transient storage failure
     StorageFailure,
     /// Cryptographic operation failure
     CryptoFailure,

@@ -151,18 +151,22 @@ impl RelationalContext {
     }
 
     /// Get shared secret for this context
-    /// Returns the cryptographic material used for context-specific operations
+    /// Returns the deterministic shared secret used for context-specific operations
     pub fn shared_secret(&self) -> Option<[u8; 32]> {
-        // For now, derive a deterministic shared secret from context ID
-        // In production, this would use proper key agreement protocol
-        let mut secret = [0u8; 32];
-        let context_bytes = self.context_id.to_bytes();
+        // Derive a context secret from the context ID and all participant IDs.
+        // This remains deterministic (for reproducibility/tests) while tying the
+        // secret to the exact participant set.
+        let mut material = Vec::with_capacity(32 + self.participants.len() * 16);
+        material.extend_from_slice(&self.context_id.to_bytes());
 
-        // Use first 32 bytes of context ID as temporary shared secret
-        let len = std::cmp::min(context_bytes.len(), 32);
-        secret[..len].copy_from_slice(&context_bytes[..len]);
+        // Hash participant IDs in stable order to avoid permutation differences.
+        let mut ids = self.participants.clone();
+        ids.sort();
+        for id in ids {
+            material.extend_from_slice(&id.to_bytes());
+        }
 
-        Some(secret)
+        Some(aura_core::hash::hash(&material))
     }
 
     /// Check if an authority is a participant

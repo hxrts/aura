@@ -1,0 +1,10 @@
+{"plugins":
+ ["/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura_Journal_Core.dylib",
+  "/nix/store/2wk0ifmv0ba5rkifq7i3pqd99wpxp0r2-lean4-4.23.0/lib/lean/libLake_shared.dylib"],
+ "options": {},
+ "name": "Aura.Journal.Semilattice",
+ "isModule": false,
+ "importArts":
+ {"Aura.Journal.Core":
+  ["/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/Journal/Core.olean"]},
+ "dynlibs": []}

@@ -73,10 +73,11 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 **Location**: `aura-core/src/tree/`
 
 **Contains**:
-- Core tree types: `TreeOp`, `AttestedOp`, `Policy`, `LeafNode`, `BranchNode`, `TreeCommitment`, `Epoch`
+- Core tree types: `TreeOp`, `AttestedOp`, `Policy`, `LeafNode`, `BranchNode`, `BranchSigningKey`, `TreeCommitment`, `Epoch`
 - Commitment functions: `commit_branch()`, `commit_leaf()`, `policy_hash()`, `compute_root_commitment()`
 - Policy meet-semilattice implementation for threshold refinement
 - Snapshot types: `Snapshot`, `Cut`, `ProposalId`, `Partial`
+- Verification module: `verify_attested_op()` (cryptographic), `check_attested_op()` (state consistency), `compute_binding_message()`
 
 **Why Layer 1?**
 
@@ -1044,7 +1045,7 @@ Run before every commit to maintain architectural compliance and simulation dete
 - **How core systems work together** → `docs/802_core_systems_guide.md`
 - **How to design advanced protocols** → `docs/804_advanced_coordination_guide.md`
 - **How simulation works** → `docs/806_simulation_guide.md`
-- **How maintenance and OTA updates work** → `docs/807_maintenance_ota_guide.md` + `docs/111_maintenance.md`
+- **How maintenance and OTA updates work** → `docs/808_maintenance_guide.md` + `docs/111_maintenance.md`
 - **How development patterns work** → `docs/805_development_patterns.md`
 - **The project's goals and constraints** → `docs/000_project_overview.md`
 - **How to debug architecture** → `just check-arch` + this document

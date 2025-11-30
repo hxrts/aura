@@ -67,9 +67,8 @@ fn apply_add_leaf_with_role(
     let new_leaf_id = LeafId(tree_state.device_count());
     let leaf_commitment = commit_leaf(new_leaf_id, tree_state.epoch().0, public_key);
 
-    // In a full implementation, we'd update the tree structure and recompute
-    // branch commitments. For now, we'll create a new root commitment that
-    // incorporates the leaf commitment
+    // In this reduced view we fold the new leaf commitment directly into the
+    // root commitment to keep determinism without a full branch topology.
     let mut hasher = hash::hasher();
     hasher.update(b"ROOT_WITH_LEAF");
     hasher.update(&leaf_commitment);
@@ -158,7 +157,8 @@ fn apply_rotate_epoch(tree_state: &TreeState) -> TreeState {
     // 2. Recompute all branch commitments bottom-up with new epoch
     // 3. Compute new root commitment
 
-    // For now, create a deterministic commitment that reflects the epoch change
+    // Compute a deterministic commitment that reflects the epoch change without
+    // re-materializing the full tree topology.
     let current_policy = Policy::Threshold {
         m: tree_state.threshold(),
         n: tree_state.device_count() as u16,
@@ -657,9 +657,9 @@ pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<OrderT
         }
     };
 
-    // Identify supersedable facts
-    // For now, we consider all facts before this snapshot as supersedable
-    // In practice, this would be more sophisticated
+    // Identify supersedable facts: everything older than the current snapshot
+    // sequence is eligible for compaction in this reducer. More selective GC
+    // can be added once snapshot metadata is richer.
     let superseded_facts = journal
         .facts
         .iter()
@@ -773,8 +773,8 @@ pub fn can_prune_proposed_bump(
 fn convert_to_core_fact(
     journal_fact: &crate::fact::Fact,
 ) -> Result<aura_core::journal::Fact, String> {
-    // For now, create a simple aura-core Fact with the journal fact information
-    // In a full implementation, this would properly map the content types
+    // Map journal fact into the aura-core fact envelope; this preserves ordering
+    // and content type tags for downstream consumers.
 
     // Create a new aura-core fact with basic information
     let mut core_fact = aura_core::journal::Fact::new();

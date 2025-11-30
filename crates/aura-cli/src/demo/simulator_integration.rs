@@ -98,8 +98,9 @@ impl SimulatedGuardianAgent {
         let device_id = DeviceId::new();
         let authority_id = AuthorityId::new();
 
-        // Create simulation environment
-        let environment = SimulationEffectComposer::for_simulation(device_id, config.seed)?;
+        // Create simulation environment (use async version to avoid nested runtime)
+        let environment =
+            SimulationEffectComposer::for_simulation_async(device_id, config.seed).await?;
 
         tracing::info!(
             "Created simulated guardian agent: {} (device: {}, authority: {})",

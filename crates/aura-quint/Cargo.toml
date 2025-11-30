@@ -34,7 +34,6 @@ hex = "0.4"
 tokio = { workspace = true }
 
 # Logging and tracing (for tests)
-tracing-subscriber = { workspace = true }
 
 # Aura types for error handling
 

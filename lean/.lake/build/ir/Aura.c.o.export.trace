@@ -1,0 +1,15 @@
+{"synthetic": false,
+ "outputs": "11340191833133360061",
+ "log":
+ [{"message":
+   ".> clang -c -o /Users/hxrts/projects/aura/lean/.lake/build/ir/Aura.c.o.export /Users/hxrts/projects/aura/lean/.lake/build/ir/Aura.c -I /nix/store/2wk0ifmv0ba5rkifq7i3pqd99wpxp0r2-lean4-4.23.0/include -fstack-clash-protection -fwrapv -fvisibility=hidden -isysroot/nix/store/ghspqwzhdmzj1rss36lcayyc8mrvparn-apple-sdk-11.3/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk -Wno-unused-command-line-argument -O3 -DNDEBUG -DLEAN_EXPORTING",
+   "level": "trace"}],
+ "inputs":
+ [["Aura:c",
+   [["/Users/hxrts/projects/aura/lean/.lake/build/ir/Aura.c",
+     "9701148387912034481"],
+    ["Lean 4.23.0, commit v4.23.0", "5645240988061349575"]]],
+  ["Lean 4.23.0, commit v4.23.0", "5645240988061349575"],
+  ["traceArgs: #[-O3, -DNDEBUG, -DLEAN_EXPORTING]", "13974588697068907418"],
+  ["arm64-apple-darwin", "6763041257277913666"]],
+ "depHash": "5484467008915613174"}

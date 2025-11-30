@@ -19,7 +19,7 @@ aura-wot = { path = "../aura-wot" }
 ed25519-dalek = { workspace = true }
 
 # Choreography dependencies (required by aura-macros)
-rumpsteak-aura-choreography = "0.6.0"
+rumpsteak-aura-choreography = "0.7.0"
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

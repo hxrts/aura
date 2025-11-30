@@ -320,7 +320,7 @@ Consensus is also used for relational context operations. Guardian bindings use 
 
 ## 11. FROST Threshold Signatures
 
-Consensus uses FROST to produce threshold signatures. Each witness holds a secret share. Witnesses compute partial signatures. The initiator or fallback proposer aggregates the shares. The final signature verifies under the group public key.
+Consensus uses FROST to produce threshold signatures. Each witness holds a secret share. Witnesses compute partial signatures. The initiator or fallback proposer aggregates the shares. The final signature verifies under the group public key stored in [TreeState](101_accounts_and_commitment_tree.md).
 
 ```rust
 pub struct WitnessShare {
@@ -335,7 +335,230 @@ Witness shares validate only for the current consensus instance. They cannot be 
 
 The attester set in the commit fact contains only devices that contributed signing shares. This provides cryptographic proof of participation.
 
-## 12. Fallback Protocol Details
+### 11.1 Integration with Tree Operation Verification
+
+When consensus produces a commit fact for a tree operation, the resulting `AttestedOp` is verified using the two-phase model from `aura-core::tree::verification`:
+
+1. **Verification** (`verify_attested_op`): Cryptographic check against the `BranchSigningKey` stored in TreeState
+2. **Check** (`check_attested_op`): Full verification plus state consistency validation
+
+The binding message includes the group public key to prevent signature reuse attacks. This ensures an attacker cannot substitute a different signing key and replay a captured signature. See [Tree Operation Verification](101_accounts_and_commitment_tree.md#41-tree-operation-verification) for details.
+
+```rust
+// Threshold derived from policy at target node
+let threshold = state.get_policy(target_node)?.required_signers(child_count);
+
+// Signing key from TreeState
+let signing_key = state.get_signing_key(target_node)?;
+
+// Verify against stored key and policy-derived threshold
+verify_attested_op(&attested_op, signing_key, threshold, current_epoch)?;
+```
+
+## 12. FROST Commitment Pipeline Optimization
+
+The pipelined commitment optimization reduces steady-state consensus from 2 RTT (round-trip times) to 1 RTT by bundling next-round nonce commitments with current-round signature shares.
+
+### 12.1 Overview
+
+The FROST pipelining optimization improves consensus performance by bundling next-round nonce commitments with current-round signature shares. This allows the coordinator to start the next consensus round immediately without waiting for a separate nonce commitment phase.
+
+**Standard FROST Consensus (2 RTT)**:
+1. **Execute → NonceCommit** (1 RTT): Coordinator sends execute request, witnesses respond with nonce commitments
+2. **SignRequest → SignShare** (1 RTT): Coordinator sends aggregated nonces, witnesses respond with signature shares
+
+**Pipelined FROST Consensus (1 RTT)** (after warm-up):
+1. **Execute+SignRequest → SignShare+NextCommitment** (1 RTT): 
+   - Coordinator sends execute request with cached commitments from previous round
+   - Witnesses respond with signature share AND next-round nonce commitment
+
+### 12.2 Core Components
+
+**WitnessState** (`consensus/witness_state.rs`) manages persistent nonce state for each witness:
+
+```rust
+pub struct WitnessState {
+    /// Precomputed nonce for the next consensus round
+    next_nonce: Option<(NonceCommitment, NonceToken)>,
+    
+    /// Current epoch to detect when cached commitments become stale
+    epoch: Epoch,
+    
+    /// Witness identifier
+    witness_id: AuthorityId,
+}
+```
+
+Key methods:
+- `get_next_commitment()`: Returns cached commitment if valid for current epoch
+- `take_nonce()`: Consumes cached nonce for use in current round
+- `set_next_nonce()`: Stores new nonce for future use
+- `invalidate()`: Clears cached state on epoch change
+
+**Message Schema Updates**: The `SignShare` message now includes optional next-round commitment:
+
+```rust
+SignShare {
+    consensus_id: ConsensusId,
+    share: PartialSignature,
+    /// Optional commitment for the next consensus round (pipelining optimization)
+    next_commitment: Option<NonceCommitment>,
+    /// Epoch for commitment validation
+    epoch: Epoch,
+}
+```
+
+**PipelinedConsensusOrchestrator** (`consensus/frost_pipelining.rs`) orchestrates the optimization:
+
+```rust
+pub struct PipelinedConsensusOrchestrator {
+    /// Manager for witness nonce states
+    witness_states: WitnessStateManager,
+    
+    /// Current epoch
+    current_epoch: Epoch,
+    
+    /// Threshold required for consensus
+    threshold: u16,
+}
+```
+
+Key methods:
+- `run_consensus()`: Determines fast path vs slow path based on cached commitments
+- `can_use_fast_path()`: Checks if sufficient cached commitments available
+- `handle_epoch_change()`: Invalidates all cached state on epoch rotation
+
+### 12.3 Epoch Safety
+
+All cached commitments are bound to epochs to prevent replay attacks:
+
+1. **Epoch Binding**: Each commitment is tied to a specific epoch
+2. **Automatic Invalidation**: Epoch changes invalidate all cached commitments
+3. **Validation**: Witnesses reject commitments from wrong epochs
+
+```rust
+// Epoch change invalidates all cached nonces
+if self.epoch != current_epoch {
+    self.next_nonce = None;
+    self.epoch = current_epoch;
+    return None;
+}
+```
+
+### 12.4 Fallback Handling
+
+The system gracefully falls back to 2 RTT when:
+
+1. **Insufficient Cached Commitments**: Less than threshold witnesses have cached nonces
+2. **Epoch Change**: All cached commitments become invalid
+3. **Witness Failures**: Missing or invalid next_commitment in responses
+4. **Initial Bootstrap**: First round after startup (no cached state)
+
+```rust
+if has_quorum {
+    // Fast path: 1 RTT using cached commitments
+    self.run_fast_path(...)
+} else {
+    // Slow path: 2 RTT standard consensus
+    self.run_slow_path(...)
+}
+```
+
+### 12.5 Performance Impact
+
+**Latency Reduction**:
+- Before: 2 RTT per consensus
+- After: 1 RTT per consensus (steady state)
+- Improvement: 50% latency reduction
+
+**Message Count**:
+- Before: 4 messages per witness (Execute, NonceCommit, SignRequest, SignShare)
+- After: 2 messages per witness (Execute+SignRequest, SignShare+NextCommitment)
+- Improvement: 50% message reduction
+
+**Trade-offs**:
+- Memory: Small overhead for caching one nonce per witness
+- Complexity: Additional state management and epoch tracking
+- Bootstrap: First round still requires 2 RTT
+
+### 12.6 Implementation Guidelines
+
+**Adding Pipelining to New Consensus Operations**:
+
+1. Update message schema: Add `next_commitment` and `epoch` fields to response messages
+2. Generate next nonce: During signature generation, also generate next-round nonce
+3. Cache management: Store next nonce in `WitnessState` for future use
+4. Epoch handling: Always validate epoch before using cached commitments
+
+**Example Witness Implementation**:
+
+```rust
+pub async fn handle_sign_request<R: RandomEffects + ?Sized>(
+    &mut self,
+    consensus_id: ConsensusId,
+    aggregated_nonces: Vec<NonceCommitment>,
+    current_epoch: Epoch,
+    random: &R,
+) -> Result<ConsensusMessage> {
+    // Generate signature share
+    let share = self.create_signature_share(consensus_id, aggregated_nonces)?;
+    
+    // Generate or retrieve next-round commitment
+    let next_commitment = if let Some((commitment, _)) = self.witness_state.take_nonce(current_epoch) {
+        // Use cached nonce
+        Some(commitment)
+    } else {
+        // Generate fresh nonce
+        let (nonces, commitment) = self.generate_nonce(random).await?;
+        let token = NonceToken::from(nonces);
+        
+        // Cache for future
+        self.witness_state.set_next_nonce(commitment.clone(), token, current_epoch);
+        
+        Some(commitment)
+    };
+    
+    Ok(ConsensusMessage::SignShare {
+        consensus_id,
+        share,
+        next_commitment,
+        epoch: current_epoch,
+    })
+}
+```
+
+### 12.7 Security Considerations
+
+1. **Nonce Reuse Prevention**: Each nonce is used exactly once and tied to specific epoch
+2. **Epoch Isolation**: Nonces from different epochs cannot be mixed
+3. **Forward Security**: Epoch rotation provides natural forward security boundary
+4. **Availability**: Fallback ensures consensus continues even without optimization
+
+### 12.8 Testing Strategy
+
+**Unit Tests**:
+- Epoch invalidation logic
+- Nonce caching and retrieval
+- Message serialization with new fields
+
+**Integration Tests**:
+- Fast path vs slow path selection
+- Epoch transition handling
+- Performance measurement
+
+**Simulation Tests**:
+- Network delay impact on 1 RTT vs 2 RTT
+- Behavior under partial failures
+- Convergence properties
+
+### 12.9 Future Enhancements
+
+1. **Adaptive Thresholds**: Dynamically adjust quorum requirements based on cached state
+2. **Predictive Caching**: Pre-generate multiple rounds of nonces during idle time
+3. **Compression**: Batch multiple commitments in single message
+4. **Cross-Context Optimization**: Share cached state across related consensus contexts
+
+## 13. Fallback Protocol Details
 
 ### Fallback Trigger
 
@@ -390,7 +613,7 @@ On AggregateShare(cid, proposals', evidΔ) from any peer:
 
 Aggregate shares spread proposal sets through gossip. Each witness checks for threshold after updates. Threshold-complete messages carry the final aggregated signature; once validated, the witness commits and stops its timers.
 
-## 13. Safety Guarantees
+## 14. Safety Guarantees
 
 Consensus satisfies agreement. At most one commit fact forms for a given `(cid, prestate_hash)`. The threshold signature ensures authenticity. No attacker can forge a threshold signature without the required number of shares.
 
@@ -398,7 +621,19 @@ Consensus satisfies validity. A commit fact references a result computed from th
 
 Consensus satisfies deterministic convergence. Evidence merges through CRDT join. All nodes accept the same commit fact.
 
-## 14. Liveness Guarantees
+### Binding Message Security
+
+The binding message for tree operations includes the group public key. This prevents key substitution attacks where an attacker captures a valid signature and replays it with a different key they control. The full binding includes:
+- Domain separator for domain isolation
+- Parent epoch and commitment for replay prevention
+- Protocol version for upgrade safety
+- Current epoch for temporal binding
+- **Group public key** for signing group binding
+- Serialized operation content
+
+This security property is enforced by `compute_binding_message()` in the verification module.
+
+## 15. Liveness Guarantees
 
 The fast path completes in one round trip when the initiator and witnesses are online. The fallback path provides eventual completion under asynchrony. Gossip ensures that share proposals propagate across partitions.
 
@@ -429,13 +664,13 @@ stateDiagram-v2
 
 These parameters should be tuned per deployment, but the ranges above keep fallback responsive without overwhelming the network.
 
-## 15. Relation to FROST
+## 16. Relation to FROST
 
 Consensus uses FROST as the final stage of agreement. FROST ensures that only one threshold signature exists per result. FROST signatures provide strong cryptographic proof.
 
 Consensus and FROST remain separate. Consensus orchestrates communication. FROST proves final agreement. Combining the two yields a single commit fact.
 
-## 16. Summary
+## 17. Summary
 
 Aura Consensus produces monotone commit facts that represent non-monotone operations. It integrates with journals through set union. It uses FROST threshold signatures and CRDT evidence structures. It provides agreement, validity, and liveness. It supports authority updates and relational operations. It requires no global log and no central coordinator.
 The helper `HasEquivocatedInSet` excludes conflict batches that contain conflicting signatures from the same witness. `Fallback_Start` transitions the local state machine into fallback mode and arms gossip timers. Implementations must provide these utilities alongside the timers described earlier.

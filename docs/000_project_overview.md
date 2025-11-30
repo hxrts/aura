@@ -116,9 +116,13 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [Distributed Systems Contract](004_distributed_systems_contract.md) specifies safety and liveness guarantees, the synchrony model, latency bounds, and adversarial assumptions.
 
+[System Invariants](005_system_invariants.md) documents safety invariants and verification properties across the system.
+
 **Core Systems**
 
 [Authority and Identity](100_authority_and_identity.md) describes the authority-centric identity model with opaque authorities and relational contexts.
+
+[Identifiers and Boundaries](105_identifiers_and_boundaries.md) documents the identifier system and context isolation.
 
 [Accounts and Commitment Tree](101_accounts_and_commitment_tree.md) covers the commitment tree structure for threshold identity management.
 
@@ -140,11 +144,15 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [State Reduction](110_state_reduction.md) describes deterministic state reduction from fact journals to canonical state.
 
-[Identifiers and Boundaries](105_identifiers_and_boundaries.md) documents the identifier system and context isolation.
-
 [Maintenance](111_maintenance.md) covers the distributed maintenance stack including snapshots and garbage collection.
 
-[FROST Pipelining Optimization](114_frost_pipelining_optimization.md) describes the single-RTT consensus optimization that reduces latency by 50%.
+[Asynchronous Message Patterns](112_amp.md) documents patterns for reliable asynchronous message coordination.
+
+[Database Architecture](113_database.md) specifies the distributed database layer using journals, Biscuit queries, and CRDTs.
+
+[Social Architecture](114_social_architecture.md) defines the social organization model using messages, blocks, and neighborhoods.
+
+[Terminal UI Architecture](115_tui.md) specifies the ratatui-based TUI for the Aura CLI.
 
 **Developer Guides**
 
@@ -162,13 +170,13 @@ Additional documentation covers specific aspects of the system. The Foundation c
 
 [Simulation Guide](806_simulation_guide.md) covers deterministic simulation for verification and debugging.
 
-[Maintenance and OTA Guide](807_maintenance_ota_guide.md) explains distributed maintenance, snapshots, garbage collection, and over-the-air upgrade procedures.
+[Verification Guide](807_verification_guide.md) covers formal verification techniques and property validation.
+
+[Maintenance Guide](808_maintenance_guide.md) explains distributed maintenance, snapshots, garbage collection, and system evolution.
 
 **Project Meta**
 
 [Project Structure](999_project_structure.md) provides a comprehensive crate structure overview with the dependency graph.
-
-[Development Patterns and Workflows](805_development_patterns.md) covers practical patterns for developing Aura systems, including code location guidance and typical implementation workflows.
 
 ## System Features
 

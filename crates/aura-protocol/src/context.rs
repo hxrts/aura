@@ -59,7 +59,8 @@ impl AuraContext {
             account_id: None,
             session_id: None,
             mode: ExecutionMode::Testing,
-            operation_id: Uuid::nil(), // Use nil UUID for deterministic testing
+            // Deterministic non-nil UUID to keep tests stable without using nil IDs
+            operation_id: Uuid::from_u128(1),
             metadata: HashMap::new(),
             epoch: 0,
             flow_hint: None,
@@ -145,7 +146,7 @@ impl AuraContext {
 
         match &self.mode {
             ExecutionMode::Testing => {
-                child.operation_id = Uuid::nil(); // Deterministic for testing
+                child.operation_id = Uuid::from_u128(1); // Deterministic for testing without nil
             }
             ExecutionMode::Production => {
                 // Generate UUID using random effects
@@ -179,7 +180,7 @@ impl AuraContext {
 
         match &self.mode {
             ExecutionMode::Testing => {
-                child.operation_id = Uuid::nil(); // Deterministic for testing
+                child.operation_id = Uuid::from_u128(1); // Deterministic for testing without nil
             }
             ExecutionMode::Production => {
                 // Generate UUID using random effects

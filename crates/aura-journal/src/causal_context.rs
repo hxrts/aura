@@ -171,7 +171,7 @@ impl CausalContext {
                 lamport: 0,
             },
             dependencies: BTreeSet::new(),
-            actor: DeviceId::placeholder(),
+            actor: DeviceId::deterministic_test_id(),
         }
     }
 

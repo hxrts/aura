@@ -170,7 +170,7 @@ impl Fact {
             value,
             timestamp,
             actor_id,
-            version: timestamp, // Use timestamp as logical clock for now
+            version: timestamp, // logical clock derived from physical timestamp
         };
 
         // Last-Writer-Wins resolution
@@ -547,13 +547,29 @@ impl Default for Fact {
 
 /// A capability, represented as a wrapper around a serialized Biscuit token.
 ///
-/// This struct is a simple container for the `token_bytes`. All semantic evaluation
-/// of the capability (e.g., authorization checks) is handled by the `AuthorizationEffects`
-/// trait in a higher-level crate. This type has no authorization logic itself.
+/// This struct is a container for the `token_bytes` and the `root_key_bytes` needed
+/// to verify and compare tokens. All semantic evaluation of the capability
+/// (e.g., authorization checks) is handled by the `AuthorizationEffects` trait in
+/// a higher-level crate. This type has no authorization logic itself.
+///
+/// # Meet Semantics
+///
+/// The meet operation (⊓) computes capability intersection following Biscuit attenuation:
+/// - Empty tokens: `a ⊓ ∅ = ∅` (empty is bottom, absorbing element)
+/// - Same issuer (root key), attenuation chain: returns the token with more blocks (more restricted)
+/// - Different issuers: returns empty (incomparable tokens → bottom)
+/// - Same token bytes: returns the token unchanged (idempotent)
+///
+/// This follows the meet-semilattice laws where adding blocks strictly reduces authority.
+/// See docs/109_authorization.md for the formal specification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cap {
     /// Serialized Biscuit token (empty if no capabilities)
     token_bytes: Vec<u8>,
+    /// Root public key bytes (32 bytes for Ed25519, empty if unknown)
+    /// Required for proper meet semantics and token verification
+    #[serde(default)]
+    root_key_bytes: Vec<u8>,
 }
 
 /// Authentication levels (kept for compatibility)
@@ -565,33 +581,62 @@ pub enum AuthLevel {
     Threshold = 3,
 }
 
-/// Delegation constraints (stub for compatibility)
+/// Delegation constraints
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DelegationConstraints {
     pub max_depth: Option<u32>,
 }
 
 impl Cap {
+    /// Create a new empty capability (bottom element).
     pub fn new() -> Self {
         Self {
             token_bytes: Vec::new(),
+            root_key_bytes: Vec::new(),
         }
     }
 
+    /// Create a top capability (maximum authority).
+    ///
+    /// Note: In Biscuit semantics, a token with no attenuation blocks has maximum
+    /// authority. An empty token represents "no capability" (bottom).
+    /// Top is conceptual - actual authority requires a valid token.
     pub fn top() -> Self {
         Self {
             token_bytes: Vec::new(),
+            root_key_bytes: Vec::new(),
         }
     }
 
+    /// Create a Cap from a Biscuit token and its root public key.
+    ///
+    /// The root key is required for proper meet semantics and token verification.
+    pub fn from_biscuit_with_key(
+        token: &biscuit_auth::Biscuit,
+        root_key: &biscuit_auth::PublicKey,
+    ) -> Result<Self, CapError> {
+        Ok(Self {
+            token_bytes: token
+                .to_vec()
+                .map_err(|e| CapError::Serialization(e.to_string()))?,
+            root_key_bytes: root_key.to_bytes().to_vec(),
+        })
+    }
+
+    /// Create a Cap from a Biscuit token without storing the root key.
+    ///
+    /// Note: Without the root key, meet semantics will be conservative
+    /// (treating different tokens as incomparable → bottom).
     pub fn from_biscuit(token: &biscuit_auth::Biscuit) -> Result<Self, CapError> {
         Ok(Self {
             token_bytes: token
                 .to_vec()
                 .map_err(|e| CapError::Serialization(e.to_string()))?,
+            root_key_bytes: Vec::new(),
         })
     }
 
+    /// Deserialize the token into a Biscuit using the provided root key.
     pub fn to_biscuit(
         &self,
         root_key: &biscuit_auth::PublicKey,
@@ -603,15 +648,94 @@ impl Cap {
             .map_err(|e| CapError::Deserialization(e.to_string()))
     }
 
+    /// Deserialize the token using the stored root key.
+    ///
+    /// Returns an error if no root key is stored.
+    pub fn to_biscuit_with_stored_key(&self) -> Result<biscuit_auth::Biscuit, CapError> {
+        if self.token_bytes.is_empty() {
+            return Err(CapError::EmptyToken);
+        }
+        if self.root_key_bytes.len() != 32 {
+            return Err(CapError::MissingRootKey);
+        }
+
+        let key_bytes: [u8; 32] = self.root_key_bytes[..32]
+            .try_into()
+            .map_err(|_| CapError::InvalidRootKey)?;
+
+        let root_key = biscuit_auth::PublicKey::from_bytes(&key_bytes)
+            .map_err(|_| CapError::InvalidRootKey)?;
+
+        biscuit_auth::Biscuit::from(&self.token_bytes, root_key)
+            .map_err(|e| CapError::Deserialization(e.to_string()))
+    }
+
+    /// Check if the capability is empty (bottom element).
     pub fn is_empty(&self) -> bool {
         self.token_bytes.is_empty()
     }
 
+    /// Check if this Cap has a stored root key.
+    pub fn has_root_key(&self) -> bool {
+        self.root_key_bytes.len() == 32
+    }
+
+    /// Get the root key bytes if present.
+    pub fn root_key_bytes(&self) -> Option<&[u8]> {
+        if self.has_root_key() {
+            Some(&self.root_key_bytes)
+        } else {
+            None
+        }
+    }
+
+    /// Get the token bytes.
+    pub fn token_bytes(&self) -> &[u8] {
+        &self.token_bytes
+    }
+
+    /// Update the token with a new Biscuit value.
     pub fn update(&mut self, token: &biscuit_auth::Biscuit) -> Result<(), CapError> {
         self.token_bytes = token
             .to_vec()
             .map_err(|e| CapError::Serialization(e.to_string()))?;
         Ok(())
+    }
+
+    /// Update the token with a new Biscuit value and root key.
+    pub fn update_with_key(
+        &mut self,
+        token: &biscuit_auth::Biscuit,
+        root_key: &biscuit_auth::PublicKey,
+    ) -> Result<(), CapError> {
+        self.token_bytes = token
+            .to_vec()
+            .map_err(|e| CapError::Serialization(e.to_string()))?;
+        self.root_key_bytes = root_key.to_bytes().to_vec();
+        Ok(())
+    }
+
+    /// Get the block count from a Biscuit token.
+    ///
+    /// Returns the number of blocks in the token, which indicates the attenuation depth.
+    /// More blocks = more attenuated = less authority.
+    fn block_count(&self) -> Option<usize> {
+        if self.token_bytes.is_empty() {
+            return None;
+        }
+
+        // If we have a stored root key, try to parse the token
+        if self.root_key_bytes.len() == 32 {
+            if let Ok(key_bytes) = TryInto::<[u8; 32]>::try_into(&self.root_key_bytes[..32]) {
+                if let Ok(root_key) = biscuit_auth::PublicKey::from_bytes(&key_bytes) {
+                    if let Ok(biscuit) = biscuit_auth::Biscuit::from(&self.token_bytes, root_key) {
+                        return Some(biscuit.block_count());
+                    }
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -625,14 +749,60 @@ pub enum CapError {
 
     #[error("Empty token")]
     EmptyToken,
+
+    #[error("Missing root key: stored key required for this operation")]
+    MissingRootKey,
+
+    #[error("Invalid root key: key bytes are malformed")]
+    InvalidRootKey,
 }
 
 impl MeetSemiLattice for Cap {
+    /// Compute the meet (greatest lower bound) of two capabilities.
+    ///
+    /// Meet semantics follow Biscuit attenuation:
+    /// - Empty ⊓ anything = Empty (bottom is absorbing)
+    /// - Same token bytes = return unchanged (idempotent)
+    /// - Same issuer (root key), different tokens: return the more attenuated one (more blocks)
+    /// - Different issuers or incomparable: return empty (bottom)
+    ///
+    /// The result is always at most as permissive as both inputs.
     fn meet(&self, other: &Self) -> Self {
+        // Bottom is absorbing: ∅ ⊓ x = x ⊓ ∅ = ∅
         if self.token_bytes.is_empty() || other.token_bytes.is_empty() {
             return Self::new();
         }
-        self.clone()
+
+        // Identical tokens: a ⊓ a = a
+        if self.token_bytes == other.token_bytes {
+            return self.clone();
+        }
+
+        // Different tokens - need to compare root keys and block counts
+        // If root keys differ or are missing, tokens are incomparable → bottom
+        if self.root_key_bytes.len() != 32
+            || other.root_key_bytes.len() != 32
+            || self.root_key_bytes != other.root_key_bytes
+        {
+            // Different issuers or missing keys → incomparable → bottom
+            return Self::new();
+        }
+
+        // Same issuer - compare block counts
+        // More blocks = more attenuation = less authority = lower in the lattice
+        match (self.block_count(), other.block_count()) {
+            (Some(self_blocks), Some(other_blocks)) => {
+                // Return the token with more blocks (more restrictive)
+                // In a meet-semilattice, more restrictions = lower = result of meet
+                if self_blocks >= other_blocks {
+                    self.clone()
+                } else {
+                    other.clone()
+                }
+            }
+            // If we can't parse either token, be conservative → bottom
+            _ => Self::new(),
+        }
     }
 }
 
@@ -643,18 +813,47 @@ impl Top for Cap {
 }
 
 impl PartialOrd for Cap {
+    /// Partial ordering for capabilities following meet-semilattice structure.
+    ///
+    /// In a capability lattice:
+    /// - Empty (bottom) ≤ everything
+    /// - More attenuated tokens (more blocks) are ≤ less attenuated tokens
+    /// - Tokens from different issuers are incomparable (None)
+    ///
+    /// Note: This is a partial order because tokens from different issuers
+    /// cannot be meaningfully compared.
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        // Handle empty tokens (bottom element)
         match (self.is_empty(), other.is_empty()) {
-            (true, true) => Some(std::cmp::Ordering::Equal),
-            (true, false) => Some(std::cmp::Ordering::Less),
-            (false, true) => Some(std::cmp::Ordering::Greater),
-            (false, false) => {
-                if self.token_bytes == other.token_bytes {
-                    Some(std::cmp::Ordering::Equal)
-                } else {
-                    None
-                }
+            (true, true) => return Some(std::cmp::Ordering::Equal),
+            (true, false) => return Some(std::cmp::Ordering::Less),
+            (false, true) => return Some(std::cmp::Ordering::Greater),
+            (false, false) => {}
+        }
+
+        // Both have tokens - check if identical
+        if self.token_bytes == other.token_bytes {
+            return Some(std::cmp::Ordering::Equal);
+        }
+
+        // Different tokens - need same root key to compare
+        if self.root_key_bytes.len() != 32
+            || other.root_key_bytes.len() != 32
+            || self.root_key_bytes != other.root_key_bytes
+        {
+            // Different issuers or missing keys → incomparable
+            return None;
+        }
+
+        // Same issuer - compare by block count
+        // More blocks = more attenuated = less authority = lower in the lattice
+        match (self.block_count(), other.block_count()) {
+            (Some(self_blocks), Some(other_blocks)) => {
+                // Higher block count = more restrictions = lower in lattice
+                Some(other_blocks.cmp(&self_blocks))
             }
+            // Can't parse tokens → incomparable
+            _ => None,
         }
     }
 }
@@ -852,8 +1051,161 @@ mod tests {
         let merged_keys: Vec<_> = journal_a.facts.entries.lww_map.keys().cloned().collect();
         assert!(merged_keys.contains(&"k1".to_string()));
         assert!(merged_keys.contains(&"k2".to_string()));
-        // Cap meet should not panic; current stub yields an empty token_bytes
+        // Cap meet with empty cap produces empty (bottom absorbs)
         assert!(journal_a.caps.is_empty());
+    }
+
+    #[test]
+    fn test_cap_meet_with_biscuit_tokens() {
+        use biscuit_auth::{macros::*, KeyPair};
+
+        // Create a root keypair
+        let root = KeyPair::new();
+        let root_public = root.public();
+
+        // Create a base token
+        let base_token = biscuit!(
+            r#"
+            account("test_account");
+            capability("read");
+            capability("write");
+        "#
+        )
+        .build(&root)
+        .expect("Failed to create base token");
+
+        // Create an attenuated token (more blocks = more restricted)
+        let attenuated_token = base_token
+            .append(block!(
+                r#"
+            check if operation("read");
+        "#
+            ))
+            .expect("Failed to attenuate token");
+
+        // Create Caps with root key
+        let cap_base =
+            Cap::from_biscuit_with_key(&base_token, &root_public).expect("Failed to create cap");
+        let cap_attenuated = Cap::from_biscuit_with_key(&attenuated_token, &root_public)
+            .expect("Failed to create attenuated cap");
+
+        // Meet of base and attenuated should return the attenuated (more restricted)
+        let meet_result = cap_base.meet(&cap_attenuated);
+        assert!(!meet_result.is_empty());
+
+        // The result should be the more attenuated token (more blocks)
+        let result_blocks = meet_result.block_count();
+        let attenuated_blocks = cap_attenuated.block_count();
+        assert_eq!(result_blocks, attenuated_blocks);
+    }
+
+    #[test]
+    fn test_cap_meet_different_issuers() {
+        use biscuit_auth::{macros::*, KeyPair};
+
+        // Create two different root keypairs (different issuers)
+        let root1 = KeyPair::new();
+        let root2 = KeyPair::new();
+
+        // Create tokens from different issuers
+        let token1 = biscuit!(
+            r#"
+            account("account1");
+        "#
+        )
+        .build(&root1)
+        .expect("Failed to create token1");
+
+        let token2 = biscuit!(
+            r#"
+            account("account2");
+        "#
+        )
+        .build(&root2)
+        .expect("Failed to create token2");
+
+        let cap1 =
+            Cap::from_biscuit_with_key(&token1, &root1.public()).expect("Failed to create cap1");
+        let cap2 =
+            Cap::from_biscuit_with_key(&token2, &root2.public()).expect("Failed to create cap2");
+
+        // Meet of tokens from different issuers should return bottom (empty)
+        let meet_result = cap1.meet(&cap2);
+        assert!(meet_result.is_empty());
+    }
+
+    #[test]
+    fn test_cap_partial_ordering() {
+        use biscuit_auth::{macros::*, KeyPair};
+
+        let root = KeyPair::new();
+        let root_public = root.public();
+
+        // Create base token
+        let base_token = biscuit!(
+            r#"
+            account("test");
+        "#
+        )
+        .build(&root)
+        .expect("Failed to create base token");
+
+        // Create attenuated token
+        let attenuated_token = base_token
+            .append(block!(
+                r#"
+            check if operation("read");
+        "#
+            ))
+            .expect("Failed to attenuate");
+
+        let cap_base = Cap::from_biscuit_with_key(&base_token, &root_public).unwrap();
+        let cap_attenuated = Cap::from_biscuit_with_key(&attenuated_token, &root_public).unwrap();
+        let cap_empty = Cap::new();
+
+        // Empty is less than everything
+        assert!(cap_empty < cap_base);
+        assert!(cap_empty < cap_attenuated);
+
+        // More attenuated (more blocks) is less than less attenuated
+        assert!(cap_attenuated < cap_base);
+
+        // Same cap is equal
+        assert_eq!(cap_base.partial_cmp(&cap_base), Some(std::cmp::Ordering::Equal));
+    }
+
+    #[test]
+    fn test_cap_accessors() {
+        use biscuit_auth::{macros::*, KeyPair};
+
+        let root = KeyPair::new();
+        let root_public = root.public();
+
+        let token = biscuit!(
+            r#"
+            account("test");
+        "#
+        )
+        .build(&root)
+        .expect("Failed to create token");
+
+        // Cap with key
+        let cap_with_key = Cap::from_biscuit_with_key(&token, &root_public).unwrap();
+        assert!(cap_with_key.has_root_key());
+        assert!(cap_with_key.root_key_bytes().is_some());
+        assert!(!cap_with_key.token_bytes().is_empty());
+        assert!(!cap_with_key.is_empty());
+
+        // Cap without key
+        let cap_without_key = Cap::from_biscuit(&token).unwrap();
+        assert!(!cap_without_key.has_root_key());
+        assert!(cap_without_key.root_key_bytes().is_none());
+        assert!(!cap_without_key.is_empty());
+
+        // Empty cap
+        let empty_cap = Cap::new();
+        assert!(!empty_cap.has_root_key());
+        assert!(empty_cap.is_empty());
     }
 
     #[test]

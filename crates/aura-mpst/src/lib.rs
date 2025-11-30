@@ -107,7 +107,7 @@ pub mod runtime;
 pub mod context;
 
 // guards module REMOVED - use aura-protocol::guards::{CapGuard, SendGuard} instead
-// See ADR-015 for migration guidance
+// See docs/107_mpst_and_choreography.md for migration guidance and choreography-first guard architecture
 
 /// Leakage budget tracking for choreographies
 /// **DEPRECATED**: Use aura-protocol::guards::LeakageTracker and aura-core::effects::LeakageEffects instead

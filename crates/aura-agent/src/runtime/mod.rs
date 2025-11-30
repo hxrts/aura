@@ -16,11 +16,6 @@
 //! - **Testing**: Mock handlers with deterministic behavior
 //! - **Simulation**: Deterministic handlers with scenario injection, time control
 
-// Core runtime coordinator (formerly system.rs in aura-protocol)
-// Temporarily using stub coordinator while refactoring to authority-centric architecture
-#[cfg(feature = "legacy-stub")]
-pub mod coordinator_stub;
-
 // Runtime builder and container
 pub mod builder;
 pub mod container;
@@ -44,14 +39,8 @@ pub mod services;
 // Effect system implementation
 pub mod effects;
 
-// Effect trait definitions (stubs for old architecture)
-pub mod agent;
-pub mod choreographic;
 pub mod effect_api;
-pub mod handler_adapters;
 pub mod system;
-pub mod system_traits;
-pub mod tree;
 
 // Initialization - DISABLED: incomplete code with missing handler adapters
 // pub mod initialization;
@@ -64,8 +53,6 @@ pub mod reliability;
 pub mod choreography_adapter;
 
 // OTA orchestration (moved from aura-protocol)
-pub mod ota_orchestration;
-
 // Authority management
 pub mod authority_manager;
 

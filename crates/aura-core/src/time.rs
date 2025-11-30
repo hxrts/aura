@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::time::SystemTime;
 
-use crate::types::identifiers::{AuthorityId, DeviceId};
+use crate::{
+    crypto::Ed25519Signature,
+    types::identifiers::{AuthorityId, DeviceId},
+};
 
 /// Physical clock representation with optional uncertainty.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -278,8 +281,8 @@ impl<'a> Iterator for VectorClockIter<'a> {
 }
 /// Scalar clock for tie-breaking.
 pub type ScalarClock = u64;
-/// Signature placeholder for attestation proofs.
-pub type Signature = Vec<u8>;
+/// Signature attached to attested time proofs (Ed25519 bytes).
+pub type Signature = Ed25519Signature;
 
 /// Confidence/precision indicator for ranges and metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

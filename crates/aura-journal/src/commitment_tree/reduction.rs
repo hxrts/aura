@@ -377,8 +377,7 @@ fn recompute_root_commitment_simple(state: &mut TreeState) {
 
 /// Recompute root commitment from current tree structure
 fn recompute_root_commitment_from_tree(state: &mut TreeState) {
-    // Use the simple approach for now - in a full implementation this would
-    // traverse to find the actual root node and use its commitment directly
+    // Deterministic recomputation over all branch and leaf commitments
     recompute_root_commitment_simple(state);
 }
 

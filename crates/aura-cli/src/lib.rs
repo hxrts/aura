@@ -75,9 +75,12 @@
 #![allow(clippy::disallowed_types)] // CLI uses blake3::Hasher directly in some places
 
 pub mod commands;
-pub mod demo;
 pub mod effects;
 pub mod handlers;
+
+// Demo module requires simulator - only available with development feature
+#[cfg(feature = "development")]
+pub mod demo;
 pub mod tui;
 pub mod visualization;
 

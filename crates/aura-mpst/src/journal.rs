@@ -216,8 +216,35 @@ pub trait JournalCoupling {
 
     /// Validate that all annotations are consistent
     fn validate_annotations(&self) -> AuraResult<()> {
-        // Check for conflicting annotations or invalid deltas
-        // This is a placeholder for annotation validation logic
+        for (name, annotation) in self.journal_annotations() {
+            match &annotation.op_type {
+                JournalOpType::AddFacts | JournalOpType::RefineCaps | JournalOpType::Merge => {
+                    if annotation.delta.is_none() {
+                        return Err(AuraError::invalid(format!(
+                            "Journal annotation '{}' requires a delta for {:?}",
+                            name, annotation.op_type
+                        )));
+                    }
+                }
+                JournalOpType::Custom(desc) => {
+                    if desc.trim().is_empty() {
+                        return Err(AuraError::invalid(format!(
+                            "Journal annotation '{}' has an empty custom description",
+                            name
+                        )));
+                    }
+                }
+            }
+
+            if let Some(desc) = &annotation.description {
+                if desc.trim().is_empty() {
+                    return Err(AuraError::invalid(format!(
+                        "Journal annotation '{}' must have a non-empty description",
+                        name
+                    )));
+                }
+            }
+        }
         Ok(())
     }
 }

@@ -184,6 +184,8 @@ pub struct ContextRendezvousCoordinator {
     contexts: HashMap<ContextId, Arc<RelationalContext>>,
     /// Seen envelopes for deduplication
     seen_envelopes: HashSet<EnvelopeId>,
+    /// Local receipt log for audit and replay protection
+    receipts: HashMap<EnvelopeId, RendezvousReceipt>,
     /// Cache expiration time (reserved for future use)
     #[allow(dead_code)]
     cache_duration: Duration,
@@ -198,6 +200,7 @@ impl ContextRendezvousCoordinator {
             local_authority,
             contexts: HashMap::new(),
             seen_envelopes: HashSet::new(),
+            receipts: HashMap::new(),
             cache_duration: Duration::from_secs(300), // 5 minute cache
             effects,
         }
@@ -1144,7 +1147,7 @@ impl ContextRendezvousCoordinator {
     }
 
     /// Store receipt as journal fact
-    async fn store_receipt_fact(&self, receipt: RendezvousReceipt) -> AuraResult<()> {
+    async fn store_receipt_fact(&mut self, receipt: RendezvousReceipt) -> AuraResult<()> {
         // Generate random fact ID using effect system
         let random_bytes = self.effects.random_bytes_32().await;
         let mut fact_id_bytes = [0u8; 32];
@@ -1166,13 +1169,11 @@ impl ContextRendezvousCoordinator {
             timestamp: fact_ts,
         };
 
-        // Store fact in journal for audit trail
-        // Note: In production this should use journal namespacing once available
+        // Store fact in coordinator-local receipt log for audit trail and
+        // replay protection. This keeps behavior deterministic while avoiding
+        // journal namespace collisions until namespacing lands in the journal.
         tracing::debug!("Storing receipt fact: {:?}", fact.order);
-
-        // Currently rendezvous receipts are logged for observability
-        // Future: Integrate with JournalEffects::append_fact once journal
-        // namespacing for rendezvous receipts is implemented
+        self.receipts.entry(receipt.envelope_id).or_insert(receipt);
         Ok(())
     }
 

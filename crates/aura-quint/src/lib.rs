@@ -22,9 +22,11 @@
 //!         .with_invariant("counter >= 0")
 //!         .with_context("counter", "Int");
 //!
-//!     let result = futures::executor::block_on(async {
+//!     // Run inside your async runtime of choice
+//!     let result = async {
 //!         runner.verify_property(&property).await
-//!     })?;
+//!     }
+//!     .await?;
 //!     println!("Verification result: {:?}", result);
 //!
 //!     Ok(())

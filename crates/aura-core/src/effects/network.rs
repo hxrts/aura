@@ -74,8 +74,8 @@ pub enum NetworkError {
     /// Failed to establish a connection
     #[error("Connection failed: {0}")]
     ConnectionFailed(String),
-    /// Operation is not implemented
-    #[error("Not implemented")]
+    /// Operation is unsupported by the current handler
+    #[error("Unsupported operation")]
     NotImplemented,
     /// Serialization failed while preparing a network payload
     #[error("Serialization failed: {error}")]

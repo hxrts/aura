@@ -42,7 +42,6 @@ async-trait = { workspace = true }
 uuid = { workspace = true }
 
 # Cryptographic and utility dependencies
-blake3 = { workspace = true }
 hex = { workspace = true }
 
 # Logging
@@ -53,10 +52,8 @@ tracing = { workspace = true }
 # aura-testkit = { path = "../aura-testkit" }
 # aura-protocol = { path = "../aura-protocol" }
 aura-macros = { path = "../aura-macros" }
-proptest = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
-chrono = { workspace = true }
 
 [features]
 default = []

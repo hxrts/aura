@@ -71,7 +71,6 @@ serde_ipld_dagcbor = "0.6"
 tokio = { version = "1.40", features = ["full"] }
 futures = "0.3"
 async-trait = "0.1"
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 
 # Utilities
 uuid = { version = "1.6", features = ["v4", "v5", "serde"] }
@@ -95,20 +94,15 @@ indexmap = "2.5"
 proptest = "1.5"
 dirs = "5.0"
 glob = "0.3"
-fastrand = "2.1"
 parking_lot = "0.12"
 subtle = "2.6"
 getrandom = "0.2"
 futures-util = { version = "0.3", features = ["alloc"] }
 
 # Session types & choreographic programming
-rumpsteak-aura = "0.6.0"
-rumpsteak-aura-choreography = "0.6.0"
-
-# Additional dependencies for cryptography
-x25519-dalek = { version = "2.0", features = ["serde", "reusable_secrets", "static_secrets"] }
+rumpsteak-aura = "0.7.0"
+rumpsteak-aura-choreography = "0.7.0"
 signature = "2.2"
-derive_more = { version = "1.0", features = ["from", "into", "try_into", "deref", "display", "debug"] }
 
 # KeyJournal dependencies - external libraries for threshold operations and graph algorithms
 petgraph = "0.6"
@@ -117,37 +111,17 @@ petgraph = "0.6"
 tokio-tungstenite = "0.20"
 tokio-stream = "0.1"
 
-# Platform-specific dependencies
-security-framework = "2.9"
-core-foundation = "0.9"
-windows = { version = "0.52", features = ["Win32_Security_Credentials", "Win32_System_Diagnostics_ToolHelp", "Win32_Foundation"] }
-keyutils = "0.1"
-jni = "0.21"
-
 # Development and testing
 tokio-test = "0.4"
 tempfile = "3.8"
-quickcheck = "1.0"
 serial_test = "3.0"
-
-# Additional missing dependencies
-hpke = "0.12"
-snow = "0.9"
 biscuit-auth = "5.0"
-
-# rumpsteak-aura dependencies
-async-recursion = "1.1"
 proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "2.0", features = ["full"] }
-pest = "2.7"
-pest_derive = "2.7"
 
 # Benchmarking and WASM dependencies
 criterion = "0.5"
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-wasm-timer = "0.2"
 
 [profile.release]
 opt-level = 3

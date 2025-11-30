@@ -26,7 +26,7 @@ This allows the system to support resources that belong to relationships, not de
 
 Local-First aims for privacy through local storage and controlled replication. Aura requires stronger guarantees because the social graph is the network. Data, metadata, and protocol steps flow through people’s devices. This requires a discipline that goes beyond access control.
 
-Aura makes consent a technical primitive. Every action that produces a network-visible effect must pass a guard chain: capabilities (Biscuit), flow budgets, leakage budgets, and journal coupling. A message cannot be sent—literally cannot be emitted on the wire—unless all parties have cryptographically granted the necessary permissions. This ensures that participation, disclosure, and coordination are always intentional.
+Aura makes consent a technical primitive. Every action that produces a network-visible effect must pass a guard chain: capabilities (Biscuit), flow budgets, leakage budgets, and journal coupling. Guard evaluation runs over a prepared `GuardSnapshot` and returns `EffectCommand` data that an async interpreter executes only after the entire chain succeeds, so no transport work occurs unless every permission and budget check passes. A message cannot be sent—literally cannot be emitted on the wire—unless all parties have cryptographically granted the necessary permissions. This ensures that participation, disclosure, and coordination are always intentional.
 
 Local-First keeps data on your device. Aura ensures that every observable effect results from consent—whether the data lives locally or within a shared context.
 

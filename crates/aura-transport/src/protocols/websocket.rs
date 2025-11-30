@@ -3,10 +3,14 @@
 //! Core WebSocket protocol messages for aura-macros choreography! macro.
 //! Target: <100 lines (simple implementation).
 
+use aura_core::hash::{hash as core_hash, hasher};
 use aura_core::identifiers::DeviceId;
-use aura_core::time::{PhysicalTime, TimeStamp};
+use aura_core::time::{OrderTime, TimeStamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Core WebSocket protocol messages for choreographic usage
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,7 +103,11 @@ pub enum FrameType {
 impl WebSocketMessage {
     /// Create handshake request
     pub fn handshake_request(initiator: DeviceId, capabilities: Vec<String>) -> Self {
-        Self::handshake_request_with_id(Self::generate_session_id(), initiator, capabilities)
+        Self::handshake_request_with_id(
+            Self::generate_session_id(initiator),
+            initiator,
+            capabilities,
+        )
     }
 
     /// Create handshake request with specific session ID
@@ -116,11 +124,16 @@ impl WebSocketMessage {
         }
     }
 
-    /// Generate deterministic session ID
-    fn generate_session_id() -> Uuid {
-        // Use deterministic approach for session IDs
-        // In production this would use a proper deterministic algorithm
-        Uuid::nil() // Placeholder
+    /// Generate deterministic session ID using initiator + monotonic counter
+    fn generate_session_id(initiator: DeviceId) -> Uuid {
+        let counter = SESSION_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let mut h = hasher();
+        h.update(initiator.0.as_bytes());
+        h.update(&counter.to_le_bytes());
+        let digest = h.finalize();
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&digest[..16]);
+        Uuid::from_bytes(uuid_bytes)
     }
 
     /// Create successful handshake response
@@ -141,18 +154,18 @@ impl WebSocketMessage {
         }
     }
 
-    /// Create data frame with default timestamp
-    ///
-    /// Note: In production, timestamp should be provided via PhysicalTimeEffects
+    /// Create data frame with deterministic order-only timestamp
     pub fn data_frame(session_id: Uuid, payload: Vec<u8>, frame_type: FrameType) -> Self {
+        let mut order_bytes = [0u8; 32];
+        order_bytes[..16].copy_from_slice(session_id.as_bytes());
+        let payload_digest = core_hash(&payload);
+        order_bytes[16..].copy_from_slice(&payload_digest[..16]);
+
         Self::data_frame_with_timestamp(
             session_id,
             payload,
             frame_type,
-            TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            }),
+            TimeStamp::OrderClock(OrderTime(order_bytes)),
         )
     }
 
@@ -169,7 +182,7 @@ impl WebSocketMessage {
             metadata: FrameMetadata {
                 frame_type,
                 timestamp,
-                sequence: 0, // Will be set by sender
+                sequence: 0, // Deterministically assigned by caller if needed
             },
         }
     }

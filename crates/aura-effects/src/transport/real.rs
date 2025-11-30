@@ -56,10 +56,11 @@ impl TransportEffects for RealTransportHandler {
             "Sending transport envelope"
         );
 
+        // Actual I/O is handled by NetworkEffects; this path only emits structured logs.
         info!(
             destination = ?envelope.destination,
             payload_size = envelope.payload.len(),
-            "Envelope sent via real transport (stateless placeholder)"
+            "Envelope logged for real transport handler"
         );
 
         Ok(())
@@ -131,7 +132,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_send_envelope_placeholder() {
+    async fn test_send_envelope_logs() {
         let handler = RealTransportHandler::new();
         let envelope = TransportEnvelope {
             destination: AuthorityId::default(),

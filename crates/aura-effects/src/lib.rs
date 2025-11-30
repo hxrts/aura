@@ -66,6 +66,8 @@ pub mod console;
 pub mod context;
 /// Cryptographic effect handlers for signing, verification, and key derivation
 pub mod crypto;
+/// Indexed journal handler with B-tree indexes, Bloom filters, and Merkle trees
+pub mod database;
 // NOTE: JournalEffects moved to aura-journal (domain crate) per Layer 2 pattern
 pub mod guard_interpreter;
 pub mod leakage_handler;
@@ -82,10 +84,21 @@ pub mod transport;
 // NOTE: WotAuthorizationHandler moved to aura-wot per Layer 2 pattern
 pub use biometric::FallbackBiometricHandler;
 pub use bloom::BloomHandler;
+pub use database::query::{
+    AuraQuery, FactTerm, QueryError, QueryResult, ScopedQuery, ScopedQueryError, ScopedQueryResult,
+};
+pub use database::{IndexedJournalHandler, IndexedJournalWrapper};
+// Subscription API (Phase 3)
+pub use database::subscription::{
+    DatabaseSubscriptionEffects, FactDelta, FactFilter, FactStream, FromQueryResult, QueryScope,
+    SubscribableJournalHandler, SubscriptionError, SubscriptionFact,
+};
+// Materialized Views (Phase 3)
 pub use configuration::RealConfigurationHandler;
 pub use console::RealConsoleHandler;
 pub use context::{ExecutionContext, StandardContextHandler};
 pub use crypto::RealCryptoHandler;
+pub use database::views::{FactReducible, MaterializedView};
 // NOTE: JournalHandler moved to aura-journal per Layer 2 pattern
 pub use guard_interpreter::ProductionEffectInterpreter;
 pub use leakage_handler::ProductionLeakageHandler;

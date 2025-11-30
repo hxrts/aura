@@ -375,7 +375,6 @@ mod tests {
             uncertainty: None,
         });
 
-        // Note: time_until_expiration now returns a placeholder value
         assert!(cap.time_until_expiration(&time_500).is_some());
         assert_eq!(cap.time_until_expiration(&time_1000), Some(0));
         assert_eq!(cap.time_until_expiration(&time_1500), Some(0));

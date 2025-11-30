@@ -18,13 +18,10 @@ workspace = true
 aura-core = { path = "../aura-core" }
 
 # Effect handler composition utilities
-aura-composition = { path = "../aura-composition" }
 
 # Session types and choreography
-aura-mpst = { path = "../aura-mpst" }
 
 # Transport layer for AMP protocol
-aura-transport = { path = "../aura-transport" }
 
 # Async runtime
 tokio = { workspace = true }
@@ -38,14 +35,10 @@ serde_json = { workspace = true }
 # Utilities
 uuid = { workspace = true }
 thiserror = { workspace = true }
-tracing = { workspace = true }
-chrono = { workspace = true }
 
 [dev-dependencies]
 # For testing
 tokio = { workspace = true }
-tokio-test = { workspace = true }
-tempfile = { workspace = true }
 
 [features]
 default = []

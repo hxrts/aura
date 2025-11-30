@@ -3,11 +3,15 @@
 //! Core hole punching messages compatible with rumpsteak-aura choreographic DSL.
 //! Target: <120 lines (minimal implementation).
 
+use aura_core::hash::{hash as core_hash, hasher};
 use aura_core::identifiers::DeviceId;
-use aura_core::time::TimeStamp;
+use aura_core::time::{OrderTime, TimeStamp};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use uuid::Uuid;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+static HOLE_PUNCH_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Core hole punching messages for choreographic protocols
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,7 +123,7 @@ impl HolePunchMessage {
         relay_server: SocketAddr,
     ) -> Self {
         Self::coordination_request_with_id(
-            Self::generate_session_id(),
+            Self::generate_session_id(initiator, target),
             initiator,
             target,
             relay_server,
@@ -142,10 +146,16 @@ impl HolePunchMessage {
     }
 
     /// Generate deterministic session ID
-    fn generate_session_id() -> Uuid {
-        // Use deterministic approach for session IDs
-        // In production this would use a proper deterministic algorithm
-        Uuid::nil() // Placeholder
+    fn generate_session_id(initiator: DeviceId, target: DeviceId) -> Uuid {
+        let counter = HOLE_PUNCH_SESSION_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let mut h = hasher();
+        h.update(initiator.0.as_bytes());
+        h.update(target.0.as_bytes());
+        h.update(&counter.to_le_bytes());
+        let digest = h.finalize();
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&digest[..16]);
+        Uuid::from_bytes(uuid_bytes)
     }
 
     /// Create punch packet
@@ -160,7 +170,13 @@ impl HolePunchMessage {
             source,
             target,
             sequence,
-            TimeStamp::OrderClock(aura_core::time::OrderTime([0u8; 32])),
+            {
+                let mut bytes = [0u8; 32];
+                bytes[..16].copy_from_slice(session_id.as_bytes());
+                let seq_hash = core_hash(&sequence.to_le_bytes());
+                bytes[16..].copy_from_slice(&seq_hash[..16]);
+                TimeStamp::OrderClock(OrderTime(bytes))
+            },
         )
     }
 

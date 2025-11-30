@@ -41,13 +41,10 @@ thread_local! {
     static CURRENT_CONTEXT: std::cell::RefCell<Option<AuraContext>> = const { std::cell::RefCell::new(None) };
 }
 
-/// Get current context or create a temporary one
+/// Get current context or fail fast if none is set
 fn get_context() -> AuraContext {
     CURRENT_CONTEXT.with(|ctx| {
-        ctx.borrow().clone().unwrap_or_else(|| {
-            // Fallback: create temporary context
-            AuraContext::for_testing(DeviceId::placeholder())
-        })
+        ctx.borrow().clone().expect("AuraContext must be set before effect execution")
     })
 }
 

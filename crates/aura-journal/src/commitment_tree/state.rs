@@ -10,7 +10,9 @@
 //! - **Navigation Helpers**: Query nodes, leaves, paths, policies
 //! - **Commitment Verification**: Validate tree integrity
 
-use crate::commitment_tree::{BranchNode, Epoch, LeafId, LeafNode, NodeIndex, Policy, TreeHash32};
+use crate::commitment_tree::{
+    BranchNode, BranchSigningKey, Epoch, LeafId, LeafNode, NodeIndex, Policy, TreeHash32,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
@@ -131,6 +133,13 @@ pub struct TreeState {
     /// Tree topology: tracks parent-child relationships for efficient navigation
     /// This enables parent pointer navigation and affected node computation
     tree_topology: TreeTopology,
+
+    /// Branch signing keys for threshold signature verification
+    ///
+    /// Each branch node has a group public key established via DKG.
+    /// The threshold is derived from the branch's Policy, not stored here.
+    /// Keys are updated when membership changes or DKG is re-run.
+    branch_signing_keys: BTreeMap<NodeIndex, BranchSigningKey>,
 }
 
 impl TreeState {
@@ -143,6 +152,7 @@ impl TreeState {
             leaves: BTreeMap::new(),
             leaf_commitments: BTreeMap::new(),
             tree_topology: TreeTopology::new(),
+            branch_signing_keys: BTreeMap::new(),
         }
     }
 
@@ -160,6 +170,7 @@ impl TreeState {
             leaves,
             leaf_commitments: BTreeMap::new(),
             tree_topology: TreeTopology::new(),
+            branch_signing_keys: BTreeMap::new(),
         }
     }
 
@@ -397,6 +408,79 @@ impl TreeState {
         if let Some(branch) = self.branches.get_mut(&index) {
             branch.policy = policy;
         }
+    }
+
+    // ===== Signing Key Operations =====
+
+    /// Get the signing key for a branch node
+    ///
+    /// Returns the group public key used for verifying threshold signatures
+    /// on operations at this branch.
+    pub fn get_signing_key(&self, index: &NodeIndex) -> Option<&BranchSigningKey> {
+        self.branch_signing_keys.get(index)
+    }
+
+    /// Set the signing key for a branch node
+    ///
+    /// Called after DKG completes to store the group public key.
+    pub fn set_signing_key(&mut self, index: NodeIndex, key: BranchSigningKey) {
+        self.branch_signing_keys.insert(index, key);
+    }
+
+    /// Remove the signing key for a branch node
+    ///
+    /// Called when a branch is removed from the tree.
+    pub fn remove_signing_key(&mut self, index: &NodeIndex) -> Option<BranchSigningKey> {
+        self.branch_signing_keys.remove(index)
+    }
+
+    /// Check if a branch has a signing key
+    pub fn has_signing_key(&self, index: &NodeIndex) -> bool {
+        self.branch_signing_keys.contains_key(index)
+    }
+
+    /// Get all signing keys
+    pub fn signing_keys(&self) -> &BTreeMap<NodeIndex, BranchSigningKey> {
+        &self.branch_signing_keys
+    }
+
+    /// Get the signing witness for a node (key + threshold derived from policy)
+    ///
+    /// This is the complete information needed to verify an operation at this node.
+    pub fn signing_witness(&self, index: &NodeIndex) -> Option<crate::commitment_tree::SigningWitness> {
+        let key = self.branch_signing_keys.get(index)?;
+        let policy = self.get_policy(index)?;
+        let child_count = self.get_children(*index).len();
+        let threshold = policy.required_signers(child_count);
+
+        Some(crate::commitment_tree::SigningWitness::from_signing_key(
+            key, threshold,
+        ))
+    }
+}
+
+/// Implementation of TreeStateView for TreeState
+///
+/// This allows TreeState to be used with the verification module from aura-core.
+impl crate::commitment_tree::TreeStateView for TreeState {
+    fn get_signing_key(&self, node: NodeIndex) -> Option<&BranchSigningKey> {
+        self.branch_signing_keys.get(&node)
+    }
+
+    fn get_policy(&self, node: NodeIndex) -> Option<&Policy> {
+        self.branches.get(&node).map(|b| &b.policy)
+    }
+
+    fn child_count(&self, node: NodeIndex) -> usize {
+        self.get_children(node).len()
+    }
+
+    fn current_epoch(&self) -> Epoch {
+        self.epoch
+    }
+
+    fn current_commitment(&self) -> TreeHash32 {
+        self.root_commitment
     }
 }
 

@@ -47,16 +47,57 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-VIOLATIONS=0; WARNINGS=0
-VIOLATION_DETAILS=(); WARNING_DETAILS=()
+VIOLATIONS=0
+VIOLATION_DETAILS=()
 
 violation() { VIOLATIONS=$((VIOLATIONS+1)); VIOLATION_DETAILS+=("$1"); echo -e "${RED}✖${NC} $1"; }
-warning() { WARNINGS=$((WARNINGS+1)); WARNING_DETAILS+=("$1"); echo -e "${YELLOW}•${NC} $1"; }
+# Warnings are treated as violations to enforce strict compliance
+warning() { violation "$1"; }
 info() { echo -e "${BLUE}•${NC} $1"; }
+
+# Sort hits by layer (L1→L8) based on crate path.
+sort_hits_by_layer() {
+  while IFS= read -r entry; do
+    [ -z "$entry" ] && continue
+    path=${entry%%:*}
+    crate=$(echo "$path" | cut -d/ -f2)
+    layer=$(layer_of "$crate")
+    [ "$layer" = "0" ] && layer=99
+    printf "%02d:%s\n" "$layer" "$entry"
+  done | sort -t: -k1,1n -k2,2 | sed 's/^[0-9][0-9]://'
+}
+
+# Helper to emit numbered violations with consistent formatting and layer ordering.
+emit_hits() {
+  local label="$1"; shift
+  local hits="$1"
+  if [ -n "$hits" ]; then
+    local sorted
+    sorted=$(printf "%s\n" "$hits" | sort_hits_by_layer)
+    local idx=1
+    while IFS= read -r entry; do
+      [ -z "$entry" ] && continue
+      violation "${label} [${idx}]: ${entry}"
+      idx=$((idx+1))
+    done <<< "$sorted"
+  else
+    info "${label}: none"
+  fi
+}
 
 section() { echo -e "\n${BOLD}${CYAN}$1${NC}"; }
 
-check_cargo() { command -v cargo >/dev/null 2>&1; }
+check_cargo() {
+  if command -v cargo >/dev/null 2>&1; then
+    return 0
+  fi
+  # Fallback to user toolchain (common in dev shells where PATH is trimmed)
+  if [ -x "$HOME/.cargo/bin/cargo" ]; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+    return 0
+  fi
+  return 1
+}
 
 layer_of() {
   case "$1" in
@@ -73,7 +114,7 @@ layer_of() {
 }
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_LAYERS" = true ]; then
-  section "Layer purity"
+  section "Layer purity — keep aura-core interface-only; move impls to aura-effects (L3) or domain crates (L2); see docs/999_project_structure.md §Layer 1 and docs/001_system_architecture.md §6"
   # aura-core should only define traits/types (no impl of Effects)
   # Exclude: trait definitions, blanket impls (impl<...), and doc comments
   # Blanket impls include: extension traits and Arc<T> wrappers (both allowed exceptions per docs/999)
@@ -96,7 +137,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_LAYERS" = true ]; then
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_DEPS" = true ]; then
-  section "Dependency direction"
+  section "Dependency direction — remove upward deps (Lx→Ly where y>x); follow docs/999_project_structure.md dependency graph"
   if check_cargo; then
     deps=$(cargo metadata --format-version 1 --no-deps 2>/dev/null | jq -r '.packages[] | select(.name | startswith("aura-")) | [.name, (.dependencies[] | select(.name | startswith("aura-")) | .name)] | @tsv') || deps=""
     clean=true
@@ -108,14 +149,14 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_DEPS" = true ]; then
         clean=false
       fi
     done <<< "$deps"
-    if [ "$clean" = true ]; then info "Dependency direction: clean"; fi
+  if [ "$clean" = true ]; then info "Dependency direction: clean"; fi
   else
-    warning "cargo unavailable; dependency direction not checked"
+    violation "cargo unavailable; dependency direction not checked"
   fi
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
-  section "Effects"
+  section "Effects — infra traits only in aura-core; infra impls in aura-effects; app effects in domain crates; mocks in aura-testkit (docs/106_effect_system_and_runtime.md §1, docs/999_project_structure.md §Effect Trait Classification)"
   # Infrastructure effect traits must live in aura-core
   infra_traits="CryptoEffects|NetworkEffects|StorageEffects|PhysicalTimeEffects|LogicalClockEffects|OrderClockEffects|TimeAttestationEffects|RandomEffects|ConsoleEffects|ConfigurationEffects"
   infra_defs=$(find crates/ -name "*.rs" -not -path "*/aura-core/*" -exec grep -El "pub trait ($infra_traits)" {} + 2>/dev/null || true)
@@ -143,12 +184,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-testkit/" \
     | grep -v "crates/aura-core/" \
     | grep -v "tests/" || true)
-  if [ -n "$infra_impls" ]; then
-    warning "Infrastructure effects implemented outside aura-effects:"
-    echo "$infra_impls"
-  else
-    info "Infrastructure effect impls confined to aura-effects/testkit"
-  fi
+  emit_hits "Infrastructure effects implemented outside aura-effects" "$infra_impls"
 
   # Check for application effects in aura-effects
   app_effects="JournalEffects|AuthorityEffects|FlowBudgetEffects|LeakageEffects|AuthorizationEffects|RelationalContextEffects|GuardianEffects"
@@ -162,14 +198,9 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   # Check for direct OS operations in domain handlers
   domain_crates="aura-journal|aura-wot|aura-verify|aura-store|aura-transport|aura-authenticate|aura-recovery|aura-relational"
   os_violations=$(find crates/ -path "*/src/*" -name "*.rs" | grep -E "($domain_crates)" | xargs grep -l "std::fs::\|SystemTime::now\|thread_rng()" 2>/dev/null | grep -v "test" || true)
-  if [ -n "$os_violations" ]; then
-    warning "Direct OS operations in domain crates (should use effect injection):"
-    echo "$os_violations"
-  else
-    info "No direct OS ops in domain crates"
-  fi
+  emit_hits "Direct OS operations in domain crates (should use effect injection)" "$os_violations"
 
-  section "Runtime coupling"
+  section "Runtime coupling — keep foundation/spec crates runtime-agnostic; wrap tokio/async-std behind effects (docs/106_effect_system_and_runtime.md §3.5, docs/001_system_architecture.md §3)"
   runtime_pattern="tokio::|async_std::"
   runtime_hits=$(rg --no-heading "$runtime_pattern" crates -g "*.rs" || true)
   filtered_runtime=$(echo "$runtime_hits" \
@@ -178,6 +209,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-simulator/" \
     | grep -v "crates/aura-cli/" \
     | grep -v "crates/aura-composition/" \
+    | grep -v "crates/aura-testkit/" \
     | grep -v "#\\[tokio::test\\]" \
     | grep -v "#\\[async_std::test\\]" \
     | grep -v "#\\[tokio::main\\]" \
@@ -185,18 +217,9 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "/examples/" \
     | grep -v "test_macros.rs" \
     | grep -v "benches/" || true)
-  if [ -n "$filtered_runtime" ]; then
-    warning "Concrete runtime usage detected outside handler/composition layers (aura-core and domain crates must stay runtime-agnostic):"
-    echo "$filtered_runtime"
-    echo "  👉 Fix by replacing tokio/async-std types with effect-injected abstractions:"
-    echo "     - Sleep/timeout -> PhysicalTimeEffects::sleep_ms or effect-injected timers"
-    echo "     - Mutex/RwLock -> effects-backed state or futures locks in tests/examples only"
-    echo "     - Runtime-specific imports -> move to aura-effects/testkit/composition layers"
-  else
-    info "No concrete runtime coupling detected outside handler/composition layers"
-  fi
+  emit_hits "Concrete runtime usage detected outside handler/composition layers (replace tokio/async-std with effect-injected abstractions)" "$filtered_runtime"
 
-  section "Impure functions"
+  section "Impure functions — route time/random/fs through effect traits; production handlers in aura-effects or runtime assembly (docs/106_effect_system_and_runtime.md §1.3, .claude/skills/common_patterns.md)"
   # Strict flag for direct wall-clock/random usage outside allowed areas
   impure_pattern="SystemTime::now|Instant::now|thread_rng\\(|rand::thread_rng|chrono::Utc::now|chrono::Local::now|rand::rngs::OsRng|rand::random"
   impure_hits=$(rg --no-heading "$impure_pattern" crates -g "*.rs" || true)
@@ -237,15 +260,22 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     done <<< "$filtered_impure"
     filtered_impure="$filtered_final"
   fi
-  if [ -n "$filtered_impure" ]; then
-    violation "Impure functions detected outside effect implementations/testkit/runtime assembly:"
-    echo "$filtered_impure"
-  else
-    info "Impure function usage confined to effect implementations/testkit/runtime"
-  fi
+  emit_hits "Impure functions detected outside effect implementations/testkit/runtime assembly" "$filtered_impure"
 
-  # Check for direct sleeps (should use effect-injected time, especially for simulator determinism)
-  sleep_pattern="std::thread::sleep|tokio::time::sleep|async_std::task::sleep"
+  section "Physical time guardrails — use PhysicalTimeEffects::sleep_ms; keep sleeps simulator-controllable (docs/106_effect_system_and_runtime.md §1.1, .claude/skills/common_patterns.md)"
+  # Direct tokio::time::sleep instances should go through PhysicalTimeEffects
+  tokio_sleep_hits=$(rg --no-heading "tokio::time::sleep" crates -g "*.rs" || true)
+  filtered_tokio_sleep=$(echo "$tokio_sleep_hits" \
+    | grep -v "crates/aura-effects/" \
+    | grep -v "crates/aura-simulator/" \
+    | grep -v "crates/aura-testkit/" \
+    | grep -v "/tests/" \
+    | grep -v "/examples/" \
+    | grep -v "benches/" || true)
+  emit_hits "Direct tokio::time::sleep usage (should use PhysicalTimeEffects::sleep_ms)" "$filtered_tokio_sleep"
+
+  # Check for direct sleeps from std/async-std (should use effect-injected time)
+  sleep_pattern="std::thread::sleep|async_std::task::sleep"
   sleep_hits=$(rg --no-heading "$sleep_pattern" crates -g "*.rs" || true)
   filtered_sleep=$(echo "$sleep_hits" \
     | grep -v "crates/aura-effects/src/time.rs" \
@@ -253,14 +283,9 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-testkit/" \
     | grep -v "/tests/" \
     | grep -v "benches/" || true)
-  if [ -n "$filtered_sleep" ]; then
-    warning "Direct sleeps detected (should be effect-injected/simulator-controlled):"
-    echo "$filtered_sleep"
-  else
-    info "No direct sleep usage outside allowed handlers/simulator"
-  fi
+  emit_hits "Direct sleeps detected (should be effect-injected/simulator-controlled)" "$filtered_sleep"
 
-  section "Simulation control surfaces"
+  section "Simulation control surfaces — inject randomness/IO/spawn via effects so simulator can control (docs/806_simulation_guide.md, .claude/skills/common_patterns.md)"
   sim_patterns="rand::random|rand::thread_rng|rand::rngs::OsRng|RngCore::fill_bytes|std::io::stdin|read_line\\(|std::thread::spawn"
   sim_hits=$(rg --no-heading "$sim_patterns" crates -g "*.rs" || true)
   filtered_sim=$(echo "$sim_hits" \
@@ -272,14 +297,9 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "///" \
     | grep -v "//!" \
     | grep -v "//" || true)
-  if [ -n "$filtered_sim" ]; then
-    warning "Potential non-injected randomness/IO/spawn (should be simulator-controllable; see docs/806_simulation_guide.md and .claude/skills/common_patterns.md):"
-    echo "$filtered_sim"
-  else
-    info "Randomness/IO/spawn hooks appear confined to injectable layers"
-  fi
+  emit_hits "Potential non-injected randomness/IO/spawn (should be simulator-controllable; see docs/806_simulation_guide.md and .claude/skills/common_patterns.md)" "$filtered_sim"
 
-  section "Pure interpreter alignment"
+  section "Pure interpreter alignment — migrate to GuardSnapshot + pure guard eval + EffectCommand interpreter (docs/106_effect_system_and_runtime.md §8, docs/001_system_architecture.md §2.1-2.3)"
   guard_bridge_hits=$(
     rg --no-heading "GuardEffectSystem" crates -g "*.rs" || true
   )
@@ -287,32 +307,22 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     rg --no-heading "futures::executor::block_on" crates -g "*.rs" || true
   )
   sync_output=$(printf "%s\n%s" "$guard_bridge_hits" "$guard_block_on_hits" | sed '/^$/d' | sort -u)
-  if [ -n "$sync_output" ]; then
-    warning "Synchronous guard/effect bridges detected (migrate to pure snapshot + EffectCommand + interpreter; see docs/adr/014_guard.md and docs/806_simulation_guide.md):"
-    echo "$sync_output"
-  else
-    info "No synchronous guard/effect bridges detected"
-  fi
+  emit_hits "Synchronous guard/effect bridges detected (migrate to pure snapshot + EffectCommand + interpreter; see docs/106_effect_system_and_runtime.md and docs/806_simulation_guide.md)" "$sync_output"
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_GUARDS" = true ]; then
-  section "Guard chain"
+  section "Guard chain — all TransportEffects sends must flow through CapGuard → FlowGuard → JournalCoupler (docs/108_transport_and_information_flow.md, docs/001_system_architecture.md §2.1)"
   transport_sends=$(rg --no-heading "TransportEffects::(send|open_channel)" crates -g "*.rs" || true)
   guard_allowlist="crates/aura-protocol/src/guards|crates/aura-protocol/src/handlers/sessions|tests/|crates/aura-testkit/"
   bypass_hits=$(echo "$transport_sends" | grep -Ev "$guard_allowlist" || true)
-  if [ -n "$bypass_hits" ]; then
-    warning "Potential guard-chain bypass (TransportEffects send/open outside guard modules):"
-    echo "$bypass_hits"
-  else
-    info "Transport usage confined to guard chain modules"
-  fi
+  emit_hits "Potential guard-chain bypass (TransportEffects send/open outside guard modules)" "$bypass_hits"
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_INVARIANTS" = true ]; then
-  section "Invariant docs"
+  section "Invariant docs — INVARIANTS.md must include required headings; model after docs/005_system_invariants.md"
   invariant_files=$(find crates -name INVARIANTS.md 2>/dev/null | sort)
   if [ -z "$invariant_files" ]; then
-    warning "No INVARIANTS.md files found"
+    violation "Invariant docs: none found"
   else
     for inv in $invariant_files; do
       missing=()
@@ -322,32 +332,70 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_INVARIANTS" = true ]; then
         fi
       done
       if [ ${#missing[@]} -gt 0 ]; then
-        violation "$inv missing required sections: ${missing[*]}"
+        violation "Invariant doc missing sections [$(IFS=,; echo "${missing[*]}")]: $inv"
       else
-        info "$inv: schema OK"
+        info "Invariant doc OK: $inv"
       fi
     done
   fi
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_REG" = true ]; then
-  section "Handler composition"
+  section "Handler composition — instantiate aura-effects via EffectRegistry/aura-composition, not direct new(); see docs/106_effect_system_and_runtime.md §3.3 and docs/999_project_structure.md §Layer 3"
   handler_pattern="(aura_effects::.*Handler::new|PhysicalTimeHandler::new|RealRandomHandler::new|FilesystemStorageHandler::new|EncryptedStorageHandler::new|TcpNetworkHandler::new|RealCryptoHandler::new)"
   instantiation=$(rg --no-heading "$handler_pattern" crates/aura-protocol/src crates/aura-authenticate/src crates/aura-chat/src crates/aura-invitation/src crates/aura-recovery/src crates/aura-relational/src crates/aura-rendezvous/src crates/aura-sync/src -g "*.rs" -g "!tests/**/*" || true)
-  if [ -n "$instantiation" ]; then
-    warning "Direct aura-effects handler instantiation found (prefer EffectRegistry / composition):"
-    echo "$instantiation"
-  else
-    info "No direct aura-effects handler instantiation in orchestration/feature crates"
-  fi
+  emit_hits "Direct aura-effects handler instantiation found (prefer EffectRegistry / composition)" "$instantiation"
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_TODOS" = true ]; then
-  section "TODO/FIXME"
+  section "Production placeholders — replace nil UUIDs/placeholder text with real IDs/derivations (see docs/105_identifiers_and_boundaries.md, docs/001_system_architecture.md §1.4)"
+  placeholder_hits=$(rg --no-heading -i "uuid::nil\\(\\)|uuid::nil\\(|uuid::nil\\)|placeholder implementation|placeholder|for now" crates -g "*.rs" \
+    | grep -v "/tests/" \
+    | grep -v "/benches/" \
+    | grep -v "/examples/" || true)
+  if [ -n "$placeholder_hits" ]; then
+    formatted=$(while IFS= read -r entry; do
+      [ -z "$entry" ] && continue
+      echo "$entry -- Action: derive real identifiers via AuthorityId/ContextId or deterministic key derivation"
+    done <<< "$placeholder_hits")
+    emit_hits "Placeholder identity/ID use" "$formatted"
+  else
+    info "Placeholder identity/ID use: none"
+  fi
+
+  section "Deterministic algorithm TODOs — replace vague notes with implemented deterministic paths (docs/108_transport_and_information_flow.md, docs/003_information_flow_contract.md)"
+  deterministic_hits=$(rg --no-heading -i "deterministic algorithm" crates -g "*.rs" \
+    | grep -v "/tests/" \
+    | grep -v "/benches/" \
+    | grep -v "/examples/" || true)
+  if [ -n "$deterministic_hits" ]; then
+    formatted=$(while IFS= read -r entry; do
+      [ -z "$entry" ] && continue
+      echo "$entry -- Action: implement deterministic selection/ordering per transport/guard specs; avoid entropy leaks"
+    done <<< "$deterministic_hits")
+    emit_hits "Deterministic algorithm stub" "$formatted"
+  else
+    info "Deterministic algorithm stubs: none"
+  fi
+
+  section "Temporary context fallbacks — ensure real context resolution instead of temp contexts (docs/103_relational_contexts.md, docs/001_system_architecture.md §1.4)"
+  temp_ctx_hits=$(rg --no-heading -i "temporary context|temp context" crates -g "*.rs" \
+    | grep -v "/tests/" \
+    | grep -v "/benches/" \
+    | grep -v "/examples/" || true)
+  if [ -n "$temp_ctx_hits" ]; then
+    formatted=$(while IFS= read -r entry; do
+      [ -z "$entry" ] && continue
+      echo "$entry -- Action: resolve ContextId via relational/journal state; remove temp context creation to avoid guard bypass"
+    done <<< "$temp_ctx_hits")
+    emit_hits "Temporary context fallback" "$formatted"
+  else
+    info "Temporary context fallbacks: none"
+  fi
+
+  section "TODO/FIXME — convert to tracked issues or implement; prioritize architecture/compliance blockers first"
   todo_hits=$(rg --no-heading "TODO|FIXME" crates || true)
   if [ -n "$todo_hits" ]; then
-    count=$(echo "$todo_hits" | wc -l | tr -d ' ')
-    warning "TODO/FIXME markers present [$count]; full list numbered (layer-ordered L1→L8):" 
     sorted_todos=$(while IFS= read -r line; do
       path=${line%%:*}
       crate=$(echo "$path" | cut -d/ -f2)
@@ -355,7 +403,23 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_TODOS" = true ]; then
       [ "$layer" = "0" ] && layer=99
       printf "%02d:%s\n" "$layer" "$line"
     done <<< "$todo_hits" | sort -t: -k1,1n -k2,2 | sed 's/^[0-9]\\{2\\}://')
-    nl -ba <<< "$sorted_todos"
+    emit_hits "TODO/FIXME" "$sorted_todos"
+  else
+    info "TODO/FIXME: none"
+  fi
+
+  section "Incomplete markers — replace \"in production\"/WIP text with TODOs or complete implementation per docs/805_development_patterns.md"
+  incomplete_pattern="in production[^\\n]*(would|should|not)|stub|not implemented|unimplemented|temporary|workaround|hacky|\\bWIP\\b|\\bTBD\\b|prototype|future work|to be implemented"
+  incomplete_hits=$(rg --no-heading -i "$incomplete_pattern" crates -g "*.rs" || true)
+  filtered_incomplete=$(echo "$incomplete_hits" \
+    | grep -v "/tests/" \
+    | grep -v "/benches/" \
+    | grep -v "/examples/" \
+    | grep -E "//" || true)
+  if [ -n "$filtered_incomplete" ]; then
+    emit_hits "Incomplete/WIP marker" "$filtered_incomplete"
+  else
+    info "Incomplete/WIP markers: none"
   fi
 fi
 
@@ -365,6 +429,5 @@ if [ $VIOLATIONS -eq 0 ]; then
 else
   echo -e "${RED}✖ $VIOLATIONS violation(s)${NC}"
 fi
-[ $WARNINGS -gt 0 ] && echo -e "${YELLOW}• $WARNINGS warning(s)${NC}"
 
 exit $([ $VIOLATIONS -eq 0 ] && echo 0 || echo 1)

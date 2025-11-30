@@ -69,7 +69,7 @@ impl MetricsSystemHandler {
         Self::new(config)
     }
 
-    /// Record a counter increment (stateless - delegates to external service)
+    /// Record a counter increment
     pub async fn increment_counter(
         &self,
         name: &str,
@@ -97,7 +97,7 @@ impl MetricsSystemHandler {
         Ok(())
     }
 
-    /// Set a gauge value (stateless - delegates to external service)
+    /// Set a gauge value
     pub async fn set_gauge(
         &self,
         name: &str,
@@ -125,7 +125,7 @@ impl MetricsSystemHandler {
         Ok(())
     }
 
-    /// Record a histogram observation (stateless - delegates to external service)
+    /// Record a histogram observation
     pub async fn observe_histogram(
         &self,
         name: &str,
@@ -343,7 +343,6 @@ mod tests {
     async fn test_metrics_operations() {
         let handler = MetricsSystemHandler::default();
 
-        // Test metrics operations (currently placeholders)
         handler
             .increment_counter(
                 "requests_total",

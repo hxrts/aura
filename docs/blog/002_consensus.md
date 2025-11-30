@@ -15,7 +15,7 @@ struct CommitFact {
     cid: ConsensusId,
     rid: ResultId,          // result id = H(operation, prestate)
     threshold_signature: ThresholdSignature,
-    attester_set: BTreeSet<DeviceId>,
+    attester_set: BTreeSet<AuthorityId>,
 }
 ```
 

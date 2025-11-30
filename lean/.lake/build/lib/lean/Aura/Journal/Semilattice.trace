@@ -1,0 +1,29 @@
+{"synthetic": false,
+ "outputs":
+ {"o": ["17916829061365910090"],
+  "i": "3909491585067828896",
+  "c": "3930576276887938617"},
+ "log":
+ [{"message":
+   ".> LEAN_PATH=/Users/hxrts/projects/aura/lean/.lake/build/lib/lean /nix/store/2wk0ifmv0ba5rkifq7i3pqd99wpxp0r2-lean4-4.23.0/bin/lean /Users/hxrts/projects/aura/lean/Aura/Journal/Semilattice.lean -o /Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/Journal/Semilattice.olean -i /Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/Journal/Semilattice.ilean -c /Users/hxrts/projects/aura/lean/.lake/build/ir/Aura/Journal/Semilattice.c --setup /Users/hxrts/projects/aura/lean/.lake/build/ir/Aura/Journal/Semilattice.setup.json --json",
+   "level": "trace"}],
+ "inputs":
+ [["Aura.Journal.Semilattice:deps",
+   [["deps",
+     [["auraLean/Aura:extraDep", [["@auraLean:extraDep", "1723"]]],
+      ["imports",
+       [["Aura.Journal.Core transitive imports (legacy)", "1723"],
+        ["Aura.Journal.Core:importAllArts", "17049047563776382129"]]]]],
+    ["libs",
+     [["import dynlibs",
+       [["/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura_Journal_Core.dylib",
+         "14672662395829395362"]]],
+      ["package external libraries", "1723"],
+      ["module dynlibs", "1723"],
+      ["module plugins", "1723"]]]]],
+  ["Lean 4.23.0, commit v4.23.0", "5645240988061349575"],
+  ["/Users/hxrts/projects/aura/lean/Aura/Journal/Semilattice.lean",
+   "4441970033807435368"],
+  ["options", "1723"],
+  ["Module.leanArgs: #[]", "1723"]],
+ "depHash": "7949473063756119252"}

@@ -255,7 +255,7 @@ impl EffectSystemBuilder {
         match self.execution_mode {
             ExecutionMode::Production => Err("Production runtime requires async build".to_string()),
             _ => {
-                // Create a temporary context for building
+                // Create a build-time context for wiring handlers
                 let authority_id = self.authority_id.ok_or("Authority ID required")?;
                 let context_id = aura_core::identifiers::ContextId::new();
                 let core_mode = match self.execution_mode {

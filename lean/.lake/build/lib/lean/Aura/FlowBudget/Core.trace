@@ -1,0 +1,29 @@
+{"synthetic": false,
+ "outputs":
+ {"o": ["1441240512639401597"],
+  "i": "15240238488522307911",
+  "c": "7948623035020607524"},
+ "log":
+ [{"message":
+   ".> LEAN_PATH=/Users/hxrts/projects/aura/lean/.lake/build/lib/lean /nix/store/2wk0ifmv0ba5rkifq7i3pqd99wpxp0r2-lean4-4.23.0/bin/lean /Users/hxrts/projects/aura/lean/Aura/FlowBudget/Core.lean -o /Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/FlowBudget/Core.olean -i /Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/FlowBudget/Core.ilean -c /Users/hxrts/projects/aura/lean/.lake/build/ir/Aura/FlowBudget/Core.c --setup /Users/hxrts/projects/aura/lean/.lake/build/ir/Aura/FlowBudget/Core.setup.json --json",
+   "level": "trace"},
+  {"message": "Aura/FlowBudget/Core.lean:24:8: declaration uses 'sorry'",
+   "level": "warning"},
+  {"message": "Aura/FlowBudget/Core.lean:30:8: declaration uses 'sorry'",
+   "level": "warning"}],
+ "inputs":
+ [["Aura.FlowBudget.Core:deps",
+   [["deps",
+     [["auraLean/Aura:extraDep", [["@auraLean:extraDep", "1723"]]],
+      ["imports", "1723"]]],
+    ["libs",
+     [["import dynlibs", "1723"],
+      ["package external libraries", "1723"],
+      ["module dynlibs", "1723"],
+      ["module plugins", "1723"]]]]],
+  ["Lean 4.23.0, commit v4.23.0", "5645240988061349575"],
+  ["/Users/hxrts/projects/aura/lean/Aura/FlowBudget/Core.lean",
+   "8504521255511942857"],
+  ["options", "1723"],
+  ["Module.leanArgs: #[]", "1723"]],
+ "depHash": "16622867598544785084"}

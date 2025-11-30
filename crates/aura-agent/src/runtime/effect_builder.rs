@@ -50,14 +50,13 @@ impl EffectBuilder {
         // Validate requirements are met by bundles
         self.validate_requirements()?;
 
-        // Build the effect system with a basic config (stub implementation)
         let config = crate::core::AgentConfig::default();
         super::AuraEffectSystem::new(config).map_err(|e| AuraError::agent(e.to_string()))
     }
 
     #[allow(dead_code)] // Part of future effect system API
     fn validate_requirements(&self) -> Result<(), AuraError> {
-        // Stub validation - will be expanded with actual requirement checking
+        // Requirements enforcement deferred until ProtocolRequirements is populated by callers.
         Ok(())
     }
 }

@@ -208,9 +208,10 @@ impl JoinSemilattice for AccountState {
 
 impl Bottom for AccountState {
     fn bottom() -> Self {
-        // This is a placeholder - in practice, AccountState needs initialization
-        // with specific account_id and group_public_key
-        panic!("AccountState cannot be created without account_id and group_public_key")
+        AccountState::new(
+            AccountId::default(),
+            Ed25519VerifyingKey::default(),
+        )
     }
 }
 

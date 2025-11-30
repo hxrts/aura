@@ -9,7 +9,6 @@ use crate::biscuit_authorization::BiscuitAuthorizationBridge;
 use crate::resource_scope::ResourceScope;
 use async_trait::async_trait;
 use aura_core::effects::{AuthorizationEffects, AuthorizationError, CryptoEffects};
-use aura_core::identifiers::DeviceId;
 use aura_core::{AuthorityId, Cap, MeetSemiLattice};
 use biscuit_auth::PublicKey;
 use std::marker::PhantomData;
@@ -35,10 +34,10 @@ pub struct WotAuthorizationHandler<C: CryptoEffects> {
 
 impl<C: CryptoEffects> WotAuthorizationHandler<C> {
     /// Create a new WoT authorization handler with infrastructure effect dependencies
-    pub fn new(crypto: C, root_public_key: PublicKey, device_id: DeviceId) -> Self {
+    pub fn new(crypto: C, root_public_key: PublicKey, authority_id: AuthorityId) -> Self {
         Self {
             crypto,
-            biscuit_bridge: BiscuitAuthorizationBridge::new(root_public_key, device_id),
+            biscuit_bridge: BiscuitAuthorizationBridge::new(root_public_key, authority_id),
             _phantom: PhantomData,
         }
     }
@@ -130,7 +129,8 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
         }
 
         ResourceScope::Storage {
-            authority_id: AuthorityId::from_uuid(Uuid::nil()),
+            // Deterministic, non-nil fallback derived from resource path
+            authority_id: AuthorityId::from_uuid(Uuid::new_v5(&Uuid::NAMESPACE_URL, resource.as_bytes())),
             path: resource.to_string(),
         }
     }

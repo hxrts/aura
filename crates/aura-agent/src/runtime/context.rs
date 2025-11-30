@@ -106,9 +106,9 @@ impl EffectContext {
     }
 
     /// Check if this context is valid for the given session
-    pub fn is_valid_for_session(&self, _session_id: SessionId) -> bool {
-        // Stub validation - will be expanded with actual session validation
-        true
+    pub fn is_valid_for_session(&self, session_id: SessionId) -> bool {
+        // A context is valid only for its originating session.
+        self.session_id == session_id
     }
 }
 

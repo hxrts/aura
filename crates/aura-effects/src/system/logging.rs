@@ -441,7 +441,6 @@ mod tests {
     async fn test_basic_logging() {
         let handler = LoggingSystemHandler::new(LoggingConfig::default());
 
-        // Test basic logging (currently placeholders)
         handler
             .log("info", "test", "hello world")
             .await
@@ -465,7 +464,6 @@ mod tests {
     async fn test_audit_logging() {
         let handler = LoggingSystemHandler::new(LoggingConfig::default());
 
-        // Test audit logging (currently a placeholder)
         handler
             .audit_log(
                 "authentication",

@@ -10,7 +10,7 @@ use aura_core::effects::ExecutionMode;
 use aura_core::AuraError;
 use aura_mpst::LocalSessionType;
 
-/// Minimal effect type placeholder for test mocks
+/// Minimal effect type used by mock handlers in tests
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum EffectType {
     Dummy,
@@ -22,7 +22,7 @@ impl EffectType {
     }
 }
 
-/// Minimal AuraContext placeholder for test mocks
+/// Minimal AuraContext used by mock handlers in tests
 #[derive(Clone, Debug, Default)]
 pub struct AuraContext;
 
@@ -127,7 +127,14 @@ impl AuraHandler for MockHandler {
             match operation {
                 "current_timestamp" => Ok(1_000_000u64.to_le_bytes().to_vec()),
                 "current_timestamp_millis" => Ok(1_000_000_000u64.to_le_bytes().to_vec()),
-                "random_uuid" => Ok(uuid::Uuid::nil().as_bytes().to_vec()),
+                "random_uuid" => {
+                    let mut h = aura_core::hash::hasher();
+                    h.update(b"mock-random-uuid");
+                    let digest = h.finalize();
+                    let mut bytes = [0u8; 16];
+                    bytes.copy_from_slice(&digest[..16]);
+                    Ok(uuid::Uuid::from_bytes(bytes).as_bytes().to_vec())
+                }
                 "hash" => Ok(vec![0; 32]),
                 _ => Ok(Vec::new()),
             }

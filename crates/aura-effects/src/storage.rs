@@ -178,14 +178,44 @@ impl StorageEffects for FilesystemStorageHandler {
     }
 }
 
-fn apply_keystream(data: &[u8], key: &[u8]) -> Vec<u8> {
-    if key.is_empty() {
-        return data.to_vec();
+fn nonce_for(key: &[u8], key_str: &str) -> Result<chacha20poly1305::Nonce, StorageError> {
+    use chacha20poly1305::Nonce;
+    // Use aura_core's hash function (SHA-256) for nonce derivation
+    let mut h = aura_core::hash::hasher();
+    h.update(key);
+    h.update(key_str.as_bytes());
+    let derived = h.finalize();
+    let mut nonce_bytes = [0u8; 12];
+    nonce_bytes.copy_from_slice(&derived[..12]);
+    Ok(Nonce::from(nonce_bytes))
+}
+
+fn encrypt_stream(data: &[u8], key: &[u8], key_str: &str) -> Result<Vec<u8>, StorageError> {
+    use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, Key, KeyInit};
+    if key.len() != 32 {
+        return Err(StorageError::WriteFailed(
+            "Encryption key must be 32 bytes".to_string(),
+        ));
     }
-    data.iter()
-        .enumerate()
-        .map(|(i, b)| b ^ key[i % key.len()])
-        .collect()
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    let nonce = nonce_for(key, key_str)?;
+    cipher
+        .encrypt(&nonce, data)
+        .map_err(|e| StorageError::WriteFailed(format!("Encryption failed: {}", e)))
+}
+
+fn decrypt_stream(data: &[u8], key: &[u8], key_str: &str) -> Result<Vec<u8>, StorageError> {
+    use chacha20poly1305::{aead::Aead, ChaCha20Poly1305, Key, KeyInit};
+    if key.len() != 32 {
+        return Err(StorageError::ReadFailed(
+            "Encryption key must be 32 bytes".to_string(),
+        ));
+    }
+    let cipher = ChaCha20Poly1305::new(Key::from_slice(key));
+    let nonce = nonce_for(key, key_str)?;
+    cipher
+        .decrypt(&nonce, data)
+        .map_err(|e| StorageError::ReadFailed(format!("Decryption failed: {}", e)))
 }
 
 /// Encrypted storage handler for production use
@@ -204,8 +234,6 @@ pub struct EncryptedStorageHandler {
 impl EncryptedStorageHandler {
     /// Create a new encrypted storage handler
     ///
-    /// Note: The `encryption_key` parameter is currently for future implementation.
-    /// In production, this would handle proper key management and encryption.
     pub fn new(storage_path: PathBuf, encryption_key: Option<Vec<u8>>) -> Self {
         Self {
             filesystem_handler: FilesystemStorageHandler::new(storage_path),
@@ -247,7 +275,7 @@ impl EncryptedStorageHandler {
 impl StorageEffects for EncryptedStorageHandler {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         let payload = if let Some(k) = &self.encryption_key {
-            apply_keystream(&value, k)
+            encrypt_stream(&value, k, key)?
         } else {
             value
         };
@@ -257,7 +285,7 @@ impl StorageEffects for EncryptedStorageHandler {
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
         let data = self.filesystem_handler.retrieve(key).await?;
         let decrypted = if let (Some(ciphertext), Some(k)) = (&data, &self.encryption_key) {
-            Some(apply_keystream(ciphertext, k))
+            Some(decrypt_stream(ciphertext, k, key)?)
         } else {
             data
         };

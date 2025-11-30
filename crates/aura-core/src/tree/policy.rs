@@ -151,6 +151,37 @@ impl Policy {
     pub fn is_stricter_than(&self, other: &Self) -> bool {
         self.meet(other) == *self
     }
+
+    /// Returns the minimum number of signers required for this policy.
+    ///
+    /// This derives the concrete threshold from the policy given the current
+    /// number of children at the node. The threshold is used for signature
+    /// verification to ensure enough signers participated.
+    ///
+    /// # Arguments
+    ///
+    /// * `child_count` - The number of children (leaves or branches) under this node
+    ///
+    /// # Returns
+    ///
+    /// The minimum number of signers required for operations at this node.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use aura_core::tree::Policy;
+    ///
+    /// assert_eq!(Policy::Any.required_signers(3), 1);
+    /// assert_eq!(Policy::All.required_signers(3), 3);
+    /// assert_eq!(Policy::Threshold { m: 2, n: 3 }.required_signers(3), 2);
+    /// ```
+    pub fn required_signers(&self, child_count: usize) -> u16 {
+        match self {
+            Policy::Any => 1,
+            Policy::All => child_count as u16,
+            Policy::Threshold { m, .. } => *m,
+        }
+    }
 }
 
 impl PartialOrd for Policy {

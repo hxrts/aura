@@ -32,7 +32,6 @@ async-channel = "1"
 # Cryptography provided through aura-core
 ed25519-dalek = { workspace = true }
 frost-ed25519 = { workspace = true }
-blake3 = { workspace = true }
 sha2 = { workspace = true }
 
 # Randomness

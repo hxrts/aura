@@ -47,6 +47,34 @@ pub struct AuthorityTreeState {
 
     /// Active leaf indices
     active_leaves: BTreeSet<LeafId>,
+
+    /// Cached Merkle proof paths for each leaf (sibling hashes from leaf→root)
+    merkle_paths: BTreeMap<LeafId, Vec<Vec<u8>>>,
+
+    /// Cached FROST key shares per device (cleared on structural changes)
+    frost_key_cache: BTreeMap<LocalDeviceId, Vec<u8>>,
+
+    /// Devices that require a DKG refresh
+    pending_dkg_devices: BTreeSet<LocalDeviceId>,
+
+    /// Scheduled DKG runs keyed by epoch for deterministic replay
+    scheduled_dkg_epochs: BTreeMap<Epoch, BTreeSet<LocalDeviceId>>,
+
+    /// Recorded notifications for devices and relying parties
+    dkg_notifications: Vec<DkgNotification>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct DkgNotification {
+    device_id: LocalDeviceId,
+    epoch: Epoch,
+    kind: DkgNotificationKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+enum DkgNotificationKind {
+    KeyShareStale,
+    RotationScheduled,
 }
 
 impl AuthorityTreeState {
@@ -63,6 +91,11 @@ impl AuthorityTreeState {
             next_leaf_id: 0,
             threshold: 1,
             active_leaves: BTreeSet::new(),
+            merkle_paths: BTreeMap::new(),
+            frost_key_cache: BTreeMap::new(),
+            pending_dkg_devices: BTreeSet::new(),
+            scheduled_dkg_epochs: BTreeMap::new(),
+            dkg_notifications: Vec::new(),
         }
     }
 
@@ -257,8 +290,8 @@ impl AuthorityTreeState {
 
     /// Find nodes affected by recent changes
     fn find_affected_nodes(&self) -> Vec<u32> {
-        // In a full implementation, this would track which nodes have been modified
-        // For now, conservatively assume all non-root nodes are affected
+        // Conservatively assume all non-root nodes are affected until
+        // incremental change tracking is added.
         let mut affected = Vec::new();
 
         // Add all leaf nodes
@@ -266,8 +299,6 @@ impl AuthorityTreeState {
             affected.push(leaf_id.0);
         }
 
-        // Add internal nodes (would be tracked in a full tree structure)
-        // For now, just ensure we recompute a reasonable set
         if !affected.is_empty() {
             affected.push(0); // Root node
         }
@@ -291,20 +322,70 @@ impl AuthorityTreeState {
 
     /// Propagate commitment changes up to the root
     fn propagate_commitments_to_root(&mut self) {
-        // In a full tree implementation, this would traverse from modified leaves
-        // up to the root, updating commitments at each level
-
-        // For now, ensure the root commitment is current
         self.compute_tree_commitment();
     }
 
     /// Update merkle proof paths for nodes that have changed
     fn update_merkle_proof_paths(&mut self) {
-        // Merkle proof paths allow efficient verification without the full tree
-        // This would update cached proof paths for devices and guardians
+        // Merkle proof paths allow efficient verification without the full tree.
+        // Build sibling-hash paths deterministically for each active leaf.
+        let leaf_commitments = self.build_leaf_commitments();
 
-        // For now, this is a placeholder as we don't yet cache merkle paths
-        // In production, this would update SecureStorageEffects with new paths
+        // Track nodes per level with their covered leaves for proof construction
+        #[derive(Clone)]
+        struct Node {
+            hash: Vec<u8>,
+            leaves: Vec<LeafId>,
+        }
+
+        let mut paths: BTreeMap<LeafId, Vec<Vec<u8>>> = BTreeMap::new();
+
+        if leaf_commitments.is_empty() {
+            self.merkle_paths.clear();
+            return;
+        }
+
+        let mut level: Vec<Node> = leaf_commitments
+            .into_iter()
+            .map(|(leaf_id, hash)| Node {
+                hash,
+                leaves: vec![leaf_id],
+            })
+            .collect();
+
+        while level.len() > 1 {
+            let mut next = Vec::new();
+
+            for chunk in level.chunks(2) {
+                let left = &chunk[0];
+                let right = if chunk.len() == 2 { &chunk[1] } else { &chunk[0] };
+
+                // Record sibling hashes for proofs
+                for leaf in &left.leaves {
+                    paths.entry(*leaf).or_default().push(right.hash.clone());
+                }
+                for leaf in &right.leaves {
+                    paths.entry(*leaf).or_default().push(left.hash.clone());
+                }
+
+                // Compute parent hash
+                let mut hasher = aura_core::hash::hasher();
+                hasher.update(&left.hash);
+                hasher.update(&right.hash);
+
+                let mut parent_leaves = left.leaves.clone();
+                parent_leaves.extend_from_slice(&right.leaves);
+
+                next.push(Node {
+                    hash: hasher.finalize().to_vec(),
+                    leaves: parent_leaves,
+                });
+            }
+
+            level = next;
+        }
+
+        self.merkle_paths = paths;
     }
 
     /// Check if a leaf has a valid parent node
@@ -329,20 +410,12 @@ impl AuthorityTreeState {
 
     /// Rebalance tree structure for optimal performance
     fn rebalance_tree_structure(&mut self) {
-        // 1. Analyze current tree structure for imbalance
         let balance_factor = self.calculate_tree_balance_factor();
 
         if self.requires_rebalancing(balance_factor) {
-            // 2. Reorganize nodes to maintain balanced tree properties
             self.perform_tree_rebalancing();
-
-            // 3. Minimize tree depth for threshold operations
             self.optimize_tree_depth();
-
-            // 4. Update internal pointers and maintain leaf ordering
             self.update_tree_pointers();
-
-            // Recompute commitments after structural changes
             self.update_tree_structure_and_commitments();
         }
     }
@@ -437,8 +510,6 @@ impl AuthorityTreeState {
 
     /// Update tree structure for optimal performance
     fn update_optimal_tree_structure(&mut self, _device_count: usize) {
-        // In a full implementation, this would create optimal internal node structure
-        // For now, ensure next_device_id is properly maintained
         self.next_device_id = self.device_mapping.len() as u32 + 1;
     }
 
@@ -459,14 +530,8 @@ impl AuthorityTreeState {
 
     /// Clear cached FROST threshold signature shares
     fn clear_frost_key_cache(&mut self) {
-        // Clear any locally cached FROST key material
-        // In production, this would integrate with SecureStorageEffects
-
-        // For now, ensure any cached derivation state is reset
-        // This prevents using stale key shares after tree changes
-
-        // Mark that cached keys are invalid by updating internal state
-        // Real implementation would call into secure storage layer
+        self.frost_key_cache.clear();
+        // Clearing in-memory cache ensures regenerated shares on next use.
     }
 
     /// Mark key derivation cache as stale
@@ -483,13 +548,8 @@ impl AuthorityTreeState {
 
     /// Mark devices for key regeneration
     fn mark_devices_for_key_regeneration(&mut self) {
-        // In production, this would send notifications to devices
-        // that they need to regenerate their key shares
-
-        // For each device, mark that DKG is required
         let device_ids: Vec<LocalDeviceId> = self.device_mapping.keys().copied().collect();
         for device_id in device_ids {
-            // In real implementation, would queue DKG request for device
             self.queue_dkg_for_device(device_id);
         }
     }
@@ -502,21 +562,36 @@ impl AuthorityTreeState {
         // Increment epoch to trigger new DKG ceremony
         self.epoch += 1;
 
-        // In production, this would also:
-        // - Schedule DKG with all participants
-        // - Update consensus requirements
-        // - Notify relying parties of key rotation
+        if !self.pending_dkg_devices.is_empty() {
+            self.scheduled_dkg_epochs
+                .entry(self.epoch)
+                .or_default()
+                .extend(self.pending_dkg_devices.iter().copied());
+
+            for device_id in self.pending_dkg_devices.iter().copied() {
+                self.dkg_notifications.push(DkgNotification {
+                    device_id,
+                    epoch: self.epoch,
+                    kind: DkgNotificationKind::RotationScheduled,
+                });
+            }
+        }
     }
 
-    /// Queue DKG for a specific device (placeholder)
+    /// Queue DKG for a specific device
     fn queue_dkg_for_device(&mut self, _device_id: LocalDeviceId) {
-        // In production, this would:
-        // 1. Add device to DKG participant list
-        // 2. Schedule DKG ceremony
-        // 3. Notify device of upcoming key regeneration
+        let device_id = _device_id;
+        self.pending_dkg_devices.insert(device_id);
+        self.scheduled_dkg_epochs
+            .entry(self.epoch)
+            .or_default()
+            .insert(device_id);
 
-        // For now, this is a placeholder for the DKG scheduling logic
-        // Real implementation would integrate with the choreography system
+        self.dkg_notifications.push(DkgNotification {
+            device_id,
+            epoch: self.epoch,
+            kind: DkgNotificationKind::KeyShareStale,
+        });
     }
 
     /// Compute proper tree commitment using merkle tree
@@ -535,8 +610,9 @@ impl AuthorityTreeState {
     }
 
     /// Build commitments for all active leaves
-    fn build_leaf_commitments(&self) -> Vec<(LeafId, Vec<u8>)> {
+    fn build_leaf_commitments(&mut self) -> Vec<(LeafId, Vec<u8>)> {
         let mut leaf_commitments = Vec::new();
+        let mut stale_devices = Vec::new();
 
         // Collect all device leaf commitments
         for (&device_id, &leaf_id) in &self.device_mapping {
@@ -546,10 +622,16 @@ impl AuthorityTreeState {
                 let commitment = self.compute_leaf_commitment(leaf);
                 leaf_commitments.push((leaf_id, commitment));
             } else {
-                // If we don't have the leaf data, create a placeholder commitment
-                let placeholder_commitment =
-                    self.compute_placeholder_leaf_commitment(device_id, leaf_id);
-                leaf_commitments.push((leaf_id, placeholder_commitment));
+                // If the mapping is stale, drop it so the tree remains sound
+                stale_devices.push(device_id);
+            }
+        }
+
+        // Remove stale device mappings outside the iteration to avoid borrow conflicts
+        if !stale_devices.is_empty() {
+            for device in stale_devices {
+                // Safety: even if the mapping was updated, removal is idempotent
+                self.device_mapping.remove(&device);
             }
         }
 
@@ -631,22 +713,6 @@ impl AuthorityTreeState {
         hasher.finalize().to_vec()
     }
 
-    /// Compute placeholder commitment for missing leaf
-    fn compute_placeholder_leaf_commitment(
-        &self,
-        device_id: LocalDeviceId,
-        leaf_id: LeafId,
-    ) -> Vec<u8> {
-        use aura_core::hash;
-        let mut hasher = hash::hasher();
-
-        hasher.update(b"PLACEHOLDER_LEAF_V1");
-        hasher.update(&leaf_id.0.to_le_bytes());
-        hasher.update(&device_id.0.to_le_bytes());
-        hasher.update(&self.epoch.to_le_bytes());
-
-        hasher.finalize().to_vec()
-    }
 }
 
 impl Default for AuthorityTreeState {

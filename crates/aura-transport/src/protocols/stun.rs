@@ -3,9 +3,13 @@
 //! Essential STUN protocol messages for NAT traversal and connectivity.
 //! Target: <150 lines (focused implementation).
 
+use aura_core::hash::hasher;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::net::SocketAddr;
 use uuid::Uuid;
+
+static STUN_TX_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 /// Essential STUN protocol messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -127,9 +131,14 @@ impl StunMessage {
 
     /// Generate deterministic transaction ID
     fn generate_transaction_id() -> Uuid {
-        // Use deterministic approach for transaction IDs
-        // In production this would use a proper deterministic algorithm
-        Uuid::nil() // Placeholder
+        let counter = STUN_TX_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let mut h = hasher();
+        h.update(b"stun-txid");
+        h.update(&counter.to_le_bytes());
+        let digest = h.finalize();
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&digest[..16]);
+        Uuid::from_bytes(uuid_bytes)
     }
 
     /// Create STUN binding success response

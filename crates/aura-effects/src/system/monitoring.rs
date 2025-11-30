@@ -331,19 +331,10 @@ impl SystemEffects for MonitoringSystemHandler {
     }
 
     async fn restart_component(&self, component: &str) -> Result<(), SystemError> {
-        // In production this would delegate to the component supervisor; here we just log and
-        // track a restart attempt so the simulator can assert the behavior.
-        self.stats
-            .lock()
-            .map(|mut s| {
-                s.total_alerts = s.total_alerts.saturating_add(1);
-            })
-            .ok();
-        tracing::warn!(
-            component = component,
-            "Restart requested via monitoring handler"
-        );
-        Ok(())
+        tracing::warn!(component = component, "Restart requested via monitoring handler");
+        Err(SystemError::OperationFailed {
+            message: "restart_component not supported in monitoring handler".to_string(),
+        })
     }
 
     async fn shutdown(&self) -> Result<(), SystemError> {
@@ -368,7 +359,6 @@ mod tests {
     async fn test_alert_operations() {
         let handler = MonitoringSystemHandler::default();
 
-        // Test alert sending (currently a placeholder)
         handler
             .send_alert(
                 "component",

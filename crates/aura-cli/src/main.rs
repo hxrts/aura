@@ -14,8 +14,11 @@ use std::path::PathBuf;
 
 use aura_cli::{
     AdminAction, AmpAction, AuthorityCommands, ChatCommands, CliHandler, ContextAction,
-    InvitationAction, RecoveryAction, ScenarioAction, SnapshotAction,
+    InvitationAction, RecoveryAction, SnapshotAction,
 };
+
+#[cfg(feature = "development")]
+use aura_cli::{DemoCommands, ScenarioAction};
 
 #[derive(Parser)]
 #[command(name = "aura")]
@@ -87,10 +90,18 @@ enum Commands {
         mode: String,
     },
 
-    /// Scenario management
+    /// Scenario management (requires development feature)
+    #[cfg(feature = "development")]
     Scenarios {
         #[command(subcommand)]
         action: ScenarioAction,
+    },
+
+    /// Interactive TUI demo with simulator (requires development feature)
+    #[cfg(feature = "development")]
+    Demo {
+        #[command(subcommand)]
+        command: DemoCommands,
     },
 
     /// Maintenance flows (snapshot, GC, OTA hooks)
@@ -203,7 +214,10 @@ async fn main() -> Result<()> {
                 .handle_threshold(configs, *threshold, mode)
                 .await
         }
+        #[cfg(feature = "development")]
         Commands::Scenarios { action } => cli_handler.handle_scenarios(action).await,
+        #[cfg(feature = "development")]
+        Commands::Demo { command } => cli_handler.handle_demo(command).await,
         Commands::Snapshot { action } => cli_handler.handle_snapshot(action).await,
         Commands::Admin { action } => cli_handler.handle_admin(action).await,
         Commands::Recovery { action } => cli_handler.handle_recovery(action).await,
@@ -265,6 +279,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "development")]
     fn test_cli_scenarios() {
         let cli = Cli::try_parse_from([
             "aura",

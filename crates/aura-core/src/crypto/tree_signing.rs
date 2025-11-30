@@ -142,11 +142,9 @@ impl Nonce {
 
     /// Convert to FROST signing nonces
     ///
-    /// This is a security limitation - FROST nonces should not be reconstructed
-    /// from serialized data. In production, nonces should be:
-    /// 1. Generated fresh for each signing operation
-    /// 2. Stored securely in memory only
-    /// 3. Never persisted to disk
+    /// This is a security limitation: FROST nonces should not be reconstructed
+    /// from serialized data. Nonces must be generated fresh per signing operation,
+    /// kept in-memory, and never persisted.
     pub fn to_frost(&self) -> Result<frost::round1::SigningNonces, String> {
         Err("FROST nonces cannot be reconstructed from serialized data for security reasons. Generate fresh nonces for each signing operation.".to_string())
     }
@@ -354,7 +352,11 @@ pub fn binding_message(ctx: &TreeSigningContext, op_bytes: &[u8]) -> Vec<u8> {
 ///
 /// This mirrors the binding used by journal verification and keeps the logic
 /// near the canonical tree types to avoid duplicated hashing code elsewhere.
-pub fn tree_op_binding_message(attested: &AttestedOp, current_epoch: u64) -> Vec<u8> {
+pub fn tree_op_binding_message(
+    attested: &AttestedOp,
+    current_epoch: u64,
+    group_public_key: &[u8; 32],
+) -> Vec<u8> {
     let mut h = hash::hasher();
 
     // Domain separator
@@ -367,6 +369,9 @@ pub fn tree_op_binding_message(attested: &AttestedOp, current_epoch: u64) -> Vec
 
     // Current epoch
     h.update(&current_epoch.to_be_bytes());
+
+    // Group public key binds signature to signing group
+    h.update(group_public_key);
 
     // Serialize operation specifics
     let op_bytes = serialize_tree_op_for_binding(&attested.op.op);
@@ -451,8 +456,7 @@ pub fn generate_nonce_with_share(
     let mut nonce_id = [0u8; 32];
     rng.fill_bytes(&mut nonce_id);
 
-    // Note: FROST SigningNonces don't have a serialize method because they contain
-    // secret data. We'll store a placeholder and reconstruct when needed.
+    // Serialize signing nonces for secure storage via Nonce::from_frost.
     let nonce = Nonce::from_frost(frost_nonce);
 
     let commitment = NonceCommitment::from_frost(identifier, frost_commitment);

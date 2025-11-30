@@ -12,10 +12,20 @@ An account authority exposes a single public key. This public key is derived fro
 pub struct TreeState {
     pub epoch: Epoch,
     pub root_commitment: Hash32,
+    pub branch_signing_keys: BTreeMap<NodeIndex, BranchSigningKey>,
 }
 ```
 
-This structure represents the reduced state of an account. The `epoch` and `root_commitment` are derived from the fact set. External parties reference only these values.
+This structure represents the reduced state of an account. The `epoch` and `root_commitment` are derived from the fact set. The `branch_signing_keys` map stores FROST group public keys for each branch node. External parties reference only the epoch and root commitment.
+
+```rust
+pub struct BranchSigningKey {
+    pub group_public_key: [u8; 32],
+    pub key_epoch: Epoch,
+}
+```
+
+A `BranchSigningKey` stores the FROST group public key for threshold signing at a branch node. The `key_epoch` tracks when the key was established, allowing detection of stale keys after epoch rotation. Signing keys are derived from distributed key generation (DKG) among the devices under that branch.
 
 ## 2. Commitment Tree Structure
 
@@ -46,6 +56,22 @@ pub enum Policy {
 
 This enum expresses the allowed policies. The `Any` policy accepts one signature from any device under that branch. The `Threshold` policy requires `m` signatures out of `n` devices. The `All` policy requires all devices under the branch. Policies form a meet semilattice. The meet selects the stricter of two policies.
 
+The `required_signers()` method derives the concrete threshold from the policy given the current child count at the node:
+
+```rust
+impl Policy {
+    pub fn required_signers(&self, child_count: usize) -> u16 {
+        match self {
+            Policy::Any => 1,
+            Policy::All => child_count as u16,
+            Policy::Threshold { m, .. } => *m,
+        }
+    }
+}
+```
+
+This method is used during signature verification to determine how many signers must have participated in the threshold signing.
+
 ## 4. Tree Operations
 
 Tree operations modify the commitment tree. Each operation references a parent epoch and parent commitment. Each operation is signed through threshold signing.
@@ -67,10 +93,75 @@ Each operation appears in the journal as an attested operation.
 pub struct AttestedOp {
     pub op: TreeOp,
     pub agg_sig: Vec<u8>,
+    pub signer_count: u16,
 }
 ```
 
-The `agg_sig` field stores the threshold signature produced by devices. The signature validates under the parent root commitment. Devices refuse to sign if the local tree state does not match.
+The `agg_sig` field stores the FROST threshold signature produced by devices. The `signer_count` records how many devices contributed to the aggregate signature. The signature validates under the parent root commitment. Devices refuse to sign if the local tree state does not match.
+
+## 4.1. Tree Operation Verification
+
+Tree operations use a two-phase verification model that separates cryptographic verification from state consistency checking.
+
+### Verification
+
+**Verification** (`verify_attested_op`) performs cryptographic signature checking only:
+
+1. Check signer count meets threshold requirement
+2. Compute binding message (includes group public key)
+3. Verify FROST aggregate signature
+
+```rust
+pub fn verify_attested_op(
+    attested: &AttestedOp,
+    signing_key: &BranchSigningKey,
+    threshold: u16,
+    current_epoch: Epoch,
+) -> Result<(), VerificationError>;
+```
+
+Verification is self-contained. It can be performed with just the attested operation and the signing key. This enables offline verification and archival validation.
+
+### Check
+
+**Check** (`check_attested_op`) performs full verification plus TreeState consistency:
+
+1. Verify the operation cryptographically
+2. Ensure signing key exists for target node
+3. Validate operation epoch matches state
+4. Confirm parent commitment matches state
+
+```rust
+pub fn check_attested_op<S: TreeStateView>(
+    state: &S,
+    attested: &AttestedOp,
+    target_node: NodeIndex,
+) -> Result<(), CheckError>;
+```
+
+Check is used during reduction and operation acceptance. It ensures operations are both cryptographically valid and consistent with current state.
+
+### Binding Message Security
+
+The binding message includes the group public key to prevent signature reuse attacks:
+
+```rust
+pub fn compute_binding_message(
+    attested: &AttestedOp,
+    current_epoch: Epoch,
+    group_public_key: &[u8; 32],
+) -> Vec<u8>;
+```
+
+The binding message contains:
+- Domain separator (`"TREE_OP_VERIFY"`)
+- Parent epoch and commitment (replay prevention)
+- Protocol version
+- Current epoch
+- **Group public key** (prevents key substitution attacks)
+- Serialized operation content
+
+Including the group public key ensures signatures are bound to a specific signing group. An attacker cannot substitute a different key they control and reuse a captured signature.
 
 ## 5. Semilattice Model
 
@@ -164,10 +255,14 @@ The tree design ensures that no external party can identify device structure. Th
 ```mermaid
 graph LR
     OpLog["OpLog<br/>(CRDT OR-set of AttestedOp)"]
+    Verify["verify_attested_op()"]
+    Check["check_attested_op()"]
     Reduce["reduce()"]
-    TreeState["TreeState<br/>(derived, materialized on-demand)<br/>- epoch: u64<br/>- root_commitment: Hash32<br/>- nodes: BTreeMap<br/>- leaves: BTreeMap"]
-    
-    OpLog -->|reduce| Reduce
+    TreeState["TreeState<br/>(derived, materialized on-demand)<br/>- epoch: u64<br/>- root_commitment: Hash32<br/>- branch_signing_keys: BTreeMap<br/>- nodes: BTreeMap<br/>- leaves: BTreeMap"]
+
+    OpLog -->|cryptographic| Verify
+    Verify -->|state consistency| Check
+    Check -->|valid ops| Reduce
     Reduce -->|derives| TreeState
 ```
 
@@ -188,11 +283,13 @@ graph TD
     B["2. operations.rs<br/>TreeOperationProcessor validates"]
     C["3. attested_ops.rs<br/>Convert to AttestedOp fact"]
     D["4. Journal stores fact<br/>CRDT OR-set"]
-    E["5. reduction.rs<br/>reduce processes all facts"]
-    F["6. application.rs<br/>apply_verified builds TreeState"]
-    G["7. state.rs<br/>TreeState materialized"]
-    H["8. authority_state.rs<br/>Internal device view updated"]
-    
+    E["5. verification.rs<br/>verify_attested_op (crypto)"]
+    F["6. verification.rs<br/>check_attested_op (state)"]
+    G["7. reduction.rs<br/>reduce processes valid facts"]
+    H["8. application.rs<br/>apply_verified builds TreeState"]
+    I["9. state.rs<br/>TreeState materialized"]
+    J["10. authority_state.rs<br/>Internal device view updated"]
+
     A --> B
     B --> C
     C --> D
@@ -200,6 +297,8 @@ graph TD
     E --> F
     F --> G
     G --> H
+    H --> I
+    I --> J
 ```
 
 ### Merkle Commitment Layout

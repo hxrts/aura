@@ -26,9 +26,13 @@ aura-sync = { path = "../aura-sync" }
 aura-effects = { path = "../aura-effects" }
 aura-wot = { path = "../aura-wot" }
 aura-chat = { path = "../aura-chat" }
-aura-simulator = { path = "../aura-simulator" }
 aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }
+aura-store = { path = "../aura-store" }
+
+# Optional development dependencies - only included with "development" feature
+aura-simulator = { path = "../aura-simulator", optional = true }
+aura-testkit = { path = "../aura-testkit", optional = true }
 
 # Effect system
 async-trait = { workspace = true }
@@ -61,6 +65,13 @@ biscuit-auth = { workspace = true }
 # Testing infrastructure (Layer 7 can use testkit)
 aura-testkit = { path = "../aura-testkit" }
 aura-macros = { path = "../aura-macros" }
+tempfile = { workspace = true }
 
 [features]
 default = []
+# Development mode includes demo orchestration, simulator, and testkit
+# Build with: cargo build --features development
+development = [
+    "dep:aura-simulator",
+    "dep:aura-testkit",
+]

@@ -368,7 +368,7 @@ impl DemoScenarioBridgeBuilder {
 /// Integration function to setup demo and hand off to human-agent mode
 pub async fn setup_and_run_human_agent_demo(
     setup_config: DemoSetupConfig,
-    _demo_config: HumanAgentDemoConfig,
+    demo_config: HumanAgentDemoConfig,
     seed: u64,
 ) -> anyhow::Result<()> {
     tracing::info!("Starting integrated demo setup and execution");
@@ -379,9 +379,6 @@ pub async fn setup_and_run_human_agent_demo(
 
     tracing::info!("Scenario setup completed, handing off to human-agent demo");
 
-    // Phase 2: Hand off to human-agent demo mode
-    // Note: This would need to be integrated with the TuiApp and demo system
-    // For now, just log the successful handoff
     tracing::info!(
         "Demo ready - Bob: {}, Alice: {}, Charlie: {}",
         setup_result.bob_authority,
@@ -395,6 +392,27 @@ pub async fn setup_and_run_human_agent_demo(
         setup_result.setup_metrics.scenarios_executed,
         setup_result.setup_metrics.guardian_registrations
     );
+
+    // Phase 2: Hand off to human-agent demo mode
+    if !demo_config.auto_advance {
+        // Launch interactive TUI
+        use crate::tui::demo::{DemoConfig, DemoInterface};
+
+        tracing::info!("Launching interactive TUI demo");
+
+        let tui_config = DemoConfig {
+            use_simulator: true,
+            action_delay_ms: demo_config.agent_delay_ms,
+            verbose: demo_config.verbose_logging,
+        };
+
+        let mut demo_interface = DemoInterface::with_config(tui_config);
+        demo_interface.run().await?;
+
+        tracing::info!("TUI demo session ended");
+    } else {
+        tracing::info!("Auto-advance mode: skipping interactive TUI");
+    }
 
     Ok(())
 }

@@ -23,7 +23,6 @@ aura-core = { path = "../aura-core" }
 # aura-session-core = { path = "../aura-session-core" }  # For future session types implementation
 
 # CRDT
-automerge = { workspace = true }
 
 # Cryptography provided through aura-core effects system
 # Cryptographic types now imported through aura-core
@@ -31,7 +30,6 @@ automerge = { workspace = true }
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_cbor = { workspace = true }
 bincode = { workspace = true }
 
 # Async traits only (runtime dependencies removed for Layer 2 compliance)
@@ -41,12 +39,10 @@ async-trait = { workspace = true }
 uuid = { workspace = true }
 time = { workspace = true }
 thiserror = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
 hex = { workspace = true }
 
 # KeyJournal external dependencies
-petgraph = { workspace = true }
 # secret_sharing = { workspace = true }  # Removed due to yanked zeroize dependency - using MVP placeholder
 # biscuit-auth = { workspace = true } # removed - unused
 

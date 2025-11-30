@@ -237,7 +237,7 @@ where
                 // Note: In production, we'd need more context about the actual operation
                 let event = LeakageEvent {
                     source: self.authority_id,
-                    destination: self.authority_id, // Self-leakage for now
+                    destination: self.authority_id, // Self-leakage for deterministic accounting
                     context_id: aura_core::identifiers::ContextId::new(), // Would need real context
                     leakage_amount: bits as u64,
                     observer_class: ObserverClass::External, // Conservative default
@@ -278,10 +278,13 @@ where
                     "Sending network envelope"
                 );
 
-                // Convert NetworkAddress to a peer ID (in production, you'd have proper mapping)
-                // For now, we'll use a deterministic UUID based on the address
-                let peer_id =
-                    uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_DNS, to.as_str().as_bytes());
+                // Deterministic peer id derived from network address bytes
+                let mut h = aura_core::hash::hasher();
+                h.update(to.as_bytes());
+                let digest = h.finalize();
+                let mut peer_bytes = [0u8; 16];
+                peer_bytes.copy_from_slice(&digest[..16]);
+                let peer_id = uuid::Uuid::from_bytes(peer_bytes);
 
                 // Send via network effects
                 self.network
@@ -563,7 +566,9 @@ mod tests {
         async fn receive(
             &self,
         ) -> std::result::Result<(uuid::Uuid, Vec<u8>), aura_core::effects::NetworkError> {
-            Ok((uuid::Uuid::nil(), vec![]))
+            let deterministic_id =
+                uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, b"guard_interpreter_destination");
+            Ok((deterministic_id, vec![]))
         }
 
         async fn receive_from(

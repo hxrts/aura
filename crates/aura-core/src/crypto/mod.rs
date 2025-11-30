@@ -101,7 +101,7 @@ impl Ed25519VerifyingKey {
     }
 }
 
-/// HPKE key types (opaque placeholders for now).
+/// HPKE key types (X25519 serialized byte representation).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct HpkePublicKey(pub Vec<u8>);
 

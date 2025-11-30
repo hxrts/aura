@@ -1,0 +1,28 @@
+{"plugins":
+ ["/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura_Journal_Core.dylib",
+  "/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura_Journal_Semilattice.dylib",
+  "/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura_KeyDerivation_Core.dylib",
+  "/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura_GuardChain_Core.dylib",
+  "/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura_FlowBudget_Core.dylib",
+  "/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura_Frost_Core.dylib",
+  "/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura_TimeSystem_Core.dylib",
+  "/nix/store/2wk0ifmv0ba5rkifq7i3pqd99wpxp0r2-lean4-4.23.0/lib/lean/libLake_shared.dylib"],
+ "options": {},
+ "name": "Aura",
+ "isModule": false,
+ "importArts":
+ {"Aura.TimeSystem.Core":
+  ["/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/TimeSystem/Core.olean"],
+  "Aura.KeyDerivation.Core":
+  ["/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/KeyDerivation/Core.olean"],
+  "Aura.Journal.Semilattice":
+  ["/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/Journal/Semilattice.olean"],
+  "Aura.Journal.Core":
+  ["/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/Journal/Core.olean"],
+  "Aura.GuardChain.Core":
+  ["/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/GuardChain/Core.olean"],
+  "Aura.Frost.Core":
+  ["/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/Frost/Core.olean"],
+  "Aura.FlowBudget.Core":
+  ["/Users/hxrts/projects/aura/lean/.lake/build/lib/lean/Aura/FlowBudget/Core.olean"]},
+ "dynlibs": []}

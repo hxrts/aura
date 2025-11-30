@@ -99,7 +99,7 @@ A constructs a descriptor. A encrypts it with the context key. A publishes an en
 
 Flow budgets limit the rate of envelope propagation. Each envelope includes a cost. The rendezvous manager charges this cost before sending or forwarding. Cost is scoped to `(ContextId, neighbor_authority)`.
 
-The budget charge uses the guard chain. `CapGuard` ensures authorization for propagation. `FlowGuard` charges the budget. `JournalCoupler` inserts forwarding receipts into the journal.
+The budget charge uses the guard chain. `CapGuard` ensures authorization for propagation. `FlowGuard` charges the budget. `JournalCoupler` inserts forwarding receipts into the journal. Guard evaluation runs over a prepared `GuardSnapshot` and returns `EffectCommand` items that an async interpreter executes so guards remain pure and no transport work occurs until the entire sequence succeeds.
 
 ```rust
 pub struct Receipt {

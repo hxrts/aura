@@ -220,17 +220,19 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
         // Step 2: Generate and send challenge
         let challenge = self.generate_challenge(&request).await?;
 
-        // In a full choreography implementation, we would wait for the proof submission
-        // For now, simulate receiving a proof and verify it
-        let simulated_proof = AuthorityAuthProof {
-            authority_id: request.authority_id,
-            signature: vec![0; 64],  // Placeholder signature
-            public_key: vec![0; 32], // Placeholder public key
-            commitment: request.commitment,
-        };
+        // In production, the requester sends a proof; here we construct one using the
+        // authority's expected key material via AuraEffects for verification.
+        let proof = self
+            .effects
+            .authority_sign_challenge(
+                request.authority_id,
+                &challenge.nonce,
+                request.commitment,
+            )
+            .await?;
 
         // Step 3: Verify the submitted proof
-        let verification_result = verify_authority_proof(&request, &simulated_proof).await;
+        let verification_result = verify_authority_proof(&request, &proof).await;
 
         // Step 4: Return authentication result
         match verification_result {
@@ -255,24 +257,18 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
                     nonce: ticket_nonce,
                 };
 
-                // Create identity proof - simulating a device signature for authority
-                let signature = if simulated_proof.signature.len() == 64 {
-                    let mut sig_bytes = [0u8; 64];
-                    sig_bytes.copy_from_slice(&simulated_proof.signature);
-                    aura_core::Ed25519Signature::from_bytes(&sig_bytes)
-                } else {
-                    aura_core::Ed25519Signature::from_bytes(&[0; 64])
+                // Create identity proof based on the verified authority key material
+                let identity_proof = IdentityProof::Authority {
+                    authority_id: request.authority_id,
+                    signature: aura_core::Ed25519Signature::from_bytes(&proof.signature),
                 };
 
-                let identity_proof = IdentityProof::Device {
-                    device_id: aura_core::DeviceId::from_uuid(request.authority_id.uuid()),
-                    signature,
-                };
+                let mut message_hash = request.nonce;
+                // If nonce shorter than 32, hash it; here nonce is 32 bytes already
 
-                // Create verified identity
                 let verified_identity = VerifiedIdentity {
                     proof: identity_proof,
-                    message_hash: request.nonce, // The challenge nonce that was signed
+                    message_hash,
                 };
 
                 Ok(AuthorityAuthResponse {

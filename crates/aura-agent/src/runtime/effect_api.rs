@@ -1,9 +1,6 @@
-//! Effect API stubs
-//!
-//! Placeholder for effect API compatibility layer that bridges
-//! the old and new effect system architectures.
+//! Effect API compatibility shim bridging the old and new effect system architectures.
 
-/// Stub effect API bridge
+/// Compatibility bridge for legacy effect APIs
 #[derive(Debug)]
 pub struct EffectApiBridge;
 

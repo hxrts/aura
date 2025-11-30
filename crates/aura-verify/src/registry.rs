@@ -167,45 +167,41 @@ impl IdentityVerifier {
         // would need to be implemented based on the new AttestedOp structure
         // For now, we'll do a basic structural validation
 
-        let threshold_result: Result<(), Box<dyn std::error::Error + Send + Sync>> = Ok(());
-
-        match threshold_result {
-            Ok(()) => {
-                tracing::debug!("Threshold signature verification succeeded");
-
-                // 3. Basic validation passed
-                let auth_check: Result<bool, AuraError> = Ok(true);
-
-                match auth_check {
-                    Ok(true) => Ok(VerificationResult {
-                        verified: true,
-                        details: format!(
-                            "Attested operation verified: {} signers",
-                            attested_op.signer_count
-                        ),
-                        confidence: 1.0,
-                    }),
-                    Ok(false) => Ok(VerificationResult {
-                        verified: false,
-                        details: "Signers not authorized for this operation".to_string(),
-                        confidence: 0.2,
-                    }),
-                    Err(e) => Ok(VerificationResult {
-                        verified: false,
-                        details: format!("Authorization check failed: {}", e),
-                        confidence: 0.0,
-                    }),
-                }
-            }
-            Err(e) => {
-                tracing::warn!("Threshold signature verification failed: {:?}", e);
-                Ok(VerificationResult {
-                    verified: false,
-                    details: format!("Threshold signature verification failed: {}", e),
-                    confidence: 0.0,
-                })
-            }
+        if attested_op.signer_count == 0 || attested_op.agg_sig.is_empty() {
+            return Ok(VerificationResult {
+                verified: false,
+                details: "Attested operation missing signature data".to_string(),
+                confidence: 0.0,
+            });
         }
+
+        let op_bytes = aura_core::util::serialization::to_vec(&attested_op.op)
+            .map_err(|e| AuraError::serialization(e.to_string()))?;
+        let op_hash = aura_core::hash::hash(&op_bytes);
+
+        const ED25519_SIG_LEN: usize = 64;
+        if attested_op.agg_sig.len() != ED25519_SIG_LEN {
+            return Ok(VerificationResult {
+                verified: false,
+                details: "Aggregate signature length invalid".to_string(),
+                confidence: 0.0,
+            });
+        }
+
+        tracing::debug!(
+            signer_count = attested_op.signer_count,
+            ?op_hash,
+            "Attested operation structurally verified"
+        );
+
+        Ok(VerificationResult {
+            verified: true,
+            details: format!(
+                "Attested operation structurally verified: {} signers",
+                attested_op.signer_count
+            ),
+            confidence: 0.6,
+        })
     }
 
     /// Check if a device has required capabilities for an operation

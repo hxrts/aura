@@ -9,8 +9,8 @@ use aura_core::{Hash32 as Commitment, NodeIndex};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-// Note: TreeOperation is now TreeOpKind from commitment_tree
-// This module uses a placeholder until intent system is migrated to new tree types
+// TreeOperation aliases commitment_tree::TreeOpKind until the intent system is fully
+// migrated to the new tree mutation types.
 use crate::commitment_tree::TreeOpKind as TreeOperation;
 
 /// Import unified time types from aura-core
@@ -489,7 +489,6 @@ mod tests {
             uncertainty: None,
         });
 
-        // Note: age now returns a placeholder value
         assert!(intent.age(&time_1500).is_some());
         assert_eq!(intent.age(&time_1000), Some(0));
     }

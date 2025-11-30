@@ -3,8 +3,9 @@
 //! Provides essential message wrappers with built-in privacy preservation, relationship scoping,
 //! and minimal framing metadata. Target: <150 lines (concise implementation).
 
-use aura_core::{identifiers::DeviceId, AuraResult, RelationshipId};
+use aura_core::{hash::hasher, identifiers::DeviceId, AuraResult, RelationshipId};
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
 
 /// Universal message wrapper with essential blinding capabilities
@@ -78,6 +79,12 @@ pub enum PrivacyLevel {
 }
 
 impl Envelope {
+    /// Global counter to provide uniqueness without randomness
+    fn message_counter() -> &'static AtomicU64 {
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        &COUNTER
+    }
+
     /// Create new envelope with minimal privacy preservation
     pub fn new(payload: Vec<u8>) -> Self {
         Self::new_with_id(Self::generate_message_id(), payload)
@@ -101,9 +108,14 @@ impl Envelope {
     /// Generate a deterministic message ID based on payload
     /// This avoids direct UUID generation while providing uniqueness
     fn generate_message_id() -> Uuid {
-        // Use a deterministic UUID namespace for transport messages
-        // This ensures reproducible IDs for testing while maintaining uniqueness
-        Uuid::nil() // Placeholder - in production this would use a deterministic algorithm
+        let counter = Self::message_counter().fetch_add(1, Ordering::SeqCst);
+        let mut h = hasher();
+        h.update(b"aura-envelope-id");
+        h.update(&counter.to_le_bytes());
+        let digest = h.finalize();
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&digest[..16]);
+        Uuid::from_bytes(uuid_bytes)
     }
 
     /// Create relationship-scoped envelope with privacy preservation

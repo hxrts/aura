@@ -315,7 +315,7 @@ pub struct TransportAnswerPayload {
 pub struct SbbTransportBridge {
     /// SBB flooding coordinator
     flooding_coordinator: Arc<RwLock<SbbFloodingCoordinator>>,
-    /// Transport message sender (placeholder interface)
+    /// Transport message sender used to bridge SBB flooding to the network layer
     transport_sender: Option<BoxedTransportSender>,
     /// Pending transport offers we've sent (waiting for answers)
     pending_offers: Arc<RwLock<HashMap<DeviceId, TransportOfferPayload>>>,
@@ -331,7 +331,7 @@ impl std::fmt::Debug for SbbTransportBridge {
     }
 }
 
-/// Transport sender interface (placeholder - would integrate with real transport)
+/// Transport sender interface bridging SBB messages onto an underlying transport
 #[async_trait::async_trait]
 pub trait TransportSender: Send + Sync {
     /// Send message to peer via transport layer
@@ -502,9 +502,17 @@ impl SbbTransportBridge {
             answer.device_id, answer.selected_method
         );
 
-        // Process answer and establish connection via selected transport method (stub)
+        // Get current time in ms from coordinator's time effects
+        let coordinator = self.flooding_coordinator.read().await;
+        let now_secs = coordinator.current_time_secs().await;
+        drop(coordinator);
+        let now_ms = now_secs * 1000;
+        if answer.expires_at < now_ms {
+            return Err(AuraError::invalid("Transport answer expired".to_string()));
+        }
+
         tracing::info!(
-            "Establishing connection using {:?} (params {} bytes)",
+            "Transport answer selected {:?} with {} param bytes",
             answer.selected_method,
             answer.connection_params.len()
         );
@@ -1063,7 +1071,7 @@ impl crate::sbb::SbbFlooding for SbbTransportBridge {
             };
             sender.0.send_to_peer(peer, message).await
         } else {
-            // Fallback to coordinator's placeholder implementation
+            // Fallback to coordinator-provided sender when no custom transport is set
             let mut coordinator = self.flooding_coordinator.write().await;
             coordinator.forward_to_peer(envelope, peer, now).await
         }

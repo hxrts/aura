@@ -82,7 +82,7 @@ impl AgentBuilder {
             .authority_id
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
-        // Create a temporary context for building
+        // Build-time context used only for effect wiring
         let temp_context = EffectContext::new(
             authority_id,
             aura_core::identifiers::ContextId::new(),
@@ -140,6 +140,26 @@ impl AgentBuilder {
             .with_config(self.config)
             .with_authority(authority_id)
             .build_sync()
+            .map_err(AgentError::runtime)?;
+
+        Ok(AuraAgent::new(runtime, authority_id))
+    }
+
+    /// Build a simulation agent using an existing async runtime
+    pub async fn build_simulation_async(
+        self,
+        seed: u64,
+        ctx: &EffectContext,
+    ) -> AgentResult<AuraAgent> {
+        let authority_id = self
+            .authority_id
+            .ok_or_else(|| AgentError::config("Authority ID required"))?;
+
+        let runtime = EffectSystemBuilder::simulation(seed)
+            .with_config(self.config)
+            .with_authority(authority_id)
+            .build(ctx)
+            .await
             .map_err(AgentError::runtime)?;
 
         Ok(AuraAgent::new(runtime, authority_id))

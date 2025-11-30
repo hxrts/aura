@@ -12,7 +12,6 @@
 //! - **Deterministic ordering**: For reduction reproducibility
 
 use aura_core::hash;
-use aura_core::identifiers::DeviceId;
 use aura_core::semilattice::JoinSemilattice;
 use aura_core::{
     tree::{AttestedOp, TreeHash32},
@@ -258,13 +257,6 @@ impl OpLog {
         self.add_operation(op)
     }
 
-    /// Get the local device ID (placeholder for sync protocol)
-    /// In production, this should be stored in OpLog metadata
-    pub fn local_device_id(&self) -> DeviceId {
-        // Placeholder - in production, OpLog should store its owner device ID
-        // Using nil UUID as constant placeholder to avoid random UUID generation
-        DeviceId(uuid::Uuid::nil())
-    }
 }
 
 impl Default for OpLog {

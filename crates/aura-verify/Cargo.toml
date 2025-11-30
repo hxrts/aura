@@ -22,7 +22,6 @@ uuid = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 hex = { workspace = true }
-blake3 = { workspace = true }
 
 [dev-dependencies]
 # Test utilities now use aura-core crypto functions instead of direct ed25519-dalek

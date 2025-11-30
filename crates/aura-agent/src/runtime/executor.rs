@@ -53,9 +53,8 @@ impl EffectExecutor {
             .map_err(|e| AuraError::invalid(e.to_string()))?
             .ok_or_else(|| AuraError::invalid(format!("{}.{}", effect_type, operation)))?;
 
-        // Stub execution - will be expanded with actual handler invocation
-        Ok(EffectResult::Success(format!(
-            "Executed {}.{}",
+        Err(AuraError::invalid(format!(
+            "Handler for {}.{} is registered but execution dispatch is not implemented yet",
             effect_type, operation
         )))
     }

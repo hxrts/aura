@@ -15,6 +15,7 @@ use aura_core::crypto::{IdentityKeyContext, KeyDerivationSpec, PermissionKeyCont
 use aura_core::effects::crypto::{FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext};
 use aura_core::effects::{CryptoEffects, CryptoError, RandomEffects};
 use aura_core::hash;
+use rand::RngCore;
 use zeroize::Zeroize;
 
 /// Derive an encryption key using the specified context and version
@@ -391,18 +392,33 @@ impl CryptoEffects for RealCryptoHandler {
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
 
-        // Generate actual FROST nonces using a placeholder signing share
-        let signing_share = frost::keys::SigningShare::deserialize([0u8; 32])
-            .unwrap_or_else(|_| frost::keys::SigningShare::default());
-
-        let (nonces, commitments) = match self.seed {
+        // Generate FROST signing share deterministically (seeded) or from OS RNG
+        let mut share_bytes = [0u8; 32];
+        match self.seed {
             Some(seed) => {
                 let mut rng = ChaCha20Rng::from_seed(seed);
-                frost::round1::commit(&signing_share, &mut rng)
+                rng.fill_bytes(&mut share_bytes);
             }
             None => {
                 let mut rng = rand::rngs::OsRng;
-                frost::round1::commit(&signing_share, &mut rng)
+                rng.fill_bytes(&mut share_bytes);
+            }
+        }
+
+        let signing_share = frost::keys::SigningShare::deserialize(share_bytes).map_err(|e| {
+            CryptoError::invalid(format!("Failed to derive signing share: {}", e))
+        })?;
+
+        let (nonces, commitments) = {
+            match self.seed {
+                Some(seed) => {
+                    let mut rng = ChaCha20Rng::from_seed(seed);
+                    frost::round1::commit(&signing_share, &mut rng)
+                }
+                None => {
+                    let mut rng = rand::rngs::OsRng;
+                    frost::round1::commit(&signing_share, &mut rng)
+                }
             }
         };
 
@@ -504,7 +520,6 @@ impl CryptoEffects for RealCryptoHandler {
         let (signing_nonces_bytes, _): (Vec<u8>, Vec<u8>) = bincode::deserialize(&nonce_buf)
             .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces: {}", e)))?;
 
-        // Reconstruct deterministic SigningNonces from bytes (test-only stub)
         let signing_nonces = frost::round1::SigningNonces::deserialize(&signing_nonces_bytes)
             .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces format: {}", e)))?;
 

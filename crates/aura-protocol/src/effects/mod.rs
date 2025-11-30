@@ -136,10 +136,11 @@ pub trait AuraEffects:
 // - AuraEffectSystem: Concrete effect system type
 // - EffectSystemConfig: System configuration
 
-/// Protocol requirement specification stub
+/// Protocol requirement specification marker
 ///
-/// This trait provides a placeholder for protocol requirements.
-/// For full implementation, use aura_composition::ProtocolRequirements.
+/// Used by protocol crates to surface the effect bounds they need at compile time.
+/// Implementors should set `Requirements` to a concrete trait alias (e.g., `type Requirements = dyn AuraEffects;`)
+/// so downstream code can enforce correct effect composition without runtime checks.
 pub trait ProtocolRequirements {
     /// Type-level specification of required effects
     type Requirements;

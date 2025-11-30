@@ -473,7 +473,7 @@ ci-dry-run:
     echo ""
 
     # 1. Format Check
-    echo "[1/5] Running Format Check..."
+    echo "[1/8] Running Format Check..."
     if cargo fmt --all -- --check; then
         echo -e "${GREEN}[OK]${NC} Format check passed"
     else
@@ -483,7 +483,7 @@ ci-dry-run:
     echo ""
 
     # 2. Clippy with Effects Enforcement
-    echo "[2/5] Running Clippy with Effects Enforcement..."
+    echo "[2/8] Running Clippy with Effects Enforcement..."
     if cargo clippy --workspace --all-targets --verbose -- \
         -D warnings \
         -D clippy::disallowed_methods \
@@ -499,7 +499,7 @@ ci-dry-run:
     echo ""
 
     # 3. Test Suite
-    echo "[3/5] Running Test Suite..."
+    echo "[3/8] Running Test Suite..."
     if cargo test --workspace --verbose; then
         echo -e "${GREEN}[OK]${NC} Test suite passed"
     else
@@ -509,7 +509,7 @@ ci-dry-run:
     echo ""
 
     # 4. Check for Effects System Violations (Layer-Aware)
-    echo "[4/5] Checking for Effects System Violations..."
+    echo "[4/8] Checking for Effects System Violations..."
     violations_found=0
 
     # Layer architecture:
@@ -626,7 +626,7 @@ ci-dry-run:
     echo ""
 
     # 5. Documentation Links Check
-    echo "[5/6] Checking Documentation Links..."
+    echo "[5/8] Checking Documentation Links..."
     # Install markdown-link-check if not available
     if ! command -v markdown-link-check &> /dev/null; then
         echo "Installing markdown-link-check..."
@@ -664,7 +664,7 @@ ci-dry-run:
     echo ""
 
     # 6. Build Check
-    echo "[6/7] Running Build Check..."
+    echo "[6/8] Running Build Check..."
     if cargo build --workspace --verbose; then
         echo -e "${GREEN}[OK]${NC} Build check passed"
     else
@@ -673,7 +673,31 @@ ci-dry-run:
     fi
     echo ""
 
-    # Summary
+    # 7. Unused Dependencies Check
+    echo "[7/8] Checking for Unused Dependencies (cargo-udeps)..."
+    echo "Using nightly Rust toolchain for cargo-udeps..."
+
+    # Run cargo-udeps using the nightly shell from flake.nix
+    if nix develop .#nightly --command cargo udeps --all-targets 2>&1 | tee /tmp/udeps-output.txt | grep -q "unused dependencies:"; then
+        # Found unused dependencies - show them
+        echo -e "${YELLOW}[WARNING]${NC} Found unused dependencies:"
+        grep -A 100 "unused dependencies:" /tmp/udeps-output.txt | head -50
+        echo ""
+        echo -e "${YELLOW}Note:${NC} cargo-udeps may report false positives for:"
+        echo "  - Dependencies used in macro-generated code"
+        echo "  - Dependencies used only in doc-tests"
+        echo "  - Re-exported dependencies in public APIs"
+        echo ""
+        echo "Review the output above and verify these are actual unused dependencies."
+        echo "This is a WARNING, not a failure - CI will continue."
+    else
+        echo -e "${GREEN}[OK]${NC} No unused dependencies found (or only known false positives)"
+    fi
+    rm -f /tmp/udeps-output.txt
+    echo ""
+
+    # 8. Summary
+    echo "[8/8] Summary"
     echo "======================================================"
     if [ $exit_code -eq 0 ]; then
         echo -e "${GREEN}All CI checks passed!${NC}"
@@ -1057,3 +1081,36 @@ test-quint-pipeline:
     echo ""
     echo "The converted JSON can be consumed by the simulator tests that expect"
     echo "Quint specification files at /tmp/dkd_spec.json"
+
+# ============================================================================
+# Lean Verification Tasks
+# ============================================================================
+
+# Initialize Lean project (run once or after clean)
+lean-init:
+    @echo "Initializing Lean project..."
+    cd lean && lake update
+
+# Build Lean verification modules
+lean-build: lean-init
+    @echo "Building Lean verification modules..."
+    cd lean && lake build
+
+# Build the Lean verifier CLI
+lean-verifier: lean-build
+    @echo "Building Lean verifier CLI..."
+    cd lean && lake build aura_verifier
+
+# Run Lean verification tests (placeholder for now)
+lean-check: lean-verifier
+    @echo "Running Lean verification..."
+    cd lean && lake exe aura_verifier version
+
+# Clean Lean build artifacts
+lean-clean:
+    @echo "Cleaning Lean artifacts..."
+    cd lean && lake clean
+
+# Full Lean workflow (clean, build, verify)
+lean-full: lean-clean lean-build lean-check
+    @echo "Lean verification complete!"

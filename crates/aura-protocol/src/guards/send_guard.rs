@@ -6,11 +6,16 @@
 
 use super::effect_system_trait::GuardContextProvider;
 use super::GuardEffects;
+use crate::authorization::BiscuitAuthorizationBridge;
+use crate::guards::biscuit_evaluator::BiscuitGuardEvaluator;
 use crate::guards::pure_executor::{BorrowedEffectInterpreter, GuardChainExecutor};
 use crate::guards::{privacy::track_leakage_consumption, JournalCoupler, LeakageBudget};
+use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, Receipt};
-use biscuit_auth::Biscuit;
+use aura_wot::biscuit_resources::ResourceScope;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use biscuit_auth::{Biscuit, PublicKey};
 // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
 use tracing::{debug, warn};
 
@@ -35,29 +40,54 @@ pub struct SendGuardChain {
 }
 
 impl SendGuardChain {
-    /// Temporary basic authorization guard while migrating to pure guard path.
-    /// Uses a metadata-provided Biscuit token string until the interpreter pipeline wires in BiscuitGuardEvaluator.
-    async fn evaluate_authorization_guard<E: GuardContextProvider>(
+    async fn evaluate_authorization_guard<E: GuardContextProvider + PhysicalTimeEffects>(
         &self,
         effect_system: &E,
     ) -> AuraResult<(bool, String)> {
-        // Simplified placeholder: require a Biscuit token that matches the expected authorization string.
-        // In production this should delegate to biscuit_evaluator.
-        let expected = self.message_authorization.clone();
-        // If no authorization requirement, allow.
-        if expected.is_empty() {
+        if self.message_authorization.is_empty() {
             return Ok((true, "none".to_string()));
         }
 
-        // Try to load a token from effect system metadata (legacy path)
-        let maybe_token = effect_system.get_metadata("biscuit_token");
-        if let Some(token) = maybe_token {
-            if token == expected {
-                return Ok((true, "biscuit".to_string()));
-            }
-        }
+        let token_b64 = effect_system
+            .get_metadata("biscuit_token")
+            .ok_or_else(|| AuraError::invalid("missing biscuit_token metadata".to_string()))?;
+        let root_pk_b64 = effect_system
+            .get_metadata("biscuit_root_pk")
+            .ok_or_else(|| AuraError::invalid("missing biscuit_root_pk metadata".to_string()))?;
 
-        Ok((false, "authorization_failed".to_string()))
+        let root_bytes =
+            BASE64.decode(&root_pk_b64).map_err(|e| AuraError::invalid(format!("{}", e)))?;
+        let root_pk = PublicKey::from_bytes(&root_bytes)
+            .map_err(|e| AuraError::invalid(format!("invalid root pk: {e}")))?;
+        let token = Biscuit::from_base64(&token_b64, |_| Ok(root_pk))
+            .map_err(|e| AuraError::invalid(format!("invalid biscuit token: {e}")))?;
+
+        let bridge = BiscuitAuthorizationBridge::new(root_pk, effect_system.authority_id());
+        let evaluator = BiscuitGuardEvaluator::new(bridge);
+
+        let resource = ResourceScope::Relay {
+            channel_id: self.context.to_string(),
+        };
+
+        let now_secs = effect_system
+            .physical_time()
+            .await
+            .map_err(|e| AuraError::invalid(format!("time error: {e}")))?
+            .ts_ms
+            / 1000;
+
+        match evaluator.evaluate_guard(
+            &token,
+            &self.message_authorization,
+            &resource,
+            self.cost as u64,
+            &mut aura_core::FlowBudget::default(),
+            now_secs,
+        ) {
+            Ok(result) if result.authorized => Ok((true, "biscuit".to_string())),
+            Ok(_) => Ok((false, "authorization_failed".to_string())),
+            Err(e) => Err(AuraError::invalid(format!("biscuit eval failed: {e}"))),
+        }
     }
 
     pub fn authorization_requirement(&self) -> &str {

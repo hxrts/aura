@@ -38,6 +38,14 @@
           targets = [ "wasm32-unknown-unknown" ];
         };
 
+        rustToolchainNightly = pkgs.rust-bin.nightly.latest.default.override {
+          extensions = [
+            "rust-src"
+            "rust-analyzer"
+          ];
+          targets = [ "wasm32-unknown-unknown" ];
+        };
+
         # Apalache package from pre-built release
         apalache = pkgs.stdenv.mkDerivation rec {
           pname = "apalache";
@@ -119,6 +127,11 @@
           default = cargoNix.workspaceMembers.aura-cli.build;
           aura-cli = cargoNix.workspaceMembers.aura-cli.build;
 
+          # CLI with development features (demo mode, simulator integration)
+          aura-cli-dev = cargoNix.workspaceMembers.aura-cli.build.override {
+            features = [ "development" ];
+          };
+
           # Core applications
           aura-agent = cargoNix.workspaceMembers.aura-agent.build;
           aura-simulator = cargoNix.workspaceMembers.aura-simulator.build;
@@ -183,6 +196,7 @@
             tlaplus # TLA+ tools from nixpkgs
             nodejs_20
             jre # For ANTLR4TS and Apalache
+            lean4 # Lean 4 for kernel verification
 
             # Documentation tools
             markdown-link-check
@@ -203,6 +217,7 @@
               echo "Apalache version: $(apalache-mc version 2>/dev/null | head -1 || echo 'available')"
               echo "TLA+ tools: $(tlc2 2>&1 | head -1 | grep -o 'Version.*' || echo 'available')"
               echo "Node.js version: $(node --version)"
+              echo "Lean version: $(lean --version 2>/dev/null || echo 'available')"
               echo ""
               echo "Available commands:"
               echo "  just --list          Show all available tasks"
@@ -213,6 +228,7 @@
               echo "  trunk serve          Serve console with hot reload (in console/)"
               echo "  quint --help         Formal verification with Quint"
               echo "  apalache-mc --help   Model checking with Apalache"
+              echo "  lean --help          Kernel verification with Lean 4"
               echo "  crate2nix --help     Generate hermetic Nix builds"
               echo ""
               echo "Hermetic builds:"
@@ -223,6 +239,47 @@
               echo ""
             fi
 
+            export RUST_BACKTRACE=1
+            export RUST_LOG=info
+            export MACOSX_DEPLOYMENT_TARGET=11.0
+          '';
+        };
+
+        devShells.nightly = pkgs.mkShell {
+          buildInputs = with pkgs; [
+            # Nightly Rust toolchain
+            rustToolchainNightly
+            cargo-udeps
+
+            # Essential development tools
+            just
+            git
+            ripgrep
+            jq
+
+            # Build tools
+            pkg-config
+            openssl
+
+            # POSIX tools (for Justfile scripts)
+            coreutils
+            findutils
+            gawk
+            gnused
+          ];
+
+          shellHook = ''
+            echo "Aura Nightly Development Environment"
+            echo "====================================="
+            echo ""
+            echo "Rust version: $(rustc --version)"
+            echo "Cargo version: $(cargo --version)"
+            echo ""
+            echo "Available commands:"
+            echo "  cargo udeps              Check for unused dependencies"
+            echo "  cargo +nightly udeps     Same as above (already using nightly)"
+            echo "  just --list              Show all available tasks"
+            echo ""
             export RUST_BACKTRACE=1
             export RUST_LOG=info
             export MACOSX_DEPLOYMENT_TARGET=11.0

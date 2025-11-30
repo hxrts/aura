@@ -17,13 +17,7 @@ aura-effects = { path = "../aura-effects" }
 aura-composition = { path = "../aura-composition" }
 aura-protocol = { path = "../aura-protocol" }
 aura-journal = { path = "../aura-journal" }
-aura-relational = { path = "../aura-relational" }
 aura-wot = { path = "../aura-wot" }
-aura-verify = { path = "../aura-verify" }
-aura-sync = { path = "../aura-sync" }
-aura-recovery = { path = "../aura-recovery" }
-aura-invitation = { path = "../aura-invitation" }
-aura-authenticate = { path = "../aura-authenticate" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
 
@@ -52,9 +46,7 @@ futures = { workspace = true }
 uuid = { workspace = true }
 time = { workspace = true }
 thiserror = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
-chrono = { workspace = true }
 once_cell = { workspace = true }
 parking_lot = { workspace = true }
 
@@ -95,6 +87,5 @@ real-android-keystore = []  # Enable real Android Keystore implementation
 [dev-dependencies]
 # tokio-test = { workspace = true } # removed - unused
 aura-testkit = { path = "../aura-testkit" }
-tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 futures = { workspace = true }

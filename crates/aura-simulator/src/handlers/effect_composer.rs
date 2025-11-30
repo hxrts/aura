@@ -11,9 +11,9 @@ use super::{
     stateless_simulator::SimulationTickResult, SimulationFaultHandler, SimulationScenarioHandler,
     SimulationTimeHandler,
 };
-use aura_agent::{AgentBuilder, AuraEffectSystem};
-use aura_core::effects::{ChaosEffects, TestingEffects};
-use aura_core::identifiers::AuthorityId;
+use aura_agent::{AgentBuilder, AuraEffectSystem, EffectContext};
+use aura_core::effects::{ChaosEffects, ExecutionMode, TestingEffects};
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
 use std::sync::Arc;
 use tracing::info;
@@ -51,7 +51,28 @@ impl SimulationEffectComposer {
         self
     }
 
-    /// Add core effect system using agent runtime
+    /// Add core effect system using agent runtime (async version for use within tokio runtime)
+    pub async fn with_effect_system_async(mut self) -> Result<Self, SimulationComposerError> {
+        let authority_id = AuthorityId::new();
+        let context_id = ContextId::new();
+        let ctx = EffectContext::new(
+            authority_id,
+            context_id,
+            ExecutionMode::Simulation { seed: self.seed },
+        );
+        let _agent = AgentBuilder::new()
+            .with_authority(authority_id)
+            .build_simulation_async(self.seed, &ctx)
+            .await
+            .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
+        let config = aura_agent::core::AgentConfig::default();
+        let effect_system = AuraEffectSystem::testing(&config)
+            .map_err(|e| SimulationComposerError::EffectSystemCreationFailed(e.to_string()))?;
+        self.effect_system = Some(Arc::new(effect_system));
+        Ok(self)
+    }
+
+    /// Add core effect system using agent runtime (sync version - only use outside tokio runtime)
     pub fn with_effect_system(mut self) -> Result<Self, SimulationComposerError> {
         let authority_id = AuthorityId::new();
         let _agent = AgentBuilder::new()
@@ -101,7 +122,7 @@ impl SimulationEffectComposer {
         })
     }
 
-    /// Create a typical testing environment with all handlers
+    /// Create a typical testing environment with all handlers (sync - only use outside tokio runtime)
     pub fn for_testing(
         device_id: DeviceId,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
@@ -114,7 +135,21 @@ impl SimulationEffectComposer {
             .build()
     }
 
-    /// Create a simulation environment with specific seed
+    /// Create a typical testing environment with all handlers (async - safe within tokio runtime)
+    pub async fn for_testing_async(
+        device_id: DeviceId,
+    ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
+        Self::new(device_id)
+            .with_seed(42) // Deterministic for testing
+            .with_effect_system_async()
+            .await?
+            .with_time_control()
+            .with_fault_injection()
+            .with_scenario_management()
+            .build()
+    }
+
+    /// Create a simulation environment with specific seed (sync - only use outside tokio runtime)
     pub fn for_simulation(
         device_id: DeviceId,
         seed: u64,
@@ -122,6 +157,21 @@ impl SimulationEffectComposer {
         Self::new(device_id)
             .with_seed(seed)
             .with_effect_system()?
+            .with_time_control()
+            .with_fault_injection()
+            .with_scenario_management()
+            .build()
+    }
+
+    /// Create a simulation environment with specific seed (async - safe within tokio runtime)
+    pub async fn for_simulation_async(
+        device_id: DeviceId,
+        seed: u64,
+    ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
+        Self::new(device_id)
+            .with_seed(seed)
+            .with_effect_system_async()
+            .await?
             .with_time_control()
             .with_fault_injection()
             .with_scenario_management()
@@ -444,19 +494,34 @@ pub enum SimulationComposerError {
 pub mod factory {
     use super::*;
 
-    /// Create a testing simulation environment with all handlers
+    /// Create a testing simulation environment with all handlers (sync)
     pub fn create_testing_environment(
         device_id: DeviceId,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
         SimulationEffectComposer::for_testing(device_id)
     }
 
-    /// Create a deterministic simulation environment for reproducible testing
+    /// Create a testing simulation environment with all handlers (async)
+    pub async fn create_testing_environment_async(
+        device_id: DeviceId,
+    ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
+        SimulationEffectComposer::for_testing_async(device_id).await
+    }
+
+    /// Create a deterministic simulation environment for reproducible testing (sync)
     pub fn create_deterministic_environment(
         device_id: DeviceId,
         seed: u64,
     ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
         SimulationEffectComposer::for_simulation(device_id, seed)
+    }
+
+    /// Create a deterministic simulation environment for reproducible testing (async)
+    pub async fn create_deterministic_environment_async(
+        device_id: DeviceId,
+        seed: u64,
+    ) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
+        SimulationEffectComposer::for_simulation_async(device_id, seed).await
     }
 }
 

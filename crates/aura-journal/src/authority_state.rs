@@ -88,8 +88,12 @@ impl AuthorityState {
             .await
             .map_err(|e| AuraError::internal(format!("Failed to generate FROST nonces: {}", e)))?;
 
-        // Step 2: Create list of participant IDs (for now, use first `threshold` devices)
-        let participants: Vec<u16> = (1..=threshold).collect();
+        // Step 2: Select deterministic participant set from tree state leaves
+        // Device IDs are derived from leaf indices in the tree (1-indexed for FROST)
+        let mut device_ids: Vec<u16> = (1..=device_count as u16).collect();
+        device_ids.sort_unstable();
+        device_ids.truncate(threshold as usize);
+        let participants = device_ids;
 
         // Step 3: Get the public key package from stored threshold context
         let frost_keygen_result = self.threshold_context.as_ref().ok_or_else(|| {

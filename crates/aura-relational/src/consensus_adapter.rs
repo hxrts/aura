@@ -124,8 +124,9 @@ mod tests {
         // Test that the adapter interface works by testing a failing consensus scenario
         // This tests the adapter without requiring a full consensus implementation
         let key_packages = HashMap::new(); // Intentionally empty to trigger controlled failure
+        let group_pk_bytes = aura_core::hash::hash(b"relational-consensus-test-key").to_vec();
         let group_public_key = PublicKeyPackage::new(
-            vec![0u8; 32],                     // placeholder group public key
+            group_pk_bytes,
             std::collections::BTreeMap::new(), // empty signer keys for test
             1,                                 // minimal threshold
             1,                                 // minimal max signers

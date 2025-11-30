@@ -1,7 +1,8 @@
-//! Integration tests for choreography-first guard architecture (ADR-015)
+//! Integration tests for the choreography-first guard architecture described in
+//! [`docs/107_mpst_and_choreography.md`].
 //!
 //! These tests demonstrate that choreographic annotations automatically generate
-//! EffectCommand sequences that execute through the unified interpreter infrastructure.
+//! `EffectCommand` sequences that execute through the unified interpreter infrastructure.
 
 use aura_core::{
     effects::guard::{EffectCommand, EffectInterpreter, EffectResult},
