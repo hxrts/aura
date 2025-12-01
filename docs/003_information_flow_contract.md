@@ -517,8 +517,7 @@ Implementation requires careful attention to cryptographic details, metadata han
 - [Relational Contexts](103_relational_contexts.md)
 - [Authorization](109_authorization.md)
 - [Identifiers and Boundaries](105_identifiers_and_boundaries.md)
-- [Transport and Information Flow](108_transport_and_information_flow.md) - Privacy-by-design patterns
-- [Privacy Checklist](privacy_checklist.md) - Development checklist for privacy-preserving code
+- [Transport and Information Flow](108_transport_and_information_flow.md) - Development checklist for privacy-preserving code
 
 ## Implementation References
 

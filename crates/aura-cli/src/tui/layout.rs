@@ -314,8 +314,8 @@ impl LayoutPresets {
         let vertical = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(2),               // Tabs row
-                Constraint::Min(10),                 // Content area
+                Constraint::Length(2),                // Tabs row
+                Constraint::Min(10),                  // Content area
                 Constraint::Length(heights::COMPACT), // Footer
             ])
             .split(area);
@@ -330,7 +330,7 @@ impl LayoutPresets {
         let vertical = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Min(10),                 // Content area
+                Constraint::Min(10),                  // Content area
                 Constraint::Length(heights::COMPACT), // Footer
             ])
             .split(area);

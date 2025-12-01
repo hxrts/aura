@@ -37,5 +37,4 @@
 - [Aura Messaging Protocol](blog/001_group_messaging.md)
 - [Aura Consensus](blog/002_consensus.md)
 - [Aura CLI Recovery Demo (CLI + Simulator)](demo/cli_recovery.md)
-- [Privacy-by-Design Checklist](privacy_checklist.md)
 - [Quint + Choreo](quint/language_guide.md)
