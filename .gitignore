@@ -62,3 +62,8 @@ work/
 ext/
 mermaid.min.js
 mermaid-init.js
+
+# Lean build artifacts
+lean/.lake/
+lean/build/
+lean/.lean_build/
