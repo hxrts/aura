@@ -98,7 +98,6 @@ jobs:
           files_with_violations=$(rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ \
               --files-with-matches \
               --glob '!**/aura-effects/**' \
-              --glob '!**/aura-mpst/**' \
               --glob '!**/aura-simulator/**' \
               --glob '!**/aura-testkit/**' \
               --glob '!**/tests/**' \
