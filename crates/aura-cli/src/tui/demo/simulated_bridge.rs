@@ -197,8 +197,8 @@ impl SimulatedBridge {
                 let recovery = self.store.get_recovery().await;
                 self.emit(AuraEvent::GuardianApproved {
                     guardian_id,
-                    current: recovery.approvals_received as u32,
-                    threshold: recovery.threshold as u32,
+                    current: recovery.approvals_received,
+                    threshold: recovery.threshold,
                 });
 
                 if recovery.state == RecoveryState::Completed {
