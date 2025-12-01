@@ -1,1 +1,0 @@
-{"version":4,"references":{},"module":"Aura","directImports":[["Aura.Journal.Core",false,false,false],["Aura.Journal.Semilattice",false,false,false],["Aura.KeyDerivation.Core",false,false,false],["Aura.GuardChain.Core",false,false,false],["Aura.FlowBudget.Core",false,false,false],["Aura.Frost.Core",false,false,false],["Aura.TimeSystem.Core",false,false,false]]}
