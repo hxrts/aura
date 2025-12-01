@@ -43,7 +43,3 @@
 # Demo
 
 - [Aura CLI Recovery Demo (CLI + Simulator)](demo/cli_recovery.md)
-
-# Quint
-
-- [Quint + Choreo](quint/language_guide.md)
