@@ -480,7 +480,7 @@ pub enum TraversalDepth {
 }
 ```
 
-Street depth allows seeing frontage. Frontage depth allows limited interaction. Interior depth provides full resident-level access. See [Urban Social Topology](115_urban_social_topology.md) for the complete model.
+Street depth allows seeing frontage. Frontage depth allows limited interaction. Interior depth provides full resident-level access. See [Social Architecture](114_social_architecture.md) for the complete model.
 
 ### 9.3 Storage Constraints
 

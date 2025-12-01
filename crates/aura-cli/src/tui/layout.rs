@@ -79,6 +79,8 @@ pub mod splits {
     pub const SIDEBAR: u16 = 30;
     /// Content/sidebar ratio (70/30)
     pub const CONTENT: u16 = 70;
+    /// List/detail split for browse screens (40/60)
+    pub const LIST_DETAIL: u16 = 40;
 }
 
 // ============================================================================
@@ -298,6 +300,43 @@ impl LayoutPresets {
             .constraints(constraints)
             .split(area)
             .to_vec()
+    }
+
+    /// List/detail browse screen (used by guardians, invitations, help, etc.)
+    /// Returns: [list_panel, detail_panel]
+    pub fn list_detail(area: Rect) -> Vec<Rect> {
+        Self::two_columns(area, splits::LIST_DETAIL)
+    }
+
+    /// Browse screen with tabs: tabs + list/detail + footer
+    /// Returns: [tabs, list, detail, footer]
+    pub fn tabbed_list_detail(area: Rect) -> (Rect, Vec<Rect>, Rect) {
+        let vertical = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2),               // Tabs row
+                Constraint::Min(10),                 // Content area
+                Constraint::Length(heights::COMPACT), // Footer
+            ])
+            .split(area);
+
+        let content = Self::list_detail(vertical[1]);
+        (vertical[0], content, vertical[2])
+    }
+
+    /// Simple list/detail screen with footer (no tabs)
+    /// Returns: [list, detail, footer]
+    pub fn list_detail_with_footer(area: Rect) -> (Vec<Rect>, Rect) {
+        let vertical = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(10),                 // Content area
+                Constraint::Length(heights::COMPACT), // Footer
+            ])
+            .split(area);
+
+        let content = Self::list_detail(vertical[0]);
+        (content, vertical[1])
     }
 }
 

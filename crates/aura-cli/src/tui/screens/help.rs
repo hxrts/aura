@@ -15,7 +15,7 @@ use ratatui::{
 use super::{Screen, ScreenType};
 use crate::tui::commands::{all_command_help, CommandCategory, CommandHelp};
 use crate::tui::input::InputAction;
-use crate::tui::layout::{splits, LayoutPresets, ScreenLayout};
+use crate::tui::layout::{heights, LayoutPresets, ScreenLayout};
 use crate::tui::styles::Styles;
 
 /// Help screen state
@@ -376,11 +376,11 @@ impl Screen for HelpScreen {
         // Layout using consistent grid system: main content + footer
         let main_chunks = ScreenLayout::new()
             .flexible(10) // Main content (min 10 rows)
-            .fixed(3) // Footer/shortcuts (3 rows)
+            .fixed(heights::COMPACT) // Footer/shortcuts (3 rows)
             .build(area);
 
-        // Split content into list + details using percentage split
-        let content_chunks = LayoutPresets::two_columns(main_chunks[0], splits::SIDEBAR + 25);
+        // Split content into list + details using standard LIST_DETAIL split (40/60)
+        let content_chunks = LayoutPresets::list_detail(main_chunks[0]);
 
         self.render_list(f, content_chunks[0], styles);
         self.render_detail(f, content_chunks[1], styles);

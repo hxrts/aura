@@ -13,7 +13,7 @@ use ratatui::{
 
 use super::{Screen, ScreenType};
 use crate::tui::input::InputAction;
-use crate::tui::layout::{heights, splits, LayoutPresets, ScreenLayout};
+use crate::tui::layout::{heights, LayoutPresets, ScreenLayout};
 use crate::tui::reactive::{Guardian, GuardianStatus};
 use crate::tui::styles::Styles;
 
@@ -332,8 +332,8 @@ impl Screen for GuardiansScreen {
             .fixed(heights::STANDARD) // Threshold status (5 rows)
             .build(area);
 
-        // Split main content into list + details using percentage split
-        let content_chunks = LayoutPresets::two_columns(main_chunks[0], splits::SIDEBAR);
+        // Split main content into list + details using standard LIST_DETAIL split (40/60)
+        let content_chunks = LayoutPresets::list_detail(main_chunks[0]);
 
         self.render_list(f, content_chunks[0], styles);
         self.render_detail(f, content_chunks[1], styles);

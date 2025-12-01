@@ -14,7 +14,7 @@ use ratatui::{
 
 use super::{Screen, ScreenType};
 use crate::tui::input::InputAction;
-use crate::tui::layout::{heights, splits, LayoutPresets, ScreenLayout};
+use crate::tui::layout::{heights, LayoutPresets, ScreenLayout};
 use crate::tui::reactive::{Invitation, InvitationDirection, InvitationStatus, InvitationType};
 use crate::tui::styles::Styles;
 
@@ -404,8 +404,8 @@ impl Screen for InvitationsScreen {
             .fixed(heights::COMPACT) // Actions footer (3 rows)
             .build(area);
 
-        // Split content into list + details using percentage split
-        let content_chunks = LayoutPresets::two_columns(chunks[1], splits::SIDEBAR + 15);
+        // Split content into list + details using standard LIST_DETAIL split (40/60)
+        let content_chunks = LayoutPresets::list_detail(chunks[1]);
 
         self.render_tabs(f, chunks[0], styles);
         self.render_list(f, content_chunks[0], styles);

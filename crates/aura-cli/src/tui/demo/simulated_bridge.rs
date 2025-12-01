@@ -405,8 +405,8 @@ impl SimulatedBridge {
 
                 let _ = event_tx.send(AuraEvent::GuardianApproved {
                     guardian_id,
-                    current: recovery.approvals_received as u32,
-                    threshold: recovery.threshold as u32,
+                    current: recovery.approvals_received,
+                    threshold: recovery.threshold,
                 });
 
                 // Check if threshold is met
@@ -446,8 +446,8 @@ impl SimulatedBridge {
 
                 let _ = event_tx.send(AuraEvent::GuardianApproved {
                     guardian_id,
-                    current: recovery.approvals_received as u32,
-                    threshold: recovery.threshold as u32,
+                    current: recovery.approvals_received,
+                    threshold: recovery.threshold,
                 });
 
                 // Check if threshold is met
