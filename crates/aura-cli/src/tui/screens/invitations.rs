@@ -296,17 +296,17 @@ impl InvitationsScreen {
         if let Some(invitation) = self.selected_invitation() {
             match (&invitation.direction, &invitation.status) {
                 (InvitationDirection::Inbound, InvitationStatus::Pending) => {
-                    actions.push(Span::styled("[A]ccept  ", styles.text_success()));
-                    actions.push(Span::styled("[D]ecline  ", styles.text_error()));
+                    actions.push(Span::styled("[a]ccept  ", styles.text_success()));
+                    actions.push(Span::styled("[d]ecline  ", styles.text_error()));
                 }
                 (InvitationDirection::Outbound, InvitationStatus::Pending) => {
-                    actions.push(Span::styled("[C]ancel  ", styles.text_warning()));
+                    actions.push(Span::styled("[c]ancel  ", styles.text_warning()));
                 }
                 _ => {}
             }
         }
 
-        actions.push(Span::styled("[N]ew Invitation  ", styles.text_highlight()));
+        actions.push(Span::styled("[n]ew Invitation  ", styles.text_highlight()));
         actions.push(Span::styled("[Tab] Filter  ", styles.text_muted()));
 
         let action_line = Line::from(actions);

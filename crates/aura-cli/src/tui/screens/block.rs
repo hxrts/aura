@@ -500,9 +500,9 @@ impl BlockScreen {
         }
 
         if self.is_steward {
-            actions.push(Span::styled("[I] ", styles.text_success()));
+            actions.push(Span::styled("[i] ", styles.text_success()));
             actions.push(Span::styled("Invite  ", styles.text()));
-            actions.push(Span::styled("[M] ", styles.text_success()));
+            actions.push(Span::styled("[m] ", styles.text_success()));
             actions.push(Span::styled("Moderate  ", styles.text()));
         }
 
