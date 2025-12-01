@@ -22,7 +22,7 @@
 - [Aura Messaging Protocol (AMP)](112_amp.md)
 - [Database Architecture](113_database.md)
 - [Social Architecture](114_social_architecture.md)
-- [Terminal UI Architecture](115_tui.md)
+- [Terminal User Interface](115_tui.md)
 - [Hello World Guide](801_hello_world_guide.md)
 - [Core Systems Guide: Time Domain Selection](802_core_systems_guide.md)
 - [Coordination Systems Guide](803_coordination_guide.md)
@@ -31,10 +31,19 @@
 - [Testing Guide](805_testing_guide.md)
 - [Simulation Guide](806_simulation_guide.md)
 - [Verification Guide](807_verification_guide.md)
-- [Maintenance Guide](808_maintenance_guide.md)
+- [Maintenance and OTA Guide](808_maintenance_guide.md)
 - [Aura Crate Structure and Dependency Graph](999_project_structure.md)
+
+# Blog
+
 - [Beyond Local First](blog/000_beyond_local_first.md)
 - [Aura Messaging Protocol](blog/001_group_messaging.md)
 - [Aura Consensus](blog/002_consensus.md)
+
+# Demo
+
 - [Aura CLI Recovery Demo (CLI + Simulator)](demo/cli_recovery.md)
+
+# Quint
+
 - [Quint + Choreo](quint/language_guide.md)
