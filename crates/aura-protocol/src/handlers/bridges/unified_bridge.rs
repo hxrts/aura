@@ -217,7 +217,7 @@ impl AuraHandler for UnifiedAuraHandlerBridge {
         _ctx: &AuraContext,
     ) -> Result<(), AuraHandlerError> {
         // Session execution would typically use choreographic effects
-        // For now, provide a basic implementation that delegates to choreographic effects
+        // For this case, provide a basic implementation that delegates to choreographic effects
         let effects_guard = self.effects.lock().await;
 
         // Convert session to choreographic operations (simplified)

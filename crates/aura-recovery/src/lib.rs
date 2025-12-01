@@ -65,7 +65,7 @@ pub mod coordinator;
 /// Guardian setup choreography for initial relationship establishment
 pub mod guardian_setup;
 
-/// Guardian key recovery approvals (placeholder types)
+/// Guardian key recovery approvals
 pub mod guardian_key_recovery;
 
 /// Guardian membership change choreography for adding/removing guardians

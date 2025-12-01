@@ -172,10 +172,9 @@ impl<C: CryptoEffects, S: StorageEffects> TuiLocalStore<C, S> {
 /// Helper to derive key material from an authority
 ///
 /// In a real implementation, this would derive from the authority's
-/// secret key. For now, we use a placeholder that hashes the authority ID.
+/// secret key. Here we deterministically hash the authority ID for repeatable demos.
 pub fn derive_key_material(authority_id: &AuthorityId) -> Vec<u8> {
-    // In production, this should derive from actual authority secret material
-    // For now, use a deterministic derivation from the authority ID
+    // Deterministic derivation keeps the TUI cache reproducible.
     use aura_core::hash::hash;
     let mut data = Vec::new();
     data.extend_from_slice(b"aura-local-store-key-v1");
@@ -191,7 +190,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn test_authority() -> AuthorityId {
-        AuthorityId::new()
+        crate::ids::authority_id("tui:local-store:test-authority")
     }
 
     #[tokio::test]
@@ -254,7 +253,7 @@ mod tests {
         // Create and save
         {
             let mut store = TuiLocalStore::open(
-                authority_id.clone(),
+                authority_id,
                 &key_material,
                 Some(path.clone()),
                 crypto.clone(),
@@ -280,7 +279,7 @@ mod tests {
     async fn test_contact_management() {
         let temp_dir = TempDir::new().unwrap();
         let authority_id = test_authority();
-        let contact_authority = AuthorityId::new();
+        let contact_authority = crate::ids::authority_id("tui:local-store:contact");
         let key_material = derive_key_material(&authority_id);
         let crypto = Arc::new(MockCryptoHandler::new());
         let storage = Arc::new(MemoryStorageHandler::new());
@@ -295,7 +294,7 @@ mod tests {
         .await
         .unwrap();
 
-        let mut contact = ContactCache::new(contact_authority.clone());
+        let mut contact = ContactCache::new(contact_authority);
         contact.display_name = Some("Alice".to_string());
         store.update_contact(contact);
         assert!(store.is_dirty());

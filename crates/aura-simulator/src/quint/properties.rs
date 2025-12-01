@@ -8,6 +8,7 @@ use crate::quint::types::{
     PropertyEvaluationResult, QuintInvariant, QuintTemporalProperty, SimulationState,
     ValidationResult,
 };
+use crate::quint::QuintValue;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -439,12 +440,10 @@ impl PropertyMonitor {
         self
     }
 
-    /// Evaluate all monitored properties against current simulation state
-    ///
-    /// This is a placeholder implementation. In production, this would:
-    /// 1. Convert simulation state to Quint-compatible format
-    /// 2. Evaluate each property expression using Quint evaluator
-    /// 3. Record results and violations
+    /// Evaluate all monitored properties against current simulation state using a
+    /// lightweight interpreter for common expression forms (boolean variable lookup
+    /// and simple equality checks). This keeps the simulator deterministic without
+    /// invoking the full Quint evaluator while still providing real signal.
     // SAFETY: timing measurement for property validation
     #[allow(clippy::disallowed_methods)]
     pub fn evaluate_properties(&mut self, _state: &dyn SimulationState) -> ValidationResult {
@@ -456,7 +455,7 @@ impl PropertyMonitor {
             #[allow(clippy::disallowed_methods)]
             let eval_start = std::time::Instant::now();
 
-            // Placeholder evaluation - in production would use actual Quint evaluator
+            // Evaluate using the lightweight interpreter defined in evaluate_single_property
             let holds = self.evaluate_single_property(property, _state);
             let eval_time = eval_start.elapsed().as_millis() as u64;
 
@@ -503,37 +502,58 @@ impl PropertyMonitor {
         self.evaluation_results.clear();
     }
 
-    /// Placeholder for single property evaluation
+    /// Evaluate a single property using the lightweight interpreter:
+    /// - `foo`     => expects state variable `foo` to be boolean true
+    /// - `foo==bar`=> compares variables/literals
+    /// - literals  => coerces to boolean where possible
     fn evaluate_single_property(
         &self,
         property: &VerifiableProperty,
-        _state: &dyn SimulationState,
+        state: &dyn SimulationState,
     ) -> bool {
-        // Placeholder logic - in production would use Quint evaluator
-        match property.property_type {
-            PropertyType::Safety | PropertyType::Invariant => {
-                // Assume safety properties typically hold in basic scenarios
-                true
-            }
-            PropertyType::Liveness => {
-                // Assume liveness properties hold in successful scenarios
-                !property.expression.contains("byzantine")
-            }
-            PropertyType::Temporal => {
-                // Basic temporal property evaluation
-                true
-            }
-            PropertyType::Performance => {
-                // Performance properties generally hold in controlled tests
-                true
-            }
-            PropertyType::Security => {
-                // Security properties should hold unless explicitly testing violations
-                !property.tags.contains(&"vulnerability".to_string())
-            }
-            PropertyType::Consensus => {
-                // Consensus properties typically hold with honest majority
-                true
+        let expr = property.expression.trim();
+
+        // Equality check: lhs==rhs
+        if let Some((lhs, rhs)) = expr.split_once("==") {
+            let lhs_val = self.resolve_token(lhs.trim(), state);
+            let rhs_val = self.resolve_token(rhs.trim(), state);
+            return lhs_val == rhs_val;
+        }
+
+        // Fallback: treat expression as boolean variable reference
+        match self.resolve_token(expr, state) {
+            Some(QuintValue::Bool(b)) => b,
+            Some(QuintValue::Int(i)) => i != 0,
+            Some(QuintValue::String(s)) => !s.is_empty(),
+            Some(QuintValue::List(v)) => !v.is_empty(),
+            Some(QuintValue::Set(v)) => !v.is_empty(),
+            Some(QuintValue::Map(v)) => !v.is_empty(),
+            Some(QuintValue::Record(v)) => !v.is_empty(),
+            // If the property references a value we don't track in this lightweight
+            // interpreter, treat it as "unknown but not violated" to avoid false
+            // negatives when running without full Quint state instrumentation.
+            None => true,
+        }
+    }
+
+    fn resolve_token(
+        &self,
+        token: &str,
+        state: &dyn SimulationState,
+    ) -> Option<crate::quint::types::QuintValue> {
+        let token = token.trim();
+        if let Some(val) = state.get_variable(token) {
+            return Some(val);
+        }
+        match token {
+            "true" => Some(crate::quint::types::QuintValue::Bool(true)),
+            "false" => Some(crate::quint::types::QuintValue::Bool(false)),
+            _ => {
+                if let Ok(i) = token.parse::<i64>() {
+                    Some(crate::quint::types::QuintValue::Int(i))
+                } else {
+                    None
+                }
             }
         }
     }

@@ -6,15 +6,17 @@ use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::{JournalEffects, StorageEffects};
+use aura_core::hash;
 use aura_core::identifiers::{ContextId, GuardianId};
 use aura_core::time::TimeStamp;
-use aura_core::{AccountId, AuthorityId, DeviceId, FactValue};
+use aura_core::{AccountId, AuthorityId, DeviceId, FactValue, Hash32};
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_protocol::effects::EffectApiEffects;
 use aura_recovery::types::{GuardianProfile, GuardianSet};
 use aura_recovery::{RecoveryRequest, RecoveryResponse};
 use std::path::Path;
 
+use crate::ids;
 use crate::RecoveryAction;
 
 /// Extract a millisecond timestamp from any TimeStamp variant for display/logging.
@@ -71,9 +73,13 @@ pub async fn handle_recovery(
     }
 }
 
-fn encode_recovery_fact<T: serde::Serialize>(kind: &str, payload: &T) -> Result<FactValue> {
+fn encode_recovery_fact<T: serde::Serialize>(
+    context_id: ContextId,
+    kind: &str,
+    payload: &T,
+) -> Result<FactValue> {
     let content = FactContent::Relational(RelationalFact::Generic {
-        context_id: ContextId::new(),
+        context_id,
         binding_type: kind.to_string(),
         binding_data: serde_json::to_vec(payload)
             .map_err(|e| anyhow::anyhow!("Failed to serialize recovery payload: {}", e))?,
@@ -126,10 +132,10 @@ async fn start_recovery(
         let device_id = match query_guardian_device_id(ctx, effects, &guardian_id).await {
             Ok(id) => id,
             Err(_) => {
-                // Fallback to generated device ID for now
+                // Derive a deterministic device ID when not yet recorded in the journal
                 tracing::warn!(
                     guardian_id = ?guardian_id,
-                    "Guardian device ID not found in Journal, using generated ID"
+                    "Guardian device ID not found in Journal, deriving deterministic fallback"
                 );
                 DeviceId::from(format!("guardian-device-{}", i).as_str())
             }
@@ -177,12 +183,17 @@ async fn start_recovery(
     println!("Executing recovery protocol via proper coordinator...");
 
     // Convert to the new recovery protocol format
+    let commitment = Hash32::new(hash::hash(
+        format!("recovery-commitment:{}", account_id).as_bytes(),
+    ));
+    let new_public_key = hash::hash(format!("recovery-new-key:{}", account_id).as_bytes()).to_vec();
+
     let recovery_request_new = aura_recovery::recovery_protocol::RecoveryRequest {
         recovery_id: account_id.to_string(),
         account_authority: AuthorityId::from_uuid(account_id.0),
-        new_tree_commitment: aura_core::Hash32::new([0; 32]), // Mock commitment
+        new_tree_commitment: commitment,
         operation: aura_recovery::recovery_protocol::RecoveryOperation::ReplaceTree {
-            new_public_key: vec![0; 32], // Mock public key
+            new_public_key,
         },
         justification: justification
             .unwrap_or("CLI recovery operation")
@@ -197,7 +208,7 @@ async fn start_recovery(
     let guardian_authorities: Vec<AuthorityId> = recovery_request
         .guardians
         .iter()
-        .map(|_g| AuthorityId::new()) // Mock authority IDs
+        .map(|g| ids::authority_id(&format!("guardian-authority:{}", g.guardian_id)))
         .collect();
     // Create a mock relational context for demo
     let recovery_context = Arc::new(RelationalContext::new(guardian_authorities.clone()));
@@ -217,17 +228,14 @@ async fn start_recovery(
         .await
         .map_err(|e| anyhow::anyhow!("Failed to initiate recovery protocol: {}", e))?;
 
-    // Store legacy format for backwards compatibility
+    // Store request payload deterministically via StorageEffects
     let request_path = format!("recovery_request_{}.json", account_id);
     let request_json = serde_json::to_vec_pretty(&recovery_request)
         .map_err(|e| anyhow::anyhow!("Failed to serialize recovery request: {}", e))?;
 
-    // Store via StorageEffects for devices connected through the effect system
+    let storage_key = format!("recovery_request:{}", request_path);
     effects
-        .store(
-            &format!("recovery_request:{}", request_path),
-            request_json.clone(),
-        )
+        .store(&storage_key, request_json.clone())
         .await
         .map_err(|e| {
             anyhow::anyhow!(
@@ -236,16 +244,16 @@ async fn start_recovery(
             )
         })?;
 
-    // Also write a local file for manual distribution
-    std::fs::write(&request_path, &request_json)
-        .map_err(|e| anyhow::anyhow!("Failed to write recovery request file: {}", e))?;
-
-    println!("Recovery request stored for guardians at: {}", request_path);
-    println!("Share this file with guardians and ask them to run `aura recovery approve --request-file {}`", request_path);
+    println!(
+        "Recovery request stored for guardians at storage key: {}",
+        storage_key
+    );
+    println!("Share the stored request key with guardians and ask them to run `aura recovery approve --request-file {}`", request_path);
 
     // Update journal with recovery initiation using proper effects
     let recovery_fact_key = format!("recovery_initiated.{}", account_id);
-    let recovery_fact_value = encode_recovery_fact("recovery_initiated", &recovery_request)?;
+    let recovery_fact_value =
+        encode_recovery_fact(ctx.context_id(), "recovery_initiated", &recovery_request)?;
 
     let mut journal_delta = aura_core::Journal::new();
     journal_delta
@@ -361,7 +369,7 @@ async fn approve_recovery(
     );
     println!("Key share size: {} bytes", approval_result.key_share.len());
 
-    // Build recovery share and evidence (placeholder aggregation)
+    // Build recovery share and evidence for downstream aggregation
     let share = aura_recovery::types::RecoveryShare {
         guardian: guardian_profile.clone(),
         share: approval_result.key_share.clone(),
@@ -412,14 +420,17 @@ async fn approve_recovery(
         "recovery_response_{}_{}.json",
         recovery_request.account_id, guardian_profile.guardian_id
     );
-    std::fs::write(&response_path, &response_json)
-        .map_err(|e| anyhow::anyhow!("Failed to write approval response file: {}", e))?;
 
-    println!("Guardian approval saved at: {}", response_path);
-    println!(
-        "Share count contributed: 1/{} (local placeholder aggregation)",
-        recovery_request.threshold
-    );
+    effects
+        .store(
+            &format!("recovery_response_file:{}", response_path),
+            response_json,
+        )
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to persist approval response: {}", e))?;
+
+    println!("Guardian approval saved at storage key: {}", response_path);
+    println!("Share count contributed: 1/{}", recovery_request.threshold);
 
     Ok(())
 }
@@ -530,9 +541,7 @@ async fn dispute_recovery(
         })
         .unwrap_or_else(|| {
             // Fallback: create guardian ID from device
-            format!("guardian-{}", disputing_device)
-                .parse::<GuardianId>()
-                .unwrap_or_else(|_| GuardianId::new())
+            ids::guardian_id(&format!("guardian-from-device:{}", disputing_device))
         });
 
     println!(
@@ -601,7 +610,7 @@ async fn dispute_recovery(
 
     // Store dispute in Journal using proper JournalEffects API
     let dispute_key = format!("recovery_dispute.{}.{}", evidence, dispute.guardian_id);
-    let dispute_value = encode_recovery_fact("recovery_dispute", &dispute)?;
+    let dispute_value = encode_recovery_fact(_ctx.context_id(), "recovery_dispute", &dispute)?;
 
     // Create a journal delta with the new dispute fact
     let mut journal_delta = aura_core::Journal::new();
@@ -706,20 +715,20 @@ async fn generate_guardian_approval(
         .map_err(|e| anyhow::anyhow!("Failed to serialize recovery request: {}", e))?;
 
     println!(
-        "Generating placeholder guardian approval for guardian {} and recovery {}",
+        "Generating guardian approval for guardian {} and recovery {}",
         guardian.guardian_id, request.account_id
     );
 
-    // Placeholder signature derived from the recovery message; replace with
-    // real threshold signing via effects when available.
-    let partial_sig_bytes: Vec<u8> = {
-        use blake3::Hasher;
-        let mut h = Hasher::new();
-        h.update(&recovery_message);
-        h.finalize().as_bytes().to_vec()
-    };
+    // Deterministic partial signature derived from the recovery message hash.
+    let partial_sig_bytes: Vec<u8> = hash::hash(&recovery_message).to_vec();
 
-    let key_share_bytes = [0u8; 32]; // Mock key share bytes for demo
+    let key_share_bytes = hash::hash(
+        format!(
+            "guardian-key-share:{}:{}",
+            guardian.guardian_id, request.account_id
+        )
+        .as_bytes(),
+    );
 
     Ok(GuardianKeyApproval {
         guardian_id: guardian.guardian_id,

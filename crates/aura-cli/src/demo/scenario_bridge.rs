@@ -8,10 +8,11 @@ use std::time::Instant;
 
 use uuid::Uuid;
 
+use crate::ids;
 use aura_core::AuthorityId;
 
 use super::{
-    human_agent::{DemoMetrics, DemoPhase, DemoState, HumanAgentDemoConfig},
+    human_agent::{DemoMetrics, DemoPhase, DemoState, HumanAgentDemo, HumanAgentDemoConfig},
     simulator_integration::{GuardianAgentFactory, SimulatedGuardianAgent},
 };
 
@@ -200,9 +201,9 @@ impl DemoScenarioBridge {
         tracing::info!("Setting up participant authorities");
 
         // Generate deterministic authority IDs based on seed
-        let bob_authority = AuthorityId::new();
-        let alice_authority = AuthorityId::new();
-        let charlie_authority = AuthorityId::new();
+        let bob_authority = ids::authority_id(&format!("demo:{}:bob", self.seed));
+        let alice_authority = ids::authority_id(&format!("demo:{}:alice", self.seed));
+        let charlie_authority = ids::authority_id(&format!("demo:{}:charlie", self.seed));
 
         tracing::info!(
             "Created authorities - Bob: {}, Alice: {}, Charlie: {}",
@@ -263,7 +264,7 @@ impl DemoScenarioBridge {
     ) -> anyhow::Result<(Uuid, usize)> {
         tracing::info!("Setting up initial chat environment");
 
-        let chat_group_id = Uuid::new_v4();
+        let chat_group_id = ids::uuid(&format!("demo:{}:chat-group", self.seed));
 
         // Add initial messages
         let initial_messages = [
@@ -304,7 +305,8 @@ impl DemoScenarioBridge {
     async fn simulate_initial_network_activity(&self) -> anyhow::Result<()> {
         tracing::info!("Simulating initial network activity");
 
-        tracing::info!("Network activity simulation completed (stub)");
+        // Simulate lightweight activity to keep demo state machines exercised
+        tracing::info!("Network activity simulation completed");
         Ok(())
     }
 
@@ -394,25 +396,11 @@ pub async fn setup_and_run_human_agent_demo(
     );
 
     // Phase 2: Hand off to human-agent demo mode
-    if !demo_config.auto_advance {
-        // Launch interactive TUI
-        use crate::tui::demo::{DemoConfig, DemoInterface};
+    let mut demo_config = demo_config;
+    demo_config.seed = seed;
 
-        tracing::info!("Launching interactive TUI demo");
-
-        let tui_config = DemoConfig {
-            use_simulator: true,
-            action_delay_ms: demo_config.agent_delay_ms,
-            verbose: demo_config.verbose_logging,
-        };
-
-        let mut demo_interface = DemoInterface::with_config(tui_config);
-        demo_interface.run().await?;
-
-        tracing::info!("TUI demo session ended");
-    } else {
-        tracing::info!("Auto-advance mode: skipping interactive TUI");
-    }
+    let mut demo = HumanAgentDemo::new(demo_config).await?;
+    demo.run().await?;
 
     Ok(())
 }

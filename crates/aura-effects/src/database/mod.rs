@@ -1,3 +1,6 @@
+// Lock poisoning is fatal for this module - we prefer to panic than continue with corrupted state
+#![allow(clippy::expect_used)]
+
 //! Indexed Journal Handler - B-tree indexes, Bloom filters, and Merkle trees
 //!
 //! # Effect Classification
@@ -118,7 +121,9 @@ struct AuthorityIndex {
     next_id: u64,
 }
 
+// Manual impl to avoid derive macro - struct has complex state initialization
 impl Default for AuthorityIndex {
+    #[allow(clippy::derivable_impls)]
     fn default() -> Self {
         Self {
             by_predicate: BTreeMap::new(),
@@ -153,7 +158,7 @@ impl AuthorityIndex {
             id,
             predicate: predicate.clone(),
             value,
-            authority: authority.clone(),
+            authority,
             timestamp,
         };
 
@@ -559,6 +564,11 @@ impl IndexedJournalEffects for IndexedJournalHandler {
         Ok(index.get_in_range(&start, &end))
     }
 
+    async fn all_facts(&self) -> Result<Vec<IndexedFact>, AuraError> {
+        let index = self.index.read().expect("Index lock poisoned");
+        Ok(index.facts.values().cloned().collect())
+    }
+
     fn might_contain(&self, predicate: &str, value: &FactValue) -> bool {
         self.bloom_check(predicate, value)
     }
@@ -780,6 +790,10 @@ impl<J: JournalEffects> IndexedJournalEffects for IndexedJournalWrapper<J> {
         self.index.facts_in_range(start, end).await
     }
 
+    async fn all_facts(&self) -> Result<Vec<IndexedFact>, AuraError> {
+        self.index.all_facts().await
+    }
+
     fn might_contain(&self, predicate: &str, value: &FactValue) -> bool {
         self.index.might_contain(predicate, value)
     }
@@ -841,25 +855,25 @@ mod tests {
         let handler = IndexedJournalHandler::new();
 
         // Create distinct authorities
-        let auth1 = AuthorityId::new();
-        let auth2 = AuthorityId::new();
+        let auth1 = AuthorityId::new_from_entropy([1u8; 32]);
+        let auth2 = AuthorityId::new_from_entropy([2u8; 32]);
 
         handler.add_fact(
             "data".to_string(),
             FactValue::Number(100),
-            Some(auth1.clone()),
+            Some(auth1),
             None,
         );
         handler.add_fact(
             "data".to_string(),
             FactValue::Number(200),
-            Some(auth1.clone()),
+            Some(auth1),
             None,
         );
         handler.add_fact(
             "data".to_string(),
             FactValue::Number(300),
-            Some(auth2.clone()),
+            Some(auth2),
             None,
         );
 
@@ -999,20 +1013,10 @@ mod tests {
     async fn test_index_stats() {
         let handler = IndexedJournalHandler::new();
 
-        let auth = AuthorityId::new();
+        let auth = AuthorityId::new_from_entropy([3u8; 32]);
 
-        handler.add_fact(
-            "pred1".to_string(),
-            FactValue::Number(1),
-            Some(auth.clone()),
-            None,
-        );
-        handler.add_fact(
-            "pred2".to_string(),
-            FactValue::Number(2),
-            Some(auth.clone()),
-            None,
-        );
+        handler.add_fact("pred1".to_string(), FactValue::Number(1), Some(auth), None);
+        handler.add_fact("pred2".to_string(), FactValue::Number(2), Some(auth), None);
         handler.add_fact("pred1".to_string(), FactValue::Number(3), None, None);
 
         let stats = handler.index_stats().await.unwrap();
@@ -1022,6 +1026,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::disallowed_methods)] // Instant::now() legitimate for performance testing
     async fn test_performance_10k_facts() {
         let handler = IndexedJournalHandler::with_capacity(10000);
 
@@ -1112,7 +1117,7 @@ mod tests {
             _peer: &AuthorityId,
             budget: &aura_core::FlowBudget,
         ) -> Result<aura_core::FlowBudget, AuraError> {
-            Ok(budget.clone())
+            Ok(*budget)
         }
 
         async fn charge_flow_budget(

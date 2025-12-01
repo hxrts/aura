@@ -1072,7 +1072,7 @@ mod tests {
         "#
         )
         .build(&root)
-        .expect("Failed to create base token");
+        .unwrap();
 
         // Create an attenuated token (more blocks = more restricted)
         let attenuated_token = base_token
@@ -1081,13 +1081,11 @@ mod tests {
             check if operation("read");
         "#
             ))
-            .expect("Failed to attenuate token");
+            .unwrap();
 
         // Create Caps with root key
-        let cap_base =
-            Cap::from_biscuit_with_key(&base_token, &root_public).expect("Failed to create cap");
-        let cap_attenuated = Cap::from_biscuit_with_key(&attenuated_token, &root_public)
-            .expect("Failed to create attenuated cap");
+        let cap_base = Cap::from_biscuit_with_key(&base_token, &root_public).unwrap();
+        let cap_attenuated = Cap::from_biscuit_with_key(&attenuated_token, &root_public).unwrap();
 
         // Meet of base and attenuated should return the attenuated (more restricted)
         let meet_result = cap_base.meet(&cap_attenuated);
@@ -1114,7 +1112,7 @@ mod tests {
         "#
         )
         .build(&root1)
-        .expect("Failed to create token1");
+        .unwrap();
 
         let token2 = biscuit!(
             r#"
@@ -1122,12 +1120,10 @@ mod tests {
         "#
         )
         .build(&root2)
-        .expect("Failed to create token2");
+        .unwrap();
 
-        let cap1 =
-            Cap::from_biscuit_with_key(&token1, &root1.public()).expect("Failed to create cap1");
-        let cap2 =
-            Cap::from_biscuit_with_key(&token2, &root2.public()).expect("Failed to create cap2");
+        let cap1 = Cap::from_biscuit_with_key(&token1, &root1.public()).unwrap();
+        let cap2 = Cap::from_biscuit_with_key(&token2, &root2.public()).unwrap();
 
         // Meet of tokens from different issuers should return bottom (empty)
         let meet_result = cap1.meet(&cap2);
@@ -1148,7 +1144,7 @@ mod tests {
         "#
         )
         .build(&root)
-        .expect("Failed to create base token");
+        .unwrap();
 
         // Create attenuated token
         let attenuated_token = base_token
@@ -1157,7 +1153,7 @@ mod tests {
             check if operation("read");
         "#
             ))
-            .expect("Failed to attenuate");
+            .unwrap();
 
         let cap_base = Cap::from_biscuit_with_key(&base_token, &root_public).unwrap();
         let cap_attenuated = Cap::from_biscuit_with_key(&attenuated_token, &root_public).unwrap();
@@ -1171,7 +1167,10 @@ mod tests {
         assert!(cap_attenuated < cap_base);
 
         // Same cap is equal
-        assert_eq!(cap_base.partial_cmp(&cap_base), Some(std::cmp::Ordering::Equal));
+        assert_eq!(
+            cap_base.partial_cmp(&cap_base),
+            Some(std::cmp::Ordering::Equal)
+        );
     }
 
     #[test]
@@ -1187,7 +1186,7 @@ mod tests {
         "#
         )
         .build(&root)
-        .expect("Failed to create token");
+        .unwrap();
 
         // Cap with key
         let cap_with_key = Cap::from_biscuit_with_key(&token, &root_public).unwrap();

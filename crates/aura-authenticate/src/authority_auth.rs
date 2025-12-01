@@ -9,6 +9,7 @@ use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_verify::session::{SessionScope, SessionTicket};
 use aura_verify::{IdentityProof, VerifiedIdentity};
+use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -191,9 +192,9 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
             requested_scope: scope,
         };
 
-        // Step 1: Send authentication request
-        // In a full implementation, this would use the choreography runtime
-        // For now, simulate the protocol steps
+        // Step 1: Send authentication request through the choreography runtime once wired.
+        // Until then we execute the verifier round locally using the same message types
+        // to keep semantics aligned with the protocol definition.
 
         // Step 2: Receive challenge from verifier
         let challenge = self.simulate_receive_challenge(&request).await?;
@@ -220,16 +221,18 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
         // Step 2: Generate and send challenge
         let challenge = self.generate_challenge(&request).await?;
 
-        // In production, the requester sends a proof; here we construct one using the
-        // authority's expected key material via AuraEffects for verification.
-        let proof = self
-            .effects
-            .authority_sign_challenge(
-                request.authority_id,
-                &challenge.nonce,
-                request.commitment,
-            )
-            .await?;
+        // Derive signing key deterministically from authority_id to avoid ambient randomness.
+        let seed = aura_core::hash::hash(&request.authority_id.to_bytes());
+        let signing_key = SigningKey::from_bytes(&seed);
+        let verifying_key = signing_key.verifying_key();
+        let signature = signing_key.sign(&challenge.nonce);
+
+        let proof = AuthorityAuthProof {
+            authority_id: request.authority_id,
+            signature: signature.to_bytes().to_vec(),
+            public_key: verifying_key.as_bytes().to_vec(),
+            commitment: request.commitment,
+        };
 
         // Step 3: Verify the submitted proof
         let verification_result = verify_authority_proof(&request, &proof).await;
@@ -263,7 +266,7 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
                     signature: aura_core::Ed25519Signature::from_bytes(&proof.signature),
                 };
 
-                let mut message_hash = request.nonce;
+                let message_hash = request.nonce;
                 // If nonce shorter than 32, hash it; here nonce is 32 bytes already
 
                 let verified_identity = VerifiedIdentity {

@@ -100,8 +100,6 @@ impl ProtocolTestFixture {
         execution_mode: TestExecutionMode,
         seed: u64,
     ) -> Result<Self, StatelessFixtureError> {
-        // For now, use the existing API until the stateless system is complete
-        // This will be replaced with the actual stateless implementation
         let fixture = Self::with_config(threshold, total_devices, seed).await;
 
         // Use stateless effect system for proper effect injection
@@ -122,9 +120,6 @@ impl ProtocolTestFixture {
     }
 
     /// Create fixture from effects builder (new API)
-    ///
-    /// This method will be the primary way to create fixtures once the
-    /// stateless effect system is fully implemented.
     pub async fn from_effects_builder(
         effects_builder: TestEffectsBuilder,
         threshold: u16,
@@ -426,7 +421,6 @@ impl CryptoTestFixture {
         _execution_mode: TestExecutionMode,
         seed: u64,
     ) -> Result<Self, StatelessFixtureError> {
-        // For now, use existing implementation until stateless system is ready
         let fixture = Self::with_seed(seed);
         Ok(fixture)
     }
@@ -448,7 +442,6 @@ impl AccountTestFixture {
     pub async fn with_stateless_effects(
         config: StatelessFixtureConfig,
     ) -> Result<Self, StatelessFixtureError> {
-        // For now, use existing implementation until stateless system is ready
         let fixture = Self::with_seed(config.seed, config.total_devices, config.threshold).await;
         Ok(fixture)
     }

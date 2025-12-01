@@ -8,7 +8,7 @@ use aura_journal::{reduce_context, Fact, FactContent, FactJournal as Journal, Jo
 
 #[test]
 fn recovery_from_journal_reconstructs_channel_state() {
-    let ctx = ContextId::new();
+    let ctx = ContextId::new_from_entropy([21u8; 32]);
     let channel = ChannelId::from_bytes([5u8; 32]);
 
     let checkpoint = Fact {
@@ -44,8 +44,8 @@ fn recovery_from_journal_reconstructs_channel_state() {
     journal.add_fact(checkpoint).unwrap();
     journal.add_fact(committed).unwrap();
 
-    let state = reduce_context(&journal);
-    let ch_state = state.channel_epochs.get(&channel).unwrap(); // Test expectation
+    let state = reduce_context(&journal).unwrap();
+    let ch_state = state.channel_epochs.get(&channel).unwrap();
     assert_eq!(ch_state.chan_epoch, 1);
     assert_eq!(ch_state.last_checkpoint_gen, 42);
     assert_eq!(ch_state.skip_window, 32);

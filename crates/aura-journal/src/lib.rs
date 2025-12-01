@@ -83,7 +83,9 @@ pub use fact::{
     AttestedOp as FactAttestedOp, Fact, FactContent, Journal as FactJournal, JournalNamespace,
     RelationalFact, SnapshotFact, TreeOpKind,
 };
-pub use reduction::{reduce_authority, reduce_context, ChannelEpochState, RelationalState};
+pub use reduction::{
+    reduce_authority, reduce_context, ChannelEpochState, ReductionNamespaceError, RelationalState,
+};
 // Primary Journal API (STABLE)
 pub use journal_api::{AccountSummary, Journal, JournalFact};
 

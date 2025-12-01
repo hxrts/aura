@@ -59,6 +59,8 @@
 pub mod types {
     pub mod config;
     pub mod connection;
+    /// Endpoint address representation for transport layer.
+    pub mod endpoint;
     pub mod envelope;
 }
 

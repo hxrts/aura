@@ -193,7 +193,8 @@ impl ConnectionMetrics {
 
     /// Record outgoing message
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    /// Note: Callers should obtain `now` via `std::time::Instant::now()` only in effect handlers.
+    /// Application code should use physical_time() from the effect system.
     pub fn record_sent(&mut self, bytes: u64, now: std::time::Instant) {
         self.bytes_sent += bytes;
         self.messages_sent += 1;
@@ -202,7 +203,8 @@ impl ConnectionMetrics {
 
     /// Record incoming message
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    /// Note: Callers should obtain `now` via `std::time::Instant::now()` only in effect handlers.
+    /// Application code should use physical_time() from the effect system.
     pub fn record_received(&mut self, bytes: u64, now: std::time::Instant) {
         self.bytes_received += bytes;
         self.messages_received += 1;
@@ -211,7 +213,8 @@ impl ConnectionMetrics {
 
     /// Mark connection as established
     ///
-    /// Note: Callers should obtain `now` via `TimeEffects::now_instant()` and pass it to this method
+    /// Note: Callers should obtain `now` via `std::time::Instant::now()` only in effect handlers.
+    /// Application code should use physical_time() from the effect system.
     pub fn connected(&mut self, now: std::time::Instant) {
         self.connection_time = Some(now);
         self.last_activity = Some(now);

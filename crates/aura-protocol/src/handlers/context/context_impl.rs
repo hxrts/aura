@@ -380,6 +380,13 @@ impl AuraContext {
     pub fn for_testing(device_id: DeviceId) -> Self {
         // Use deterministic values for testing
         let created_at = 0u64; // Fixed timestamp for deterministic testing
+        let mut seed = Vec::with_capacity(24);
+        seed.extend_from_slice(device_id.0.as_bytes());
+        seed.extend_from_slice(&created_at.to_le_bytes());
+        let digest = aura_core::hash::hash(&seed);
+        let mut op_bytes = [0u8; 16];
+        op_bytes.copy_from_slice(&digest[..16]);
+        let operation_id = uuid::Uuid::from_bytes(op_bytes);
         Self {
             device_id,
             execution_mode: ExecutionMode::Testing,
@@ -387,7 +394,7 @@ impl AuraContext {
             created_at,
             account_id: None,
             metadata: HashMap::new(),
-            operation_id: uuid::Uuid::nil(), // Deterministic UUID for testing
+            operation_id,
             epoch: created_at,
             flow_hint: None,
             choreographic: None,
@@ -552,26 +559,25 @@ impl AuraContext {
 }
 
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use aura_core::identifiers::DeviceId;
-    use uuid::Uuid;
 
     #[test]
     fn test_session_id() {
-        let id1 = SessionId::new();
-        let id2 = SessionId::new();
-        assert_ne!(id1, id2);
+        // Use deterministic UUIDs for reproducible tests
+        let id1 = SessionId::from_uuid(Uuid::from_u128(1));
+        let id2 = SessionId::from_uuid(Uuid::from_u128(1));
+        assert_eq!(id1, id2);
 
-        let uuid = Uuid::new_v4();
+        let uuid = id1.uuid();
         let id3 = SessionId::from_uuid(uuid);
         assert_eq!(id3.0, uuid);
     }
 
     #[test]
     fn test_choreographic_context() {
-        let role = ChoreographicRole::new(Uuid::new_v4(), 0);
+        let role = ChoreographicRole::new(DeviceId::deterministic_test_id().into(), 0);
         let participants = vec![role];
         let mut ctx = ChoreographicContext::new(role, participants, 1);
 
@@ -607,7 +613,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_context() {
-        let device_id = DeviceId::from(Uuid::new_v4());
+        let device_id = DeviceId::deterministic_test_id();
         let mut ctx = AgentContext::new(device_id);
 
         // Test configuration
@@ -633,7 +639,7 @@ mod tests {
 
     #[test]
     fn test_explicit_context_fields() {
-        let device_id = DeviceId::from(Uuid::new_v4());
+        let device_id = DeviceId::deterministic_test_id();
         let ctx = AuraContext::for_testing(device_id)
             .with_tracing("trace123".to_string(), "span456".to_string())
             .with_metrics();
@@ -649,7 +655,7 @@ mod tests {
 
     #[test]
     fn test_aura_context() {
-        let device_id = DeviceId::from(Uuid::new_v4());
+        let device_id = DeviceId::deterministic_test_id();
 
         // Test factory methods
         let testing_ctx = AuraContext::for_testing(device_id);

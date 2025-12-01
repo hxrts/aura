@@ -127,7 +127,7 @@ impl Handler for CompositeHandler {
         session: LocalSessionType,
         ctx: &HandlerContext,
     ) -> Result<(), HandlerError> {
-        // For now, delegate to choreographic effect handler if available
+        // Sessions are executed exclusively by a registered choreographic handler
         if let Some(handler) = self.handlers.get(&EffectType::Choreographic) {
             handler.execute_session(session, ctx).await
         } else {
@@ -347,9 +347,49 @@ mod tests {
     use super::*;
     use crate::registry::Handler;
 
+    /// Minimal handler used for registration tests
+    struct TestConsoleHandler;
+
+    #[async_trait]
+    impl Handler for TestConsoleHandler {
+        async fn execute_effect(
+            &self,
+            _effect_type: EffectType,
+            operation: &str,
+            _parameters: &[u8],
+            _ctx: &HandlerContext,
+        ) -> Result<Vec<u8>, HandlerError> {
+            match operation {
+                "log_info" | "log_warn" | "log_error" => Ok(vec![]),
+                _ => Err(HandlerError::UnknownOperation {
+                    effect_type: EffectType::Console,
+                    operation: operation.to_string(),
+                }),
+            }
+        }
+
+        async fn execute_session(
+            &self,
+            _session: LocalSessionType,
+            _ctx: &HandlerContext,
+        ) -> Result<(), HandlerError> {
+            Err(HandlerError::SessionExecution {
+                source: "Console handler does not execute sessions".into(),
+            })
+        }
+
+        fn supports_effect(&self, effect_type: EffectType) -> bool {
+            effect_type == EffectType::Console
+        }
+
+        fn execution_mode(&self) -> ExecutionMode {
+            ExecutionMode::Testing
+        }
+    }
+
     #[test]
     fn test_composite_handler_creation() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
 
         let handler = CompositeHandler::for_testing(device_id);
         assert_eq!(handler.execution_mode(), ExecutionMode::Testing);
@@ -367,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_composite_handler_builder() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
 
         let builder =
             CompositeHandlerBuilder::new(device_id).execution_mode(ExecutionMode::Production);
@@ -382,7 +422,7 @@ mod tests {
 
     #[test]
     fn test_composite_handler_adapter() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
 
         let adapter = CompositeHandlerAdapter::for_testing(device_id);
         assert_eq!(Handler::execution_mode(&adapter), ExecutionMode::Testing);
@@ -399,20 +439,29 @@ mod tests {
 
     #[test]
     fn test_handler_registration() {
-        let device_id = DeviceId::new();
-        let composite = CompositeHandler::for_testing(device_id);
+        let device_id = DeviceId::new_from_entropy([4u8; 32]);
+        let mut composite = CompositeHandler::for_testing(device_id);
 
         // Initially no handlers registered
         assert!(!composite.has_handler(EffectType::Console));
         assert!(composite.registered_effect_types().is_empty());
 
-        // Note: Would register actual handlers in a complete test
-        // For now, we just test the registration infrastructure exists
+        // Register a minimal console handler and validate registration bookkeeping
+        let handler = Box::new(TestConsoleHandler);
+        composite
+            .register_handler(EffectType::Console, handler)
+            .unwrap();
+
+        assert!(composite.has_handler(EffectType::Console));
+        assert_eq!(
+            composite.registered_effect_types(),
+            vec![EffectType::Console]
+        );
     }
 
     #[test]
     fn test_supported_operations() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([5u8; 32]);
         let adapter = CompositeHandlerAdapter::for_testing(device_id);
 
         // Test that the operation mapping exists (even without registered handlers)

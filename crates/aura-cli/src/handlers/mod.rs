@@ -131,12 +131,24 @@ impl CliHandler {
 
     /// Handle snapshot maintenance commands.
     pub async fn handle_snapshot(&self, action: &SnapshotAction) -> Result<()> {
-        snapshot::handle_snapshot(&self.effect_context, self.device_id, action).await
+        snapshot::handle_snapshot(
+            &self.effect_context,
+            &self.effect_system,
+            self.device_id,
+            action,
+        )
+        .await
     }
 
     /// Handle admin maintenance commands.
     pub async fn handle_admin(&self, action: &AdminAction) -> Result<()> {
-        admin::handle_admin(&self.effect_context, self.device_id, action).await
+        admin::handle_admin(
+            &self.effect_context,
+            &self.effect_system,
+            self.device_id,
+            action,
+        )
+        .await
     }
 
     /// Handle guardian recovery commands
@@ -149,7 +161,7 @@ impl CliHandler {
         invite::handle_invitation(&self.effect_context, &self.effect_system, action).await
     }
 
-    /// Handle authority management commands (placeholder)
+    /// Handle authority management commands
     pub async fn handle_authority(&self, command: &AuthorityCommands) -> Result<()> {
         authority::handle_authority(&self.effect_context, &self.effect_system, command).await
     }
@@ -164,7 +176,7 @@ impl CliHandler {
         ota::handle_ota(&self.effect_context, &self.effect_system, action).await
     }
 
-    /// Handle AMP commands (placeholder wiring).
+    /// Handle AMP commands routed through the effect system.
     pub async fn handle_amp(&self, action: &AmpAction) -> Result<()> {
         amp::handle_amp(&self.effect_context, &self.effect_system, action).await
     }

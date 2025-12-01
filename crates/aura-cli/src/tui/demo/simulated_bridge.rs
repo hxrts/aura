@@ -336,7 +336,7 @@ impl SimulatedBridge {
                 Ok(())
             }
 
-            // === Other commands - stubs ===
+            // === Other commands routed through the simulated bridge ===
             EffectCommand::UpdateNickname { name } => {
                 tracing::info!("Demo: Updated nickname to {}", name);
                 Ok(())

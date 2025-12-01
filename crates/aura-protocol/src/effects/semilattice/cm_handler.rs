@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn test_on_recv_applies_operation() {
         let mut handler = CmHandler::new(TestState::new());
-        let actor = DeviceId::new();
+        let actor = DeviceId::deterministic_test_id();
 
         let op = create_test_op(1, 5, actor);
         let msg = OpWithCtx::new(op.clone(), op.causal_ctx.clone());
@@ -274,7 +274,7 @@ mod tests {
     #[test]
     fn test_on_recv_deduplicates() {
         let mut handler = CmHandler::new(TestState::new());
-        let actor = DeviceId::new();
+        let actor = DeviceId::deterministic_test_id();
 
         let op1 = create_test_op(1, 5, actor);
         let op2 = create_test_op(1, 10, actor); // Same ID, different value
@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn test_multiple_operations() {
         let mut handler = CmHandler::new(TestState::new());
-        let actor = DeviceId::new();
+        let actor = DeviceId::deterministic_test_id();
 
         let op1 = create_test_op(1, 5, actor);
         let op2 = create_test_op(2, 3, actor);
@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn test_causal_ordering() {
         let mut handler = CmHandler::new(TestState::new());
-        let actor = DeviceId::new();
+        let actor = DeviceId::deterministic_test_id();
 
         // Create operations with causal dependencies
         let op1_ctx = CausalContext::new(actor);
@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn test_create_op_msg() {
         let handler = CmHandler::new(TestState::new());
-        let actor = DeviceId::new();
+        let actor = DeviceId::deterministic_test_id();
         let op = create_test_op(1, 5, actor);
         let msg = handler.create_op_msg(op.clone(), op.causal_ctx.clone());
 

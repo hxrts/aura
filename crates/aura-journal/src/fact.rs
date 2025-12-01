@@ -20,7 +20,7 @@ use aura_core::{
 use std::collections::HashMap;
 
 /// Effect context for API operations (kept local to avoid circular imports)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
 pub struct EffectContext {
     /// Authority performing the operation
@@ -29,16 +29,6 @@ pub struct EffectContext {
     session_id: Option<u32>, // Simplified for this context
     /// Additional metadata
     metadata: HashMap<String, String>,
-}
-
-impl Default for EffectContext {
-    fn default() -> Self {
-        Self {
-            authority_id: AuthorityId::new(),
-            session_id: None,
-            metadata: HashMap::new(),
-        }
-    }
 }
 
 impl EffectContext {
@@ -422,7 +412,7 @@ mod tests {
 
     #[test]
     fn test_journal_creation() {
-        let auth_id = AuthorityId::new();
+        let auth_id = AuthorityId::new_from_entropy([9u8; 32]);
         let namespace = JournalNamespace::Authority(auth_id);
         let journal = Journal::new(namespace.clone());
 
@@ -432,7 +422,7 @@ mod tests {
 
     #[test]
     fn test_journal_merge() {
-        let auth_id = AuthorityId::new();
+        let auth_id = AuthorityId::new_from_entropy([10u8; 32]);
         let namespace = JournalNamespace::Authority(auth_id);
 
         let mut journal1 = Journal::new(namespace.clone());
@@ -473,8 +463,8 @@ mod tests {
     #[test]
     #[should_panic(expected = "Cannot merge journals from different namespaces")]
     fn test_journal_merge_different_namespaces() {
-        let namespace1 = JournalNamespace::Authority(AuthorityId::new());
-        let namespace2 = JournalNamespace::Authority(AuthorityId::new());
+        let namespace1 = JournalNamespace::Authority(AuthorityId::new_from_entropy([11u8; 32]));
+        let namespace2 = JournalNamespace::Authority(AuthorityId::new_from_entropy([12u8; 32]));
 
         let journal1 = Journal::new(namespace1);
         let journal2 = Journal::new(namespace2);

@@ -7,6 +7,7 @@ use crate::fact::{Fact, FactContent, Journal as FactJournal, JournalNamespace};
 use crate::semilattice::{AccountState, OpLog};
 
 use aura_core::effects::time::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects};
+use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::semilattice::JoinSemilattice;
 use aura_core::time::{OrderTime, TimeDomain, TimeStamp};
@@ -28,6 +29,13 @@ pub struct Journal {
     op_log: OpLog,
     /// Fact-based journal for new architecture
     fact_journal: FactJournal,
+}
+
+fn derive_context_for_fact(fact: &JournalFact) -> ContextId {
+    let mut input = Vec::new();
+    input.extend_from_slice(&fact.source_authority.to_bytes());
+    input.extend_from_slice(fact.content.as_bytes());
+    ContextId::new_from_entropy(hash(&input))
 }
 
 impl Journal {
@@ -162,7 +170,7 @@ impl Journal {
             timestamp: ts,
             order,
             content: FactContent::Relational(crate::fact::RelationalFact::Generic {
-                context_id: ContextId::new(),
+                context_id: derive_context_for_fact(&journal_fact),
                 binding_type: journal_fact.content.clone(),
                 binding_data: journal_fact.content.clone().into_bytes(),
             }),
@@ -191,10 +199,15 @@ impl Journal {
         use crate::reduction::reduce_authority;
 
         // Reduce the authority facts to get current tree state
-        let authority_state = reduce_authority(&self.fact_journal);
-
-        // Return device count from the tree state
-        authority_state.tree_state.device_count() as usize
+        // AccountJournal always uses Authority namespace, so Ok is expected
+        match reduce_authority(&self.fact_journal) {
+            Ok(authority_state) => authority_state.tree_state.device_count() as usize,
+            Err(_) => {
+                // This should not happen for an AccountJournal
+                tracing::warn!("AccountJournal has unexpected namespace, returning 0 devices");
+                0
+            }
+        }
     }
 
     /// Get account ID

@@ -58,8 +58,8 @@ impl Parse for ChoreographyInput {
             }
         }
 
-        // Ignore the rest of the content (messages, etc.) for now
-        // The rumpsteak layer will handle the full syntax
+        // Messages and actions are parsed by rumpsteak; consume remaining tokens
+        // so this wrapper can still extract Aura annotations cleanly.
         while !content.is_empty() {
             let _: proc_macro2::TokenTree = content.parse()?;
         }
@@ -221,10 +221,10 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                     }
                 }
 
-                /// Placeholder for Biscuit guard validation
+                /// Biscuit guard validation hook
                 ///
-                /// This method should be implemented by users who inject a real BiscuitGuardEvaluator
-                /// via the generic type parameter. The signature matches what the choreography expects.
+                /// Implementations should call into a real BiscuitGuardEvaluator supplied via the
+                /// generic type parameter. The default checks for a non-empty capability string.
                 pub fn validate_guard(&self, capability: &str, resource_type: &str) -> Result<(), String> {
                     // Default implementation logs the validation attempt
                     if capability.is_empty() {
@@ -234,9 +234,10 @@ fn generate_aura_wrapper(input: &ChoreographyInput, namespace: Option<&str>) -> 
                     }
                 }
 
-                /// Placeholder for Biscuit guard evaluation with flow cost
+                /// Biscuit guard evaluation with flow cost
                 ///
-                /// This method should be implemented by users who inject real evaluator and flow budget
+                /// Implementations should charge flow budget and validate Biscuit guards. Default
+                /// behavior delegates to `validate_guard`.
                 pub fn evaluate_guard_with_flow(&mut self, capability: &str, resource_type: &str, _flow_cost: u64) -> Result<(), String> {
                     // Default implementation just validates capability
                     self.validate_guard(capability, resource_type)

@@ -5,6 +5,7 @@ use aura_core::effects::{CryptoEffects, JournalEffects, StorageEffects};
 use aura_core::flow::FlowBudget;
 use aura_core::scope::{AuthorityOp, ContextOp, ResourceScope};
 use aura_core::{
+    hash::hash,
     identifiers::{AuthorityId, ContextId},
     semilattice::JoinSemilattice,
     AuraError, FactValue, Journal,
@@ -18,6 +19,54 @@ use std::marker::PhantomData;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StoredJournal {
     journal: Journal,
+}
+
+fn derive_context_id(label: &[u8], parts: &[&[u8]]) -> ContextId {
+    let mut input = Vec::new();
+    input.extend_from_slice(label);
+    for part in parts {
+        input.extend_from_slice(part);
+    }
+    ContextId::new_from_entropy(hash(&input))
+}
+
+fn relational_context_id(rel: &crate::fact::RelationalFact) -> ContextId {
+    use crate::fact::RelationalFact::*;
+    match rel {
+        GuardianBinding {
+            account_id,
+            guardian_id,
+            ..
+        } => derive_context_id(
+            b"guardian-binding",
+            &[&account_id.to_bytes(), &guardian_id.to_bytes()],
+        ),
+        RecoveryGrant {
+            account_id,
+            guardian_id,
+            grant_hash,
+        } => derive_context_id(
+            b"recovery-grant",
+            &[
+                &account_id.to_bytes(),
+                &guardian_id.to_bytes(),
+                grant_hash.as_bytes(),
+            ],
+        ),
+        Consensus {
+            consensus_id,
+            operation_hash,
+            ..
+        } => derive_context_id(
+            b"consensus",
+            &[consensus_id.as_bytes(), operation_hash.as_bytes()],
+        ),
+        AmpChannelCheckpoint(checkpoint) => checkpoint.context,
+        AmpProposedChannelEpochBump(proposed) => proposed.context,
+        AmpCommittedChannelEpochBump(committed) => committed.context,
+        AmpChannelPolicy(policy) => policy.context,
+        Generic { context_id, .. } => *context_id,
+    }
 }
 
 /// Domain-specific journal handler that persists state via StorageEffects
@@ -42,7 +91,7 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects, F: Flo
 {
     /// Creates a new journal handler with a fresh authority ID.
     pub fn new(crypto: C, storage: S) -> Self {
-        Self::with_authority(AuthorityId::new(), crypto, storage)
+        Self::with_authority(AuthorityId::default(), crypto, storage)
     }
 
     /// Creates a new journal handler with the specified authority ID.
@@ -107,22 +156,7 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects, F: Flo
                     operation: AuthorityOp::UpdateTree,
                 },
                 crate::fact::FactContent::Relational(rel) => {
-                    let context_id = match rel {
-                        crate::fact::RelationalFact::GuardianBinding { .. }
-                        | crate::fact::RelationalFact::RecoveryGrant { .. } => ContextId::new(),
-                        crate::fact::RelationalFact::Consensus { .. } => ContextId::new(),
-                        crate::fact::RelationalFact::AmpChannelCheckpoint(checkpoint) => {
-                            checkpoint.context
-                        }
-                        crate::fact::RelationalFact::AmpProposedChannelEpochBump(proposed) => {
-                            proposed.context
-                        }
-                        crate::fact::RelationalFact::AmpCommittedChannelEpochBump(committed) => {
-                            committed.context
-                        }
-                        crate::fact::RelationalFact::AmpChannelPolicy(policy) => policy.context,
-                        crate::fact::RelationalFact::Generic { context_id, .. } => *context_id,
-                    };
+                    let context_id = relational_context_id(rel);
                     ResourceScope::Context {
                         context_id,
                         operation: ContextOp::UpdateParams,
@@ -284,8 +318,7 @@ impl<
         _context: &ContextId,
         _peer: &AuthorityId,
     ) -> Result<FlowBudget, AuraError> {
-        // Flow budget retrieval logic would be handled through journal state
-        // For now, return a default flow budget
+        // Flow budget retrieval will eventually read from journal facts; until then use default.
         Ok(FlowBudget::default())
     }
 

@@ -257,8 +257,8 @@ mod tests {
     fn test_scoped_envelope_validation() {
         let payload = b"test message".to_vec();
         let relationship_id = RelationshipId::new([2u8; 32]);
-        let sender = DeviceId::new();
-        let recipient = DeviceId::new();
+        let sender = DeviceId::new_from_entropy([1u8; 32]);
+        let recipient = DeviceId::new_from_entropy([2u8; 32]);
 
         // Valid scoped envelope
         let scoped_env = Envelope::new_scoped(payload.clone(), relationship_id.clone(), None);

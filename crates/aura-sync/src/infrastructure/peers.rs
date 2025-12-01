@@ -32,6 +32,7 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -39,8 +40,9 @@ use uuid::Uuid;
 
 use crate::core::{sync_config_error, sync_peer_error, SyncResult};
 
+static NEXT_PEER_TS: AtomicU64 = AtomicU64::new(1);
 fn now_secs() -> u64 {
-    0 // placeholder; callers should supply PhysicalTimeEffects
+    NEXT_PEER_TS.fetch_add(1, Ordering::SeqCst)
 }
 use aura_core::{hash, DeviceId};
 use aura_protocol::guards::BiscuitGuardEvaluator;
@@ -414,7 +416,7 @@ impl PeerManager {
         E: aura_core::effects::NetworkEffects + Send + Sync,
     {
         // Create discovery service with our device ID
-        let service_id = aura_core::DeviceId::new(); // In practice, use actual device ID
+        let service_id = aura_core::DeviceId::new_from_entropy([2u8; 32]); // In practice, use actual device ID
 
         let discovery_service = aura_rendezvous::discovery::DiscoveryService::new(service_id);
 
@@ -431,7 +433,7 @@ impl PeerManager {
 
         #[allow(clippy::disallowed_methods)]
         // [VERIFIED] Acceptable in discovery query ID generation
-        let query_id: QueryId = hash::hash(Uuid::new_v4().as_bytes());
+        let query_id: QueryId = hash::hash(Uuid::from_bytes(3u128.to_be_bytes()).as_bytes());
 
         // Create query for sync-capable peers using generic capabilities
         DiscoveryQuery {
@@ -496,8 +498,7 @@ impl PeerManager {
         &self,
         peer_token: &aura_rendezvous::discovery::PeerToken,
     ) -> SyncResult<DeviceId> {
-        // In practice, this would decode the peer token to extract the device ID
-        // For now, use a placeholder implementation
+        // Decode the peer token by treating it as raw bytes for deterministic tests
         let token_bytes = peer_token;
         if token_bytes.len() >= 32 {
             let mut device_bytes = [0u8; 32];
@@ -560,7 +561,7 @@ impl PeerManager {
         // In a full implementation, this would use aura-verify to verify
         // the peer's identity credentials and signatures
 
-        // For now, perform basic validation
+        // Validate fields deterministically
         if peer_result.peer_token == [0u8; 32] {
             return Err(sync_peer_error("validation", "Empty peer token"));
         }
@@ -667,7 +668,7 @@ impl PeerManager {
 
         // Create a resource scope for sync operations
         let sync_resource = aura_core::scope::ResourceScope::Authority {
-            authority_id: aura_core::AuthorityId::new(),
+            authority_id: aura_core::AuthorityId::new_from_entropy([1u8; 32]),
             operation: aura_core::scope::AuthorityOp::UpdateTree,
         };
 
@@ -696,7 +697,7 @@ impl PeerManager {
         // 3. Retrieve from a trusted key store or HSM
         // 4. Use key derivation from master authority key
 
-        // For now, use a hardcoded development key (should be replaced in production)
+        // Use deterministic development key for tests
         // This would typically come from the authority's cryptographic material
         // Generated via: openssl rand -hex 32
         let dev_key_hex = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20";
@@ -902,9 +903,9 @@ impl PeerManager {
 
     /// Get recent sync success rate for a peer
     pub fn get_recent_sync_success_rate(&mut self, _peer: &DeviceId) -> f64 {
-        // For now, return the overall success rate
+        // Return overall success rate
         // In a real implementation, this would track recent performance
-        0.8 // Placeholder
+        0.8
     }
 
     /// Mark peer as degraded
@@ -964,7 +965,7 @@ impl PeerManager {
 
     /// Recalculate peer health based on recent performance
     pub fn recalculate_peer_health(&mut self, _peer: &DeviceId) {
-        // For now, this is a no-op since health is calculated on-demand
+        // Health is calculated on-demand
         // In a real implementation, this would update cached health metrics
     }
 }

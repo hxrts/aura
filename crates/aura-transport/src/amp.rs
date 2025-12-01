@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_derive_for_send() {
-        let context = ContextId::new();
+        let context = ContextId::default();
         let channel = ChannelId::from_bytes([1u8; 32]);
         let state = AmpRatchetState {
             chan_epoch: 0,
@@ -225,7 +225,7 @@ mod tests {
         };
 
         let header = AmpHeader {
-            context: ContextId::new(),
+            context: ContextId::default(),
             channel: ChannelId::from_bytes([1u8; 32]),
             chan_epoch: 0,
             ratchet_gen: 2,
@@ -246,7 +246,7 @@ mod tests {
         };
 
         let header = AmpHeader {
-            context: ContextId::new(),
+            context: ContextId::default(),
             channel: ChannelId::from_bytes([1u8; 32]),
             chan_epoch: 1, // Wrong epoch
             ratchet_gen: 2,
@@ -266,7 +266,7 @@ mod tests {
         };
 
         let header = AmpHeader {
-            context: ContextId::new(),
+            context: ContextId::default(),
             channel: ChannelId::from_bytes([1u8; 32]),
             chan_epoch: 0,
             ratchet_gen: 20, // Outside window [0, 8]
@@ -282,7 +282,7 @@ mod tests {
     #[test]
     fn test_message_key_derivation_deterministic() {
         let header = AmpHeader {
-            context: ContextId::new(),
+            context: ContextId::default(),
             channel: ChannelId::from_bytes([1u8; 32]),
             chan_epoch: 0,
             ratchet_gen: 1,

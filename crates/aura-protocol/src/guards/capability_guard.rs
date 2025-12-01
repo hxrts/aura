@@ -252,14 +252,15 @@ impl CapabilityGuardExt for CapabilityGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::{epochs::Epoch, identifiers::DeviceId};
+    use aura_core::epochs::Epoch;
     use biscuit_auth::PublicKey;
 
     #[tokio::test]
     async fn test_authority_operation_guard() {
         // Create mock bridge
         let root_key = PublicKey::from_bytes(&[0u8; 32]).unwrap();
-        let bridge = BiscuitAuthorizationBridge::new(root_key, DeviceId::new());
+        let bridge =
+            BiscuitAuthorizationBridge::new(root_key, AuthorityId::new_from_entropy([1u8; 32]));
 
         // Create guard
         let guard = CapabilityGuard::new(bridge);
@@ -270,7 +271,7 @@ mod tests {
         // Test without token (should fail)
         let result = guard
             .evaluate_authority_op(
-                &AuthorityId::new(),
+                &AuthorityId::new_from_entropy([71u8; 32]),
                 &AuthorityOp::AddDevice,
                 None,
                 &mut budget,

@@ -176,15 +176,13 @@ impl HandlerUtils {
 }
 
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)]
 mod tests {
     use super::*;
     use aura_core::identifiers::DeviceId;
-    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_handler_basic_functionality() {
-        let device_id = DeviceId::from(Uuid::new_v4());
+        let device_id = DeviceId::deterministic_test_id();
         let handler = AuraHandlerFactory::for_testing(device_id);
         let ctx = AuraContext::for_testing(device_id);
 
@@ -206,7 +204,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_typed_effect_execution() {
-        let device_id = DeviceId::from(Uuid::new_v4());
+        let device_id = DeviceId::deterministic_test_id();
         let mut handler = AuraHandlerFactory::for_testing(device_id);
         let ctx = AuraContext::for_testing(device_id);
 

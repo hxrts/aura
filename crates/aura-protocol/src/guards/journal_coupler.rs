@@ -2,16 +2,39 @@
 //!
 //! This module provides the `JournalCoupler` that bridges the guard chain execution
 //! with journal CRDT operations. It ensures that protocol operations that succeed
-//! capability checks properly update the distributed journal state.
+//! capability checks properly update and persist the distributed journal state.
 //!
 //! ## Integration Flow
 //!
 //! ```text
 //! CapGuard → FlowGuard → JournalCoupler → Protocol Execution
 //!     ↓         ↓            ↓                    ↓
-//! Check     Check       Apply journal      Execute with
-//! caps      budget      deltas atomically  full context
+//! Check     Check       Apply & persist    Execute with
+//! caps      budget      journal deltas     full context
 //! ```
+//!
+//! ## Charge-Before-Send Invariant
+//!
+//! The JournalCoupler enforces the charge-before-send invariant from the formal model:
+//! journal facts MUST be persisted before any transport effects occur. This ensures:
+//!
+//! 1. **Durability**: Facts are committed even if the protocol operation fails
+//! 2. **Consistency**: Other replicas see journal state before related messages
+//! 3. **Monotonicity**: CRDT semantics guarantee no rollback is needed
+//!
+//! ## Execution Modes
+//!
+//! - **Pessimistic** (default): Execute operation first, then apply and persist journal
+//!   changes. Journal is only persisted if the operation succeeds.
+//!
+//! - **Optimistic**: Apply and persist journal changes first, then execute operation.
+//!   Journal changes remain even if operation fails (safe due to CRDT monotonicity).
+//!
+//! ## Persistence Contract
+//!
+//! All journal changes are persisted via `JournalEffects::persist_journal()` after
+//! being computed. This module does NOT rely on callers to persist - it handles
+//! persistence internally to maintain the charge-before-send invariant.
 //!
 //! The JournalCoupler implements the formal model's "journal coupling" semantics
 //! where protocol operations atomically update both local state and distributed
@@ -185,6 +208,16 @@ impl JournalCoupler {
     /// Execute with optimistic journal application (apply deltas first)
     ///
     /// Timing is captured via the tracing span (subscriber handles `Instant::now()`).
+    ///
+    /// # Optimistic Semantics
+    ///
+    /// In optimistic mode, journal changes are persisted BEFORE operation execution.
+    /// This follows CRDT semantics where operations are monotonic - if the operation
+    /// fails, the journal changes remain valid and don't need rollback. This is safe
+    /// because:
+    /// 1. Journal operations are join-semilattice (monotonic, idempotent)
+    /// 2. The operation's success/failure doesn't affect the validity of the facts
+    /// 3. Retrying the operation will see the already-applied journal state
     #[instrument(skip(self, effect_system, operation, initial_journal))]
     async fn execute_optimistic<E, T, F, Fut>(
         &self,
@@ -203,7 +236,32 @@ impl JournalCoupler {
             .apply_annotations(operation_id, effect_system, &initial_journal)
             .await?;
 
-        // Phase 2: Execute the protocol operation
+        // Phase 2: Persist journal changes before operation execution
+        // This ensures durability of the journal state regardless of operation outcome
+        if !journal_ops.is_empty() {
+            effect_system
+                .persist_journal(&updated_journal)
+                .await
+                .map_err(|e| {
+                    error!(
+                        operation_id = operation_id,
+                        error = %e,
+                        "Failed to persist optimistic journal changes"
+                    );
+                    aura_core::AuraError::internal(format!(
+                        "Optimistic journal persistence failed for operation '{}': {}",
+                        operation_id, e
+                    ))
+                })?;
+
+            debug!(
+                operation_id = operation_id,
+                journal_ops_applied = journal_ops.len(),
+                "Optimistic journal changes persisted, proceeding with operation"
+            );
+        }
+
+        // Phase 3: Execute the protocol operation
         let execution_result = operation(effect_system).await;
 
         match execution_result {
@@ -231,11 +289,12 @@ impl JournalCoupler {
                 warn!(
                     operation_id = operation_id,
                     error = %e,
-                    "Operation failed after optimistic journal application"
+                    journal_ops_committed = journal_ops.len(),
+                    "Operation failed after optimistic journal application - journal changes remain committed (CRDT monotonicity)"
                 );
 
                 // In optimistic mode, we don't roll back journal changes
-                // The journal changes are considered committed
+                // The journal changes are already persisted and remain valid
                 // This follows CRDT semantics where operations are monotonic
 
                 Err(e)
@@ -266,6 +325,32 @@ impl JournalCoupler {
         let (updated_journal, journal_ops) = self
             .apply_annotations(operation_id, effect_system, &initial_journal)
             .await?;
+
+        // Phase 3: Persist journal changes atomically
+        // This ensures charge-before-send invariant: journal commit happens before transport
+        if !journal_ops.is_empty() {
+            effect_system
+                .persist_journal(&updated_journal)
+                .await
+                .map_err(|e| {
+                    error!(
+                        operation_id = operation_id,
+                        error = %e,
+                        "Failed to persist journal changes - operation succeeded but journal not committed"
+                    );
+                    aura_core::AuraError::internal(format!(
+                        "Journal persistence failed for operation '{}': {}. \
+                         Operation completed but journal state is inconsistent.",
+                        operation_id, e
+                    ))
+                })?;
+
+            debug!(
+                operation_id = operation_id,
+                journal_ops_applied = journal_ops.len(),
+                "Journal changes persisted successfully"
+            );
+        }
 
         info!(
             operation_id = operation_id,
@@ -475,17 +560,53 @@ impl JournalCoupler {
                 }
             }
             JournalOpType::Custom(custom_op) => {
-                // Custom operations are application-specific
-                // For now, we don't apply any journal changes
-                let journal_op = JournalOperation::CustomOperation {
-                    name: custom_op.clone(),
-                    data: serde_json::Value::Null,
-                    description: annotation
-                        .description
-                        .clone()
-                        .unwrap_or_else(|| format!("Custom operation: {}", custom_op)),
-                };
-                Ok((current_journal.clone(), journal_op))
+                // Custom operations require application-specific handling.
+                // If a delta is provided, we apply it as a general merge.
+                // Otherwise, we log a warning since this may indicate a misconfiguration.
+                if let Some(delta) = &annotation.delta {
+                    // Apply the delta if provided with the custom operation
+                    let with_facts = effect_system.merge_facts(current_journal, delta).await?;
+                    let final_journal = effect_system.refine_caps(&with_facts, delta).await?;
+
+                    debug!(
+                        custom_op = custom_op,
+                        "Applied delta for custom journal operation"
+                    );
+
+                    let journal_op = JournalOperation::CustomOperation {
+                        name: custom_op.clone(),
+                        data: serde_json::json!({
+                            "delta_applied": true,
+                            "facts_count": delta.facts.len(),
+                        }),
+                        description: annotation
+                            .description
+                            .clone()
+                            .unwrap_or_else(|| format!("Custom operation: {}", custom_op)),
+                    };
+                    Ok((final_journal, journal_op))
+                } else {
+                    // No delta provided - this is a no-op but may indicate a bug
+                    warn!(
+                        custom_op = custom_op,
+                        "Custom journal operation '{}' has no delta - no journal changes applied. \
+                         If this is intentional, consider using a different operation type.",
+                        custom_op
+                    );
+
+                    let journal_op = JournalOperation::CustomOperation {
+                        name: custom_op.clone(),
+                        data: serde_json::json!({
+                            "delta_applied": false,
+                            "warning": "No delta provided for custom operation"
+                        }),
+                        description: annotation
+                            .description
+                            .clone()
+                            .unwrap_or_else(|| format!("Custom operation (no-op): {}", custom_op)),
+                    };
+                    Ok((current_journal.clone(), journal_op))
+                }
             }
         }
     }
@@ -671,7 +792,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_optimistic_vs_pessimistic_execution() {
-        let device_id = DeviceId::new();
+        let _device_id = DeviceId::deterministic_test_id();
 
         // Test pessimistic execution (default)
         let pessimistic_coupler = JournalCoupler::new();

@@ -244,8 +244,9 @@ where
             ],
         };
 
-        // This would normally use the relationship formation choreography
-        // For now, we record it in the registry
+        // This would normally use the relationship formation choreography; while that
+        // integration lands we persist the event through the effect API registry to
+        // ensure auditability and replay.
         let relationship_event = serde_json::json!({
             "type": "relationship_established",
             "relationship_id": relationship_id,
@@ -310,8 +311,9 @@ where
         envelope: &InvitationEnvelope,
         effects: &E,
     ) -> InvitationResult<()> {
-        // Poll the effect API event stream for a receipt matching the invitation.
-        // In production, the transport layer would emit a receipt event when delivery is confirmed.
+        // Poll the effect API event stream for a receipt matching the invitation. The
+        // transport adapter is expected to emit `EffectApiEvent::Receipt` for confirmed
+        // deliveries, which keeps this wait loop deterministic for tests.
         let mut stream = EffectApiEffects::subscribe_to_events(effects)
             .await
             .map_err(|e| InvitationError::internal(e.to_string()))?;

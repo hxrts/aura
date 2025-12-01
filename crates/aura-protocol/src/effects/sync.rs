@@ -12,41 +12,34 @@
 
 use async_trait::async_trait;
 use aura_core::{AttestedOp, Hash32};
-// Placeholder: BloomEffects integration pending
-// use aura_journal::semilattice::OpLog;  // Temporarily disabled
+use aura_journal::semilattice::concrete_types::OpLog;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-/// Bloom filter digest for efficient OpLog comparison
-///
-/// Placeholder implementation (BloomEffects integration pending).
-/// Real implementation should use:
-/// ```ignore
-/// bloom_effects.create_bloom_filter(BloomConfig::oplog_sync()).await
-/// bloom_effects.bloom_insert(&mut filter, &op_cid.as_bytes()).await
-/// bloom_effects.bloom_contains(&filter, &cid.as_bytes()).await
-/// ```
+/// Deterministic digest for efficient OpLog comparison.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BloomDigest {
-    /// Set of operation CIDs (placeholder - should be BloomFilter)
-    /// Placeholder: Replace with `filter: BloomFilter` field when BloomEffects lands.
+    /// Set of operation CIDs (deterministic, order-independent)
     pub cids: BTreeSet<Hash32>,
 }
 
 impl BloomDigest {
-    /// Create a digest from an OpLog
-    /* // Temporarily disabled due to OpLog import issue
+    /// Create a digest from an OpLog using deterministic CIDs (hash of op bytes).
     pub fn from_oplog(oplog: &OpLog) -> Self {
         let cids = oplog
             .list_ops()
             .iter()
-            .map(|op| Hash32::from(op.op.parent_commitment)) // Simplified CID computation
+            .map(|op| {
+                Hash32::from(aura_core::hash::hash(
+                    &bincode::serialize(op).unwrap_or_default(),
+                ))
+            })
             .collect();
 
         Self { cids }
     }
-    */
+
     /// Create an empty digest
     pub fn empty() -> Self {
         Self {
@@ -108,6 +101,10 @@ pub enum SyncError {
     /// Authorization failed during guard chain evaluation
     #[error("Authorization failed: guard chain denied operation")]
     AuthorizationFailed,
+
+    /// Guard chain evaluation failure (authorization, flow budget, or journal coupling)
+    #[error("Guard chain failure: {0}")]
+    GuardChainFailure(String),
 }
 
 /// Sync effect traits for anti-entropy and broadcast operations

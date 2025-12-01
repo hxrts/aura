@@ -18,6 +18,7 @@ use super::{
     scenario_bridge::{DemoScenarioBridge, DemoSetupConfig},
     simulator_integration::SimulatedGuardianAgent,
 };
+use crate::ids;
 use crate::tui::{DemoEvent, TuiApp};
 use aura_core::AuthorityId;
 
@@ -137,16 +138,20 @@ pub struct HumanAgentDemoConfig {
 
     /// Maximum demo duration before auto-completion
     pub max_demo_duration_minutes: u64,
+
+    /// Deterministic seed for demo setup and simulated agents
+    pub seed: u64,
 }
 
 impl Default for HumanAgentDemoConfig {
     fn default() -> Self {
         Self {
-            auto_advance: true,
+            auto_advance: false,
             agent_delay_ms: 1000,
             verbose_logging: true,
             guardian_response_time_ms: 3000,
             max_demo_duration_minutes: 30,
+            seed: 42,
         }
     }
 }
@@ -160,7 +165,7 @@ impl HumanAgentDemo {
         bob_app.set_demo_sender(demo_tx);
 
         // Use scenario bridge to setup the complete demo environment
-        let seed = 42; // Deterministic seed for reliable demo
+        let seed = config.seed; // Deterministic seed for reliable demo
         let setup_config = DemoSetupConfig {
             participant_count: 3,
             guardian_threshold: 2,
@@ -262,16 +267,26 @@ impl HumanAgentDemo {
 
         while start_time.elapsed() < max_duration {
             // Handle demo events from Bob's TUI
-            if let Ok(Some(event)) = tokio::time::timeout(
+            match tokio::time::timeout(
                 std::time::Duration::from_millis(100),
                 self.demo_events.recv(),
             )
             .await
             {
-                self.handle_demo_event(event).await?;
+                Ok(Some(event)) => {
+                    self.handle_demo_event(event).await?;
 
-                if self.demo_state.phase == DemoPhase::Completed {
+                    if self.demo_state.phase == DemoPhase::Completed {
+                        break;
+                    }
+                }
+                Ok(None) => {
+                    // Sender dropped (e.g., user pressed 'q' to quit TUI) — exit cleanly.
+                    tracing::info!("Demo events channel closed; exiting demo loop.");
                     break;
+                }
+                Err(_) => {
+                    // Timeout; continue loop
                 }
             }
 
@@ -393,8 +408,7 @@ impl HumanAgentDemo {
     async fn simulate_device_loss(&mut self) -> anyhow::Result<()> {
         tracing::info!("Simulating Bob's device loss");
 
-        // This would integrate with the actual Aura system
-        // For now, we'll just log and update state
+        // Clear Bob's authority to simulate device loss; recovery will rebind deterministically
         self.demo_state.bob_authority = None;
 
         Ok(())
@@ -404,7 +418,10 @@ impl HumanAgentDemo {
     async fn initiate_recovery_process(&mut self) -> anyhow::Result<()> {
         tracing::info!("Initiating recovery process");
 
-        let recovery_session = Uuid::new_v4();
+        let recovery_session = ids::uuid(&format!(
+            "demo-recovery-session:{}",
+            self.demo_state.metrics.recovery_operations + 1
+        ));
         self.demo_state.recovery_session = Some(recovery_session);
         self.demo_state.metrics.recovery_operations += 1;
 
@@ -480,7 +497,9 @@ impl HumanAgentDemo {
         tracing::info!("Completing recovery process");
 
         // Restore Bob's authority
-        self.demo_state.bob_authority = Some(AuthorityId::new());
+        self.demo_state
+            .bob_authority
+            .replace(ids::authority_id("demo:bob:recovered"));
         self.demo_state.recovery_session = None;
 
         // Advance to completion
@@ -507,8 +526,29 @@ impl HumanAgentDemo {
 
     /// Check for automatic phase advancement
     async fn check_auto_advance(&mut self) -> anyhow::Result<()> {
-        // Implementation would check various conditions for auto-advancement
-        // For now, just a placeholder
+        // Auto-progress through phases when pending work is complete.
+        match self.demo_state.phase {
+            DemoPhase::Setup
+            | DemoPhase::BobOnboarding
+            | DemoPhase::GuardianSetup
+            | DemoPhase::NormalOperation
+            | DemoPhase::DeviceLoss => {
+                self.advance_demo_phase().await?;
+            }
+            DemoPhase::RecoveryInitiation => {
+                // Move to guardian coordination once a recovery session exists
+                if self.demo_state.recovery_session.is_some() {
+                    self.advance_demo_phase().await?;
+                }
+            }
+            DemoPhase::GuardianCoordination => {
+                // If guardians have approved, finalize recovery
+                if self.demo_state.recovery_session.is_some() {
+                    self.complete_recovery().await?;
+                }
+            }
+            DemoPhase::RecoveryCompletion | DemoPhase::Completed => {}
+        }
         Ok(())
     }
 

@@ -7,7 +7,10 @@
 // Authorization logic moved from aura-store to proper domain (aura-wot)
 use aura_core::scope::ResourceScope;
 use aura_core::{AuthorityId, FlowBudget};
-use biscuit_auth::{Biscuit, PublicKey};
+use biscuit_auth::{
+    macros::{fact, policy, rule},
+    Authorizer, Biscuit, PublicKey,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing;
@@ -97,7 +100,7 @@ impl BiscuitStorageEvaluator {
     pub fn new(root_public_key: PublicKey, authority_id: AuthorityId) -> Self {
         Self {
             root_public_key,
-            permission_mappings: PermissionMappings::default(),
+            permission_mappings: PermissionMappings::new(),
             authority_id,
         }
     }
@@ -209,58 +212,61 @@ impl BiscuitStorageEvaluator {
         resource_scope: &ResourceScope,
         operation: &str,
     ) -> Result<bool, BiscuitStorageError> {
-        // Note: Token signature verification happens when Biscuit is constructed from bytes
-        // with Biscuit::from(bytes, root_key). If we have a &Biscuit, it's already verified.
+        // Token signature verification happens when Biscuit is constructed from bytes.
+        // Here we enforce scope, capability, and authority binding using Datalog rules
+        // that mirror the authority-centric model in docs/109_authorization.md.
+        let mut authorizer = Authorizer::new();
+        authorizer.add_token(token).map_err(|e| {
+            BiscuitStorageError::TokenVerification(format!("Failed to add token: {}", e))
+        })?;
 
-        // For now, implement basic authorization logic based on resource and operation
-        // Full implementation would use token.authorize(&authorizer) with proper Datalog facts
-        match resource_scope {
-            ResourceScope::Storage { authority_id, path } => {
-                // SECURITY: Verify token authority_id matches resource authority
-                // Extract authority_id from token and ensure it matches the resource scope
-                if !self.verify_token_authority(token, authority_id)? {
-                    return Ok(false); // Token not authorized for this authority
-                }
-
-                // Check basic operation permissions
-                // In the authority-centric model, permissions are evaluated based on:
-                // 1. The authority owning the storage
-                // 2. The path within that authority's storage
-                // 3. The operation being performed
-
-                match operation {
-                    "read" => {
-                        // Read operations allowed if token is for the correct authority
-                        Ok(true)
-                    }
-                    "write" => {
-                        // Write operations require ownership or delegation
-                        // Check if path is writable for this authority
-                        if path.starts_with("global/") {
-                            Ok(false) // Global paths might be read-only
-                        } else {
-                            Ok(true) // Authority can write to own storage
-                        }
-                    }
-                    "admin" => {
-                        // Admin operations require full authority control
-                        // Only the authority itself can perform admin operations
-                        Ok(true) // Simplified: assume token validates authority
-                    }
-                    _ => Ok(false), // Unknown operations denied
-                }
-            }
-            _ => {
-                // Non-storage resources - implement as needed
-                Ok(false)
-            }
+        // Add environment facts for the requested operation and resource path.
+        for fact in self.resource_facts(resource_scope, operation)? {
+            authorizer
+                .add_fact(fact)
+                .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))?;
         }
+
+        // Policy 1: bind token to the authority that owns the storage namespace.
+        // Accept either an explicit authority_id(<uuid>) fact in the token or an
+        // account(<uuid>) fact that matches the authority UUID. This matches the
+        // account-issued device tokens produced by AccountAuthority.
+        authorizer
+            .add_policy(policy!(
+                "allow if authority_id($auth), expected_authority($expected), $auth == $expected;"
+            ))
+            .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))?;
+
+        // Policy 2: accept account(<uuid>) facts for backward compatibility with
+        // existing device tokens issued by AccountAuthority.
+        authorizer
+            .add_policy(policy!(
+                "allow if account($acct), expected_authority($expected), $acct == $expected;"
+            ))
+            .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))?;
+
+        // Policy 3: enforce capability + operation + resource coherence. Any token
+        // checks (e.g., resource prefix) embedded in the Biscuit must also succeed
+        // because Authorizer evaluates all token checks alongside these facts.
+        authorizer
+            .add_policy(policy!(
+                "allow if capability($op), operation($op), resource($res);"
+            ))
+            .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))?;
+
+        // Default deny keeps evaluation strict.
+        authorizer
+            .add_policy(policy!("deny if true;"))
+            .map_err(|e| BiscuitStorageError::AuthorizationFailed(e.to_string()))?;
+
+        Ok(authorizer.authorize().is_ok())
     }
 
     /// Verify that token is authorized for the specified authority
     ///
     /// Extracts authority_id from token facts and compares with expected authority.
     /// Returns true if token is authorized for the authority.
+    #[allow(dead_code)]
     fn verify_token_authority(
         &self,
         token: &Biscuit,
@@ -270,85 +276,73 @@ impl BiscuitStorageEvaluator {
         // Biscuit tokens should contain an "authority_id" fact in the authority block
         // Format: authority_id(<uuid>)
 
-        use biscuit_auth::Authorizer;
-
-        // Create an authorizer to query token facts
         let mut authorizer = Authorizer::new();
-
-        // Add the token to the authorizer
         authorizer.add_token(token).map_err(|e| {
             BiscuitStorageError::TokenVerification(format!("Failed to add token: {}", e))
         })?;
 
-        // Add proper Datalog query to check for authority_id fact
-        // Format: authority_id(<uuid_string>)
-        let expected_uuid = expected_authority.to_string();
+        // Allow tokens that carry either authority_id(<uuid>) or account(<uuid>) that
+        // matches the expected authority UUID (authority IDs are UUID-wrapped).
+        let uuid = expected_authority.uuid().to_string();
 
-        // Add query to check for authority_id fact
-        // Note: query() method accepts &str directly and parses it into a Rule internally
-        let query_str = format!(
-            "data($authority) <- authority_id($authority), $authority == \"{}\"",
-            expected_uuid
-        );
-        let query_result: Result<Vec<(String,)>, _> = authorizer.query(query_str.as_str());
-
-        match query_result {
-            Ok(results) if !results.is_empty() => return Ok(true),
-            Err(e) => {
-                return Err(BiscuitStorageError::TokenVerification(format!(
-                    "Authority query failed: {}",
-                    e
-                )))
-            }
-            _ => {} // Continue to next check
+        let authority_match: Result<Vec<(String,)>, _> = authorizer.query(rule!(
+            "data($authority) <- authority_id($authority), $authority == {uuid};",
+            uuid = uuid.clone()
+        ));
+        if matches!(authority_match, Ok(v) if !v.is_empty()) {
+            return Ok(true);
         }
 
-        // Try alternative fact formats that might be in the token
-        // Check for authority fact: authority(<uuid>)
-        let alt_query_str = format!(
-            "data($authority) <- authority($authority), $authority == \"{}\"",
-            expected_uuid
-        );
-        let alt_query_result: Result<Vec<(String,)>, _> = authorizer.query(alt_query_str.as_str());
-
-        match alt_query_result {
-            Ok(results) if !results.is_empty() => return Ok(true),
-            Err(e) => {
-                return Err(BiscuitStorageError::TokenVerification(format!(
-                    "Alternative authority query failed: {}",
-                    e
-                )))
-            }
-            _ => {} // Continue to next check
+        let account_match: Result<Vec<(String,)>, _> = authorizer.query(rule!(
+            "data($account) <- account($account), $account == {uuid};",
+            uuid = uuid
+        ));
+        if matches!(account_match, Ok(v) if !v.is_empty()) {
+            return Ok(true);
         }
 
-        // Check for owner fact: owner(<uuid>)
-        let owner_query_str = format!(
-            "data($owner) <- owner($owner), $owner == \"{}\"",
-            expected_uuid
-        );
-        let owner_query_result: Result<Vec<(String,)>, _> =
-            authorizer.query(owner_query_str.as_str());
-
-        match owner_query_result {
-            Ok(results) if !results.is_empty() => return Ok(true),
-            Err(e) => {
-                return Err(BiscuitStorageError::TokenVerification(format!(
-                    "Owner query failed: {}",
-                    e
-                )))
-            }
-            _ => {} // No match found
-        }
-
-        // No authority_id fact found - token is not properly scoped for this authority
-        // In the authority-centric model, this is a security requirement
         tracing::warn!(
             expected_authority = %expected_authority,
-            "Token does not contain authority_id fact for expected authority - access denied"
+            "Token does not present authority/account binding for expected authority"
         );
 
         Ok(false)
+    }
+
+    /// Build Datalog facts for the requested resource and operation, escaping strings safely.
+    fn resource_facts(
+        &self,
+        resource_scope: &ResourceScope,
+        operation: &str,
+    ) -> Result<Vec<biscuit_auth::builder::Fact>, BiscuitStorageError> {
+        let op_fact = fact!("operation({op})", op = operation.to_string());
+        let (authority_fact, resource_fact) = match resource_scope {
+            ResourceScope::Storage { authority_id, path } => {
+                let authority_fact = fact!(
+                    "authority_id({auth})",
+                    auth = authority_id.uuid().to_string()
+                );
+                let path_fact = fact!("resource({res})", res = path.to_string());
+                (authority_fact, path_fact)
+            }
+            _ => {
+                return Err(BiscuitStorageError::InvalidResource(
+                    "Non-storage resource scopes are not supported".to_string(),
+                ))
+            }
+        };
+
+        let expected_auth_fact = fact!(
+            "expected_authority({auth})",
+            auth = self.authority_id.uuid().to_string()
+        );
+
+        Ok(vec![
+            expected_auth_fact,
+            authority_fact,
+            resource_fact,
+            op_fact,
+        ])
     }
 
     /// Calculate flow cost for storage operation
@@ -500,12 +494,12 @@ mod tests {
     use aura_core::AccountId;
 
     fn setup_test_authority() -> AccountAuthority {
-        AccountAuthority::new(AccountId::new())
+        AccountAuthority::new(AccountId::new_from_entropy([9u8; 32]))
     }
 
     fn setup_test_evaluator() -> BiscuitStorageEvaluator {
         let authority = setup_test_authority();
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::from_uuid(authority.account_id().0);
         BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id)
     }
 
@@ -513,7 +507,7 @@ mod tests {
     #[test]
     fn test_authority_centric_content_access() {
         let evaluator = setup_test_evaluator();
-        let _authority_id = AuthorityId::new();
+        let _authority_id = AuthorityId::new_from_entropy([69u8; 32]);
 
         // Test content resource scope conversion
         let content_resource = StorageResource::content("personal/user123/doc");
@@ -599,7 +593,7 @@ mod tests {
     #[test]
     fn test_biscuit_access_request() {
         let authority = setup_test_authority();
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let token = authority.create_device_token(device_id).unwrap();
         let token_bytes = token.to_vec().unwrap();
 

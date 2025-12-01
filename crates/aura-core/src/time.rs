@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::time::SystemTime;
 
 use crate::{
     crypto::Ed25519Signature,
@@ -339,9 +338,13 @@ pub struct ProvenancedTime {
 }
 
 /// Optional, policy-gated metadata sidecar (omitted by default).
+///
+/// IMPORTANT: All time values must use PhysicalTime to maintain compliance
+/// with the information flow contract. Direct use of SystemTime violates
+/// the effect system architecture and breaks simulation/testing capabilities.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TimeMetadata {
-    pub created_at: Option<SystemTime>,
+    pub created_at: Option<PhysicalTime>,
     pub precision: Option<TimeConfidence>,
     pub confidence: Option<TimeConfidence>,
     pub authority: Option<AuthorityId>,
@@ -575,8 +578,8 @@ mod tests {
 
     #[test]
     fn logical_clock_respects_partial_order() {
-        let device_a = DeviceId::new();
-        let device_b = DeviceId::new();
+        let device_a = DeviceId::new_from_entropy([86u8; 32]);
+        let device_b = DeviceId::new_from_entropy([87u8; 32]);
 
         let mut v1 = VectorClock::new();
         v1.insert(device_a, 1);

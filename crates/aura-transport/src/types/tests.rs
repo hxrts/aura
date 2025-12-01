@@ -17,14 +17,22 @@ use aura_core::{
 use std::collections::HashMap;
 use std::time::{SystemTime, Duration};
 
+fn device(seed: u8) -> DeviceId {
+    DeviceId::new_from_entropy([seed; 32])
+}
+
+fn context(seed: u8) -> ContextId {
+    ContextId::new_from_entropy([seed; 32])
+}
+
 #[cfg(test)]
 mod envelope_tests {
     use super::*;
 
     #[test]
     fn test_envelope_creation() {
-        let sender = DeviceId::new();
-        let recipient = DeviceId::new();
+        let sender = device(1);
+        let recipient = device(2);
         let message = b"test message".to_vec();
 
         let envelope = Envelope::new(message.clone(), sender, recipient);
@@ -37,8 +45,8 @@ mod envelope_tests {
 
     #[test]
     fn test_scoped_envelope_creation() {
-        let sender = DeviceId::new();
-        let context = ContextId::new("test_context");
+        let sender = device(3);
+        let context = context(1);
         let message = b"scoped message".to_vec();
 
         let envelope = Envelope::new_scoped(message.clone(), sender, context);
@@ -51,8 +59,8 @@ mod envelope_tests {
 
     #[test]
     fn test_privacy_level_preservation() {
-        let sender = DeviceId::new();
-        let recipient = DeviceId::new();
+        let sender = device(4);
+        let recipient = device(5);
         let message = b"privacy test".to_vec();
 
         // Test each privacy level
@@ -79,9 +87,9 @@ mod envelope_tests {
 
     #[test]
     fn test_envelope_forwarding_preserves_privacy() {
-        let original_sender = DeviceId::new();
-        let original_recipient = DeviceId::new();
-        let forwarding_recipient = DeviceId::new();
+        let original_sender = device(6);
+        let original_recipient = device(7);
+        let forwarding_recipient = device(8);
         let message = b"forwarded message".to_vec();
 
         let envelope = Envelope::new_with_privacy(
@@ -102,9 +110,9 @@ mod envelope_tests {
 
     #[test]
     fn test_relationship_scoping_isolation() {
-        let sender = DeviceId::new();
-        let context1 = ContextId::new("test_context");
-        let context2 = ContextId::new("test_context");
+        let sender = device(9);
+        let context1 = context(10);
+        let context2 = context(11);
         let message = b"isolation test".to_vec();
 
         let envelope1 = Envelope::new_scoped(message.clone(), sender, context1);
@@ -130,9 +138,9 @@ mod envelope_tests {
 
     #[test]
     fn test_envelope_serialization_roundtrip() {
-        let sender = DeviceId::new();
-        let recipient = DeviceId::new();
-        let context = ContextId::new("test_context");
+        let sender = device(12);
+        let recipient = device(13);
+        let context = context(12);
         let message = b"serialization test with special chars: αβγδε 🔒🔑".as_bytes().to_vec();
 
         let original = Envelope::new_scoped(message, sender, context);
@@ -235,8 +243,8 @@ mod connection_tests {
 
     #[test]
     fn test_connection_id_creation() {
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
+        let device1 = device(20);
+        let device2 = device(21);
 
         let connection_id = ConnectionId::new(device1, device2);
 
@@ -247,9 +255,9 @@ mod connection_tests {
 
     #[test]
     fn test_scoped_connection_id() {
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
-        let context = ContextId::new("test_context");
+        let device1 = device(22);
+        let device2 = device(23);
+        let context = context(22);
 
         let scoped_id = ConnectionId::new_scoped(device1, device2, context);
 
@@ -261,10 +269,10 @@ mod connection_tests {
 
     #[test]
     fn test_connection_id_uniqueness() {
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
-        let context1 = ContextId::new("test_context");
-        let context2 = ContextId::new("test_context");
+        let device1 = device(24);
+        let device2 = device(25);
+        let context1 = context(23);
+        let context2 = context(24);
 
         // Same devices, different contexts should create different connection IDs
         let scoped1 = ConnectionId::new_scoped(device1, device2, context1);
@@ -298,9 +306,9 @@ mod connection_tests {
 
     #[test]
     fn test_connection_info() {
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
-        let context = ContextId::new("test_context");
+        let device1 = device(26);
+        let device2 = device(27);
+        let context = context(25);
 
         let connection_id = ConnectionId::new_scoped(device1, device2, context);
         let info = connection_id.info();
@@ -312,9 +320,9 @@ mod connection_tests {
 
     #[test]
     fn test_connection_serialization() {
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
-        let context = ContextId::new("test_context");
+        let device1 = device(28);
+        let device2 = device(29);
+        let context = context(26);
 
         let original = ConnectionId::new_scoped(device1, device2, context);
         let serialized = serde_json::to_string(&original).expect("Serialization failed");
@@ -344,8 +352,8 @@ mod property_tests {
     #[test]
     fn test_envelope_privacy_monotonicity() {
         // Privacy level should never decrease through operations
-        let sender = DeviceId::new();
-        let recipient = DeviceId::new();
+        let sender = device(30);
+        let recipient = device(31);
         let message = b"monotonicity test".to_vec();
 
         for initial_level in [PrivacyLevel::Clear, PrivacyLevel::Blinded, PrivacyLevel::RelationshipScoped] {
@@ -357,7 +365,7 @@ mod property_tests {
             );
 
             // Forward operation should preserve or strengthen privacy
-            let forwarded = envelope.forward_to(DeviceId::new());
+            let forwarded = envelope.forward_to(device(32));
             assert!(forwarded.privacy_level() >= envelope.privacy_level());
 
             // Serialization roundtrip should preserve privacy exactly
@@ -369,12 +377,12 @@ mod property_tests {
 
     #[test]
     fn test_relationship_scoping_prevents_leakage() {
-        let sender = DeviceId::new();
+        let sender = device(33);
         let mut context_envelopes = HashMap::new();
 
         // Create envelopes in different relationship contexts
         for i in 0..10 {
-            let context = ContextId::new("test_context");
+            let context = context(30 + i);
             let message = format!("secret message {}", i).into_bytes();
             let envelope = Envelope::new_scoped(message, sender, context);
             context_envelopes.insert(context, envelope);
@@ -398,13 +406,13 @@ mod property_tests {
 
     #[test]
     fn test_connection_isolation_property() {
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
+        let device1 = device(34);
+        let device2 = device(35);
 
         // Create connections in different relationship contexts
         let mut connections = HashMap::new();
-        for _i in 0..5 {
-            let context = ContextId::new("test_context");
+        for i in 0..5 {
+            let context = context(40 + i);
             let connection = ConnectionId::new_scoped(device1, device2, context);
             connections.insert(context, connection);
         }

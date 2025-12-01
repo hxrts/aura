@@ -504,7 +504,11 @@ pub async fn run_consensus<T: serde::Serialize>(
     time: &(impl PhysicalTimeEffects + ?Sized),
 ) -> Result<CommitFact> {
     let config = ConsensusConfig::new(params.threshold, params.witnesses, params.epoch);
-    let authority_id = AuthorityId::new(); // Would be the actual coordinator ID
+    // Derive coordinator ID deterministically from the prestate hash to keep coordination scoped to the instance.
+    let prestate_hash = prestate.compute_hash();
+    let mut entropy = [0u8; 32];
+    entropy.copy_from_slice(&prestate_hash.0);
+    let authority_id = AuthorityId::new_from_entropy(entropy);
 
     let protocol = ConsensusProtocol::new(
         authority_id,
@@ -529,9 +533,12 @@ mod tests {
 
     #[test]
     fn test_protocol_creation() {
-        let witnesses = vec![AuthorityId::new(), AuthorityId::new()];
+        let witnesses = vec![
+            AuthorityId::new_from_entropy([1u8; 32]),
+            AuthorityId::new_from_entropy([2u8; 32]),
+        ];
         let config = ConsensusConfig::new(2, witnesses, Epoch::from(1));
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([3u8; 32]);
 
         let protocol = ConsensusProtocol::new(
             authority_id,

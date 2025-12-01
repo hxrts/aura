@@ -17,6 +17,18 @@ use aura_core::{
     Hash32,
 };
 use std::collections::{BTreeMap, BTreeSet};
+use thiserror::Error;
+
+/// Error type for journal namespace mismatches during reduction
+#[derive(Debug, Clone, Error, PartialEq, Eq)]
+pub enum ReductionNamespaceError {
+    /// Attempted to reduce a context journal as authority state
+    #[error("Cannot reduce context journal as authority state: expected Authority namespace, got Context")]
+    ContextAsAuthority,
+    /// Attempted to reduce an authority journal as relational state
+    #[error("Cannot reduce authority journal as relational state: expected Context namespace, got Authority")]
+    AuthorityAsContext,
+}
 
 /// Apply an attested operation to a tree state
 ///
@@ -254,7 +266,14 @@ fn compute_relational_state_hash(state: &RelationalState) -> Hash32 {
 ///
 /// This function deterministically computes the current state of an
 /// authority by applying all attested operations in order.
-pub fn reduce_authority(journal: &Journal) -> aura_core::authority::AuthorityState {
+///
+/// # Errors
+///
+/// Returns `ReductionNamespaceError::ContextAsAuthority` if the journal
+/// has a Context namespace instead of an Authority namespace.
+pub fn reduce_authority(
+    journal: &Journal,
+) -> Result<aura_core::authority::AuthorityState, ReductionNamespaceError> {
     match &journal.namespace {
         JournalNamespace::Authority(_) => {
             // Extract all attested operations
@@ -284,11 +303,9 @@ pub fn reduce_authority(journal: &Journal) -> aura_core::authority::AuthoritySta
                 .collect::<Result<_, _>>()
                 .unwrap_or_else(|_| BTreeSet::new());
 
-            aura_core::authority::AuthorityState { tree_state, facts }
+            Ok(aura_core::authority::AuthorityState { tree_state, facts })
         }
-        JournalNamespace::Context(_) => {
-            panic!("Cannot reduce context journal as authority state");
-        }
+        JournalNamespace::Context(_) => Err(ReductionNamespaceError::ContextAsAuthority),
     }
 }
 
@@ -296,8 +313,13 @@ pub fn reduce_authority(journal: &Journal) -> aura_core::authority::AuthoritySta
 ///
 /// This is the main entry point for reducing journal facts to a TreeState.
 /// It delegates to reduce_authority for the actual work.
-pub fn reduce_account_facts(journal: &Journal) -> TreeState {
-    reduce_authority(journal).tree_state
+///
+/// # Errors
+///
+/// Returns `ReductionNamespaceError::ContextAsAuthority` if the journal
+/// has a Context namespace instead of an Authority namespace.
+pub fn reduce_account_facts(journal: &Journal) -> Result<TreeState, ReductionNamespaceError> {
+    Ok(reduce_authority(journal)?.tree_state)
 }
 
 /// Enhanced reduction with state ordering validation
@@ -437,7 +459,12 @@ pub enum RelationalBindingType {
 ///
 /// This function computes the current relational state by processing
 /// all relational facts and flow budget facts.
-pub fn reduce_context(journal: &Journal) -> RelationalState {
+///
+/// # Errors
+///
+/// Returns `ReductionNamespaceError::AuthorityAsContext` if the journal
+/// has an Authority namespace instead of a Context namespace.
+pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNamespaceError> {
     match &journal.namespace {
         JournalNamespace::Context(context_id) => {
             let mut bindings = Vec::new();
@@ -570,15 +597,13 @@ pub fn reduce_context(journal: &Journal) -> RelationalState {
                 );
             }
 
-            RelationalState {
+            Ok(RelationalState {
                 bindings,
                 flow_budgets,
                 channel_epochs,
-            }
+            })
         }
-        JournalNamespace::Authority(_) => {
-            panic!("Cannot reduce authority journal as relational state");
-        }
+        JournalNamespace::Authority(_) => Err(ReductionNamespaceError::AuthorityAsContext),
     }
 }
 
@@ -644,15 +669,23 @@ fn select_pending_bump(
 /// Compute snapshot state for garbage collection
 ///
 /// This identifies facts that can be superseded by a snapshot.
-pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<OrderTime>) {
+///
+/// # Errors
+///
+/// Returns `ReductionNamespaceError` if the journal namespace doesn't match
+/// the expected namespace for reduction.
+pub fn compute_snapshot(
+    journal: &Journal,
+    sequence: u64,
+) -> Result<(Hash32, Vec<OrderTime>), ReductionNamespaceError> {
     // Compute hash of current state
     let state_hash = match &journal.namespace {
         JournalNamespace::Authority(_) => {
-            let state = reduce_authority(journal);
+            let state = reduce_authority(journal)?;
             compute_authority_state_hash(&state)
         }
         JournalNamespace::Context(_) => {
-            let state = reduce_context(journal);
+            let state = reduce_context(journal)?;
             compute_relational_state_hash(&state)
         }
     };
@@ -669,7 +702,7 @@ pub fn compute_snapshot(journal: &Journal, sequence: u64) -> (Hash32, Vec<OrderT
         })
         .collect();
 
-    (state_hash, superseded_facts)
+    Ok((state_hash, superseded_facts))
 }
 
 // ==== AMP Garbage Collection Helpers ====
@@ -821,16 +854,16 @@ mod tests {
 
     #[test]
     fn test_reduce_empty_authority_journal() {
-        let auth_id = AuthorityId::new();
+        let auth_id = AuthorityId::new_from_entropy([13u8; 32]);
         let journal = Journal::new(JournalNamespace::Authority(auth_id));
 
-        let state = reduce_authority(&journal);
+        let state = reduce_authority(&journal).unwrap();
         assert_eq!(state.facts.len(), 0);
     }
 
     #[test]
     fn test_reduce_context_with_bindings() {
-        let ctx_id = ContextId::new();
+        let ctx_id = ContextId::new_from_entropy([14u8; 32]);
         let mut journal = Journal::new(JournalNamespace::Context(ctx_id));
 
         // Add a guardian binding fact
@@ -838,15 +871,15 @@ mod tests {
             order: OrderTime([1u8; 32]),
             timestamp: TimeStamp::OrderClock(OrderTime([1u8; 32])),
             content: FactContent::Relational(RelationalFact::GuardianBinding {
-                account_id: AuthorityId::new(),
-                guardian_id: AuthorityId::new(),
+                account_id: AuthorityId::new_from_entropy([15u8; 32]),
+                guardian_id: AuthorityId::new_from_entropy([16u8; 32]),
                 binding_hash: Hash32::default(),
             }),
         };
 
         journal.add_fact(fact).unwrap();
 
-        let state = reduce_context(&journal);
+        let state = reduce_context(&journal).unwrap();
         assert_eq!(state.bindings.len(), 1);
         matches!(
             state.bindings[0].binding_type,
@@ -856,7 +889,7 @@ mod tests {
 
     #[test]
     fn amp_routine_bump_respects_spacing_rule() {
-        let ctx_id = ContextId::new();
+        let ctx_id = ContextId::new_from_entropy([17u8; 32]);
         let channel = ChannelId::from_bytes([1u8; 32]);
         let mut journal = Journal::new(JournalNamespace::Context(ctx_id));
 
@@ -896,7 +929,7 @@ mod tests {
             })
             .unwrap();
 
-        let state = reduce_context(&journal);
+        let state = reduce_context(&journal).unwrap();
         let ch_state = state.channel_epochs.get(&channel).unwrap(); // Test expectation - intentional panic on test failure
         assert!(ch_state.pending_bump.is_none());
         assert_eq!(ch_state.chan_epoch, 0);
@@ -905,7 +938,7 @@ mod tests {
 
     #[test]
     fn amp_emergency_bump_bypasses_spacing_rule() {
-        let ctx_id = ContextId::new();
+        let ctx_id = ContextId::new_from_entropy([18u8; 32]);
         let channel = ChannelId::from_bytes([3u8; 32]);
         let mut journal = Journal::new(JournalNamespace::Context(ctx_id));
 
@@ -945,7 +978,7 @@ mod tests {
             })
             .unwrap();
 
-        let state = reduce_context(&journal);
+        let state = reduce_context(&journal).unwrap();
         let ch_state = state.channel_epochs.get(&channel).unwrap(); // Test expectation - intentional panic on test failure
         let pending = ch_state.pending_bump.as_ref().unwrap(); // Test expectation - intentional panic on test failure
         assert_eq!(pending.new_epoch, 1);
@@ -953,16 +986,19 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Cannot reduce context journal as authority state")]
     fn test_reduce_wrong_namespace_type() {
-        let ctx_id = ContextId::new();
+        let ctx_id = ContextId::new_from_entropy([19u8; 32]);
         let journal = Journal::new(JournalNamespace::Context(ctx_id));
-        let _ = reduce_authority(&journal);
+        let result = reduce_authority(&journal);
+        assert!(
+            matches!(result, Err(ReductionNamespaceError::ContextAsAuthority)),
+            "Expected ContextAsAuthority error when reducing context journal as authority"
+        );
     }
 
     #[test]
     fn amp_reduction_order_independent() {
-        let ctx = ContextId::new();
+        let ctx = ContextId::new_from_entropy([20u8; 32]);
         let channel = ChannelId::from_bytes([7u8; 32]);
 
         let checkpoint = Fact {
@@ -1004,8 +1040,8 @@ mod tests {
         journal_b.add_fact(proposed).unwrap();
         journal_b.add_fact(checkpoint).unwrap();
 
-        let state_a = reduce_context(&journal_a);
-        let state_b = reduce_context(&journal_b);
+        let state_a = reduce_context(&journal_a).unwrap();
+        let state_b = reduce_context(&journal_b).unwrap();
         assert_eq!(
             state_a.channel_epochs.get(&channel),
             state_b.channel_epochs.get(&channel)

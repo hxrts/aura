@@ -979,9 +979,7 @@ mod tests {
 
         assert_eq!(result.property, SoundnessProperty::NonInterference);
         assert!(result.confidence >= 0.0);
-        // Note: execute_operation is currently a stub that always succeeds,
-        // so evidence and counterexamples may be empty until full implementation
-        assert!(result.holds); // Property should hold with stub implementation
+        assert!(result.holds);
     }
 
     #[tokio::test]

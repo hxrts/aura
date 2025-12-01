@@ -365,7 +365,7 @@ mod tests {
     #[tokio::test]
     async fn test_authority_management() {
         let ctx = TuiContext::with_defaults();
-        let auth_id = aura_core::AuthorityId::new();
+        let auth_id = crate::ids::authority_id("tui:test-authority");
 
         ctx.set_authority(auth_id).await;
         assert_eq!(ctx.authority().await, Some(auth_id));

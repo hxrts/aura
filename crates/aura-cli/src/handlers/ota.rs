@@ -6,15 +6,14 @@
 use anyhow::{Context, Result};
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_core::effects::{ConsoleEffects, StorageEffects};
-use aura_core::{AccountId, Hash32, SemanticVersion};
+use aura_core::{hash, AccountId, Hash32, SemanticVersion};
 use aura_sync::maintenance::{IdentityEpochFence, UpgradeProposal};
 use aura_sync::protocols::ota::UpgradeKind;
-use blake3::Hasher;
 use std::fs;
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::OtaAction;
+use crate::{ids, OtaAction};
 
 /// Handle OTA commands through effects
 pub async fn handle_ota(
@@ -90,7 +89,10 @@ async fn propose_upgrade(
     let artifact_hash = compute_artifact_hash(download_url)?;
 
     let proposal = UpgradeProposal {
-        package_id: Uuid::new_v4(),
+        package_id: ids::uuid(&format!(
+            "ota:{}:{}:{}:{}",
+            major, minor, patch, download_url
+        )),
         version,
         artifact_hash,
         artifact_uri: Some(download_url.to_string()),
@@ -220,7 +222,7 @@ async fn get_stats(_ctx: &EffectContext, effects: &AuraEffectSystem) -> Result<(
 }
 
 fn compute_artifact_hash(download_url: &str) -> Result<Hash32> {
-    let mut hasher = Hasher::new();
+    let mut hasher = hash::hasher();
     let path = Path::new(download_url);
     if path.exists() {
         let data = fs::read(path)?;
@@ -229,7 +231,7 @@ fn compute_artifact_hash(download_url: &str) -> Result<Hash32> {
         hasher.update(download_url.as_bytes());
     }
     let digest = hasher.finalize();
-    Ok(Hash32(*digest.as_bytes()))
+    Ok(Hash32::new(digest))
 }
 
 async fn list_saved_proposals(effects: &AuraEffectSystem) -> Result<Vec<UpgradeProposal>> {

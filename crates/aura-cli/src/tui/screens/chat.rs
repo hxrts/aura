@@ -480,7 +480,7 @@ impl Screen for ChatScreen {
 
 /// Format a timestamp for display
 fn format_timestamp(ts: u64) -> String {
-    // Simple formatting - in production would use chrono
+    // Simple formatting suitable for offline TUI; swap for chrono/formatting helpers if needed
     let hours = (ts / 3600000) % 24;
     let minutes = (ts / 60000) % 60;
     format!("{:02}:{:02}", hours, minutes)

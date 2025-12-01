@@ -116,7 +116,7 @@ impl TestDevice {
         let network_effects = Arc::clone(&effects) as Arc<dyn NetworkEffects>;
 
         // Create network transport
-        let context_id = aura_core::ContextId::new();
+        let context_id = aura_core::ContextId::new_from_entropy([0u8; 32]);
         let transport = NetworkTransport::new(device_id, network_effects, context_id);
 
         // Create SBB system

@@ -57,7 +57,10 @@ pub use aura_core::{ChunkId, ContentId, ContentSize};
 
 // Re-export main APIs
 pub use capabilities::{AccessDecision, StorageCapability, StoragePermission, StorageResource};
-pub use chunk::{compute_chunk_layout, ChunkLayout, ChunkManifest, ContentManifest, ErasureConfig};
+pub use chunk::{
+    compute_chunk_layout, plan_chunk_layout_from_size, ChunkLayout, ChunkManifest, ContentManifest,
+    ErasureConfig,
+};
 pub use crdt::{StorageIndex, StorageOpLog, StorageState};
 pub use errors::StorageError;
 pub use local::{

@@ -165,15 +165,22 @@ pub async fn finalize_amp_bump_with_journal_default<J: AmpJournalEffects>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::frost::Share;
-    use aura_core::AuthorityId;
+    use aura_core::{frost::Share, AuthorityId, ContextId};
     use std::collections::HashMap;
+
+    fn authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn context(seed: u8) -> ContextId {
+        ContextId::new_from_entropy([seed; 32])
+    }
 
     #[tokio::test]
     async fn amp_consensus_missing_keys_fails() {
         let prestate = Prestate::new(vec![], aura_core::Hash32::default());
         let proposal = ProposedChannelEpochBump {
-            context: aura_core::identifiers::ContextId::new(),
+            context: context(1),
             channel: aura_core::identifiers::ChannelId::from_bytes([1u8; 32]),
             parent_epoch: 0,
             new_epoch: 1,
@@ -181,7 +188,7 @@ mod tests {
             reason: aura_journal::fact::ChannelBumpReason::Routine,
         };
 
-        let witnesses = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
+        let witnesses = vec![authority(10), authority(11), authority(12)];
         let key_packages: HashMap<AuthorityId, Share> = HashMap::new();
 
         // Create test FROST keys using testkit (minimum valid parameters)

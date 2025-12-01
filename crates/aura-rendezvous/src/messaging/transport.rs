@@ -804,7 +804,7 @@ impl aura_core::effects::FlowBudgetEffects for GuardEffectArc {
 
         Ok(aura_core::Receipt::new(
             *context,
-            AuthorityId::new(),
+            AuthorityId::default(),
             *peer,
             updated_budget.epoch,
             cost,
@@ -1019,7 +1019,7 @@ impl SbbFloodingCoordinator {
     pub fn set_transport_sender(&mut self, sender: Arc<dyn TransportSender>) {
         // Store transport sender reference for use in forward_to_peer
         // Note: This would require adding a field to store the sender in SbbFloodingCoordinator
-        // For now, log that the sender was configured
+        // Sender configured; transport integration handled by underlying NetworkTransport
         tracing::debug!("Transport sender configured for flooding coordinator");
         // The actual integration is handled at the SbbTransportBridge level
         let _ = sender; // Use the sender parameter to avoid unused warnings
@@ -1135,7 +1135,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rendezvous_offer_creation() -> Result<(), Box<dyn std::error::Error>> {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let effects = test_effects(device_id)?;
         let bridge = SbbTransportBridge::new(device_id, effects);
 
@@ -1162,7 +1162,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_message_handling() -> Result<(), Box<dyn std::error::Error>> {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
         let effects = test_effects(device_id)?;
         let bridge = SbbTransportBridge::new(device_id, effects);
 
@@ -1172,7 +1172,7 @@ mod tests {
 
         let message = SbbMessageType::RendezvousFlood {
             envelope,
-            from_peer: Some(DeviceId::new()),
+            from_peer: Some(DeviceId::new_from_entropy([3u8; 32])),
         };
 
         // Should handle message without error
@@ -1183,9 +1183,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_transport_sender() {
-        let peer1 = DeviceId::new();
-        let peer2 = DeviceId::new();
-        let peer3 = DeviceId::new();
+        let peer1 = DeviceId::new_from_entropy([4u8; 32]);
+        let peer2 = DeviceId::new_from_entropy([5u8; 32]);
+        let peer3 = DeviceId::new_from_entropy([6u8; 32]);
 
         let sender = MockTransportSender::new(vec![peer1, peer2]);
 
@@ -1216,13 +1216,13 @@ mod tests {
         let system = Arc::new(aura_agent::AuraEffectSystem::testing(&config)?);
         let effects = system.clone() as Arc<dyn NetworkEffects>;
         let guard = system.clone() as Arc<dyn AuraEffects>;
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([84u8; 32]);
         let transport = NetworkTransport::new(device_id, effects, context_id);
 
         let sender = NetworkTransportSender::new(transport, guard, AuthorityId::from(device_id.0));
 
         // Should create successfully
-        let unreachable_peer = DeviceId::new();
+        let unreachable_peer = DeviceId::new_from_entropy([7u8; 32]);
         assert!(!sender.is_peer_reachable(&unreachable_peer).await);
         Ok(())
     }
@@ -1241,7 +1241,7 @@ mod tests {
         let system = Arc::new(aura_agent::AuraEffectSystem::testing(&config)?);
         let network_effects = system.clone() as Arc<dyn NetworkEffects>;
         let guard = system.clone() as Arc<dyn AuraEffects>;
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([85u8; 32]);
         let transport = NetworkTransport::new(device_id, network_effects, context_id);
         let sender = NetworkTransportSender::new(transport, guard, AuthorityId::from(device_id.0));
 

@@ -216,25 +216,34 @@ impl AuraHandler for UnifiedAuraHandlerBridge {
         _session: LocalSessionType,
         _ctx: &AuraContext,
     ) -> Result<(), AuraHandlerError> {
-        // Session execution would typically use choreographic effects
-        // For now, provide a basic implementation that delegates to choreographic effects
         let effects_guard = self.effects.lock().await;
+        let session_id = effects_guard.random_uuid().await;
+        let roles = effects_guard.all_roles();
 
-        // Convert session to choreographic operations (simplified)
-        // In a full implementation, this would use the session type algebra
-        // to compile session types to choreographic effects
+        effects_guard
+            .start_session(session_id, roles.clone())
+            .await
+            .map_err(|e| AuraHandlerError::SessionExecution {
+                source: Box::new(e),
+            })?;
 
-        // For demonstration, we'll emit a choreographic event
         let event = ChoreographyEvent::PhaseStarted {
             phase: "session_start".to_string(),
-            participants: vec![], // Would be derived from session type
+            participants: roles,
         };
 
         effects_guard.emit_choreo_event(event).await.map_err(|e| {
             AuraHandlerError::SessionExecution {
                 source: Box::new(e),
             }
-        })
+        })?;
+
+        effects_guard
+            .end_session()
+            .await
+            .map_err(|e| AuraHandlerError::SessionExecution {
+                source: Box::new(e),
+            })
     }
 
     fn supports_effect(&self, effect_type: EffectType) -> bool {

@@ -270,7 +270,7 @@ impl SnapshotProtocol {
 
     /// Commit a snapshot after collecting approvals
     ///
-    /// Note: Callers should obtain `completion_id` via `RandomEffects` or use `Uuid::new_v4()` in tests
+    /// Note: Callers should obtain `completion_id` via `RandomEffects` or use `Uuid::from_bytes(10u128.to_be_bytes())` in tests
     pub fn commit(
         &self,
         proposal: SnapshotProposal,
@@ -335,7 +335,7 @@ impl Default for SnapshotProtocol {
 // =============================================================================
 
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)] // Test code uses Uuid::new_v4() for test data generation
+#[allow(clippy::disallowed_methods)] // Test code uses Uuid::from_bytes(11u128.to_be_bytes()) for test data generation
 mod tests {
     use super::*;
 
@@ -362,7 +362,12 @@ mod tests {
         assert!(!protocol.is_pending());
 
         let (_guard, proposal) = protocol
-            .propose(device, 10, Hash32([0; 32]), Uuid::new_v4())
+            .propose(
+                device,
+                10,
+                Hash32([0; 32]),
+                Uuid::from_bytes(12u128.to_be_bytes()),
+            )
             .unwrap();
 
         assert!(protocol.is_pending());
@@ -373,7 +378,12 @@ mod tests {
 
         // Second proposal should fail
         assert!(protocol
-            .propose(device, 11, Hash32([0; 32]), uuid::Uuid::new_v4())
+            .propose(
+                device,
+                11,
+                Hash32([0; 32]),
+                uuid::Uuid::from_bytes(13u128.to_be_bytes())
+            )
             .is_err());
     }
 
@@ -388,7 +398,12 @@ mod tests {
         let device = DeviceId::from_bytes([1; 32]);
 
         let (_guard, proposal) = protocol
-            .propose(device, 10, Hash32([0; 32]), Uuid::new_v4())
+            .propose(
+                device,
+                10,
+                Hash32([0; 32]),
+                Uuid::from_bytes(30u128.to_be_bytes()),
+            )
             .unwrap();
 
         let approvals = vec![
@@ -405,7 +420,7 @@ mod tests {
         ];
 
         let result = protocol
-            .commit(proposal, approvals, Uuid::new_v4())
+            .commit(proposal, approvals, Uuid::from_bytes(31u128.to_be_bytes()))
             .unwrap();
         assert!(result.committed);
         assert!(!protocol.is_pending());

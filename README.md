@@ -52,9 +52,9 @@ The TUI requires the `development` feature which includes the simulator and test
 nix develop
 
 # Build CLI with development features (TUI + simulator + testkit)
-cargo build -p aura-cli --features development --release
+cargo build -p aura-cli --bin aura --features development --release
 
-# The binary is at: target/release/aura
+# The binary used in the demo flow below: ./target/release/aura
 ```
 
 ### Running the TUI
@@ -64,7 +64,7 @@ cargo build -p aura-cli --features development --release
 The interactive demo walks through Bob's guardian recovery journey:
 
 ```bash
-# Interactive demo (default - press Enter/Space to advance through phases)
+# Interactive demo (default: interactive; press Enter/Space to advance)
 ./target/release/aura demo human-agent
 
 # With auto-advance (non-interactive):

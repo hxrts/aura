@@ -300,7 +300,7 @@ mod tests {
             prestate_hash: Hash32::default(),
             operation_hash: Hash32::default(),
             threshold_signature: None,
-            attester_set: vec![AuthorityId::new()],
+            attester_set: vec![AuthorityId::new_from_entropy([49u8; 32])],
             threshold_met: true,
         };
 

@@ -331,7 +331,10 @@ impl SystemEffects for MonitoringSystemHandler {
     }
 
     async fn restart_component(&self, component: &str) -> Result<(), SystemError> {
-        tracing::warn!(component = component, "Restart requested via monitoring handler");
+        tracing::warn!(
+            component = component,
+            "Restart requested via monitoring handler"
+        );
         Err(SystemError::OperationFailed {
             message: "restart_component not supported in monitoring handler".to_string(),
         })

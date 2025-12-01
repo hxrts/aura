@@ -353,7 +353,7 @@ mod tests {
     #[test]
     fn test_consistency_proof() {
         let handler: MvHandler<TestSet> = MvHandler::default();
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::deterministic_test_id();
 
         let proof = handler.generate_consistency_proof(device_id);
         assert_eq!(proof.participant, device_id);

@@ -18,6 +18,7 @@
 pub mod config;
 pub mod connection;
 pub mod envelope;
+pub mod endpoint;
 
 #[cfg(test)]
 mod tests;

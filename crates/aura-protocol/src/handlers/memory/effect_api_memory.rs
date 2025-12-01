@@ -9,10 +9,12 @@ use std::sync::Mutex;
 
 /// Memory-based effect_api handler for testing
 pub struct MemoryLedgerHandler {
-    // Placeholder event buffer for in-memory testing
-    _events: Vec<Vec<u8>>,
+    /// In-memory event log with monotonic epochs (epoch = index + 1)
+    events: Mutex<Vec<(u64, Vec<u8>)>>,
     random: Arc<dyn RandomEffects>,
     time: Arc<dyn PhysicalTimeEffects>,
+    /// Stable device ID for this handler
+    device_id: aura_core::identifiers::DeviceId,
 }
 
 impl MemoryLedgerHandler {
@@ -21,25 +23,32 @@ impl MemoryLedgerHandler {
     /// # Parameters
     /// - `random`: RandomEffects implementation for UUID generation and secrets
     /// - `time`: PhysicalTimeEffects implementation for timestamp operations
+    /// - `device_id`: Stable device ID for this handler
     ///
     /// This follows Layer 4 orchestration pattern where handlers store effect dependencies
     /// for coordinated multi-effect operations.
-    pub fn new(random: Arc<dyn RandomEffects>, time: Arc<dyn PhysicalTimeEffects>) -> Self {
+    pub fn new(
+        random: Arc<dyn RandomEffects>,
+        time: Arc<dyn PhysicalTimeEffects>,
+        device_id: aura_core::identifiers::DeviceId,
+    ) -> Self {
         Self {
-            _events: Vec::new(),
+            events: Mutex::new(Vec::new()),
             random,
             time,
+            device_id,
         }
     }
 }
 
 impl Default for MemoryLedgerHandler {
     fn default() -> Self {
-        // Default uses mock handlers for testing
+        // Default uses mock handlers for testing with deterministic device ID
         use aura_effects::time::PhysicalTimeHandler;
         Self::new(
             Arc::new(DeterministicRandom::new([1u8; 32])),
             Arc::new(PhysicalTimeHandler),
+            aura_core::identifiers::DeviceId::deterministic_test_id(),
         )
     }
 }
@@ -95,16 +104,25 @@ impl RandomEffects for DeterministicRandom {
 impl EffectApiEffects for MemoryLedgerHandler {
     // Removed old methods that are no longer part of the trait
 
-    async fn append_event(&self, _event: Vec<u8>) -> Result<(), EffectApiError> {
+    async fn append_event(&self, event: Vec<u8>) -> Result<(), EffectApiError> {
+        let mut events = self.events.lock().unwrap();
+        let next_epoch = (events.len() as u64) + 1;
+        events.push((next_epoch, event));
         Ok(())
     }
 
     async fn current_epoch(&self) -> Result<u64, EffectApiError> {
-        Ok(0)
+        let events = self.events.lock().unwrap();
+        Ok(events.len() as u64)
     }
 
-    async fn events_since(&self, _epoch: u64) -> Result<Vec<Vec<u8>>, EffectApiError> {
-        Ok(vec![])
+    async fn events_since(&self, epoch: u64) -> Result<Vec<Vec<u8>>, EffectApiError> {
+        let events = self.events.lock().unwrap();
+        Ok(events
+            .iter()
+            .filter(|(e, _)| *e > epoch)
+            .map(|(_, bytes)| bytes.clone())
+            .collect())
     }
 
     async fn is_device_authorized(
@@ -181,7 +199,7 @@ impl EffectApiEffects for MemoryLedgerHandler {
     async fn effect_api_device_id(
         &self,
     ) -> Result<aura_core::identifiers::DeviceId, EffectApiError> {
-        Ok(aura_core::identifiers::DeviceId::new()) // Memory implementation returns a new device ID
+        Ok(self.device_id)
     }
 
     async fn new_uuid(&self) -> Result<uuid::Uuid, EffectApiError> {

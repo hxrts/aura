@@ -416,7 +416,7 @@ impl FrostConsensusOrchestrator {
             signing_share,
             verifying_share,
             *frost_group_pkg.verifying_key(),
-            1, // placeholder min_signers until full FROST integration is wired
+            self.config.threshold,
         );
 
         // Convert commitments to FROST format
@@ -537,10 +537,15 @@ pub fn verify_threshold_signature(
 mod tests {
     use super::*;
     use aura_core::epochs::Epoch;
+    use aura_core::AuthorityId;
+
+    fn authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
 
     #[tokio::test]
     async fn test_orchestrator_creation() {
-        let witnesses = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
+        let witnesses = vec![authority(1), authority(2), authority(3)];
         let config = ConsensusConfig::new(2, witnesses, Epoch::from(1));
 
         let orchestrator = FrostConsensusOrchestrator::new(
@@ -560,7 +565,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_epoch_change() {
-        let witnesses = vec![AuthorityId::new(), AuthorityId::new()];
+        let witnesses = vec![authority(10), authority(11)];
         let config = ConsensusConfig::new(2, witnesses, Epoch::from(1));
 
         let orchestrator = FrostConsensusOrchestrator::new(

@@ -571,7 +571,7 @@ mod tests {
 
     #[test]
     fn test_relationship_forwarding_logic() {
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId::new_from_entropy([1u8; 32]);
         let rel_id = RelationshipId::new([0u8; 32]);
         let now = 1000000u64; // Test timestamp
 
@@ -600,11 +600,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_capability_aware_coordinator() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
         let mut coordinator = CapabilityAwareSbbCoordinator::new(device_id);
 
-        let peer1 = DeviceId::new();
-        let peer2 = DeviceId::new();
+        let peer1 = DeviceId::new_from_entropy([3u8; 32]);
+        let peer2 = DeviceId::new_from_entropy([4u8; 32]);
         let rel_id = RelationshipId::new([0u8; 32]);
         let now = 1000000u64; // Test timestamp
 
@@ -632,10 +632,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_envelope_flooding_with_capabilities() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([5u8; 32]);
         let mut coordinator = CapabilityAwareSbbCoordinator::new(device_id);
 
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId::new_from_entropy([6u8; 32]);
         let rel_id = RelationshipId::new([0u8; 32]);
         let now = 1000000u64; // Test timestamp
         coordinator.add_relationship(peer_id, rel_id, TrustLevel::Medium, false, now);

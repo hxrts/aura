@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_topic_id_creation() {
-        let session_id = SessionId::new();
+        let session_id = SessionId::from_uuid(uuid::Uuid::from_u128(1));
         let topic = TopicId::new(session_id, "test-topic".to_string());
 
         assert_eq!(topic.session_id, session_id);
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_topic_id_crdt_sync() {
-        let session_id = SessionId::new();
+        let session_id = SessionId::from_uuid(uuid::Uuid::from_u128(2));
         let topic = TopicId::crdt_sync(session_id, "journal-map");
 
         assert_eq!(topic.topic_name, "crdt-sync-journal-map");
@@ -210,8 +210,8 @@ mod tests {
 
     #[test]
     fn test_causal_context_happens_before() {
-        let device_a = DeviceId::new();
-        let device_b = DeviceId::new();
+        let device_a = DeviceId::new_from_entropy([1u8; 32]);
+        let device_b = DeviceId::new_from_entropy([2u8; 32]);
 
         let mut ctx1 = CausalContext::empty();
         ctx1.logical_time.vector.insert(device_a, 1);
@@ -227,8 +227,8 @@ mod tests {
 
     #[test]
     fn test_causal_context_concurrent() {
-        let device_a = DeviceId::new();
-        let device_b = DeviceId::new();
+        let device_a = DeviceId::new_from_entropy([3u8; 32]);
+        let device_b = DeviceId::new_from_entropy([4u8; 32]);
 
         let mut ctx1 = CausalContext::empty();
         ctx1.logical_time.vector.insert(device_a, 1);
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_causal_context_increment() {
-        let device = DeviceId::new();
+        let device = DeviceId::new_from_entropy([5u8; 32]);
         let mut ctx = CausalContext::empty();
 
         ctx.increment(device);
@@ -256,8 +256,8 @@ mod tests {
 
     #[test]
     fn test_causal_context_merge() {
-        let device_a = DeviceId::new();
-        let device_b = DeviceId::new();
+        let device_a = DeviceId::new_from_entropy([6u8; 32]);
+        let device_b = DeviceId::new_from_entropy([7u8; 32]);
 
         let mut ctx1 = CausalContext::empty();
         ctx1.logical_time.vector.insert(device_a, 2);

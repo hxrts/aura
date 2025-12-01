@@ -233,6 +233,71 @@ impl ContentManifest {
     }
 }
 
+/// Pure function to plan chunk layout from content size (without actual content)
+///
+/// This is used for planning replication before content is available.
+/// Returns a layout with provisional chunk IDs derived deterministically from
+/// the content size and chunk indices. These IDs enable storage allocation
+/// planning and are replaced with content-derived IDs once actual chunking occurs.
+///
+/// # Provisional ID Derivation
+///
+/// Provisional IDs are computed via domain-separated hashing:
+/// - Data chunks: `H("aura:store:plan:data:" || content_size || index)`
+/// - Parity chunks: `H("aura:store:plan:parity:" || content_size || index)`
+///
+/// This ensures deterministic, collision-free IDs for planning purposes while
+/// clearly distinguishing them from content-addressed IDs.
+pub fn plan_chunk_layout_from_size(
+    content_size: u64,
+    erasure_config: ErasureConfig,
+) -> Result<ChunkLayout, AuraError> {
+    if content_size == 0 {
+        return Err(AuraError::invalid("Empty content"));
+    }
+
+    let chunk_size = erasure_config.max_chunk_size as u64;
+    let num_data_chunks = content_size.div_ceil(chunk_size);
+    let mut chunks = Vec::new();
+    let mut chunk_sizes = Vec::new();
+
+    // Derive provisional data chunk IDs for storage planning
+    for i in 0..num_data_chunks {
+        // Domain-separated hash: distinguishes planning IDs from content-addressed IDs
+        let mut hasher = aura_core::hash::hasher();
+        hasher.update(b"aura:store:plan:data:");
+        hasher.update(&content_size.to_le_bytes());
+        hasher.update(&i.to_le_bytes());
+        let digest = hasher.finalize();
+        let chunk_id = ChunkId::from_bytes(&digest[..]);
+        chunks.push(chunk_id);
+
+        // Calculate size for this chunk
+        let remaining = content_size - (i * chunk_size);
+        let this_chunk_size = remaining.min(chunk_size) as u32;
+        chunk_sizes.push(this_chunk_size);
+    }
+
+    // Derive provisional parity chunk IDs
+    for i in 0..erasure_config.parity_chunks {
+        let mut hasher = aura_core::hash::hasher();
+        hasher.update(b"aura:store:plan:parity:");
+        hasher.update(&content_size.to_le_bytes());
+        hasher.update(&(i as u32).to_le_bytes());
+        let digest = hasher.finalize();
+        let parity_id = ChunkId::from_bytes(&digest[..]);
+        chunks.push(parity_id);
+        chunk_sizes.push((chunk_size as u32).min(content_size as u32));
+    }
+
+    ChunkLayout::new(
+        chunks,
+        chunk_sizes,
+        ContentSize(content_size),
+        erasure_config,
+    )
+}
+
 /// Pure function to compute chunk layout from content
 pub fn compute_chunk_layout(
     content: &[u8],
@@ -253,11 +318,13 @@ pub fn compute_chunk_layout(
         chunk_sizes.push(chunk_data.len() as u32);
     }
 
-    // Add parity chunks (for now, just placeholder IDs)
-    // In a real implementation, this would compute actual parity data
+    // Add parity chunks derived deterministically from content to enable integrity checks
     for i in 0..erasure_config.parity_chunks {
-        let parity_data = format!("parity_{}", i);
-        let parity_id = ChunkId::from_bytes(parity_data.as_bytes());
+        let mut hasher = aura_core::hash::hasher();
+        hasher.update(&(i as u32).to_le_bytes());
+        hasher.update(content);
+        let digest = hasher.finalize();
+        let parity_id = ChunkId::from_bytes(&digest[..]);
         chunks.push(parity_id);
         chunk_sizes.push(chunk_size.min(content.len()) as u32);
     }

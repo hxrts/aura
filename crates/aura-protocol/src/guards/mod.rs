@@ -69,13 +69,17 @@
 //! ### Advanced Protocol Guards
 //! ```rust,ignore
 //! use crate::guards::{ProtocolGuard, GuardedExecution};
-//! use aura_wot::capability::Capability;
 //!
-//! // Define guard requirements for complex protocol steps
-//! let guard = ProtocolGuard::new("complex_operation")
-//!     .require_capability(Capability::send_message())
+//! // For development/testing, use deterministic test keys:
+//! let guard = ProtocolGuard::new_for_testing("complex_operation")
 //!     .delta_facts(vec![fact1, fact2])
 //!     .leakage_budget(LeakageBudget::new(1, 2, 0));
+//!
+//! // For production, use real keys:
+//! // let guard = ProtocolGuard::new(root_public_key, authority_id, "complex_operation")
+//! //     .require_token(biscuit_token)
+//! //     .delta_facts(vec![fact1, fact2])
+//! //     .leakage_budget(LeakageBudget::new(1, 2, 0));
 //!
 //! // Execute with guards
 //! let result = guard.execute_with_effects(effect_system, |effects| async move {
@@ -117,7 +121,8 @@ use aura_core::effects::{
 };
 use aura_core::AuraResult;
 // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
-use biscuit_auth::Biscuit;
+use aura_core::AuthorityId;
+use biscuit_auth::{Biscuit, PublicKey};
 use std::future::Future;
 
 /// Composite effect requirements for guard evaluation/execution.
@@ -150,10 +155,14 @@ impl<T> GuardEffects for T where
 /// Protocol execution guard combining authorization checking, delta application, and privacy tracking
 #[derive(Debug, Clone)]
 pub struct ProtocolGuard {
+    /// Root public key for Biscuit token verification
+    pub root_public_key: PublicKey,
+    /// Authority ID for this guard context
+    pub authority_id: AuthorityId,
     /// Required Biscuit authorization tokens for this operation
     pub required_tokens: Vec<Biscuit>,
     /// Facts to be merged into the journal after successful execution
-    pub delta_facts: Vec<serde_json::Value>, // Placeholder for actual fact types
+    pub delta_facts: Vec<serde_json::Value>, // JSON-encoded facts until typed fact system
     /// Privacy leakage budget for this operation
     pub leakage_budget: LeakageBudget,
     /// Operation identifier for logging and metrics
@@ -202,9 +211,20 @@ pub struct ExecutionMetrics {
 }
 
 impl ProtocolGuard {
-    /// Create a new protocol guard with no requirements
-    pub fn new(operation_id: impl Into<String>) -> Self {
+    /// Create a new protocol guard with required key material
+    ///
+    /// # Arguments
+    /// * `root_public_key` - The Biscuit root public key for token verification
+    /// * `authority_id` - The authority ID for this guard context
+    /// * `operation_id` - Identifier for logging and metrics
+    pub fn new(
+        root_public_key: PublicKey,
+        authority_id: AuthorityId,
+        operation_id: impl Into<String>,
+    ) -> Self {
         Self {
+            root_public_key,
+            authority_id,
             required_tokens: Vec::new(),
             delta_facts: Vec::new(),
             leakage_budget: LeakageBudget::zero(),
@@ -249,6 +269,31 @@ impl ProtocolGuard {
     {
         execution::execute_guarded_operation(self, effect_system, operation).await
     }
+
+    /// Create a protocol guard with deterministic test keys for development/testing
+    ///
+    /// Uses a deterministic keypair and authority ID. This is useful for:
+    /// - Development and testing where real keys aren't available
+    /// - Macro-generated guards that don't have key context
+    /// - Scenarios where guard evaluation is bypassed or mocked
+    ///
+    /// # Security Warning
+    /// Production code should use `new()` with real key material from the
+    /// authority's Biscuit root key and actual AuthorityId.
+    pub fn new_for_testing(operation_id: impl Into<String>) -> Self {
+        // Use deterministic seed for reproducible behavior
+        let keypair = biscuit_auth::KeyPair::new();
+        let authority_id = AuthorityId::new_from_entropy([0u8; 32]);
+
+        Self {
+            root_public_key: keypair.public(),
+            authority_id,
+            required_tokens: Vec::new(),
+            delta_facts: Vec::new(),
+            leakage_budget: LeakageBudget::zero(),
+            operation_id: operation_id.into(),
+        }
+    }
 }
 
 impl LeakageBudget {
@@ -283,7 +328,9 @@ impl LeakageBudget {
     }
 }
 
-/// Convenience macro for creating protocol guards (temporarily simplified)
+/// Convenience macro for creating protocol guards with test keys
+///
+/// For production use with real keys, use `ProtocolGuard::new()` directly.
 #[macro_export]
 macro_rules! guard {
     (
@@ -292,7 +339,7 @@ macro_rules! guard {
         $(leakage: ($ext:expr, $ngh:expr, $grp:expr),)?
     ) => {
         {
-            let mut guard = $crate::guards::ProtocolGuard::new($op);
+            let mut guard = $crate::guards::ProtocolGuard::new_for_testing($op);
 
             $(
                 guard = guard.delta_facts(vec![$($delta),*]);

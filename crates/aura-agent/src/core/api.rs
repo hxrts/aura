@@ -5,7 +5,10 @@
 use super::{AgentConfig, AgentError, AgentResult, AuthorityContext};
 use crate::runtime::system::RuntimeSystem;
 use crate::runtime::{EffectContext, EffectSystemBuilder};
-use aura_core::identifiers::AuthorityId;
+use aura_core::{
+    hash::hash,
+    identifiers::{AuthorityId, ContextId},
+};
 
 /// Main agent interface - thin facade delegating to runtime
 pub struct AuraAgent {
@@ -83,9 +86,10 @@ impl AgentBuilder {
             .ok_or_else(|| AgentError::config("Authority ID required"))?;
 
         // Build-time context used only for effect wiring
+        let context_entropy = hash(&authority_id.to_bytes());
         let temp_context = EffectContext::new(
             authority_id,
-            aura_core::identifiers::ContextId::new(),
+            ContextId::new_from_entropy(context_entropy),
             aura_core::effects::ExecutionMode::Production,
         );
 

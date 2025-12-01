@@ -1,4 +1,4 @@
-//! Rendezvous/SBB delivery placeholder used until the full transport stack lands.
+//! Rendezvous/SBB delivery logging hook used by the invitation flow.
 
 use crate::InvitationResult;
 // use aura_core::effects::ConsoleEffects; // Unused

@@ -302,7 +302,8 @@ mod tests {
     }
 
     fn sample_group_id() -> ChatGroupId {
-        ChatGroupId::from_uuid(Uuid::nil())
+        // Deterministic non-nil group id for tests
+        ChatGroupId::from_uuid(Uuid::from_bytes(42u128.to_be_bytes()))
     }
 
     fn sample_message(ts_ms: u64) -> ChatMessage {
@@ -320,7 +321,7 @@ mod tests {
         ChatMessage::new_text(
             ChatMessageId(message_id),
             sample_group_id(),
-            aura_core::identifiers::AuthorityId::from_uuid(Uuid::nil()),
+            aura_core::identifiers::AuthorityId::from_uuid(Uuid::from_bytes(7u128.to_be_bytes())),
             format!("hello-{ts_ms}"),
             timestamp,
         )

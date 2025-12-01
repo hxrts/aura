@@ -491,7 +491,7 @@ impl Default for BlockMessagesScreen {
 
 impl Screen for BlockMessagesScreen {
     fn screen_type(&self) -> ScreenType {
-        ScreenType::Block // Reuse Block screen type for now
+        ScreenType::Block
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Option<InputAction> {

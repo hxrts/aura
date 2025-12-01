@@ -400,7 +400,7 @@ impl AntiEntropyProtocol {
             .await
             .map_err(|e| sync_session_error(format!("Failed to get local journal: {}", e)))?;
 
-        // For now, use empty operations list - in full implementation,
+        // Currently uses empty operations list; transport-level sync fills in ops
         // this would come from the journal's operation log
         let local_ops: Vec<AttestedOp> = vec![];
 

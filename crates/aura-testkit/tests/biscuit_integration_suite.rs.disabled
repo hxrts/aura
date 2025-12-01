@@ -19,7 +19,7 @@ use aura_wot::{
 /// Helper function to convert legacy ResourceScope to new ResourceScope for bridge authorization
 fn convert_legacy_scope(legacy_scope: &LegacyResourceScope) -> ResourceScope {
     let authority_id = AuthorityId::new();
-    let context_id = ContextId::new();
+    let context_id = ContextId::new_from_entropy([0u8; 32]);
     aura_wot::resource_scope::legacy::convert_legacy_resource_scope(
         legacy_scope,
         authority_id,

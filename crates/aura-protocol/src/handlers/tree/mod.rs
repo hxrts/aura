@@ -7,5 +7,7 @@
 //! enabling separation between domain CRDT operations and protocol-layer orchestration.
 
 pub mod dummy;
+pub mod in_memory;
 
 pub use dummy::DummyTreeHandler;
+pub use in_memory::InMemoryTreeHandler;

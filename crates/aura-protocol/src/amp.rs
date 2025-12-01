@@ -130,7 +130,8 @@ pub async fn get_channel_state<A: AmpJournalEffects>(
     channel: ChannelId,
 ) -> Result<ChannelEpochState> {
     let journal = effects.fetch_context_journal(context).await?;
-    let state = reduce_context(&journal);
+    let state = reduce_context(&journal)
+        .map_err(|e| AuraError::internal(format!("context reduction failed: {e}")))?;
     state
         .channel_epochs
         .get(&channel)

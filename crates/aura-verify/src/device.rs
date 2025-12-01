@@ -77,21 +77,23 @@ pub fn verify_signature(
 // Tests commented out due to missing crypto functions in current aura_crypto API
 /*
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)] // Test code uses Uuid::new_v4() for test data generation
 mod tests {
     use super::*;
-    use aura_core::Effects;
+    use aura_core::hash;
     use aura_core::identifiers::DeviceId;
     use uuid::Uuid;
 
     #[test]
     fn test_verify_device_signature_success() {
-        let effects = Effects::test();
-        let device_id = DeviceId(Uuid::new_v4());
+        let digest = hash::hash(b"device-test-1");
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&digest[..16]);
+        let device_id = DeviceId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes));
 
         // Generate a key pair for testing
         let signing_key = aura_core::generate_ed25519_key();
-        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
+        let verifying_key = aura_core::ed25519_verifying_key(&signing_key)
+            .expect("test signing key should be valid");
 
         let message = b"test message";
         let signature = aura_core::ed25519_sign(&signing_key, message);
@@ -103,12 +105,15 @@ mod tests {
 
     #[test]
     fn test_verify_device_signature_invalid() {
-        let effects = Effects::test();
-        let device_id = DeviceId(Uuid::new_v4());
+        let digest = hash::hash(b"device-test-2");
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&digest[..16]);
+        let device_id = DeviceId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes));
 
         // Generate two different key pairs
         let signing_key1 = aura_core::generate_ed25519_key();
-        let verifying_key1 = aura_core::ed25519_verifying_key(&signing_key1);
+        let verifying_key1 = aura_core::ed25519_verifying_key(&signing_key1)
+            .expect("test signing key should be valid");
         let signing_key2 = aura_core::generate_ed25519_key();
 
         let message = b"test message";

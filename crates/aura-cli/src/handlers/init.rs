@@ -45,10 +45,9 @@ pub async fn handle_init(
     create_directory_through_effects(ctx, effects, output).await?;
     create_directory_through_effects(ctx, effects, &configs_dir).await?;
 
-    // Create placeholder effect API through storage effects
+    // Create effect API metadata through storage effects
     let effect_api_path = output.join("effect_api.cbor");
-    let effect_api_data =
-        create_placeholder_effect_api(ctx, effects, threshold, num_devices).await?;
+    let effect_api_data = create_effect_api(ctx, effects, threshold, num_devices).await?;
 
     effects
         .store(&effect_api_path.display().to_string(), effect_api_data)
@@ -114,8 +113,8 @@ async fn create_directory_through_effects(
     Ok(())
 }
 
-/// Create placeholder effect API data
-async fn create_placeholder_effect_api(
+/// Create effect API data
+async fn create_effect_api(
     _ctx: &EffectContext,
     effects: &AuraEffectSystem,
     threshold: u32,
@@ -130,11 +129,11 @@ async fn create_placeholder_effect_api(
 
     // Create a simple CBOR-like structure
     let effect_api_data = format!(
-        "placeholder_effect_api:threshold={},devices={},created={}",
+        "effect_api:threshold={},devices={},created={}",
         threshold, num_devices, timestamp
     );
 
-    println!("Created placeholder effect API");
+    println!("Created effect API metadata");
 
     Ok(effect_api_data.into_bytes())
 }

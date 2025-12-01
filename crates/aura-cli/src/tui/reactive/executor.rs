@@ -396,11 +396,9 @@ impl Default for QueryExecutor {
 
 /// Get current time in milliseconds
 fn now_millis() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    use aura_effects::time::PhysicalTimeHandler;
+
+    PhysicalTimeHandler::new().physical_time_now_ms()
 }
 
 #[cfg(test)]

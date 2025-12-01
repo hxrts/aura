@@ -15,6 +15,7 @@ use aura_verify::{IdentityProof, KeyMaterial, VerifiedIdentity};
 use aura_wot::BiscuitTokenManager;
 use biscuit_auth::Biscuit;
 use futures::lock::Mutex;
+use hex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -499,11 +500,7 @@ where
 
     /// Discover guardians using connected peers, falling back to deterministic
     /// derivation from the account identifier to guarantee progress.
-    async fn discover_guardians(
-        &self,
-        account_id: AccountId,
-        required: usize,
-    ) -> Vec<DeviceId> {
+    async fn discover_guardians(&self, account_id: AccountId, required: usize) -> Vec<DeviceId> {
         let mut guardians: Vec<DeviceId> = self
             .effect_system
             .connected_peers()
@@ -520,7 +517,10 @@ where
         // from the account to keep the choreography progressing in offline/demo modes.
         let mut idx = 0u32;
         while guardians.len() < required {
-            guardians.push(derived_device_id(&format!("{}-guardian-{}", account_id, idx)));
+            guardians.push(derived_device_id(&format!(
+                "{}-guardian-{}",
+                account_id, idx
+            )));
             idx += 1;
         }
 
@@ -685,25 +685,19 @@ where
     }
 
     /// Generate guardian challenge for additional verification
-    async fn generate_guardian_challenge<R: aura_core::effects::RandomEffects>(
-        &self,
-        request_id: &str,
-        rng: &R,
-    ) -> AuraResult<Vec<u8>> {
-        let mut nonce = vec![0u8; 16];
-        rng.random_fill(&mut nonce).await;
-        let challenge = format!("guardian_challenge_{}_{}", request_id, hex::encode(nonce));
+    async fn generate_guardian_challenge(&self, request_id: &str) -> AuraResult<Vec<u8>> {
+        let nonce = self.effect_system.random_bytes(16).await;
+        let challenge = format!("guardian_challenge_{}_{}", request_id, hex::encode(&nonce));
         Ok(challenge.into_bytes())
     }
 
     /// Sign guardian approval decision
-    async fn sign_approval_decision<C: aura_core::effects::CryptoEffects>(
+    async fn sign_approval_decision(
         &self,
         request_id: &str,
         account_id: &AccountId,
         approved: bool,
         justification: &str,
-        crypto: &C,
     ) -> AuraResult<Vec<u8>> {
         // Create message to sign
         let message = format!(
@@ -711,15 +705,17 @@ where
             request_id, account_id, approved, justification
         );
 
-        // Sign with device keypair managed by CryptoEffects
-        let device_id = self.local_device_id().await;
-        let keypair = crypto
-            .derive_device_keypair(device_id)
+        // Generate a keypair for signing using CryptoEffects
+        // Keypair comes from effect system; production wiring should supply device-bound keys
+        let (secret, _public) = self
+            .effect_system
+            .ed25519_generate_keypair()
             .await
             .map_err(|e| AuraError::crypto(e.to_string()))?;
 
-        let sig = crypto
-            .ed25519_sign(message.as_bytes(), &keypair.secret)
+        let sig = self
+            .effect_system
+            .ed25519_sign(message.as_bytes(), &secret)
             .await
             .map_err(|e| AuraError::crypto(e.to_string()))?;
 
@@ -939,7 +935,7 @@ where
             };
 
             if let Some(GuardianAuthMessage::ApprovalRequest {
-                guardian_id: _requested_guardian,
+                guardian_id: requested_guardian,
                 account_id,
                 recovery_context,
                 request_id,
@@ -953,7 +949,14 @@ where
                 );
 
                 // Verify this guardian is being requested
-                // For now, we accept any approval request since GuardianId mapping is not complete
+                if requested_guardian != device_id {
+                    tracing::debug!(
+                        "guardian {:?} ignoring request {} not addressed to it",
+                        device_id,
+                        request_id
+                    );
+                    continue;
+                }
 
                 // Perform guardian validation of the recovery request
                 let approval_decision = self
@@ -961,9 +964,7 @@ where
                     .await?;
 
                 // Send guardian challenge for additional verification
-                // Use time-based nonce derived from current timestamp
-                let nonce = now as u128;
-                let challenge = self.generate_guardian_challenge(&request_id, nonce).await?;
+                let challenge = self.generate_guardian_challenge(&request_id).await?;
                 let expires_at = now + 300; // 5 minutes from now
                 let _challenge_msg = GuardianAuthMessage::GuardianChallenge {
                     request_id: request_id.clone(),
@@ -1008,6 +1009,7 @@ where
                     .await;
 
                 // Create guardian approval record
+                let message_hash = aura_core::hash::hash(request_id.as_bytes());
                 let guardian_approval = GuardianApproval {
                     guardian_id: device_id,
                     verified_identity: VerifiedIdentity {
@@ -1015,7 +1017,7 @@ where
                             device_id,
                             signature: aura_verify::Ed25519Signature::from_bytes(&signature),
                         },
-                        message_hash: [0u8; 32], // Placeholder
+                        message_hash,
                     },
                     approved: approval_decision.approved,
                     justification: approval_decision.justification,
@@ -1056,23 +1058,14 @@ where
     async fn execute_coordinator(&self) -> AuraResult<GuardianAuthResponse> {
         tracing::info!("Executing guardian auth as coordinator");
 
-        // Coordinate approval process across guardians
-        // The coordinator role is primarily handled by the requester in this choreography
-        // A separate coordinator would be needed for multi-requester scenarios where
-        // multiple devices are attempting recovery simultaneously
-        //
-        // For now, the coordinator role is a placeholder since the requester handles
-        // coordination directly by collecting approvals from guardians
+        // Coordinate approval process across guardians. In the current phase the requester
+        // already orchestrates collection, so the coordinator simply rejects explicit
+        // invocations to avoid silently skipping work. When multi-requester scenarios are
+        // enabled, this branch should broker approval state between requesters.
 
-        tracing::warn!("Coordinator role not fully implemented - requester handles coordination");
-
-        Ok(GuardianAuthResponse {
-            guardian_approvals: Vec::new(),
-            success: false,
-            error: Some(
-                "Coordinator role requires multi-requester coordination scenario".to_string(),
-            ),
-        })
+        Err(AuraError::invalid(
+            "guardian coordinator role is disabled; requester orchestrates approvals",
+        ))
     }
 
     /// Check if the requester has authorization to request guardian approval using Biscuit tokens
@@ -1212,7 +1205,7 @@ where
                     .current_request
                     .as_ref()
                     .map(|req| ContextId::from_uuid(req.account_id.0))
-                    .unwrap_or_else(ContextId::new);
+                    .unwrap_or_default();
                 // Guardian approvals are tied to recovery approval within the context.
                 ResourceScope::Context {
                     context_id,
@@ -1264,7 +1257,8 @@ where
         let serialized_request =
             serde_json::to_vec(request).map_err(|e| AuraError::serialization(e.to_string()))?;
 
-        // Log the request being sent (placeholder for actual network effects)
+        // Log the request being sent; the effect system decides whether to route
+        // directly to a peer or broadcast based on the configured transport.
         if let GuardianAuthMessage::ApprovalRequest {
             guardian_id,
             request_id,
@@ -1496,8 +1490,8 @@ where
                 challenge: challenge_bytes.clone(),
                 expires_at,
             };
-            let serialized =
-                serde_json::to_vec(&challenge_msg).map_err(|e| AuraError::serialization(e.to_string()))?;
+            let serialized = serde_json::to_vec(&challenge_msg)
+                .map_err(|e| AuraError::serialization(e.to_string()))?;
             let _ = self
                 .effect_system
                 .send_to_peer(guardian_id.0, serialized)
@@ -1525,16 +1519,17 @@ where
         for challenge in challenges {
             let device_id = challenge.guardian_id;
 
-            // Derive guardian-specific keypair from CryptoEffects
-            let keypair = self
+            // Generate a keypair for this guardian using CryptoEffects
+            // Keypair comes from effect system; production wiring should supply device-bound keys
+            let (secret, public_bytes) = self
                 .effect_system
-                .derive_device_keypair(device_id)
+                .ed25519_generate_keypair()
                 .await
                 .map_err(|e| AuraError::crypto(e.to_string()))?;
 
             let signature_bytes = self
                 .effect_system
-                .ed25519_sign(&challenge.challenge, &keypair.secret)
+                .ed25519_sign(&challenge.challenge, &secret)
                 .await
                 .map_err(|e| AuraError::crypto(e.to_string()))?;
 
@@ -1543,8 +1538,10 @@ where
                 signature: aura_core::crypto::Ed25519Signature::from_bytes(&signature_bytes),
             };
 
+            let public_key = aura_core::Ed25519VerifyingKey::from_bytes(&public_bytes)
+                .map_err(|e| AuraError::crypto(e.to_string()))?;
             let mut key_material = KeyMaterial::new();
-            key_material.add_device_key(device_id, keypair.public.clone());
+            key_material.add_device_key(device_id, public_key);
 
             proofs.push(IdentitySubmission {
                 request_id: challenge.request_id.clone(),

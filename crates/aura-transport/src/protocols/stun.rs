@@ -3,10 +3,10 @@
 //! Essential STUN protocol messages for NAT traversal and connectivity.
 //! Target: <150 lines (focused implementation).
 
+use crate::types::endpoint::EndpointAddress;
 use aura_core::hash::hasher;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::net::SocketAddr;
 use uuid::Uuid;
 
 static STUN_TX_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -68,7 +68,7 @@ pub enum StunClass {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum StunAttribute {
     /// Mapped address from server perspective
-    MappedAddress(SocketAddr),
+    MappedAddress(EndpointAddress),
 
     /// Username for authentication
     Username(String),
@@ -94,13 +94,13 @@ pub enum StunAttribute {
     Nonce(String),
 
     /// XOR mapped address (RFC 5389)
-    XorMappedAddress(SocketAddr),
+    XorMappedAddress(EndpointAddress),
 
     /// Software identification
     Software(String),
 
     /// Alternate server
-    AlternateServer(SocketAddr),
+    AlternateServer(EndpointAddress),
 
     /// Unknown attribute
     Unknown {
@@ -142,7 +142,7 @@ impl StunMessage {
     }
 
     /// Create STUN binding success response
-    pub fn binding_response(transaction_id: Uuid, mapped_addr: SocketAddr) -> Self {
+    pub fn binding_response(transaction_id: Uuid, mapped_addr: EndpointAddress) -> Self {
         Self {
             message_type: StunMessageType {
                 method: StunMethod::Binding,
@@ -184,10 +184,10 @@ impl StunMessage {
     }
 
     /// Get mapped address from response
-    pub fn mapped_address(&self) -> Option<SocketAddr> {
+    pub fn mapped_address(&self) -> Option<EndpointAddress> {
         self.find_attribute(|attr| match attr {
-            StunAttribute::MappedAddress(addr) => Some(*addr),
-            StunAttribute::XorMappedAddress(addr) => Some(*addr),
+            StunAttribute::MappedAddress(addr) => Some(addr.clone()),
+            StunAttribute::XorMappedAddress(addr) => Some(addr.clone()),
             _ => None,
         })
     }
@@ -223,7 +223,7 @@ impl StunMessage {
 #[derive(Debug, Clone)]
 pub struct StunConfig {
     /// STUN server addresses
-    pub servers: Vec<SocketAddr>,
+    pub servers: Vec<EndpointAddress>,
     /// Request timeout
     pub request_timeout: std::time::Duration,
     /// Maximum number of retries

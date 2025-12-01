@@ -472,9 +472,9 @@ mod tests {
 
     #[test]
     fn test_message_context_isolation() {
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
-        let device3 = DeviceId::new();
+        let device1 = DeviceId::new_from_entropy([18u8; 32]);
+        let device2 = DeviceId::new_from_entropy([19u8; 32]);
+        let device3 = DeviceId::new_from_entropy([20u8; 32]);
 
         let relay_ctx1 = MessageContext::relay_between(&device1, &device2);
         let relay_ctx2 = MessageContext::relay_between(&device2, &device3);

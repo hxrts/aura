@@ -109,7 +109,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_consensus_adapter_delegation() {
-        let auth = AuthorityId::new();
+        let auth = AuthorityId::new_from_entropy([54u8; 32]);
         let prestate = Prestate::new(vec![(auth, Hash32::default())], Hash32::default());
 
         #[derive(serde::Serialize)]
@@ -155,7 +155,11 @@ mod tests {
     #[test]
     fn test_config_validation() {
         // Test valid config
-        let config = ConsensusConfig::new(1, vec![AuthorityId::new()], Epoch::from(1));
+        let config = ConsensusConfig::new(
+            1,
+            vec![AuthorityId::new_from_entropy([55u8; 32])],
+            Epoch::from(1),
+        );
         assert!(validate_config(&config).is_ok());
 
         // Test empty witness set
@@ -163,16 +167,28 @@ mod tests {
         assert!(validate_config(&config).is_err());
 
         // Test threshold too high
-        let config = ConsensusConfig::new(5, vec![AuthorityId::new()], Epoch::from(1));
+        let config = ConsensusConfig::new(
+            5,
+            vec![AuthorityId::new_from_entropy([56u8; 32])],
+            Epoch::from(1),
+        );
         assert!(validate_config(&config).is_err());
 
         // Test timeout too high
-        let mut config = ConsensusConfig::new(1, vec![AuthorityId::new()], Epoch::from(1));
+        let mut config = ConsensusConfig::new(
+            1,
+            vec![AuthorityId::new_from_entropy([57u8; 32])],
+            Epoch::from(1),
+        );
         config.timeout_ms = 400000;
         assert!(validate_config(&config).is_err());
 
         // Test timeout too low
-        let mut config = ConsensusConfig::new(1, vec![AuthorityId::new()], Epoch::from(1));
+        let mut config = ConsensusConfig::new(
+            1,
+            vec![AuthorityId::new_from_entropy([58u8; 32])],
+            Epoch::from(1),
+        );
         config.timeout_ms = 500;
         assert!(validate_config(&config).is_err());
     }
@@ -181,7 +197,7 @@ mod tests {
     fn test_failed_proof_creation() {
         let prestate_hash = Hash32::default();
         let operation_hash = Hash32([1u8; 32]);
-        let attesters = vec![AuthorityId::new()];
+        let attesters = vec![AuthorityId::new_from_entropy([59u8; 32])];
 
         let proof = create_failed_proof(prestate_hash, operation_hash, attesters.clone());
 

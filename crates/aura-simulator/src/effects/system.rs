@@ -474,6 +474,18 @@ impl NetworkEffects for SimulationEffectSystem {
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
         self.network.subscribe_to_peer_events().await
     }
+
+    async fn open(&self, address: &str) -> Result<String, NetworkError> {
+        self.network.open(address).await
+    }
+
+    async fn send(&self, connection_id: &str, data: Vec<u8>) -> Result<(), NetworkError> {
+        self.network.send(connection_id, data).await
+    }
+
+    async fn close(&self, connection_id: &str) -> Result<(), NetworkError> {
+        self.network.close(connection_id).await
+    }
 }
 
 /// Factory for creating simulation effect systems

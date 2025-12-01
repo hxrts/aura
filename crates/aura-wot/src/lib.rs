@@ -33,7 +33,7 @@
 //!
 //! // Authority-based resource authorization
 //! let resource = ResourceScope::Authority {
-//!     authority_id: AuthorityId::new(),
+//!     authority_id: AuthorityId::default(),
 //!     operation: AuthorityOp::UpdateTree,
 //! };
 //! // Token verification handles cryptographic delegation chains

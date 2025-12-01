@@ -37,7 +37,7 @@ use aura_core::effects::{
     ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects,
     RandomEffects,
 };
-use aura_core::{AccountId, ContextId, DeviceId, Hash32};
+use aura_core::{hash, AccountId, ContextId, DeviceId, Hash32};
 use aura_macros::choreography;
 use hex;
 use serde::{Deserialize, Serialize};
@@ -575,12 +575,12 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
         _relationship_keys: &RelationshipKeys,
         _config: &RelationshipFormationConfig,
     ) -> Result<Hash32, RelationshipFormationError> {
-        // Implementation would coordinate trust record exchange
-        tracing::debug!(
-            "Exchanging trust records choreographically for context {}",
-            context_id
-        );
-        Ok(Hash32([0u8; 32])) // Placeholder hash
+        // Derive a deterministic trust record digest from context to keep the exchange stable in tests
+        let mut h = hash::hasher();
+        h.update(b"aura-relationship-trust");
+        h.update(context_id.to_string().as_bytes());
+        let digest = h.finalize();
+        Ok(Hash32::new(digest))
     }
 }
 
@@ -1685,6 +1685,28 @@ mod tests {
             let stream = stream::empty();
             Ok(Box::pin(stream))
         }
+
+        async fn open(
+            &self,
+            _address: &str,
+        ) -> Result<String, aura_core::effects::network::NetworkError> {
+            Err(aura_core::effects::network::NetworkError::NotImplemented)
+        }
+
+        async fn send(
+            &self,
+            _connection_id: &str,
+            _data: Vec<u8>,
+        ) -> Result<(), aura_core::effects::network::NetworkError> {
+            Err(aura_core::effects::network::NetworkError::NotImplemented)
+        }
+
+        async fn close(
+            &self,
+            _connection_id: &str,
+        ) -> Result<(), aura_core::effects::network::NetworkError> {
+            Ok(())
+        }
     }
 
     #[async_trait::async_trait]
@@ -1762,8 +1784,8 @@ mod tests {
     #[test]
     fn test_relationship_formation_config_creation() {
         let config = RelationshipFormationConfig {
-            initiator_id: DeviceId::new(),
-            responder_id: DeviceId::new(),
+            initiator_id: DeviceId::new_from_entropy([1u8; 32]),
+            responder_id: DeviceId::new_from_entropy([2u8; 32]),
             account_context: None,
             timeout_secs: 60,
         };

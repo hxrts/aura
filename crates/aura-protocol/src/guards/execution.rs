@@ -14,8 +14,7 @@ use super::{
 };
 use crate::authorization::BiscuitAuthorizationBridge;
 use aura_core::{epochs::Epoch, AuraError, AuraResult, FlowBudget};
-use aura_wot::ResourceScope;
-use biscuit_auth::Biscuit;
+use aura_wot::{AuthorityOp, ResourceScope};
 use std::future::Future;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -41,19 +40,31 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
     }
 
     // Get authorization bridge from effect system for Biscuit token verification
+    // Authorization bridge derived from protocol guard context
+    let auth_bridge = BiscuitAuthorizationBridge::for_guard(
+        guard.root_public_key,
+        guard.authority_id,
+        &guard.operation_id,
+    );
+    let evaluator = BiscuitGuardEvaluator::new(auth_bridge);
     let mut failed_requirements = Vec::new();
     let mut total_flow_consumed = 0;
     let mut max_delegation_depth = None;
-
-    // Create authorization bridge - in production this would come from effect system
-    let auth_bridge = BiscuitAuthorizationBridge::new_mock();
-    let evaluator = BiscuitGuardEvaluator::new(auth_bridge);
+    let mut context = GuardVerificationContext::new(
+        guard.operation_id.clone(),
+        ResourceScope::Authority {
+            authority_id: guard.authority_id,
+            operation: AuthorityOp::UpdateTree,
+        },
+        1,
+        FlowBudget::new(guard.required_tokens.len() as u64 + 1, Epoch(0)),
+    );
 
     for (idx, token) in guard.required_tokens.iter().enumerate() {
         debug!(token_idx = idx, "Evaluating Biscuit token requirement");
 
         // Evaluate token directly with proper Biscuit verification
-        match verify_biscuit_token(token, &evaluator) {
+        match verify_biscuit_token(token, &evaluator, &mut context) {
             Ok(result) => {
                 debug!(
                     token_idx = idx,
@@ -102,146 +113,60 @@ pub async fn evaluate_guard(guard: &ProtocolGuard) -> Result<GuardEvaluationResu
     })
 }
 
-/// Verify Biscuit token directly
+/// Context for guard token verification
+///
+/// This struct provides the necessary context for verifying Biscuit tokens,
+/// including the capability being exercised and the resource scope.
+#[derive(Debug, Clone)]
+pub struct GuardVerificationContext {
+    /// The capability being exercised (e.g., "send_message", "execute_operation")
+    pub capability: String,
+    /// The resource scope for authorization
+    pub resource_scope: ResourceScope,
+    /// Flow cost for this operation
+    pub flow_cost: u64,
+    /// Available flow budget
+    pub flow_budget: FlowBudget,
+}
+
+impl GuardVerificationContext {
+    /// Create a new verification context
+    pub fn new(
+        capability: impl Into<String>,
+        resource_scope: ResourceScope,
+        flow_cost: u64,
+        flow_budget: FlowBudget,
+    ) -> Self {
+        Self {
+            capability: capability.into(),
+            resource_scope,
+            flow_cost,
+            flow_budget,
+        }
+    }
+}
+
+/// Verify Biscuit token against an explicit capability/scope context.
 fn verify_biscuit_token(
     token: &biscuit_auth::Biscuit,
     evaluator: &BiscuitGuardEvaluator,
+    context: &mut GuardVerificationContext,
 ) -> Result<GuardResult, GuardError> {
-    // For now, use a default capability and resource scope
-    // In a real implementation, this would be determined by the context of the operation
-    let default_capability = "execute_operation";
-    let default_resource = aura_wot::ResourceScope::Authority {
-        authority_id: aura_core::AuthorityId::new(),
-        operation: aura_wot::AuthorityOp::UpdateTree,
-    };
-    let flow_cost = 1; // Default minimal flow cost for verification
-    let mut budget = FlowBudget::new(100, Epoch(1)); // Default budget for verification
-
     evaluator.evaluate_guard_default_time(
         token,
-        default_capability,
-        &default_resource,
-        flow_cost,
-        &mut budget,
+        &context.capability,
+        &context.resource_scope,
+        context.flow_cost,
+        &mut context.flow_budget,
     )
 }
 
-/// Parse and verify Biscuit token requirements (legacy string-based)
-///
-/// Token requirement format: "capability:resource:flow_cost"
-/// Example: "send_message:device:5"
-fn parse_and_verify_biscuit_token(
-    token_requirement: &str,
-    evaluator: &BiscuitGuardEvaluator,
-) -> Result<GuardResult, GuardError> {
-    // Parse token requirement format: "capability:resource:flow_cost"
-    let parts: Vec<&str> = token_requirement.split(':').collect();
-    if parts.len() != 3 {
-        return Err(GuardError::AuthorizationFailed(format!(
-            "Invalid token requirement format: {}. Expected 'capability:resource:flow_cost'",
-            token_requirement
-        )));
-    }
-
-    let capability = parts[0];
-    let resource = parts[1];
-    let flow_cost = parts[2].parse::<u64>().map_err(|_| {
-        GuardError::AuthorizationFailed(format!("Invalid flow cost in requirement: {}", parts[2]))
-    })?;
-
-    debug!(
-        capability = %capability,
-        resource = %resource,
-        flow_cost = flow_cost,
-        "Parsing Biscuit token requirement"
-    );
-
-    // Create a Biscuit token for the requirement using the authorization bridge
-    let auth_bridge = BiscuitAuthorizationBridge::new_mock();
-    let token = create_biscuit_token(capability, resource, &auth_bridge)?;
-
-    // Create resource scope for authorization check
-    // Using Storage variant as a general-purpose resource scope
-    let resource_scope = ResourceScope::Storage {
-        authority_id: aura_core::AuthorityId::new(),
-        path: resource.to_string(),
-    };
-
-    // Use the evaluator to check the token against the requirement
-    let mut mock_budget = aura_core::FlowBudget::new(1000, aura_core::epochs::Epoch(0)); // High limit for testing
-
-    match evaluator.evaluate_guard_default_time(
-        &token,
-        capability,
-        &resource_scope,
-        flow_cost,
-        &mut mock_budget,
-    ) {
-        Ok(result) => {
-            debug!(
-                capability = %capability,
-                authorized = result.authorized,
-                flow_consumed = result.flow_consumed,
-                delegation_depth = ?result.delegation_depth,
-                "Biscuit token verification successful"
-            );
-            Ok(result)
-        }
-        Err(error) => {
-            warn!(
-                capability = %capability,
-                resource = %resource,
-                error = %error,
-                "Biscuit token verification failed"
-            );
-            Err(error)
-        }
-    }
-}
-
-/// Create a Biscuit token with proper authorization integration
-///
-/// This function now integrates with the authorization bridge and effect system
-/// to create properly signed and authorized Biscuit tokens.
-fn create_biscuit_token(
-    capability: &str,
-    resource: &str,
-    _auth_bridge: &crate::authorization::BiscuitAuthorizationBridge,
-) -> Result<Biscuit, GuardError> {
-    use biscuit_auth::{macros::*, KeyPair};
-
-    // In production, this would use the proper root keypair from the authorization bridge
-    // For now, we still use a generated keypair but with proper token structure
-    let keypair = KeyPair::new();
-    let expiry_secs: i64 = 3_600; // deterministic placeholder expiry
-
-    // Create a properly structured Biscuit token with comprehensive authorization facts
-    let token = biscuit!(
-        r#"
-        resource({resource});
-        capability({capability});
-        operation("execute");
-        authority("device");
-        time(2024, 11, 22);
-        expires_at({expiry});
-        "#,
-        resource = resource,
-        capability = capability,
-        expiry = expiry_secs
-    )
-    .build(&keypair)
-    .map_err(|e| {
-        GuardError::AuthorizationFailed(format!("Failed to create Biscuit token: {}", e))
-    })?;
-
-    debug!(
-        capability = %capability,
-        resource = %resource,
-        "Created Biscuit token with authorization bridge integration"
-    );
-
-    Ok(token)
-}
+// NOTE: Legacy `parse_and_verify_biscuit_token` and `create_biscuit_token` functions
+// have been removed. They were dead code that created tokens with random keypairs,
+// which is insecure. Token creation and verification should use:
+//   - GuardVerificationContext for explicit verification context
+//   - Effect system metadata for token retrieval (see send_guard.rs)
+//   - BiscuitTokenManager from aura-wot for proper token management
 
 /// Guard evaluation results using Biscuit authorization
 #[derive(Debug)]

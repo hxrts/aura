@@ -212,7 +212,8 @@ struct ApprovalResponse {
     pub approver_device_id: DeviceId,
 }
 
-// Placeholder function for session creation choreography access
+// Entry point for session creation choreography; to be invoked by the CLI once
+// the choreography runtime is connected.
 // The choreography macro will generate the appropriate types and functions
 pub fn get_session_creation_choreography() {
     // The choreography macro will generate the appropriate types and functions
@@ -459,7 +460,7 @@ mod tests {
     fn test_session_request_serialization() {
         let request = SessionRequest {
             device_id: test_device_id(1),
-            account_id: AccountId::new(),
+            account_id: AccountId::new_from_entropy([1u8; 32]),
             verified_identity: VerifiedIdentity {
                 proof: aura_verify::IdentityProof::Device {
                     device_id: test_device_id(1),

@@ -216,9 +216,9 @@ fn verify_consensus_proof(
         return false;
     }
 
-    // Check 2: Verify threshold signature is present
-    // Production code would verify the signature cryptographically
-    // For now, we check that the signature structure is valid
+    // Check 2: Verify threshold signature is present. Cryptographic verification
+    // happens in the guard chain; here we assert the proof contains a signature
+    // payload so relational checks cannot be bypassed with empty proofs.
     if proof.threshold_signature.is_none() {
         return false;
     }
@@ -356,7 +356,8 @@ impl GuardianAuthHandler {
                     .filter(|record| record.guardian_id == guardian_id)
                     .max_by_key(|record| record.requested_at);
 
-                let latest_request_time = latest_request.as_ref().map(|r| r.requested_at).unwrap_or(0);
+                let latest_request_time =
+                    latest_request.as_ref().map(|r| r.requested_at).unwrap_or(0);
 
                 let now = time_effects
                     .physical_time()
@@ -377,9 +378,9 @@ impl GuardianAuthHandler {
                     }
                 }
 
-                // For now, approve if binding exists and has reasonable parameters
+                // Approve only when binding parameters satisfy minimum safety window
+                // (1 hour default) and notification requirements were met above.
                 if recovery_delay.as_secs() < 3600 {
-                    // Delay too short (less than 1 hour)
                     return Ok(false);
                 }
 
@@ -417,17 +418,16 @@ impl GuardianAuthHandler {
         guardian_id: AuthorityId,
         account_id: AuthorityId,
     ) -> bool {
-        self.context
-            .get_facts()
-            .iter()
-            .any(|fact| match fact {
-                RelationalFact::Generic(binding) if binding.binding_type == "guardian_notification" => {
-                    serde_json::from_slice::<GuardianNotificationRecord>(&binding.binding_data)
-                        .map(|record| record.guardian_id == guardian_id && record.account_id == account_id)
-                        .unwrap_or(false)
-                }
-                _ => false,
-            })
+        self.context.get_facts().iter().any(|fact| match fact {
+            RelationalFact::Generic(binding) if binding.binding_type == "guardian_notification" => {
+                serde_json::from_slice::<GuardianNotificationRecord>(&binding.binding_data)
+                    .map(|record| {
+                        record.guardian_id == guardian_id && record.account_id == account_id
+                    })
+                    .unwrap_or(false)
+            }
+            _ => false,
+        })
     }
 }
 

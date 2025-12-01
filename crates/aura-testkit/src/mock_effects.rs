@@ -616,6 +616,18 @@ impl NetworkEffects for MockEffects {
         use futures::stream;
         Ok(Box::pin(stream::empty()))
     }
+
+    async fn open(&self, _address: &str) -> Result<String, NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
+
+    async fn send(&self, _connection_id: &str, _data: Vec<u8>) -> Result<(), NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
+
+    async fn close(&self, _connection_id: &str) -> Result<(), NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::{ConsoleEffects, StorageEffects};
-use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
+use aura_core::AccountId;
 use aura_recovery::guardian_setup::GuardianSetupCoordinator;
 use aura_recovery::types::{GuardianProfile, GuardianSet, RecoveryRequest};
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
@@ -1008,12 +1008,20 @@ async fn run_guardian_setup_choreography(
     effects: Arc<AuraEffectSystem>,
     steps: &mut Vec<SimStep>,
 ) -> Result<(), anyhow::Error> {
-    let device_id = DeviceId::new();
+    let device_id = crate::ids::device_id("scenario:guardian-setup:device");
     let coordinator = GuardianSetupCoordinator::new(effects);
 
     let guardians = GuardianSet::new(vec![
-        GuardianProfile::new(GuardianId::new(), DeviceId::new(), "alice"),
-        GuardianProfile::new(GuardianId::new(), DeviceId::new(), "charlie"),
+        GuardianProfile::new(
+            crate::ids::guardian_id("guardian:alice"),
+            crate::ids::device_id("guardian:alice:device"),
+            "alice",
+        ),
+        GuardianProfile::new(
+            crate::ids::guardian_id("guardian:charlie"),
+            crate::ids::device_id("guardian:charlie:device"),
+            "charlie",
+        ),
     ]);
 
     let timestamp = 0;
@@ -1027,7 +1035,7 @@ async fn run_guardian_setup_choreography(
 
     let request = RecoveryRequest {
         requesting_device: device_id,
-        account_id: AccountId::new(),
+        account_id: AccountId::new_from_entropy(aura_core::hash::hash(b"scenario:guardian-setup")),
         context: recovery_context,
         threshold: 2,
         guardians,
@@ -1067,33 +1075,15 @@ async fn persist_log(
     log: &ScenarioLog,
 ) -> Result<String> {
     let output_path = scenario_log_output_path(scenario_path);
+    let storage_key = format!("scenario_log:{}", output_path.display());
 
-    if let Some(parent) = output_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent).map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to create scenario log directory {}: {}",
-                    parent.display(),
-                    e
-                )
-            })?;
-        }
-    }
-
-    fs::write(&output_path, log.lines.join("\n")).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to write scenario log {}: {}",
-            output_path.display(),
-            e
-        )
-    })?;
-
-    let storage_key = format!("scenario_log:{}", scenario_path.display());
     StorageEffects::store(effects, &storage_key, log.lines.join("\n").into_bytes())
         .await
-        .ok();
+        .map_err(|e| {
+            anyhow::anyhow!("Failed to persist scenario log via storage effects: {}", e)
+        })?;
 
-    Ok(output_path.to_string_lossy().into_owned())
+    Ok(storage_key)
 }
 
 fn scenario_log_output_path(scenario_path: &Path) -> PathBuf {
@@ -1133,33 +1123,13 @@ async fn save_scenario_results(
     }
     .map_err(|e| anyhow::anyhow!("Failed to serialize results: {}", e))?;
 
-    // Persist to filesystem for user visibility
-    if let Some(parent) = output_path.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to create output directory {}: {}",
-                    parent.display(),
-                    e
-                )
-            })?;
-        }
-    }
-    std::fs::write(output_path, results_json.as_bytes()).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to write scenario results to {}: {}",
-            output_path.display(),
-            e
-        )
-    })?;
-
     let output_key = format!("scenario_output:{}", output_path.display());
     effects
         .store(&output_key, results_json.as_bytes().to_vec())
         .await
         .map_err(|e| anyhow::anyhow!("Failed to save results via storage effects: {}", e))?;
 
-    println!("Results saved to: {}", output_path.display());
+    println!("Results saved to storage key: {}", output_key);
 
     Ok(())
 }

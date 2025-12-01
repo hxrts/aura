@@ -314,7 +314,7 @@ mod tests {
             SecureChannelCoordinator::new(DeviceId::from([1u8; 32]), ChannelConfig::default());
 
         let peer_id = DeviceId::from([2u8; 32]);
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
         let time = time_source();
 
         let result = coordinator.init_channel(peer_id, context_id, &time).await;
@@ -332,7 +332,7 @@ mod tests {
             SecureChannelCoordinator::new(DeviceId::from([1u8; 32]), ChannelConfig::default());
 
         let peer_id = DeviceId::from([2u8; 32]);
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([2u8; 32]);
         let time = time_source();
         let channel_id = coordinator
             .init_channel(peer_id, context_id, &time)

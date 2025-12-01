@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
+use aura_core::effects::StorageEffects;
 use std::path::Path;
 
 /// Handle status display through effects
@@ -14,8 +15,10 @@ pub async fn handle_status(
 ) -> Result<()> {
     println!("Account status for config: {}", config_path.display());
 
+    let config_key = config_path.display().to_string();
+
     // Check if config exists through storage effects
-    let config_exists = std::path::Path::new(&config_path.display().to_string()).exists();
+    let config_exists = effects.exists(&config_key).await.unwrap_or(false);
 
     if !config_exists {
         eprintln!("Config file not found: {}", config_path.display());
@@ -26,7 +29,7 @@ pub async fn handle_status(
     }
 
     // Read and parse config through storage effects
-    match read_config_through_effects(ctx, effects, config_path).await {
+    match read_config_through_effects(ctx, effects, &config_key).await {
         Ok(config) => {
             display_status_info(ctx, effects, &config).await;
             Ok(())
@@ -44,11 +47,17 @@ pub async fn handle_status(
 /// Read configuration through storage effects
 async fn read_config_through_effects(
     _ctx: &EffectContext,
-    _effects: &AuraEffectSystem,
-    config_path: &Path,
+    effects: &AuraEffectSystem,
+    config_key: &str,
 ) -> Result<DeviceConfig> {
-    let config_str = std::fs::read_to_string(config_path.display().to_string())
-        .map_err(|e| anyhow::anyhow!("Failed to read config: {}", e))?;
+    let config_bytes = effects
+        .retrieve(config_key)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to read config: {}", e))?
+        .ok_or_else(|| anyhow::anyhow!("Config {} not found in storage", config_key))?;
+
+    let config_str = String::from_utf8(config_bytes)
+        .map_err(|e| anyhow::anyhow!("Config is not valid UTF-8: {}", e))?;
 
     // Parse TOML configuration
     let config: DeviceConfig = toml::from_str(&config_str)

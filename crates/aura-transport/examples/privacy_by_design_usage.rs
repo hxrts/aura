@@ -232,8 +232,6 @@ fn relationship_scoped_connections_example() {
 fn protocol_privacy_example() {
     println!("📡 Example 5: Protocol Messages with Built-in Privacy\n");
 
-    use std::net::SocketAddr;
-
     // STUN message with privacy-aware construction
     let _stun_message = StunMessage::binding_request();
 
@@ -242,7 +240,7 @@ fn protocol_privacy_example() {
     println!("  Transaction ID included for privacy");
 
     // Hole punch message with basic construction
-    let target_addr: SocketAddr = std::net::SocketAddr::from(([192, 168, 1, 100], 12345));
+    let target_addr = aura_transport::types::endpoint::EndpointAddress::new("192.168.1.100:12345");
     let _hole_punch_msg = HolePunchMessage::coordination_request(
         aura_core::identifiers::DeviceId::new(),
         aura_core::identifiers::DeviceId::new(),

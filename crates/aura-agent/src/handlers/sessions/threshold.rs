@@ -85,9 +85,9 @@ mod tests {
         use crate::core::AgentConfig;
         use crate::runtime::effects::AuraEffectSystem;
 
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([79u8; 32]);
         let authority_context = AuthorityContext::new(authority_id);
-        let account_id = AccountId::new();
+        let account_id = AccountId::new_from_entropy([30u8; 32]);
 
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config).unwrap();
@@ -118,9 +118,9 @@ mod tests {
         use crate::core::AgentConfig;
         use crate::runtime::effects::AuraEffectSystem;
 
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([80u8; 32]);
         let authority_context = AuthorityContext::new(authority_id);
-        let account_id = AccountId::new();
+        let account_id = AccountId::new_from_entropy([31u8; 32]);
 
         let config = AgentConfig::default();
         let effect_system = AuraEffectSystem::testing(&config).unwrap();

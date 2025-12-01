@@ -80,7 +80,7 @@ pub struct DkdSessionId(pub String);
 #[cfg(test)]
 impl Default for DkdSessionId {
     fn default() -> Self {
-        Self::new()
+        Self::deterministic("default")
     }
 }
 
@@ -88,7 +88,7 @@ impl DkdSessionId {
     /// Create a new DKD session ID for testing (production code should use RandomEffects)
     #[cfg(test)]
     pub fn new() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
+        Self::deterministic("dkd-session")
     }
 
     /// Create a deterministic session ID for testing
@@ -869,21 +869,24 @@ where
 }
 
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)] // Test code uses Uuid::new_v4() for test data generation
 mod tests {
     use super::*;
     use aura_agent::{AgentConfig, AuraEffectSystem};
     use aura_core::DeviceId;
     use aura_testkit::TestEffectsBuilder;
 
+    fn device(seed: u8) -> DeviceId {
+        DeviceId::new_from_entropy([seed; 32])
+    }
+
     #[tokio::test]
     async fn test_dkd_session_creation() {
         let config = create_test_config(2, 3);
         let mut protocol = DkdProtocol::new(config);
 
-        let participants = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
+        let participants = vec![device(1), device(2), device(3)];
 
-        let effects = TestEffectsBuilder::for_unit_tests(DeviceId::new())
+        let effects = TestEffectsBuilder::for_unit_tests(device(9))
             .build()
             .unwrap_or_else(|_| panic!("Failed to build test effects"));
         let session_id = protocol
@@ -902,7 +905,7 @@ mod tests {
         let effects = AuraEffectSystem::testing(&AgentConfig::default()).unwrap();
 
         let session_id = DkdSessionId::deterministic("test");
-        let device_id = DeviceId::new();
+        let device_id = device(4);
 
         let contribution = protocol
             .generate_contribution(&effects, &session_id, device_id)
@@ -919,7 +922,7 @@ mod tests {
         let protocol = DkdProtocol::new(create_test_config(2, 3));
 
         let mut contribution = ParticipantContribution {
-            device_id: DeviceId::new(),
+            device_id: device(5),
             randomness: [1u8; 32],
             commitment: Hash32::new(hash::hash(&[1u8; 32])),
             signature: vec![1, 2, 3, 4],
@@ -940,14 +943,14 @@ mod tests {
 
         let contributions = vec![
             ParticipantContribution {
-                device_id: DeviceId::new(),
+                device_id: device(6),
                 randomness: [1u8; 32],
                 commitment: Hash32::new(hash::hash(&[1u8; 32])),
                 signature: vec![1, 2, 3],
                 timestamp: 12345,
             },
             ParticipantContribution {
-                device_id: DeviceId::new(),
+                device_id: device(7),
                 randomness: [2u8; 32],
                 commitment: Hash32::new(hash::hash(&[2u8; 32])),
                 signature: vec![4, 5, 6],

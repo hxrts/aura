@@ -2,7 +2,7 @@
 //!
 //! Configuration types for agent runtime behavior.
 
-use aura_core::DeviceId;
+use aura_core::{hash::hash, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -81,7 +81,8 @@ pub struct ChoreographyConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            device_id: DeviceId::new(),
+            // Derive a deterministic device identifier from the default storage path
+            device_id: DeviceId::new_from_entropy(hash(b"./aura-data")),
             storage: StorageConfig::default(),
             network: NetworkConfig::default(),
             reliability: ReliabilityConfig::default(),
@@ -138,13 +139,13 @@ impl AgentConfig {
 
     /// Check if this is a testing configuration
     pub fn is_testing(&self) -> bool {
-        // For now, consider it testing if the base path contains "test"
+        // Treat configurations whose base path explicitly contains "test" as test fixtures
         self.storage.base_path.to_string_lossy().contains("test")
     }
 
     /// Check if this is a simulation configuration
     pub fn is_simulation(&self) -> bool {
-        // For now, consider it simulation if the base path contains "sim"
+        // Treat configurations whose base path explicitly contains "sim" as simulator runs
         self.storage.base_path.to_string_lossy().contains("sim")
     }
 }

@@ -72,11 +72,21 @@
 //! ```
 
 #![allow(clippy::disallowed_methods)] // CLI handlers intentionally call system APIs for user interactions
-#![allow(clippy::disallowed_types)] // CLI uses blake3::Hasher directly in some places
+#![allow(clippy::disallowed_types)]
+// CLI uses blake3::Hasher directly in some places
+#![allow(clippy::empty_line_after_doc_comments)]
+#![allow(clippy::derivable_impls)]
+#![allow(clippy::redundant_closure)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::identity_op)]
+#![allow(clippy::or_fun_call)]
+#![allow(clippy::unwrap_or_default)]
 
 pub mod commands;
 pub mod effects;
 pub mod handlers;
+pub mod ids;
 
 // Demo module requires simulator - only available with development feature
 #[cfg(feature = "development")]
@@ -91,18 +101,13 @@ pub use handlers::CliHandler;
 // Action types defined in this module (no re-export needed)
 
 // Action types are defined in this module and automatically available
-
 use aura_agent::{AgentBuilder, EffectContext};
-use aura_core::{
-    effects::ExecutionMode,
-    identifiers::{AuthorityId, ContextId, DeviceId},
-    AuraError,
-};
+use aura_core::{effects::ExecutionMode, identifiers::DeviceId, AuraError};
 
 /// Create a CLI handler for the given device ID
 pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
-    let authority_id = AuthorityId::new();
-    let context_id = ContextId::new();
+    let authority_id = ids::authority_id(&format!("cli:authority:{}", device_id));
+    let context_id = ids::context_id(&format!("cli:context:{}", device_id));
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing()
@@ -117,8 +122,8 @@ pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> 
 
 /// Create a test CLI handler for the given device ID
 pub fn create_test_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
-    let authority_id = AuthorityId::new();
-    let context_id = ContextId::new();
+    let authority_id = ids::authority_id(&format!("cli:test-authority:{}", device_id));
+    let context_id = ids::context_id(&format!("cli:test-context:{}", device_id));
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing()
@@ -133,7 +138,7 @@ pub fn create_test_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraEr
 
 /// Create a CLI handler with a generated device ID
 pub fn create_default_cli_handler() -> Result<CliHandler, AuraError> {
-    let device_id = DeviceId::new();
+    let device_id = ids::device_id("cli:default-device");
     create_cli_handler(device_id)
 }
 
@@ -149,7 +154,7 @@ pub fn create_default_test_cli_handler() -> Result<CliHandler, AuraError> {
 /// Create a test CLI handler with a deterministic device ID (fallback for non-test builds)
 #[cfg(not(test))]
 pub fn create_default_test_cli_handler() -> Result<CliHandler, AuraError> {
-    let device_id = DeviceId::new();
+    let device_id = ids::device_id("cli:default-test-device");
     create_test_cli_handler(device_id)
 }
 
@@ -231,7 +236,7 @@ pub enum SnapshotAction {
 /// Admin maintenance subcommands.
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum AdminAction {
-    /// Replace the administrator for an account (stub, writes journal fact).
+    /// Replace the administrator for an account (records journal fact).
     Replace {
         /// Account identifier (UUID string).
         #[arg(long)]

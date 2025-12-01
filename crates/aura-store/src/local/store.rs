@@ -219,7 +219,7 @@ mod tests {
     use aura_core::effects::crypto::{
         CryptoEffects, FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext,
     };
-    use aura_core::effects::storage::StorageError;
+    use aura_core::effects::storage::{StorageError, StorageStats};
     use aura_core::AuraError;
     use std::collections::HashMap;
     use std::sync::RwLock;
@@ -240,23 +240,35 @@ mod tests {
     #[async_trait]
     impl StorageEffects for TestStorage {
         async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
-            let mut data = self.data.write().expect("lock poisoned");
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
             data.insert(key.to_string(), value);
             Ok(())
         }
 
         async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
-            let data = self.data.read().expect("lock poisoned");
+            let data = self
+                .data
+                .read()
+                .map_err(|e| StorageError::ReadFailed(e.to_string()))?;
             Ok(data.get(key).cloned())
         }
 
         async fn remove(&self, key: &str) -> Result<bool, StorageError> {
-            let mut data = self.data.write().expect("lock poisoned");
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| StorageError::DeleteFailed(e.to_string()))?;
             Ok(data.remove(key).is_some())
         }
 
         async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
-            let data = self.data.read().expect("lock poisoned");
+            let data = self
+                .data
+                .read()
+                .map_err(|e| StorageError::ListFailed(e.to_string()))?;
             let keys: Vec<String> = match prefix {
                 Some(p) => data.keys().filter(|k| k.starts_with(p)).cloned().collect(),
                 None => data.keys().cloned().collect(),
@@ -265,12 +277,18 @@ mod tests {
         }
 
         async fn exists(&self, key: &str) -> Result<bool, StorageError> {
-            let data = self.data.read().expect("lock poisoned");
+            let data = self
+                .data
+                .read()
+                .map_err(|e| StorageError::ReadFailed(e.to_string()))?;
             Ok(data.contains_key(key))
         }
 
         async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
-            let mut data = self.data.write().expect("lock poisoned");
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
             data.extend(pairs);
             Ok(())
         }
@@ -279,7 +297,10 @@ mod tests {
             &self,
             keys: &[String],
         ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
-            let data = self.data.read().expect("lock poisoned");
+            let data = self
+                .data
+                .read()
+                .map_err(|e| StorageError::ReadFailed(e.to_string()))?;
             let result: HashMap<String, Vec<u8>> = keys
                 .iter()
                 .filter_map(|k| data.get(k).map(|v| (k.clone(), v.clone())))
@@ -287,23 +308,28 @@ mod tests {
             Ok(result)
         }
 
-        async fn clear_prefix(&self, prefix: &str) -> Result<u64, StorageError> {
-            let mut data = self.data.write().expect("lock poisoned");
-            let keys_to_remove: Vec<_> = data
-                .keys()
-                .filter(|k| k.starts_with(prefix))
-                .cloned()
-                .collect();
-            let count = keys_to_remove.len() as u64;
-            for key in keys_to_remove {
-                data.remove(&key);
-            }
-            Ok(count)
+        async fn clear_all(&self) -> Result<(), StorageError> {
+            let mut data = self
+                .data
+                .write()
+                .map_err(|e| StorageError::WriteFailed(e.to_string()))?;
+            data.clear();
+            Ok(())
         }
 
-        async fn size_bytes(&self, key: &str) -> Result<Option<u64>, StorageError> {
-            let data = self.data.read().expect("lock poisoned");
-            Ok(data.get(key).map(|v| v.len() as u64))
+        async fn stats(&self) -> Result<StorageStats, StorageError> {
+            let data = self
+                .data
+                .read()
+                .map_err(|e| StorageError::ReadFailed(e.to_string()))?;
+            let key_count = data.len() as u64;
+            let total_size = data.values().map(|v| v.len() as u64).sum();
+            Ok(StorageStats {
+                key_count,
+                total_size,
+                available_space: None,
+                backend_type: "memory".to_string(),
+            })
         }
     }
 
@@ -349,7 +375,8 @@ mod tests {
 
         async fn random_uuid(&self) -> uuid::Uuid {
             let bytes = self.deterministic_bytes(16, 0);
-            uuid::Uuid::from_slice(&bytes).unwrap_or_else(|_| uuid::Uuid::nil())
+            uuid::Uuid::from_slice(&bytes)
+                .unwrap_or_else(|_| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, &bytes))
         }
     }
 

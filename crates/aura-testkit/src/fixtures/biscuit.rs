@@ -13,6 +13,10 @@ use biscuit_auth::{macros::*, Biscuit, PublicKey};
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+fn device(seed: u8) -> DeviceId {
+    DeviceId::new_from_entropy([seed; 32])
+}
+
 /// Comprehensive fixture for Biscuit token testing scenarios
 pub struct BiscuitTestFixture {
     pub account_authority: AccountAuthority,
@@ -33,7 +37,7 @@ pub struct DelegatedTokenChain {
 impl BiscuitTestFixture {
     /// Create a new test fixture with a random account
     pub fn new() -> Self {
-        let account_id = AccountId::new();
+        let account_id = AccountId::new_from_entropy([0u8; 32]);
         let account_authority = AccountAuthority::new(account_id);
 
         Self {
@@ -341,12 +345,12 @@ pub fn create_multi_device_scenario() -> Result<BiscuitTestFixture, BiscuitError
     let mut fixture = BiscuitTestFixture::new();
 
     // Add owner device
-    let owner_device = DeviceId::new();
+    let owner_device = device(1);
     fixture.add_device_token(owner_device)?;
 
     // Add two guardians
-    let guardian1 = DeviceId::new();
-    let guardian2 = DeviceId::new();
+    let guardian1 = device(2);
+    let guardian2 = device(3);
     fixture.add_guardian_token(guardian1)?;
     fixture.add_guardian_token(guardian2)?;
 
@@ -357,7 +361,7 @@ pub fn create_multi_device_scenario() -> Result<BiscuitTestFixture, BiscuitError
 pub fn create_delegation_scenario() -> Result<BiscuitTestFixture, BiscuitError> {
     let mut fixture = BiscuitTestFixture::new();
 
-    let owner_device = DeviceId::new();
+    let owner_device = device(4);
     fixture.add_device_token(owner_device)?;
 
     // Create a delegation chain with progressive restrictions
@@ -386,12 +390,12 @@ pub fn create_recovery_scenario() -> Result<BiscuitTestFixture, BiscuitError> {
     let mut fixture = BiscuitTestFixture::new();
 
     // Add compromised device (to be recovered)
-    let compromised_device = DeviceId::new();
+    let compromised_device = device(5);
     fixture.add_device_token(compromised_device)?;
 
     // Add three guardians for 2-of-3 recovery
-    for _ in 0..3 {
-        let guardian_device = DeviceId::new();
+    for i in 0..3 {
+        let guardian_device = device(6 + i);
         fixture.add_guardian_token(guardian_device)?;
     }
 
@@ -403,16 +407,16 @@ pub fn create_security_test_scenario() -> Result<BiscuitTestFixture, BiscuitErro
     let mut fixture = BiscuitTestFixture::new();
 
     // Add devices with different privilege levels
-    let admin_device = DeviceId::new();
-    let regular_device = DeviceId::new();
-    let restricted_device = DeviceId::new();
+    let admin_device = device(20);
+    let regular_device = device(21);
+    let restricted_device = device(22);
 
     fixture.add_device_token(admin_device)?;
     fixture.add_device_token(regular_device)?;
 
     // Create restricted and compromised tokens for security testing
     let _minimal_token = fixture.create_minimal_token(restricted_device)?;
-    let _compromised_token = fixture.create_compromised_scenario(DeviceId::new())?;
+    let _compromised_token = fixture.create_compromised_scenario(device(23))?;
 
     Ok(fixture)
 }
@@ -436,7 +440,7 @@ mod tests {
     #[test]
     fn test_device_token_creation() {
         let mut fixture = BiscuitTestFixture::new();
-        let device_id = DeviceId::new();
+        let device_id = device(30);
 
         fixture.add_device_token(device_id).unwrap();
         assert!(fixture.device_tokens.contains_key(&device_id));
@@ -445,7 +449,7 @@ mod tests {
     #[test]
     fn test_guardian_token_creation() {
         let mut fixture = BiscuitTestFixture::new();
-        let device_id = DeviceId::new();
+        let device_id = device(31);
 
         fixture.add_guardian_token(device_id).unwrap();
         assert!(fixture.guardian_tokens.contains_key(&device_id));
@@ -482,7 +486,7 @@ mod tests {
     #[test]
     fn test_expiring_token_creation() {
         let fixture = BiscuitTestFixture::new();
-        let device_id = DeviceId::new();
+        let device_id = device(32);
 
         let token = fixture.create_expiring_token(device_id, 3600).unwrap();
         assert!(!token.to_vec().unwrap().is_empty());
@@ -491,7 +495,7 @@ mod tests {
     #[test]
     fn test_depth_limited_token_creation() {
         let fixture = BiscuitTestFixture::new();
-        let device_id = DeviceId::new();
+        let device_id = device(33);
 
         let token = fixture.create_depth_limited_token(device_id, 3).unwrap();
         assert!(!token.to_vec().unwrap().is_empty());

@@ -447,7 +447,10 @@ impl TreeState {
     /// Get the signing witness for a node (key + threshold derived from policy)
     ///
     /// This is the complete information needed to verify an operation at this node.
-    pub fn signing_witness(&self, index: &NodeIndex) -> Option<crate::commitment_tree::SigningWitness> {
+    pub fn signing_witness(
+        &self,
+        index: &NodeIndex,
+    ) -> Option<crate::commitment_tree::SigningWitness> {
         let key = self.branch_signing_keys.get(index)?;
         let policy = self.get_policy(index)?;
         let child_count = self.get_children(*index).len();

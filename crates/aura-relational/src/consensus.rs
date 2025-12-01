@@ -177,7 +177,11 @@ mod tests {
 
     #[test]
     fn test_consensus_config() {
-        let witnesses = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
+        let witnesses = vec![
+            AuthorityId::new_from_entropy([50u8; 32]),
+            AuthorityId::new_from_entropy([51u8; 32]),
+            AuthorityId::new_from_entropy([52u8; 32]),
+        ];
 
         let config = ConsensusConfig::new(2, witnesses);
 
@@ -187,7 +191,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_consensus_protocol_adapter() {
-        let auth = AuthorityId::new();
+        let auth = AuthorityId::new_from_entropy([53u8; 32]);
         let prestate = Prestate::new(vec![(auth, Hash32::default())], Hash32::default());
 
         #[derive(Serialize)]

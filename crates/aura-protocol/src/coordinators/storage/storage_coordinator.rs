@@ -6,7 +6,6 @@
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::{identifiers::DeviceId, AuraResult};
 use aura_effects::{EncryptedStorageHandler, FilesystemStorageHandler};
-// Note: MemoryStorageHandler would be from aura-testkit, using FilesystemStorageHandler for now
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -25,11 +24,9 @@ pub struct StorageCoordinator {
 /// Storage backend enum wrapping different handler types
 #[derive(Clone)]
 pub enum StorageBackend {
-    /// In-memory storage
-    Memory(Arc<FilesystemStorageHandler>),
     /// Filesystem storage
     Filesystem(Arc<FilesystemStorageHandler>),
-    /// Encrypted memory storage
+    /// Encrypted filesystem storage
     Encrypted(Arc<EncryptedStorageHandler>),
 }
 
@@ -37,7 +34,6 @@ impl StorageBackend {
     /// Get backend type identifier
     pub fn backend_type(&self) -> &'static str {
         match self {
-            StorageBackend::Memory(_) => "memory",
             StorageBackend::Filesystem(_) => "filesystem",
             StorageBackend::Encrypted(_) => "encrypted",
         }
@@ -52,7 +48,6 @@ impl StorageBackend {
             -> std::pin::Pin<Box<dyn std::future::Future<Output = R> + Send + 'a>>,
     {
         match self {
-            StorageBackend::Memory(handler) => operation(handler.as_ref()).await,
             StorageBackend::Filesystem(handler) => operation(handler.as_ref()).await,
             StorageBackend::Encrypted(handler) => operation(handler.as_ref()).await,
         }
@@ -112,11 +107,10 @@ impl StorageCoordinatorBuilder {
 }
 
 impl StorageCoordinator {
-    /// Create a simple coordinator with memory storage
-    pub fn with_memory(device_id: DeviceId) -> Self {
-        let primary = StorageBackend::Memory(Arc::new(FilesystemStorageHandler::from_path(
-            std::env::temp_dir().join("aura_memory_storage"),
-        )));
+    /// Create a coordinator backed by filesystem storage (default for agents)
+    pub fn with_filesystem(device_id: DeviceId, path: impl Into<std::path::PathBuf>) -> Self {
+        let primary =
+            StorageBackend::Filesystem(Arc::new(FilesystemStorageHandler::from_path(path.into())));
         Self {
             primary,
             replicas: Vec::new(),
@@ -125,10 +119,14 @@ impl StorageCoordinator {
         }
     }
 
-    /// Create coordinator with encrypted storage
-    pub fn with_encrypted(device_id: DeviceId, encryption_key: Option<Vec<u8>>) -> Self {
+    /// Create coordinator with encrypted filesystem storage
+    pub fn with_encrypted(
+        device_id: DeviceId,
+        path: impl Into<std::path::PathBuf>,
+        encryption_key: Option<Vec<u8>>,
+    ) -> Self {
         let primary = StorageBackend::Encrypted(Arc::new(EncryptedStorageHandler::from_path(
-            "/tmp/storage".to_string().into(),
+            path.into(),
             encryption_key,
         )));
         Self {
@@ -179,7 +177,7 @@ impl StorageCoordinator {
         if !self.replicas.is_empty() {
             for replica in &self.replicas {
                 if replica.backend_type() != backend.backend_type() {
-                    // Async replication (fire and forget for now)
+                    // Async replication (reliability via effect layer)
                     let key_ref = key_owned.clone();
                     let value_for_replica = value.clone();
                     let _ = replica
@@ -236,6 +234,36 @@ impl StorageCoordinator {
         }
 
         Ok(None)
+    }
+
+    /// Check existence across primary and replicas
+    pub async fn coordinated_exists(&self, key: &str) -> Result<bool, StorageError> {
+        let key_owned = key.to_string();
+        let primary_backend = self.select_backend(&key_owned);
+
+        if primary_backend
+            .execute(|storage| {
+                let k = key_owned.clone();
+                Box::pin(async move { storage.exists(&k).await })
+            })
+            .await?
+        {
+            return Ok(true);
+        }
+
+        for replica in &self.replicas {
+            if replica
+                .execute(|storage| {
+                    let k = key_owned.clone();
+                    Box::pin(async move { storage.exists(&k).await })
+                })
+                .await?
+            {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     /// Remove from all backends
@@ -349,8 +377,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_coordinator_basic_operations() {
-        let device_id = DeviceId::new();
-        let coordinator = StorageCoordinator::with_memory(device_id);
+        let device_id = DeviceId::deterministic_test_id();
+        let test_path = std::env::temp_dir().join("aura_test_basic");
+        let coordinator = StorageCoordinator::with_filesystem(device_id, test_path);
 
         // Test store and retrieve
         let key = "test_key";
@@ -371,13 +400,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_coordinator_with_replicas() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::deterministic_test_id();
         let coordinator = StorageCoordinatorBuilder::new(device_id)
-            .with_primary(StorageBackend::Memory(Arc::new(
-                FilesystemStorageHandler::from_path(std::env::temp_dir().join("aura_test_storage")),
+            .with_primary(StorageBackend::Filesystem(Arc::new(
+                FilesystemStorageHandler::from_path(
+                    std::env::temp_dir().join("aura_test_replicas"),
+                ),
             )))
             .add_replica(StorageBackend::Encrypted(Arc::new(
-                EncryptedStorageHandler::from_path("/tmp/test".to_string().into(), None),
+                EncryptedStorageHandler::from_path(
+                    std::env::temp_dir().join("aura_test_encrypted"),
+                    None,
+                ),
             )))
             .build()
             .unwrap();
@@ -398,13 +432,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_routing_rules() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::deterministic_test_id();
         let coordinator = StorageCoordinatorBuilder::new(device_id)
-            .with_primary(StorageBackend::Memory(Arc::new(
-                FilesystemStorageHandler::from_path(std::env::temp_dir().join("aura_test_storage")),
+            .with_primary(StorageBackend::Filesystem(Arc::new(
+                FilesystemStorageHandler::from_path(std::env::temp_dir().join("aura_test_routing")),
             )))
             .add_replica(StorageBackend::Encrypted(Arc::new(
-                EncryptedStorageHandler::from_path("/tmp/test".to_string().into(), None),
+                EncryptedStorageHandler::from_path(
+                    std::env::temp_dir().join("aura_test_encrypted_routing"),
+                    None,
+                ),
             )))
             .with_routing_rule("secret_".to_string(), "encrypted".to_string())
             .build()
@@ -413,10 +450,10 @@ mod tests {
         let normal_key = "normal_data";
         let secret_key = "secret_data";
 
-        // Normal data should go to primary (memory)
+        // Normal data should go to primary (filesystem)
         assert_eq!(
             coordinator.select_backend(normal_key).backend_type(),
-            "memory"
+            "filesystem"
         );
 
         // Secret data should go to encrypted backend

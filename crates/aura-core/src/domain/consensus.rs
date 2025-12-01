@@ -164,8 +164,8 @@ mod tests {
 
     #[test]
     fn test_prestate_hash_deterministic() {
-        let auth1 = AuthorityId::new();
-        let auth2 = AuthorityId::new();
+        let auth1 = AuthorityId::new_from_entropy([21u8; 32]);
+        let auth2 = AuthorityId::new_from_entropy([22u8; 32]);
         let commit1 = Hash32([1u8; 32]);
         let commit2 = Hash32([2u8; 32]);
         let context = Hash32([3u8; 32]);
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn test_prestate_builder() {
-        let auth = AuthorityId::new();
+        let auth = AuthorityId::new_from_entropy([23u8; 32]);
         let commit = Hash32::default();
         let context = Hash32([1u8; 32]);
 
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_bind_operation() {
-        let auth = AuthorityId::new();
+        let auth = AuthorityId::new_from_entropy([24u8; 32]);
         let commit = Hash32::default();
         let context = Hash32([1u8; 32]);
 

@@ -537,6 +537,13 @@ impl AuraContext {
     /// Create a new context for testing mode
     pub fn for_testing(device_id: DeviceId) -> Self {
         let created_at = 0u64; // Fixed timestamp for deterministic testing
+        let mut seed = Vec::with_capacity(24);
+        seed.extend_from_slice(device_id.0.as_bytes());
+        seed.extend_from_slice(&created_at.to_le_bytes());
+        let digest = aura_core::hash::hash(&seed);
+        let mut op_bytes = [0u8; 16];
+        op_bytes.copy_from_slice(&digest[..16]);
+        let operation_id = uuid::Uuid::from_bytes(op_bytes);
         Self {
             device_id,
             execution_mode: ExecutionMode::Testing,
@@ -544,7 +551,7 @@ impl AuraContext {
             created_at,
             account_id: None,
             metadata: Arc::new(HashMap::new()),
-            operation_id: uuid::Uuid::nil(), // Deterministic UUID for testing
+            operation_id,
             epoch: created_at,
             choreographic: None,
             simulation: None,
@@ -748,7 +755,11 @@ mod tests {
 
     #[test]
     fn test_immutable_choreographic_context() {
-        let role = ChoreographicRole::new(Uuid::nil(), 0);
+        let digest = aura_core::hash::hash(b"handler-choreo-role-0");
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&digest[..16]);
+        let role_id = Uuid::from_bytes(uuid_bytes);
+        let role = ChoreographicRole::new(role_id, 0);
         let participants = vec![role];
         let ctx = ChoreographicContext::new(role, participants, 1);
 
@@ -794,7 +805,7 @@ mod tests {
         assert_eq!(ctx2.get_config("key"), Some("value")); // New has value
 
         // Test immutable sessions
-        let session_id = SessionId::new();
+        let session_id = SessionId::from_uuid(uuid::Uuid::from_u128(1));
         let ctx3 = ctx2.with_session(session_id, "test_session", 1000);
 
         assert!(ctx2.get_session(&session_id).is_none()); // Original unchanged
@@ -846,7 +857,7 @@ mod tests {
         assert_eq!(ctx2.metadata.get("key"), Some(&"value".to_string()));
 
         // Test immutable session
-        let session_id = SessionId::new();
+        let session_id = SessionId::from_uuid(uuid::Uuid::from_u128(2));
         let ctx3 = ctx2.with_session(session_id);
         assert!(ctx2.session_id.is_none()); // Original unchanged
         assert_eq!(ctx3.session_id, Some(session_id));

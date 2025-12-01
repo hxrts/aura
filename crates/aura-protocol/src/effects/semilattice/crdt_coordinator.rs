@@ -225,9 +225,9 @@ where
                         "CmRDT handler not registered".to_string(),
                     )
                 })?;
-                // For CmRDT, we need to provide buffered operations; currently emits empty set.
-                let operations = Vec::new();
-                CrdtSyncData::Operations(operations)
+                // Buffered operations not exposed by current handler; return empty set.
+                let _ = handler;
+                CrdtSyncData::Operations(Vec::new())
             }
             CrdtType::Delta => {
                 let handler = self.delta_handler.as_ref().ok_or_else(|| {
@@ -235,9 +235,9 @@ where
                         "Delta CRDT handler not registered".to_string(),
                     )
                 })?;
-                // Provide available deltas; currently emits empty placeholder.
-                let delta_bytes = Vec::new();
-                CrdtSyncData::Deltas(vec![delta_bytes])
+                // Deltas not buffered; return empty list.
+                let _ = handler;
+                CrdtSyncData::Deltas(Vec::new())
             }
             CrdtType::Meet => {
                 let handler = self.mv_handler.as_ref().ok_or_else(|| {
@@ -616,7 +616,7 @@ mod tests {
         fn ctx(&self) -> &Self::Ctx {
             use std::sync::LazyLock;
             static DUMMY_CTX: LazyLock<CausalContext> =
-                LazyLock::new(|| CausalContext::new(DeviceId::new()));
+                LazyLock::new(|| CausalContext::new(DeviceId::deterministic_test_id()));
             &DUMMY_CTX
         }
     }
@@ -683,7 +683,7 @@ mod tests {
 
     #[test]
     fn test_builder_with_cv() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([1u8; 32]);
         let coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,
@@ -702,7 +702,7 @@ mod tests {
 
     #[test]
     fn test_builder_with_cv_state() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([2u8; 32]);
         let initial_state = TestCounter(42);
         let coordinator: CrdtCoordinator<
             TestCounter,
@@ -719,7 +719,7 @@ mod tests {
 
     #[test]
     fn test_builder_chaining() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([3u8; 32]);
         let coordinator = CrdtCoordinator::<
             TestCounter,
             DummyCmState,
@@ -747,7 +747,7 @@ mod tests {
             DummyOp,
             DummyId,
         > = CrdtCoordinator::with_cv_state(authority_id, TestCounter::bottom());
-        let session_id = SessionId::new();
+        let session_id = SessionId::from_uuid(uuid::Uuid::from_u128(1));
 
         let request = coordinator.create_sync_request(session_id, CrdtType::Convergent)?;
 
@@ -769,7 +769,7 @@ mod tests {
             DummyOp,
             DummyId,
         > = CrdtCoordinator::with_cv_state(authority_id, TestCounter(42));
-        let session_id = SessionId::new();
+        let session_id = SessionId::from_uuid(uuid::Uuid::from_u128(2));
 
         let request = CrdtSyncRequest {
             session_id,
@@ -798,7 +798,7 @@ mod tests {
             DummyOp,
             DummyId,
         > = CrdtCoordinator::with_cv_state(authority_id, TestCounter(10));
-        let session_id = SessionId::new();
+        let session_id = SessionId::from_uuid(uuid::Uuid::from_u128(3));
 
         // Create a response with a higher counter value
         let peer_state = TestCounter(50);
@@ -821,7 +821,7 @@ mod tests {
 
     #[test]
     fn test_has_handler() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([4u8; 32]);
         let coordinator: CrdtCoordinator<
             TestCounter,
             DummyCmState,

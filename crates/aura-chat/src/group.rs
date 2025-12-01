@@ -88,7 +88,7 @@ mod tests {
 
     fn create_test_group() -> ChatGroup {
         let group_id = ChatGroupId::from_uuid(Uuid::from_bytes([1u8; 16]));
-        let creator_id = AuthorityId::new();
+        let creator_id = AuthorityId::new_from_entropy([64u8; 32]);
         // Use deterministic time for tests instead of system time
         let now = TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: 1000,
@@ -115,7 +115,7 @@ mod tests {
     fn test_group_membership() {
         let group = create_test_group();
         let creator_id = &group.created_by;
-        let non_member_id = AuthorityId::new();
+        let non_member_id = AuthorityId::new_from_entropy([65u8; 32]);
 
         assert!(group.is_member(creator_id));
         assert!(!group.is_member(&non_member_id));
@@ -125,7 +125,7 @@ mod tests {
     fn test_admin_permissions() {
         let group = create_test_group();
         let creator_id = &group.created_by;
-        let non_member_id = AuthorityId::new();
+        let non_member_id = AuthorityId::new_from_entropy([66u8; 32]);
 
         assert!(group.is_admin(creator_id));
         assert!(!group.is_admin(&non_member_id));

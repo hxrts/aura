@@ -102,14 +102,14 @@ impl EvidenceBuilder {
         }
     }
 
-    /// Create default/placeholder evidence (for testing and compatibility)
+    /// Create minimal deterministic evidence for testing and compatibility
     ///
     /// # Returns
     /// RecoveryEvidence with default values for all fields
     pub fn create_default_evidence() -> RecoveryEvidence {
         RecoveryEvidence {
-            account_id: AccountId::new(),
-            recovering_device: DeviceId::new(),
+            account_id: AccountId::new_from_entropy([0u8; 32]),
+            recovering_device: DeviceId::new_from_entropy([1u8; 32]),
             guardians: Vec::new(),
             issued_at: 0,
             cooldown_expires_at: 0,
@@ -178,8 +178,8 @@ mod tests {
     fn create_test_share(cooldown_secs: u64) -> RecoveryShare {
         RecoveryShare {
             guardian: GuardianProfile {
-                guardian_id: GuardianId::new(),
-                device_id: DeviceId::new(),
+                guardian_id: GuardianId::new_from_entropy([cooldown_secs as u8; 32]),
+                device_id: DeviceId::new_from_entropy([cooldown_secs as u8; 32]),
                 label: "Test Guardian".to_string(),
                 trust_level: TrustLevel::High,
                 cooldown_secs,
@@ -192,8 +192,8 @@ mod tests {
 
     #[test]
     fn test_create_success_evidence() {
-        let account_id = AccountId::new();
-        let device_id = DeviceId::new();
+        let account_id = AccountId::new_from_entropy([1u8; 32]);
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
         let shares = vec![create_test_share(900), create_test_share(1200)];
 
         let evidence = EvidenceBuilder::create_success_evidence(account_id, device_id, &shares);
@@ -209,8 +209,8 @@ mod tests {
 
     #[test]
     fn test_create_failed_evidence() {
-        let account_id = AccountId::new();
-        let device_id = DeviceId::new();
+        let account_id = AccountId::new_from_entropy([3u8; 32]);
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
 
         let evidence = EvidenceBuilder::create_failed_evidence(account_id, device_id);
 

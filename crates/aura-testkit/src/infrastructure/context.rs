@@ -565,6 +565,22 @@ impl NetworkEffects for CompositeTestHandler {
     ) -> Result<aura_core::effects::PeerEventStream, aura_core::effects::NetworkError> {
         self.network.subscribe_to_peer_events().await
     }
+
+    async fn open(&self, address: &str) -> Result<String, aura_core::effects::NetworkError> {
+        self.network.open(address).await
+    }
+
+    async fn send(
+        &self,
+        connection_id: &str,
+        data: Vec<u8>,
+    ) -> Result<(), aura_core::effects::NetworkError> {
+        self.network.send(connection_id, data).await
+    }
+
+    async fn close(&self, connection_id: &str) -> Result<(), aura_core::effects::NetworkError> {
+        self.network.close(connection_id).await
+    }
 }
 
 /// Convenience functions for common test scenarios
@@ -587,16 +603,20 @@ pub fn create_integration_context() -> AuraResult<SimpleTestContext> {
 mod tests {
     use super::*;
 
+    fn device(seed: u8) -> DeviceId {
+        DeviceId::new_from_entropy([seed; 32])
+    }
+
     #[test]
     fn test_simple_context_creation() {
         let context = SimpleTestContext::new(ExecutionMode::Testing);
         assert_eq!(context.execution_mode(), ExecutionMode::Testing);
-        assert_ne!(context.device_id(), DeviceId::new()); // Should have unique ID
+        assert_ne!(context.device_id(), device(1)); // Should have unique ID
     }
 
     #[test]
     fn test_context_with_device_id() {
-        let device_id = DeviceId::new();
+        let device_id = device(2);
         let context = SimpleTestContext::with_device_id(ExecutionMode::Testing, device_id);
         assert_eq!(context.execution_mode(), ExecutionMode::Testing);
         assert_eq!(context.device_id(), device_id);

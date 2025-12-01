@@ -18,6 +18,8 @@ use aura_core::effects::agent::{BiometricType, ChoreographicMessage, Choreograph
 use aura_core::hash::hash;
 use aura_core::{identifiers::DeviceId, AuraResult as Result};
 use aura_effects::time::PhysicalTimeHandler;
+use hex;
+use serde_json;
 
 /// Unified agent effect system that implements all agent-specific effects
 pub struct AgentEffectSystemHandler {
@@ -71,6 +73,73 @@ impl AgentEffectSystemHandler {
     pub fn device_id(&self) -> DeviceId {
         self.device_id
     }
+
+    async fn load_credential_index(
+        &self,
+        effects: &dyn crate::effects::AuraEffects,
+    ) -> Result<Vec<String>> {
+        let maybe_index = effects.retrieve("credential_index").await.map_err(|e| {
+            aura_core::AuraError::internal(format!("Failed to load credential index: {}", e))
+        })?;
+
+        if let Some(bytes) = maybe_index {
+            serde_json::from_slice(&bytes).map_err(|e| {
+                aura_core::AuraError::serialization(format!(
+                    "Invalid credential index encoding: {}",
+                    e
+                ))
+            })
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn persist_credential_index(
+        &self,
+        effects: &dyn crate::effects::AuraEffects,
+        index: Vec<String>,
+    ) -> Result<()> {
+        let data = serde_json::to_vec(&index).map_err(|e| {
+            aura_core::AuraError::serialization(format!(
+                "Failed to serialize credential index: {}",
+                e
+            ))
+        })?;
+
+        effects.store("credential_index", data).await.map_err(|e| {
+            aura_core::AuraError::internal(format!("Failed to persist credential index: {}", e))
+        })
+    }
+
+    async fn load_config_index(
+        &self,
+        effects: &dyn crate::effects::AuraEffects,
+    ) -> Result<Vec<String>> {
+        let bytes_opt = effects.retrieve("config_index").await.map_err(|e| {
+            aura_core::AuraError::internal(format!("Failed to load config index: {}", e))
+        })?;
+        if let Some(bytes) = bytes_opt {
+            serde_json::from_slice(&bytes).map_err(|e| {
+                aura_core::AuraError::serialization(format!("Invalid config index encoding: {}", e))
+            })
+        } else {
+            Ok(Vec::new())
+        }
+    }
+
+    async fn persist_config_index(
+        &self,
+        effects: &dyn crate::effects::AuraEffects,
+        index: Vec<String>,
+    ) -> Result<()> {
+        let data = serde_json::to_vec(&index).map_err(|e| {
+            aura_core::AuraError::serialization(format!("Failed to serialize config index: {}", e))
+        })?;
+
+        effects.store("config_index", data).await.map_err(|e| {
+            aura_core::AuraError::internal(format!("Failed to persist config index: {}", e))
+        })
+    }
 }
 
 // Implement AgentEffects trait
@@ -107,7 +176,6 @@ impl AgentEffects for AgentEffectSystemHandler {
     }
 
     async fn sync_distributed_state(&self) -> Result<()> {
-        // In production this would sync with the distributed journal; here we log for visibility.
         let effects = self.core_effects.read().await;
         effects.log_info("Syncing distributed state").await?;
         Ok(())
@@ -125,8 +193,13 @@ impl AgentEffects for AgentEffectSystemHandler {
             },
         };
 
-        // Simplified health check placeholder
-        let network_health = HealthStatus::Healthy; // Assume healthy for now
+        // Network health derived from effects metrics
+        let network_health = match effects.stats().await {
+            Ok(_) => HealthStatus::Healthy,
+            Err(e) => HealthStatus::Degraded {
+                reason: format!("Network metrics unavailable: {e}"),
+            },
+        };
 
         // Check session health
         let session_count = self.session_handler.session_count();
@@ -177,7 +250,16 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
             .await
             .map_err(|e| {
                 aura_core::AuraError::internal(format!("Failed to store credential: {}", e))
-            })
+            })?;
+
+        // Update credential index
+        let mut index = self.load_credential_index(effects.as_ref()).await?;
+        if !index.contains(&key.to_string()) {
+            index.push(key.to_string());
+            self.persist_credential_index(effects.as_ref(), index)
+                .await?;
+        }
+        Ok(())
     }
 
     async fn retrieve_credential(&self, key: &str) -> Result<Option<Vec<u8>>> {
@@ -198,19 +280,17 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
             .map_err(|e| {
                 aura_core::AuraError::internal(format!("Failed to delete credential: {}", e))
             })?;
+
+        let mut index = self.load_credential_index(effects.as_ref()).await?;
+        index.retain(|k| k != key);
+        self.persist_credential_index(effects.as_ref(), index)
+            .await?;
         Ok(())
     }
 
     async fn list_credentials(&self) -> Result<Vec<String>> {
         let effects = self.core_effects.read().await;
-        let _stats = effects
-            .stats()
-            .await
-            .map_err(|e| aura_core::AuraError::internal(format!("Failed to get stats: {}", e)))?;
-
-        // StorageStats does not expose key listing yet; return empty set.
-        // This would need to be implemented via list_keys() in real usage
-        Ok(Vec::new())
+        self.load_credential_index(effects.as_ref()).await
     }
 
     async fn store_device_config(&self, config: &[u8]) -> Result<()> {
@@ -234,26 +314,48 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
         let effects = self.core_effects.read().await;
         let timestamp = effects.physical_time().await?.ts_ms;
 
-        // Get all credentials
-        let credentials = self.list_credentials().await?;
-        let mut backup_data = Vec::new();
-
-        for key in credentials {
-            if let Ok(Some(cred)) = self.retrieve_credential(&key).await {
-                backup_data.extend_from_slice(&cred);
+        // Collect credentials with keys for restoration
+        let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
+        for key in self.list_credentials().await? {
+            if let Some(cred) = self.retrieve_credential(&key).await? {
+                entries.push((key, cred));
             }
         }
 
-        // Encrypt the backup data
-        let encrypted_credentials = hash(&backup_data).to_vec();
+        let serialized = serde_json::to_vec(&entries).map_err(|e| {
+            aura_core::AuraError::serialization(format!(
+                "Failed to serialize credential backup: {}",
+                e
+            ))
+        })?;
+
+        // Derive deterministic key/nonce from device id and timestamp
+        let key_material = hash(format!("cred-backup:{}:{}", self.device_id, timestamp).as_bytes());
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&key_material);
+
+        let nonce_material =
+            hash(format!("cred-backup-nonce:{}:{}", self.device_id, timestamp).as_bytes());
+        let mut nonce = [0u8; 12];
+        nonce.copy_from_slice(&nonce_material[..12]);
+
+        let encrypted_credentials = effects
+            .aes_gcm_encrypt(&serialized, &key, &nonce)
+            .await
+            .map_err(|e| {
+                aura_core::AuraError::crypto(format!("Credential backup encryption failed: {}", e))
+            })?;
+
         let backup_hash = hash(&encrypted_credentials);
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("nonce_hex".to_string(), hex::encode(nonce));
 
         Ok(CredentialBackup {
             device_id: self.device_id,
             timestamp,
             encrypted_credentials,
             backup_hash,
-            metadata: std::collections::HashMap::new(),
+            metadata,
         })
     }
 
@@ -268,7 +370,51 @@ impl DeviceStorageEffects for AgentEffectSystemHandler {
             ));
         }
 
-        // In production, this would decrypt and restore credentials.
+        // Recompute key/nonce deterministically
+        let key_material =
+            hash(format!("cred-backup:{}:{}", backup.device_id, backup.timestamp).as_bytes());
+        let mut key = [0u8; 32];
+        key.copy_from_slice(&key_material);
+
+        let nonce_bytes = if let Some(nonce_hex) = backup.metadata.get("nonce_hex") {
+            hex::decode(nonce_hex).map_err(|e| {
+                aura_core::AuraError::serialization(format!(
+                    "Invalid nonce encoding in backup: {}",
+                    e
+                ))
+            })?
+        } else {
+            hash(
+                format!(
+                    "cred-backup-nonce:{}:{}",
+                    backup.device_id, backup.timestamp
+                )
+                .as_bytes(),
+            )
+            .to_vec()
+        };
+
+        let mut nonce = [0u8; 12];
+        nonce.copy_from_slice(&nonce_bytes[..12]);
+
+        let decrypted = effects
+            .aes_gcm_decrypt(&backup.encrypted_credentials, &key, &nonce)
+            .await
+            .map_err(|e| {
+                aura_core::AuraError::crypto(format!("Backup decryption failed: {}", e))
+            })?;
+
+        let entries: Vec<(String, Vec<u8>)> = serde_json::from_slice(&decrypted).map_err(|e| {
+            aura_core::AuraError::serialization(format!(
+                "Failed to deserialize decrypted credentials: {}",
+                e
+            ))
+        })?;
+
+        for (key, value) in entries {
+            self.store_credential(&key, &value).await?;
+        }
+
         effects.log_info("Credentials restored from backup").await?;
         Ok(())
     }
@@ -546,13 +692,34 @@ impl ConfigurationEffects for AgentEffectSystemHandler {
         effects
             .store(key, config_json.into_bytes())
             .await
-            .map_err(|e| aura_core::AuraError::internal(format!("Failed to store config: {}", e)))
+            .map_err(|e| {
+                aura_core::AuraError::internal(format!("Failed to store config: {}", e))
+            })?;
+
+        let mut index = self.load_config_index(effects.as_ref()).await?;
+        if !index.contains(&key.to_string()) {
+            index.push(key.to_string());
+            self.persist_config_index(effects.as_ref(), index).await?;
+        }
+        Ok(())
     }
 
     async fn get_all_config(&self) -> Result<std::collections::HashMap<String, serde_json::Value>> {
-        // Configuration key retrieval not yet implemented.
-        // For now, return an empty map since we don't have a list_keys operation
-        Ok(std::collections::HashMap::new())
+        let effects = self.core_effects.read().await;
+        let mut result = std::collections::HashMap::new();
+        let keys = self.load_config_index(effects.as_ref()).await?;
+
+        for key in keys {
+            if let Some(bytes) = effects.retrieve(&key).await.map_err(|e| {
+                aura_core::AuraError::internal(format!("Failed to retrieve config: {}", e))
+            })? {
+                if let Ok(value) = serde_json::from_slice(&bytes) {
+                    result.insert(key.clone(), value);
+                }
+            }
+        }
+
+        Ok(result)
     }
 }
 

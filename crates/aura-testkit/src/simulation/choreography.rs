@@ -252,7 +252,7 @@ impl ChoreographyTestHarness {
             tasks.push(task);
         }
 
-        // Execute all device roles sequentially for now (foundation approach)
+        // Execute all device roles sequentially (foundation approach)
         let mut results = Vec::new();
         for task in tasks {
             results.push(task.await?);

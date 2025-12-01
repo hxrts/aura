@@ -27,33 +27,28 @@ use super::context::TuiContext;
 use super::demo::Tip;
 use aura_core::AuthorityId;
 
-/// Demo events for coordinating demo orchestration
-///
-/// This enum is used by the human-agent demo system for coordination
-/// between Bob's TUI and the automated guardian agents.
-#[deprecated(
-    since = "0.1.0",
-    note = "Use SimulatedBridge for new demo implementations"
-)]
+/// Minimal demo events for coordinating the human-agent demo.
+/// These are intentionally scoped to the current demo flow.
 #[derive(Debug, Clone)]
 pub enum DemoEvent {
-    /// Advance to next demo phase
+    /// Advance to the next demo phase (triggered by Enter/Space)
     AdvancePhase,
-    /// Send a message
+    /// Send a chat message from Bob during the demo
     SendMessage(String),
-    /// Initiate recovery
+    /// Begin the recovery process after device loss
     InitiateRecovery,
-    /// Guardian approval received
+    /// A guardian approved the recovery (authority ID provided)
     GuardianApproval(AuthorityId),
-    /// Restore messages after recovery
+    /// Restore Bob's messages after successful recovery
     RestoreMessages,
-    /// Reset demo state
+    /// Reset the demo state back to setup
     Reset,
 }
 use super::input::{InputAction, InputMode};
 use super::screens::{
-    ChatScreen, GuardiansScreen, InvitationsScreen, RecoveryScreen, Screen, ScreenManager,
-    ScreenType, WelcomeScreen,
+    BlockMessagesScreen, BlockScreen, ChatScreen, ContactsScreen, GuardiansScreen,
+    InvitationsScreen, NeighborhoodScreen, RecoveryScreen, Screen, ScreenManager, ScreenType,
+    WelcomeScreen,
 };
 use super::styles::Styles;
 
@@ -75,8 +70,7 @@ pub struct TuiApp {
     show_help: bool,
     /// Should quit application
     should_quit: bool,
-    /// Demo event sender for orchestration (deprecated)
-    #[allow(deprecated)]
+    /// Demo event sender for orchestration
     demo_tx: Option<mpsc::UnboundedSender<DemoEvent>>,
     /// Cached tip for rendering (updated from async context)
     cached_tip: Option<Tip>,
@@ -89,6 +83,10 @@ struct Screens {
     guardians: GuardiansScreen,
     recovery: RecoveryScreen,
     invitations: InvitationsScreen,
+    contacts: ContactsScreen,
+    neighborhood: NeighborhoodScreen,
+    block: BlockScreen,
+    block_messages: BlockMessagesScreen,
 }
 
 impl Default for Screens {
@@ -99,6 +97,10 @@ impl Default for Screens {
             guardians: GuardiansScreen::new(),
             recovery: RecoveryScreen::new(),
             invitations: InvitationsScreen::new(),
+            contacts: ContactsScreen::new(),
+            neighborhood: NeighborhoodScreen::new(),
+            block: BlockScreen::new(),
+            block_messages: BlockMessagesScreen::new(),
         }
     }
 }
@@ -260,6 +262,10 @@ impl TuiApp {
         self.screens.guardians.update();
         self.screens.recovery.update();
         self.screens.invitations.update();
+        self.screens.contacts.update();
+        self.screens.neighborhood.update();
+        self.screens.block.update();
+        self.screens.block_messages.update();
     }
 
     /// Handle key input
@@ -323,6 +329,32 @@ impl TuiApp {
             }
             KeyCode::Char('5') => {
                 self.screen_manager.navigate(ScreenType::Invitations);
+                return;
+            }
+            KeyCode::Char('6') => {
+                self.screen_manager.navigate(ScreenType::Contacts);
+                return;
+            }
+            KeyCode::Char('7') => {
+                self.screen_manager.navigate(ScreenType::Neighborhood);
+                return;
+            }
+            KeyCode::Char('8') => {
+                self.screen_manager.navigate(ScreenType::Block);
+                return;
+            }
+            KeyCode::Char('9') => {
+                self.screen_manager.navigate(ScreenType::BlockMessages);
+                return;
+            }
+            KeyCode::Enter | KeyCode::Char(' ') => {
+                // Advance demo phase when in demo mode
+                if let Some(tx) = &self.demo_tx {
+                    let _ = tx.send(DemoEvent::AdvancePhase);
+                }
+                // Move off the welcome screen into chat to show progress
+                self.screens.welcome.advance();
+                self.screen_manager.navigate(ScreenType::Chat);
                 return;
             }
             KeyCode::Char('i') if self.screen_manager.current() == ScreenType::Chat => {
@@ -481,7 +513,10 @@ impl TuiApp {
                 let _ = self
                     .ctx
                     .bridge()
-                    .dispatch(EffectCommand::SendDirectMessage { target, content: text })
+                    .dispatch(EffectCommand::SendDirectMessage {
+                        target,
+                        content: text,
+                    })
                     .await;
             }
             IrcCommand::Me { action } => {
@@ -625,8 +660,18 @@ impl TuiApp {
     }
 
     /// Execute a text command
-    async fn execute_command(&mut self, _cmd: &str) {
-        // Placeholder: routed commands are handled by execute_irc_command
+    async fn execute_command(&mut self, cmd: &str) {
+        let trimmed = cmd.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        // Use default channel; context wiring for channel selection is not yet implemented
+        let channel = "general".to_string();
+        let irc_cmd = super::commands::IrcCommand::Msg {
+            target: channel,
+            text: trimmed.to_string(),
+        };
+        self.execute_irc_command(irc_cmd).await;
     }
 
     /// Send a message via the effect bridge
@@ -650,7 +695,11 @@ impl TuiApp {
             ScreenType::Chat => ScreenType::Guardians,
             ScreenType::Guardians => ScreenType::Recovery,
             ScreenType::Recovery => ScreenType::Invitations,
-            ScreenType::Invitations => ScreenType::Welcome,
+            ScreenType::Invitations => ScreenType::Contacts,
+            ScreenType::Contacts => ScreenType::Neighborhood,
+            ScreenType::Neighborhood => ScreenType::Block,
+            ScreenType::Block => ScreenType::BlockMessages,
+            ScreenType::BlockMessages => ScreenType::Welcome,
             _ => ScreenType::Welcome,
         };
         self.screen_manager.navigate(next);
@@ -671,6 +720,10 @@ impl TuiApp {
             ScreenType::Guardians => &mut self.screens.guardians,
             ScreenType::Recovery => &mut self.screens.recovery,
             ScreenType::Invitations => &mut self.screens.invitations,
+            ScreenType::Contacts => &mut self.screens.contacts,
+            ScreenType::Neighborhood => &mut self.screens.neighborhood,
+            ScreenType::Block => &mut self.screens.block,
+            ScreenType::BlockMessages => &mut self.screens.block_messages,
             _ => &mut self.screens.welcome,
         }
     }
@@ -683,6 +736,10 @@ impl TuiApp {
             ScreenType::Guardians => &self.screens.guardians,
             ScreenType::Recovery => &self.screens.recovery,
             ScreenType::Invitations => &self.screens.invitations,
+            ScreenType::Contacts => &self.screens.contacts,
+            ScreenType::Neighborhood => &self.screens.neighborhood,
+            ScreenType::Block => &self.screens.block,
+            ScreenType::BlockMessages => &self.screens.block_messages,
             _ => &self.screens.welcome,
         }
     }
@@ -717,7 +774,13 @@ impl TuiApp {
         self.render_tabs(f, chunks[0]);
 
         // Main screen content
-        self.current_screen().render(f, chunks[1], &self.styles);
+        let panel = self
+            .styles
+            .panel(self.screen_manager.current().title())
+            .border_style(self.styles.border());
+        let inner = panel.inner(chunks[1]);
+        f.render_widget(panel, chunks[1]);
+        self.current_screen().render(f, inner, &self.styles);
 
         // Tip bar (if present)
         if has_tip {
@@ -762,6 +825,10 @@ impl TuiApp {
             "3:Guardians",
             "4:Recovery",
             "5:Invitations",
+            "6:Contacts",
+            "7:Neighborhood",
+            "8:Block",
+            "9:Block Msgs",
         ];
         let selected = match self.screen_manager.current() {
             ScreenType::Welcome => 0,
@@ -769,6 +836,10 @@ impl TuiApp {
             ScreenType::Guardians => 2,
             ScreenType::Recovery => 3,
             ScreenType::Invitations => 4,
+            ScreenType::Contacts => 5,
+            ScreenType::Neighborhood => 6,
+            ScreenType::Block => 7,
+            ScreenType::BlockMessages => 8,
             _ => 0,
         };
 
@@ -888,15 +959,15 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_app_creation() {
+    #[tokio::test]
+    async fn test_app_creation() {
         let app = TuiApp::new();
         assert_eq!(app.screen_manager.current(), ScreenType::Welcome);
         assert!(!app.should_quit);
     }
 
-    #[test]
-    fn test_screen_cycling() {
+    #[tokio::test]
+    async fn test_screen_cycling() {
         let mut app = TuiApp::new();
         assert_eq!(app.screen_manager.current(), ScreenType::Welcome);
 
@@ -911,6 +982,18 @@ mod tests {
 
         app.cycle_screen();
         assert_eq!(app.screen_manager.current(), ScreenType::Invitations);
+
+        app.cycle_screen();
+        assert_eq!(app.screen_manager.current(), ScreenType::Contacts);
+
+        app.cycle_screen();
+        assert_eq!(app.screen_manager.current(), ScreenType::Neighborhood);
+
+        app.cycle_screen();
+        assert_eq!(app.screen_manager.current(), ScreenType::Block);
+
+        app.cycle_screen();
+        assert_eq!(app.screen_manager.current(), ScreenType::BlockMessages);
 
         app.cycle_screen();
         assert_eq!(app.screen_manager.current(), ScreenType::Welcome);

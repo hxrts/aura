@@ -306,7 +306,7 @@ where
         Ok(())
     }
 
-    // Helper method to convert legacy fault types to new effect system types
+    // Helper method to convert legacy fault types to the unified FaultType in aura-core
     fn convert_legacy_fault_type(
         &self,
         legacy_fault: LegacyFaultType,
@@ -374,7 +374,6 @@ pub struct ScenarioSummary {
 }
 
 /// Legacy fault type for migration compatibility
-/// This will be removed once all code is migrated to use the new FaultType from aura-core
 #[derive(Debug, Clone)]
 pub enum LegacyFaultType {
     NetworkPartition,

@@ -4,7 +4,9 @@
 //! Supports multiple severity levels and stacking.
 
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use aura_effects::time::PhysicalTimeHandler;
 
 use crossterm::event::KeyEvent;
 use ratatui::{
@@ -39,8 +41,8 @@ pub struct Toast {
     pub message: String,
     /// Severity level
     pub level: ToastLevel,
-    /// When the toast was created
-    pub created_at: Instant,
+    /// When the toast was created (ms since epoch)
+    pub created_at_ms: u64,
     /// How long to display (None = until dismissed)
     pub duration: Option<Duration>,
     /// Whether the toast can be dismissed by user
@@ -54,7 +56,7 @@ impl Toast {
             id: ToastId::new(),
             message: message.into(),
             level,
-            created_at: Instant::now(),
+            created_at_ms: 0,
             duration: Some(Duration::from_secs(5)),
             dismissable: true,
         }
@@ -100,10 +102,8 @@ impl Toast {
 
     /// Check if the toast has expired
     pub fn is_expired(&self) -> bool {
-        match self.duration {
-            Some(d) => self.created_at.elapsed() >= d,
-            None => false,
-        }
+        // ToastManager evaluates expiry with current time; individual toasts don't know now.
+        false
     }
 
     /// Get the icon for this toast level
@@ -126,6 +126,8 @@ pub struct ToastManager {
     max_visible: usize,
     /// Whether the toast area is focused (for dismissal)
     focused: bool,
+    /// Time source for deterministic timestamps
+    time: PhysicalTimeHandler,
 }
 
 impl ToastManager {
@@ -135,6 +137,7 @@ impl ToastManager {
             toasts: VecDeque::new(),
             max_visible: 5,
             focused: false,
+            time: PhysicalTimeHandler::new(),
         }
     }
 
@@ -146,6 +149,8 @@ impl ToastManager {
 
     /// Add a new toast
     pub fn push(&mut self, toast: Toast) {
+        let mut toast = toast;
+        toast.created_at_ms = self.time.physical_time_now_ms();
         self.toasts.push_back(toast);
         // Trim old toasts if we exceed the limit
         while self.toasts.len() > self.max_visible * 2 {
@@ -189,12 +194,24 @@ impl ToastManager {
 
     /// Remove expired toasts
     pub fn cleanup(&mut self) {
-        self.toasts.retain(|t| !t.is_expired());
+        let now_ms = self.time.physical_time_now_ms();
+        self.toasts.retain(|t| match t.duration {
+            Some(dur) => now_ms.saturating_sub(t.created_at_ms) < dur.as_millis() as u64,
+            None => true,
+        });
     }
 
     /// Get visible toasts
     pub fn visible(&self) -> impl Iterator<Item = &Toast> {
-        self.toasts.iter().rev().take(self.max_visible)
+        let now_ms = self.time.physical_time_now_ms();
+        self.toasts
+            .iter()
+            .rev()
+            .take(self.max_visible)
+            .filter(move |t| match t.duration {
+                Some(dur) => now_ms.saturating_sub(t.created_at_ms) < dur.as_millis() as u64,
+                None => true,
+            })
     }
 
     /// Check if there are any toasts

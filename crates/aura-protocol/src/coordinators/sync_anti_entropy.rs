@@ -273,7 +273,7 @@ mod tests {
                 op: TreeOpKind::AddLeaf {
                     leaf: aura_journal::commitment_tree::LeafNode {
                         leaf_id: aura_journal::commitment_tree::LeafId(1),
-                        device_id: aura_core::identifiers::DeviceId::new(),
+                        device_id: aura_core::identifiers::DeviceId::deterministic_test_id(),
                         role: aura_journal::commitment_tree::LeafRole::Device,
                         public_key: vec![1, 2, 3],
                         meta: vec![],
@@ -289,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_empty_digest() {
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
         let digest = handler.get_oplog_digest().await.unwrap();
         assert!(digest.filter.is_empty());
@@ -297,7 +297,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_digest_with_ops() {
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([2u8; 32]);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -313,7 +313,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_compute_ops_to_push() {
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([3u8; 32]);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -336,7 +336,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_compute_cids_to_pull() {
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([4u8; 32]);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let local_digest = BloomDigest::empty();
@@ -358,7 +358,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_remote_ops() {
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([5u8; 32]);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -372,7 +372,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_peer_management() {
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([6u8; 32]);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let peer1 = Uuid::from_u128(1);
@@ -389,7 +389,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_op() {
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([7u8; 32]);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -409,7 +409,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_request_missing_op() {
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([8u8; 32]);
         let handler = AntiEntropyHandler::new(AntiEntropyConfig::default(), context_id);
 
         let peer_id = Uuid::from_u128(1);

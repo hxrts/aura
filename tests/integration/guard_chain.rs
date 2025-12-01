@@ -127,8 +127,8 @@ async fn test_protocol_guard_with_journal_coupling() -> AuraResult<()> {
     let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
     let mut effect_system = fixture.effect_system_direct();
 
-    // Create protocol guard
-    let guard = ProtocolGuard::new("test_protocol")
+    // Create protocol guard with placeholder keys for testing
+    let guard = ProtocolGuard::new_placeholder("test_protocol")
         .delta_facts(vec![serde_json::json!({
             "type": "session_attestation",
             "session_id": "test_session",
@@ -294,7 +294,7 @@ async fn test_guard_chain_capability_enforcement() -> AuraResult<()> {
     let mut effect_system = fixture.effect_system_direct();
 
     // Create guard with delta facts (capability checking moved to Biscuit tokens)
-    let guard = ProtocolGuard::new("capability_test").delta_facts(vec![serde_json::json!({
+    let guard = ProtocolGuard::new_placeholder("capability_test").delta_facts(vec![serde_json::json!({
         "type": "restricted_operation",
         "operation": "capability_protected"
     })]);
@@ -337,7 +337,7 @@ async fn test_leakage_budget_tracking() -> AuraResult<()> {
     let mut effect_system = fixture.effect_system_direct();
 
     // Create guard with specific leakage budget
-    let guard = ProtocolGuard::new("leakage_test").leakage_budget(
+    let guard = ProtocolGuard::new_placeholder("leakage_test").leakage_budget(
         aura_protocol::guards::LeakageBudget::new(
             3, // External adversary
             2, // Neighbor adversary
@@ -374,7 +374,7 @@ async fn test_guard_chain_with_multiple_delta_facts() -> AuraResult<()> {
     let mut effect_system = fixture.effect_system_direct();
 
     // Create guard with multiple delta facts
-    let guard = ProtocolGuard::new("multi_delta_test").delta_facts(vec![
+    let guard = ProtocolGuard::new_placeholder("multi_delta_test").delta_facts(vec![
         serde_json::json!({
             "type": "session_attestation",
             "session_id": "multi_delta_session",

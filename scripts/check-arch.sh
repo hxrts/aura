@@ -19,6 +19,9 @@ Options (run all when none given):
   --invariants     INVARIANTS.md schema validation
   --todos          Incomplete code markers
   --registration   Handler composition vs direct instantiation
+  --layer N[,M...] Filter output to specific layer numbers (1-8); repeatable
+  --quick          Run fast checks only (skip todos, placeholders)
+  -v, --verbose    Show more detail (allowlisted paths, etc.)
   -h, --help       Show this help
 EOF
 }
@@ -31,6 +34,9 @@ RUN_GUARDS=false
 RUN_INVARIANTS=false
 RUN_TODOS=false
 RUN_REG=false
+RUN_QUICK=false
+VERBOSE=false
+LAYER_FILTERS=()
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -41,11 +47,35 @@ while [[ $# -gt 0 ]]; do
     --invariants) RUN_ALL=false; RUN_INVARIANTS=true ;;
     --todos) RUN_ALL=false; RUN_TODOS=true ;;
     --registration) RUN_ALL=false; RUN_REG=true ;;
+    --layer)
+      if [[ -z "${2-}" ]]; then
+        echo "--layer requires a layer number (1-8)"; exit 1
+      fi
+      IFS=',' read -r -a layers <<< "$2"
+      for l in "${layers[@]}"; do
+        LAYER_FILTERS+=("$l")
+      done
+      shift
+      ;;
+    --quick) RUN_QUICK=true ;;
+    -v|--verbose) VERBOSE=true ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1"; usage; exit 1 ;;
   esac
   shift
 done
+
+# Quick mode skips slower/noisier checks
+if [ "$RUN_QUICK" = true ] && [ "$RUN_ALL" = true ]; then
+  RUN_LAYERS=true
+  RUN_DEPS=true
+  RUN_EFFECTS=true
+  RUN_GUARDS=true
+  RUN_INVARIANTS=true
+  RUN_REG=true
+  RUN_TODOS=false  # Skip todos in quick mode
+  RUN_ALL=false
+fi
 
 VIOLATIONS=0
 VIOLATION_DETAILS=()
@@ -55,7 +85,15 @@ violation() { VIOLATIONS=$((VIOLATIONS+1)); VIOLATION_DETAILS+=("$1"); echo -e "
 warning() { violation "$1"; }
 info() { echo -e "${BLUE}•${NC} $1"; }
 
-# Sort hits by layer (L1→L8) based on crate path.
+# Extract layer from a file path
+get_layer_from_path() {
+  local path="$1"
+  local crate
+  crate=$(echo "$path" | sed 's|^crates/||' | cut -d/ -f1)
+  layer_of "$crate"
+}
+
+# Sort hits by layer (L1→L8) based on crate path, preserving layer info.
 sort_hits_by_layer() {
   while IFS= read -r entry; do
     [ -z "$entry" ] && continue
@@ -64,10 +102,25 @@ sort_hits_by_layer() {
     layer=$(layer_of "$crate")
     [ "$layer" = "0" ] && layer=99
     printf "%02d:%s\n" "$layer" "$entry"
-  done | sort -t: -k1,1n -k2,2 | sed 's/^[0-9][0-9]://'
+  done | sort -t: -k1,1n -k2,2
+}
+
+layer_filter_matches() {
+  local layer="$1"
+  # No filter -> always matches
+  if [ ${#LAYER_FILTERS[@]} -eq 0 ]; then
+    return 0
+  fi
+  for lf in "${LAYER_FILTERS[@]}"; do
+    if [ "$layer" = "$lf" ]; then
+      return 0
+    fi
+  done
+  return 1
 }
 
 # Helper to emit numbered violations with consistent formatting and layer ordering.
+# Output format: [Ln] label [idx]: path:content
 emit_hits() {
   local label="$1"; shift
   local hits="$1"
@@ -75,17 +128,74 @@ emit_hits() {
     local sorted
     sorted=$(printf "%s\n" "$hits" | sort_hits_by_layer)
     local idx=1
+    local any=false
     while IFS= read -r entry; do
       [ -z "$entry" ] && continue
-      violation "${label} [${idx}]: ${entry}"
+      # Extract layer number (first 2 chars) and actual content
+      local layer_num="${entry:0:2}"
+      local content="${entry:3}"  # Skip "NN:"
+      # Convert layer 99 back to "?" for unknown
+      [ "$layer_num" = "99" ] && layer_num="?"
+      # Remove leading zero
+      layer_num="${layer_num#0}"
+        # Apply layer filter if present
+      if ! layer_filter_matches "$layer_num"; then
+        continue
+      fi
+      any=true
+      violation "[L${layer_num}] ${label} [${idx}]: ${content}"
       idx=$((idx+1))
     done <<< "$sorted"
+    if [ "$any" = false ]; then
+      info "${label}: none (filtered)"
+    fi
   else
     info "${label}: none"
   fi
 }
 
 section() { echo -e "\n${BOLD}${CYAN}$1${NC}"; }
+verbose() { [ "$VERBOSE" = true ] && echo -e "${BLUE}  ↳${NC} $1" || true; }
+
+# Precise allowlists for impure operations
+# These specify exact modules/files that legitimately need impure operations
+
+# Infrastructure effect implementations (Layer 3)
+EFFECT_HANDLER_ALLOWLIST="crates/aura-effects/src/"
+
+# Test infrastructure (Layer 8) - mocks and test harnesses
+TEST_ALLOWLIST="crates/aura-testkit/|/tests/|/examples/|benches/"
+
+# Simulator handlers (Layer 6) - simulation-specific impurity
+SIMULATOR_ALLOWLIST="crates/aura-simulator/src/handlers/"
+
+# Runtime assembly (Layer 6) - where effects are composed with real impls
+RUNTIME_ALLOWLIST="crates/aura-agent/src/runtime/"
+
+# CLI entry points (Layer 7) - main.rs where production starts
+CLI_ENTRY_ALLOWLIST="crates/aura-cli/src/main.rs"
+
+# Common filter for effect/impure checks
+# Usage: filter_common_allowlist "$input" ["extra_pattern"]
+filter_common_allowlist() {
+  local input="$1"
+  local extra="${2:-}"
+  local result
+  # Use -E for extended regex (alternation with |)
+  # Filter doc comments (///) as they're examples, not actual code
+  result=$(echo "$input" \
+    | grep -v "$EFFECT_HANDLER_ALLOWLIST" \
+    | grep -v "$SIMULATOR_ALLOWLIST" \
+    | grep -Ev "$TEST_ALLOWLIST" \
+    | grep -v "///" || true)
+  if [ -n "$extra" ]; then
+    result=$(echo "$result" | grep -Ev "$extra" || true)
+  fi
+  echo "$result"
+}
+
+# Counts for summary
+declare -A CATEGORY_COUNTS
 
 check_cargo() {
   if command -v cargo >/dev/null 2>&1; then
@@ -158,7 +268,7 @@ fi
 if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   section "Effects — infra traits only in aura-core; infra impls in aura-effects; app effects in domain crates; mocks in aura-testkit (docs/106_effect_system_and_runtime.md §1, docs/999_project_structure.md §Effect Trait Classification)"
   # Infrastructure effect traits must live in aura-core
-  infra_traits="CryptoEffects|NetworkEffects|StorageEffects|PhysicalTimeEffects|LogicalClockEffects|OrderClockEffects|TimeAttestationEffects|RandomEffects|ConsoleEffects|ConfigurationEffects"
+  infra_traits="CryptoEffects|NetworkEffects|StorageEffects|PhysicalTimeEffects|LogicalClockEffects|OrderClockEffects|TimeAttestationEffects|RandomEffects|ConsoleEffects|ConfigurationEffects|LeakageEffects"
   infra_defs=$(find crates/ -name "*.rs" -not -path "*/aura-core/*" -exec grep -El "pub trait ($infra_traits)" {} + 2>/dev/null || true)
   if [ -n "$infra_defs" ]; then
     violation "Infrastructure effect traits defined outside aura-core:" 
@@ -187,7 +297,8 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   emit_hits "Infrastructure effects implemented outside aura-effects" "$infra_impls"
 
   # Check for application effects in aura-effects
-  app_effects="JournalEffects|AuthorityEffects|FlowBudgetEffects|LeakageEffects|AuthorizationEffects|RelationalContextEffects|GuardianEffects"
+  # Note: LeakageEffects is infrastructure (moved to infra_traits above)
+  app_effects="JournalEffects|AuthorityEffects|FlowBudgetEffects|AuthorizationEffects|RelationalContextEffects|GuardianEffects|ChoreographicEffects|EffectApiEffects|SyncEffects"
   app_impls=$(grep -R "impl.*\($app_effects\)" crates/aura-effects/src 2>/dev/null | grep -v "test" || true)
   if [ -n "$app_impls" ]; then
     violation "Application effects implemented in aura-effects (should be in domain crates)"
@@ -199,6 +310,22 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   domain_crates="aura-journal|aura-wot|aura-verify|aura-store|aura-transport|aura-authenticate|aura-recovery|aura-relational"
   os_violations=$(find crates/ -path "*/src/*" -name "*.rs" | grep -E "($domain_crates)" | xargs grep -l "std::fs::\|SystemTime::now\|thread_rng()" 2>/dev/null | grep -v "test" || true)
   emit_hits "Direct OS operations in domain crates (should use effect injection)" "$os_violations"
+
+  # Check for direct std::fs usage outside handler layers (should use StorageEffects)
+  # Allowed: effect handler impls (storage.rs), runtime assembly, tests
+  fs_pattern="std::fs::|std::io::File|std::io::BufReader|std::io::BufWriter"
+  fs_hits=$(rg --no-heading "$fs_pattern" crates -g "*.rs" || true)
+  filtered_fs=$(filter_common_allowlist "$fs_hits" "$RUNTIME_ALLOWLIST")
+  emit_hits "Direct std::fs usage (should use StorageEffects)" "$filtered_fs"
+  verbose "Allowed: aura-effects/src/, aura-simulator/src/handlers/, aura-agent/src/runtime/, tests/"
+
+  # Check for direct std::net usage outside handler layers (should use NetworkEffects)
+  # Allowed: effect handler impls (network.rs), runtime assembly, tests
+  net_pattern="std::net::|TcpStream|TcpListener|UdpSocket"
+  net_hits=$(rg --no-heading "$net_pattern" crates -g "*.rs" || true)
+  filtered_net=$(filter_common_allowlist "$net_hits" "$RUNTIME_ALLOWLIST")
+  emit_hits "Direct std::net usage (should use NetworkEffects)" "$filtered_net"
+  verbose "Allowed: aura-effects/src/, aura-simulator/src/handlers/, aura-agent/src/runtime/, tests/"
 
   section "Runtime coupling — keep foundation/spec crates runtime-agnostic; wrap tokio/async-std behind effects (docs/106_effect_system_and_runtime.md §3.5, docs/001_system_architecture.md §3)"
   runtime_pattern="tokio::|async_std::"
@@ -219,7 +346,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "benches/" || true)
   emit_hits "Concrete runtime usage detected outside handler/composition layers (replace tokio/async-std with effect-injected abstractions)" "$filtered_runtime"
 
-  section "Impure functions — route time/random/fs through effect traits; production handlers in aura-effects or runtime assembly (docs/106_effect_system_and_runtime.md §1.3, .claude/skills/common_patterns.md)"
+  section "Impure functions — route time/random/fs through effect traits; production handlers in aura-effects or runtime assembly (docs/106_effect_system_and_runtime.md §1.3, .claude/skills/patterns/SKILL.md)"
   # Strict flag for direct wall-clock/random usage outside allowed areas
   impure_pattern="SystemTime::now|Instant::now|thread_rng\\(|rand::thread_rng|chrono::Utc::now|chrono::Local::now|rand::rngs::OsRng|rand::random"
   impure_hits=$(rg --no-heading "$impure_pattern" crates -g "*.rs" || true)
@@ -262,7 +389,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   fi
   emit_hits "Impure functions detected outside effect implementations/testkit/runtime assembly" "$filtered_impure"
 
-  section "Physical time guardrails — use PhysicalTimeEffects::sleep_ms; keep sleeps simulator-controllable (docs/106_effect_system_and_runtime.md §1.1, .claude/skills/common_patterns.md)"
+  section "Physical time guardrails — use PhysicalTimeEffects::sleep_ms; keep sleeps simulator-controllable (docs/106_effect_system_and_runtime.md §1.1, .claude/skills/patterns/SKILL.md)"
   # Direct tokio::time::sleep instances should go through PhysicalTimeEffects
   tokio_sleep_hits=$(rg --no-heading "tokio::time::sleep" crates -g "*.rs" || true)
   filtered_tokio_sleep=$(echo "$tokio_sleep_hits" \
@@ -285,7 +412,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "benches/" || true)
   emit_hits "Direct sleeps detected (should be effect-injected/simulator-controlled)" "$filtered_sleep"
 
-  section "Simulation control surfaces — inject randomness/IO/spawn via effects so simulator can control (docs/806_simulation_guide.md, .claude/skills/common_patterns.md)"
+  section "Simulation control surfaces — inject randomness/IO/spawn via effects so simulator can control (docs/806_simulation_guide.md, .claude/skills/patterns/SKILL.md)"
   sim_patterns="rand::random|rand::thread_rng|rand::rngs::OsRng|RngCore::fill_bytes|std::io::stdin|read_line\\(|std::thread::spawn"
   sim_hits=$(rg --no-heading "$sim_patterns" crates -g "*.rs" || true)
   filtered_sim=$(echo "$sim_hits" \
@@ -297,7 +424,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "///" \
     | grep -v "//!" \
     | grep -v "//" || true)
-  emit_hits "Potential non-injected randomness/IO/spawn (should be simulator-controllable; see docs/806_simulation_guide.md and .claude/skills/common_patterns.md)" "$filtered_sim"
+  emit_hits "Potential non-injected randomness/IO/spawn (should be simulator-controllable; see docs/806_simulation_guide.md and .claude/skills/patterns/SKILL.md)" "$filtered_sim"
 
   section "Pure interpreter alignment — migrate to GuardSnapshot + pure guard eval + EffectCommand interpreter (docs/106_effect_system_and_runtime.md §8, docs/001_system_architecture.md §2.1-2.3)"
   guard_bridge_hits=$(
@@ -308,6 +435,114 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   )
   sync_output=$(printf "%s\n%s" "$guard_bridge_hits" "$guard_block_on_hits" | sed '/^$/d' | sort -u)
   emit_hits "Synchronous guard/effect bridges detected (migrate to pure snapshot + EffectCommand + interpreter; see docs/106_effect_system_and_runtime.md and docs/806_simulation_guide.md)" "$sync_output"
+
+  section "Identifier determinism — avoid entropy-consuming ID creation; use deterministic constructors for tests"
+  # Reference: .claude/skills/patterns/SKILL.md (Test Determinism Violations section)
+  # Reference: docs/805_testing_guide.md (Deterministic Identifier Generation section)
+
+  # Check for AuthorityId::new(), ContextId::new(), DeviceId::new() which use system entropy
+  # Allowed only in: effect handlers (random.rs), runtime assembly, CLI entry point, tests
+  entropy_id_pattern="AuthorityId::new\\(\\)|ContextId::new\\(\\)|DeviceId::new\\(\\)"
+  entropy_id_hits=$(rg --no-heading "$entropy_id_pattern" crates -g "*.rs" || true)
+  filtered_entropy_ids=$(echo "$entropy_id_hits" \
+    | grep -v "$EFFECT_HANDLER_ALLOWLIST" \
+    | grep -v "$RUNTIME_ALLOWLIST" \
+    | grep -v "$CLI_ENTRY_ALLOWLIST" \
+    | grep -Ev "$TEST_ALLOWLIST" || true)
+  if [ -n "$filtered_entropy_ids" ]; then
+    # Sort by layer and emit with layer prefix, respecting layer filters
+    sorted_ids=$(printf "%s\n" "$filtered_entropy_ids" | sort_hits_by_layer)
+    any=false
+    while IFS= read -r entry; do
+      [ -z "$entry" ] && continue
+      layer_num="${entry:0:2}"
+      content="${entry:3}"
+      [ "$layer_num" = "99" ] && layer_num="?"
+      layer_num="${layer_num#0}"
+      if ! layer_filter_matches "$layer_num"; then
+        continue
+      fi
+      any=true
+      violation "[L${layer_num}] Entropy-consuming ID: $content"
+      echo -e "    ${YELLOW}Fix:${NC} Use XxxId::new_from_entropy([n; 32]) or ContextId::from_uuid(Uuid::from_bytes([n; 16]))"
+      echo -e "    ${YELLOW}Ref:${NC} .claude/skills/patterns/SKILL.md §Test Determinism Violations"
+    done <<< "$sorted_ids"
+    if [ "$any" = false ]; then
+      info "Entropy-consuming identifiers: none (filtered)"
+    fi
+  else
+    info "Entropy-consuming identifiers (AuthorityId::new, ContextId::new, DeviceId::new): none"
+  fi
+
+  # Check for Uuid::new_v4() which uses system entropy
+  # Allowed only in: effect handlers, runtime assembly, CLI entry point, tests
+  uuid_v4_pattern="Uuid::new_v4|uuid::Uuid::new_v4"
+  uuid_v4_hits=$(rg --no-heading "$uuid_v4_pattern" crates -g "*.rs" || true)
+  filtered_uuid_v4=$(echo "$uuid_v4_hits" \
+    | grep -v "$EFFECT_HANDLER_ALLOWLIST" \
+    | grep -v "$RUNTIME_ALLOWLIST" \
+    | grep -v "$CLI_ENTRY_ALLOWLIST" \
+    | grep -Ev "$TEST_ALLOWLIST" || true)
+  if [ -n "$filtered_uuid_v4" ]; then
+    # Sort by layer and emit with layer prefix, respecting layer filters
+    sorted_uuids=$(printf "%s\n" "$filtered_uuid_v4" | sort_hits_by_layer)
+    any=false
+    while IFS= read -r entry; do
+      [ -z "$entry" ] && continue
+      layer_num="${entry:0:2}"
+      content="${entry:3}"
+      [ "$layer_num" = "99" ] && layer_num="?"
+      layer_num="${layer_num#0}"
+      if ! layer_filter_matches "$layer_num"; then
+        continue
+      fi
+      any=true
+      violation "[L${layer_num}] Entropy-consuming UUID: $content"
+      echo -e "    ${YELLOW}Fix:${NC} Use Uuid::nil() for placeholders or Uuid::from_bytes([n; 16]) for deterministic unique IDs"
+      echo -e "    ${YELLOW}Ref:${NC} .claude/skills/patterns/SKILL.md §Test Determinism Violations"
+    done <<< "$sorted_uuids"
+    if [ "$any" = false ]; then
+      info "Entropy-consuming UUIDs: none (filtered)"
+    fi
+  else
+    info "Entropy-consuming UUIDs (Uuid::new_v4): none"
+  fi
+
+  # Check for rand::random and thread_rng outside allowed areas
+  rand_pattern="rand::random|thread_rng\\(\\)|rand::thread_rng"
+  rand_hits=$(rg --no-heading "$rand_pattern" crates -g "*.rs" || true)
+  filtered_rand=$(echo "$rand_hits" \
+    | grep -v "crates/aura-effects/" \
+    | grep -v "crates/aura-testkit/" \
+    | grep -v "crates/aura-simulator/" \
+    | grep -v "crates/aura-agent/src/runtime/" \
+    | grep -v "/tests/" \
+    | grep -v "///" \
+    | grep -v "//!" || true)
+  if [ -n "$filtered_rand" ]; then
+    # Sort by layer and emit with layer prefix, respecting layer filters
+    sorted_rand=$(printf "%s\n" "$filtered_rand" | sort_hits_by_layer)
+    any=false
+    while IFS= read -r entry; do
+      [ -z "$entry" ] && continue
+      layer_num="${entry:0:2}"
+      content="${entry:3}"
+      [ "$layer_num" = "99" ] && layer_num="?"
+      layer_num="${layer_num#0}"
+      if ! layer_filter_matches "$layer_num"; then
+        continue
+      fi
+      any=true
+      violation "[L${layer_num}] Direct randomness: $content"
+      echo -e "    ${YELLOW}Fix:${NC} Use RandomEffects trait for production code; use deterministic seeds/bytes for tests"
+      echo -e "    ${YELLOW}Ref:${NC} .claude/skills/patterns/SKILL.md §Test Determinism Violations, docs/805_testing_guide.md"
+    done <<< "$sorted_rand"
+    if [ "$any" = false ]; then
+      info "Direct randomness: none (filtered)"
+    fi
+  else
+    info "Direct randomness (rand::random, thread_rng): none"
+  fi
 fi
 
 if [ "$RUN_ALL" = true ] || [ "$RUN_GUARDS" = true ]; then
@@ -428,6 +663,17 @@ if [ $VIOLATIONS -eq 0 ]; then
   echo -e "${GREEN}✔ No violations${NC}"
 else
   echo -e "${RED}✖ $VIOLATIONS violation(s)${NC}"
+  if [ "$VERBOSE" = true ] && [ ${#VIOLATION_DETAILS[@]} -gt 0 ]; then
+    echo -e "\n${BOLD}Violation details:${NC}"
+    for detail in "${VIOLATION_DETAILS[@]}"; do
+      echo "  - $detail"
+    done
+  fi
+fi
+
+# Show quick mode hint if many violations
+if [ $VIOLATIONS -gt 10 ] && [ "$RUN_QUICK" = false ]; then
+  echo -e "\n${YELLOW}Tip:${NC} Use --quick to skip TODO/placeholder checks for faster iteration"
 fi
 
 exit $([ $VIOLATIONS -eq 0 ] && echo 0 || echo 1)

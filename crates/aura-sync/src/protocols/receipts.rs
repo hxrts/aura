@@ -279,7 +279,7 @@ impl ReceiptVerificationProtocol {
             .ts_ms
             / 1000;
 
-        // Generate an Ed25519 key pair for signing (in production, this would retrieve the device's key)
+        // Generate an Ed25519 key pair for signing using injected CryptoEffects
         let (public_key, private_key) =
             crypto_effects
                 .ed25519_generate_keypair()

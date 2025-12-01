@@ -11,13 +11,18 @@ use crate::types::{PrivacyLevel, TransportConfig};
 use aura_core::{identifiers::DeviceId, ContextId};
 use std::collections::HashMap;
 
+// Deterministic helper for device identifiers in tests to avoid consuming entropy.
+fn device(seed: u8) -> DeviceId {
+    DeviceId::new_from_entropy([seed; 32])
+}
+
 #[cfg(test)]
 mod peer_info_tests {
     use super::*;
 
     #[test]
     fn test_peer_info_creation() {
-        let device_id = DeviceId::new();
+        let device_id = device(1);
         let capabilities = vec!["transport".to_string(), "messaging".to_string()];
 
         let peer = PeerInfo::new(device_id, "test-peer".to_string(), capabilities.clone());
@@ -30,7 +35,7 @@ mod peer_info_tests {
 
     #[test]
     fn test_blinded_peer_info() {
-        let device_id = DeviceId::new();
+        let device_id = device(2);
         let capabilities = vec!["secret_cap".to_string(), "public_cap".to_string()];
 
         let peer = PeerInfo::new_blinded(device_id, "blinded-peer".to_string(), capabilities);
@@ -51,7 +56,7 @@ mod peer_info_tests {
 
     #[test]
     fn test_peer_capability_queries() {
-        let device_id = DeviceId::new();
+        let device_id = device(3);
         let capabilities = vec![
             "transport_basic".to_string(),
             "transport_secure".to_string(),
@@ -81,8 +86,8 @@ mod peer_info_tests {
 
     #[test]
     fn test_peer_metrics() {
-        let device_id = DeviceId::new();
-        let context = ContextId::new("test_context");
+        let device_id = device(4);
+        let context = ContextId::new_from_entropy([1u8; 32]);
 
         let mut peer = PeerInfo::new(device_id, "metrics-peer".to_string(), vec!["test".to_string()]);
 
@@ -99,7 +104,7 @@ mod peer_info_tests {
 
     #[test]
     fn test_peer_serialization() {
-        let device_id = DeviceId::new();
+        let device_id = device(5);
         let capabilities = vec!["cap1".to_string(), "cap2".to_string()];
 
         let original = PeerInfo::new_blinded(device_id, "serializable-peer".to_string(), capabilities);
@@ -137,13 +142,13 @@ mod selection_criteria_tests {
 
         // Create test peers
         let matching_peer = PeerInfo::new(
-            DeviceId::new(),
+            device(10),
             "matching".to_string(),
             vec!["transport".to_string(), "secure".to_string(), "extra".to_string()],
         );
 
         let non_matching_peer = PeerInfo::new(
-            DeviceId::new(),
+            device(11),
             "non-matching".to_string(),
             vec!["transport".to_string()], // Missing "secure"
         );
@@ -155,7 +160,7 @@ mod selection_criteria_tests {
 
     #[test]
     fn test_relationship_scoped_selection() {
-        let context = ContextId::new("test_context");
+        let context = ContextId::new_from_entropy([2u8; 32]);
         let criteria = PrivacyAwareSelectionCriteria {
             required_capabilities: vec!["messaging".to_string()],
             privacy_level: PrivacyLevel::RelationshipScoped,
@@ -165,7 +170,7 @@ mod selection_criteria_tests {
         };
 
         let peer = PeerInfo::new(
-            DeviceId::new(),
+            device(12),
             "scoped-peer".to_string(),
             vec!["messaging".to_string(), "file_transfer".to_string()],
         );
@@ -187,7 +192,7 @@ mod selection_criteria_tests {
         };
 
         let peer_many_caps = PeerInfo::new(
-            DeviceId::new(),
+            device(13),
             "many-caps".to_string(),
             vec![
                 "basic".to_string(),
@@ -210,20 +215,20 @@ mod selection_criteria_tests {
         let criteria = PrivacyAwareSelectionCriteria {
             required_capabilities: vec!["verified_transport".to_string()],
             privacy_level: PrivacyLevel::RelationshipScoped,
-            relationship_scope: Some(ContextId::new("test_context")),
+            relationship_scope: Some(ContextId::new_from_entropy([3u8; 32])),
             max_capability_disclosure: 1,
             require_capability_proofs: true,
         };
 
         let peer_with_proofs = PeerInfo::new_with_proofs(
-            DeviceId::new(),
+            device(14),
             "proven-peer".to_string(),
             vec!["verified_transport".to_string()],
             HashMap::from([("verified_transport".to_string(), vec![0x01, 0x02, 0x03])]),
         );
 
         let peer_without_proofs = PeerInfo::new(
-            DeviceId::new(),
+            device(15),
             "unproven-peer".to_string(),
             vec!["verified_transport".to_string()],
         );
@@ -240,20 +245,20 @@ mod discovery_tests {
 
     #[test]
     fn test_relationship_scoped_discovery() {
-        let context1 = ContextId::new("test_context");
-        let context2 = ContextId::new("test_context");
+        let context1 = ContextId::new_from_entropy([4u8; 32]);
+        let context2 = ContextId::new_from_entropy([5u8; 32]);
 
         let mut discovery = RelationshipScopedDiscovery::new();
 
         // Add peers to different relationship contexts
         let peer1 = PeerInfo::new(
-            DeviceId::new(),
+            device(20),
             "family-peer".to_string(),
             vec!["messaging".to_string()],
         );
 
         let peer2 = PeerInfo::new(
-            DeviceId::new(),
+            device(21),
             "work-peer".to_string(),
             vec!["messaging".to_string(), "file_sharing".to_string()],
         );
@@ -276,23 +281,23 @@ mod discovery_tests {
 
     #[test]
     fn test_discovery_with_selection_criteria() {
-        let context = ContextId::new("test_context");
+        let context = ContextId::new_from_entropy([6u8; 32]);
         let mut discovery = RelationshipScopedDiscovery::new();
 
         // Add various peers
         let peers = vec![
             PeerInfo::new(
-                DeviceId::new(),
+                device(40),
                 "basic-peer".to_string(),
                 vec!["transport".to_string()],
             ),
             PeerInfo::new(
-                DeviceId::new(),
+                device(41),
                 "secure-peer".to_string(),
                 vec!["transport".to_string(), "secure".to_string()],
             ),
             PeerInfo::new(
-                DeviceId::new(),
+                device(42),
                 "advanced-peer".to_string(),
                 vec!["transport".to_string(), "secure".to_string(), "advanced".to_string()],
             ),
@@ -327,9 +332,9 @@ mod discovery_tests {
         // Create multiple isolated relationship contexts
         let mut contexts = Vec::new();
         for i in 0..5 {
-            let context = ContextId::new("test_context");
+            let context = ContextId::new_from_entropy([7u8; 32]);
             let peer = PeerInfo::new(
-                DeviceId::new(),
+                device(30 + i as u8),
                 format!("peer-{}", i),
                 vec![format!("capability-{}", i)],
             );
@@ -361,7 +366,7 @@ mod property_tests {
 
     #[test]
     fn test_capability_blinding_preserves_functionality() {
-        let device_id = DeviceId::new();
+        let device_id = device(50);
         let capabilities = vec![
             "transport".to_string(),
             "secure_messaging".to_string(),
@@ -390,7 +395,7 @@ mod property_tests {
 
     #[test]
     fn test_selection_criteria_consistency() {
-        let context = ContextId::new("test_context");
+        let context = ContextId::new_from_entropy([8u8; 32]);
         let base_criteria = PrivacyAwareSelectionCriteria {
             required_capabilities: vec!["basic".to_string()],
             privacy_level: PrivacyLevel::Blinded,
@@ -400,7 +405,7 @@ mod property_tests {
         };
 
         let test_peer = PeerInfo::new(
-            DeviceId::new(),
+            device(60),
             "test-peer".to_string(),
             vec!["basic".to_string(), "extra".to_string()],
         );
@@ -421,12 +426,12 @@ mod property_tests {
         let mut discovery = RelationshipScopedDiscovery::new();
 
         // Same peer in different relationship contexts should be isolated
-        let peer_id = DeviceId::new();
+        let peer_id = device(70);
         let peer1 = PeerInfo::new(peer_id, "context1-peer".to_string(), vec!["cap1".to_string()]);
         let peer2 = PeerInfo::new(peer_id, "context2-peer".to_string(), vec!["cap2".to_string()]);
 
-        let context1 = ContextId::new("test_context");
-        let context2 = ContextId::new("test_context");
+        let context1 = ContextId::new_from_entropy([9u8; 32]);
+        let context2 = ContextId::new_from_entropy([10u8; 32]);
 
         discovery.add_peer_to_context(context1, peer1);
         discovery.add_peer_to_context(context2, peer2);

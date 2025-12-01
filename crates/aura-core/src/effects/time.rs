@@ -18,7 +18,6 @@
 use crate::time::{OrderTime, PhysicalTime, TimeOrdering};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
 use uuid::Uuid;
 
 /// Error type for time operations.
@@ -84,15 +83,15 @@ pub trait TimeComparison: Send + Sync {
 /// Compatibility shim for legacy time accessors.
 ///
 /// New code should prefer the domain-specific traits above, but many callers
-/// still expect helper methods like `current_timestamp()` and `now_instant()`.
+/// still expect helper methods like `current_timestamp()`.
 /// This trait delegates to `PhysicalTimeEffects` and should be blanket
 /// implemented for any physical clock provider.
+///
+/// NOTE: The legacy `now_instant()` method has been removed as it violated
+/// the effect system architecture by exposing `std::time::Instant` in the
+/// trait signature. Use `physical_time()` instead for all time operations.
 #[async_trait]
 pub trait TimeEffects: PhysicalTimeEffects {
-    /// Monotonic clock instant - must be implemented by effect handlers.
-    /// This cannot have a default implementation as it violates effect system architecture.
-    async fn now_instant(&self) -> Instant;
-
     /// Current Unix timestamp in seconds.
     async fn current_timestamp(&self) -> u64 {
         self.physical_time()

@@ -120,7 +120,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_storage() {
-        let account_id = AccountId::new();
+        let account_id = AccountId::new_from_entropy([2u8; 32]);
         let storage = MockStorage::new(account_id);
 
         assert_eq!(storage.account_id(), account_id);
@@ -145,7 +145,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_mock_storage_stats() {
-        let account_id = AccountId::new();
+        let account_id = AccountId::new_from_entropy([3u8; 32]);
         let storage = MockStorage::new(account_id);
 
         storage.store("key1", b"data1").await.unwrap();

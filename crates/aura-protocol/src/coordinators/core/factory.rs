@@ -1198,8 +1198,8 @@ mod tests {
         // Valid config should pass
         assert!(config.validate().is_ok());
 
-        // Invalid device ID should fail
-        config.device_id = DeviceId(uuid::Uuid::nil());
+        // Invalid device ID should fail (use all-zero UUID without relying on nil())
+        config.device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         assert!(config.validate().is_err());
 
         // Reset device ID

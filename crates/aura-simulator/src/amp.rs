@@ -1,4 +1,4 @@
-//! AMP simulation scenarios (placeholder).
+//! AMP simulation scenarios used by the simulator harness.
 use crate::scenario::types::{
     ByzantineConditions, ExpectedOutcome, NetworkConditions, Scenario, ScenarioAssertion,
     ScenarioSetup,

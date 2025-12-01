@@ -68,8 +68,7 @@ fn create_snapshot_fact_operation(
     cut_epoch: Epoch,
 ) -> Result<AttestedOp, CompactionError> {
     // Represent the snapshot as a RotateEpoch fence; downstream reducers treat this
-    // as an epoch boundary for compaction. Replace with a dedicated SnapshotFact
-    // once the type is introduced.
+    // as an epoch boundary for compaction until a dedicated SnapshotFact type lands.
     let snapshot_op = TreeOpKind::RotateEpoch {
         affected: snapshot
             .roster

@@ -3,7 +3,11 @@
 //! Centralized color palette and styling for consistent TUI appearance.
 //! Supports future dark/light theme switching.
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::{
+    prelude::Span,
+    style::{Color, Modifier, Style},
+    widgets::{Block, BorderType, Borders, Padding},
+};
 
 /// Color palette for the Aura TUI
 #[derive(Debug, Clone, Copy)]
@@ -199,6 +203,16 @@ impl Styles {
             ToastLevel::Error => self.palette.error,
         };
         Style::default().fg(color)
+    }
+
+    /// Consistent panel block used across screens
+    pub fn panel<'a>(&self, title: impl Into<String>) -> Block<'a> {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(self.border())
+            .title(Span::styled(title.into(), self.text_highlight()))
+            .padding(Padding::uniform(1))
     }
 }
 

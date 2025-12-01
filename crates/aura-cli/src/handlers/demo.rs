@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use aura_core::AuraError;
 
+use crate::ids;
 use crate::{
     commands::demo::{DemoCommands, DemoScenarioArg},
     create_cli_handler,
@@ -21,7 +22,6 @@ use crate::{
     },
     ScenarioAction,
 };
-use aura_core::DeviceId;
 
 /// Handler for demo commands
 pub struct DemoHandler;
@@ -120,6 +120,7 @@ impl DemoHandler {
             verbose_logging: verbose,
             guardian_response_time_ms: guardian_delay_ms,
             max_demo_duration_minutes: timeout_minutes,
+            seed,
         };
 
         // Execute demo
@@ -272,9 +273,12 @@ impl DemoHandler {
         println!("Seed: {}", seed);
         println!("Detailed report: {}", detailed_report);
 
-        // Build a temporary CLI handler with a fresh device/authority context
-        let handler = create_cli_handler(DeviceId::new())
-            .map_err(|e| AuraError::internal(format!("Failed to create demo handler: {}", e)))?;
+        // Build a CLI handler with a deterministic device/authority context
+        let handler =
+            create_cli_handler(ids::device_id(&format!("demo:recovery-workflow:{}", seed)))
+                .map_err(|e| {
+                    AuraError::internal(format!("Failed to create demo handler: {}", e))
+                })?;
 
         // Execute the cli_recovery_demo scenario via existing scenario machinery
         handler
@@ -305,7 +309,7 @@ impl DemoHandler {
         println!("Scenario: {}", scenario.description());
         println!("Loading demo data...");
 
-        // Create the effect bridge (uses stub implementations for demo)
+        // Create the effect bridge (demo-safe in-memory bridge)
         let bridge = EffectBridge::new();
 
         // Create the tip provider for contextual hints

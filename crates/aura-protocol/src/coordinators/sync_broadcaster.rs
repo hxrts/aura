@@ -349,7 +349,7 @@ mod tests {
                 op: TreeOpKind::AddLeaf {
                     leaf: LeafNode {
                         leaf_id: LeafId(1),
-                        device_id: aura_core::identifiers::DeviceId::new(),
+                        device_id: aura_core::identifiers::DeviceId::deterministic_test_id(),
                         role: LeafRole::Device,
                         public_key: vec![1, 2, 3],
                         meta: vec![],
@@ -369,7 +369,7 @@ mod tests {
             eager_push_enabled: true,
             ..Default::default()
         };
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
         let handler = BroadcasterHandler::new(config, context_id);
 
         let peer1 = Uuid::from_u128(1);
@@ -388,7 +388,7 @@ mod tests {
             eager_push_enabled: false,
             ..Default::default()
         };
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
         let handler = BroadcasterHandler::new(config, context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -403,7 +403,7 @@ mod tests {
             eager_push_enabled: true,
             ..Default::default()
         };
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
         let handler = BroadcasterHandler::new(config, context_id);
 
         let peer1 = Uuid::from_u128(1);
@@ -428,7 +428,7 @@ mod tests {
             eager_push_enabled: true,
             ..Default::default()
         };
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
         let handler = BroadcasterHandler::new(config, context_id);
 
         // Fill pending queue to capacity
@@ -451,7 +451,7 @@ mod tests {
             lazy_pull_enabled: true,
             ..Default::default()
         };
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
         let handler = BroadcasterHandler::new(config, context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -475,7 +475,7 @@ mod tests {
             lazy_pull_enabled: false,
             ..Default::default()
         };
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
         let handler = BroadcasterHandler::new(config, context_id);
 
         let op = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -491,7 +491,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_announce_new_op() {
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
         let handler = BroadcasterHandler::new(BroadcastConfig::default(), context_id);
 
         let peer1 = Uuid::from_u128(1);
@@ -506,7 +506,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_merge_deduplication() {
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
         let handler = BroadcasterHandler::new(BroadcastConfig::default(), context_id);
 
         let op1 = create_test_op(aura_core::Hash32([1u8; 32]));
@@ -528,7 +528,7 @@ mod tests {
             max_ops_per_peer: 1,
             ..Default::default()
         };
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
         let handler = BroadcasterHandler::new(config, context_id);
 
         let peer1 = Uuid::from_u128(1);

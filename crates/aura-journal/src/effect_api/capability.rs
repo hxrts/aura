@@ -197,16 +197,16 @@ impl CapabilityRef {
     /// Get time until expiration (returns 0 if already expired)
     pub fn time_until_expiration(&self, current_time: &TimeStamp) -> Option<u64> {
         use aura_core::time::{OrderingPolicy, TimeOrdering};
-
-        match current_time.compare(&self.expires_at, OrderingPolicy::DeterministicTieBreak) {
-            TimeOrdering::After => Some(0),      // Already expired
-            TimeOrdering::Concurrent => Some(0), // At expiration time
-            _ => {
-                // For time differences, we need proper duration calculation
-                // This is a simplified version - proper implementation would use
-                // domain-specific duration calculation from aura-core
-                Some(1000) // Placeholder until proper duration API is available
+        match (current_time, &self.expires_at) {
+            (TimeStamp::PhysicalClock(now), TimeStamp::PhysicalClock(exp)) => {
+                match current_time.compare(&self.expires_at, OrderingPolicy::DeterministicTieBreak)
+                {
+                    TimeOrdering::After | TimeOrdering::Concurrent => Some(0),
+                    _ => Some(exp.ts_ms.saturating_sub(now.ts_ms)),
+                }
             }
+            // For non-physical clocks, return None to force callers to supply a physical time
+            _ => None,
         }
     }
 }

@@ -25,7 +25,7 @@ pub mod types {
         RecoveryDemoSuccess,
     }
 
-    /// Legacy Byzantine strategy placeholder
+    /// Legacy Byzantine strategy kept for backward compatibility with older scenarios
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub struct LegacyByzantineStrategy {
         pub name: String,

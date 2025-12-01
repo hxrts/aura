@@ -310,9 +310,14 @@ impl OperationId {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     fn test_actor() -> ActorId {
-        DeviceId::new()
+        static COUNTER: AtomicU64 = AtomicU64::new(1);
+        let seed = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let mut bytes = [0u8; 32];
+        bytes[..8].copy_from_slice(&seed.to_le_bytes());
+        DeviceId::from_bytes(bytes)
     }
 
     #[test]

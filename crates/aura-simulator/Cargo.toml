@@ -48,6 +48,7 @@ indexmap = { workspace = true }
 # Additional dependencies for choreographic framework
 futures = { workspace = true }
 bincode = { workspace = true }
+sysinfo = { workspace = true }
 
 # Scenario management
 toml = { workspace = true }

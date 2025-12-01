@@ -358,7 +358,11 @@ impl AuthorityTreeState {
 
             for chunk in level.chunks(2) {
                 let left = &chunk[0];
-                let right = if chunk.len() == 2 { &chunk[1] } else { &chunk[0] };
+                let right = if chunk.len() == 2 {
+                    &chunk[1]
+                } else {
+                    &chunk[0]
+                };
 
                 // Record sibling hashes for proofs
                 for leaf in &left.leaves {
@@ -390,8 +394,7 @@ impl AuthorityTreeState {
 
     /// Check if a leaf has a valid parent node
     fn has_parent_for_leaf(&self, _leaf_id: LeafId) -> bool {
-        // In a full tree implementation, check if leaf_id has a parent node
-        // For now, assume all leaves have implicit parent (simplified structure)
+        // Parent relationships are implicit in this simplified authority tree representation
         true
     }
 
@@ -712,7 +715,6 @@ impl AuthorityTreeState {
 
         hasher.finalize().to_vec()
     }
-
 }
 
 impl Default for AuthorityTreeState {

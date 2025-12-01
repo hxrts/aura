@@ -37,7 +37,7 @@ fn test_aura_handler_creation() {
 #[test]
 fn test_aura_endpoint_creation() {
     let device_id = DeviceId::new();
-    let context_id = ContextId::new();
+    let context_id = ContextId::new_from_entropy([0u8; 32]);
 
     let mut endpoint = AuraEndpoint::new(device_id, context_id);
     assert_eq!(endpoint.device_id, device_id);

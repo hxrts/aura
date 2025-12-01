@@ -5,13 +5,11 @@
 
 use anyhow::Result;
 use aura_agent::{AgentBuilder, EffectContext};
-use aura_core::{
-    effects::ExecutionMode,
-    identifiers::{AuthorityId, ContextId, DeviceId},
-};
+use aura_core::effects::ExecutionMode;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+use aura_cli::ids;
 use aura_cli::{
     AdminAction, AmpAction, AuthorityCommands, ChatCommands, CliHandler, ContextAction,
     InvitationAction, RecoveryAction, SnapshotAction,
@@ -161,9 +159,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Create CLI device ID
-    let device_id = DeviceId::new();
-    let authority_id = AuthorityId::new();
-    let context_id = ContextId::new();
+    let device_id = ids::device_id("cli:main-device");
+    let authority_id = ids::authority_id("cli:main-authority");
+    let context_id = ids::context_id("cli:main-context");
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
 
     // Initialize agent based on environment

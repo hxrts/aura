@@ -80,6 +80,9 @@ pub trait IndexedJournalEffects: Send + Sync {
         end: TimeStamp,
     ) -> Result<Vec<IndexedFact>, AuraError>;
 
+    /// Return all indexed facts (append-only view).
+    async fn all_facts(&self) -> Result<Vec<IndexedFact>, AuraError>;
+
     /// Fast membership test using Bloom filter.
     ///
     /// Returns `true` if the predicate/value pair might be in the index,
@@ -143,6 +146,10 @@ impl<T: IndexedJournalEffects + ?Sized> IndexedJournalEffects for std::sync::Arc
         end: TimeStamp,
     ) -> Result<Vec<IndexedFact>, AuraError> {
         (**self).facts_in_range(start, end).await
+    }
+
+    async fn all_facts(&self) -> Result<Vec<IndexedFact>, AuraError> {
+        (**self).all_facts().await
     }
 
     fn might_contain(&self, predicate: &str, value: &FactValue) -> bool {

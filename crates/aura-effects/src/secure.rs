@@ -202,8 +202,27 @@ impl SecureStorageEffects for RealSecureStorageHandler {
     }
 
     async fn get_device_attestation(&self) -> Result<Vec<u8>, SecureStorageError> {
-        // Placeholder attestation blob
-        Ok(self.platform_config.as_bytes().to_vec())
+        #[derive(serde::Serialize)]
+        struct Attestation<'a> {
+            platform: &'a str,
+            issued_at_ms: u64,
+            capabilities: Vec<String>,
+        }
+
+        #[allow(clippy::disallowed_methods)]
+        let issued_at_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| SecureStorageError::storage(e.to_string()))?
+            .as_millis() as u64;
+
+        let attestation = Attestation {
+            platform: &self.platform_config,
+            issued_at_ms,
+            capabilities: self.get_secure_storage_capabilities(),
+        };
+
+        serde_json::to_vec(&attestation)
+            .map_err(|e| SecureStorageError::serialization(e.to_string()))
     }
 
     async fn is_secure_storage_available(&self) -> bool {

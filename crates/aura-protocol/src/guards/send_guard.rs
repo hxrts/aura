@@ -13,7 +13,7 @@ use crate::guards::{privacy::track_leakage_consumption, JournalCoupler, LeakageB
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::{AuraError, AuraResult, Receipt};
-use aura_wot::biscuit_resources::ResourceScope;
+use aura_wot::ResourceScope;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use biscuit_auth::{Biscuit, PublicKey};
 // use aura_wot::Capability; // Legacy capability removed - use Biscuit tokens instead
@@ -55,8 +55,9 @@ impl SendGuardChain {
             .get_metadata("biscuit_root_pk")
             .ok_or_else(|| AuraError::invalid("missing biscuit_root_pk metadata".to_string()))?;
 
-        let root_bytes =
-            BASE64.decode(&root_pk_b64).map_err(|e| AuraError::invalid(format!("{}", e)))?;
+        let root_bytes = BASE64
+            .decode(&root_pk_b64)
+            .map_err(|e| AuraError::invalid(format!("{}", e)))?;
         let root_pk = PublicKey::from_bytes(&root_bytes)
             .map_err(|e| AuraError::invalid(format!("invalid root pk: {e}")))?;
         let token = Biscuit::from_base64(&token_b64, |_| Ok(root_pk))
@@ -65,8 +66,10 @@ impl SendGuardChain {
         let bridge = BiscuitAuthorizationBridge::new(root_pk, effect_system.authority_id());
         let evaluator = BiscuitGuardEvaluator::new(bridge);
 
-        let resource = ResourceScope::Relay {
-            channel_id: self.context.to_string(),
+        // Use Context scope for send authorization - message sends occur within relational contexts
+        let resource = ResourceScope::Context {
+            context_id: self.context,
+            operation: aura_wot::ContextOp::UpdateParams, // Send operations use generic context update capability
         };
 
         let now_secs = effect_system
@@ -106,17 +109,17 @@ impl SendGuardChain {
         self.peer
     }
 
-    /// Temporary noop evaluation for legacy callers that haven't migrated to the async path.
-    /// Returns an authorized result without performing any checks.
+    /// Legacy sync wrapper for callers still on the blocking path.
+    /// For production use, prefer the async `evaluate` method above.
     pub fn evaluate_noop(&self) -> SendGuardResult {
         SendGuardResult {
-            authorized: true,
-            authorization_satisfied: true,
-            flow_authorized: true,
+            authorized: false,
+            authorization_satisfied: false,
+            flow_authorized: false,
             receipt: None,
             authorization_level: Some(self.message_authorization.clone()),
             metrics: SendGuardMetrics::default(),
-            denial_reason: None,
+            denial_reason: Some("legacy sync evaluation is disabled; call evaluate_async".into()),
         }
     }
 }
@@ -289,101 +292,14 @@ impl SendGuardChain {
         })
     }
 
-    /// Retrieve Biscuit token for send authorization from effect system
-    async fn retrieve_send_token<E: GuardContextProvider + aura_core::TimeEffects>(
-        &self,
-        capability: &str,
-        resource: &str,
-        effect_system: &E,
-    ) -> AuraResult<Biscuit> {
-        // Try to retrieve token from storage based on capability and context
-        let token_key = format!("send_tokens/{}_{}", capability, self.context);
-
-        // First try to get a stored token for this capability and context
-        if let Some(token_data) = effect_system.get_metadata(&token_key) {
-            // Try to deserialize the token from storage (assume it's hex-encoded bytes for now)
-            if hex::decode(&token_data).is_err() {
-                tracing::warn!(
-                    capability = %capability,
-                    "Failed to decode hex token data, creating new one"
-                );
-            }
-        }
-
-        // If no token found or deserialization failed, create a new one using the authorization bridge
-        self.create_fresh_send_token(capability, resource, effect_system)
-            .await
-    }
-
-    /// Create a fresh Biscuit token for send authorization using authorization bridge
-    async fn create_fresh_send_token<E: GuardContextProvider + aura_core::TimeEffects>(
-        &self,
-        capability: &str,
-        resource: &str,
-        effect_system: &E,
-    ) -> AuraResult<Biscuit> {
-        use biscuit_auth::KeyPair;
-
-        // In production, this would use the proper authorization bridge with the root keypair
-        // For now, create a properly structured token that would match real tokens
-        let keypair = KeyPair::new();
-        self.create_fresh_send_token_with_keypair(capability, resource, effect_system, &keypair)
-            .await
-    }
-
-    async fn create_fresh_send_token_with_keypair<
-        E: GuardContextProvider + aura_core::TimeEffects,
-    >(
-        &self,
-        capability: &str,
-        resource: &str,
-        effect_system: &E,
-        keypair: &biscuit_auth::KeyPair,
-    ) -> AuraResult<Biscuit> {
-        use biscuit_auth::macros::*;
-
-        let context_str = self.context.to_string();
-        let peer_str = self.peer.to_string();
-        let authority_str = effect_system.authority_id().to_string();
-        let timestamp_secs = effect_system
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0) as i64;
-        let expiry_secs = timestamp_secs + 3600; // 1 hour from now
-
-        // Create a Biscuit token with comprehensive send permissions
-        let token = biscuit!(
-            r#"
-            authority({authority_str});
-            resource({resource});
-            capability({capability});
-            context({context_str});
-            peer({peer_str});
-            operation("send");
-            time({timestamp});
-            expires_at({expiry});
-            "#,
-            authority_str = authority_str.clone(),
-            context_str = context_str,
-            peer_str = peer_str,
-            timestamp = timestamp_secs,
-            expiry = expiry_secs
-        )
-        .build(keypair)
-        .map_err(|e| AuraError::invalid(format!("Failed to build Biscuit token: {}", e)))?;
-
-        debug!(
-            capability = %capability,
-            resource = %resource,
-            context = ?self.context,
-            peer = ?self.peer,
-            authority = %authority_str,
-            "Created fresh send authorization token with authorization bridge integration"
-        );
-
-        Ok(token)
-    }
+    // NOTE: Token retrieval and creation is handled via effect system metadata.
+    // The effect system must provide:
+    //   - "biscuit_token": Base64-encoded Biscuit token
+    //   - "biscuit_root_pk": Base64-encoded root public key
+    //
+    // See evaluate_authorization_guard() for the actual token verification logic.
+    // Token issuance should be handled by higher-level authorization services,
+    // NOT created ad-hoc here. This ensures proper key management and audit trails.
 
     /// Evaluate the flow guard: headroom(ctx, cost) and charge flow budget
     async fn evaluate_flow_guard<E: GuardEffects>(&self, effect_system: &E) -> AuraResult<Receipt> {
@@ -551,11 +467,19 @@ mod tests {
     use super::*;
     // use aura_core::AccountId;
 
+    fn test_context() -> ContextId {
+        ContextId::new_from_entropy([77u8; 32])
+    }
+
+    fn test_peer() -> AuthorityId {
+        AuthorityId::new_from_entropy([78u8; 32])
+    }
+
     #[tokio::test]
     async fn test_send_guard_chain_creation() {
         let authorization = "message:send".to_string();
-        let context = ContextId::new();
-        let peer = AuthorityId::new();
+        let context = test_context();
+        let peer = test_peer();
         let cost = 100;
 
         let guard = SendGuardChain::new(authorization.clone(), context, peer, cost)
@@ -571,8 +495,8 @@ mod tests {
     #[tokio::test]
     async fn test_create_send_guard_convenience() {
         let authorization = "message:send".to_string();
-        let context = ContextId::new();
-        let peer = AuthorityId::new();
+        let context = test_context();
+        let peer = test_peer();
         let cost = 50;
 
         let guard = create_send_guard(authorization.clone(), context, peer, cost);
@@ -586,8 +510,8 @@ mod tests {
     #[tokio::test]
     async fn test_denial_reason_formatting() {
         let authorization = "message:send".to_string();
-        let context = ContextId::new();
-        let peer = AuthorityId::new();
+        let context = test_context();
+        let peer = test_peer();
         let guard = SendGuardChain::new(authorization.clone(), context, peer, 100);
 
         // Test authorization failure only

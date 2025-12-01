@@ -7,7 +7,7 @@ use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
 fn current_timestamp_secs() -> u64 {
-    0 // placeholder; callers should inject PhysicalTimeEffects
+    panic!("timestamp must be supplied via PhysicalTimeEffects; call new_with_timestamp with an explicit value")
 }
 use uuid::Uuid;
 
@@ -435,7 +435,7 @@ mod tests {
     fn test_request_response_flow() {
         let from = test_device_id(1);
         let to = test_device_id(2);
-        let request_id = uuid::Uuid::new_v4();
+        let request_id = uuid::Uuid::from_bytes(1u128.to_be_bytes());
 
         let request = RequestMessage::new(from, to, "ping".to_string(), request_id);
         let response = ResponseMessage::success(&request, "pong".to_string());
@@ -460,7 +460,7 @@ mod tests {
     #[test]
     fn test_batch_creation() {
         let items = vec![1, 2, 3, 4, 5, 6, 7];
-        let batch_id = uuid::Uuid::new_v4();
+        let batch_id = uuid::Uuid::from_bytes(2u128.to_be_bytes());
         let batches = BatchMessage::create_batches(items, 3, batch_id);
 
         assert_eq!(batches.len(), 3);
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn test_progress_message() {
-        let op_id = Uuid::new_v4();
+        let op_id = Uuid::from_bytes(3u128.to_be_bytes());
         let progress = ProgressMessage::new(op_id, 0.5, "Processing".to_string())
             .with_eta(300)
             .with_metadata("items", "100");

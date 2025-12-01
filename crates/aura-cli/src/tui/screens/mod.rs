@@ -44,12 +44,12 @@ pub enum ScreenType {
     Guardians,
     /// Recovery process screen
     Recovery,
-    /// Settings screen
-    Settings,
     /// Invitations screen
     Invitations,
     /// Block management screen
     Block,
+    /// Block message history screen
+    BlockMessages,
     /// Neighborhood traversal screen
     Neighborhood,
     /// Contacts and petnames screen
@@ -66,9 +66,9 @@ impl ScreenType {
             Self::Chat => "Chat",
             Self::Guardians => "Guardians",
             Self::Recovery => "Recovery",
-            Self::Settings => "Settings",
             Self::Invitations => "Invitations",
             Self::Block => "Block",
+            Self::BlockMessages => "Block Messages",
             Self::Neighborhood => "Neighborhood",
             Self::Contacts => "Contacts",
             Self::Help => "Help",
@@ -81,9 +81,9 @@ impl ScreenType {
             Self::Chat => Some('c'),
             Self::Guardians => Some('g'),
             Self::Recovery => Some('r'),
-            Self::Settings => Some('s'),
             Self::Invitations => Some('i'),
             Self::Block => Some('b'),
+            Self::BlockMessages => Some('m'),
             Self::Neighborhood => Some('n'),
             Self::Contacts => Some('o'), // 'o' for contaOcts (c is taken by Chat)
             Self::Help => Some('?'),

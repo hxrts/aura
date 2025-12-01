@@ -1,7 +1,7 @@
 //! Dummy tree handler used for wiring tests and composite handlers.
 //!
 //! The real commitment tree logic lives in higher layers. For unit tests and
-//! placeholder contexts we only need a handler that satisfies the trait
+//! Minimal handler used for contexts where full tree logic is unnecessary (tests/sim).
 //! signatures without performing any work.
 
 use async_trait::async_trait;

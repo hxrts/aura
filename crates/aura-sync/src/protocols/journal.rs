@@ -152,7 +152,7 @@ pub struct JournalSyncConfig {
 impl Default for JournalSyncConfig {
     fn default() -> Self {
         Self {
-            account_id: AccountId::new(),
+            account_id: AccountId::new_from_entropy([0u8; 32]),
             batch_size: 128,
             max_concurrent_syncs: 5,
             sync_timeout: Duration::from_secs(30),

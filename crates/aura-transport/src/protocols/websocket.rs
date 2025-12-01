@@ -7,8 +7,8 @@ use aura_core::hash::{hash as core_hash, hasher};
 use aura_core::identifiers::DeviceId;
 use aura_core::time::{OrderTime, TimeStamp};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use std::sync::atomic::{AtomicU64, Ordering};
+use uuid::Uuid;
 
 static SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 

@@ -290,13 +290,15 @@ mod tests {
 // pub mod agent;
 pub mod storage;
 // REMOVED: pub mod system; // Moved to aura-effects (Layer 3) - basic handlers
-pub mod mock;
 pub mod tree;
+pub use tree::InMemoryTreeHandler;
+pub mod sync;
 
 // Flattened handlers (previously in subdirectories)
 pub mod sync_anti_entropy;
 pub use sync_anti_entropy::AntiEntropyHandler;
 pub mod sync_broadcaster;
+pub use sync::LocalSyncHandler;
 pub use sync_broadcaster::{BroadcastConfig, BroadcasterHandler};
 
 pub use crate::coordinators::time_enhanced::EnhancedTimeHandler;
@@ -314,4 +316,4 @@ pub use transport_coordinator::{
 // External re-exports
 // REMOVED: Users should import MockJournalHandler directly from aura-effects
 // pub use aura_effects::journal::MockJournalHandler;
-pub use mock::MockHandler;
+// REMOVED: MockHandler moved to aura-testkit (Layer 8) per architectural guidelines

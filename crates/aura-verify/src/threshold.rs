@@ -109,25 +109,18 @@ pub fn verify_threshold_signature_with_signers(
     Ok(())
 }
 
-// Tests commented out due to missing crypto functions in current aura_crypto API
-/*
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)] // Test code uses Uuid::new_v4() for test data generation
 mod tests {
     use super::*;
-    use aura_core::Effects;
-    use aura_core::identifiers::DeviceId;
-    use uuid::Uuid;
+    use aura_core::Ed25519SigningKey;
 
     #[test]
     fn test_verify_threshold_signature_sufficient_signers() {
-        let _effects = Effects::test();
-
-        // Create a test signature
-        let signing_key = aura_core::generate_ed25519_key();
-        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
+        // Deterministic signing key avoids ambient randomness in tests
+        let signing_key = Ed25519SigningKey::from_bytes(&[7u8; 32]);
+        let verifying_key = signing_key.verifying_key().unwrap();
         let message = b"test threshold message";
-        let signature = aura_core::ed25519_sign(&signing_key, message);
+        let signature = signing_key.sign(message).unwrap();
         let min_signers = 1;
 
         let result = verify_threshold_signature(message, &signature, &verifying_key, min_signers);
@@ -137,12 +130,10 @@ mod tests {
 
     #[test]
     fn test_verify_threshold_signature_insufficient_signers() {
-        let _effects = Effects::test();
-
-        let signing_key = aura_core::generate_ed25519_key();
-        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
+        let signing_key = Ed25519SigningKey::from_bytes(&[3u8; 32]);
+        let verifying_key = signing_key.verifying_key().unwrap();
         let message = b"test threshold message";
-        let signature = aura_core::ed25519_sign(&signing_key, message);
+        let signature = signing_key.sign(message).unwrap();
         let min_signers = 2; // Require more than available (Ed25519 is single signature)
 
         let result = verify_threshold_signature(message, &signature, &verifying_key, min_signers);
@@ -156,14 +147,12 @@ mod tests {
 
     #[test]
     fn test_verify_threshold_signature_with_signers() {
-        let effects = Effects::test();
+        let expected_signers = vec![DeviceId::deterministic_test_id()];
 
-        let expected_signers = vec![DeviceId(Uuid::new_v4())];
-
-        let signing_key = aura_core::generate_ed25519_key();
-        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
+        let signing_key = Ed25519SigningKey::from_bytes(&[11u8; 32]);
+        let verifying_key = signing_key.verifying_key().unwrap();
         let message = b"test threshold message";
-        let signature = aura_core::ed25519_sign(&signing_key, message);
+        let signature = signing_key.sign(message).unwrap();
 
         let result = verify_threshold_signature_with_signers(
             message,
@@ -175,4 +164,3 @@ mod tests {
         assert!(result.is_ok());
     }
 }
-*/

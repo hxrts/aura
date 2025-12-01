@@ -258,6 +258,6 @@ impl AuraContext {
 
 impl Default for AuraContext {
     fn default() -> Self {
-        Self::for_testing(DeviceId::new())
+        Self::for_testing(DeviceId::deterministic_test_id())
     }
 }

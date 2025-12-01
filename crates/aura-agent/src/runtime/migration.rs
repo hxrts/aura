@@ -1,7 +1,8 @@
 //! Migration utilities
 //!
-//! Placeholder for migration utilities to help transition from
-//! the old architecture to the new authority-centric design.
+//! Provides scaffolding for future data and configuration migrations between
+//! runtime versions. Concrete migration steps will be added alongside schema
+//! changes in authority-centric releases.
 
 /// Migration coordinator
 #[derive(Debug)]

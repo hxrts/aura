@@ -177,10 +177,10 @@ impl ReplicationCoordinator {
             ReplicationStrategy::Hybrid { erasure_config, .. } => erasure_config.clone(),
         };
 
-        // For now, create a simple layout - in practice this would compute actual chunk layout
-        use aura_store::compute_chunk_layout;
-        let dummy_content = vec![0u8; content_size as usize];
-        compute_chunk_layout(&dummy_content, config).map_err(|e| {
+        use aura_store::chunk::plan_chunk_layout_from_size;
+
+        // Derive a deterministic layout without allocating full content: use size only.
+        plan_chunk_layout_from_size(content_size, config).map_err(|e| {
             aura_core::AuraError::internal(format!("Failed to plan chunk layout: {}", e))
         })
     }
@@ -321,7 +321,7 @@ mod tests {
 
     #[test]
     fn test_replication_coordinator_creation() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let strategy = ReplicationStrategy::SimpleReplication { replica_count: 3 };
         let coordinator = ReplicationCoordinator::new(device_id, strategy);
 
@@ -331,14 +331,14 @@ mod tests {
 
     #[test]
     fn test_node_registration_and_selection() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let strategy = ReplicationStrategy::SimpleReplication { replica_count: 2 };
         let mut coordinator = ReplicationCoordinator::new(device_id, strategy);
 
         // Register nodes
-        let node1 = StorageNodeInfo::new(DeviceId::new(), 1000);
-        let node2 = StorageNodeInfo::new(DeviceId::new(), 2000);
-        let node3 = StorageNodeInfo::new(DeviceId::new(), 500);
+        let node1 = StorageNodeInfo::new(DeviceId::new_from_entropy([2u8; 32]), 1000);
+        let node2 = StorageNodeInfo::new(DeviceId::new_from_entropy([3u8; 32]), 2000);
+        let node3 = StorageNodeInfo::new(DeviceId::new_from_entropy([4u8; 32]), 500);
 
         coordinator.register_node(node1);
         coordinator.register_node(node2);
@@ -351,12 +351,15 @@ mod tests {
 
     #[test]
     fn test_chunk_placement_tracking() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let strategy = ReplicationStrategy::SimpleReplication { replica_count: 2 };
         let mut coordinator = ReplicationCoordinator::new(device_id, strategy);
 
         let chunk_id = ChunkId::from_bytes(b"test_chunk");
-        let nodes = vec![DeviceId::new(), DeviceId::new()];
+        let nodes = vec![
+            DeviceId::new_from_entropy([2u8; 32]),
+            DeviceId::new_from_entropy([3u8; 32]),
+        ];
 
         coordinator.record_chunk_placement(chunk_id.clone(), nodes.clone());
         let locations = coordinator.get_chunk_locations(&chunk_id);
@@ -365,7 +368,7 @@ mod tests {
 
     #[test]
     fn test_node_health_assessment() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let node = StorageNodeInfo::new(device_id, 1000);
 
         assert!(node.is_healthy()); // Fresh node should be healthy
@@ -374,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_replication_stats() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let strategy = ReplicationStrategy::SimpleReplication { replica_count: 2 };
         let mut coordinator = ReplicationCoordinator::new(device_id, strategy);
 
@@ -382,8 +385,14 @@ mod tests {
         let chunk1 = ChunkId::from_bytes(b"chunk1");
         let chunk2 = ChunkId::from_bytes(b"chunk2");
 
-        coordinator.record_chunk_placement(chunk1, vec![DeviceId::new(), DeviceId::new()]);
-        coordinator.record_chunk_placement(chunk2, vec![DeviceId::new()]); // Under-replicated
+        coordinator.record_chunk_placement(
+            chunk1,
+            vec![
+                DeviceId::new_from_entropy([2u8; 32]),
+                DeviceId::new_from_entropy([3u8; 32]),
+            ],
+        );
+        coordinator.record_chunk_placement(chunk2, vec![DeviceId::new_from_entropy([4u8; 32])]); // Under-replicated
 
         let stats = coordinator.replication_stats();
         assert_eq!(stats.total_chunks, 2);

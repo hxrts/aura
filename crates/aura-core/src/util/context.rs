@@ -429,10 +429,14 @@ impl Default for ContextDerivationService {
 mod tests {
     use super::*;
 
+    fn device(seed: u8) -> DeviceId {
+        DeviceId::new_from_entropy([seed; 32])
+    }
+
     #[test]
     fn test_relay_context_derivation() {
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
+        let device1 = device(10);
+        let device2 = device(11);
 
         let context1 = RelayContextDerivation::derive_relay_context(&device1, &device2).unwrap();
         let context2 = RelayContextDerivation::derive_relay_context(&device2, &device1).unwrap();
@@ -447,7 +451,7 @@ mod tests {
 
     #[test]
     fn test_group_context_derivation() {
-        let devices = vec![DeviceId::new(), DeviceId::new(), DeviceId::new()];
+        let devices = vec![device(12), device(13), device(14)];
 
         let context = GroupContextDerivation::derive_group_context(&devices, 2).unwrap();
         let context2 = GroupContextDerivation::derive_group_context(&devices, 2).unwrap();
@@ -488,15 +492,15 @@ mod tests {
     #[test]
     fn test_unified_context_service() {
         let service = ContextDerivationService::new();
-        let device1 = DeviceId::new();
-        let device2 = DeviceId::new();
+        let device1 = device(15);
+        let device2 = device(16);
 
         // Test relay context
         let relay_context = service.derive_relay(&device1, &device2).unwrap();
         assert!(matches!(relay_context, MessageContext::Relay(_)));
 
         // Test group context
-        let devices = vec![device1, device2, DeviceId::new()];
+        let devices = vec![device1, device2, device(17)];
         let group_context = service.derive_group(&devices, 2).unwrap();
         assert!(matches!(group_context, MessageContext::Group(_)));
 

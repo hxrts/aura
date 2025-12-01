@@ -695,10 +695,12 @@ mod tests {
 
     #[test]
     fn test_storage_budget() {
-        let mut budget = BlockStorageBudgetView::default();
-        budget.total_limit = BlockStorageBudgetView::DEFAULT_TOTAL;
-        budget.resident_spent = 8 * BlockStorageBudgetView::RESIDENT_ALLOCATION;
-        budget.neighborhood_donated = 4 * BlockStorageBudgetView::NEIGHBORHOOD_DONATION;
+        let budget = BlockStorageBudgetView {
+            total_limit: BlockStorageBudgetView::DEFAULT_TOTAL,
+            resident_spent: 8 * BlockStorageBudgetView::RESIDENT_ALLOCATION,
+            neighborhood_donated: 4 * BlockStorageBudgetView::NEIGHBORHOOD_DONATION,
+            ..Default::default()
+        };
 
         // 10 MB - 1.6 MB (residents) - 4 MB (neighborhoods) = ~4.4 MB
         let remaining = budget.remaining();

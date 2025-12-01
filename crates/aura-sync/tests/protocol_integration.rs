@@ -11,6 +11,10 @@ use aura_sync::protocols::{
     ReceiptVerificationProtocol, SnapshotConfig, SnapshotProtocol,
 };
 
+fn device(seed: u8) -> DeviceId {
+    DeviceId::new_from_entropy([seed; 32])
+}
+
 // Test fixture: deterministic timestamp for reproducible tests
 const TEST_TIMESTAMP_MS: u64 = 1700000000000; // 2023-11-15 in milliseconds
 
@@ -61,9 +65,9 @@ fn test_anti_entropy_with_multiple_peers() {
     let config = AntiEntropyConfig::default();
     let _protocol = AntiEntropyProtocol::new(config);
 
-    let peer1 = DeviceId::new();
-    let peer2 = DeviceId::new();
-    let peer3 = DeviceId::new();
+    let peer1 = device(1);
+    let peer2 = device(2);
+    let peer3 = device(3);
 
     // Protocol should support multiple concurrent peer syncs
     assert_ne!(peer1, peer2);
@@ -110,8 +114,8 @@ fn test_journal_sync_with_peers() {
     let config = JournalSyncConfig::default();
     let _protocol = JournalSyncProtocol::new(config);
 
-    let primary_peer = DeviceId::new();
-    let backup_peer = DeviceId::new();
+    let primary_peer = device(4);
+    let backup_peer = device(5);
 
     // Verify peer distinction
     assert_ne!(primary_peer, backup_peer);
@@ -159,9 +163,9 @@ fn test_snapshot_with_multiple_writers() {
     let config = SnapshotConfig::default();
     let _protocol = SnapshotProtocol::new(config);
 
-    let writer1 = DeviceId::new();
-    let writer2 = DeviceId::new();
-    let reader = DeviceId::new();
+    let writer1 = device(6);
+    let writer2 = device(7);
+    let reader = device(8);
 
     // All should be distinct
     assert_ne!(writer1, writer2);
@@ -210,9 +214,9 @@ fn test_ota_with_coordinators() {
     let config = OTAConfig::default();
     let _protocol = OTAProtocol::new(config);
 
-    let coordinator = DeviceId::new();
-    let participant1 = DeviceId::new();
-    let participant2 = DeviceId::new();
+    let coordinator = device(9);
+    let participant1 = device(10);
+    let participant2 = device(11);
 
     // Coordinator and participants should be distinct
     assert_ne!(coordinator, participant1);
@@ -261,10 +265,10 @@ fn test_receipt_verification_chain() {
     let config = ReceiptVerificationConfig::default();
     let _protocol = ReceiptVerificationProtocol::new(config);
 
-    let sender = DeviceId::new();
-    let intermediate1 = DeviceId::new();
-    let intermediate2 = DeviceId::new();
-    let receiver = DeviceId::new();
+    let sender = device(12);
+    let intermediate1 = device(13);
+    let intermediate2 = device(14);
+    let receiver = device(15);
 
     // All should be distinct for proper chain tracking
     let chain = [sender, intermediate1, intermediate2, receiver];
@@ -279,7 +283,7 @@ fn test_receipt_verification_chain() {
 #[test]
 fn test_epoch_rotation_coordinator_creation() {
     // Test epoch rotation coordinator instantiation
-    let device_id = DeviceId::new();
+    let device_id = device(16);
     let config = EpochConfig::default();
     let coordinator = EpochRotationCoordinator::new(device_id, 0, config);
 
@@ -289,13 +293,13 @@ fn test_epoch_rotation_coordinator_creation() {
 #[test]
 fn test_epoch_rotation_initiation() {
     // Test epoch rotation initiation
-    let device_id = DeviceId::new();
+    let device_id = device(17);
     let config = EpochConfig::default();
     let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
 
-    let participant1 = DeviceId::new();
-    let participant2 = DeviceId::new();
-    let context_id = aura_core::ContextId::new();
+    let participant1 = device(18);
+    let participant2 = device(19);
+    let context_id = aura_core::ContextId::new_from_entropy([0u8; 32]);
 
     let result = coordinator.initiate_rotation(vec![participant1, participant2], context_id);
 
@@ -307,7 +311,7 @@ fn test_epoch_rotation_initiation() {
 #[test]
 fn test_epoch_rotation_with_insufficient_participants() {
     // Test epoch rotation fails with too few participants
-    let device_id = DeviceId::new();
+    let device_id = device(20);
     let config = EpochConfig {
         rotation_threshold: 3,
         ..Default::default()
@@ -315,8 +319,8 @@ fn test_epoch_rotation_with_insufficient_participants() {
 
     let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
 
-    let participant = DeviceId::new();
-    let context_id = aura_core::ContextId::new();
+    let participant = device(21);
+    let context_id = aura_core::ContextId::new_from_entropy([1u8; 32]);
 
     let result = coordinator.initiate_rotation(vec![participant], context_id);
 
@@ -330,13 +334,13 @@ fn test_epoch_rotation_with_insufficient_participants() {
 #[test]
 fn test_epoch_confirmation_processing() {
     // Test processing epoch confirmations
-    let device_id = DeviceId::new();
+    let device_id = device(22);
     let config = EpochConfig::default();
     let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
 
-    let participant1 = DeviceId::new();
-    let participant2 = DeviceId::new();
-    let context_id = aura_core::ContextId::new();
+    let participant1 = device(23);
+    let participant2 = device(24);
+    let context_id = aura_core::ContextId::new_from_entropy([2u8; 32]);
 
     let rotation_id = coordinator
         .initiate_rotation(vec![participant1, participant2], context_id)
@@ -371,12 +375,12 @@ fn test_epoch_confirmation_processing() {
 #[test]
 fn test_epoch_commit() {
     // Test epoch commit operation
-    let device_id = DeviceId::new();
+    let device_id = device(25);
     let config = EpochConfig::default();
     let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
 
-    let participants = vec![DeviceId::new(), DeviceId::new()];
-    let context_id = aura_core::ContextId::new();
+    let participants = vec![device(26), device(27)];
+    let context_id = aura_core::ContextId::new_from_entropy([3u8; 32]);
 
     let rotation_id = coordinator
         .initiate_rotation(participants.clone(), context_id)
@@ -404,14 +408,14 @@ fn test_epoch_commit() {
 #[test]
 fn test_epoch_rotation_cleanup() {
     // Test cleanup of completed rotations
-    let device_id = DeviceId::new();
+    let device_id = device(28);
     let config = EpochConfig::default();
     let mut coordinator = EpochRotationCoordinator::new(device_id, 0, config);
 
     // Create and complete multiple rotations
     for i in 0..3 {
-        let participants = vec![DeviceId::new(), DeviceId::new()];
-        let context_id = aura_core::ContextId::new();
+        let participants = vec![device(30 + (i as u8 * 2)), device(31 + (i as u8 * 2))];
+        let context_id = aura_core::ContextId::new_from_entropy([4u8; 32]);
 
         let rotation_id = coordinator
             .initiate_rotation(participants.clone(), context_id)
@@ -459,7 +463,7 @@ fn test_protocol_independence() {
     let _snap = SnapshotProtocol::new(snapshot_config);
     let _ota = OTAProtocol::new(ota_config);
     let _recv = ReceiptVerificationProtocol::new(receipt_config);
-    let _epoch = EpochRotationCoordinator::new(DeviceId::new(), 0, epoch_config);
+    let _epoch = EpochRotationCoordinator::new(device(40), 0, epoch_config);
 
     // All should coexist without conflicts
 }
@@ -483,9 +487,9 @@ fn test_protocol_configuration_consistency() {
 #[test]
 fn test_multi_device_protocol_scenarios() {
     // Test realistic multi-device scenarios
-    let device1 = DeviceId::new();
-    let device2 = DeviceId::new();
-    let device3 = DeviceId::new();
+    let device1 = device(41);
+    let device2 = device(42);
+    let device3 = device(43);
 
     // Create coordinators on each device
     let mut coord1 = EpochRotationCoordinator::new(device1, 0, EpochConfig::default());
@@ -493,7 +497,7 @@ fn test_multi_device_protocol_scenarios() {
     let _coord3 = EpochRotationCoordinator::new(device3, 0, EpochConfig::default());
 
     // Device 1 initiates rotation
-    let context = aura_core::ContextId::new();
+    let context = aura_core::ContextId::new_from_entropy([5u8; 32]);
     let rotation_id = coord1
         .initiate_rotation(vec![device2, device3], context)
         .unwrap();

@@ -48,7 +48,7 @@ fn websocket_handshake_example() -> Result<(), Box<dyn std::error::Error>> {
 
     let initiator_id = DeviceId::from_bytes([1u8; 32]);
     let responder_id = DeviceId::from_bytes([2u8; 32]);
-    let context_id = ContextId::new();
+    let context_id = ContextId::new_from_entropy([0u8; 32]);
 
     // Create choreographic configuration
     let choreo_config = ChoreographicConfig {
@@ -130,7 +130,7 @@ fn channel_establishment_example() -> Result<(), Box<dyn std::error::Error>> {
     let coordinator_id = DeviceId::from_bytes([10u8; 32]);
     let participant1_id = DeviceId::from_bytes([11u8; 32]);
     let participant2_id = DeviceId::from_bytes([12u8; 32]);
-    let context_id = ContextId::new();
+    let context_id = ContextId::new_from_entropy([1u8; 32]);
 
     let choreo_config = ChoreographicConfig {
         execution_timeout: std::time::Duration::from_secs(60),

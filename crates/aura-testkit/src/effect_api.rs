@@ -261,7 +261,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_effect_api_consistency() {
-        let account_id = AccountId::new();
+        let account_id = AccountId::new_from_entropy([1u8; 32]);
         let effect_api1 = LedgerTestFixture::new(account_id).await;
         let effect_api2 = LedgerTestFixture::new(account_id).await;
 

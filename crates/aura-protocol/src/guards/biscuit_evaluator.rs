@@ -1,5 +1,5 @@
 use crate::authorization::BiscuitAuthorizationBridge;
-use aura_core::FlowBudget;
+use aura_core::{AuthorityId, FlowBudget};
 use aura_wot::{BiscuitError, ResourceScope};
 use biscuit_auth::Biscuit;
 
@@ -10,6 +10,11 @@ pub struct BiscuitGuardEvaluator {
 impl BiscuitGuardEvaluator {
     pub fn new(bridge: BiscuitAuthorizationBridge) -> Self {
         Self { bridge }
+    }
+
+    /// Get the authority ID from the underlying bridge
+    pub fn authority_id(&self) -> AuthorityId {
+        self.bridge.authority_id()
     }
 
     /// Backwards compatible wrapper for evaluate_guard without explicit time

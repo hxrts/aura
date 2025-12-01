@@ -104,19 +104,18 @@ fn create_recovery_approval_message(
 // Tests commented out due to missing crypto functions in current aura_crypto API
 /*
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)] // Test code uses Uuid::new_v4() for test data generation
 mod tests {
     use super::*;
-    use aura_core::Effects;
+    use aura_core::hash;
 
     #[test]
     fn test_verify_guardian_signature_success() {
-        let effects = Effects::test();
-        let guardian_id = effects.gen_uuid();
+        let guardian_id = Uuid::from_bytes(hash::hash(b"guardian-test-1")[..16].try_into().unwrap());
 
         // Generate a key pair for testing
         let signing_key = aura_core::generate_ed25519_key();
-        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
+        let verifying_key = aura_core::ed25519_verifying_key(&signing_key)
+            .expect("test signing key should be valid");
 
         let message = b"guardian test message";
         let signature = aura_core::ed25519_sign(&signing_key, message);
@@ -129,11 +128,12 @@ mod tests {
     #[test]
     fn test_verify_guardian_signature_invalid() {
         let effects = Effects::test();
-        let guardian_id = effects.gen_uuid();
+        let guardian_id = Uuid::from_bytes(hash::hash(b"guardian-test-verify-2")[..16].try_into().unwrap());
 
         // Generate two different key pairs
         let signing_key1 = aura_core::generate_ed25519_key();
-        let verifying_key1 = aura_core::ed25519_verifying_key(&signing_key1);
+        let verifying_key1 = aura_core::ed25519_verifying_key(&signing_key1)
+            .expect("test signing key should be valid");
         let signing_key2 = aura_core::generate_ed25519_key();
 
         let message = b"guardian test message";
@@ -157,7 +157,8 @@ mod tests {
 
         // Generate a key pair for testing
         let signing_key = aura_core::generate_ed25519_key();
-        let verifying_key = aura_core::ed25519_verifying_key(&signing_key);
+        let verifying_key = aura_core::ed25519_verifying_key(&signing_key)
+            .expect("test signing key should be valid");
 
         // Create the approval message and sign it
         let approval_message =
@@ -176,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_recovery_approval_message_format() {
-        let guardian_id = Uuid::new_v4();
+        let guardian_id = Uuid::from_bytes(hash::hash(b"guardian-test-approval-format")[..16].try_into().unwrap());
         let recovery_request_hash = [1u8; 32];
 
         let message = create_recovery_approval_message(guardian_id, &recovery_request_hash);

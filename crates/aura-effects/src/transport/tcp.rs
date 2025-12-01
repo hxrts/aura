@@ -6,7 +6,10 @@
 
 use super::{TransportConfig, TransportConnection, TransportError, TransportResult};
 use async_trait::async_trait;
-use aura_core::effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
+use aura_core::{
+    effects::{NetworkEffects, NetworkError, PeerEvent, PeerEventStream},
+    hash,
+};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -206,11 +209,51 @@ impl NetworkEffects for TcpTransportHandler {
     }
 
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
-        // TCP receiving requires a persistent connection and listener
-        // This is a placeholder for stateless implementation
-        Err(NetworkError::ReceiveFailed {
-            reason: "TCP receive requires connection management".to_string(),
-        })
+        // Bind to the configured address (or ephemeral if not provided) and
+        // read a single framed message. This keeps the handler stateless while
+        // still allowing inbound delivery in tests and small deployments.
+        let bind_addr: SocketAddr = std::env::var("AURA_TCP_LISTEN_ADDR")
+            .unwrap_or_else(|_| "127.0.0.1:0".to_string())
+            .parse()
+            .map_err(|e| NetworkError::ReceiveFailed {
+                reason: format!("Invalid listen address: {}", e),
+            })?;
+
+        let listener =
+            TcpListener::bind(bind_addr)
+                .await
+                .map_err(|e| NetworkError::ReceiveFailed {
+                    reason: format!("Failed to bind listener: {}", e),
+                })?;
+
+        let accept_result = timeout(self.config.read_timeout, listener.accept())
+            .await
+            .map_err(|_| NetworkError::ReceiveFailed {
+                reason: "TCP receive timed out waiting for connection".to_string(),
+            })
+            .and_then(|res| {
+                res.map_err(|e| NetworkError::ReceiveFailed {
+                    reason: format!("Failed to accept TCP connection: {}", e),
+                })
+            })?;
+
+        let (mut stream, peer_addr) = accept_result;
+        let peer_id = uuid_from_addr(&peer_addr);
+
+        let mut buffer = vec![0u8; self.config.buffer_size];
+        let bytes_read = timeout(self.config.read_timeout, stream.read(&mut buffer))
+            .await
+            .map_err(|_| NetworkError::ReceiveFailed {
+                reason: "TCP receive timed out while reading".to_string(),
+            })
+            .and_then(|res| {
+                res.map_err(|e| NetworkError::ReceiveFailed {
+                    reason: format!("TCP read failed: {}", e),
+                })
+            })?;
+
+        buffer.truncate(bytes_read);
+        Ok((peer_id, buffer))
     }
 
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
@@ -236,4 +279,36 @@ impl NetworkEffects for TcpTransportHandler {
         let stream = stream::empty::<PeerEvent>();
         Ok(Pin::from(Box::new(stream)))
     }
+
+    async fn open(&self, address: &str) -> Result<String, NetworkError> {
+        // Open a TCP connection and return a connection ID
+        let addr: SocketAddr = address
+            .parse()
+            .map_err(|e| NetworkError::ConnectionFailed(format!("Invalid address: {}", e)))?;
+        let _stream = TcpStream::connect(addr)
+            .await
+            .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
+        // Generate deterministic connection ID from address
+        let conn_hash = hash::hash(address.as_bytes());
+        let mut conn_id_bytes = [0u8; 16];
+        conn_id_bytes.copy_from_slice(&conn_hash[..16]);
+        Ok(Uuid::from_bytes(conn_id_bytes).to_string())
+    }
+
+    async fn send(&self, _connection_id: &str, _data: Vec<u8>) -> Result<(), NetworkError> {
+        // Stateless TCP handler doesn't maintain connection state for send
+        Err(NetworkError::NotImplemented)
+    }
+
+    async fn close(&self, _connection_id: &str) -> Result<(), NetworkError> {
+        // Stateless TCP handler doesn't maintain connection state for close
+        Ok(())
+    }
+}
+
+fn uuid_from_addr(addr: &SocketAddr) -> Uuid {
+    let hash_bytes = hash::hash(addr.to_string().as_bytes());
+    let mut uuid_bytes = [0u8; 16];
+    uuid_bytes.copy_from_slice(&hash_bytes[..16]);
+    Uuid::from_bytes(uuid_bytes)
 }

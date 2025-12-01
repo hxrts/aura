@@ -6,7 +6,6 @@
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::{identifiers::DeviceId, AuraResult};
 use aura_effects::{EncryptedStorageHandler, FilesystemStorageHandler};
-// Note: MemoryStorageHandler would be from aura-testkit, using FilesystemStorageHandler for now
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -179,16 +178,16 @@ impl StorageCoordinator {
         if !self.replicas.is_empty() {
             for replica in &self.replicas {
                 if replica.backend_type() != backend.backend_type() {
-                    // Async replication (fire and forget for now)
                     let key_ref = key_owned.clone();
                     let value_for_replica = value.clone();
-                    let _ = replica
+                    // Replicate and surface errors for visibility
+                    replica
                         .execute(|storage| {
                             Box::pin(
                                 async move { storage.store(&key_ref, value_for_replica).await },
                             )
                         })
-                        .await;
+                        .await?;
                 }
             }
         }
@@ -349,7 +348,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_coordinator_basic_operations() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let coordinator = StorageCoordinator::with_memory(device_id);
 
         // Test store and retrieve
@@ -371,7 +370,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_coordinator_with_replicas() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
         let coordinator = StorageCoordinatorBuilder::new(device_id)
             .with_primary(StorageBackend::Memory(Arc::new(
                 FilesystemStorageHandler::from_path(std::env::temp_dir().join("aura_test_storage")),
@@ -398,7 +397,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_routing_rules() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let coordinator = StorageCoordinatorBuilder::new(device_id)
             .with_primary(StorageBackend::Memory(Arc::new(
                 FilesystemStorageHandler::from_path(std::env::temp_dir().join("aura_test_storage")),

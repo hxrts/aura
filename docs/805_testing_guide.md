@@ -11,7 +11,7 @@ Aura's testing approach is built on four key principles:
 3. **Protocol Fidelity** - Tests run actual protocol logic through real effect implementations
 4. **Deterministic Execution** - Controlled effects enable reproducible test environments
 
-**Critical**: Tests must follow the same [effect system](106_effect_system_and_runtime.md) guidelines as production code. Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, or other impure functions is forbidden. All impure operations must flow through effect traits to ensure deterministic simulation and WASM compatibility.
+**Critical**: Tests must follow the same [effect system](106_effect_system_and_runtime.md) guidelines as production code. Direct usage of `SystemTime::now()`, `thread_rng()`, `File::open()`, `Uuid::new_v4()`, or other impure functions is forbidden. All impure operations must flow through effect traits to ensure deterministic simulation and WASM compatibility.
 
 This approach eliminates boilerplate while providing testing capabilities through automatic tracing, timeout protection, and reusable test fixtures.
 
@@ -116,6 +116,36 @@ async fn test_with_custom_config() -> aura_core::AuraResult<()> {
     // Use fixture
     Ok(())
 }
+```
+
+### Deterministic Identifier Generation
+
+Tests must use deterministic methods for creating identifiers like `AuthorityId`, `ContextId`, and `DeviceId`. Never use methods that consume system entropy.
+
+```rust
+use aura_core::identifiers::{AuthorityId, ContextId};
+use uuid::Uuid;
+
+// ✅ CORRECT: Deterministic identifiers for tests
+let auth_id = AuthorityId::new_from_entropy([1u8; 32]);  // Deterministic bytes
+let ctx_id = ContextId::from_uuid(Uuid::nil());          // Placeholder
+let ctx_id = ContextId::from_uuid(Uuid::from_bytes([2u8; 16]));  // Unique but deterministic
+
+// ❌ FORBIDDEN: Non-deterministic identifiers
+// let auth_id = AuthorityId::new();           // Uses system entropy!
+// let ctx_id = ContextId::from_uuid(Uuid::new_v4());  // Uses system entropy!
+```
+
+**Why deterministic IDs matter**:
+- **Reproducible tests**: Same inputs produce same outputs every run
+- **Debuggability**: Failures can be reproduced exactly
+- **CI reliability**: No flaky tests from random ID collisions
+
+When tests need multiple distinct identifiers, use incrementing byte patterns:
+```rust
+let auth1 = AuthorityId::new_from_entropy([1u8; 32]);
+let auth2 = AuthorityId::new_from_entropy([2u8; 32]);
+let auth3 = AuthorityId::new_from_entropy([3u8; 32]);
 ```
 
 ### Effect System Compliance in Tests
@@ -414,6 +444,86 @@ use aura_testkit::verification::*;
 // Assertion helpers for common patterns
 // (specific utilities depend on your test needs)
 ```
+
+## Testing Sync/Async Code (GuardSnapshot Pattern)
+
+Aura's guard chain uses a three-phase pattern that separates sync evaluation from async execution. This is important for testing pure guard logic independently from effect execution.
+
+### The GuardSnapshot Pattern
+
+Guard evaluation is **pure and synchronous** over a prepared snapshot. The async interpreter then executes the resulting commands:
+
+```rust
+use aura_macros::aura_test;
+use aura_testkit::*;
+
+#[aura_test]
+async fn test_guard_chain_evaluation() -> aura_core::AuraResult<()> {
+    let fixture = create_test_fixture().await?;
+    let effects = fixture.effects();
+    let ctx = fixture.context();
+
+    // Phase 1: Async - Prepare the snapshot
+    let snapshot = prepare_guard_snapshot(&ctx, &effects).await?;
+
+    // Phase 2: Sync - Pure guard evaluation (no I/O, easily testable)
+    let commands = guard_chain.evaluate(&snapshot)?;
+
+    // Phase 3: Async - Interpret commands
+    for cmd in commands {
+        execute_effect_command(&effects, cmd).await?;
+    }
+
+    Ok(())
+}
+```
+
+### Testing Pure Guard Logic
+
+Because guard evaluation is synchronous and pure, you can unit test it without async runtime:
+
+```rust
+#[test]
+fn test_cap_guard_denies_unauthorized() {
+    // Create snapshot with no capabilities
+    let snapshot = GuardSnapshot {
+        capabilities: vec![],
+        flow_budget: FlowBudget { limit: 100, spent: 0, epoch: 0 },
+        ..Default::default()
+    };
+
+    // Evaluate guard synchronously - no async needed
+    let result = CapGuard::evaluate(&snapshot, &SendRequest::default());
+
+    assert!(result.is_err());
+    assert!(matches!(result.unwrap_err(), GuardError::Unauthorized));
+}
+
+#[test]
+fn test_flow_guard_blocks_over_budget() {
+    let snapshot = GuardSnapshot {
+        flow_budget: FlowBudget { limit: 100, spent: 95, epoch: 0 },
+        ..Default::default()
+    };
+
+    // Request that would exceed budget
+    let request = SendRequest { cost: 10, ..Default::default() };
+    let result = FlowGuard::evaluate(&snapshot, &request);
+
+    assert!(result.is_err());
+    assert!(matches!(result.unwrap_err(), GuardError::BudgetExceeded));
+}
+```
+
+### When to Use Each Phase
+
+- **Snapshot preparation**: Async - gathers current state from effects
+- **Guard evaluation**: Sync - pure business logic, easily testable without mocks
+- **Command interpretation**: Async - actual side effects (charging, journaling, sending)
+
+This separation ensures that authorization logic remains testable without complex async test harnesses.
+
+**File reference:** `docs/001_system_architecture.md` (Sections 2.1, 3.5)
 
 ## Limitations and Future Work
 

@@ -2,13 +2,21 @@
 //!
 //! This module provides the runtime support for the `#[aura_test]` macro,
 //! including automatic setup/teardown, test isolation, and utility functions.
+//!
+//! # Feature Flags
+//!
+//! - `full-effect-system`: Enables `TestFixture::effect_system*()` methods that
+//!   provide an `AuraEffectSystem` from `aura-agent`. Only enable this in Layer 5+
+//!   crates or integration tests to avoid circular dependencies.
 
 use std::sync::Once;
 use std::time::Duration;
 
 use crate::foundation::{create_mock_test_context, SimpleTestContext};
+#[cfg(feature = "full-effect-system")]
 use aura_agent::{core::AgentConfig, AuraEffectSystem};
 use aura_core::{AuraError, AuraResult, DeviceId};
+#[cfg(feature = "full-effect-system")]
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
 
@@ -124,6 +132,11 @@ impl TestFixture {
     ///
     /// This creates a mock effect system configured for testing.
     /// Returns an Arc<AuraEffectSystem> that implements all effect traits.
+    ///
+    /// # Feature Flag
+    ///
+    /// Requires the `full-effect-system` feature to be enabled.
+    #[cfg(feature = "full-effect-system")]
     pub fn effect_system(&self) -> Arc<AuraEffectSystem> {
         let config = AgentConfig::default();
         let system = AuraEffectSystem::testing(&config).expect("build test effect system");
@@ -134,6 +147,11 @@ impl TestFixture {
     ///
     /// This creates a mock effect system configured for testing.
     /// Returns an Arc<AuraEffectSystem> for compatibility with old interfaces.
+    ///
+    /// # Feature Flag
+    ///
+    /// Requires the `full-effect-system` feature to be enabled.
+    #[cfg(feature = "full-effect-system")]
     pub fn effect_system_arc(&self) -> Arc<AuraEffectSystem> {
         let config = AgentConfig::default();
         let system = AuraEffectSystem::testing(&config).expect("build test effect system");
@@ -144,6 +162,11 @@ impl TestFixture {
     ///
     /// This creates a mock effect system configured for testing.
     /// Use this when you need the concrete type, not wrapped.
+    ///
+    /// # Feature Flag
+    ///
+    /// Requires the `full-effect-system` feature to be enabled.
+    #[cfg(feature = "full-effect-system")]
     pub fn effect_system_direct(&self) -> AuraEffectSystem {
         let config = AgentConfig::default();
         AuraEffectSystem::testing(&config).expect("build test effect system")
@@ -153,6 +176,11 @@ impl TestFixture {
     ///
     /// This creates an effect system that implements AuraEffects
     /// and can be used with coordinators that require Arc<E: AuraEffects>.
+    ///
+    /// # Feature Flag
+    ///
+    /// Requires the `full-effect-system` feature to be enabled.
+    #[cfg(feature = "full-effect-system")]
     pub fn effect_system_wrapped(&self) -> Arc<AuraEffectSystem> {
         let config = AgentConfig::default();
         let system = AuraEffectSystem::testing(&config).expect("build test effect system");

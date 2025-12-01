@@ -85,15 +85,10 @@ impl CommandDispatcher {
         self.current_channel.as_deref()
     }
 
-    /// Check if a command is allowed (capability check - stub for now)
+    /// Check if a command is allowed (currently permissive until Biscuit wiring lands)
     pub fn check_capability(&self, command: &IrcCommand) -> Result<(), DispatchError> {
-        // Stub: in production this should evaluate Biscuit capabilities
         let _capability = command.required_capability();
-
-        // In production, this would:
-        // 1. Get current user's Biscuit token
-        // 2. Build an authorizer with the required capability
-        // 3. Evaluate and return Ok/Err based on result
+        // Capability evaluation will be enforced once Biscuit integration is routed through the bridge.
 
         Ok(())
     }

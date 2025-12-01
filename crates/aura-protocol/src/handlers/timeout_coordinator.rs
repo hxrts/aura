@@ -25,7 +25,7 @@ pub struct TimeoutCoordinator<T, R> {
     inner: T,
     /// Random effects for UUID generation
     random: R,
-    /// Placeholder registry hook for future coordination (kept for API compatibility)
+    /// Reserved registry hook for future coordination (kept for API compatibility)
     _registry: Arc<()>,
 }
 

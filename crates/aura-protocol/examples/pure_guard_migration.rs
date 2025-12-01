@@ -116,8 +116,8 @@ async fn run_examples() -> AuraResult<()> {
         max_message_size: 1024,
     }));
 
-    let authority = AuthorityId::new();
-    let context = ContextId::new();
+    let authority = AuthorityId::new_from_entropy([1u8; 32]);
+    let context = ContextId::new_from_entropy([2u8; 32]);
     let mut budgets = HashMap::new();
     budgets.insert((context, authority), 1000);
 

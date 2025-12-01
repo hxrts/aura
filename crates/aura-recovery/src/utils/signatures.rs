@@ -83,8 +83,8 @@ mod tests {
     fn create_test_share(signature: Vec<u8>) -> RecoveryShare {
         RecoveryShare {
             guardian: GuardianProfile {
-                guardian_id: GuardianId::new(),
-                device_id: DeviceId::new(),
+                guardian_id: GuardianId::new_from_entropy([0u8; 32]),
+                device_id: DeviceId::new_from_entropy([1u8; 32]),
                 label: "Test Guardian".to_string(),
                 trust_level: TrustLevel::High,
                 cooldown_secs: 900,

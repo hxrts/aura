@@ -68,7 +68,7 @@ pub enum MaintenanceEvent {
     CacheInvalidated(CacheInvalidated),
     /// Upgrade activation notice.
     UpgradeActivated(UpgradeActivated),
-    /// Admin replacement announcement (stub for fork workflow).
+    /// Admin replacement announcement used by the fork workflow.
     AdminReplaced(AdminReplaced),
 }
 
@@ -88,9 +88,10 @@ pub struct SnapshotProposed {
 impl SnapshotProposed {
     /// Create a new proposal.
     pub fn new(proposer: DeviceId, target_epoch: Epoch, state_digest: Hash32) -> Self {
+        // Deterministic proposal identifier so tests remain reproducible; callers should
+        // supply a context-derived UUID when integrating with journal facts.
         Self {
-            #[allow(clippy::disallowed_methods)] // [VERIFIED] Acceptable in maintenance proposal ID generation
-            proposal_id: Uuid::new_v4(),
+            proposal_id: Uuid::from_bytes(1u128.to_be_bytes()),
             proposer,
             target_epoch,
             state_digest,
@@ -334,8 +335,13 @@ impl MaintenanceService {
     ) -> SyncResult<SnapshotProposed> {
         let protocol = self.snapshot_protocol.write();
 
+        // Derive a deterministic proposal id from the state digest to avoid entropy usage.
+        let mut id_bytes = [0u8; 16];
+        id_bytes.copy_from_slice(&state_digest.0[..16]);
+        let proposal_id = Uuid::from_bytes(id_bytes);
+
         let (_guard, proposal) =
-            protocol.propose(proposer, target_epoch, state_digest, Uuid::nil())?;
+            protocol.propose(proposer, target_epoch, state_digest, proposal_id)?;
 
         // Convert to maintenance event type
         Ok(SnapshotProposed {
@@ -580,10 +586,7 @@ impl MaintenanceService {
     }
 
     async fn flush_pending_operations(&self) -> SyncResult<()> {
-        // Ensure cache manager flushes pending invalidations and OTA protocol finalizes any in-flight tasks.
-        // No-op until cache manager exposes a flush API.
-
-        // Snapshot/OTA protocols are stateless per call; no-op flush placeholder for now.
+        self.cache_manager.write().clear();
         Ok(())
     }
 
@@ -759,11 +762,11 @@ mod tests {
         let service = MaintenanceService::new(Default::default()).unwrap();
         let random_effects = aura_testkit::stateful_effects::MockCryptoHandler::new();
 
-        let package_id = Uuid::new_v4();
+        let package_id = Uuid::from_bytes(2u128.to_be_bytes());
         let version = SemanticVersion::new(1, 2, 3);
         let kind = UpgradeKind::SoftFork;
         let package_hash = Hash32::from([1u8; 32]);
-        let proposer = DeviceId::new();
+        let proposer = DeviceId::new_from_entropy([3u8; 32]);
 
         let proposal = service
             .propose_upgrade(

@@ -6,10 +6,10 @@
 //! As a Layer 2 (Specification) module, this only defines types.
 //! Actual coordination logic belongs in Layer 4 (aura-protocol).
 
+use crate::types::endpoint::EndpointAddress;
 use aura_core::identifiers::ContextId;
 use aura_core::AuthorityId;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
 
 /// Context-scoped transport session
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -41,12 +41,12 @@ pub enum TransportProtocol {
     /// QUIC transport
     Quic {
         /// Socket address for QUIC endpoint
-        endpoint: SocketAddr,
+        endpoint: EndpointAddress,
     },
     /// TCP transport
     Tcp {
         /// Socket address for TCP endpoint
-        endpoint: SocketAddr,
+        endpoint: EndpointAddress,
     },
     /// WebRTC transport
     WebRTC {
@@ -94,12 +94,10 @@ impl Default for ContextTransportConfig {
             default_flow_budget: 10000,
             supported_protocols: vec![
                 TransportProtocol::Quic {
-                    #[allow(clippy::unwrap_used)] // Valid IPv6 address literal
-                    endpoint: "[::]:0".parse().unwrap(),
+                    endpoint: EndpointAddress::new("[::]:0"),
                 },
                 TransportProtocol::Tcp {
-                    #[allow(clippy::unwrap_used)] // Valid IPv6 address literal
-                    endpoint: "[::]:0".parse().unwrap(),
+                    endpoint: EndpointAddress::new("[::]:0"),
                 },
             ],
         }
@@ -194,7 +192,7 @@ mod tests {
     #[test]
     fn test_transport_protocol_serialization() {
         let protocol = TransportProtocol::Quic {
-            endpoint: "127.0.0.1:8080".parse().unwrap(),
+            endpoint: EndpointAddress::new("127.0.0.1:8080"),
         };
 
         let serialized = serde_json::to_string(&protocol).unwrap();

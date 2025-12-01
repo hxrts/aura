@@ -291,12 +291,12 @@ mod tests {
     async fn test_leakage_record_and_retrieve() {
         let storage = Arc::new(TestStorage::new());
         let handler = ProductionLeakageHandler::with_storage(storage);
-        let context = ContextId::new();
+        let context = ContextId::new_from_entropy([1u8; 32]);
 
         // Record a leakage event
         let event = LeakageEvent {
-            source: AuthorityId::new(),
-            destination: AuthorityId::new(),
+            source: AuthorityId::new_from_entropy([2u8; 32]),
+            destination: AuthorityId::new_from_entropy([3u8; 32]),
             context_id: context,
             leakage_amount: 100,
             observer_class: ObserverClass::External,
@@ -317,13 +317,13 @@ mod tests {
     async fn test_leakage_budget_accumulation() {
         let storage = Arc::new(TestStorage::new());
         let handler = ProductionLeakageHandler::with_storage(storage);
-        let context = ContextId::new();
+        let context = ContextId::new_from_entropy([1u8; 32]);
 
         // Record multiple events
         for i in 0..5 {
             let event = LeakageEvent {
-                source: AuthorityId::new(),
-                destination: AuthorityId::new(),
+                source: AuthorityId::new_from_entropy([2u8; 32]),
+                destination: AuthorityId::new_from_entropy([3u8; 32]),
                 context_id: context,
                 leakage_amount: 100,
                 observer_class: ObserverClass::External,
@@ -342,12 +342,12 @@ mod tests {
     async fn test_leakage_budget_check() {
         let storage = Arc::new(TestStorage::new());
         let handler = ProductionLeakageHandler::with_storage(storage);
-        let context = ContextId::new();
+        let context = ContextId::new_from_entropy([1u8; 32]);
 
         // Record initial leakage
         let event = LeakageEvent {
-            source: AuthorityId::new(),
-            destination: AuthorityId::new(),
+            source: AuthorityId::new_from_entropy([2u8; 32]),
+            destination: AuthorityId::new_from_entropy([3u8; 32]),
             context_id: context,
             leakage_amount: 100,
             observer_class: ObserverClass::External,
@@ -375,13 +375,13 @@ mod tests {
     async fn test_leakage_history_filtering() {
         let storage = Arc::new(TestStorage::new());
         let handler = ProductionLeakageHandler::with_storage(storage);
-        let context = ContextId::new();
+        let context = ContextId::new_from_entropy([1u8; 32]);
 
         // Record events at different timestamps
         for ts in [1000u64, 2000, 3000, 4000, 5000] {
             let event = LeakageEvent {
-                source: AuthorityId::new(),
-                destination: AuthorityId::new(),
+                source: AuthorityId::new_from_entropy([2u8; 32]),
+                destination: AuthorityId::new_from_entropy([3u8; 32]),
                 context_id: context,
                 leakage_amount: 100,
                 observer_class: ObserverClass::External,
@@ -407,7 +407,7 @@ mod tests {
     async fn test_empty_context_returns_empty() {
         let storage = Arc::new(TestStorage::new());
         let handler = ProductionLeakageHandler::with_storage(storage);
-        let context = ContextId::new();
+        let context = ContextId::new_from_entropy([1u8; 32]);
 
         // No events recorded
         let history = handler.get_leakage_history(context, None).await.unwrap();

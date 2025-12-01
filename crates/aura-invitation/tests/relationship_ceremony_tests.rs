@@ -101,7 +101,7 @@ async fn test_bidirectional_relationship_formation() -> aura_core::AuraResult<()
 
     let initiator_id = DeviceId(Uuid::new_v4());
     let responder_id = DeviceId(Uuid::new_v4());
-    let account_context = Some(AccountId::new());
+    let account_context = Some(AccountId::new_from_entropy([0u8; 32]));
 
     let config = RelationshipFormationConfig {
         initiator_id,
@@ -223,8 +223,9 @@ async fn test_bidirectional_key_symmetry() -> aura_core::AuraResult<()> {
 /// Test validation proof creation and verification
 #[aura_test]
 async fn test_validation_proof_system() -> aura_core::AuraResult<()> {
-    let alice_device = DeviceId::new();
-    let bob_device = DeviceId::new();
+    // Use distinct, deterministic device IDs to ensure proofs diverge per-device
+    let alice_device = DeviceId::new_from_entropy([1u8; 32]); // sentinel but unique for this test
+    let bob_device = DeviceId::new_from_entropy([2u8; 32]); // different entropy → different device id
     let fixture = aura_testkit::create_test_fixture_with_device_id(alice_device).await?;
     let effect_system = fixture.effect_system();
 
@@ -312,8 +313,9 @@ async fn test_validation_proof_system() -> aura_core::AuraResult<()> {
 /// Test trust record creation and signature verification
 #[aura_test]
 async fn test_trust_record_system() -> aura_core::AuraResult<()> {
-    let alice_device = DeviceId::new();
-    let bob_device = DeviceId::new();
+    // Distinct device IDs so signatures remain device-bound
+    let alice_device = DeviceId::new_from_entropy([3u8; 32]);
+    let bob_device = DeviceId::new_from_entropy([4u8; 32]);
     let fixture = aura_testkit::create_test_fixture_with_device_id(alice_device).await?;
     let effect_system = fixture.effect_system();
 

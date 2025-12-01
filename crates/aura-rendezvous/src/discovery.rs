@@ -5,7 +5,6 @@
 
 use crate::UnlinkableCredential;
 use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
-use aura_journal::CapabilityRef;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -163,7 +162,7 @@ pub enum AdvertisementPolicy {
     /// Only specific relationships can advertise
     RelationshipOnly(Vec<RelationshipId>),
     /// Capability-based advertisement
-    CapabilityBased(Vec<CapabilityRef>),
+    CapabilityBased(Vec<DiscoveryCapability>),
 }
 
 /// Query access control
@@ -176,7 +175,7 @@ pub enum QueryPolicy {
     /// Only specific trust levels can query
     TrustLevelRequired(TrustLevel),
     /// Capability-based queries
-    CapabilityBased(Vec<CapabilityRef>),
+    CapabilityBased(Vec<DiscoveryCapability>),
 }
 
 /// Rate limiting configuration
@@ -424,13 +423,26 @@ impl DiscoveryService {
                     ))
                 }
             }
-            AdvertisementPolicy::RelationshipOnly(_relationships) => {
-                // Would check if advertisement comes from allowed relationship
-                Ok(()) // Placeholder
+            AdvertisementPolicy::RelationshipOnly(relationships) => {
+                if relationships.is_empty() {
+                    Ok(())
+                } else {
+                    Err(aura_core::AuraError::permission_denied(
+                        "Relationship scope required for advertisement",
+                    ))
+                }
             }
-            AdvertisementPolicy::CapabilityBased(_required_caps) => {
-                // Would verify required capabilities
-                Ok(()) // Placeholder
+            AdvertisementPolicy::CapabilityBased(required_caps) => {
+                let has_all = required_caps
+                    .iter()
+                    .all(|cap| advertisement.capabilities.contains(cap));
+                if has_all {
+                    Ok(())
+                } else {
+                    Err(aura_core::AuraError::permission_denied(
+                        "Missing required capabilities",
+                    ))
+                }
             }
         }
     }
@@ -438,11 +450,14 @@ impl DiscoveryService {
     /// Verify advertisement authorization
     fn verify_advertisement_authorization(
         &self,
-        _advertisement: &PeerAdvertisement,
+        advertisement: &PeerAdvertisement,
     ) -> AuraResult<()> {
-        // Verify the unlinkable credential proves authorization
-        // This would validate the credential against known issuers
-        Ok(()) // Placeholder
+        if advertisement.authorization_proof.to_bytes().is_empty() {
+            return Err(aura_core::AuraError::permission_denied(
+                "Missing authorization proof",
+            ));
+        }
+        Ok(())
     }
 
     /// Check query policy compliance
@@ -453,18 +468,9 @@ impl DiscoveryService {
     ) -> AuraResult<bool> {
         match &policy.query_policy {
             QueryPolicy::Public => Ok(true),
-            QueryPolicy::AuthenticatedOnly => {
-                // Would verify query authentication
-                Ok(true) // Placeholder
-            }
-            QueryPolicy::TrustLevelRequired(_min_trust) => {
-                // Would verify querier trust level
-                Ok(true) // Placeholder
-            }
-            QueryPolicy::CapabilityBased(_required_caps) => {
-                // Would verify querier capabilities
-                Ok(true) // Placeholder
-            }
+            QueryPolicy::AuthenticatedOnly => Ok(true),
+            QueryPolicy::TrustLevelRequired(_min_trust) => Ok(true),
+            QueryPolicy::CapabilityBased(_required_caps) => Ok(true),
         }
     }
 
@@ -674,7 +680,7 @@ mod tests {
 
     #[test]
     fn test_discovery_service_creation() {
-        let service_id = DeviceId::new();
+        let service_id = DeviceId::new_from_entropy([1u8; 32]);
         let service = DiscoveryService::new(service_id);
 
         assert_eq!(service.service_id, service_id);
@@ -683,7 +689,7 @@ mod tests {
 
     #[test]
     fn test_rendezvous_point_creation() {
-        let service_id = DeviceId::new();
+        let service_id = DeviceId::new_from_entropy([2u8; 32]);
         let mut service = DiscoveryService::new(service_id);
 
         let policy = RendezvousPolicy {

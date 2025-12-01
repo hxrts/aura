@@ -33,7 +33,7 @@ fn run_sync<F: Future>(fut: F) -> F::Output {
     }
 }
 
-// Minimal placeholder FROST-like types to avoid aura-frost dependency.
+// Lightweight deterministic FROST-like types to avoid pulling the full aura-frost dependency in simulator-only code.
 #[derive(Debug, Clone)]
 struct ThresholdSigningConfig {
     threshold: usize,
@@ -148,7 +148,7 @@ impl FrostCrypto {
         signers.sort();
         signers.dedup();
         if signers.len() < config.threshold {
-            // pad with placeholder signer IDs to satisfy threshold for demo purposes
+            // pad with synthetic signer IDs to satisfy threshold for demo purposes
             let missing = config.threshold - signers.len();
             let start = signers.last().copied().unwrap_or(0) + 1;
             signers.extend(start..start + missing as u16);
@@ -673,7 +673,7 @@ impl SimulationScenarioHandler {
         let attestation = params
             .get("attestation")
             .cloned()
-            .unwrap_or_else(|| "placeholder".to_string());
+            .unwrap_or_else(|| "unknown_signer".to_string());
 
         self.record_simple_event(
             "run_choreography",
@@ -753,7 +753,8 @@ impl SimulationScenarioHandler {
 
         let config = ThresholdSigningConfig::new(threshold, total, 120);
         let authorities: Vec<AuthorityId> = (0..config.total_signers)
-            .map(|_| AuthorityId::new())
+            .enumerate()
+            .map(|(idx, _)| AuthorityId::new_from_entropy([idx as u8; 32]))
             .collect();
         Ok((harness, config, authorities))
     }
@@ -929,7 +930,7 @@ impl SimulationScenarioHandler {
         participants: &[String],
         params: &HashMap<String, String>,
     ) -> Result<(), TestingError> {
-        // For now run the full pipeline and surface commit + reveal sequencing in a single path.
+        // Execute the full pipeline and surface commit + reveal sequencing in a single path.
         let result = self.execute_frost_threshold(participants, params);
         if result.is_ok() {
             self.record_simple_event(
@@ -955,7 +956,7 @@ impl SimulationScenarioHandler {
         _participants: &[String],
         params: &HashMap<String, String>,
     ) -> Result<(), TestingError> {
-        // Placeholder: simulate coordinator failure and retry the signing flow.
+        // Simulate coordinator failure and retry the signing flow.
         let mut data = HashMap::from([
             ("choreography".to_string(), "frost_recovery".to_string()),
             ("status".to_string(), "ok".to_string()),
@@ -981,7 +982,8 @@ impl SimulationScenarioHandler {
         let result = run_sync(async {
             let config = ThresholdSigningConfig::new(threshold, total, 120);
             let authorities: Vec<AuthorityId> = (0..config.total_signers)
-                .map(|_| AuthorityId::new())
+                .enumerate()
+                .map(|(idx, _)| AuthorityId::new_from_entropy([20u8 + idx as u8; 32]))
                 .collect();
 
             let context = TreeSigningContext::new(1, 0, [0u8; 32]);
@@ -1088,7 +1090,8 @@ impl SimulationScenarioHandler {
         let result = run_sync(async {
             let config = ThresholdSigningConfig::new(threshold, total, 120);
             let authorities: Vec<AuthorityId> = (0..config.total_signers)
-                .map(|_| AuthorityId::new())
+                .enumerate()
+                .map(|(idx, _)| AuthorityId::new_from_entropy([40u8 + idx as u8; 32]))
                 .collect();
 
             let device_ctx = harness

@@ -363,7 +363,7 @@ fn infer_fact_type(fact: &JsonValue) -> &str {
         .unwrap_or("unknown")
 }
 
-// Placeholder types for journal operations (these should match aura-journal types)
+// Local types for journal operations (mirrors aura-journal types for guard processing)
 
 /// Journal operation types for fact application
 #[derive(Debug, Clone)]
@@ -425,7 +425,7 @@ pub enum JournalOperation {
     },
 }
 
-// Parser functions for extracting data from facts (placeholders)
+// Parser functions for extracting data from JSON facts
 
 fn parse_device_id_from_fact(fact: &JsonValue) -> AuraResult<String> {
     fact.get("device_id")

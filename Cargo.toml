@@ -119,6 +119,7 @@ biscuit-auth = "5.0"
 proc-macro2 = "1.0"
 quote = "1.0"
 syn = { version = "2.0", features = ["full"] }
+sysinfo = "0.33"
 
 # Benchmarking and WASM dependencies
 criterion = "0.5"

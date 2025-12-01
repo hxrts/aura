@@ -160,7 +160,7 @@ mod tests {
     #[test]
     fn test_authority_scope_datalog() {
         let scope = ResourceScope::Authority {
-            authority_id: AuthorityId::new(),
+            authority_id: AuthorityId::new_from_entropy([40u8; 32]),
             operation: AuthorityOp::UpdateTree,
         };
 
@@ -172,7 +172,7 @@ mod tests {
     #[test]
     fn test_context_scope_pattern() {
         let scope = ResourceScope::Context {
-            context_id: ContextId::new(),
+            context_id: ContextId::new_from_entropy([41u8; 32]),
             operation: ContextOp::ApproveRecovery,
         };
 

@@ -194,29 +194,29 @@ Snapshots and upgrade bundles stored outside the journal are referenced solely b
 
 Core effect families provide the runtime contract:
 
-```purescript
+```lean
 -- Read/append mergeable state
-class JournalEffects m where
-  read_facts   :: m Fact
-  merge_facts  :: Fact -> m Unit
+class JournalEffects (m : Type → Type) where
+  read_facts  : m Fact
+  merge_facts : Fact → m Unit
 
 -- Biscuit verification + guard evaluation
-class AuthorizationEffects m where
-  evaluate_guard :: Biscuit -> CapabilityPredicate -> m Cap
-  derive_cap     :: ContextId -> m Cap -- cached policy frontier
+class AuthorizationEffects (m : Type → Type) where
+  evaluate_guard : Biscuit → CapabilityPredicate → m Cap
+  derive_cap     : ContextId → m Cap  -- cached policy frontier
 
 -- Cryptography and key mgmt (abstracted to swap FROST, AEAD, DR, etc.)
-class CryptoEffects m where
-  sign_threshold  :: Bytes -> m SigWitness
-  aead_seal       :: K_box -> Plain -> m Cipher
-  aead_open       :: K_box -> Cipher -> m (Maybe Plain)
-  commitment_step    :: ContextId -> m ContextId
+class CryptoEffects (m : Type → Type) where
+  sign_threshold  : Bytes → m SigWitness
+  aead_seal       : K_box → Plain → m Cipher
+  aead_open       : K_box → Cipher → m (Option Plain)
+  commitment_step : ContextId → m ContextId
 
 -- Transport (unified)
-class TransportEffects m where
-  send    :: PeerId -> Msg Ctx P V -> m Unit
-  recv    :: m (Msg Ctx Any V)
-  connect :: PeerId -> m Channel
+class TransportEffects (m : Type → Type) where
+  send    : PeerId → Msg Ctx P V → m Unit
+  recv    : m (Msg Ctx Any V)
+  connect : PeerId → m Channel
 ```
 
 These effect signatures define the interface between protocols and the runtime. The `JournalEffects` family handles state operations. The `AuthorizationEffects` family verifies Biscuit tokens and fuses them with local policy. The `CryptoEffects` family handles cryptographic operations. The `TransportEffects` family handles network communication.
@@ -234,19 +234,19 @@ Named invariants used across documents:
 - No-Observable-Without-Charge: there is no $`\text{send}(\text{ctx}, \text{peer}, \ldots)`$ event without a preceding successful $`\text{charge}(\text{ctx}, \text{peer}, \text{cost}, \text{epoch})`$.
 - Deterministic-Replenishment: $`\text{limit}(\text{ctx})`$ is computed deterministically from capability evaluation. The value $`\text{spent}`$ (stored as journal facts) is join-monotone. Epochs gate resets.
 
-```purescript
+```lean
 -- Time & randomness for simulation/proofs
-class TimeEffects m where
-  now   :: m Instant
-  sleep :: Duration -> m Unit
+class TimeEffects (m : Type → Type) where
+  now   : m Instant
+  sleep : Duration → m Unit
 
-class RandEffects m where
-  sample :: Dist -> m Val
+class RandEffects (m : Type → Type) where
+  sample : Dist → m Val
 
 -- Privacy budgets (ext/ngh/group observers)
-class LeakageEffects m where
-  record_leakage   :: ObserverClass -> Number -> m Unit
-  remaining_budget :: ObserverClass -> m Number
+class LeakageEffects (m : Type → Type) where
+  record_leakage   : ObserverClass → Number → m Unit
+  remaining_budget : ObserverClass → m Number
 ```
 
 The `TimeEffects` and `RandEffects` families support simulation and testing. The `LeakageEffects` family enforces privacy budget constraints.

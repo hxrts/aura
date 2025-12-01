@@ -17,8 +17,6 @@
 
 use crate::Result;
 use serde_json::Value;
-use uuid;
-
 /// Identifier for a property specification
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PropertyId(pub String);
@@ -175,6 +173,11 @@ impl PropertyId {
         Self(id.into())
     }
 
+    pub fn new_random() -> Self {
+        let h = crate::hash::hash(b"quint-property-id");
+        Self(hex::encode(&h[..16]))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -189,9 +192,17 @@ impl VerificationId {
         &self.0
     }
 
-    #[allow(clippy::disallowed_methods)]
-    pub fn generate() -> Self {
-        Self(uuid::Uuid::new_v4().to_string())
+    /// Generate a verification ID from entropy bytes.
+    ///
+    /// Use with `RandomEffects::random_bytes_32()` for runtime generation:
+    /// ```ignore
+    /// let entropy = random_effects.random_bytes_32().await;
+    /// let id = VerificationId::generate_from_entropy(entropy);
+    /// ```
+    pub fn generate_from_entropy(entropy: [u8; 32]) -> Self {
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&entropy[..16]);
+        Self(uuid::Uuid::from_bytes(uuid_bytes).to_string())
     }
 }
 

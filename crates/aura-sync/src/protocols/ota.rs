@@ -175,7 +175,7 @@ impl OTAProtocol {
 
     /// Propose an upgrade
     ///
-    /// Note: Callers should obtain `proposal_id` via `RandomEffects` or use `Uuid::new_v4()` in tests
+    /// Note: Callers should obtain `proposal_id` via `RandomEffects::random_uuid()` or provide a deterministic `Uuid::from_bytes(..)` in tests
     pub fn propose_upgrade(
         &mut self,
         proposal_id: Uuid,
@@ -303,8 +303,8 @@ mod tests {
 
         let proposal = protocol
             .propose_upgrade(
-                Uuid::new_v4(), // proposal_id
-                Uuid::new_v4(), // package_id
+                Uuid::from_bytes(2u128.to_be_bytes()), // proposal_id
+                Uuid::from_bytes(3u128.to_be_bytes()), // package_id
                 "2.0.0".to_string(),
                 UpgradeKind::SoftFork,
                 Hash32([0; 32]),
@@ -328,8 +328,8 @@ mod tests {
 
         protocol
             .propose_upgrade(
-                Uuid::new_v4(), // proposal_id
-                Uuid::new_v4(), // package_id
+                Uuid::from_bytes(4u128.to_be_bytes()), // proposal_id
+                Uuid::from_bytes(5u128.to_be_bytes()), // package_id
                 "2.0.0".to_string(),
                 UpgradeKind::SoftFork,
                 Hash32([0; 32]),
@@ -356,8 +356,8 @@ mod tests {
 
         protocol
             .propose_upgrade(
-                Uuid::new_v4(), // proposal_id
-                Uuid::new_v4(), // package_id
+                Uuid::from_bytes(6u128.to_be_bytes()),  // proposal_id
+                Uuid::from_bytes(20u128.to_be_bytes()), // package_id
                 "2.0.0".to_string(),
                 UpgradeKind::SoftFork,
                 Hash32([0; 32]),

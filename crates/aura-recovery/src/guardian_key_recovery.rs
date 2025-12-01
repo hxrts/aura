@@ -1,11 +1,10 @@
-//! Placeholder guardian key recovery types to satisfy recovery flows.
-//! Real implementation should integrate the recovery choreography and guardian approvals.
+//! Guardian key recovery data structures supporting recovery choreography and approvals.
 
 use aura_core::identifiers::GuardianId;
 use aura_core::time::TimeStamp;
 use serde::{Deserialize, Serialize};
 
-/// Guardian approval for key recovery (placeholder).
+/// Guardian approval for key recovery.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianKeyApproval {
     pub guardian_id: GuardianId,

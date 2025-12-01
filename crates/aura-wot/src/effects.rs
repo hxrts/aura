@@ -130,7 +130,10 @@ impl<C: CryptoEffects> WotAuthorizationHandler<C> {
 
         ResourceScope::Storage {
             // Deterministic, non-nil fallback derived from resource path
-            authority_id: AuthorityId::from_uuid(Uuid::new_v5(&Uuid::NAMESPACE_URL, resource.as_bytes())),
+            authority_id: AuthorityId::from_uuid(Uuid::new_v5(
+                &Uuid::NAMESPACE_URL,
+                resource.as_bytes(),
+            )),
             path: resource.to_string(),
         }
     }

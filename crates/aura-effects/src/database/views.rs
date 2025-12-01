@@ -1,3 +1,6 @@
+// Lock poisoning is fatal for this module - we prefer to panic than continue with corrupted state
+#![allow(clippy::expect_used)]
+
 //! Materialized Views over CRDTs
 //!
 //! This module provides `MaterializedView<T>`, a thin wrapper over `CvHandler`
@@ -280,7 +283,7 @@ mod tests {
     }
 
     fn test_authority() -> AuthorityId {
-        AuthorityId::new()
+        AuthorityId::new_from_entropy([1u8; 32])
     }
 
     fn test_fact(id: u64, predicate: &str) -> SubscriptionFact {

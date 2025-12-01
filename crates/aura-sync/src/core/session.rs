@@ -13,10 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
-fn now_secs() -> u64 {
-    0 // placeholder; callers should supply PhysicalTimeEffects
-}
-
 /// Unified session state machine following choreographic patterns
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SessionState<T> {
@@ -53,13 +49,6 @@ impl<T> SessionState<T> {
             } => now >= *cleanup_deadline,
             SessionState::Completed(_) => false,
         }
-    }
-
-    /// Check if session has timed out using current system time (compatibility method)
-    #[allow(clippy::disallowed_methods)]
-    pub fn is_timed_out_now(&self) -> bool {
-        let now = now_secs();
-        self.is_timed_out(now)
     }
 
     /// Get session participants
@@ -264,6 +253,8 @@ pub struct SessionManager<T> {
     metrics: Option<MetricsCollector>,
     /// Last cleanup timestamp (Unix timestamp in seconds)
     last_cleanup: u64,
+    /// Monotonic counter used to derive deterministic-but-unique session IDs
+    session_counter: u64,
 }
 
 impl<T> SessionManager<T>
@@ -279,6 +270,7 @@ where
             config,
             metrics: None,
             last_cleanup: now,
+            session_counter: 0,
         }
     }
 
@@ -291,7 +283,23 @@ where
             config,
             metrics: Some(metrics),
             last_cleanup: now,
+            session_counter: 0,
         }
+    }
+
+    /// Deterministically derive a unique session ID using the caller-supplied timestamp
+    /// and a local monotonic counter (no ambient randomness).
+    fn generate_session_id(&mut self, now: u64) -> SessionId {
+        let mut input = Vec::new();
+        input.extend_from_slice(b"aura.sync.session.id");
+        input.extend_from_slice(&now.to_le_bytes());
+        input.extend_from_slice(&self.session_counter.to_le_bytes());
+        self.session_counter = self.session_counter.wrapping_add(1);
+
+        let digest = aura_core::hash::hash(&input);
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&digest[..16]);
+        SessionId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes))
     }
 
     /// Create a new session with participants
@@ -321,7 +329,7 @@ where
             ));
         }
 
-        let session_id = SessionId::new();
+        let session_id = self.generate_session_id(now);
         // Use the provided now parameter instead of an implicit clock
         let now_secs = now;
 
@@ -346,17 +354,14 @@ where
         &mut self,
         session_id: SessionId,
         protocol_state: T,
-        current_timestamp_secs: Option<u64>,
+        current_timestamp_secs: u64,
     ) -> SyncResult<()> {
         let session = self
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
-        let now = current_timestamp_secs.unwrap_or_else(|| {
-            // Fallback for compatibility when time is not provided
-            now_secs()
-        });
+        let now = current_timestamp_secs;
 
         // Check timeout before pattern matching to avoid borrow conflicts
         if session.is_timed_out(now) {
@@ -386,7 +391,12 @@ where
     }
 
     /// Update session protocol state
-    pub fn update_session(&mut self, session_id: SessionId, new_state: T) -> SyncResult<()>
+    pub fn update_session(
+        &mut self,
+        session_id: SessionId,
+        new_state: T,
+        current_timestamp_secs: u64,
+    ) -> SyncResult<()>
     where
         T: std::fmt::Debug,
     {
@@ -396,8 +406,8 @@ where
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
-        if session.is_timed_out_now() {
-            self.timeout_session(session_id)?;
+        if session.is_timed_out(current_timestamp_secs) {
+            self.timeout_session(session_id, current_timestamp_secs)?;
             return Err(sync_timeout_error("session_update", self.config.timeout));
         }
 
@@ -420,14 +430,14 @@ where
         operations_count: usize,
         bytes_transferred: usize,
         metadata: HashMap<String, String>,
-        current_timestamp_secs: Option<u64>,
+        current_timestamp_secs: u64,
     ) -> SyncResult<()> {
         let session = self
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
-        let current_ts = current_timestamp_secs.unwrap_or_else(now_secs);
+        let current_ts = current_timestamp_secs;
         let duration_ms = session.duration_ms(current_ts).unwrap_or(0);
         let participants = session.participants().to_vec();
 
@@ -443,12 +453,11 @@ where
 
         // Record metrics
         if let Some(ref metrics) = self.metrics {
-            let now = current_timestamp_secs.unwrap_or_else(now_secs);
             metrics.record_sync_completion(
                 &session_id.to_string(),
                 operations_count,
                 bytes_transferred,
-                now,
+                current_ts,
             );
         }
 
@@ -461,13 +470,14 @@ where
         session_id: SessionId,
         error: SessionError,
         partial_results: Option<PartialResults>,
+        current_timestamp_secs: u64,
     ) -> SyncResult<()> {
         let session = self
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
-        let current_ts = now_secs();
+        let current_ts = current_timestamp_secs;
         let duration_ms = session.duration_ms(current_ts).unwrap_or(0);
 
         let result = SessionResult::Failure {
@@ -495,7 +505,11 @@ where
     }
 
     /// Timeout a session
-    pub fn timeout_session(&mut self, session_id: SessionId) -> SyncResult<()>
+    pub fn timeout_session(
+        &mut self,
+        session_id: SessionId,
+        current_timestamp_secs: u64,
+    ) -> SyncResult<()>
     where
         T: std::fmt::Debug,
     {
@@ -504,7 +518,7 @@ where
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
-        let current_ts = now_secs();
+        let current_ts = current_timestamp_secs;
         let duration_ms = session.duration_ms(current_ts).unwrap_or(0);
         let last_known_state = format!("{:?}", session);
 
@@ -597,7 +611,7 @@ where
 
         // Timeout sessions
         for session_id in to_timeout {
-            self.timeout_session(session_id)?;
+            self.timeout_session(session_id, now)?;
             removed += 1;
         }
 
@@ -815,7 +829,7 @@ mod tests {
             data: vec![1, 2, 3],
         };
         manager
-            .activate_session(session_id, initial_state.clone(), Some(now))
+            .activate_session(session_id, initial_state.clone(), now)
             .unwrap();
         assert_eq!(manager.count_active_sessions(), 1);
 
@@ -847,7 +861,7 @@ mod tests {
             data: vec![],
         };
         manager
-            .activate_session(session_id, initial_state, Some(now))
+            .activate_session(session_id, initial_state, now)
             .unwrap();
 
         // Complete session
@@ -855,7 +869,7 @@ mod tests {
         metadata.insert("test_key".to_string(), "test_value".to_string());
 
         manager
-            .complete_session(session_id, 100, 1024, metadata, Some(now + 100))
+            .complete_session(session_id, 100, 1024, metadata, now + 100)
             .unwrap();
         assert_eq!(manager.count_active_sessions(), 0);
         assert_eq!(manager.count_completed_sessions(), 1);
@@ -888,7 +902,7 @@ mod tests {
             data: vec![],
         };
         manager
-            .activate_session(session_id, initial_state, Some(now))
+            .activate_session(session_id, initial_state, now)
             .unwrap();
 
         // Fail session
@@ -896,7 +910,7 @@ mod tests {
             constraint: "test constraint".to_string(),
         };
         manager
-            .fail_session(session_id, error.clone(), None)
+            .fail_session(session_id, error.clone(), None, now + 10)
             .unwrap();
 
         // Verify failure
@@ -937,11 +951,9 @@ mod tests {
             data: vec![],
         };
         manager
-            .activate_session(session1, state.clone(), Some(now))
+            .activate_session(session1, state.clone(), now)
             .unwrap();
-        manager
-            .activate_session(session2, state, Some(now))
-            .unwrap();
+        manager.activate_session(session2, state, now).unwrap();
 
         // Try to exceed limit
         let result = manager.create_session(vec![test_device_id(1)], now);
@@ -971,7 +983,7 @@ mod tests {
             phase: "test".to_string(),
             data: vec![],
         };
-        let result = manager.activate_session(session_id, state, None);
+        let result = manager.activate_session(session_id, state, now + 200);
         assert!(result.is_err());
         // Timeout errors now map to Internal
         assert!(matches!(result.unwrap_err(), SyncError::Internal { .. }));
@@ -995,11 +1007,9 @@ mod tests {
             phase: "test".to_string(),
             data: vec![],
         };
+        manager.activate_session(session_id, state, now).unwrap();
         manager
-            .activate_session(session_id, state, Some(now))
-            .unwrap();
-        manager
-            .complete_session(session_id, 0, 0, HashMap::new(), Some(now + 50))
+            .complete_session(session_id, 0, 0, HashMap::new(), now + 50)
             .unwrap();
 
         assert_eq!(manager.sessions.len(), 1);
@@ -1027,9 +1037,7 @@ mod tests {
                 phase: "test".to_string(),
                 data: vec![],
             };
-            manager
-                .activate_session(session_id, state, Some(now))
-                .unwrap();
+            manager.activate_session(session_id, state, now).unwrap();
 
             if i < 2 {
                 manager
@@ -1038,14 +1046,16 @@ mod tests {
                         10 * (i + 1),
                         100 * (i + 1),
                         HashMap::new(),
-                        Some(now + 100 * (i as u64 + 1)),
+                        now + 100 * (i as u64 + 1),
                     )
                     .unwrap();
             } else {
                 let error = SessionError::ProtocolViolation {
                     constraint: "test".to_string(),
                 };
-                manager.fail_session(session_id, error, None).unwrap();
+                manager
+                    .fail_session(session_id, error, None, now + 50)
+                    .unwrap();
             }
         }
 

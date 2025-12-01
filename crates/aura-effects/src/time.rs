@@ -10,13 +10,12 @@ use async_trait::async_trait;
 use aura_core::effects::time::{
     LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeComparison, TimeError,
 };
-use aura_core::hash::hash;
 use aura_core::time::{
     LogicalTime, OrderTime, OrderingPolicy, TimeOrdering, TimeStamp, VectorClock,
 };
+use rand::RngCore;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time;
-use uuid::Uuid;
 
 /// Production physical clock handler backed by the system clock.
 #[derive(Debug, Clone, Default)]
@@ -27,6 +26,20 @@ impl PhysicalTimeHandler {
     /// Create a new physical clock handler.
     pub fn new() -> Self {
         Self
+    }
+
+    /// Synchronous physical time helper (ms since epoch).
+    ///
+    /// This is intended for UI/frontend call sites that are not async and need
+    /// a best-effort timestamp without spawning a runtime. It still sources time
+    /// from the system clock, so simulator-driven tests should prefer the async
+    /// `physical_time` trait method for full control.
+    #[allow(clippy::disallowed_methods)] // Effect handler is permitted to read the host clock
+    pub fn physical_time_now_ms(&self) -> u64 {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO);
+        now.as_millis() as u64
     }
 
     /// Sleep until a target epoch in seconds (best-effort).
@@ -175,12 +188,16 @@ pub struct OrderClockHandler;
 #[async_trait]
 impl OrderClockEffects for OrderClockHandler {
     #[tracing::instrument(name = "order_time", level = "trace")]
-    #[allow(clippy::disallowed_methods)] // Effect implementation uses system randomness for ordering tokens
+    #[allow(clippy::disallowed_methods)] // This IS the time handler implementation
     async fn order_time(&self) -> Result<OrderTime, TimeError> {
         let start = std::time::Instant::now();
 
-        let uuid = Uuid::new_v4();
-        let hashed = hash(uuid.as_bytes());
+        // Order clock must be unpredictable but stateless; use OS entropy here (allowed in L3 handler).
+        let entropy = rand::rngs::OsRng.next_u64().to_le_bytes();
+        let mut hasher = aura_core::hash::hasher();
+        hasher.update(b"ORDER_TIME_TOKEN");
+        hasher.update(&entropy);
+        let hashed = hasher.finalize();
         let result = OrderTime(hashed);
 
         // Record latency metrics

@@ -86,6 +86,11 @@ impl WelcomeScreen {
         self.needs_redraw = true;
     }
 
+    /// Public advance method for external navigation (e.g., Enter on welcome)
+    pub fn advance(&mut self) {
+        self.next_step();
+    }
+
     /// Move to previous onboarding step
     fn prev_step(&mut self) {
         self.step = match self.step {
@@ -101,17 +106,12 @@ impl WelcomeScreen {
     /// Render the welcome step
     fn render_welcome(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
         let logo = r#"
-    ╔═══════════════════════════════════════╗
-    ║                                       ║
-    ║       █████╗ ██╗   ██╗██████╗  █████╗ ║
-    ║      ██╔══██╗██║   ██║██╔══██╗██╔══██╗║
-    ║      ███████║██║   ██║██████╔╝███████║║
-    ║      ██╔══██║██║   ██║██╔══██╗██╔══██║║
-    ║      ██║  ██║╚██████╔╝██║  ██║██║  ██║║
-    ║      ╚═╝  ╚═╝ ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝║
-    ║                                       ║
-    ║     Threshold Identity & Recovery     ║
-    ╚═══════════════════════════════════════╝
+╔═════════════════════════╗
+║                         ║
+║     ▄▀█ █░█ █▀█ ▄▀█     ║
+║     █▀█ █▄█ █▀▄ █▀█     ║
+║                         ║
+╚═════════════════════════╝
 "#;
 
         let content = vec![

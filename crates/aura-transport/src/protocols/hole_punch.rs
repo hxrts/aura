@@ -3,13 +3,13 @@
 //! Core hole punching messages compatible with rumpsteak-aura choreographic DSL.
 //! Target: <120 lines (minimal implementation).
 
+use crate::types::endpoint::EndpointAddress;
 use aura_core::hash::{hash as core_hash, hasher};
 use aura_core::identifiers::DeviceId;
 use aura_core::time::{OrderTime, TimeStamp};
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
-use uuid::Uuid;
 use std::sync::atomic::{AtomicU64, Ordering};
+use uuid::Uuid;
 
 static HOLE_PUNCH_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -25,7 +25,7 @@ pub enum HolePunchMessage {
         /// Target device for hole punching
         target: DeviceId,
         /// Relay server coordinates the process
-        relay_server: SocketAddr,
+        relay_server: EndpointAddress,
     },
 
     /// Punch packet sent directly between peers
@@ -51,9 +51,9 @@ pub enum HolePunchMessage {
         /// Successfully reached peer
         reached_peer: DeviceId,
         /// Local endpoint that succeeded
-        local_endpoint: SocketAddr,
+        local_endpoint: EndpointAddress,
         /// Remote endpoint that was reached
-        remote_endpoint: SocketAddr,
+        remote_endpoint: EndpointAddress,
     },
 
     /// Coordination response from relay
@@ -87,7 +87,7 @@ pub enum HolePunchInstruction {
     /// Send punch packets to specific endpoint
     SendPunch {
         /// Target endpoint to send punch packets to
-        target_endpoint: SocketAddr,
+        target_endpoint: EndpointAddress,
         /// Number of punch packets to send
         packet_count: u32,
         /// Interval between packets in milliseconds
@@ -97,7 +97,7 @@ pub enum HolePunchInstruction {
     /// Listen for incoming punch packets
     ListenForPunch {
         /// Local endpoint to bind for listening
-        local_endpoint: SocketAddr,
+        local_endpoint: EndpointAddress,
         /// Timeout for listening operation in milliseconds
         timeout_ms: u64,
     },
@@ -111,7 +111,7 @@ pub enum HolePunchInstruction {
     /// Use specific local endpoint
     BindToEndpoint {
         /// Specific endpoint to bind to
-        endpoint: SocketAddr,
+        endpoint: EndpointAddress,
     },
 }
 
@@ -120,7 +120,7 @@ impl HolePunchMessage {
     pub fn coordination_request(
         initiator: DeviceId,
         target: DeviceId,
-        relay_server: SocketAddr,
+        relay_server: EndpointAddress,
     ) -> Self {
         Self::coordination_request_with_id(
             Self::generate_session_id(initiator, target),
@@ -135,7 +135,7 @@ impl HolePunchMessage {
         session_id: Uuid,
         initiator: DeviceId,
         target: DeviceId,
-        relay_server: SocketAddr,
+        relay_server: EndpointAddress,
     ) -> Self {
         Self::CoordinationRequest {
             session_id,
@@ -165,19 +165,13 @@ impl HolePunchMessage {
         target: DeviceId,
         sequence: u32,
     ) -> Self {
-        Self::punch_packet_at_time(
-            session_id,
-            source,
-            target,
-            sequence,
-            {
-                let mut bytes = [0u8; 32];
-                bytes[..16].copy_from_slice(session_id.as_bytes());
-                let seq_hash = core_hash(&sequence.to_le_bytes());
-                bytes[16..].copy_from_slice(&seq_hash[..16]);
-                TimeStamp::OrderClock(OrderTime(bytes))
-            },
-        )
+        Self::punch_packet_at_time(session_id, source, target, sequence, {
+            let mut bytes = [0u8; 32];
+            bytes[..16].copy_from_slice(session_id.as_bytes());
+            let seq_hash = core_hash(&sequence.to_le_bytes());
+            bytes[16..].copy_from_slice(&seq_hash[..16]);
+            TimeStamp::OrderClock(OrderTime(bytes))
+        })
     }
 
     /// Create punch packet with specific timestamp
@@ -202,8 +196,8 @@ impl HolePunchMessage {
         session_id: Uuid,
         acknoweffect_api: DeviceId,
         reached_peer: DeviceId,
-        local_endpoint: SocketAddr,
-        remote_endpoint: SocketAddr,
+        local_endpoint: EndpointAddress,
+        remote_endpoint: EndpointAddress,
     ) -> Self {
         Self::PunchAcknowledgment {
             session_id,
@@ -271,7 +265,7 @@ pub struct PunchConfig {
     /// Enable symmetric NAT detection
     pub enable_symmetric_detection: bool,
     /// Relay servers for coordination
-    pub relay_servers: Vec<SocketAddr>,
+    pub relay_servers: Vec<EndpointAddress>,
 }
 
 impl Default for PunchConfig {

@@ -42,7 +42,7 @@ impl AdminReplaced {
 pub enum MaintenanceEvent {
     /// Admin was replaced
     AdminReplaced(AdminReplaced),
-    /// Placeholder for other maintenance events
+    /// Extensible maintenance event
     Other {
         /// Type identifier for the event
         event_type: String,

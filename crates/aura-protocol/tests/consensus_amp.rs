@@ -10,7 +10,7 @@ use std::collections::HashMap;
 #[tokio::test]
 async fn amp_consensus_smoke() {
     // Minimal proposal and witness set.
-    let ctx = aura_core::identifiers::ContextId::new();
+    let ctx = aura_core::identifiers::ContextId::new_from_entropy([1u8; 32]);
     let channel = aura_core::identifiers::ChannelId::from_bytes([1u8; 32]);
     let proposal = ProposedChannelEpochBump {
         context: ctx,
@@ -22,7 +22,7 @@ async fn amp_consensus_smoke() {
     };
 
     let prestate = aura_core::Prestate::new(vec![], aura_core::Hash32::default());
-    let witnesses = vec![AuthorityId::new()];
+    let witnesses = vec![AuthorityId::new_from_entropy([11u8; 32])];
     let key_packages: HashMap<AuthorityId, Share> = HashMap::new();
 
     // Create test FROST keys using testkit
@@ -49,7 +49,7 @@ async fn amp_consensus_smoke() {
 
 #[tokio::test]
 async fn amp_consensus_success_path() {
-    let ctx = aura_core::identifiers::ContextId::new();
+    let ctx = aura_core::identifiers::ContextId::new_from_entropy([2u8; 32]);
     let channel = aura_core::identifiers::ChannelId::from_bytes([2u8; 32]);
     let proposal = ProposedChannelEpochBump {
         context: ctx,
@@ -61,7 +61,10 @@ async fn amp_consensus_success_path() {
     };
 
     let prestate = aura_core::Prestate::new(vec![], aura_core::Hash32::default());
-    let witnesses = vec![AuthorityId::new(), AuthorityId::new()];
+    let witnesses = vec![
+        AuthorityId::new_from_entropy([21u8; 32]),
+        AuthorityId::new_from_entropy([22u8; 32]),
+    ];
     let mut key_packages: HashMap<AuthorityId, Share> = HashMap::new();
 
     // Create test FROST keys using testkit

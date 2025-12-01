@@ -143,7 +143,7 @@ pub fn create_anti_entropy_protocol() -> AntiEntropyProtocol {
 /// Helper for creating journal sync protocol instances
 pub fn create_journal_sync_protocol() -> JournalSyncProtocol {
     let config = JournalSyncConfig {
-        account_id: aura_core::AccountId::new(),
+        account_id: aura_core::AccountId::new_from_entropy([1u8; 32]),
         batch_size: 50,
         sync_timeout: Duration::from_secs(15),
         max_concurrent_syncs: 5,

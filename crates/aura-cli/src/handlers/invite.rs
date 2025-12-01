@@ -3,7 +3,6 @@
 use crate::InvitationAction;
 use anyhow::{anyhow, Context, Result};
 use aura_agent::{AgentBuilder, AuraEffectSystem, EffectContext};
-use aura_core::identifiers::AuthorityId;
 use aura_core::{effects::StorageEffects, AccountId, DeviceId};
 use aura_invitation::{
     device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest, InvitationEnvelope},
@@ -35,7 +34,10 @@ pub async fn handle_invitation(
 
             // Create fresh agent for coordinator
             let agent = AgentBuilder::new()
-                .with_authority(AuthorityId::new())
+                .with_authority(crate::ids::authority_id(&format!(
+                    "invite:create:{}",
+                    account
+                )))
                 .build_testing()?;
             let coord_effects = agent.runtime().effects().clone();
 
@@ -61,7 +63,7 @@ pub async fn handle_invitation(
 
             // Create fresh agent for coordinator
             let agent = AgentBuilder::new()
-                .with_authority(AuthorityId::new())
+                .with_authority(crate::ids::authority_id("invite:accept"))
                 .build_testing()?;
             let coord_effects = agent.runtime().effects().clone();
 

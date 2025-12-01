@@ -5,16 +5,29 @@
 
 use aura_core::crypto::hash::hasher;
 use aura_core::{AccountId, DeviceId, SessionId};
+use uuid::Uuid;
+
+fn account(seed: u8) -> AccountId {
+    AccountId::new_from_entropy([seed; 32])
+}
+
+fn device(seed: u8) -> DeviceId {
+    DeviceId::new_from_entropy([seed; 32])
+}
+
+fn session(seed: u8) -> SessionId {
+    SessionId::from_uuid(Uuid::from_bytes([seed; 16]))
+}
 
 /// Test basic DKD key derivation simulation
 #[test]
 fn test_basic_dkd_derivation() {
     // Create test identifiers
-    let account_id = AccountId::new();
-    let session_id = SessionId::new();
-    let device1 = DeviceId::new();
-    let device2 = DeviceId::new();
-    let device3 = DeviceId::new();
+    let account_id = account(1);
+    let session_id = session(2);
+    let device1 = device(3);
+    let device2 = device(4);
+    let device3 = device(5);
 
     let participants = vec![device1, device2, device3];
     let app_id = "test_app";
@@ -40,9 +53,9 @@ fn test_basic_dkd_derivation() {
 /// Test that DKD is deterministic
 #[test]
 fn test_dkd_determinism() {
-    let account_id = AccountId::new();
-    let session_id = SessionId::new();
-    let participants = vec![DeviceId::new(), DeviceId::new()];
+    let account_id = account(6);
+    let session_id = session(7);
+    let participants = vec![device(8), device(9)];
     let app_id = "app";
     let context = "context";
 
@@ -56,9 +69,9 @@ fn test_dkd_determinism() {
 /// Test that different contexts produce different keys
 #[test]
 fn test_dkd_context_separation() {
-    let account_id = AccountId::new();
-    let session_id = SessionId::new();
-    let participants = vec![DeviceId::new(), DeviceId::new()];
+    let account_id = account(10);
+    let session_id = session(11);
+    let participants = vec![device(12), device(13)];
     let app_id = "app";
 
     let key1 = simulate_dkd_derivation(&account_id, &session_id, &participants, app_id, "context1");
@@ -74,9 +87,9 @@ fn test_dkd_context_separation() {
 /// Test that different applications produce different keys
 #[test]
 fn test_dkd_app_separation() {
-    let account_id = AccountId::new();
-    let session_id = SessionId::new();
-    let participants = vec![DeviceId::new(), DeviceId::new()];
+    let account_id = account(14);
+    let session_id = session(15);
+    let participants = vec![device(16), device(17)];
     let context = "context";
 
     let key1 = simulate_dkd_derivation(&account_id, &session_id, &participants, "app1", context);
@@ -92,11 +105,11 @@ fn test_dkd_app_separation() {
 /// Test that participant set affects derivation
 #[test]
 fn test_dkd_participant_dependence() {
-    let account_id = AccountId::new();
-    let session_id = SessionId::new();
-    let device1 = DeviceId::new();
-    let device2 = DeviceId::new();
-    let device3 = DeviceId::new();
+    let account_id = account(18);
+    let session_id = session(19);
+    let device1 = device(20);
+    let device2 = device(21);
+    let device3 = device(22);
     let app_id = "app";
     let context = "context";
 
@@ -116,11 +129,11 @@ fn test_dkd_participant_dependence() {
 /// Test threshold-like behavior simulation
 #[test]
 fn test_threshold_simulation() {
-    let account_id = AccountId::new();
-    let session_id = SessionId::new();
-    let device1 = DeviceId::new();
-    let device2 = DeviceId::new();
-    let device3 = DeviceId::new();
+    let account_id = account(23);
+    let session_id = session(24);
+    let device1 = device(25);
+    let device2 = device(26);
+    let device3 = device(27);
     let all_participants = vec![device1, device2, device3];
     let app_id = "app";
     let context = "context";
@@ -169,16 +182,16 @@ fn test_threshold_simulation() {
 #[test]
 fn test_identifier_uniqueness() {
     // Test that different IDs are unique
-    let account1 = AccountId::new();
-    let account2 = AccountId::new();
+    let account1 = AccountId::new_from_entropy([1u8; 32]);
+    let account2 = AccountId::new_from_entropy([2u8; 32]);
     assert_ne!(account1, account2);
 
     let session1 = SessionId::new();
-    let session2 = SessionId::new();
+    let session2 = SessionId::from_uuid(Uuid::from_bytes([3u8; 16]));
     assert_ne!(session1, session2);
 
-    let device1 = DeviceId::new();
-    let device2 = DeviceId::new();
+    let device1 = DeviceId::new_from_entropy([4u8; 32]);
+    let device2 = DeviceId::new_from_entropy([5u8; 32]);
     assert_ne!(device1, device2);
 
     // Test string representation

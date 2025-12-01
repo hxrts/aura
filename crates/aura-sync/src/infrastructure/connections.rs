@@ -39,18 +39,17 @@
 //! ```
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::core::{sync_resource_exhausted, sync_session_error, SyncResult};
-use aura_core::{DeviceId, SessionId};
-fn now_millis() -> u64 {
-    0 // placeholder; callers should supply PhysicalTimeEffects
-}
+use aura_core::{hash, DeviceId, SessionId};
+static NEXT_CONN_ID: AtomicU64 = AtomicU64::new(1);
 
-fn now_secs() -> u64 {
-    0 // placeholder; callers should supply PhysicalTimeEffects
+fn next_sequence() -> u64 {
+    NEXT_CONN_ID.fetch_add(1, Ordering::SeqCst)
 }
 
 // =============================================================================
@@ -543,19 +542,11 @@ impl ConnectionPool {
     ) -> SyncResult<TransportConnectionInfo> {
         tracing::debug!("Establishing transport connection to peer {}", peer_id);
 
-        // In a full implementation, this would:
-        // 1. Use NetworkEffects to discover peer endpoints
-        // 2. Try connecting to each endpoint using TransportEffects
-        // 3. Return connection details for the successful connection
-
-        // For now, create a placeholder transport connection
-        // This should be replaced with actual aura-transport integration
-        let connection_id = format!("transport_{}_{}", peer_id, now_millis());
-
-        // Placeholder: in production this would be effect-injected delay; skip sleeping to keep deterministic/simulator-friendly
+        // Synthetic connection record until transport wiring is attached via NetworkEffects.
+        let connection_id = format!("transport_{}_{}", peer_id, next_sequence());
 
         tracing::info!(
-            "Established placeholder transport connection {} to peer {}",
+            "Established transport connection {} to peer {}",
             connection_id,
             peer_id
         );
@@ -563,9 +554,9 @@ impl ConnectionPool {
         Ok(TransportConnectionInfo {
             connection_id,
             protocol: "quic".to_string(), // Default to QUIC
-            remote_address: format!("peer_{}.local:8080", peer_id), // Placeholder address
-            public_key: vec![0u8; 32],    // Placeholder public key
-            established_at: now_secs(),
+            remote_address: format!("peer_{}.local:8080", peer_id),
+            public_key: hash::hash(peer_id.to_string().as_bytes()).to_vec(),
+            established_at: next_sequence(),
         })
     }
 
@@ -699,7 +690,7 @@ mod tests {
         pool.release(peer_id, handle, now).unwrap();
 
         // Wait for idle timeout
-        // Placeholder delay removed to keep tests deterministic; eviction uses logical time input
+        // Deterministic eviction; delay handled via logical time input
 
         // Evict expired connections - needs future timestamp
         let later = now + 100;

@@ -30,7 +30,7 @@ use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::effects::crypto::FrostKeyGenResult;
 use aura_core::effects::CryptoError;
-use aura_core::{identifiers::DeviceId, AuraError};
+use aura_core::AuraError;
 use std::sync::Arc;
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -44,7 +44,9 @@ thread_local! {
 /// Get current context or fail fast if none is set
 fn get_context() -> AuraContext {
     CURRENT_CONTEXT.with(|ctx| {
-        ctx.borrow().clone().expect("AuraContext must be set before effect execution")
+        ctx.borrow()
+            .clone()
+            .expect("AuraContext must be set before effect execution")
     })
 }
 
@@ -442,12 +444,11 @@ impl aura_core::effects::ConsoleEffects for TypedHandlerBridge {
 mod tests {
     use super::*;
     use crate::coordinators::core::erased::AuraHandlerFactory as ErasedAuraHandlerFactory;
-    use aura_core::ExecutionMode;
-    use uuid::Uuid;
+    use aura_core::{DeviceId, ExecutionMode};
 
     #[tokio::test]
     async fn test_crypto_effects_bridge() {
-        let device_id = DeviceId::from(Uuid::from_u128(1));
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let handler = ErasedAuraHandlerFactory::for_testing(device_id);
         let ctx = crate::coordinators::context_immutable::AuraContext::for_testing(device_id);
 
@@ -482,7 +483,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_time_effects_bridge() {
-        let device_id = DeviceId::from(Uuid::from_u128(2));
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
         let handler = ErasedAuraHandlerFactory::for_testing(device_id);
         let _handler = Arc::new(RwLock::new(handler));
 
@@ -493,7 +494,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_console_effects_bridge() {
-        let device_id = DeviceId::from(Uuid::from_u128(3));
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let handler = ErasedAuraHandlerFactory::for_testing(device_id);
         let _handler = Arc::new(RwLock::new(handler));
 

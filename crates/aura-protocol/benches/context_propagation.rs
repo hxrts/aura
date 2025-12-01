@@ -9,6 +9,7 @@
 use aura_core::identifiers::{AuthorityId, DeviceId};
 use aura_core::ContextId;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use uuid::Uuid;
 
 /// Benchmark DeviceId operations
 fn bench_device_id_operations(c: &mut Criterion) {
@@ -40,13 +41,13 @@ fn bench_device_id_operations(c: &mut Criterion) {
 fn bench_context_id_operations(c: &mut Criterion) {
     c.bench_function("context_id_new", |b| {
         b.iter(|| {
-            let id = ContextId::new();
+            let id = ContextId::new_from_entropy([0u8; 32]);
             black_box(id);
         });
     });
 
     c.bench_function("context_id_to_bytes", |b| {
-        let id = ContextId::new();
+        let id = ContextId::new_from_entropy([1u8; 32]);
         b.iter(|| {
             let bytes = id.to_bytes();
             let _ = black_box(bytes);
@@ -54,7 +55,7 @@ fn bench_context_id_operations(c: &mut Criterion) {
     });
 
     c.bench_function("context_id_as_bytes", |b| {
-        let id = ContextId::new();
+        let id = ContextId::new_from_entropy([2u8; 32]);
         b.iter(|| {
             let bytes = id.as_bytes();
             black_box(bytes);
@@ -62,7 +63,7 @@ fn bench_context_id_operations(c: &mut Criterion) {
     });
 
     c.bench_function("context_id_clone", |b| {
-        let id = ContextId::new();
+        let id = ContextId::new_from_entropy([3u8; 32]);
         b.iter(|| {
             let cloned = id;
             black_box(cloned);
@@ -72,8 +73,6 @@ fn bench_context_id_operations(c: &mut Criterion) {
 
 /// Benchmark AuthorityId operations
 fn bench_authority_id_operations(c: &mut Criterion) {
-    use uuid::Uuid;
-
     c.bench_function("authority_id_from_uuid", |b| {
         b.iter(|| {
             let uuid = Uuid::from_bytes([2u8; 16]);
@@ -121,7 +120,7 @@ fn bench_identifier_equality(c: &mut Criterion) {
         });
     });
 
-    let context1 = ContextId::new();
+    let context1 = ContextId::new_from_entropy([4u8; 32]);
     let context2 = context1;
 
     c.bench_function("context_id_equality", |b| {
@@ -148,7 +147,7 @@ fn bench_identifier_hashing(c: &mut Criterion) {
     });
 
     c.bench_function("context_id_hash", |b| {
-        let id = ContextId::new();
+        let id = ContextId::new_from_entropy([5u8; 32]);
         b.iter(|| {
             let mut hasher = DefaultHasher::new();
             id.hash(&mut hasher);
@@ -158,7 +157,6 @@ fn bench_identifier_hashing(c: &mut Criterion) {
     });
 
     c.bench_function("authority_id_hash", |b| {
-        use uuid::Uuid;
         let uuid = Uuid::from_bytes([2u8; 16]);
         let id = AuthorityId::from_uuid(uuid);
         b.iter(|| {

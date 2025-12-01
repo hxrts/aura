@@ -171,7 +171,7 @@ pub trait TreeEffects: Send + Sync {
     /// ```ignore
     /// let valid = tree_effects.verify_aggregate_sig(&op, &state).await?;
     /// if !valid {
-    ///     return Err(AuraError::crypto_verification_failed("Invalid signature"));
+    ///     return Err(AuraError::crypto("Invalid signature"));
     /// }
     /// ```
     async fn verify_aggregate_sig(

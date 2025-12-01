@@ -67,9 +67,10 @@ impl PropertySpec {
     /// Create a new property specification
     #[allow(clippy::disallowed_methods)]
     pub fn new(name: impl Into<String>) -> Self {
+        let name_str = name.into();
         Self {
-            id: Uuid::new_v4(),
-            name: name.into(),
+            id: Uuid::from_bytes(Self::hash_id_bytes("quint:property", &name_str)),
+            name: name_str,
             description: None,
             kind: PropertyKind::Invariant,
             expression: String::new(),
@@ -151,6 +152,16 @@ impl PropertySpec {
     pub fn with_property(mut self, property: impl Into<String>) -> Self {
         self.properties.push(property.into());
         self
+    }
+
+    fn hash_id_bytes(domain: &str, label: &str) -> [u8; 16] {
+        let mut h = aura_core::hash::hasher();
+        h.update(domain.as_bytes());
+        h.update(label.as_bytes());
+        let digest = h.finalize();
+        let mut out = [0u8; 16];
+        out.copy_from_slice(&digest[..16]);
+        out
     }
 
     /// Generate the complete Quint specification for this property
@@ -237,9 +248,10 @@ impl PropertySuite {
     /// Create a new property suite
     #[allow(clippy::disallowed_methods)]
     pub fn new(name: impl Into<String>) -> Self {
+        let name_str = name.into();
         Self {
-            id: Uuid::new_v4(),
-            name: name.into(),
+            id: Uuid::from_bytes(PropertySpec::hash_id_bytes("quint:suite", &name_str)),
+            name: name_str,
             description: None,
             properties: Vec::new(),
             shared_context: HashMap::new(),

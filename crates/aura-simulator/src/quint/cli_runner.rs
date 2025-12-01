@@ -1,6 +1,6 @@
 //! Real Quint CLI Integration
 //!
-//! Replaces placeholder implementations with actual Quint CLI execution.
+//! Provides concrete Quint CLI execution helpers.
 //! Provides parsing, verification, and property evaluation using the real Quint tool.
 
 use crate::quint::types::{QuintInvariant, QuintSpec};

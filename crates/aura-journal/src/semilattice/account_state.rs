@@ -208,10 +208,7 @@ impl JoinSemilattice for AccountState {
 
 impl Bottom for AccountState {
     fn bottom() -> Self {
-        AccountState::new(
-            AccountId::default(),
-            Ed25519VerifyingKey::default(),
-        )
+        AccountState::new(AccountId::default(), Ed25519VerifyingKey::default())
     }
 }
 
@@ -285,8 +282,9 @@ mod tests {
     #[test]
     fn test_account_state_creation() {
         let account_id = AccountId(uuid::Uuid::from_bytes([1u8; 16]));
-        let signing_key = aura_core::Ed25519SigningKey::from_bytes(&[1u8; 32]);
-        let group_public_key = signing_key.verifying_key();
+        let (_sk, group_public_key_raw) = aura_core::util::test_utils::test_key_pair(1);
+        let group_public_key =
+            aura_core::Ed25519VerifyingKey(group_public_key_raw.to_bytes().to_vec());
 
         let state = AccountState::new(account_id, group_public_key);
         assert_eq!(state.get_epoch(), 0);
@@ -295,8 +293,9 @@ mod tests {
     #[test]
     fn test_epoch_management() {
         let account_id = AccountId(uuid::Uuid::from_bytes([3u8; 16]));
-        let signing_key = aura_core::Ed25519SigningKey::from_bytes(&[1u8; 32]);
-        let group_public_key = signing_key.verifying_key();
+        let (_sk, group_public_key_raw) = aura_core::util::test_utils::test_key_pair(2);
+        let group_public_key =
+            aura_core::Ed25519VerifyingKey(group_public_key_raw.to_bytes().to_vec());
 
         let mut state = AccountState::new(account_id, group_public_key);
 
@@ -315,8 +314,9 @@ mod tests {
     #[test]
     fn test_join_semilattice() {
         let account_id = AccountId(uuid::Uuid::from_bytes([4u8; 16]));
-        let signing_key = aura_core::Ed25519SigningKey::from_bytes(&[1u8; 32]);
-        let group_public_key = signing_key.verifying_key();
+        let (_sk, group_public_key_raw) = aura_core::util::test_utils::test_key_pair(3);
+        let group_public_key =
+            aura_core::Ed25519VerifyingKey(group_public_key_raw.to_bytes().to_vec());
 
         let mut state1 = AccountState::new(account_id, group_public_key.clone());
         let mut state2 = AccountState::new(account_id, group_public_key);

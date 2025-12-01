@@ -687,9 +687,9 @@ mod tests {
     fn test_convert_send_guard_to_request() {
         use crate::guards::send_guard::SendGuardChain;
 
-        let context = ContextId::new();
-        let peer = AuthorityId::new();
-        let authority = AuthorityId::new(); // Create once and reuse
+        let context = ContextId::new_from_entropy([74u8; 32]);
+        let peer = AuthorityId::new_from_entropy([75u8; 32]);
+        let authority = AuthorityId::new_from_entropy([76u8; 32]); // Create once and reuse
         let message_authorization = "guard:send".to_string();
         let cost = 42;
 

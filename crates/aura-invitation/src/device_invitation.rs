@@ -71,14 +71,20 @@ pub struct InvitationEnvelope {
 impl InvitationEnvelope {
     fn new(request: &DeviceInvitationRequest, created_at: u64, ttl_secs: u64) -> Self {
         let expires_at = created_at + ttl_secs;
-        let invitation_id = format!("invitation-{}", Uuid::nil());
         let mut hasher = hash::hasher();
-        hasher.update(invitation_id.as_bytes());
+        hasher.update(b"invitation");
         hasher.update(request.inviter.to_string().as_bytes());
         hasher.update(request.invitee.to_string().as_bytes());
         hasher.update(request.account_id.to_string().as_bytes());
         hasher.update(&expires_at.to_be_bytes());
         let hash = hasher.finalize();
+
+        // Derive a stable, non-nil invitation id from the content hash to keep
+        // deterministic behaviour in tests and production.
+        let mut id_bytes = [0u8; 16];
+        id_bytes.copy_from_slice(&hash.as_slice()[0..16]);
+        let invitation_uuid = Uuid::from_bytes(id_bytes);
+        let invitation_id = format!("invitation-{}", invitation_uuid);
 
         Self {
             invitation_id,

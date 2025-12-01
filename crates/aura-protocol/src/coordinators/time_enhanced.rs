@@ -1,7 +1,5 @@
 //! Enhanced time handler for production use with advanced scheduling capabilities.
 
-#![allow(clippy::disallowed_methods)]
-
 use crate::effects::{TimeoutHandle, WakeCondition};
 use async_lock::RwLock;
 use aura_core::effects::{PhysicalTimeEffects, RandomEffects};
@@ -32,6 +30,8 @@ pub struct EnhancedTimeHandler {
     provider: Arc<dyn PhysicalTimeEffects>,
     /// Random provider for generating unique IDs
     random_provider: Arc<dyn RandomEffects>,
+    /// Whether the handler is using a simulated/virtual time source
+    simulated: bool,
 }
 
 /// Statistics for the time handler
@@ -51,14 +51,13 @@ impl EnhancedTimeHandler {
         Self::with_providers(
             Arc::new(aura_effects::time::PhysicalTimeHandler),
             Arc::new(aura_effects::random::RealRandomHandler),
+            false,
         )
     }
 
     /// Check if this is a simulated time handler (for testing)
     pub fn is_simulated(&self) -> bool {
-        // In practice, this would check if provider is a mock/simulated implementation
-        // For now, return false for production handlers
-        false
+        self.simulated
     }
 
     /// Sleep for a given number of milliseconds
@@ -207,12 +206,17 @@ impl EnhancedTimeHandler {
 
     /// Create a new enhanced time handler with explicit time provider
     pub fn with_provider(provider: Arc<dyn PhysicalTimeEffects>) -> Self {
-        Self::with_providers(provider, Arc::new(aura_effects::random::RealRandomHandler))
+        Self::with_providers(
+            provider,
+            Arc::new(aura_effects::random::RealRandomHandler),
+            false,
+        )
     }
 
     pub fn with_providers(
         provider: Arc<dyn PhysicalTimeEffects>,
         random_provider: Arc<dyn RandomEffects>,
+        simulated: bool,
     ) -> Self {
         Self {
             contexts: Arc::new(RwLock::new(HashMap::new())),
@@ -221,6 +225,7 @@ impl EnhancedTimeHandler {
             stats: Arc::new(RwLock::new(TimeHandlerStats::default())),
             provider,
             random_provider,
+            simulated,
         }
     }
 
@@ -296,8 +301,17 @@ impl EnhancedTimeHandler {
                 let event_count = self.get_event_count().await;
                 event_count >= *threshold
             }
-            WakeCondition::TimeoutExpired { .. } => {
-                // For now, always false since we can't track expired timeouts
+            WakeCondition::TimeoutExpired { timeout_id } => {
+                let current = self.current_timestamp().await;
+                let mut timeouts = self.timeouts.write().await;
+                if let Some(task) = timeouts.get_mut(timeout_id) {
+                    if !task.completed && current >= task.expires_at_ms {
+                        task.completed = true;
+                        let mut stats = self.stats.write().await;
+                        stats.active_timeouts = stats.active_timeouts.saturating_sub(1);
+                        return true;
+                    }
+                }
                 false
             }
             WakeCondition::Custom(_) => {
@@ -329,7 +343,6 @@ impl Default for EnhancedTimeHandler {
 }
 
 #[cfg(test)]
-#[allow(clippy::disallowed_methods)] // Test code uses Uuid::new_v4() for test data generation
 mod tests {
     use super::*;
 
@@ -390,7 +403,7 @@ mod tests {
     async fn test_context_management() {
         let handler = EnhancedTimeHandler::default();
 
-        let context_id = Uuid::new_v4();
+        let context_id = Uuid::from_bytes([1u8; 16]);
 
         handler.register_context(context_id).await;
 

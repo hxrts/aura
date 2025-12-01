@@ -42,6 +42,30 @@ async fn broken_protocol_step() -> Result<ProtocolMessage> {
 
 When protocol code follows effect system guidelines, simulation handlers can control all impure operations for deterministic execution.
 
+### Guard Chain and Simulation
+
+Aura's guard chain uses the **GuardSnapshot pattern** which separates pure evaluation from async execution. This is particularly beneficial for simulation:
+
+```rust
+// 1. Async: Prepare snapshot (simulation handlers control time/state)
+let snapshot = prepare_guard_snapshot(&ctx, &effects).await?;
+
+// 2. Sync: Pure guard evaluation (completely deterministic, no I/O)
+let commands = guard_chain.evaluate(&snapshot)?;
+
+// 3. Async: Interpret commands (simulation handlers control effects)
+for cmd in commands {
+    execute_effect_command(&effects, cmd).await?;
+}
+```
+
+Because guard evaluation is pure and synchronous, you can:
+- Unit test guard logic without async runtime or simulation
+- Verify authorization decisions deterministically
+- Inject specific `GuardSnapshot` states to test edge cases
+
+For more details, see [Testing Guide](805_testing_guide.md) and [System Architecture](001_system_architecture.md) §2.1.
+
 ### Simulation-Controlled Surfaces (must be injected)
 
 To keep the simulator in control, code must avoid direct use of:
@@ -85,7 +109,8 @@ use aura_simulator::handlers::{
 use aura_core::DeviceId;
 
 // Create simulation environment using handler composition
-let device_id = DeviceId::new();
+// Use deterministic ID for reproducible tests (see docs/805_testing_guide.md)
+let device_id = DeviceId::new_from_entropy([1u8; 32]);
 
 // Compose simulation handlers
 let composer = SimulationEffectComposer::for_testing(device_id)?;
@@ -199,9 +224,9 @@ use aura_core::DeviceId;
 
 #[tokio::test]
 async fn test_with_middleware() {
-    let device_id = DeviceId::new();
+    // Use deterministic ID for reproducibility
+    let device_id = DeviceId::new_from_entropy([1u8; 32]);
 
-    // Create middleware with configuration
     let config = SimulatorConfig {
         device_id,
         network: NetworkConfig {
@@ -252,9 +277,9 @@ use aura_core::DeviceId;
 
 #[aura_test]
 async fn simulate_basic_protocol() -> aura_core::AuraResult<()> {
-    // Setup participants
-    let device1 = DeviceId::new();
-    let device2 = DeviceId::new();
+    // Setup participants with deterministic IDs
+    let device1 = DeviceId::new_from_entropy([1u8; 32]);
+    let device2 = DeviceId::new_from_entropy([2u8; 32]);
 
     // Create simulation environments
     let env1 = SimulationEffectComposer::for_testing(device1)?;
@@ -274,7 +299,7 @@ use aura_simulator::middleware::{SimulatorConfig, NetworkConfig};
 
 #[aura_test]
 async fn simulate_with_network_faults() -> aura_core::AuraResult<()> {
-    let device_id = DeviceId::new();
+    let device_id = DeviceId::new_from_entropy([1u8; 32]);
 
     // Configure realistic WAN conditions
     let config = SimulatorConfig {
@@ -414,7 +439,7 @@ Always use deterministic settings for debugging:
 
 ```rust
 let config = SimulatorConfig {
-    device_id: DeviceId::new(),
+    device_id: DeviceId::new_from_entropy([1u8; 32]), // Deterministic for reproducibility
     network: NetworkConfig::default(),
     enable_fault_injection: false,
     deterministic_time: true, // Critical for reproducibility
@@ -474,10 +499,10 @@ Instead of a simulation engine, use handler composition:
 
 ```rust
 // Instead of: sim.add_participants(5)
-// Use:
+// Use deterministic IDs for reproducibility:
 let participants: Vec<_> = (0..5)
-    .map(|_| {
-        let device_id = DeviceId::new();
+    .map(|i| {
+        let device_id = DeviceId::new_from_entropy([i as u8 + 1; 32]);
         SimulationEffectComposer::for_testing(device_id).unwrap()
     })
     .collect();

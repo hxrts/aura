@@ -27,6 +27,10 @@ use std::collections::HashMap;
 use std::time::Duration;
 use uuid::Uuid;
 
+fn device(seed: u8) -> DeviceId {
+    DeviceId::new_from_entropy([seed; 32])
+}
+
 /// Generate a UUID from random bytes for testing
 fn generate_test_uuid() -> Uuid {
     // Use a deterministic approach for testing
@@ -90,7 +94,7 @@ fn test_unified_error_hierarchy_compatibility() {
     assert!(!auth_err.is_retryable());
 
     // Biscuit authorization errors (token-based access control) - maps to permission_denied
-    let biscuit_auth_err = sync_biscuit_authorization_error("Token expired", DeviceId::new());
+    let biscuit_auth_err = sync_biscuit_authorization_error("Token expired", device(1));
     assert_eq!(biscuit_auth_err.category(), "permission_denied");
     assert!(!biscuit_auth_err.is_retryable());
 
@@ -123,7 +127,7 @@ fn test_unified_error_hierarchy_compatibility() {
 #[test]
 fn test_error_context_preservation() {
     // Test that error context (peer, operation, etc.) is preserved
-    let peer_id = DeviceId::new();
+    let peer_id = device(2);
 
     // Network errors are retryable (only Network and Storage are retryable)
     let network_err = sync_network_error("Invalid protocol version");
@@ -161,8 +165,8 @@ fn test_unified_message_patterns() {
 #[test]
 fn test_request_response_correlation() {
     // Test request/response pattern used throughout sync protocols
-    let from = DeviceId::new();
-    let to = DeviceId::new();
+    let from = device(3);
+    let to = device(4);
     let payload = String::from("ping");
 
     let request = RequestMessage::new(from, to, payload, generate_test_uuid());
@@ -353,7 +357,7 @@ fn test_unified_metrics_collection() {
     collector.record_sync_start("test_session_1", now);
     collector.record_sync_completion("test_session_1", 50, 1024, now + 100);
 
-    let snapshot = collector.export_snapshot();
+    let snapshot = collector.export_snapshot(now + 100);
     assert_eq!(snapshot.operational.sync_sessions_total, 1);
     assert_eq!(snapshot.operational.sync_sessions_completed_total, 1);
     assert_eq!(snapshot.operational.sync_operations_transferred_total, 50);
@@ -372,7 +376,7 @@ fn test_error_metrics_categorization() {
     collector.record_error(ErrorCategory::Timeout, "Operation timeout");
     collector.record_error(ErrorCategory::Validation, "Invalid data");
 
-    let snapshot = collector.export_snapshot();
+    let snapshot = collector.export_snapshot(0);
     assert_eq!(snapshot.errors.network_errors_total, 1);
     assert_eq!(snapshot.errors.protocol_errors_total, 1);
     assert_eq!(snapshot.errors.timeout_errors_total, 1);
@@ -384,13 +388,13 @@ fn test_error_metrics_categorization() {
 fn test_performance_metrics() {
     // Test performance metrics collection
     let collector = MetricsCollector::new();
-    let peer = DeviceId::new();
+    let peer = device(5);
 
     collector.record_network_latency(peer, Duration::from_millis(50));
     collector.record_operation_processing_time("journal_merge", Duration::from_micros(1000));
     collector.record_compression_ratio(0.75);
 
-    let snapshot = collector.export_snapshot();
+    let snapshot = collector.export_snapshot(0);
     assert!(snapshot.performance.network_latency_stats.count > 0);
     assert!(snapshot.performance.operation_processing_stats.count > 0);
     assert!(snapshot.performance.compression_ratio_stats.count > 0);
@@ -427,7 +431,7 @@ fn test_unified_session_management() {
     let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
     // Test session creation and activation
-    let participants = vec![DeviceId::new(), DeviceId::new()];
+    let participants = vec![device(6), device(7)];
     let session_id = manager
         .create_session(participants.clone(), 1000001)
         .unwrap();
@@ -439,7 +443,7 @@ fn test_unified_session_management() {
     };
 
     manager
-        .activate_session(session_id, initial_state.clone(), None)
+        .activate_session(session_id, initial_state.clone(), 1000001)
         .unwrap();
     assert_eq!(manager.count_active_sessions(), 1);
 
@@ -449,14 +453,16 @@ fn test_unified_session_management() {
     updated_state.operations_pending = 75;
     updated_state.bytes_transferred = 1024;
 
-    manager.update_session(session_id, updated_state).unwrap();
+    manager
+        .update_session(session_id, updated_state, 1000002)
+        .unwrap();
 
     // Test successful completion
     let mut metadata = HashMap::new();
     metadata.insert(String::from("sync_type"), String::from("journal"));
 
     manager
-        .complete_session(session_id, 100, 2048, metadata, None)
+        .complete_session(session_id, 100, 2048, metadata, 1000003)
         .unwrap();
 
     // Verify final state
@@ -481,21 +487,21 @@ fn test_session_failure_handling() {
     let config = SessionConfig::default();
     let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
-    let session_id = manager
-        .create_session(vec![DeviceId::new()], 1000001)
-        .unwrap();
+    let session_id = manager.create_session(vec![device(8)], 1000001).unwrap();
     let state = TestSyncProtocolState {
         phase: String::from("test"),
         operations_pending: 50,
         bytes_transferred: 0,
     };
-    manager.activate_session(session_id, state, None).unwrap();
+    manager
+        .activate_session(session_id, state, 1000001)
+        .unwrap();
 
     // Test failure with partial results
     let partial_results = aura_sync::core::session::PartialResults {
         operations_completed: 25,
         bytes_transferred: 512,
-        completed_participants: vec![DeviceId::new()],
+        completed_participants: vec![device(9)],
         last_successful_operation: Some(String::from("journal_append")),
     };
 
@@ -504,7 +510,7 @@ fn test_session_failure_handling() {
     };
 
     manager
-        .fail_session(session_id, error, Some(partial_results))
+        .fail_session(session_id, error, Some(partial_results), 1000002)
         .unwrap();
 
     // Verify failure handling
@@ -533,7 +539,7 @@ fn test_session_resource_limits() {
     let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
 
     // Test participant limit
-    let too_many_participants = vec![DeviceId::new(); 5];
+    let too_many_participants = vec![device(10); 5];
     let result = manager.create_session(too_many_participants, 1000001);
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), AuraError::Invalid { .. }));
@@ -545,19 +551,15 @@ fn test_session_resource_limits() {
         bytes_transferred: 0,
     };
 
-    let session1 = manager
-        .create_session(vec![DeviceId::new()], 1000001)
-        .unwrap();
-    let session2 = manager
-        .create_session(vec![DeviceId::new()], 1000002)
-        .unwrap();
+    let session1 = manager.create_session(vec![device(11)], 1000001).unwrap();
+    let session2 = manager.create_session(vec![device(12)], 1000002).unwrap();
     manager
-        .activate_session(session1, state.clone(), None)
+        .activate_session(session1, state.clone(), 1000001)
         .unwrap();
-    manager.activate_session(session2, state, None).unwrap();
+    manager.activate_session(session2, state, 1000002).unwrap();
 
     // Third session should exceed limit
-    let result = manager.create_session(vec![DeviceId::new()], 1000003);
+    let result = manager.create_session(vec![device(13)], 1000003);
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), AuraError::Internal { .. }));
 }
@@ -577,25 +579,23 @@ fn test_session_statistics() {
     };
 
     // Successful session
-    let session1 = manager
-        .create_session(vec![DeviceId::new()], 1000001)
+    let session1 = manager.create_session(vec![device(14)], 1000001).unwrap();
+    manager
+        .activate_session(session1, state.clone(), 1000001)
         .unwrap();
     manager
-        .activate_session(session1, state.clone(), None)
-        .unwrap();
-    manager
-        .complete_session(session1, 50, 1000, HashMap::new(), None)
+        .complete_session(session1, 50, 1000, HashMap::new(), 1000002)
         .unwrap();
 
     // Failed session
-    let session2 = manager
-        .create_session(vec![DeviceId::new()], 1000002)
-        .unwrap();
+    let session2 = manager.create_session(vec![device(15)], 1000002).unwrap();
     manager
-        .activate_session(session2, state.clone(), None)
+        .activate_session(session2, state.clone(), 1000002)
         .unwrap();
     let error = SessionError::Timeout { duration_ms: 5000 };
-    manager.fail_session(session2, error, None).unwrap();
+    manager
+        .fail_session(session2, error, None, 1000003)
+        .unwrap();
 
     let stats = manager.get_statistics();
     assert_eq!(stats.total_sessions, 2);
@@ -625,7 +625,7 @@ fn test_cross_module_integration() {
 
     // Perform a complete sync session workflow
     let session_id = session_manager
-        .create_session(vec![DeviceId::new()], 1000001)
+        .create_session(vec![device(16)], 1000001)
         .unwrap();
 
     let state = TestSyncProtocolState {
@@ -635,7 +635,7 @@ fn test_cross_module_integration() {
     };
 
     session_manager
-        .activate_session(session_id, state, None)
+        .activate_session(session_id, state, 1000001)
         .unwrap();
 
     // Simulate session progress
@@ -646,16 +646,16 @@ fn test_cross_module_integration() {
     };
 
     session_manager
-        .update_session(session_id, updated_state)
+        .update_session(session_id, updated_state, 1000002)
         .unwrap();
 
     // Complete session
     session_manager
-        .complete_session(session_id, 100, 2048, HashMap::new(), None)
+        .complete_session(session_id, 100, 2048, HashMap::new(), 1000003)
         .unwrap();
 
     // Verify metrics integration
-    let metrics_snapshot = metrics.export_snapshot();
+    let metrics_snapshot = metrics.export_snapshot(0);
     assert!(metrics_snapshot.operational.sync_sessions_total >= 1);
     assert!(metrics_snapshot.operational.sync_sessions_completed_total >= 1);
 
@@ -704,12 +704,7 @@ fn test_backwards_compatibility_surface() {
 
     // Basic message patterns
     let _session_msg = SessionMessage::new(SessionId::new(), "test");
-    let _request_msg = RequestMessage::new(
-        DeviceId::new(),
-        DeviceId::new(),
-        "ping",
-        generate_test_uuid(),
-    );
+    let _request_msg = RequestMessage::new(device(17), device(18), "ping", generate_test_uuid());
 
     // If this test compiles and runs, basic API compatibility is maintained
 }

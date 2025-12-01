@@ -3,13 +3,12 @@ use crate::commands::amp::AmpAction;
 use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_core::identifiers::{ChannelId, ContextId};
-use aura_core::Hash32;
+use aura_core::{hash, Hash32};
 use aura_journal::fact::{
     ChannelBumpReason, ChannelCheckpoint, ProposedChannelEpochBump, RelationalFact,
 };
 use aura_protocol::amp::{get_channel_state, AmpJournalEffects};
 use std::str::FromStr;
-use uuid::Uuid;
 
 /// Handle AMP commands with effect system integration.
 pub async fn handle_amp(
@@ -85,11 +84,9 @@ async fn handle_amp_bump(
         parent_epoch: state.chan_epoch,
         new_epoch: state.chan_epoch + 1,
         reason: ChannelBumpReason::Routine,
-        bump_id: {
-            let mut buf = [0u8; 32];
-            buf[..16].copy_from_slice(Uuid::new_v4().as_bytes());
-            Hash32::new(buf)
-        },
+        bump_id: Hash32::new(hash::hash(
+            format!("amp-bump:{}:{}", context, channel).as_bytes(),
+        )),
     };
 
     effect_system

@@ -472,6 +472,7 @@ Infrastructure effects are truly foundational capabilities that every Aura syste
 - `RandomEffects`: Cryptographically secure random generation
 - `ConfigurationEffects`: Configuration file parsing
 - `ConsoleEffects`: Terminal input/output
+- `LeakageEffects`: Cross-cutting metadata leakage tracking (composable infrastructure)
 
 **Implementation Location**: These traits have stateless handlers in `aura-effects` that delegate to OS services.
 
@@ -486,11 +487,10 @@ Application effects encode Aura-specific abstractions and business logic. These 
 - May have multiple implementations for different contexts
 
 **Examples**:
-- `JournalEffects`: Fact-based journal operations, specific to Aura's CRDT design
+- `JournalEffects`: Fact-based journal operations, specific to Aura's CRDT design (aura-journal)
 - `AuthorityEffects`: Authority-specific operations, central to Aura's identity model
-- `FlowBudgetEffects`: Privacy budget management, unique to Aura's information flow control
-- `LeakageEffects`: Metadata leakage tracking, specific to Aura's privacy model
-- `AuthorizationEffects`: Biscuit token evaluation, tied to Aura's capability system
+- `FlowBudgetEffects`: Privacy budget management, unique to Aura's information flow control (aura-wot)
+- `AuthorizationEffects`: Biscuit token evaluation, tied to Aura's capability system (aura-wot)
 - `RelationalContextEffects`: Cross-authority relationship management
 - `GuardianEffects`: Recovery protocol operations
 
@@ -775,12 +775,17 @@ The project includes an automated architectural compliance checker to enforce th
 
 **What it validates**:
 - Layer boundary violations (no upward dependencies)
+- Dependency direction (Lx→Ly where y≤x only)
 - Effect trait classification and placement
 - Domain effect implementation patterns
-- Stateless handler requirements in `aura-effects`
+- Stateless handler requirements in `aura-effects` (no `Arc<Mutex>`, `Arc<RwLock>`)
 - Mock handler location in `aura-testkit`
-- Extension trait vs. business logic detection
-- Expected crate content and dependency structure
+- Guard chain integrity (no bypass of CapGuard → FlowGuard → JournalCoupler)
+- Impure function routing through effects (`SystemTime::now`, `thread_rng`, etc.)
+- Physical time guardrails (`tokio::time::sleep` confinement)
+- Handler composition patterns (no direct instantiation)
+- Placeholder/TODO detection
+- Invariants documentation schema validation
 
 The checker reports violations that must be fixed and warnings for review. Run it before submitting changes to ensure architectural compliance.
 

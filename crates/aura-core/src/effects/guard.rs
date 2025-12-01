@@ -308,8 +308,8 @@ mod tests {
     #[test]
     fn test_flow_budget_view() {
         let mut budgets = HashMap::new();
-        let authority = AuthorityId::new();
-        let context = ContextId::default();
+        let authority = AuthorityId::new_from_entropy([31u8; 32]);
+        let context = ContextId::new_from_entropy([32u8; 32]);
         budgets.insert((context, authority), 1000);
 
         let view = FlowBudgetView::new(budgets);
@@ -318,7 +318,7 @@ mod tests {
         assert!(view.has_budget(&context, &authority, 500));
         assert!(!view.has_budget(&context, &authority, 2000));
 
-        let unknown = AuthorityId::new();
+        let unknown = AuthorityId::new_from_entropy([33u8; 32]);
         assert_eq!(view.get(&context, &unknown), None);
     }
 
@@ -349,9 +349,9 @@ mod tests {
     #[test]
     fn test_guard_outcome() {
         let effects = vec![EffectCommand::ChargeBudget {
-            context: ContextId::new(),
-            authority: AuthorityId::new(),
-            peer: AuthorityId::new(),
+            context: ContextId::new_from_entropy([34u8; 32]),
+            authority: AuthorityId::new_from_entropy([35u8; 32]),
+            peer: AuthorityId::new_from_entropy([36u8; 32]),
             amount: 100,
         }];
 
@@ -367,9 +367,9 @@ mod tests {
     #[test]
     fn test_effect_command_serialization() {
         let cmd = EffectCommand::ChargeBudget {
-            context: ContextId::new(),
-            authority: AuthorityId::new(),
-            peer: AuthorityId::new(),
+            context: ContextId::new_from_entropy([37u8; 32]),
+            authority: AuthorityId::new_from_entropy([38u8; 32]),
+            peer: AuthorityId::new_from_entropy([39u8; 32]),
             amount: 100,
         };
 

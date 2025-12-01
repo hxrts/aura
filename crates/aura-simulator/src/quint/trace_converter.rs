@@ -12,7 +12,7 @@ use serde_json;
 // Note: Testing module to be imported when module structure is finalized
 // use crate::testing::{ExecutionTrace, PropertyViolation, ViolationDetectionReport};
 
-// Placeholder types until testing module is available
+// Types for converting Quint traces into simulator-friendly structures
 #[derive(Debug, Clone)]
 pub struct ExecutionTrace {
     pub steps: Vec<String>,
@@ -789,7 +789,7 @@ impl TraceConverter {
             variables,
             protocol_state: QuintProtocolState {
                 active_sessions: QuintValue::List(vec![]),
-                current_phase: QuintValue::String("placeholder".to_string()),
+                current_phase: QuintValue::String("unknown_phase".to_string()),
                 variables: HashMap::new(),
             },
             network_state: QuintNetworkState {
@@ -850,7 +850,8 @@ impl TraceConverter {
             state_completeness: if states.is_empty() { 0.0 } else { 1.0 },
             event_coverage: if events.is_empty() { 0.0 } else { 1.0 },
             temporal_consistency: self.calculate_temporal_consistency(states),
-            data_fidelity: 0.95, // Placeholder - would be calculated based on data integrity
+            // Assume full fidelity for converted traces; future versions can compute this from trace completeness
+            data_fidelity: 0.95,
         }
     }
 

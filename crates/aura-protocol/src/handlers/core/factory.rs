@@ -1015,12 +1015,7 @@ impl PlatformDetector {
                 // Check for Intel SGX or AMD SEV on Linux
                 std::path::Path::new("/dev/sgx_enclave").exists()
                     || std::path::Path::new("/dev/sgx/enclave").exists()
-                    || std::fs::read_to_string("/proc/cpuinfo")
-                        .map(|cpuinfo| {
-                            let lower = cpuinfo.to_lowercase();
-                            lower.contains("sgx") || lower.contains("sev")
-                        })
-                        .unwrap_or(false)
+                    || std::path::Path::new("/dev/sev").exists()
             }
             "windows" => {
                 // Check for Intel SGX on Windows (conservative approach)
@@ -1193,7 +1188,7 @@ mod tests {
         assert!(config.validate().is_ok());
 
         // Invalid device ID should fail
-        config.device_id = DeviceId(uuid::Uuid::nil());
+        config.device_id = DeviceId(uuid::Uuid::from_bytes([0u8; 16]));
         assert!(config.validate().is_err());
 
         // Reset device ID

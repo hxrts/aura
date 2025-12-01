@@ -208,7 +208,7 @@ mod tests {
     fn test_consensus_proof_creation() {
         let prestate_hash = Hash32::default();
         let operation_hash = Hash32([1u8; 32]);
-        let attester = AuthorityId::new();
+        let attester = AuthorityId::new_from_entropy([42u8; 32]);
 
         let proof = ConsensusProof::new(prestate_hash, operation_hash, None, vec![attester], true);
 
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn test_consensus_proof_validity() {
-        let attester = AuthorityId::new();
+        let attester = AuthorityId::new_from_entropy([43u8; 32]);
 
         // Valid proof with threshold met but no signature (incomplete)
         let proof_no_sig = ConsensusProof::new(
@@ -244,8 +244,8 @@ mod tests {
 
     #[test]
     fn test_consensus_proof_equality() {
-        let auth1 = AuthorityId::new();
-        let auth2 = AuthorityId::new();
+        let auth1 = AuthorityId::new_from_entropy([44u8; 32]);
+        let auth2 = AuthorityId::new_from_entropy([45u8; 32]);
 
         let proof1 = ConsensusProof::new(
             Hash32::default(),
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_consensus_proof_ordering() {
-        let auth = AuthorityId::new();
+        let auth = AuthorityId::new_from_entropy([46u8; 32]);
         let prestate1 = Hash32::default();
         let prestate2 = Hash32([1u8; 32]);
 
@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn test_consensus_status() {
-        let auth = AuthorityId::new();
+        let auth = AuthorityId::new_from_entropy([47u8; 32]);
 
         let success_proof =
             ConsensusProof::new(Hash32::default(), Hash32::default(), None, vec![auth], true);
@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_consensus_proof_test_helper() {
-        let auth = AuthorityId::new();
+        let auth = AuthorityId::new_from_entropy([48u8; 32]);
 
         let test_proof =
             ConsensusProof::test_proof(Hash32::default(), Hash32::default(), vec![auth]);

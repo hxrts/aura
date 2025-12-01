@@ -15,6 +15,10 @@ use aura_core::{
 use aura_simulator::effects::{SimulationEffectInterpreter, SimulationState};
 use std::sync::Arc;
 
+fn authority(seed: u8) -> AuthorityId {
+    AuthorityId::new_from_entropy([seed; 32])
+}
+
 /// Simulate a multi-party protocol with deterministic replay
 #[tokio::test]
 async fn test_multi_party_protocol_simulation() {
@@ -24,9 +28,9 @@ async fn test_multi_party_protocol_simulation() {
     });
 
     // Create three authorities
-    let alice = AuthorityId::new();
-    let bob = AuthorityId::new();
-    let carol = AuthorityId::new();
+    let alice = authority(1);
+    let bob = authority(2);
+    let carol = authority(3);
 
     // Create interpreters with shared state
     let shared_state = Arc::new(std::sync::Mutex::new(SimulationState::new(
@@ -91,7 +95,7 @@ async fn test_multi_party_protocol_simulation() {
         .unwrap();
 
     // 3. Bob and Carol process requests and charge flow budget
-    let context = ContextId::new();
+    let context = ContextId::new_from_entropy([0u8; 32]);
     bob_interp
         .execute(EffectCommand::ChargeBudget {
             context,
@@ -217,7 +221,7 @@ async fn test_guard_chain_simulation() {
         ts_ms: 1000,
         uncertainty: None,
     });
-    let authority = AuthorityId::new();
+    let authority = authority(4);
     let addr = NetworkAddress::new("test://guard_test".to_string());
 
     let interp = SimulationEffectInterpreter::new(42, time.clone(), authority, addr);
@@ -242,7 +246,7 @@ async fn test_guard_chain_simulation() {
     // Guard evaluation produces these effects
     let guard = vec![
         EffectCommand::ChargeBudget {
-            context: ContextId::new(),
+            context: ContextId::new_from_entropy([1u8; 32]),
             authority,
             peer: authority,
             amount: 100,
@@ -292,7 +296,7 @@ async fn test_budget_exhaustion_simulation() {
         ts_ms: 1000,
         uncertainty: None,
     });
-    let authority = AuthorityId::new();
+    let authority = authority(5);
     let addr = NetworkAddress::new("test://exhaustion_test".to_string());
 
     let interp = SimulationEffectInterpreter::new(42, time, authority, addr);
@@ -301,7 +305,7 @@ async fn test_budget_exhaustion_simulation() {
     // First charge should succeed
     let result = interp
         .execute(EffectCommand::ChargeBudget {
-            context: ContextId::new(),
+            context: ContextId::new_from_entropy([2u8; 32]),
             authority,
             peer: authority,
             amount: 60,
@@ -319,7 +323,7 @@ async fn test_budget_exhaustion_simulation() {
     // Second charge should succeed
     let result = interp
         .execute(EffectCommand::ChargeBudget {
-            context: ContextId::new(),
+            context: ContextId::new_from_entropy([3u8; 32]),
             authority,
             peer: authority,
             amount: 40,
@@ -337,7 +341,7 @@ async fn test_budget_exhaustion_simulation() {
     // Third charge should fail
     let result = interp
         .execute(EffectCommand::ChargeBudget {
-            context: ContextId::new(),
+            context: ContextId::new_from_entropy([4u8; 32]),
             authority,
             peer: authority,
             amount: 10,
@@ -356,7 +360,7 @@ async fn test_determinism_guarantee() {
         ts_ms: 1000,
         uncertainty: None,
     });
-    let authority = AuthorityId::new();
+    let authority = authority(6);
     let addr = NetworkAddress::new("test://determinism_test".to_string());
 
     // Run the same scenario twice with same seed

@@ -61,7 +61,7 @@ impl Default for SecurityContext {
 impl GuardContextProvider for Box<dyn AuraEffects> {
     fn authority_id(&self) -> AuthorityId {
         // Fallback authority ID for boxed trait objects; production systems should pass concrete implementors.
-        AuthorityId::new()
+        AuthorityId::default()
     }
 
     fn get_metadata(&self, _key: &str) -> Option<String> {
@@ -103,7 +103,7 @@ impl FlowBudgetEffects for Box<dyn AuraEffects> {
         let epoch = updated_budget.epoch;
         Ok(aura_core::Receipt::new(
             *context,
-            AuthorityId::new(),
+            AuthorityId::default(),
             *peer,
             epoch,
             cost,

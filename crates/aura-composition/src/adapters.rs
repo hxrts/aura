@@ -605,11 +605,11 @@ impl RegistrableHandler for TransportHandlerAdapter {
                 Ok(Vec::new()) // broadcast returns void
             }
             "receive" => {
-                let received = NetworkEffects::receive(&self.handler)
-                    .await
-                    .map_err(|e| HandlerError::ExecutionFailed {
+                let received = NetworkEffects::receive(&self.handler).await.map_err(|e| {
+                    HandlerError::ExecutionFailed {
                         source: Box::new(e),
-                    })?;
+                    }
+                })?;
                 bincode::serialize(&received).map_err(|e| HandlerError::EffectSerialization {
                     effect_type,
                     operation: operation.to_string(),

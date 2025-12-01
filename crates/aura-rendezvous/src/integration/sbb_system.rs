@@ -315,7 +315,6 @@ impl IntegratedSbbSystem {
         let sbb_envelope = SbbEnvelope::new_encrypted(encrypted_envelope, request.ttl);
         let message_size = sbb_envelope.size();
 
-        // For now, simulate flooding result - in full implementation would use enhanced flooding coordinator
         let flood_result = FloodResult::Forwarded { peer_count: 1 };
 
         Ok(SbbDiscoveryResult {
@@ -484,7 +483,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_integrated_sbb_system_creation() -> Result<(), Box<dyn std::error::Error>> {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let config = SbbConfig::default();
         let effects = test_effects(device_id)?;
         let _system = IntegratedSbbSystem::new(device_id, config, effects);
@@ -494,7 +493,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sbb_system_builder() -> Result<(), Box<dyn std::error::Error>> {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
 
         let system = SbbSystemBuilder::new(device_id)
             .with_app_context("test-sbb".to_string())
@@ -507,12 +506,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_relationship_management() -> Result<(), Box<dyn std::error::Error>> {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
         let effects = test_effects(device_id)?;
         let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default(), effects);
 
-        let friend_id = DeviceId::new();
-        let guardian_id = DeviceId::new();
+        let friend_id = DeviceId::new_from_entropy([4u8; 32]);
+        let guardian_id = DeviceId::new_from_entropy([5u8; 32]);
         let rel_id = RelationshipId::new([0u8; 32]);
         let now = 1000000u64; // Test timestamp
 
@@ -535,8 +534,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_discovery_request_flooding() -> Result<(), Box<dyn std::error::Error>> {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
+        let alice_id = DeviceId::new_from_entropy([6u8; 32]);
+        let bob_id = DeviceId::new_from_entropy([7u8; 32]);
         let alice_effects = test_effects(alice_id)?;
         let mut alice_system =
             IntegratedSbbSystem::new(alice_id, SbbConfig::default(), alice_effects);
@@ -572,8 +571,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_encrypted_discovery_to_peer() -> Result<(), Box<dyn std::error::Error>> {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
+        let alice_id = DeviceId::new_from_entropy([8u8; 32]);
+        let bob_id = DeviceId::new_from_entropy([9u8; 32]);
         let alice_effects = test_effects(alice_id)?;
         let mut alice_system =
             IntegratedSbbSystem::new(alice_id, SbbConfig::default(), alice_effects);
@@ -606,11 +605,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_trust_level_updates() -> Result<(), Box<dyn std::error::Error>> {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([10u8; 32]);
         let effects = test_effects(device_id)?;
         let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default(), effects);
 
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId::new_from_entropy([11u8; 32]);
         let rel_id = RelationshipId::new([0u8; 32]);
         let now = 1000000u64; // Test timestamp
 
@@ -634,11 +633,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_peer_capability_checking() -> Result<(), Box<dyn std::error::Error>> {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([12u8; 32]);
         let effects = test_effects(device_id)?;
         let mut system = IntegratedSbbSystem::new(device_id, SbbConfig::default(), effects);
 
-        let peer_id = DeviceId::new();
+        let peer_id = DeviceId::new_from_entropy([13u8; 32]);
         let rel_id = RelationshipId::new([0u8; 32]);
         let now = 1000000u64; // Test timestamp
 

@@ -66,66 +66,70 @@ pub enum TransportCoordinationError {
 /// Result type for transport coordination operations
 pub type CoordinationResult<T> = Result<T, TransportCoordinationError>;
 
-/// Transport inner interface placeholder
-#[derive(Debug, Clone)]
-struct TransportManagerInner {
-    _config: TransportConfig,
-}
-
-impl TransportManagerInner {
-    async fn send_data(
-        &self,
-        _connection_id: &str,
-        _data: Vec<u8>,
-    ) -> Result<(), aura_core::effects::NetworkError> {
-        // Placeholder implementation
-        Ok(())
-    }
-
-    async fn _receive_data(
-        &self,
-        _connection_id: &str,
-    ) -> Result<Vec<u8>, aura_core::effects::NetworkError> {
-        // Placeholder implementation
-        Ok(Vec::new())
-    }
-
-    async fn disconnect(
-        &self,
-        _connection_id: &str,
-    ) -> Result<(), aura_core::effects::NetworkError> {
-        // Placeholder implementation
-        Ok(())
-    }
-}
-
-/// Simple transport manager placeholder for Layer 4 coordination
+/// Transport manager with retry/backoff around NetworkEffects
 #[derive(Debug, Clone)]
 pub struct RetryingTransportManager {
-    _config: TransportConfig,
-    _max_retries: u32,
-    inner: TransportManagerInner,
+    config: TransportConfig,
+    max_retries: u32,
 }
 
 impl RetryingTransportManager {
     /// Create new retrying transport manager
     pub fn new(config: TransportConfig, max_retries: u32) -> Self {
         Self {
-            inner: TransportManagerInner {
-                _config: config.clone(),
-            },
-            _config: config,
-            _max_retries: max_retries,
+            config,
+            max_retries,
         }
     }
 
-    async fn connect_with_retry(
+    async fn connect_with_retry<E: NetworkEffects + PhysicalTimeEffects + Send + Sync>(
         &self,
+        effects: &E,
         address: &str,
     ) -> Result<ConnectionInfo, TransportCoordinationError> {
-        // Placeholder implementation for compilation
-        Ok(ConnectionInfo {
-            connection_id: format!("conn_{}", address),
+        let mut attempt = 0;
+        loop {
+            match effects.open(address).await {
+                Ok(connection_id) => {
+                    return Ok(ConnectionInfo { connection_id });
+                }
+                Err(err) => {
+                    attempt += 1;
+                    if attempt > self.max_retries {
+                        return Err(TransportCoordinationError::Transport(
+                            TransportError::ConnectionFailed(format!(
+                                "Failed to connect to {} after {} attempts: {}",
+                                address, attempt, err
+                            )),
+                        ));
+                    }
+
+                    // Simple exponential backoff with ceiling
+                    let backoff_ms = (2u64.pow(attempt.min(6)) * 50).min(2_000);
+                    let _ = effects.sleep_ms(backoff_ms).await;
+                }
+            }
+        }
+    }
+
+    async fn send_data<E: NetworkEffects + Send + Sync>(
+        &self,
+        effects: &E,
+        connection_id: &str,
+        data: Vec<u8>,
+    ) -> Result<(), TransportCoordinationError> {
+        effects.send(connection_id, data).await.map_err(|e| {
+            TransportCoordinationError::Transport(TransportError::Protocol(e.to_string()))
+        })
+    }
+
+    async fn disconnect<E: NetworkEffects + Send + Sync>(
+        &self,
+        effects: &E,
+        connection_id: &str,
+    ) -> Result<(), TransportCoordinationError> {
+        effects.close(connection_id).await.map_err(|e| {
+            TransportCoordinationError::Transport(TransportError::Protocol(e.to_string()))
         })
     }
 }
@@ -200,7 +204,10 @@ where
         }
 
         // Attempt connection with retry logic
-        let connection = self.transport_manager.connect_with_retry(address).await?;
+        let connection = self
+            .transport_manager
+            .connect_with_retry(&self.effects, address)
+            .await?;
 
         // Store connection state
         let now = self.current_ts_ms().await?;
@@ -237,12 +244,8 @@ where
 
         // Send data using transport manager
         self.transport_manager
-            .inner
-            .send_data(connection_id, data)
-            .await
-            .map_err(|e| {
-                TransportCoordinationError::ProtocolFailed(format!("Send failed: {}", e))
-            })?;
+            .send_data(&self.effects, connection_id, data)
+            .await?;
 
         Ok(())
     }
@@ -257,12 +260,8 @@ where
 
         // Clean up transport resources
         self.transport_manager
-            .inner
-            .disconnect(connection_id)
-            .await
-            .map_err(|e| {
-                TransportCoordinationError::ProtocolFailed(format!("Disconnect failed: {}", e))
-            })?;
+            .disconnect(&self.effects, connection_id)
+            .await?;
 
         Ok(())
     }

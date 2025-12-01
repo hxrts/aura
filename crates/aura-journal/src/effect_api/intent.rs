@@ -229,7 +229,15 @@ impl Intent {
         // domain-specific duration calculation from aura-core
         use aura_core::time::{OrderingPolicy, TimeOrdering};
         match current_time.compare(&self.created_at, OrderingPolicy::DeterministicTieBreak) {
-            TimeOrdering::After => Some(1000), // Placeholder duration
+            TimeOrdering::After => {
+                if let (TimeStamp::PhysicalClock(now), TimeStamp::PhysicalClock(created)) =
+                    (current_time, &self.created_at)
+                {
+                    Some(created.ts_ms.saturating_sub(now.ts_ms))
+                } else {
+                    None
+                }
+            }
             _ => Some(0),
         }
     }
@@ -329,14 +337,13 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods)]
     fn test_intent_creation() {
         use crate::commitment_tree::LeafNode;
 
         let op = TreeOperation::AddLeaf {
             leaf: LeafNode::new_device(
                 crate::commitment_tree::LeafId(0),
-                aura_core::DeviceId::new(),
+                DeviceId(uuid::Uuid::from_bytes([9u8; 16])),
                 vec![0u8; 32],
             ),
             under: NodeIndex(0),

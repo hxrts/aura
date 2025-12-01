@@ -264,7 +264,8 @@ pub fn reduce_authority_state(
     journal: &Journal,
 ) -> Result<AuthorityState> {
     // Use the reduction function to get tree state from facts
-    let tree_state = reduce_account_facts(journal);
+    let tree_state = reduce_account_facts(journal)
+        .map_err(|e| AuraError::invalid(format!("Journal namespace mismatch: {}", e)))?;
 
     Ok(AuthorityState {
         tree_state,
@@ -281,7 +282,7 @@ mod tests {
     #[test]
     fn test_derived_authority_creation_from_journal() {
         // Test that DerivedAuthority can be created from a journal
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([7u8; 32]);
         let journal = Journal::new(JournalNamespace::Authority(authority_id));
 
         let result = DerivedAuthority::from_journal(authority_id, &journal);
@@ -304,7 +305,7 @@ mod tests {
     #[test]
     fn test_reduce_authority_state_basic() {
         // Test the basic authority state reduction
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([8u8; 32]);
         let journal = Journal::new(JournalNamespace::Authority(authority_id));
 
         let result = reduce_authority_state(authority_id, &journal);

@@ -402,7 +402,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_deterministic_nonce_generation() {
-        let authority = AuthorityId::new();
+        let authority = AuthorityId::new_from_entropy([1u8; 32]);
         let addr = NetworkAddress::new("test://addr1".to_string());
         let time = TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: 1000,
@@ -429,7 +429,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_flow_budget_tracking() {
-        let authority = AuthorityId::new();
+        let authority = AuthorityId::new_from_entropy([2u8; 32]);
         let addr = NetworkAddress::new("test://addr1".to_string());
         let time = TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: 2000,
@@ -443,7 +443,7 @@ mod tests {
 
         // Charge budget
         let cmd = EffectCommand::ChargeBudget {
-            context: ContextId::new(),
+            context: ContextId::new_from_entropy([10u8; 32]),
             authority,
             peer: authority,
             amount: 250,
@@ -465,7 +465,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_event_recording() {
-        let authority = AuthorityId::new();
+        let authority = AuthorityId::new_from_entropy([3u8; 32]);
         let addr = NetworkAddress::new("test://addr1".to_string());
         let time = TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: 3000,
@@ -511,7 +511,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replay_capability() {
-        let authority = AuthorityId::new();
+        let authority = AuthorityId::new_from_entropy([4u8; 32]);
         let addr = NetworkAddress::new("test://addr1".to_string());
         let time = TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: 4000,
@@ -524,7 +524,7 @@ mod tests {
 
         let cmds = vec![
             EffectCommand::ChargeBudget {
-                context: ContextId::new(),
+                context: ContextId::new_from_entropy([12u8; 32]),
                 authority,
                 peer: authority,
                 amount: 100,
@@ -561,8 +561,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_state() {
-        let authority1 = AuthorityId::new();
-        let authority2 = AuthorityId::new();
+        let authority1 = AuthorityId::new_from_entropy([5u8; 32]);
+        let authority2 = AuthorityId::new_from_entropy([6u8; 32]);
         let time = TimeStamp::PhysicalClock(PhysicalTime {
             ts_ms: 5000,
             uncertainty: None,

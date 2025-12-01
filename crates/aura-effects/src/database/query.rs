@@ -832,7 +832,7 @@ mod tests {
     #[test]
     fn test_add_authority_context() {
         let mut query = AuraQuery::new();
-        let authority = AuthorityId::new();
+        let authority = AuthorityId::new_from_entropy([1u8; 32]);
         query.add_authority_context(authority).unwrap();
         assert!(query.authority_context.is_some());
     }
@@ -849,7 +849,9 @@ mod tests {
     fn test_clear() {
         let mut query = AuraQuery::new();
         query.add_journal_fact("user", "name", "alice").unwrap();
-        query.add_authority_context(AuthorityId::new()).unwrap();
+        query
+            .add_authority_context(AuthorityId::new_from_entropy([2u8; 32]))
+            .unwrap();
         query.add_context("key", "value");
 
         query.clear();
@@ -975,7 +977,9 @@ mod tests {
     fn test_build_authorizer() {
         let mut query = AuraQuery::new();
         query.add_journal_fact("user", "name", "alice").unwrap();
-        query.add_authority_context(AuthorityId::new()).unwrap();
+        query
+            .add_authority_context(AuthorityId::new_from_entropy([3u8; 32]))
+            .unwrap();
 
         let authorizer = query.build_authorizer();
         assert!(authorizer.is_ok());
@@ -1035,7 +1039,7 @@ mod tests {
 
     #[test]
     fn test_scoped_query_new() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([4u8; 32]);
         let scope = ResourceScope::Authority {
             authority_id,
             operation: AuthorityOp::UpdateTree,
@@ -1049,9 +1053,9 @@ mod tests {
 
     #[test]
     fn test_scoped_query_authority_scope() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([5u8; 32]);
         let scope = ResourceScope::Authority {
-            authority_id: authority_id.clone(),
+            authority_id,
             operation: AuthorityOp::AddDevice,
         };
 
@@ -1067,7 +1071,7 @@ mod tests {
     fn test_scoped_query_context_scope() {
         use aura_core::{scope::ContextOp, ContextId};
 
-        let context_id = ContextId::new();
+        let context_id = ContextId::new_from_entropy([6u8; 32]);
         let scope = ResourceScope::Context {
             context_id,
             operation: ContextOp::ApproveRecovery,
@@ -1082,7 +1086,7 @@ mod tests {
 
     #[test]
     fn test_scoped_query_storage_scope() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([7u8; 32]);
         let scope = ResourceScope::Storage {
             authority_id,
             path: "/data/user".to_string(),
@@ -1097,7 +1101,7 @@ mod tests {
 
     #[test]
     fn test_scoped_query_result_empty() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([8u8; 32]);
         let scope = ResourceScope::Authority {
             authority_id,
             operation: AuthorityOp::UpdateTree,
@@ -1113,9 +1117,9 @@ mod tests {
 
     #[test]
     fn test_scoped_query_add_context_authority() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
         let scope = ResourceScope::Authority {
-            authority_id: authority_id.clone(),
+            authority_id,
             operation: AuthorityOp::Rotate,
         };
 
@@ -1129,7 +1133,7 @@ mod tests {
             aura_query.context_facts.get("scope_type"),
             Some(&"authority".to_string())
         );
-        assert!(aura_query.context_facts.get("authority_id").is_some());
+        assert!(aura_query.context_facts.contains_key("authority_id"));
         assert_eq!(
             aura_query.context_facts.get("operation"),
             Some(&"rotate".to_string())
@@ -1138,7 +1142,7 @@ mod tests {
 
     #[test]
     fn test_scoped_query_add_context_storage() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([10u8; 32]);
         let scope = ResourceScope::Storage {
             authority_id,
             path: "/files/data".to_string(),

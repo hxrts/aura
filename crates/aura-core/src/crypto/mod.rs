@@ -57,17 +57,21 @@ impl Ed25519SigningKey {
         self.0.clone()
     }
 
-    pub fn verifying_key(&self) -> Ed25519VerifyingKey {
-        let key =
-            ed25519_dalek::SigningKey::from_bytes(&self.0.clone().try_into().unwrap_or([0u8; 32]));
-        Ed25519VerifyingKey(key.verifying_key().to_bytes().to_vec())
+    pub fn verifying_key(&self) -> Result<Ed25519VerifyingKey, crate::AuraError> {
+        let arr: [u8; 32] = self.0.clone().try_into().map_err(|_| {
+            crate::AuraError::crypto("Ed25519 signing key must be exactly 32 bytes")
+        })?;
+        let key = ed25519_dalek::SigningKey::from_bytes(&arr);
+        Ok(Ed25519VerifyingKey(key.verifying_key().to_bytes().to_vec()))
     }
 
-    pub fn sign(&self, message: &[u8]) -> Ed25519Signature {
-        let key =
-            ed25519_dalek::SigningKey::from_bytes(&self.0.clone().try_into().unwrap_or([0u8; 32]));
+    pub fn sign(&self, message: &[u8]) -> Result<Ed25519Signature, crate::AuraError> {
+        let arr: [u8; 32] = self.0.clone().try_into().map_err(|_| {
+            crate::AuraError::crypto("Ed25519 signing key must be exactly 32 bytes")
+        })?;
+        let key = ed25519_dalek::SigningKey::from_bytes(&arr);
         let sig = key.sign(message);
-        Ed25519Signature(sig.to_bytes().to_vec())
+        Ok(Ed25519Signature(sig.to_bytes().to_vec()))
     }
 }
 
@@ -147,10 +151,15 @@ pub fn ed25519_verify(
 }
 
 /// Derive verifying key from signing key bytes.
-pub fn ed25519_verifying_key(signing_key: &Ed25519SigningKey) -> Ed25519VerifyingKey {
-    let arr: [u8; 32] = signing_key.0.clone().try_into().unwrap_or([0u8; 32]);
+pub fn ed25519_verifying_key(
+    signing_key: &Ed25519SigningKey,
+) -> Result<Ed25519VerifyingKey, crate::AuraError> {
+    let arr: [u8; 32] =
+        signing_key.0.clone().try_into().map_err(|_| {
+            crate::AuraError::crypto("Ed25519 signing key must be exactly 32 bytes")
+        })?;
     let key = ed25519_dalek::SigningKey::from_bytes(&arr);
-    Ed25519VerifyingKey(key.verifying_key().to_bytes().to_vec())
+    Ok(Ed25519VerifyingKey(key.verifying_key().to_bytes().to_vec()))
 }
 
 /// Alias for Merkle proof re-export.

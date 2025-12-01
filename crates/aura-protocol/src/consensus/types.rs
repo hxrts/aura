@@ -242,7 +242,11 @@ mod tests {
 
     #[test]
     fn test_consensus_config() {
-        let witnesses = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
+        let witnesses = vec![
+            AuthorityId::new_from_entropy([1u8; 32]),
+            AuthorityId::new_from_entropy([2u8; 32]),
+            AuthorityId::new_from_entropy([3u8; 32]),
+        ];
         let config = ConsensusConfig::new(2, witnesses, Epoch::from(1));
 
         assert!(config.has_quorum());

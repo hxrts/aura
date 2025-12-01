@@ -31,6 +31,6 @@ pub use selection::{
     RelayCandidate, RelaySelectionConfig, RelaySelectionResult, RelaySelector, RelayType,
 };
 
-// Re-export from the main relay.rs file for now (to be refactored)
+// Re-export from the main relay.rs file (pending refactor)
 // These will eventually be properly extracted into coordinator.rs
 pub use crate::relay as legacy_relay;

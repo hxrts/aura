@@ -284,17 +284,15 @@ impl NetworkEffects for InMemoryTransportHandler {
     }
 
     async fn receive(&self) -> Result<(Uuid, Vec<u8>), NetworkError> {
-        // For memory transport, we need to implement proper message receiving
-        // This is a placeholder implementation
         Err(NetworkError::ReceiveFailed {
-            reason: "Not implemented for memory transport".to_string(),
+            reason: "Receive not supported in in-memory transport; use peer-specific channels"
+                .to_string(),
         })
     }
 
     async fn receive_from(&self, _peer_id: Uuid) -> Result<Vec<u8>, NetworkError> {
-        // Placeholder implementation
         Err(NetworkError::ReceiveFailed {
-            reason: "Not implemented for memory transport".to_string(),
+            reason: "Receive_from not supported; tests should use registered receiver".to_string(),
         })
     }
 
@@ -313,11 +311,22 @@ impl NetworkEffects for InMemoryTransportHandler {
     }
 
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
-        // Placeholder implementation for event subscription
         use futures::stream;
         use std::pin::Pin;
 
         let stream = stream::empty::<PeerEvent>();
         Ok(Pin::from(Box::new(stream)))
+    }
+
+    async fn open(&self, _address: &str) -> Result<String, NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
+
+    async fn send(&self, _connection_id: &str, _data: Vec<u8>) -> Result<(), NetworkError> {
+        Err(NetworkError::NotImplemented)
+    }
+
+    async fn close(&self, _connection_id: &str) -> Result<(), NetworkError> {
+        Err(NetworkError::NotImplemented)
     }
 }

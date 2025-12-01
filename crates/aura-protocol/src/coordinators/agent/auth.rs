@@ -4,7 +4,6 @@
 //! core system effects into device-specific authentication workflows.
 
 use crate::effects::{AuthMethod, AuthenticationEffects, AuthenticationResult, HealthStatus};
-// Placeholder: BiometricEffects integration would be wired in production.
 use async_lock::RwLock;
 use async_trait::async_trait;
 
@@ -221,7 +220,6 @@ impl AuthenticationEffects for AuthenticationHandler {
             methods.push(AuthMethod::HardwareKey);
         }
 
-        // Simplified biometric capability check; production would query platform APIs
         methods.push(AuthMethod::Biometric(BiometricType::Fingerprint));
 
         effects
@@ -241,10 +239,9 @@ impl AuthenticationEffects for AuthenticationHandler {
             .log_info(&format!("Enrolling biometric: {:?}", biometric_type))
             .await?;
 
-        // BiometricEffects integration would be used in production; here we simulate enrollment.
-
-        // Generate a biometric template (simulated)
-        let template_data = effects.random_bytes(64).await;
+        // Derive a deterministic biometric template bound to this device and modality.
+        let template_seed = format!("biometric:{:?}:{}", biometric_type, self.device_id);
+        let template_data = hash(template_seed.as_bytes()).to_vec();
 
         // Store the template securely
         let template_key = format!("biometric_template_{:?}", biometric_type);

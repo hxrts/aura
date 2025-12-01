@@ -348,7 +348,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_account_state_factory() {
-        let account_id = AccountId::new();
+        let account_id = AccountId::new_from_entropy([0u8; 32]);
         let _state = JournalFactory::new(account_id).build().await;
         // Account created successfully
     }

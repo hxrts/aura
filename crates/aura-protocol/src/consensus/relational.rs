@@ -191,7 +191,11 @@ mod tests {
 
     #[test]
     fn test_relational_builder() {
-        let witnesses = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
+        let witnesses = vec![
+            AuthorityId::new_from_entropy([1u8; 32]),
+            AuthorityId::new_from_entropy([2u8; 32]),
+            AuthorityId::new_from_entropy([3u8; 32]),
+        ];
         let epoch = Epoch::from(1);
 
         let config = RelationalConsensusBuilder::from_prestate(

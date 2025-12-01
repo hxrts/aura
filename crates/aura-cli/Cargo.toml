@@ -32,7 +32,7 @@ aura-store = { path = "../aura-store" }
 
 # Optional development dependencies - only included with "development" feature
 aura-simulator = { path = "../aura-simulator", optional = true }
-aura-testkit = { path = "../aura-testkit", optional = true }
+aura-testkit = { path = "../aura-testkit", optional = true, features = ["full-effect-system"] }
 
 # Effect system
 async-trait = { workspace = true }
@@ -62,8 +62,8 @@ chrono = { workspace = true }
 biscuit-auth = { workspace = true }
 
 [dev-dependencies]
-# Testing infrastructure (Layer 7 can use testkit)
-aura-testkit = { path = "../aura-testkit" }
+# Testing infrastructure (Layer 7 can use testkit with full effect system)
+aura-testkit = { path = "../aura-testkit", features = ["full-effect-system"] }
 aura-macros = { path = "../aura-macros" }
 tempfile = { workspace = true }
 

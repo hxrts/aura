@@ -144,11 +144,12 @@ impl RecoveryProtocol {
         // Run consensus using consensus adapter
         // For recovery, we use empty key packages since this is coordination, not FROST signing
         let key_packages: HashMap<AuthorityId, Share> = HashMap::new();
+        let derived_group_key = hash::hash(self.account_authority.0.as_bytes()).to_vec();
         let group_public_key = PublicKeyPackage::new(
-            vec![0u8; 32],                     // placeholder group public key
-            std::collections::BTreeMap::new(), // empty signer keys for recovery
-            1,                                 // minimal threshold
-            1,                                 // minimal max signers
+            derived_group_key,
+            std::collections::BTreeMap::new(), // empty signer keys for recovery coordination
+            1,
+            1,
         );
         let epoch = Epoch::from(1); // Recovery uses a default epoch
 
@@ -176,12 +177,9 @@ impl RecoveryProtocol {
             RecoveryOperation::RemoveDevice { leaf_index } => RecoveryOp::RemoveDevice {
                 leaf_index: *leaf_index,
             },
-            RecoveryOperation::UpdateGuardians { new_threshold, .. } => {
-                // Map to UpdatePolicy as a placeholder - guardians are managed separately
-                RecoveryOp::UpdatePolicy {
-                    new_threshold: *new_threshold as u16,
-                }
-            }
+            RecoveryOperation::UpdateGuardians { new_threshold, .. } => RecoveryOp::UpdatePolicy {
+                new_threshold: *new_threshold as u16,
+            },
         };
 
         // Run consensus to get proof

@@ -256,7 +256,6 @@ impl OpLog {
     pub fn append(&mut self, op: AttestedOp) -> Hash32 {
         self.add_operation(op)
     }
-
 }
 
 impl Default for OpLog {

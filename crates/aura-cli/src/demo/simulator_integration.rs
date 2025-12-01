@@ -10,10 +10,12 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
 
+use aura_core::effects::StorageEffects;
 use aura_core::{AuthorityId, DeviceId};
 use aura_simulator::{ComposedSimulationEnvironment, SimulationEffectComposer};
 
 use super::human_agent::{DemoPhase, DemoState};
+use crate::ids;
 use crate::tui::DemoEvent;
 
 /// Simulator-backed automated agent for demo
@@ -94,9 +96,9 @@ pub struct GuardianAgentState {
 impl SimulatedGuardianAgent {
     /// Create new simulated guardian agent
     pub async fn new(name: String, config: GuardianAgentConfig) -> anyhow::Result<Self> {
-        // Create deterministic identifiers (placeholder until proper fixtures are wired)
-        let device_id = DeviceId::new();
-        let authority_id = AuthorityId::new();
+        // Create deterministic identifiers derived from seed and guardian name
+        let device_id = ids::device_id(&format!("demo:{}:{}:device", config.seed, name));
+        let authority_id = ids::authority_id(&format!("demo:{}:{}:authority", config.seed, name));
 
         // Create simulation environment (use async version to avoid nested runtime)
         let environment =
@@ -154,10 +156,6 @@ impl SimulatedGuardianAgent {
             DemoEvent::InitiateRecovery => {
                 response_events.extend(self.handle_recovery_request(demo_state).await?);
             }
-            DemoEvent::AdvancePhase => {
-                self.state.current_phase = Some(demo_state.phase.clone());
-                response_events.extend(self.handle_phase_change(demo_state).await?);
-            }
             DemoEvent::SendMessage(content) => {
                 response_events.extend(self.handle_message_received(content, demo_state).await?);
             }
@@ -198,6 +196,7 @@ impl SimulatedGuardianAgent {
     }
 
     /// Handle demo phase changes
+    #[allow(dead_code)]
     async fn handle_phase_change(
         &mut self,
         demo_state: &DemoState,
@@ -250,6 +249,7 @@ impl SimulatedGuardianAgent {
     }
 
     /// Participate in guardian setup
+    #[allow(dead_code)]
     async fn participate_in_guardian_setup(&mut self) -> anyhow::Result<Vec<DemoEvent>> {
         tracing::info!("Guardian {} participating in setup", self.name);
 
@@ -257,6 +257,7 @@ impl SimulatedGuardianAgent {
     }
 
     /// Start normal guardian activity
+    #[allow(dead_code)]
     async fn start_normal_activity(&mut self) -> anyhow::Result<Vec<DemoEvent>> {
         tracing::info!("Guardian {} starting normal activity", self.name);
 
@@ -276,6 +277,7 @@ impl SimulatedGuardianAgent {
     }
 
     /// Acknowledge Bob's device loss
+    #[allow(dead_code)]
     async fn acknowledge_device_loss(&mut self) -> anyhow::Result<Vec<DemoEvent>> {
         tracing::info!("Guardian {} acknowledging Bob's device loss", self.name);
 
@@ -396,12 +398,20 @@ impl SimulatedGuardianAgent {
         let environment = self.environment.lock().await;
 
         // Use simulation environment to register as guardian
-        // This would integrate with actual guardian registration protocol
-        let _effect_system = environment.effect_system();
+        let effect_system = environment.effect_system();
 
-        // Execute guardian registration through effect system
-        // Placeholder for actual implementation
-        tracing::debug!("Guardian {} registration executed", self.name);
+        // Persist registration so simulator and CLI can discover guardian metadata
+        let registration_key = format!("simulated_guardian:{}:{}", self.name, self.authority_id);
+        effect_system
+            .store(&registration_key, self.authority_id.to_bytes().to_vec())
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to store guardian registration: {}", e))?;
+
+        tracing::debug!(
+            "Guardian {} registration stored at {}",
+            self.name,
+            registration_key
+        );
 
         Ok(())
     }

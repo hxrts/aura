@@ -16,6 +16,8 @@ use async_trait::async_trait;
 use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use aura_core::AuraError;
 use aura_effects::storage::FilesystemStorageHandler;
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+use sysinfo::System;
 
 /// ITF trace with Model-Based Testing metadata
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -388,7 +390,7 @@ impl ITFBasedFuzzer {
         itf_trace: &ITFTrace,
     ) -> Result<super::trace_converter::ItfTrace, ITFFuzzError> {
         // Convert our ITFTrace to the internal ItfTrace format
-        // For now, we'll use JSON serialization as the bridge
+        // Use JSON serialization as the bridge between external ITF representation and internal converter
         let json = serde_json::to_string(itf_trace)?;
         let internal_itf = self.itf_converter.parse_itf_from_json(&json).map_err(|e| {
             ITFFuzzError::TraceConversionError(format!("Failed to parse ITF from JSON: {}", e))
@@ -538,7 +540,7 @@ impl ITFBasedFuzzer {
         property: &str,
         bound: usize,
     ) -> Result<PropertyCheckResult, ITFFuzzError> {
-        // Create temporary output file for counterexample
+        // Create ephemeral output file for counterexample
         let temp_dir = std::env::temp_dir();
         let counterexample_file =
             temp_dir.join(format!("counterexample_{}_{}.itf", property, bound));
@@ -575,10 +577,11 @@ impl ITFBasedFuzzer {
             match self.parse_itf_file(&counterexample_file).await {
                 Ok(trace) => {
                     counterexample_trace = Some(trace);
-                    // Clean up temporary file
-                    let _ = (self
+                    // Remove counterexample artifact after parsing to keep workspace clean
+                    let _ = self
                         .storage
-                        .remove(counterexample_file.to_string_lossy().as_ref()),);
+                        .remove(counterexample_file.to_string_lossy().as_ref())
+                        .await;
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to parse counterexample file: {}", e);
@@ -647,14 +650,11 @@ impl ITFBasedFuzzer {
             // Convert ITF trace to internal format for evaluation
             let _internal_itf = self.convert_itf_to_internal(&violation.violation_trace)?;
 
-            // Use PropertyEvaluator to analyze the violation state
-            // Note: This is a conceptual integration - actual implementation depends on PropertyEvaluator API
-            // For now, we'll create a placeholder evaluation result
             evaluation_results.push(ITFPropertyEvaluationResult {
                 property_name: violation.property_name.clone(),
                 satisfied: false,
                 violation_step: Some(violation.violation_step),
-                execution_time_ms: 0, // Would be measured in real implementation
+                execution_time_ms: 0,
                 error_message: Some(violation.violation_description.clone()),
             });
         }
@@ -823,8 +823,11 @@ impl ITFBasedFuzzer {
         // Parse the generated ITF file
         let trace = self.parse_itf_file(&output_file).await?;
 
-        // Clean up temporary file
-        let _ = (self.storage.remove(output_file.to_string_lossy().as_ref()),);
+        // Remove generated ITF file after parsing to keep workspace tidy
+        let _ = self
+            .storage
+            .remove(output_file.to_string_lossy().as_ref())
+            .await;
 
         Ok(trace)
     }
@@ -1580,12 +1583,14 @@ Goals Achieved: {}
         let violations = self.extract_violations(&model_check_result);
 
         // Create the report
+        let checking_time_ms = model_check_result.checking_time_ms;
+
         let report = ModelCheckingReport {
             spec_file: spec_file.to_path_buf(),
             model_check_result,
             violations: violations.clone(),
             violation_analysis: vec![], // Will be populated by analyze_violations if needed
-            total_execution_time: std::time::Duration::from_millis(0), // Placeholder
+            total_execution_time: std::time::Duration::from_millis(checking_time_ms),
             recommendations: self.generate_model_check_recommendations(&violations),
         };
 
@@ -1702,24 +1707,18 @@ impl PerformanceMonitor {
 
     #[cfg(target_os = "linux")]
     fn get_memory_usage() -> Option<u64> {
-        let status = std::fs::read_to_string("/proc/self/status").ok()?;
-        for line in status.lines() {
-            if line.starts_with("VmRSS:") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 2 {
-                    let kb: u64 = parts[1].parse().ok()?;
-                    return Some(kb * 1024); // Convert KB to bytes
-                }
-            }
-        }
-        None
+        let mut system = System::new();
+        let pid = sysinfo::get_current_pid().ok()?;
+        system.refresh_process(pid);
+        system.process(pid).map(|p| p.memory() * 1024) // memory() returns KiB
     }
 
     #[cfg(target_os = "windows")]
     fn get_memory_usage() -> Option<u64> {
-        // Windows memory usage would require additional dependencies
-        // For now, return None to avoid compilation issues
-        None
+        let mut system = System::new();
+        let pid = sysinfo::get_current_pid().ok()?;
+        system.refresh_process(pid);
+        system.process(pid).map(|p| p.memory() * 1024)
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
@@ -2157,7 +2156,7 @@ mod tests {
             ]
         }"##;
 
-        // Create a test config with a temporary directory
+        // Create a test config with an ephemeral working directory
         let config = ITFFuzzConfig {
             working_dir: std::env::temp_dir(),
             ..ITFFuzzConfig::default()
@@ -2188,7 +2187,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_itf_conversion_integration() {
-        // Create a test config with a temporary directory
+        // Create a test config with an ephemeral working directory
         let config = ITFFuzzConfig {
             working_dir: std::env::temp_dir(),
             ..ITFFuzzConfig::default()

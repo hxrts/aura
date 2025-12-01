@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::time::{Duration, SystemTime};
 
 fn now_ms() -> u64 {
-    0 // placeholder; callers should supply PhysicalTimeEffects
+    0 // deterministic default; callers should supply PhysicalTimeEffects
 }
 
 /// Epoch rotation coordinator using choreographic protocols

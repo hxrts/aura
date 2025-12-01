@@ -214,6 +214,11 @@ pub enum IdentityProof {
         guardian_id: aura_core::GuardianId,
         signature: Ed25519Signature,
     },
+    /// Authority identity proof (for authority-level authentication)
+    Authority {
+        authority_id: aura_core::AuthorityId,
+        signature: Ed25519Signature,
+    },
     /// Threshold signature proof (M-of-N participants)
     Threshold(ThresholdSig),
 }

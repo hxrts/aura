@@ -99,18 +99,18 @@ Per-hop receipts provide accountability for multi-hop forwarding and are bound t
 
 ```rust
 pub struct Receipt {
-    pub context: ContextId,
+    pub ctx: ContextId,
     pub src: AuthorityId,
     pub dst: AuthorityId,
     pub epoch: Epoch,
     pub cost: u32,
     pub nonce: u64,
     pub prev: Hash32,
-    pub sig: Signature,
+    pub sig: Vec<u8>,
 }
 ```
 
-Receipts chain together to form an audit trail of budget charges across relay hops. The acceptance window is the current epoch only. Epoch rotation triggers when the journal fact `Epoch(context)` increments, resetting spent counters and invalidating old receipts.
+Receipts chain together to form an audit trail of budget charges across relay hops. The signature uses `Vec<u8>` to support multiple signature algorithms. The acceptance window is the current epoch only. Epoch rotation triggers when the journal fact `Epoch(context)` increments, resetting spent counters and invalidating old receipts.
 
 ## 3. Async Effect System Architecture
 
@@ -216,15 +216,27 @@ pub struct EffectContext {
     /// Authority performing the operation
     pub authority_id: AuthorityId,
 
-    /// Session context (if any)
-    pub session_id: Option<SessionId>,
+    /// Relational context for cross-authority operations
+    pub context_id: ContextId,
+
+    /// Session context for protocol execution
+    pub session_id: SessionId,
+
+    /// Execution mode (production or simulation)
+    pub execution_mode: ExecutionMode,
+
+    /// Flow budget tracking for rate limiting
+    pub flow_budget: FlowBudgetContext,
+
+    /// Leakage budget tracking for privacy
+    pub leakage_budget: LeakageBudgetContext,
 
     /// Additional metadata
     pub metadata: HashMap<String, String>,
 }
 ```
 
-Context flows through all effect calls to enable authority identification and session tracking. The guard chain uses context values to enforce authorization and flow constraints before network operations.
+Context flows through all effect calls to enable authority identification, session tracking, and guard chain integration. The flow and leakage budget contexts enable the guard chain to enforce rate limits and privacy constraints. The guard chain uses context values to enforce authorization and flow constraints before network operations.
 
 The effect runtime prepares a `GuardSnapshot` asynchronously, evaluates the guard chain synchronously to produce `EffectCommand` items, then interprets those commands asynchronously. Each choreography message expands to snapshot preparation, pure guard evaluation, command interpretation (charge, leak, journal), and transport sending. This ensures no observable behavior occurs without proper authorization and accounting.
 
@@ -306,11 +318,14 @@ pub struct CommitFact {
     /// Hash of the operation that was agreed upon
     pub operation_hash: Hash32,
 
-    /// The actual operation (serialized)
+    /// The actual operation (serialized for verification)
     pub operation_bytes: Vec<u8>,
 
     /// Threshold signature from witnesses
     pub threshold_signature: ThresholdSignature,
+
+    /// Group public key for signature verification
+    pub group_public_key: Option<PublicKeyPackage>,
 
     /// List of authorities that participated
     pub participants: Vec<AuthorityId>,
@@ -318,8 +333,8 @@ pub struct CommitFact {
     /// Threshold that was required
     pub threshold: u16,
 
-    /// Timestamp of consensus completion (milliseconds since epoch)
-    pub timestamp_ms: u64,
+    /// Timestamp with optional provenance attestation
+    pub timestamp: ProvenancedTime,
 
     /// Whether fast path was used
     pub fast_path: bool,
@@ -339,12 +354,17 @@ The fallback path uses epidemic gossip when witnesses disagree or initiators sta
 Consensus binds operations to explicit prestates through hash commitments. The prestate hash commits to current reduced state of all participants. Witnesses verify local state matches prestate hash to prevent forks.
 
 ```rust
-let prestate_hash = H(C_auth1, C_auth2, C_context);
-let operation_hash = H(Op);
-let consensus_id = ConsensusId::new(prestate_hash, operation_hash, nonce);
+pub struct ConsensusId(pub Hash32);
+
+impl ConsensusId {
+    pub fn new(prestate_hash: Hash32, operation_hash: Hash32, nonce: u64) -> Self {
+        // Derives unique ID from prestate, operation, and nonce
+        ConsensusId(hash(b"CONSENSUS_ID", prestate_hash, operation_hash, nonce))
+    }
+}
 ```
 
-The consensus identifier binds operations to prestates through the hash commitment. Witnesses treat matching consensus identifiers as belonging to the same consensus instance. This integration ensures consensus operations reference current authority and context state.
+The consensus identifier derives from prestate hash, operation hash, and nonce. Witnesses treat matching consensus identifiers as belonging to the same consensus instance. This binding ensures operations reference current authority and context state.
 
 ## 6. 8-Layer Crate Architecture
 

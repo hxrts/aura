@@ -216,7 +216,7 @@ fn protocol_message_testing() {
     println!("STUN message creation test passed");
 
     // Test hole punch message creation
-    let target_addr = std::net::SocketAddr::from(([127, 0, 0, 1], 8080));
+    let target_addr = aura_transport::types::endpoint::EndpointAddress::new("127.0.0.1:8080");
     let _hole_punch_message = HolePunchMessage::coordination_request(
         aura_core::identifiers::DeviceId::new(),
         aura_core::identifiers::DeviceId::new(),

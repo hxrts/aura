@@ -242,7 +242,7 @@ fn generate_display_impl(input: &ErrorTypesInput) -> proc_macro2::TokenStream {
             // Generate interpolation for the template
             let template_str = template.value();
             let interpolated = if template_str.contains('{') {
-                // Has interpolation placeholders
+                // Contains interpolation slots filled by the macro
                 quote! {
                     write!(f, #template, #(#field_names = #field_names),*)
                 }

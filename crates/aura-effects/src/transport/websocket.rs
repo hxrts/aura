@@ -212,6 +212,65 @@ impl WebSocketTransportHandler {
 
 #[async_trait]
 impl NetworkEffects for WebSocketTransportHandler {
+    async fn open(&self, endpoint: &str) -> Result<String, NetworkError> {
+        let url: Url = endpoint
+            .parse()
+            .map_err(|e: url::ParseError| NetworkError::ConnectionFailed(e.to_string()))?;
+        let (ws_stream, _connection) = self
+            .connect(url)
+            .await
+            .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
+        // Track the connection by a deterministic id (hash of endpoint)
+        let conn_id =
+            uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, endpoint.as_bytes()).to_string();
+        // Store in memory map? Handler is stateless by design; return a token so caller can map.
+        // We just drop the stream here; production should manage connection lifecycle externally.
+        drop(ws_stream);
+        Ok(conn_id)
+    }
+
+    async fn send(&self, connection_id: &str, data: Vec<u8>) -> Result<(), NetworkError> {
+        // For stateless WebSocket, connection_id is treated as endpoint URL
+        let url: Url =
+            connection_id
+                .parse()
+                .map_err(|e: url::ParseError| NetworkError::SendFailed {
+                    peer_id: None,
+                    reason: e.to_string(),
+                })?;
+        let (mut ws_stream, _connection) = self
+            .connect(url)
+            .await
+            .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
+        WebSocketTransportHandler::send(self, &mut ws_stream, &data)
+            .await
+            .map_err(|e| NetworkError::SendFailed {
+                peer_id: None,
+                reason: e.to_string(),
+            })?;
+        WebSocketTransportHandler::close(self, &mut ws_stream, Some("completed".to_string()))
+            .await
+            .map_err(|e| NetworkError::SendFailed {
+                peer_id: None,
+                reason: e.to_string(),
+            })?;
+        Ok(())
+    }
+
+    async fn close(&self, connection_id: &str) -> Result<(), NetworkError> {
+        // For stateless WebSocket, connection_id is treated as endpoint URL
+        let url: Url = connection_id
+            .parse()
+            .map_err(|e: url::ParseError| NetworkError::ConnectionFailed(e.to_string()))?;
+        let (mut ws_stream, _connection) = self
+            .connect(url)
+            .await
+            .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
+        WebSocketTransportHandler::close(self, &mut ws_stream, Some("closed".into()))
+            .await
+            .map_err(|e| NetworkError::ConnectionFailed(e.to_string()))?;
+        Ok(())
+    }
     async fn send_to_peer(&self, peer_id: Uuid, message: Vec<u8>) -> Result<(), NetworkError> {
         // Convert UUID to WebSocket URL - simplified mapping
         let url_str = format!("ws://localhost:8080/{}", peer_id);

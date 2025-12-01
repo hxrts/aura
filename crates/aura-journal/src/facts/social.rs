@@ -36,7 +36,6 @@ use aura_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use uuid::Uuid;
 
 // ============================================================================
 // Block Types
@@ -47,16 +46,18 @@ use uuid::Uuid;
 pub struct BlockId(pub [u8; 32]);
 
 impl BlockId {
-    /// Create a new random BlockId
-    #[allow(clippy::disallowed_methods)]
-    pub fn new() -> Self {
-        let uuid = Uuid::new_v4();
+    fn derive_bytes(label: &[u8]) -> [u8; 32] {
+        let mut hasher = aura_core::hash::hasher();
+        hasher.update(b"AURA_BLOCK_ID");
+        hasher.update(label);
+        let digest = hasher.finalize();
         let mut bytes = [0u8; 32];
-        bytes[..16].copy_from_slice(uuid.as_bytes());
-        // Generate second UUID for remaining 16 bytes
-        let uuid2 = Uuid::new_v4();
-        bytes[16..].copy_from_slice(uuid2.as_bytes());
-        Self(bytes)
+        bytes.copy_from_slice(&digest);
+        bytes
+    }
+    /// Create a new random BlockId
+    pub fn new() -> Self {
+        Self::from_bytes(Self::derive_bytes(b"block-id"))
     }
 
     /// Create a BlockId from raw bytes
@@ -91,15 +92,18 @@ impl std::fmt::Display for BlockId {
 pub struct NeighborhoodId(pub [u8; 32]);
 
 impl NeighborhoodId {
-    /// Create a new random NeighborhoodId
-    #[allow(clippy::disallowed_methods)]
-    pub fn new() -> Self {
-        let uuid = Uuid::new_v4();
+    fn derive_bytes(label: &[u8]) -> [u8; 32] {
+        let mut hasher = aura_core::hash::hasher();
+        hasher.update(b"AURA_NEIGHBORHOOD_ID");
+        hasher.update(label);
+        let digest = hasher.finalize();
         let mut bytes = [0u8; 32];
-        bytes[..16].copy_from_slice(uuid.as_bytes());
-        let uuid2 = Uuid::new_v4();
-        bytes[16..].copy_from_slice(uuid2.as_bytes());
-        Self(bytes)
+        bytes.copy_from_slice(&digest);
+        bytes
+    }
+    /// Create a new random NeighborhoodId
+    pub fn new() -> Self {
+        Self::from_bytes(Self::derive_bytes(b"neighborhood-id"))
     }
 
     /// Create a NeighborhoodId from raw bytes
@@ -734,11 +738,11 @@ mod tests {
 
     #[test]
     fn test_block_config_v1_validation() {
-        let valid = BlockConfigFact::v1_default(BlockId::new());
+        let valid = BlockConfigFact::v1_default(BlockId::from_bytes([1u8; 32]));
         assert!(valid.validate_v1().is_ok());
 
         let invalid = BlockConfigFact {
-            block_id: BlockId::new(),
+            block_id: BlockId::from_bytes([2u8; 32]),
             max_residents: 10, // > 8
             neighborhood_limit: 4,
         };
@@ -747,7 +751,11 @@ mod tests {
 
     #[test]
     fn test_resident_fact_to_datalog() {
-        let resident = ResidentFact::new(AuthorityId::new(), BlockId::new(), test_timestamp());
+        let resident = ResidentFact::new(
+            AuthorityId::new_from_entropy([3u8; 32]),
+            BlockId::from_bytes([4u8; 32]),
+            test_timestamp(),
+        );
         let datalog = resident.to_datalog();
         assert!(datalog.starts_with("resident("));
         assert!(datalog.contains("204800")); // 200 KB
@@ -763,14 +771,19 @@ mod tests {
 
     #[test]
     fn test_neighborhood_fact_to_datalog() {
-        let neighborhood = NeighborhoodFact::new(NeighborhoodId::new(), test_timestamp());
+        let neighborhood =
+            NeighborhoodFact::new(NeighborhoodId::from_bytes([5u8; 32]), test_timestamp());
         let datalog = neighborhood.to_datalog();
         assert!(datalog.starts_with("neighborhood("));
     }
 
     #[test]
     fn test_block_member_fact_to_datalog() {
-        let member = BlockMemberFact::new(BlockId::new(), NeighborhoodId::new(), test_timestamp());
+        let member = BlockMemberFact::new(
+            BlockId::from_bytes([6u8; 32]),
+            NeighborhoodId::from_bytes([7u8; 32]),
+            test_timestamp(),
+        );
         let datalog = member.to_datalog();
         assert!(datalog.starts_with("block_member("));
         assert!(datalog.contains("1048576")); // 1 MB donation
@@ -780,7 +793,7 @@ mod tests {
     fn test_adjacency_ordering() {
         let block_a = BlockId::from_bytes([1u8; 32]);
         let block_b = BlockId::from_bytes([2u8; 32]);
-        let neighborhood = NeighborhoodId::new();
+        let neighborhood = NeighborhoodId::from_bytes([8u8; 32]);
 
         // Should order consistently regardless of input order
         let adj1 = AdjacencyFact::new(block_a, block_b, neighborhood);
@@ -792,7 +805,7 @@ mod tests {
 
     #[test]
     fn test_storage_budget_calculations() {
-        let mut budget = BlockStorageBudget::new(BlockId::new());
+        let mut budget = BlockStorageBudget::new(BlockId::from_bytes([9u8; 32]));
 
         // Initial state
         assert_eq!(

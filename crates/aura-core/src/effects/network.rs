@@ -189,6 +189,24 @@ pub trait NetworkEffects: Send + Sync {
 
     /// Subscribe to peer connection events
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError>;
+
+    // === Connection-oriented methods (for transport coordination) ===
+
+    /// Open a connection to the specified address
+    ///
+    /// Returns a connection identifier that can be used with `send` and `close`.
+    /// This provides lower-level connection management for transport coordinators.
+    async fn open(&self, address: &str) -> Result<String, NetworkError>;
+
+    /// Send data over an established connection
+    ///
+    /// The connection_id must be from a previous successful `open` call.
+    async fn send(&self, connection_id: &str, data: Vec<u8>) -> Result<(), NetworkError>;
+
+    /// Close an established connection
+    ///
+    /// After closing, the connection_id is no longer valid.
+    async fn close(&self, connection_id: &str) -> Result<(), NetworkError>;
 }
 
 /// Blanket implementation for Arc<T> where T: NetworkEffects
@@ -220,5 +238,17 @@ impl<T: NetworkEffects + ?Sized> NetworkEffects for std::sync::Arc<T> {
 
     async fn subscribe_to_peer_events(&self) -> Result<PeerEventStream, NetworkError> {
         (**self).subscribe_to_peer_events().await
+    }
+
+    async fn open(&self, address: &str) -> Result<String, NetworkError> {
+        (**self).open(address).await
+    }
+
+    async fn send(&self, connection_id: &str, data: Vec<u8>) -> Result<(), NetworkError> {
+        (**self).send(connection_id, data).await
+    }
+
+    async fn close(&self, connection_id: &str) -> Result<(), NetworkError> {
+        (**self).close(connection_id).await
     }
 }

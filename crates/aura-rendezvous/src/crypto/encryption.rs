@@ -158,7 +158,7 @@ impl EnvelopeEncryption {
         }
 
         // If key hint is provided, could optimize by checking hint first
-        // For now, return the last error
+        // Return the most recent error if no decryption succeeded
         Err(last_error
             .unwrap_or_else(|| AuraError::crypto("No decryption keys provided".to_string())))
     }
@@ -310,14 +310,18 @@ mod tests {
     use super::*;
     use crate::relationship_keys::derive_test_root_key;
 
+    fn device(seed: u8) -> DeviceId {
+        DeviceId::new_from_entropy([seed; 32])
+    }
+
     fn create_test_envelope() -> RendezvousEnvelope {
         RendezvousEnvelope::new(b"test transport offer".to_vec(), Some(3))
     }
 
     #[test]
     fn test_envelope_encryption_roundtrip() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
+        let alice_id = device(1);
+        let bob_id = device(2);
 
         // Alice encrypts envelope for Bob
         let alice_root = derive_test_root_key(alice_id);
@@ -344,8 +348,8 @@ mod tests {
 
     #[test]
     fn test_padding_strategies() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
+        let alice_id = device(3);
+        let bob_id = device(4);
 
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
@@ -390,9 +394,9 @@ mod tests {
 
     #[test]
     fn test_key_hint_optimization() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
-        let charlie_id = DeviceId::new();
+        let alice_id = device(16);
+        let bob_id = device(17);
+        let charlie_id = device(18);
 
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
@@ -421,9 +425,9 @@ mod tests {
 
     #[test]
     fn test_multiple_peer_decryption() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
-        let charlie_id = DeviceId::new();
+        let alice_id = device(19);
+        let bob_id = device(20);
+        let charlie_id = device(21);
 
         let root_key = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, root_key);
@@ -448,8 +452,8 @@ mod tests {
 
     #[test]
     fn test_envelope_size_calculation() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
+        let alice_id = device(22);
+        let bob_id = device(23);
 
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
@@ -467,8 +471,8 @@ mod tests {
 
     #[test]
     fn test_app_context_isolation() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
+        let alice_id = device(24);
+        let bob_id = device(25);
 
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);

@@ -43,9 +43,9 @@ fn test_guard_outcome_creation() {
     // Test pure guard outcome creation
     let effects = vec![
         EffectCommand::ChargeBudget {
-            context: ContextId::new(),
-            authority: AuthorityId::new(),
-            peer: AuthorityId::new(),
+            context: ContextId::new_from_entropy([1u8; 32]),
+            authority: AuthorityId::new_from_entropy([2u8; 32]),
+            peer: AuthorityId::new_from_entropy([3u8; 32]),
             amount: 100,
         },
         EffectCommand::RecordLeakage { bits: 64 },

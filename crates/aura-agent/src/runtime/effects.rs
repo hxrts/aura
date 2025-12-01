@@ -8,13 +8,11 @@ use aura_composition::CompositeHandlerAdapter;
 use aura_core::effects::crypto::FrostSigningPackage;
 use aura_core::effects::network::PeerEventStream;
 use aura_core::effects::storage::{StorageError, StorageStats};
-use aura_core::effects::TreeOperationEffects;
+use aura_core::effects::transport::{TransportEnvelope, TransportStats};
+use aura_core::effects::TransportEffects;
 use aura_core::effects::*;
 use aura_core::Journal;
-use aura_core::{
-    AttestedOp, AuraError, AuthorityId, ContextId, DeviceId, FlowBudget, Hash32, LeafId, LeafNode,
-    NodeIndex, Policy,
-};
+use aura_core::{AttestedOp, AuraError, AuthorityId, ContextId, DeviceId, FlowBudget, Hash32};
 use aura_effects::{
     crypto::RealCryptoHandler,
     storage::FilesystemStorageHandler,
@@ -27,12 +25,13 @@ use aura_protocol::effects::{
     EffectApiEventStream, LeakageEffects, SyncEffects, SyncError,
 };
 use aura_protocol::guards::GuardContextProvider;
+use aura_protocol::handlers::{InMemoryTreeHandler, LocalSyncHandler};
 use aura_wot::{BiscuitAuthorizationBridge, FlowBudgetHandler};
-use biscuit_auth::{Biscuit, KeyPair};
+use biscuit_auth::{Biscuit, KeyPair, PublicKey};
 use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 /// Effect executor for dispatching effect calls
 ///
@@ -114,7 +113,11 @@ pub struct AuraEffectSystem {
     journal_policy: Option<(biscuit_auth::Biscuit, aura_wot::BiscuitAuthorizationBridge)>,
     journal_verifying_key: Option<Vec<u8>>,
     authority_id: AuthorityId,
-    tree_handler: aura_protocol::handlers::tree::DummyTreeHandler,
+    tree_handler: InMemoryTreeHandler,
+    sync_handler: LocalSyncHandler,
+    transport_handler: aura_effects::transport::RealTransportHandler,
+    transport_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
+    transport_stats: Arc<RwLock<TransportStats>>,
 }
 
 #[derive(Clone, Default)]
@@ -150,17 +153,23 @@ impl AuraEffectSystem {
         let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_testing(device_id);
         let authority = AuthorityId::from_uuid(config.device_id().0);
-        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
+        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
         let storage_base = config.storage.base_path.clone();
         let crypto_handler = RealCryptoHandler::new();
         let authorization_handler =
-            aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
+            Self::init_authorization_handler(authority, &crypto_handler, &journal_verifying_key);
         let storage_handler = FilesystemStorageHandler::new(storage_base);
         let leakage_storage =
             FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
         let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
             Arc::new(leakage_storage),
         );
+        let oplog = Arc::new(RwLock::new(Vec::new()));
+        let tree_handler = InMemoryTreeHandler::new(oplog.clone());
+        let sync_handler = LocalSyncHandler::new(oplog);
+        let transport_handler = aura_effects::transport::RealTransportHandler::default();
+        let transport_inbox = Arc::new(RwLock::new(Vec::new()));
+        let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
         Ok(Self {
             config,
             composite,
@@ -175,7 +184,11 @@ impl AuraEffectSystem {
             journal_policy,
             journal_verifying_key,
             authority_id: authority,
-            tree_handler: aura_protocol::handlers::tree::DummyTreeHandler::new(),
+            tree_handler,
+            sync_handler,
+            transport_handler,
+            transport_inbox,
+            transport_stats,
         })
     }
 
@@ -184,17 +197,23 @@ impl AuraEffectSystem {
         let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_production(device_id);
         let authority = AuthorityId::from_uuid(config.device_id().0);
-        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
+        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
         let storage_base = config.storage.base_path.clone();
         let crypto_handler = RealCryptoHandler::new();
         let authorization_handler =
-            aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
+            Self::init_authorization_handler(authority, &crypto_handler, &journal_verifying_key);
         let storage_handler = FilesystemStorageHandler::new(storage_base);
         let leakage_storage =
             FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
         let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
             Arc::new(leakage_storage),
         );
+        let oplog = Arc::new(RwLock::new(Vec::new()));
+        let tree_handler = InMemoryTreeHandler::new(oplog.clone());
+        let sync_handler = LocalSyncHandler::new(oplog);
+        let transport_handler = aura_effects::transport::RealTransportHandler::default();
+        let transport_inbox = Arc::new(RwLock::new(Vec::new()));
+        let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
         Ok(Self {
             config,
             composite,
@@ -209,7 +228,11 @@ impl AuraEffectSystem {
             journal_policy,
             journal_verifying_key,
             authority_id: authority,
-            tree_handler: aura_protocol::handlers::tree::DummyTreeHandler::new(),
+            tree_handler,
+            sync_handler,
+            transport_handler,
+            transport_inbox,
+            transport_stats,
         })
     }
 
@@ -217,16 +240,26 @@ impl AuraEffectSystem {
     pub fn testing(config: &AgentConfig) -> Result<Self, crate::core::AgentError> {
         let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_testing(device_id);
-        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
+        let (journal_policy, journal_verifying_key) =
+            Self::init_journal_policy(AuthorityId::from_uuid(config.device_id().0));
         let crypto_handler = RealCryptoHandler::new();
-        let authorization_handler =
-            aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
+        let authorization_handler = Self::init_authorization_handler(
+            AuthorityId::from_uuid(config.device_id().0),
+            &crypto_handler,
+            &journal_verifying_key,
+        );
         let storage_handler = FilesystemStorageHandler::new(config.storage.base_path.clone());
         let leakage_storage =
             FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
         let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
             Arc::new(leakage_storage),
         );
+        let oplog = Arc::new(RwLock::new(Vec::new()));
+        let tree_handler = InMemoryTreeHandler::new(oplog.clone());
+        let sync_handler = LocalSyncHandler::new(oplog);
+        let transport_handler = aura_effects::transport::RealTransportHandler::default();
+        let transport_inbox = Arc::new(RwLock::new(Vec::new()));
+        let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
         Ok(Self {
             config: config.clone(),
             composite,
@@ -241,7 +274,11 @@ impl AuraEffectSystem {
             journal_policy,
             journal_verifying_key,
             authority_id: AuthorityId::from_uuid(config.device_id().0),
-            tree_handler: aura_protocol::handlers::tree::DummyTreeHandler::new(),
+            tree_handler,
+            sync_handler,
+            transport_handler,
+            transport_inbox,
+            transport_stats,
         })
     }
 
@@ -249,16 +286,26 @@ impl AuraEffectSystem {
     pub fn simulation(config: &AgentConfig, seed: u64) -> Result<Self, crate::core::AgentError> {
         let device_id = config.device_id();
         let composite = CompositeHandlerAdapter::for_simulation(device_id, seed);
-        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(device_id);
+        let (journal_policy, journal_verifying_key) =
+            Self::init_journal_policy(AuthorityId::from_uuid(config.device_id().0));
         let crypto_handler = RealCryptoHandler::new();
-        let authorization_handler =
-            aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone());
+        let authorization_handler = Self::init_authorization_handler(
+            AuthorityId::from_uuid(config.device_id().0),
+            &crypto_handler,
+            &journal_verifying_key,
+        );
         let storage_handler = FilesystemStorageHandler::new(config.storage.base_path.clone());
         let leakage_storage =
             FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
         let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
             Arc::new(leakage_storage),
         );
+        let oplog = Arc::new(RwLock::new(Vec::new()));
+        let tree_handler = InMemoryTreeHandler::new(oplog.clone());
+        let sync_handler = LocalSyncHandler::new(oplog);
+        let transport_handler = aura_effects::transport::RealTransportHandler::default();
+        let transport_inbox = Arc::new(RwLock::new(Vec::new()));
+        let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
         Ok(Self {
             config: config.clone(),
             composite,
@@ -273,7 +320,11 @@ impl AuraEffectSystem {
             journal_policy,
             journal_verifying_key,
             authority_id: AuthorityId::from_uuid(config.device_id().0),
-            tree_handler: aura_protocol::handlers::tree::DummyTreeHandler::new(),
+            tree_handler,
+            sync_handler,
+            transport_handler,
+            transport_inbox,
+            transport_stats,
         })
     }
 
@@ -294,7 +345,7 @@ impl AuraEffectSystem {
 
     /// Build a permissive Biscuit policy/bridge pair for journal enforcement.
     fn init_journal_policy(
-        device_id: DeviceId,
+        authority_id: AuthorityId,
     ) -> (
         Option<(Biscuit, BiscuitAuthorizationBridge)>,
         Option<Vec<u8>>,
@@ -302,12 +353,31 @@ impl AuraEffectSystem {
         let keypair = KeyPair::new();
         match Biscuit::builder().build(&keypair) {
             Ok(token) => {
-                let bridge = BiscuitAuthorizationBridge::new(keypair.public(), device_id);
+                let bridge = BiscuitAuthorizationBridge::new(keypair.public(), authority_id);
                 let verifying_key = keypair.public().to_bytes().to_vec();
                 (Some((token, bridge)), Some(verifying_key))
             }
             Err(_) => (None, None),
         }
+    }
+
+    /// Build the Biscuit-backed authorization handler. Falls back to mock when no key is available.
+    fn init_authorization_handler(
+        authority: AuthorityId,
+        crypto_handler: &RealCryptoHandler,
+        verifying_key: &Option<Vec<u8>>,
+    ) -> aura_wot::effects::WotAuthorizationHandler<RealCryptoHandler> {
+        if let Some(bytes) = verifying_key {
+            if let Ok(public_key) = PublicKey::from_bytes(bytes) {
+                return aura_wot::effects::WotAuthorizationHandler::new(
+                    crypto_handler.clone(),
+                    public_key,
+                    authority,
+                );
+            }
+        }
+
+        aura_wot::effects::WotAuthorizationHandler::new_mock(crypto_handler.clone())
     }
 
     /// Construct a journal handler with current policy hooks.
@@ -495,58 +565,166 @@ impl RandomEffects for AuraEffectSystem {
     }
 }
 
-// Implementation of SyncEffects (placeholder; real sync wired in orchestration layer)
 #[async_trait]
 impl SyncEffects for AuraEffectSystem {
-    async fn sync_with_peer(&self, _peer_id: uuid::Uuid) -> Result<(), SyncError> {
-        Ok(())
+    async fn sync_with_peer(&self, peer_id: uuid::Uuid) -> Result<(), SyncError> {
+        self.sync_handler.sync_with_peer(peer_id).await
     }
 
     async fn get_oplog_digest(&self) -> Result<BloomDigest, SyncError> {
-        Ok(BloomDigest::empty())
+        self.sync_handler.get_oplog_digest().await
     }
 
     async fn get_missing_ops(
         &self,
-        _remote_digest: &BloomDigest,
+        remote_digest: &BloomDigest,
     ) -> Result<Vec<AttestedOp>, SyncError> {
-        Ok(Vec::new())
+        self.sync_handler.get_missing_ops(remote_digest).await
     }
 
     async fn request_ops_from_peer(
         &self,
-        _peer_id: uuid::Uuid,
-        _cids: Vec<Hash32>,
+        peer_id: uuid::Uuid,
+        cids: Vec<Hash32>,
     ) -> Result<Vec<AttestedOp>, SyncError> {
-        Ok(Vec::new())
+        self.sync_handler.request_ops_from_peer(peer_id, cids).await
     }
 
-    async fn merge_remote_ops(&self, _ops: Vec<AttestedOp>) -> Result<(), SyncError> {
-        Ok(())
+    async fn merge_remote_ops(&self, ops: Vec<AttestedOp>) -> Result<(), SyncError> {
+        self.sync_handler.merge_remote_ops(ops).await
     }
 
-    async fn announce_new_op(&self, _cid: Hash32) -> Result<(), SyncError> {
-        Ok(())
+    async fn announce_new_op(&self, cid: Hash32) -> Result<(), SyncError> {
+        self.sync_handler.announce_new_op(cid).await
     }
 
-    async fn request_op(
-        &self,
-        _peer_id: uuid::Uuid,
-        _cid: Hash32,
-    ) -> Result<AttestedOp, SyncError> {
-        Err(SyncError::AuthorizationFailed)
+    async fn request_op(&self, peer_id: uuid::Uuid, cid: Hash32) -> Result<AttestedOp, SyncError> {
+        self.sync_handler.request_op(peer_id, cid).await
     }
 
     async fn push_op_to_peers(
         &self,
-        _op: AttestedOp,
-        _peers: Vec<uuid::Uuid>,
+        op: AttestedOp,
+        peers: Vec<uuid::Uuid>,
     ) -> Result<(), SyncError> {
+        // Local handler has no network; treat push as merge then noop.
+        self.sync_handler.merge_remote_ops(vec![op]).await?;
+        let _ = peers;
         Ok(())
     }
 
     async fn get_connected_peers(&self) -> Result<Vec<uuid::Uuid>, SyncError> {
         Ok(Vec::new())
+    }
+}
+
+// Implementation of TransportEffects
+#[async_trait]
+impl TransportEffects for AuraEffectSystem {
+    async fn send_envelope(&self, envelope: TransportEnvelope) -> Result<(), TransportError> {
+        {
+            let mut inbox = self
+                .transport_inbox
+                .write()
+                .expect("transport inbox poisoned");
+            inbox.push(envelope.clone());
+        }
+
+        {
+            let mut stats = self
+                .transport_stats
+                .write()
+                .expect("transport stats poisoned");
+            stats.envelopes_sent = stats.envelopes_sent.saturating_add(1);
+            let running_total = (stats.avg_envelope_size as u64)
+                .saturating_mul(stats.envelopes_sent.saturating_sub(1))
+                .saturating_add(envelope.payload.len() as u64);
+            stats.avg_envelope_size = (running_total / stats.envelopes_sent.max(1)) as u32;
+        }
+
+        self.transport_handler.send_envelope(envelope).await
+    }
+
+    async fn receive_envelope(&self) -> Result<TransportEnvelope, TransportError> {
+        let maybe = {
+            let mut inbox = self
+                .transport_inbox
+                .write()
+                .expect("transport inbox poisoned");
+            if inbox.is_empty() {
+                None
+            } else {
+                Some(inbox.remove(0))
+            }
+        };
+
+        match maybe {
+            Some(env) => {
+                let mut stats = self
+                    .transport_stats
+                    .write()
+                    .expect("transport stats poisoned");
+                stats.envelopes_received = stats.envelopes_received.saturating_add(1);
+                Ok(env)
+            }
+            None => Err(TransportError::NoMessage),
+        }
+    }
+
+    async fn receive_envelope_from(
+        &self,
+        source: AuthorityId,
+        context: ContextId,
+    ) -> Result<TransportEnvelope, TransportError> {
+        let maybe = {
+            let mut inbox = self
+                .transport_inbox
+                .write()
+                .expect("transport inbox poisoned");
+            inbox
+                .iter()
+                .position(|env| env.source == source && env.context == context)
+                .map(|pos| inbox.remove(pos))
+        };
+
+        match maybe {
+            Some(env) => {
+                let mut stats = self
+                    .transport_stats
+                    .write()
+                    .expect("transport stats poisoned");
+                stats.envelopes_received = stats.envelopes_received.saturating_add(1);
+                Ok(env)
+            }
+            None => Err(TransportError::NoMessage),
+        }
+    }
+
+    async fn is_channel_established(&self, context: ContextId, peer: AuthorityId) -> bool {
+        let has_local = {
+            let inbox = self
+                .transport_inbox
+                .read()
+                .expect("transport inbox poisoned");
+            inbox
+                .iter()
+                .any(|env| env.context == context && env.destination == peer)
+        };
+
+        if has_local {
+            return true;
+        }
+
+        self.transport_handler
+            .is_channel_established(context, peer)
+            .await
+    }
+
+    async fn get_transport_stats(&self) -> TransportStats {
+        self.transport_stats
+            .read()
+            .expect("transport stats poisoned")
+            .clone()
     }
 }
 
@@ -772,6 +950,21 @@ impl NetworkEffects for AuraEffectSystem {
         // Mock implementation
         Err(NetworkError::NotImplemented)
     }
+
+    async fn open(&self, _address: &str) -> Result<String, NetworkError> {
+        // Mock implementation
+        Err(NetworkError::NotImplemented)
+    }
+
+    async fn send(&self, _connection_id: &str, _data: Vec<u8>) -> Result<(), NetworkError> {
+        // Mock implementation
+        Err(NetworkError::NotImplemented)
+    }
+
+    async fn close(&self, _connection_id: &str) -> Result<(), NetworkError> {
+        // Mock implementation
+        Ok(())
+    }
 }
 
 // Implementation of StorageEffects
@@ -930,7 +1123,7 @@ impl SystemEffects for AuraEffectSystem {
         message: &str,
         _context: HashMap<String, String>,
     ) -> Result<(), SystemError> {
-        // Mock implementation - for now just log without context
+        // Mock implementation that logs without additional context data
         println!("[{}] {}: {}", level.to_uppercase(), component, message);
         Ok(())
     }
@@ -1035,108 +1228,6 @@ impl ChoreographicEffects for AuraEffectSystem {
             retry_count: 0,
             total_duration_ms: 0,
         }
-    }
-}
-
-// Implementation of TreeOperationEffects (placeholder; integrate real tree ops in runtime assembly)
-#[async_trait]
-impl TreeOperationEffects for AuraEffectSystem {
-    async fn get_current_state(&self) -> Result<Vec<u8>, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::get_current_state not implemented",
-        ))
-    }
-
-    async fn get_current_commitment(&self) -> Result<Hash32, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::get_current_commitment not implemented",
-        ))
-    }
-
-    async fn get_current_epoch(&self) -> Result<u64, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::get_current_epoch not implemented",
-        ))
-    }
-
-    async fn apply_attested_op(&self, _op: AttestedOp) -> Result<Hash32, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::apply_attested_op not implemented",
-        ))
-    }
-
-    async fn verify_aggregate_sig(
-        &self,
-        _op: &AttestedOp,
-        _state: &[u8],
-    ) -> Result<bool, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::verify_aggregate_sig not implemented",
-        ))
-    }
-
-    async fn add_leaf(&self, _leaf: LeafNode, _under: NodeIndex) -> Result<Vec<u8>, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::add_leaf not implemented",
-        ))
-    }
-
-    async fn remove_leaf(&self, _leaf: LeafId, _reason: u8) -> Result<Vec<u8>, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::remove_leaf not implemented",
-        ))
-    }
-
-    async fn change_policy(
-        &self,
-        _node: NodeIndex,
-        _new_policy: Policy,
-    ) -> Result<Vec<u8>, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::change_policy not implemented",
-        ))
-    }
-
-    async fn rotate_epoch(&self, _affected: Vec<NodeIndex>) -> Result<Vec<u8>, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::rotate_epoch not implemented",
-        ))
-    }
-
-    async fn propose_snapshot(
-        &self,
-        _cut: aura_core::effects::Cut,
-    ) -> Result<aura_core::effects::ProposalId, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::propose_snapshot not implemented",
-        ))
-    }
-
-    async fn approve_snapshot(
-        &self,
-        _proposal_id: aura_core::effects::ProposalId,
-    ) -> Result<aura_core::effects::Partial, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::approve_snapshot not implemented",
-        ))
-    }
-
-    async fn finalize_snapshot(
-        &self,
-        _proposal_id: aura_core::effects::ProposalId,
-    ) -> Result<aura_core::effects::Snapshot, AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::finalize_snapshot not implemented",
-        ))
-    }
-
-    async fn apply_snapshot(
-        &self,
-        _snapshot: &aura_core::effects::Snapshot,
-    ) -> Result<(), AuraError> {
-        Err(AuraError::internal(
-            "TreeOperationEffects::apply_snapshot not implemented",
-        ))
     }
 }
 
@@ -1372,6 +1463,7 @@ mod tests {
     use super::*;
     use aura_core::identifiers::ContextId;
     use aura_protocol::amp::AmpJournalEffects;
+    use aura_protocol::effects::TreeEffects;
 
     #[tokio::test]
     async fn test_guard_effect_system_enables_amp_journal_effects() {
@@ -1379,7 +1471,7 @@ mod tests {
         let effect_system = AuraEffectSystem::testing(&config).unwrap();
 
         // Pure guards + EffectInterpreter are used; legacy bridges removed.
-        let context = ContextId::new();
+        let context = ContextId::new_from_entropy([1u8; 32]);
         let _journal = effect_system.fetch_context_journal(context).await.unwrap();
 
         // Test that metadata works
@@ -1389,6 +1481,21 @@ mod tests {
 
         // Test operation permissions
         assert!(effect_system.can_perform_operation("test_operation"));
+    }
+
+    #[tokio::test]
+    async fn test_tree_and_sync_handlers_are_wired() {
+        let config = AgentConfig::default();
+        let effect_system = AuraEffectSystem::testing(&config).unwrap();
+
+        // Tree state should be retrievable (empty but deterministic)
+        let state = effect_system.get_current_state().await.unwrap();
+        assert_eq!(state.epoch, 0); // fresh tree starts at epoch 0
+        assert_eq!(state.root_commitment, [0u8; 32]);
+
+        // Sync digest should not error
+        let digest = effect_system.get_oplog_digest().await.unwrap();
+        assert_eq!(digest.cids.len(), 0);
     }
 }
 

@@ -150,7 +150,7 @@ async fn test_cross_domain_time_comparisons() {
 #[tokio::test]
 async fn test_fact_creation_with_different_time_domains() {
     let time_source = ControllableTimeSource::new(1000);
-    let authority = AuthorityId::new();
+    let authority = AuthorityId::new_from_entropy([0u8; 32]);
     let content = TestFactContent {
         data: "test".to_string(),
     };
@@ -200,7 +200,7 @@ async fn test_fact_creation_with_different_time_domains() {
 #[tokio::test]
 async fn test_fact_ordering_across_time_domains() {
     let time_source = ControllableTimeSource::new(1000);
-    let authority = AuthorityId::new();
+    let authority = AuthorityId::new_from_entropy([1u8; 32]);
 
     // Create facts with different time domains
     let content1 = TestFactContent {

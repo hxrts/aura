@@ -1,9 +1,9 @@
-//! Lightweight placeholder crypto types until aura-crypto exposes real implementations.
+//! Lightweight rendezvous crypto stand-ins until aura-crypto exposes full primitives.
 
 use aura_core::{relationships::RelationshipId, AuraResult};
 use serde::{Deserialize, Serialize};
 
-/// Blind signature placeholder.
+/// Minimal blind signature representation.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct BlindSignature {
     bytes: Vec<u8>,
@@ -21,7 +21,7 @@ impl BlindSignature {
     }
 }
 
-/// Secret brand placeholder tied to a relationship.
+/// Relationship-bound secret brand tag used for channel derivation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretBrand {
     relationship: RelationshipId,
@@ -50,7 +50,7 @@ impl SecretBrand {
     }
 }
 
-/// Unlinkable credential placeholder.
+/// Minimal unlinkable credential container.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct UnlinkableCredential {
     bytes: Vec<u8>,

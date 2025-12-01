@@ -12,7 +12,7 @@ The target is 20 close friends using the system twice weekly. This constraint fo
 
 Most existing approaches cannot meet the requirements for a practical web-of-trust system. Centralized services violate peer-to-peer and alignment constraints. Eventually-consistent systems without strong semantics fail unpredictably during network partitions. Ad-hoc peer-to-peer protocols cannot safely evolve because protocol changes fragment the network.
 
- Aura's design solves these problems by combining threshold cryptography (FROST primitives in `aura-core::crypto::tree_signing`—the legacy `aura-frost` crate has been removed), [choreographic protocols](107_mpst_and_choreography.md), fact-based semilattices, [session types](107_mpst_and_choreography.md), [guard-chain-enforced effects](109_authorization.md), and deterministic simulation.
+ Aura's design solves these problems by combining [threshold cryptography](101_accounts_and_commitment_tree.md), [choreographic protocols](107_mpst_and_choreography.md), [fact-based semilattices](102_journal.md), [session types](107_mpst_and_choreography.md), and [guard-chain-enforced effects](109_authorization.md).
 
 ## Eight Constraints
 

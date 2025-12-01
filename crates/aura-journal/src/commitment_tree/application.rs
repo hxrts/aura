@@ -234,9 +234,12 @@ async fn verify_aggregate_signature(
         TreeOpKind::RotateEpoch { affected } => affected.first().copied().unwrap_or(NodeIndex(0)),
     };
 
-    let witness = state
-        .signing_witness(&signing_node)
-        .ok_or_else(|| ApplicationError::verification_failed(format!("missing signing key for node {:?}", signing_node)))?;
+    let witness = state.signing_witness(&signing_node).ok_or_else(|| {
+        ApplicationError::verification_failed(format!(
+            "missing signing key for node {:?}",
+            signing_node
+        ))
+    })?;
 
     if attested.signer_count < witness.threshold {
         return Err(ApplicationError::verification_failed(format!(
@@ -249,7 +252,8 @@ async fn verify_aggregate_signature(
     let group_public_key = witness.group_public_key;
 
     // Compute binding message: H("TREE_OP_SIG" || node_id || epoch || policy_hash || op_bytes)
-    let binding_message = tree_op_binding_message(attested, state.current_epoch(), &group_public_key);
+    let binding_message =
+        tree_op_binding_message(attested, state.current_epoch(), &group_public_key);
 
     // Verify aggregate signature using effect-based verification
     verify_threshold_signature(
@@ -264,6 +268,7 @@ async fn verify_aggregate_signature(
 }
 
 /// Derive a deterministic group public key from leaf public keys (fallback when signing key missing)
+#[allow(dead_code)]
 fn derive_group_public_key_from_leaves(state: &TreeState) -> ApplicationResult<[u8; 32]> {
     let mut ids = state.list_leaf_ids();
     ids.sort_by_key(|id| id.0);

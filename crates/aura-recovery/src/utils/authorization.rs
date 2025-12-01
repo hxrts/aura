@@ -141,7 +141,7 @@ mod tests {
             None,
             None,
             "test_operation",
-            &AccountId::new(),
+            &AccountId::new_from_entropy([1u8; 32]),
             ContextOp::RecoverDeviceKey,
             &time,
         )
@@ -152,8 +152,8 @@ mod tests {
 
     #[test]
     fn test_ceremony_id_generation() {
-        let account_id = AccountId::new();
-        let device_id = DeviceId::new();
+        let account_id = AccountId::new_from_entropy([2u8; 32]);
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
 
         let id = AuthorizationHelper::generate_ceremony_id("setup", &account_id, &device_id);
 

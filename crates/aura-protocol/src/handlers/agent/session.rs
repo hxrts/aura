@@ -728,7 +728,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_memory_session_operations() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::deterministic_test_id();
         let time_effects = Arc::new(TestTimeEffects);
         let handler = MemorySessionHandler::new(device_id, time_effects);
 
@@ -756,7 +756,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_join_and_leave() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let time_effects = Arc::new(TestTimeEffects);
         let handler = MemorySessionHandler::new(device_id, time_effects);
 
@@ -778,7 +778,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_session_messaging() {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
         let time_effects = Arc::new(TestTimeEffects);
         let handler = MemorySessionHandler::new(device_id, time_effects);
 

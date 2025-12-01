@@ -88,7 +88,6 @@ pub mod discovery;
 pub mod error;
 
 // Keep legacy top-level modules for backward compatibility during transition
-// These will be removed once all imports are updated
 #[doc(hidden)]
 pub use crate::channel::secure as secure_channel;
 #[doc(hidden)]
@@ -109,7 +108,7 @@ pub use crate::relay::selection as relay_selection;
 // Re-export core types from aura-core
 pub use aura_core::{AccountId, AuraError, AuraResult, Cap, RelationshipId, TrustLevel};
 
-// Re-export crypto placeholder types
+// Re-export lightweight crypto stand-ins
 pub use crypto::{BlindSignature, SecretBrand, UnlinkableCredential};
 
 // Re-export capability types from journal

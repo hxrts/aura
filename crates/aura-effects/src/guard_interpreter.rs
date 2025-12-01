@@ -197,10 +197,8 @@ where
                     AuraError::invalid(format!("Failed to get journal: {}", e))
                 })?;
 
-                // Create a delta journal with just the new fact
-                let delta = aura_core::Journal::default();
-                // Note: In a real implementation, we'd properly add the fact to the journal
-                // For now, we just persist the updated journal
+                // Create a delta journal containing the new fact to be merged
+                let delta = aura_core::Journal::with_facts(entry.fact.clone());
 
                 // Merge the fact into the current journal
                 let updated = self
@@ -234,11 +232,18 @@ where
                 );
 
                 // Create a leakage event
-                // Note: In production, we'd need more context about the actual operation
+                // Use a deterministic, non-nil surrogate ContextId derived from the interpreter
+                // authority to keep accounting reproducible. When the interpreter is wired into
+                // the transport pipeline, callers provide the real relational ContextId here.
                 let event = LeakageEvent {
                     source: self.authority_id,
                     destination: self.authority_id, // Self-leakage for deterministic accounting
-                    context_id: aura_core::identifiers::ContextId::new(), // Would need real context
+                    #[allow(clippy::unwrap_used)] // Infallible: 32-byte hash slice to 16-byte array
+                    context_id: aura_core::identifiers::ContextId::from_uuid(uuid::Uuid::from_bytes(
+                        aura_core::hash::hash(self.authority_id.to_string().as_bytes())[..16]
+                            .try_into()
+                            .unwrap(),
+                    )),
                     leakage_amount: bits as u64,
                     observer_class: ObserverClass::External, // Conservative default
                     operation: "guard_evaluation".to_string(),
@@ -280,7 +285,7 @@ where
 
                 // Deterministic peer id derived from network address bytes
                 let mut h = aura_core::hash::hasher();
-                h.update(to.as_bytes());
+                h.update(to.as_str().as_bytes());
                 let digest = h.finalize();
                 let mut peer_bytes = [0u8; 16];
                 peer_bytes.copy_from_slice(&digest[..16]);
@@ -597,6 +602,28 @@ mod tests {
                 reason: "MockNetworkEffects not implemented".to_string(),
             })
         }
+
+        async fn open(
+            &self,
+            _address: &str,
+        ) -> std::result::Result<String, aura_core::effects::NetworkError> {
+            Err(aura_core::effects::NetworkError::NotImplemented)
+        }
+
+        async fn send(
+            &self,
+            _connection_id: &str,
+            _data: Vec<u8>,
+        ) -> std::result::Result<(), aura_core::effects::NetworkError> {
+            Err(aura_core::effects::NetworkError::NotImplemented)
+        }
+
+        async fn close(
+            &self,
+            _connection_id: &str,
+        ) -> std::result::Result<(), aura_core::effects::NetworkError> {
+            Ok(())
+        }
     }
 
     struct MockRandomEffects;
@@ -656,12 +683,12 @@ mod tests {
             Arc::new(MockNetworkEffects),
             Arc::new(MockRandomEffects),
             Arc::new(MockTimeEffects),
-            AuthorityId::new(),
+            AuthorityId::new_from_entropy([1u8; 32]),
         );
 
-        let authority = AuthorityId::new();
+        let authority = AuthorityId::new_from_entropy([2u8; 32]);
         let cmd = EffectCommand::ChargeBudget {
-            context: aura_core::identifiers::ContextId::new(),
+            context: aura_core::identifiers::ContextId::new_from_entropy([3u8; 32]),
             authority,
             peer: authority,
             amount: 100,
@@ -686,7 +713,7 @@ mod tests {
             Arc::new(MockNetworkEffects),
             Arc::new(MockRandomEffects),
             Arc::new(MockTimeEffects),
-            AuthorityId::new(),
+            AuthorityId::new_from_entropy([4u8; 32]),
         );
 
         let cmd = EffectCommand::GenerateNonce { bytes: 16 };
@@ -711,7 +738,7 @@ mod tests {
             Arc::new(MockNetworkEffects),
             Arc::new(MockRandomEffects),
             Arc::new(MockTimeEffects),
-            AuthorityId::new(),
+            AuthorityId::new_from_entropy([5u8; 32]),
         );
 
         assert_eq!(interpreter.interpreter_type(), "production");

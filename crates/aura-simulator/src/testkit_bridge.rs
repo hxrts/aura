@@ -8,6 +8,7 @@
 
 use crate::types::{Result as SimResult, SimulatorConfig, SimulatorContext, SimulatorError};
 use aura_agent::{AgentBuilder, AuraEffectSystem};
+use aura_core::hash::hash;
 use aura_core::identifiers::AuthorityId;
 use aura_core::DeviceId;
 use aura_testkit::{DeviceTestFixture, ProtocolTestFixture, TestExecutionMode};
@@ -32,7 +33,9 @@ impl TestkitSimulatorBridge {
             let device_id = fixture.device_id();
 
             // Create real effect system configured for simulation
-            let authority_id = AuthorityId::new();
+            let authority_id = AuthorityId::new_from_entropy(hash(&device_id.to_bytes().expect(
+                "device ids from fixtures should always convert to bytes deterministically",
+            )));
             let _agent = AgentBuilder::new()
                 .with_authority(authority_id)
                 .build_testing()
@@ -103,7 +106,7 @@ impl TestkitSimulatorBridge {
         _seed: u64,
     ) -> SimResult<Arc<AuraEffectSystem>> {
         // Convert test harness to effect system instead of middleware stack
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy(hash(&_seed.to_le_bytes()));
         let _agent = AgentBuilder::new()
             .with_authority(authority_id)
             .build_testing()

@@ -17,6 +17,14 @@ use aura_core::{
 };
 use aura_simulator::effects::SimulationEffectInterpreter;
 
+fn authority(seed: u8) -> AuthorityId {
+    AuthorityId::new_from_entropy([seed; 32])
+}
+
+fn context(seed: u8) -> ContextId {
+    ContextId::new_from_entropy([seed; 32])
+}
+
 /// Example guard function that evaluates a request
 fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> GuardOutcome {
     // Check if user is authorized based on metadata
@@ -31,8 +39,8 @@ fn evaluate_request_guard(snapshot: &GuardSnapshot, request_type: &str) -> Guard
     }
 
     // Check flow budget
-    let context = ContextId::new(); // Would come from request context
-    let authority = AuthorityId::new(); // Would come from request
+    let context = context(0); // Would come from request context
+    let authority = authority(0); // Would come from request
     let required_budget = match request_type {
         "read" => 10,
         "write" => 50,
@@ -99,7 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ts_ms: 1000,
         uncertainty: None,
     });
-    let authority = AuthorityId::new();
+    let authority = authority(1);
     let interpreter = SimulationEffectInterpreter::new(
         42, // Deterministic seed
         initial_time.clone(),
@@ -136,7 +144,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Create guard snapshot from current state
         let state = interpreter.snapshot_state();
         // Convert flow_budgets to include context
-        let context = ContextId::new();
+        let context = context(2);
         let budgets_with_context: std::collections::HashMap<(ContextId, AuthorityId), u32> = state
             .flow_budgets
             .iter()

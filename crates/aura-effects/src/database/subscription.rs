@@ -391,7 +391,7 @@ impl SubscribableJournalHandler {
         // Add to index
         let id = self
             .index
-            .add_fact(predicate.clone(), value.clone(), authority.clone(), None);
+            .add_fact(predicate.clone(), value.clone(), authority, None);
 
         // Create subscription fact
         let sub_fact = SubscriptionFact {
@@ -433,12 +433,10 @@ impl DatabaseSubscriptionEffects for SubscribableJournalHandler {
         // Get initial facts based on scope
         let initial_facts = if scope.include_historical {
             // Query all facts matching the scope
-            // For now, get facts by authority if specified
             let indexed_facts = if let Some(ref auth) = scope.authority {
                 self.index.facts_by_authority(auth).await?
             } else {
-                // Get all facts - for now just return empty since we don't have a method for that
-                vec![]
+                self.index.all_facts().await?
             };
 
             // Convert to subscription facts
@@ -595,14 +593,14 @@ mod tests {
 
     #[test]
     fn test_fact_filter_authority() {
-        let auth = AuthorityId::new();
-        let filter = FactFilter::new().with_authority(auth.clone());
+        let auth = AuthorityId::new_from_entropy([1u8; 32]);
+        let filter = FactFilter::new().with_authority(auth);
 
         let matching_fact = SubscriptionFact {
             id: FactId::new(1),
             predicate: "test".to_string(),
             value: FactValue::Number(42),
-            authority: Some(auth.clone()),
+            authority: Some(auth),
         };
 
         let non_matching_fact = SubscriptionFact {
@@ -618,17 +616,17 @@ mod tests {
 
     #[test]
     fn test_fact_filter_combined() {
-        let auth = AuthorityId::new();
+        let auth = AuthorityId::new_from_entropy([2u8; 32]);
         let filter = FactFilter::new()
             .with_predicate_prefix("user.")
-            .with_authority(auth.clone());
+            .with_authority(auth);
 
         // Matches both criteria
         let matching = SubscriptionFact {
             id: FactId::new(1),
             predicate: "user.name".to_string(),
             value: FactValue::String("alice".to_string()),
-            authority: Some(auth.clone()),
+            authority: Some(auth),
         };
 
         // Wrong predicate
@@ -636,7 +634,7 @@ mod tests {
             id: FactId::new(2),
             predicate: "event.type".to_string(),
             value: FactValue::String("login".to_string()),
-            authority: Some(auth.clone()),
+            authority: Some(auth),
         };
 
         // Wrong authority
@@ -661,10 +659,8 @@ mod tests {
 
     #[test]
     fn test_query_scope_builder() {
-        let auth = AuthorityId::new();
-        let scope = QueryScope::new()
-            .with_authority(auth.clone())
-            .new_facts_only();
+        let auth = AuthorityId::new_from_entropy([3u8; 32]);
+        let scope = QueryScope::new().with_authority(auth).new_facts_only();
 
         assert_eq!(scope.authority, Some(auth));
         assert!(!scope.include_historical);

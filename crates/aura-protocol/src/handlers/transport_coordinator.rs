@@ -13,7 +13,7 @@
 //! - Coordinates connection lifecycle across the system
 //! - Enforces global connection limits and cleanup policies
 
-use aura_core::effects::{NetworkEffects, PhysicalTimeEffects, StorageEffects};
+use aura_core::effects::{NetworkEffects, NetworkError, PhysicalTimeEffects, StorageEffects};
 use aura_core::{identifiers::DeviceId, ContextId};
 use aura_effects::transport::{TransportConfig, TransportError};
 use std::collections::HashMap;
@@ -65,67 +65,67 @@ pub enum TransportCoordinationError {
 /// Result type for transport coordination operations
 pub type CoordinationResult<T> = Result<T, TransportCoordinationError>;
 
-/// Transport inner interface placeholder
-#[derive(Debug, Clone)]
-struct TransportManagerInner {
-    _config: TransportConfig,
-}
-
-impl TransportManagerInner {
-    async fn send_data(
-        &self,
-        _connection_id: &str,
-        _data: Vec<u8>,
-    ) -> Result<(), aura_core::effects::NetworkError> {
-        // Placeholder implementation
-        Ok(())
-    }
-
-    async fn _receive_data(
-        &self,
-        _connection_id: &str,
-    ) -> Result<Vec<u8>, aura_core::effects::NetworkError> {
-        // Placeholder implementation
-        Ok(Vec::new())
-    }
-
-    async fn disconnect(
-        &self,
-        _connection_id: &str,
-    ) -> Result<(), aura_core::effects::NetworkError> {
-        // Placeholder implementation
-        Ok(())
-    }
-}
-
-/// Simple transport manager placeholder for Layer 4 coordination
+/// Simple transport manager for Layer 4 coordination
 #[derive(Debug, Clone)]
 pub struct RetryingTransportManager {
-    _config: TransportConfig,
-    _max_retries: u32,
-    inner: TransportManagerInner,
+    config: TransportConfig,
+    max_retries: u32,
 }
 
 impl RetryingTransportManager {
     /// Create new retrying transport manager
     pub fn new(config: TransportConfig, max_retries: u32) -> Self {
         Self {
-            inner: TransportManagerInner {
-                _config: config.clone(),
-            },
-            _config: config,
-            _max_retries: max_retries,
+            config,
+            max_retries,
         }
     }
 
     async fn connect_with_retry(
         &self,
+        network: &(impl NetworkEffects + ?Sized),
         address: &str,
     ) -> Result<ConnectionInfo, TransportCoordinationError> {
-        // Placeholder implementation for compilation
-        Ok(ConnectionInfo {
-            connection_id: format!("conn_{}", address),
-        })
+        let mut last_error: Option<NetworkError> = None;
+
+        for attempt in 1..=self.max_retries {
+            match network.open(address).await {
+                Ok(connection_id) => return Ok(ConnectionInfo { connection_id }),
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < self.max_retries {
+                        continue;
+                    }
+                }
+            }
+        }
+
+        let final_error = last_error
+            .map(|e| TransportCoordinationError::Effect(format!("Network open failed: {e}")))
+            .unwrap_or_else(|| {
+                TransportCoordinationError::Transport(TransportError::ConnectionFailed(
+                    "All retry attempts exhausted".to_string(),
+                ))
+            });
+
+        Err(final_error)
+    }
+
+    async fn send_data(
+        &self,
+        network: &(impl NetworkEffects + ?Sized),
+        connection_id: &str,
+        data: Vec<u8>,
+    ) -> Result<(), NetworkError> {
+        network.send(connection_id, data).await
+    }
+
+    async fn disconnect(
+        &self,
+        network: &(impl NetworkEffects + ?Sized),
+        connection_id: &str,
+    ) -> Result<(), NetworkError> {
+        network.close(connection_id).await
     }
 }
 
@@ -153,9 +153,9 @@ pub struct TransportCoordinator<E> {
 struct ConnectionState {
     device_id: DeviceId,
     context_id: ContextId,
-    _connection_id: String,
+    connection_id: String,
     last_activity_ms: u64, // Timestamp in milliseconds from PhysicalTimeEffects
-    _retry_count: u32,
+    retry_count: u32,
 }
 
 impl<E> TransportCoordinator<E>
@@ -199,7 +199,10 @@ where
         }
 
         // Attempt connection with retry logic
-        let connection = self.transport_manager.connect_with_retry(address).await?;
+        let connection = self
+            .transport_manager
+            .connect_with_retry(&self.effects, address)
+            .await?;
 
         // Store connection state using injected time effects
         let current_time = self.effects.physical_time().await.map_err(|e| {
@@ -210,9 +213,9 @@ where
         let connection_state = ConnectionState {
             device_id: peer_id,
             context_id,
-            _connection_id: connection.connection_id.clone(),
+            connection_id: connection.connection_id.clone(),
             last_activity_ms: now_ms,
-            _retry_count: 0,
+            retry_count: 0,
         };
 
         {
@@ -244,8 +247,7 @@ where
 
         // Send data using transport manager
         self.transport_manager
-            .inner
-            .send_data(connection_id, data)
+            .send_data(&self.effects, connection_id, data)
             .await
             .map_err(|e| {
                 TransportCoordinationError::ProtocolFailed(format!("Send failed: {}", e))
@@ -264,8 +266,7 @@ where
 
         // Clean up transport resources
         self.transport_manager
-            .inner
-            .disconnect(connection_id)
+            .disconnect(&self.effects, connection_id)
             .await
             .map_err(|e| {
                 TransportCoordinationError::ProtocolFailed(format!("Disconnect failed: {}", e))

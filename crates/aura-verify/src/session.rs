@@ -1,7 +1,7 @@
 //! Session ticket verification
 //!
-//! This module handles verifying session tickets that authorize temporary
-//! operations within a protocol session.
+//! This module verifies session tickets that authorize scoped operations
+//! within a protocol session.
 
 use crate::{AuthenticationError, Result};
 use aura_core::{Ed25519Signature, Ed25519VerifyingKey};

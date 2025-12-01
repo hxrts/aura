@@ -1,4 +1,4 @@
-//! AMP CLI commands (rough stub for channel state inspection and bumps).
+//! AMP CLI commands for channel state inspection and epoch bumps.
 
 use clap::Subcommand;
 

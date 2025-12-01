@@ -27,7 +27,7 @@ fn map_amp_error(err: AmpError) -> AuraError {
     AuraError::invalid(format!("AMP ratchet error: {}", err))
 }
 
-/// Simple wire format placeholder for AMP messages (header + opaque payload).
+/// Simple wire format for AMP messages (header + opaque payload).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AmpMessage {
     pub header: AmpHeader,

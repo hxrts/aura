@@ -257,7 +257,7 @@ impl EffectSystemBuilder {
             _ => {
                 // Create a build-time context for wiring handlers
                 let authority_id = self.authority_id.ok_or("Authority ID required")?;
-                let context_id = aura_core::identifiers::ContextId::new();
+                let context_id = aura_core::identifiers::ContextId::default();
                 let core_mode = match self.execution_mode {
                     ExecutionMode::Testing => aura_core::effects::ExecutionMode::Testing,
                     ExecutionMode::Simulation { seed } => {
@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn test_builder_pattern() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
         let context = AuthorityContext::new(authority_id);
 
         let registry = EffectRegistry::custom()

@@ -230,9 +230,9 @@ mod tests {
 
     #[test]
     fn test_execution_context_builder() {
-        let device_id = DeviceId::new();
-        let account_id = AccountId::new();
-        let session_id = SessionId::new();
+        let device_id = DeviceId::deterministic_test_id();
+        let account_id = AccountId::new_from_entropy([1u8; 32]);
+        let session_id = SessionId::from_uuid(uuid::Uuid::from_u128(1));
 
         let context = ExecutionContext::new(device_id, "test".to_string())
             .with_account(account_id)
@@ -248,8 +248,8 @@ mod tests {
 
     #[test]
     fn test_context_derivation() {
-        let device_id = DeviceId::new();
-        let account_id = AccountId::new();
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
+        let account_id = AccountId::new_from_entropy([2u8; 32]);
 
         let original = ExecutionContext::new(device_id, "original".to_string())
             .with_account(account_id)
@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn test_standard_context_handler() {
         let handler = StandardContextHandler::new();
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([3u8; 32]);
 
         let context = handler.create_execution_context(device_id, "test".to_string());
 
@@ -278,8 +278,8 @@ mod tests {
     #[test]
     fn test_context_validation() {
         let handler = StandardContextHandler::new();
-        let device_id = DeviceId::new();
-        let account_id = AccountId::new();
+        let device_id = DeviceId::new_from_entropy([4u8; 32]);
+        let account_id = AccountId::new_from_entropy([4u8; 32]);
 
         let context = ExecutionContext::new(device_id, "test".to_string())
             .with_account(account_id)
@@ -298,7 +298,7 @@ mod tests {
     #[test]
     fn test_metadata_merging() {
         let handler = StandardContextHandler::new();
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([5u8; 32]);
 
         let context1 = ExecutionContext::new(device_id, "op1".to_string())
             .with_metadata("key1".to_string(), "value1".to_string())

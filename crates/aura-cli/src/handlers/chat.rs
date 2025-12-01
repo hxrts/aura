@@ -8,13 +8,12 @@ use anyhow::Result;
 use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_chat::{ChatGroupId, ChatMessageId, ChatService};
 use aura_core::{
-    effects::ConsoleEffects,
+    effects::{ConsoleEffects, StorageEffects},
     identifiers::AuthorityId,
     time::{PhysicalTime, TimeStamp},
     AuraError,
 };
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::Write;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -570,7 +569,7 @@ async fn handle_remove_member(
     Ok(())
 }
 
-/// Handle group update command (placeholder)
+/// Handle group update command
 async fn handle_update_group(
     ctx: &EffectContext,
     chat_service: &ChatService<AuraEffectSystem>,
@@ -611,7 +610,7 @@ async fn handle_update_group(
     Ok(())
 }
 
-/// Handle message search command (placeholder)
+/// Handle message search command
 async fn handle_search_messages(
     ctx: &EffectContext,
     chat_service: &ChatService<AuraEffectSystem>,
@@ -670,7 +669,7 @@ async fn handle_search_messages(
     Ok(())
 }
 
-/// Handle message editing command (placeholder)
+/// Handle message editing command
 async fn handle_edit_message(
     ctx: &EffectContext,
     chat_service: &ChatService<AuraEffectSystem>,
@@ -704,7 +703,7 @@ async fn handle_edit_message(
     Ok(())
 }
 
-/// Handle message deletion command (placeholder)
+/// Handle message deletion command
 async fn handle_delete_message(
     ctx: &EffectContext,
     chat_service: &ChatService<AuraEffectSystem>,
@@ -733,7 +732,7 @@ async fn handle_delete_message(
     Ok(())
 }
 
-/// Handle history export command (placeholder)
+/// Handle history export command
 async fn handle_export_history(
     _ctx: &EffectContext,
     chat_service: &ChatService<AuraEffectSystem>,
@@ -751,12 +750,11 @@ async fn handle_export_history(
         .filter(|m| include_system || m.message_type != aura_chat::types::MessageType::System)
         .collect();
 
-    let mut file = File::create(output)?;
+    let mut buffer: Vec<u8> = Vec::new();
 
     match format.to_lowercase().as_str() {
         "json" => {
-            let serialized = serde_json::to_vec_pretty(&filtered)?;
-            file.write_all(&serialized)?;
+            serde_json::to_writer_pretty(&mut buffer, &filtered)?;
         }
         "text" => {
             for msg in filtered {
@@ -766,11 +764,11 @@ async fn handle_export_history(
                     msg.sender_id,
                     msg.content
                 );
-                file.write_all(line.as_bytes())?;
+                buffer.write_all(line.as_bytes())?;
             }
         }
         "csv" => {
-            file.write_all(b"timestamp,sender,group,content\n")?;
+            buffer.write_all(b"timestamp,sender,group,content\n")?;
             for msg in filtered {
                 let line = format!(
                     "{},{},{},\"{}\"\n",
@@ -779,7 +777,7 @@ async fn handle_export_history(
                     msg.group_id,
                     msg.content.replace('"', "\"\"")
                 );
-                file.write_all(line.as_bytes())?;
+                buffer.write_all(line.as_bytes())?;
             }
         }
         other => {
@@ -787,7 +785,16 @@ async fn handle_export_history(
         }
     }
 
-    ConsoleEffects::log_info(effect_system, &format!("📤 Exported history to {}", output)).await?;
+    let storage_key = format!("chat_export:{}:{}", group_id, output);
+    StorageEffects::store(effect_system, &storage_key, buffer)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to store exported history: {}", e))?;
+
+    ConsoleEffects::log_info(
+        effect_system,
+        &format!("📤 Exported history to storage key {}", storage_key),
+    )
+    .await?;
 
     Ok(())
 }

@@ -5,6 +5,7 @@
 //! and runtime reconfiguration of effect handlers.
 
 use async_trait::async_trait;
+use aura_core::hash;
 use aura_core::{AccountId, DeviceId, EffectType, ExecutionMode, SessionId};
 use aura_mpst::LocalSessionType;
 use std::collections::HashMap;
@@ -25,16 +26,19 @@ pub struct HandlerContext {
 impl HandlerContext {
     // Registry helper
     /// Create a new handler context
-    #[allow(clippy::disallowed_methods)]
     pub fn new(device_id: DeviceId, execution_mode: ExecutionMode) -> Self {
-        // Uuid::new_v4() is allowed in handler context creation to generate unique operation IDs.
-        // This is a legitimate use case for runtime identifier generation in the composition layer.
+        let operation_id = {
+            let digest = hash::hash(b"handler-context-operation");
+            let mut bytes = [0u8; 16];
+            bytes.copy_from_slice(&digest[..16]);
+            Uuid::from_bytes(bytes)
+        };
         Self {
             device_id,
             execution_mode,
             session_id: None,
             account_id: None,
-            operation_id: Uuid::new_v4(),
+            operation_id,
             metadata: HashMap::new(),
         }
     }

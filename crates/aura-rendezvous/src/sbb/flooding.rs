@@ -389,7 +389,7 @@ mod tests {
 
     #[test]
     fn test_coordinator_creation() -> Result<(), Box<dyn std::error::Error>> {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
         let effects = create_test_effects(device_id)?;
         let coordinator = SbbFloodingCoordinator::new(device_id, effects);
 
@@ -401,7 +401,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_flood_with_zero_ttl() -> Result<(), Box<dyn std::error::Error>> {
-        let device_id = DeviceId::new();
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
         let effects = create_test_effects(device_id)?;
         let mut coordinator = SbbFloodingCoordinator::new(device_id, effects);
 

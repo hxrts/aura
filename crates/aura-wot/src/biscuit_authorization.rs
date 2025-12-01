@@ -12,7 +12,7 @@
 //! entry point (first guard in chain); enables delegation without trusted intermediaries.
 
 use crate::{BiscuitError, ResourceScope};
-use aura_core::identifiers::AuthorityId;
+use aura_core::{hash::hash, identifiers::AuthorityId};
 use biscuit_auth::{macros::*, Biscuit, PublicKey};
 
 // ============================================================================
@@ -40,7 +40,7 @@ impl BiscuitAuthorizationBridge {
         let keypair = KeyPair::new();
         Self {
             _root_public_key: keypair.public(),
-            authority_id: AuthorityId::new(),
+            authority_id: AuthorityId::new_from_entropy(hash(&keypair.public().to_bytes())),
         }
     }
 
@@ -51,7 +51,7 @@ impl BiscuitAuthorizationBridge {
         let keypair = KeyPair::new();
         Self {
             _root_public_key: keypair.public(),
-            authority_id: AuthorityId::new(),
+            authority_id: AuthorityId::new_from_entropy(hash(&keypair.public().to_bytes())),
         }
     }
 

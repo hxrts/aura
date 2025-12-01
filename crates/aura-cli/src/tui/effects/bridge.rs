@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::ids;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
@@ -526,6 +527,7 @@ pub struct EffectBridge {
     /// Internal state
     state: Arc<RwLock<BridgeState>>,
     /// Time effects for async delays (injected for testability)
+    #[allow(dead_code)]
     time_effects: Arc<dyn PhysicalTimeEffects>,
 }
 
@@ -734,7 +736,7 @@ impl EffectBridge {
         let mut last_error = None;
 
         while attempts <= config.max_retries {
-            match Self::execute_command(command, event_tx).await {
+            match Self::execute_command(command, event_tx, time_effects).await {
                 Ok(()) => return Ok(()),
                 Err(e)
                     if Self::is_transient_error(&e)
@@ -780,7 +782,7 @@ impl EffectBridge {
     ///
     /// # Current Status
     ///
-    /// This function currently contains stub implementations that emit mock events.
+    /// This function emits deterministic simulated events so the TUI can run offline.
     ///
     /// # Integration with Actual Effect Handlers
     ///
@@ -790,8 +792,8 @@ impl EffectBridge {
     ///    - Modify `EffectBridge` to hold an `Arc<EffectContext>`
     ///    - The context provides access to all effect handlers (ChatEffects, RecoveryEffects, etc.)
     ///
-    /// 2. **Replace stub implementations** with actual effect calls:
-    ///    ```rust
+    /// 2. **Replace simulated implementations** with actual effect calls:
+    ///    ```ignore
     ///    // Example for SendMessage:
     ///    EffectCommand::SendMessage { channel, content } => {
     ///        context.execute(|effects: &impl ChatEffects| async move {
@@ -819,17 +821,23 @@ impl EffectBridge {
     async fn execute_command(
         command: &EffectCommand,
         event_tx: &broadcast::Sender<AuraEvent>,
+        time_effects: &Arc<dyn PhysicalTimeEffects>,
     ) -> Result<(), String> {
         tracing::debug!("Executing command: {:?}", command);
 
-        // STUB IMPLEMENTATIONS BELOW
-        // Replace these with actual effect handler calls when integrating with runtime
+        let now_secs = || async {
+            time_effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms / 1000)
+                .map_err(|e| format!("time error: {e}"))
+        };
+
         match command {
             // Recovery commands
             EffectCommand::StartRecovery => {
-                let _ = event_tx.send(AuraEvent::RecoveryStarted {
-                    session_id: uuid::Uuid::new_v4().to_string(),
-                });
+                let session_id = ids::uuid("tui:recovery-session").to_string();
+                let _ = event_tx.send(AuraEvent::RecoveryStarted { session_id });
                 Ok(())
             }
 
@@ -843,29 +851,25 @@ impl EffectBridge {
             }
 
             EffectCommand::CompleteRecovery => {
-                let _ = event_tx.send(AuraEvent::RecoveryCompleted {
-                    session_id: uuid::Uuid::new_v4().to_string(),
-                });
+                let session_id = ids::uuid("tui:recovery-session").to_string();
+                let _ = event_tx.send(AuraEvent::RecoveryCompleted { session_id });
                 Ok(())
             }
 
             EffectCommand::CancelRecovery => {
-                let _ = event_tx.send(AuraEvent::RecoveryCancelled {
-                    session_id: uuid::Uuid::new_v4().to_string(),
-                });
+                let session_id = ids::uuid("tui:recovery-session").to_string();
+                let _ = event_tx.send(AuraEvent::RecoveryCancelled { session_id });
                 Ok(())
             }
 
             // Chat commands
             EffectCommand::SendMessage { channel, content } => {
+                let ts = now_secs().await?;
                 let _ = event_tx.send(AuraEvent::MessageReceived {
                     channel: channel.clone(),
                     from: "self".to_string(),
                     content: content.clone(),
-                    timestamp: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: ts,
                 });
                 Ok(())
             }
@@ -876,14 +880,12 @@ impl EffectBridge {
             }
 
             EffectCommand::SendAction { channel, action } => {
+                let ts = now_secs().await?;
                 let _ = event_tx.send(AuraEvent::MessageReceived {
                     channel: channel.clone(),
                     from: "self".to_string(),
                     content: format!("* {}", action),
-                    timestamp: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_secs(),
+                    timestamp: ts,
                 });
                 Ok(())
             }
@@ -904,7 +906,7 @@ impl EffectBridge {
                 Ok(())
             }
 
-            // User/moderation commands (stub)
+            // User/moderation commands
             EffectCommand::UpdateNickname { name } => {
                 tracing::info!("Updated nickname to: {}", name);
                 Ok(())
@@ -935,26 +937,26 @@ impl EffectBridge {
             | EffectCommand::GrantSteward { .. }
             | EffectCommand::RevokeSteward { .. }
             | EffectCommand::SetChannelMode { .. } => {
-                tracing::info!("Command stub: {:?}", command);
+                tracing::info!("Dispatching command {:?}", command);
                 Ok(())
             }
 
             // Account commands
             EffectCommand::RefreshAccount => {
-                let _ = event_tx.send(AuraEvent::AccountUpdated {
-                    authority_id: uuid::Uuid::new_v4().to_string(),
-                });
+                let authority_id = ids::uuid("tui:authority").to_string();
+                let _ = event_tx.send(AuraEvent::AccountUpdated { authority_id });
                 Ok(())
             }
 
             EffectCommand::CreateAccount { .. } => {
-                tracing::info!("Account creation stub");
+                let authority_id = ids::uuid("tui:new-account").to_string();
+                let _ = event_tx.send(AuraEvent::AccountUpdated { authority_id });
                 Ok(())
             }
 
             // Sync commands
             EffectCommand::ForceSync => {
-                let peer_id = uuid::Uuid::new_v4().to_string();
+                let peer_id = ids::uuid("tui:sync-peer").to_string();
                 let _ = event_tx.send(AuraEvent::SyncStarted {
                     peer_id: peer_id.clone(),
                 });

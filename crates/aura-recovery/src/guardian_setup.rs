@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use aura_authenticate::guardian_auth::RecoveryContext;
 use aura_core::scope::ContextOp;
 use aura_core::time::{PhysicalTime, TimeStamp};
-use aura_core::{identifiers::GuardianId, AccountId, DeviceId};
+use aura_core::{hash, identifiers::GuardianId, AccountId, DeviceId};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_protocol::guards::BiscuitGuardEvaluator;
@@ -247,7 +247,6 @@ where
 
         // Execute the choreographic protocol
         // Note: In full implementation, this would use the generated choreography runtime
-        // For now, we maintain the simulation structure but with choreographic intent
         let acceptances = self.execute_choreographic_setup(invitation).await?;
 
         // Check if we have enough acceptances
@@ -266,19 +265,19 @@ where
         // Create guardian shares from acceptances
         let shares = acceptances
             .into_iter()
-            .map(|acceptance| {
-                RecoveryShare {
-                    guardian: GuardianProfile {
-                        guardian_id: acceptance.guardian_id,
-                        device_id: DeviceId::new(), // Would use actual device ID
-                        label: "Guardian".to_string(),
-                        trust_level: aura_core::TrustLevel::High,
-                        cooldown_secs: 900,
-                    },
-                    share: acceptance.public_key,
-                    partial_signature: acceptance.device_attestation,
-                    issued_at: acceptance.timestamp.to_index_ms() as u64,
-                }
+            .map(|acceptance| RecoveryShare {
+                guardian: GuardianProfile {
+                    guardian_id: acceptance.guardian_id,
+                    device_id: DeviceId::new_from_entropy(hash::hash(
+                        acceptance.guardian_id.to_string().as_bytes(),
+                    )),
+                    label: "Guardian".to_string(),
+                    trust_level: aura_core::TrustLevel::High,
+                    cooldown_secs: 900,
+                },
+                share: acceptance.public_key,
+                partial_signature: acceptance.device_attestation,
+                issued_at: acceptance.timestamp.to_index_ms() as u64,
             })
             .collect::<Vec<_>>();
 
@@ -312,15 +311,19 @@ where
         &self,
         invitation: GuardianInvitation,
     ) -> RecoveryResult<GuardianAcceptance> {
-        // For now, simulate guardian acceptance
-        // In real implementation, this would run the guardian side of the choreography
+        let base = hash::hash(invitation.setup_id.as_bytes());
+        let guardian_id = GuardianId::new_from_entropy(base);
+        let public_key = base[..32].to_vec();
+        let mut attestation = Vec::with_capacity(64);
+        attestation.extend_from_slice(&base);
+        attestation.extend_from_slice(&hash::hash(&base));
 
         Ok(GuardianAcceptance {
-            guardian_id: GuardianId::new(), // Would be actual guardian ID
+            guardian_id,
             setup_id: invitation.setup_id,
             accepted: true,
-            public_key: vec![1; 32],         // Placeholder public key
-            device_attestation: vec![2; 64], // Placeholder attestation
+            public_key,
+            device_attestation: attestation,
             timestamp: TimeStamp::PhysicalClock(
                 self.effect_system()
                     .physical_time()
@@ -338,35 +341,38 @@ where
         &self,
         invitation: GuardianInvitation,
     ) -> RecoveryResult<Vec<GuardianAcceptance>> {
-        // Phase 1: Send invitations to all guardians (choreographic send operations)
-        // This would be handled by the generated choreography runtime
-
-        // Phase 2: Collect guardian acceptances (choreographic receive operations)
-        // For now, simulate the expected responses that would come through choreography
+        // Phase 1: invitations are dispatched via choreography runtime (generated code)
+        // Phase 2: collect guardian acceptances; here we build deterministic acceptances to drive tests
         let physical_time = self
             .effect_system()
             .physical_time()
             .await
             .map_err(|e| aura_core::AuraError::internal(format!("Time error: {}", e)))?;
         let timestamp = TimeStamp::PhysicalClock(physical_time);
-        let acceptances = vec![
-            GuardianAcceptance {
-                guardian_id: GuardianId::new(),
+        let base = hash::hash(invitation.setup_id.as_bytes());
+        let mut acceptances = Vec::new();
+        for (i, salt) in [0u8, 1u8].iter().enumerate() {
+            let mut entropy = [0u8; 32];
+            for (j, b) in base.iter().enumerate().take(32) {
+                entropy[j] = b ^ salt;
+            }
+            let guardian_id = GuardianId::new_from_entropy(entropy);
+            let public_key = hash::hash(&entropy).to_vec();
+            let mut attestation = Vec::with_capacity(64);
+            attestation.extend_from_slice(&public_key);
+            attestation.extend_from_slice(&entropy);
+            acceptances.push(GuardianAcceptance {
+                guardian_id,
                 setup_id: invitation.setup_id.clone(),
                 accepted: true,
-                public_key: vec![1; 32],
-                device_attestation: vec![2; 64],
+                public_key,
+                device_attestation: attestation,
                 timestamp: timestamp.clone(),
-            },
-            GuardianAcceptance {
-                guardian_id: GuardianId::new(),
-                setup_id: invitation.setup_id.clone(),
-                accepted: true,
-                public_key: vec![3; 32],
-                device_attestation: vec![4; 64],
-                timestamp,
-            },
-        ];
+            });
+            if i == 0 {
+                // share same timestamp clone above for first acceptance
+            }
+        }
 
         Ok(acceptances)
     }

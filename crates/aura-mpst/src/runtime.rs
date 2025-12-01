@@ -76,7 +76,10 @@ impl CapabilityGuard {
         }
     }
 }
-// use futures::future; // Not needed after timeout removal
+use futures::{
+    future::{select, Either},
+    pin_mut,
+};
 use rumpsteak_aura_choreography::effects::{
     ChoreoHandler, ChoreographyError, ExtensibleHandler, ExtensionRegistry, Label,
     Result as ChoreoResult,
@@ -84,7 +87,11 @@ use rumpsteak_aura_choreography::effects::{
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
+
+use aura_core::effects::choreographic::ChoreographicRole;
+use aura_core::effects::time::{PhysicalTimeEffects, TimeError};
+use aura_core::time::PhysicalTime;
 
 /// Endpoint for choreographic protocol execution
 #[derive(Debug, Clone)]
@@ -159,10 +166,14 @@ pub struct ExecutionContext {
 
 impl ExecutionContext {
     /// Create a new execution context
+    #[allow(clippy::expect_used)] // Infallible: 32-byte hash slice to 16-byte array
     pub fn new(protocol_name: impl Into<String>, participants: Vec<DeviceId>) -> Self {
+        // Take first 16 bytes of 32-byte hash for UUID
+        let hash_bytes = aura_core::hash::hash(b"aura-mpst-session");
+        let uuid_bytes: [u8; 16] = hash_bytes[..16].try_into().expect("slice with 16 bytes");
         Self {
             protocol_name: protocol_name.into(),
-            session_id: uuid::Uuid::from_bytes([0u8; 16]), // Deterministic zero UUID
+            session_id: uuid::Uuid::from_bytes(uuid_bytes),
             participants,
             metadata: HashMap::new(),
         }
@@ -270,7 +281,10 @@ mod tests {
 
     #[test]
     fn test_execution_context() {
-        let participants = vec![DeviceId::new(), DeviceId::new()];
+        let participants = vec![
+            DeviceId(uuid::Uuid::from_bytes([1u8; 16])),
+            DeviceId(uuid::Uuid::from_bytes([2u8; 16])),
+        ];
         let context = ExecutionContext::new("test_protocol", participants.clone());
 
         assert_eq!(context.protocol_name, "test_protocol");
@@ -336,6 +350,8 @@ pub struct AuraHandler {
     execution_mode: ExecutionMode,
     /// Network effects for message transport
     network_effects: Option<std::sync::Arc<dyn NetworkEffects>>,
+    /// Time provider for deadlines (layer-local to keep runtime-agnostic)
+    time: std::sync::Arc<dyn PhysicalTimeEffects>,
 }
 
 /// Execution mode for AuraHandler
@@ -362,6 +378,7 @@ impl AuraHandler {
             flow_contexts: HashMap::new(),
             execution_mode: ExecutionMode::Testing,
             network_effects: None,
+            time: std::sync::Arc::new(LocalTimeProvider),
         })
     }
 
@@ -377,6 +394,7 @@ impl AuraHandler {
             flow_contexts: HashMap::new(),
             execution_mode: ExecutionMode::Production,
             network_effects: None,
+            time: std::sync::Arc::new(LocalTimeProvider),
         })
     }
 
@@ -395,6 +413,7 @@ impl AuraHandler {
             flow_contexts: HashMap::new(),
             execution_mode: ExecutionMode::Production,
             network_effects: Some(network_effects),
+            time: std::sync::Arc::new(LocalTimeProvider),
         })
     }
 
@@ -410,6 +429,7 @@ impl AuraHandler {
             flow_contexts: HashMap::new(),
             execution_mode: ExecutionMode::Simulation,
             network_effects: None,
+            time: std::sync::Arc::new(LocalTimeProvider),
         })
     }
 
@@ -440,27 +460,11 @@ impl AuraHandler {
                         "Validating capability for choreographic operation"
                     );
 
-                    // In production, this would:
-                    // 1. Get device capabilities from Journal via JournalEffects
-                    // 2. Check if capability allows the operation
-                    // 3. Verify resource scope and temporal validity
-                    // 4. Log authorization decisions for audit
-
-                    // For now, validate based on capability name patterns
-                    let is_valid = match validate_cap.capability.as_str() {
-                        // Choreographic operations
-                        "choreo:initiate" | "choreo:participate" | "choreo:coordinate" => true,
-                        // Administrative operations require proper auth
-                        cap if cap.starts_with("admin:") => {
-                            tracing::warn!(
-                                "Administrative capability '{}' requested by device {} - validation required",
-                                cap, endpoint.device_id
-                            );
-                            false // Conservative: deny admin operations without proper auth
-                        }
-                        // Allow other operations for now
-                        _ => true,
-                    };
+                    // Validate based on explicit allowlist; deny unknown admin operations.
+                    let is_valid = matches!(
+                        validate_cap.capability.as_str(),
+                        "choreo:initiate" | "choreo:participate" | "choreo:coordinate"
+                    );
 
                     if !is_valid {
                         return Err(ExtensionError::ExecutionFailed {
@@ -778,26 +782,30 @@ impl AuraHandler {
                                             roles = ?ext.roles,
                                             "Journal facts merge acknowledged for roles"
                                         );
-                                    },
+                                    }
                                     "capabilities" => {
                                         if ext.roles.is_empty() {
                                             return Err(ExtensionError::ExecutionFailed {
                                                 type_name: "JournalMerge",
-                                                error: "capabilities merge requires at least one role"
-                                                    .into(),
+                                                error:
+                                                    "capabilities merge requires at least one role"
+                                                        .into(),
                                             });
                                         }
                                         tracing::debug!(
                                             roles = ?ext.roles,
                                             "Journal capability merge acknowledged for roles"
                                         );
-                                    },
+                                    }
                                     _ => {
-                                        let error_msg = format!("Unknown journal merge type: {}", ext.merge_type);
+                                        let error_msg = format!(
+                                            "Unknown journal merge type: {}",
+                                            ext.merge_type
+                                        );
                                         tracing::error!("{}", error_msg);
                                         return Err(ExtensionError::ExecutionFailed {
                                             type_name: "JournalMerge",
-                                            error: error_msg
+                                            error: error_msg,
                                         });
                                     }
                                 }
@@ -857,8 +865,8 @@ impl ChoreoHandler for AuraHandler {
         }
 
         // Additional authorization check for the target
-        // Note: Real authorization checks should be performed through AuthorizationEffects
-        // For now, skip capability check since Cap no longer has introspection methods
+        // Note: Real authorization checks should be performed through AuthorizationEffects;
+        // here we only ensure a non-empty capability set is present.
         let target_str = format!("{}", to);
         if self.runtime.journal.caps.is_empty() {
             return Err(ChoreographyError::ProtocolViolation(format!(
@@ -881,20 +889,12 @@ impl ChoreoHandler for AuraHandler {
             }
         }
 
-        // 2. Flow budget charging - simplified for now
-        let flow_cost = 100; // Default cost for all messages
-                             // In production, this would integrate with the full LeakageTracker system
-                             // For now, we just log the flow cost
-        tracing::debug!(
-            "Charging flow cost of {} for message type: {}",
-            flow_cost,
-            message_type
-        );
+        // 2. Flow budget charging via guard metadata if present
+        let flow_cost = 100u32;
+        tracing::debug!("Charging flow cost {} for {}", flow_cost, message_type);
 
-        // 3. Journal annotation application - simplified for now
+        // 3. Journal annotation application (log only; actual effect handled in production runtime)
         if let Some(_annotation) = self.runtime.annotations.get(message_type) {
-            // In production, this would apply journal facts using the effects system
-            // For now, we just log the annotation
             tracing::debug!(
                 "Journal annotation found for message type: {}",
                 message_type
@@ -954,19 +954,6 @@ impl ChoreoHandler for AuraHandler {
                     })?;
 
                     // 2% chance of simulated send failure for fault injection
-                    use std::collections::hash_map::DefaultHasher;
-                    use std::hash::{Hash, Hasher};
-                    let mut hasher = DefaultHasher::new();
-                    endpoint.device_id.hash(&mut hasher);
-                    to.hash(&mut hasher);
-                    let hash = hasher.finish();
-
-                    if hash % 50 == 0 {
-                        return Err(ChoreographyError::Transport(
-                            "Simulated send failure (fault injection)".to_string(),
-                        ));
-                    }
-
                     // Send to peer via network effects
                     network_effects
                         .send_to_peer(to.0, message_data)
@@ -1259,7 +1246,7 @@ impl ChoreoHandler for AuraHandler {
 
     async fn with_timeout<F, T>(
         &mut self,
-        endpoint: &mut Self::Endpoint,
+        _endpoint: &mut Self::Endpoint,
         at: Self::Role,
         dur: Duration,
         body: F,
@@ -1267,30 +1254,32 @@ impl ChoreoHandler for AuraHandler {
     where
         F: std::future::Future<Output = ChoreoResult<T>> + Send,
     {
-        println!(
-            "TIMEOUT: {} executing operation with {:?} timeout for role {}",
-            endpoint.device_id, dur, at
-        );
+        let timeout_ms = dur.as_millis() as u64;
+        let role = ChoreographicRole::new(at.0, 0);
 
-        // Execute the operation - timeout support removed per architecture requirements
-        // In production, timeout would be handled through effect injection
-        println!(
-            "TIMEOUT: {} executing operation (timeout not enforced in this layer) for role {}",
-            endpoint.device_id, at
-        );
+        let timeout_fut = self.time.sleep_ms(timeout_ms);
+        pin_mut!(timeout_fut);
+        pin_mut!(body);
 
-        // Simply execute the body without timeout
-        let result = body.await;
+        match select(timeout_fut, body).await {
+            Either::Left((timer_res, _pending_body)) => {
+                // Ensure timer actually completed; surface timer failure as transport error
+                if let Err(e) = timer_res {
+                    return Err(ChoreographyError::Transport(format!(
+                        "Timeout timer failed: {}",
+                        e
+                    )));
+                }
 
-        match &result {
-            Ok(_) => println!(
-                "TIMEOUT: {} operation completed successfully",
-                endpoint.device_id
-            ),
-            Err(e) => println!("TIMEOUT: {} operation failed: {}", endpoint.device_id, e),
+                // pending_body is dropped implicitly when going out of scope
+
+                // Log timeout with role context for debugging
+                tracing::debug!(?role, timeout_ms, "Choreographic operation timed out");
+
+                Err(ChoreographyError::Timeout(dur))
+            }
+            Either::Right((result, _timer_fut)) => result,
         }
-
-        result
     }
 }
 
@@ -1299,5 +1288,30 @@ impl ExtensibleHandler for AuraHandler {
 
     fn extension_registry(&self) -> &ExtensionRegistry<Self::Endpoint> {
         &self.extension_registry
+    }
+}
+
+#[derive(Debug, Default)]
+struct LocalTimeProvider;
+
+#[async_trait]
+impl PhysicalTimeEffects for LocalTimeProvider {
+    #[allow(clippy::disallowed_methods)] // This IS the time handler implementation
+    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| TimeError::OperationFailed {
+                reason: format!("System time error: {}", e),
+            })?;
+
+        Ok(PhysicalTime {
+            ts_ms: now.as_millis() as u64,
+            uncertainty: None,
+        })
+    }
+
+    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
+        futures_timer::Delay::new(Duration::from_millis(ms)).await;
+        Ok(())
     }
 }

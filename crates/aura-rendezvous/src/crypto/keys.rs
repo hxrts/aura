@@ -5,11 +5,11 @@
 //! relationship keys that Alice and Bob can derive independently.
 
 use aura_core::hash;
-use aura_core::{IdentityKeyContext, KeyDerivationSpec};
 use aura_core::{AuraError, AuraResult, DeviceId};
+use aura_core::{IdentityKeyContext, KeyDerivationSpec};
 use hkdf::Hkdf;
-use sha2::Sha256;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::collections::HashMap;
 
 /// 32-byte relationship encryption key
@@ -28,8 +28,11 @@ fn derive_relationship_key(
     let salt = b"aura-sbb-relationship-v1";
     let hk = Hkdf::<Sha256>::new(Some(salt), root_key);
     let mut okm = [0u8; 32];
-    hk.expand(&[relationship_id, spec.key_version.to_le_bytes().to_vec()].concat(), &mut okm)
-        .map_err(|_| "HKDF expand failed".to_string())?;
+    hk.expand(
+        &[relationship_id, spec.key_version.to_le_bytes().to_vec()].concat(),
+        &mut okm,
+    )
+    .map_err(|_| "HKDF expand failed".to_string())?;
     Ok(okm)
 }
 
@@ -209,10 +212,14 @@ pub fn derive_test_root_key(device_id: DeviceId) -> [u8; 32] {
 mod tests {
     use super::*;
 
+    fn device(seed: u8) -> DeviceId {
+        DeviceId::new_from_entropy([seed; 32])
+    }
+
     #[test]
     fn test_relationship_context_ordering() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
+        let alice_id = device(1);
+        let bob_id = device(2);
 
         // Context should be same regardless of parameter order
         let context1 = RelationshipContext::new(alice_id, bob_id, "sbb-envelope".to_string(), 0);
@@ -227,9 +234,9 @@ mod tests {
 
     #[test]
     fn test_relationship_context_uniqueness() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
-        let charlie_id = DeviceId::new();
+        let alice_id = device(3);
+        let bob_id = device(4);
+        let charlie_id = device(5);
 
         let context_ab = RelationshipContext::new(alice_id, bob_id, "sbb-envelope".to_string(), 0);
         let context_ac =
@@ -261,8 +268,8 @@ mod tests {
 
     #[test]
     fn test_key_derivation_deterministic() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
+        let alice_id = device(6);
+        let bob_id = device(7);
 
         // Alice's perspective
         let alice_root = derive_test_root_key(alice_id);
@@ -292,8 +299,8 @@ mod tests {
 
     #[test]
     fn test_key_rotation() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
+        let alice_id = device(8);
+        let bob_id = device(9);
         let root_key = [0x42; 32];
 
         let mut manager = RelationshipKeyManager::new(alice_id, root_key);
@@ -313,8 +320,8 @@ mod tests {
 
     #[test]
     fn test_key_caching() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
+        let alice_id = device(10);
+        let bob_id = device(11);
         let root_key = [0x42; 32];
 
         let mut manager = RelationshipKeyManager::new(alice_id, root_key);
@@ -342,8 +349,8 @@ mod tests {
 
     #[test]
     fn test_app_context_isolation() {
-        let alice_id = DeviceId::new();
-        let bob_id = DeviceId::new();
+        let alice_id = device(1);
+        let bob_id = device(2);
         let root_key = [0x42; 32];
 
         let mut manager = RelationshipKeyManager::new(alice_id, root_key);

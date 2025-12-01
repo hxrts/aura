@@ -339,7 +339,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_witness_set_fast_path() {
-        let witnesses = vec![AuthorityId::new(), AuthorityId::new(), AuthorityId::new()];
+        let witnesses = vec![
+            AuthorityId::new_from_entropy([1u8; 32]),
+            AuthorityId::new_from_entropy([2u8; 32]),
+            AuthorityId::new_from_entropy([3u8; 32]),
+        ];
         let witness_set = WitnessSet::new(2, witnesses.clone());
 
         // Initially no cached commitments
@@ -369,8 +373,8 @@ mod tests {
     #[test]
     fn test_witness_tracker() {
         let mut tracker = WitnessTracker::new();
-        let witness1 = AuthorityId::new();
-        let witness2 = AuthorityId::new();
+        let witness1 = AuthorityId::new_from_entropy([1u8; 32]);
+        let witness2 = AuthorityId::new_from_entropy([2u8; 32]);
 
         // Add nonces
         tracker.add_nonce(

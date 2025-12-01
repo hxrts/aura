@@ -294,11 +294,18 @@ impl NamespacedSync {
         })?;
 
         // Minimal policy: if token parses and targets the namespace, accept.
-        let authorizer = token
+        let mut authorizer = token
             .authorizer()
             .map_err(|e| AuraError::invalid(format!("Biscuit authorizer build failed: {}", e)))?;
         let scope_str = format!("{:?}", scope);
-        let _ = authorizer; // unused policy stub for now
+        // Minimal policy: ensure the token can be evaluated without failing and record the
+        // operation scope for auditing. Additional caveats should be attached by the caller.
+        authorizer
+            .allow()
+            .map_err(|e| AuraError::invalid(format!("Biscuit allow rule failed: {}", e)))?;
+        authorizer.authorize().map_err(|e| {
+            AuraError::permission_denied(format!("Biscuit evaluation failed: {}", e))
+        })?;
         tracing::debug!(
             "Validated Biscuit token for {} on scope {} (root verified)",
             operation,
@@ -497,7 +504,7 @@ impl NamespacedAntiEntropy {
         // Fallback to effect_api device mapping
         match effects.effect_api_device_id().await {
             Ok(device_id) => Ok(AuthorityId::from_uuid(device_id.into())),
-            Err(_) => Ok(AuthorityId::new()),
+            Err(_) => Ok(AuthorityId::new_from_entropy([1u8; 32])),
         }
     }
 
@@ -580,7 +587,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_namespace_sync_creation() {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy([2u8; 32]);
         let namespace = JournalNamespace::Authority(authority_id);
         let journal = Arc::new(RwLock::new(Journal::new(namespace.clone())));
 

@@ -33,7 +33,8 @@ biscuit-auth = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }
-aura-testkit = { path = "../aura-testkit" }
+# Testing infrastructure with full effect system for integration tests
+aura-testkit = { path = "../aura-testkit", features = ["full-effect-system"] }
 aura-agent = { path = "../aura-agent" }
 
 [lints]

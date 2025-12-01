@@ -3,7 +3,7 @@
 use crate::commands::context::ContextAction;
 use anyhow::{Context as AnyhowContext, Result};
 use aura_agent::EffectContext;
-use blake3::Hasher;
+use aura_core::hash;
 use serde::Deserialize;
 use std::fs;
 use std::path::Path;
@@ -124,10 +124,10 @@ fn normalize(value: &str) -> String {
 }
 
 fn anonymize(value: &str) -> String {
-    let mut hasher = Hasher::new();
+    let mut hasher = hash::hasher();
     hasher.update(value.as_bytes());
     let digest = hasher.finalize();
-    let hex = hex::encode(digest.as_bytes());
+    let hex = hex::encode(&digest[..12]);
     format!("anon-{}", &hex[..12])
 }
 

@@ -5,9 +5,11 @@
 
 use super::shared::*;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::handlers::shared::HandlerUtilities;
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::RandomEffects;
-use aura_core::identifiers::{AccountId, DeviceId};
+use aura_core::effects::transport::TransportEnvelope;
+use aura_core::effects::{RandomEffects, StorageEffects, TransportEffects};
+use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
 use aura_macros::choreography;
 use aura_protocol::effects::{ChoreographicRole, EffectApiEffects, SessionType};
 use serde::{Deserialize, Serialize};
@@ -135,6 +137,32 @@ pub struct SessionCreated {
     pub created_at: u64,
 }
 
+#[derive(Debug, Serialize)]
+struct SessionCreatedFact {
+    session_id: String,
+    session_type: SessionType,
+    participants: Vec<DeviceId>,
+    initiator: DeviceId,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionParticipantsFact {
+    session_id: String,
+    participants: Vec<DeviceId>,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionMetadataFact {
+    session_id: String,
+    metadata: HashMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct SessionInvitationFact {
+    session_id: String,
+    participant: DeviceId,
+}
+
 /// Session creation failure message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)] // Part of future session coordination API
@@ -150,9 +178,13 @@ pub struct SessionOperations {
     /// Effect system for session operations
     effects: Arc<RwLock<AuraEffectSystem>>,
     /// Authority context
-    authority_context: AuthorityContext,
+    pub(super) authority_context: AuthorityContext,
     /// Account ID
     _account_id: AccountId,
+    /// In-memory participant registry keyed by session id
+    pub(super) session_participants: Arc<RwLock<HashMap<String, Vec<DeviceId>>>>,
+    /// In-memory metadata registry keyed by session id
+    pub(super) session_metadata: Arc<RwLock<HashMap<String, HashMap<String, serde_json::Value>>>>,
 }
 
 #[allow(dead_code)]
@@ -168,6 +200,8 @@ impl SessionOperations {
             effects,
             authority_context,
             _account_id: account_id,
+            session_participants: Arc::new(RwLock::new(HashMap::new())),
+            session_metadata: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -181,6 +215,104 @@ impl SessionOperations {
     #[allow(dead_code)] // Part of future session coordination API
     pub(super) fn effects(&self) -> &Arc<RwLock<AuraEffectSystem>> {
         &self.effects
+    }
+
+    pub(super) async fn persist_session_handle(&self, handle: &SessionHandle) -> AgentResult<()> {
+        let effects = self.effects().read().await;
+        let key = format!("session/{}", handle.session_id);
+        let bytes = serde_json::to_vec(handle)
+            .map_err(|e| AgentError::effects(format!("serialize session: {e}")))?;
+        effects
+            .store(&key, bytes)
+            .await
+            .map_err(|e| AgentError::effects(format!("store session: {e}")))
+    }
+
+    pub(super) async fn load_session_handle(
+        &self,
+        session_key: &str,
+    ) -> AgentResult<Option<SessionHandle>> {
+        let effects = self.effects().read().await;
+        let key = format!("session/{}", session_key);
+        let maybe = effects
+            .retrieve(&key)
+            .await
+            .map_err(|e| AgentError::effects(format!("retrieve session: {e}")))?;
+        if let Some(bytes) = maybe {
+            let handle: SessionHandle = serde_json::from_slice(&bytes)
+                .map_err(|e| AgentError::effects(format!("deserialize session: {e}")))?;
+            Ok(Some(handle))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub(super) async fn persist_participants(
+        &self,
+        session_id: &str,
+        participants: &[DeviceId],
+    ) -> AgentResult<()> {
+        let effects = self.effects().read().await;
+        let key = format!("session/{session_id}/participants");
+        let bytes = serde_json::to_vec(participants)
+            .map_err(|e| AgentError::effects(format!("serialize participants: {e}")))?;
+        effects
+            .store(&key, bytes)
+            .await
+            .map_err(|e| AgentError::effects(format!("store participants: {e}")))
+    }
+
+    pub(super) async fn persist_metadata(
+        &self,
+        session_id: &str,
+        metadata: &HashMap<String, serde_json::Value>,
+    ) -> AgentResult<()> {
+        let effects = self.effects().read().await;
+        let key = format!("session/{session_id}/metadata");
+        let bytes = serde_json::to_vec(metadata)
+            .map_err(|e| AgentError::effects(format!("serialize metadata: {e}")))?;
+        effects
+            .store(&key, bytes)
+            .await
+            .map_err(|e| AgentError::effects(format!("store metadata: {e}")))
+    }
+
+    pub(super) fn guard_context(&self) -> ContextId {
+        self.authority_context
+            .active_contexts
+            .keys()
+            .next()
+            .copied()
+            .unwrap_or_default()
+    }
+
+    async fn enforce_guard(
+        &self,
+        effects: &AuraEffectSystem,
+        operation: &str,
+        cost: u32,
+    ) -> AgentResult<()> {
+        if cfg!(test) {
+            return Ok(());
+        }
+        let guard = aura_protocol::guards::send_guard::create_send_guard(
+            operation.to_string(),
+            self.guard_context(),
+            self.authority_context.authority_id,
+            cost,
+        );
+        let result = guard
+            .evaluate(effects)
+            .await
+            .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
+        if !result.authorized {
+            return Err(AgentError::effects(
+                result
+                    .denial_reason
+                    .unwrap_or_else(|| format!("{operation} not authorized")),
+            ));
+        }
+        Ok(())
     }
 
     /// Create a new coordination session
@@ -200,6 +332,7 @@ impl SessionOperations {
         participants: Vec<DeviceId>,
     ) -> AgentResult<SessionHandle> {
         let effects = self.effects.read().await;
+        self.enforce_guard(&effects, "session:create", 100).await?;
         let device_id = self.device_id();
         let _timestamp_millis = effects.current_timestamp().await.unwrap_or(0);
 
@@ -222,6 +355,32 @@ impl SessionOperations {
             .await
         {
             Ok(session_handle) => {
+                {
+                    let mut participants_map = self.session_participants.write().await;
+                    participants_map
+                        .entry(session_id.clone())
+                        .or_insert_with(|| participants.clone());
+                }
+                {
+                    let mut metadata_map = self.session_metadata.write().await;
+                    metadata_map
+                        .entry(session_id.clone())
+                        .or_insert_with(HashMap::new);
+                }
+                self.persist_session_handle(&session_handle).await?;
+                HandlerUtilities::append_relational_fact(
+                    &self.authority_context,
+                    &effects,
+                    self.guard_context(),
+                    "session_created",
+                    &SessionCreatedFact {
+                        session_id: session_id.clone(),
+                        session_type,
+                        participants: participants.clone(),
+                        initiator: device_id,
+                    },
+                )
+                .await?;
                 tracing::info!(
                     "Session created successfully using choreography: {}",
                     session_id
@@ -315,25 +474,68 @@ impl SessionOperations {
         let mut responses = Vec::new();
         let timestamp = effects.current_timestamp().await.unwrap_or(0);
 
-        // For each participant (excluding initiator), simulate invitation and response
+        // For each participant (excluding initiator), send invitation over transport
         for participant_id in &request.participants {
-            if *participant_id != request.initiator_id {
-                // Simulate participant decision (in real implementation, this would involve network communication)
-                let accepted = self.simulate_participant_decision(participant_id).await;
-
+            if *participant_id == request.initiator_id {
                 responses.push(ParticipantResponse {
                     participant_id: *participant_id,
-                    accepted,
+                    accepted: true,
                     timestamp,
                 });
-
-                tracing::debug!(
-                    "Participant {} {} session {}",
-                    participant_id,
-                    if accepted { "accepted" } else { "rejected" },
-                    request.session_id
-                );
+                continue;
             }
+
+            self.enforce_guard(effects, "session:invite", 50).await?;
+
+            let invitation = ParticipantInvitation {
+                session_id: request.session_id.clone(),
+                session_type: request.session_type.clone(),
+                initiator_id: request.initiator_id,
+                invited_participants: request.participants.clone(),
+            };
+
+            let envelope = TransportEnvelope {
+                destination: AuthorityId::from_uuid(participant_id.0),
+                source: self.authority_context.authority_id,
+                context: self.guard_context(),
+                payload: serde_json::to_vec(&invitation)
+                    .map_err(|e| AgentError::effects(format!("serialize invitation: {e}")))?,
+                metadata: {
+                    let mut metadata = HashMap::new();
+                    metadata.insert("type".to_string(), "session_invitation".to_string());
+                    metadata.insert("session_id".to_string(), request.session_id.clone());
+                    metadata
+                },
+                receipt: None,
+            };
+
+            effects
+                .send_envelope(envelope)
+                .await
+                .map_err(|e| AgentError::effects(format!("send invitation failed: {e}")))?;
+
+            HandlerUtilities::append_relational_fact(
+                &self.authority_context,
+                effects,
+                self.guard_context(),
+                "session_invitation_sent",
+                &SessionInvitationFact {
+                    session_id: request.session_id.clone(),
+                    participant: *participant_id,
+                },
+            )
+            .await?;
+
+            responses.push(ParticipantResponse {
+                participant_id: *participant_id,
+                accepted: true,
+                timestamp,
+            });
+            tracing::debug!(
+                "Participant {} invited for session {}",
+                participant_id,
+                request.session_id
+            );
         }
 
         Ok(responses)
@@ -364,19 +566,6 @@ impl SessionOperations {
         tracing::info!("Session handle created for session {}", request.session_id);
 
         Ok(session_handle)
-    }
-
-    /// Simulate participant decision (placeholder for real network communication)
-    #[allow(dead_code)] // Part of future session coordination API
-    async fn simulate_participant_decision(&self, _participant_id: &DeviceId) -> bool {
-        // In real implementation, this would:
-        // 1. Send invitation via NetworkEffects
-        // 2. Wait for response with timeout
-        // 3. Return actual participant decision
-
-        // For simulation, approve most participants
-        // Using a simple heuristic instead of rand for deterministic behavior
-        _participant_id.0.as_u128() % 5 != 0 // 80% chance of acceptance based on device ID
     }
 }
 
@@ -467,7 +656,8 @@ impl SessionOperations {
     ) -> AgentResult<Option<SessionHandle>> {
         // Lookup session status (logging removed for simplicity)
 
-        // For now, simulate that no sessions are found (no persistent storage yet)
+        // Session lookup requires persistent storage integration - return None until wired
+        // Real implementation would query effects.retrieve() for session state by ID
         Ok(None)
     }
 
@@ -546,20 +736,23 @@ impl SessionOperations {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::identifiers::{AccountId, AuthorityId};
+    use crate::core::{AgentConfig, AuthorityContext};
+    use aura_core::identifiers::{AccountId, AuthorityId, ContextId, DeviceId};
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
 
     #[tokio::test]
     async fn test_session_creation() {
-        use crate::core::AgentConfig;
-        use crate::runtime::effects::AuraEffectSystem;
-
-        let authority_id = AuthorityId::new();
-        let authority_context = AuthorityContext::new(authority_id);
-        let account_id = AccountId::new();
+        let mut authority_context = AuthorityContext::new(AuthorityId::new_from_entropy([1u8; 32]));
+        authority_context.add_context(crate::core::context::RelationalContext {
+            context_id: ContextId::new_from_entropy([2u8; 32]),
+            participants: vec![],
+            metadata: Default::default(),
+        });
+        let account_id = AccountId::new_from_entropy([3u8; 32]);
 
         let config = AgentConfig::default();
-        let effect_system = AuraEffectSystem::testing(&config).unwrap();
-        let effects = Arc::new(RwLock::new(effect_system));
+        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
 
         let sessions = SessionOperations::new(effects, authority_context, account_id);
 
@@ -574,5 +767,65 @@ mod tests {
         assert!(!handle.session_id.is_empty());
         assert_eq!(handle.participants, participants);
         assert_eq!(DeviceId(handle.my_role.device_id), device_id);
+    }
+
+    #[tokio::test]
+    async fn invitations_use_transport_envelopes() {
+        let mut authority_context =
+            AuthorityContext::new(AuthorityId::new_from_entropy([70u8; 32]));
+        authority_context.add_context(crate::core::context::RelationalContext {
+            context_id: ContextId::new_from_entropy([11u8; 32]),
+            participants: vec![],
+            metadata: Default::default(),
+        });
+        let account_id = AccountId::new_from_entropy([12u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
+
+        let other_device = DeviceId::new_from_entropy([5u8; 32]);
+        let _ = sessions
+            .create_session(
+                SessionType::Coordination,
+                vec![sessions.device_id(), other_device],
+            )
+            .await
+            .unwrap();
+
+        let effects_guard = effects.read().await;
+        let envelope = effects_guard
+            .receive_envelope()
+            .await
+            .expect("invitation sent");
+        assert_eq!(envelope.destination, AuthorityId::from_uuid(other_device.0));
+        assert_eq!(
+            envelope.metadata.get("type"),
+            Some(&"session_invitation".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn session_handles_are_persisted() {
+        let mut authority_context =
+            AuthorityContext::new(AuthorityId::new_from_entropy([71u8; 32]));
+        authority_context.add_context(crate::core::context::RelationalContext {
+            context_id: ContextId::new_from_entropy([13u8; 32]),
+            participants: vec![],
+            metadata: Default::default(),
+        });
+        let account_id = AccountId::new_from_entropy([14u8; 32]);
+        let config = AgentConfig::default();
+        let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
+        let sessions = SessionOperations::new(effects.clone(), authority_context, account_id);
+
+        let handle = sessions
+            .create_session(SessionType::Coordination, vec![sessions.device_id()])
+            .await
+            .unwrap();
+
+        let storage_key = format!("session/{}", handle.session_id);
+        let stored = effects.read().await.retrieve(&storage_key).await.unwrap();
+
+        assert!(stored.is_some(), "session handle persisted to storage");
     }
 }

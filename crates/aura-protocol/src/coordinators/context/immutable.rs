@@ -537,6 +537,12 @@ impl AuraContext {
     /// Create a new context for testing mode
     pub fn for_testing(device_id: DeviceId) -> Self {
         let created_at = 0u64; // Fixed timestamp for deterministic testing
+                               // Combine device_id and timestamp bytes for deterministic UUID generation
+        let mut seed_bytes = Vec::with_capacity(32);
+        seed_bytes.extend_from_slice(device_id.0.as_bytes());
+        seed_bytes.extend_from_slice(&created_at.to_le_bytes());
+        seed_bytes.extend_from_slice(&[0u8; 8]);
+        let operation_id = uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, &seed_bytes);
         Self {
             device_id,
             execution_mode: ExecutionMode::Testing,
@@ -544,7 +550,7 @@ impl AuraContext {
             created_at,
             account_id: None,
             metadata: Arc::new(HashMap::new()),
-            operation_id: uuid::Uuid::nil(), // Deterministic UUID for testing
+            operation_id,
             epoch: created_at,
             choreographic: None,
             simulation: None,
@@ -748,7 +754,8 @@ mod tests {
 
     #[test]
     fn test_immutable_choreographic_context() {
-        let role = ChoreographicRole::new(Uuid::nil(), 0);
+        let role_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, b"choreo-role-0");
+        let role = ChoreographicRole::new(role_id, 0);
         let participants = vec![role];
         let ctx = ChoreographicContext::new(role, participants, 1);
 

@@ -11,14 +11,6 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-fn now_millis() -> u64 {
-    0 // placeholder; call sites should use PhysicalTimeEffects
-}
-
-fn now_secs() -> u64 {
-    0 // placeholder; call sites should use PhysicalTimeEffects
-}
-
 /// Unified metrics collector following observability best practices
 #[derive(Debug, Clone)]
 pub struct MetricsCollector {
@@ -38,6 +30,10 @@ struct MetricsRegistry {
     errors: Arc<Mutex<ErrorMetrics>>,
     /// Active timing measurements
     active_timers: Arc<Mutex<HashMap<String, u64>>>,
+    /// Last successful sync timestamp (ms since Unix epoch)
+    last_sync_timestamp_ms: AtomicU64,
+    /// Last operation timestamp (ms since Unix epoch)
+    last_operation_timestamp_ms: AtomicU64,
 }
 
 /// Operational metrics following Prometheus naming conventions
@@ -372,6 +368,8 @@ impl MetricsCollector {
                 resources: Arc::new(Mutex::new(ResourceMetrics::default())),
                 errors: Arc::new(Mutex::new(ErrorMetrics::default())),
                 active_timers: Arc::new(Mutex::new(HashMap::new())),
+                last_sync_timestamp_ms: AtomicU64::new(0),
+                last_operation_timestamp_ms: AtomicU64::new(0),
             }),
         }
     }
@@ -595,10 +593,11 @@ impl MetricsCollector {
         }
     }
 
-    /// Update last sync timestamp for a peer
-    pub fn update_last_sync(&self, _peer: DeviceId) {
-        // For now, this is a no-op since we track global sync time
-        // In a real implementation, this would update per-peer sync times
+    /// Update last sync timestamp for a peer (callers provide wall-clock ms)
+    pub fn update_last_sync(&self, _peer: DeviceId, timestamp_ms: u64) {
+        self.registry
+            .last_sync_timestamp_ms
+            .store(timestamp_ms, Ordering::Relaxed);
     }
 
     /// Increment auto sync rounds counter
@@ -611,22 +610,31 @@ impl MetricsCollector {
     }
 
     /// Add auto sync results
-    pub fn add_auto_sync_results(&self, _results: &[(DeviceId, usize)]) {
-        // For now, this is a no-op
-        // In a real implementation, this would aggregate the results
+    pub fn add_auto_sync_results(&self, results: &[(DeviceId, usize)]) {
+        if let Ok(operational) = self.registry.operational.lock() {
+            let mut total_ops = 0u64;
+            for &(_, ops) in results {
+                total_ops += ops as u64;
+            }
+            operational
+                .sync_operations_transferred_total
+                .fetch_add(total_ops, Ordering::Relaxed);
+        }
     }
 
     /// Update auto sync timing
-    pub fn update_auto_sync_timing(&self, _duration: Duration) {
-        // For now, this is a no-op
-        // In a real implementation, this would track auto-sync duration
+    pub fn update_auto_sync_timing(&self, duration: Duration) {
+        if let Ok(performance) = self.registry.performance.lock() {
+            performance
+                .sync_duration_histogram
+                .observe(duration.as_millis() as f64);
+        }
     }
 
     /// Get last sync timestamp in milliseconds since Unix epoch
     pub fn get_last_sync_timestamp(&self) -> Option<u64> {
-        // For now, use the system time as a placeholder
-        // In a real implementation, this would track the actual last sync time
-        Some(now_millis())
+        let ts = self.registry.last_sync_timestamp_ms.load(Ordering::Relaxed);
+        (ts > 0).then_some(ts)
     }
 
     /// Get total number of requests processed
@@ -665,13 +673,15 @@ impl MetricsCollector {
 
     /// Get last operation timestamp in milliseconds since Unix epoch
     pub fn get_last_operation_timestamp(&self) -> Option<u64> {
-        // For now, use the system time as a placeholder
-        // In a real implementation, this would track the actual last operation time
-        Some(now_millis())
+        let ts = self
+            .registry
+            .last_operation_timestamp_ms
+            .load(Ordering::Relaxed);
+        (ts > 0).then_some(ts)
     }
 
     /// Export comprehensive metrics snapshot
-    pub fn export_snapshot(&self) -> SyncMetricsSnapshot {
+    pub fn export_snapshot(&self, timestamp_secs: u64) -> SyncMetricsSnapshot {
         let operational_snapshot = if let Ok(operational) = self.registry.operational.lock() {
             let total_sessions = operational.sync_sessions_total.load(Ordering::Relaxed);
             let completed_sessions = operational
@@ -818,13 +828,13 @@ impl MetricsCollector {
             performance: performance_snapshot,
             resources: resources_snapshot,
             errors: errors_snapshot,
-            timestamp: now_secs(),
+            timestamp: timestamp_secs,
         }
     }
 
     /// Export metrics in Prometheus format
     pub fn export_prometheus(&self) -> String {
-        let snapshot = self.export_snapshot();
+        let snapshot = self.export_snapshot(0);
 
         format!(
             "# HELP aura_sync_sessions_total Total number of sync sessions initiated\n\
@@ -886,7 +896,7 @@ mod tests {
     #[test]
     fn test_metrics_collector_creation() {
         let collector = MetricsCollector::new();
-        let snapshot = collector.export_snapshot();
+        let snapshot = collector.export_snapshot(0);
 
         assert_eq!(snapshot.operational.sync_sessions_total, 0);
         assert_eq!(snapshot.operational.connected_peers, 0);
@@ -899,12 +909,12 @@ mod tests {
         let now = 1000000u64; // Test timestamp
 
         collector.record_sync_start("test_session_1", now);
-        let snapshot1 = collector.export_snapshot();
+        let snapshot1 = collector.export_snapshot(now);
         assert_eq!(snapshot1.operational.sync_sessions_total, 1);
         assert_eq!(snapshot1.operational.active_sync_sessions, 1);
 
         collector.record_sync_completion("test_session_1", 50, 1024, now + 100);
-        let snapshot2 = collector.export_snapshot();
+        let snapshot2 = collector.export_snapshot(now + 100);
         assert_eq!(snapshot2.operational.sync_sessions_completed_total, 1);
         assert_eq!(snapshot2.operational.active_sync_sessions, 0);
         assert_eq!(snapshot2.operational.sync_operations_transferred_total, 50);
@@ -919,7 +929,7 @@ mod tests {
         collector.record_error(ErrorCategory::Protocol, "Invalid message");
         collector.record_error(ErrorCategory::Timeout, "Operation timed out");
 
-        let snapshot = collector.export_snapshot();
+        let snapshot = collector.export_snapshot(0);
         assert_eq!(snapshot.errors.network_errors_total, 1);
         assert_eq!(snapshot.errors.protocol_errors_total, 1);
         assert_eq!(snapshot.errors.timeout_errors_total, 1);
@@ -956,12 +966,13 @@ mod tests {
     #[test]
     fn test_concurrent_access() {
         let collector = Arc::new(MetricsCollector::new());
+        let base_now = 1_000_000u64;
         let mut handles = vec![];
 
         for i in 0..10 {
             let collector_clone = collector.clone();
             let handle = thread::spawn(move || {
-                let now = 1000000u64 + i as u64;
+                let now = base_now + i as u64;
                 collector_clone.record_sync_start(&format!("session_{}", i), now);
                 collector_clone.record_sync_completion(
                     &format!("session_{}", i),
@@ -977,7 +988,7 @@ mod tests {
             handle.join().unwrap();
         }
 
-        let snapshot = collector.export_snapshot();
+        let snapshot = collector.export_snapshot(base_now + 9 + 50);
         assert_eq!(snapshot.operational.sync_sessions_total, 10);
         assert_eq!(snapshot.operational.sync_sessions_completed_total, 10);
         assert_eq!(snapshot.operational.active_sync_sessions, 0);

@@ -11,8 +11,8 @@ use aura_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 use uuid::Uuid;
 
 use super::envelope::PrivacyLevel;

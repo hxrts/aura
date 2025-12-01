@@ -62,6 +62,7 @@
 #[cfg(test)]
 use aura_core::relational::GuardianParameters;
 use aura_core::{
+    hash::hash,
     identifiers::{AuthorityId, ContextId},
     relational::{GuardianBinding, RecoveryGrant, RelationalFact},
     Hash32, Result,
@@ -93,7 +94,11 @@ pub struct RelationalContext {
 impl RelationalContext {
     /// Create a new relational context
     pub fn new(participants: Vec<AuthorityId>) -> Self {
-        let context_id = ContextId::new();
+        let mut seed = Vec::new();
+        for participant in &participants {
+            seed.extend_from_slice(&participant.to_bytes());
+        }
+        let context_id = ContextId::new_from_entropy(hash(&seed));
         let journal = RelationalJournal::new(context_id);
 
         Self {
@@ -296,8 +301,8 @@ mod tests {
 
     #[test]
     fn test_relational_context_creation() {
-        let auth1 = AuthorityId::new();
-        let auth2 = AuthorityId::new();
+        let auth1 = AuthorityId::new_from_entropy([60u8; 32]);
+        let auth2 = AuthorityId::new_from_entropy([61u8; 32]);
 
         let context = RelationalContext::new(vec![auth1, auth2]);
 
@@ -308,8 +313,8 @@ mod tests {
 
     #[test]
     fn test_add_guardian_binding() {
-        let auth1 = AuthorityId::new();
-        let auth2 = AuthorityId::new();
+        let auth1 = AuthorityId::new_from_entropy([62u8; 32]);
+        let auth2 = AuthorityId::new_from_entropy([63u8; 32]);
 
         let context = RelationalContext::new(vec![auth1, auth2]);
 

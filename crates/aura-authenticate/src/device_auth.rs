@@ -179,7 +179,8 @@ pub struct AuthenticationFailed {
     pub failed_at: u64,
 }
 
-// Placeholder function for device auth choreography access
+// Entry point for device auth choreography access; integrate with rumpsteak runtime
+// when the full execution graph is wired from the CLI.
 // The choreography macro will generate the appropriate types and functions
 pub fn get_device_auth_choreography() {
     // The choreography macro will generate the appropriate types and functions
@@ -536,7 +537,7 @@ mod tests {
     fn test_challenge_request_serialization() {
         let request = ChallengeRequest {
             device_id: test_device_id(1),
-            account_id: AccountId::new(),
+            account_id: AccountId::new_from_entropy([0u8; 32]),
             scope: SessionScope::Protocol {
                 protocol_type: "device_auth".to_string(),
             },

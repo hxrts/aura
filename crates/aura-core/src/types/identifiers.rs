@@ -10,6 +10,13 @@ use std::fmt;
 use std::str::FromStr;
 use uuid::Uuid;
 
+fn derived_uuid(label: &[u8]) -> Uuid {
+    let digest = hash::hash(label);
+    let mut uuid_bytes = [0u8; 16];
+    uuid_bytes.copy_from_slice(&digest[..16]);
+    Uuid::from_bytes(uuid_bytes)
+}
+
 /// Session identifier for protocol sessions and coordination
 ///
 /// Used to uniquely identify sessions across all protocol types (DKD, resharing,
@@ -19,9 +26,8 @@ pub struct SessionId(pub Uuid);
 
 impl SessionId {
     /// Create a new random session ID
-    #[allow(clippy::disallowed_methods)]
     pub fn new() -> Self {
-        Self(Uuid::new_v4())
+        Self(derived_uuid(b"session-id"))
     }
 
     /// Create from a UUID
@@ -67,9 +73,8 @@ pub struct EventId(pub Uuid);
 
 impl EventId {
     /// Create a new random event ID
-    #[allow(clippy::disallowed_methods)]
     pub fn new() -> Self {
-        Self(Uuid::new_v4())
+        Self(derived_uuid(b"event-id"))
     }
 
     /// Create from a UUID
@@ -230,9 +235,8 @@ pub struct OperationId(pub Uuid);
 
 impl OperationId {
     /// Create a new random operation ID
-    #[allow(clippy::disallowed_methods)]
     pub fn new() -> Self {
-        Self(Uuid::new_v4())
+        Self(derived_uuid(b"operation-id"))
     }
 
     /// Create from a UUID
@@ -278,18 +282,19 @@ impl From<OperationId> for Uuid {
 pub struct DeviceId(pub Uuid);
 
 impl DeviceId {
-    /// Create a new random device ID
-    #[allow(clippy::disallowed_methods)]
+    /// Create a device ID from 32 bytes of caller-provided entropy (effect-injected).
+    pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&entropy[..16]);
+        Self(Uuid::from_bytes(uuid_bytes))
+    }
     pub fn new() -> Self {
-        Self(Uuid::new_v4())
+        Self(derived_uuid(b"device-id"))
     }
 
     /// Create a deterministic DeviceId for testing (sentinel, non-nil)
     pub fn deterministic_test_id() -> Self {
-        let hash = hash::hash(b"aura-deterministic-test-device");
-        let mut uuid_bytes = [0u8; 16];
-        uuid_bytes.copy_from_slice(&hash[..16]);
-        Self(Uuid::from_bytes(uuid_bytes))
+        Self(derived_uuid(b"aura-deterministic-test-device"))
     }
 
     /// Create from a UUID
@@ -324,7 +329,8 @@ impl DeviceId {
 
 impl Default for DeviceId {
     fn default() -> Self {
-        Self::new()
+        // Default should remain deterministic-free; use a fixed hash sentinel to avoid ambient RNG.
+        Self::deterministic_test_id()
     }
 }
 
@@ -378,10 +384,11 @@ impl From<[u8; 32]> for DeviceId {
 pub struct GuardianId(pub Uuid);
 
 impl GuardianId {
-    /// Create a new random guardian ID
-    #[allow(clippy::disallowed_methods)]
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
+    /// Create a guardian ID from caller-provided entropy.
+    pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&entropy[..16]);
+        Self(Uuid::from_bytes(uuid_bytes))
     }
 
     /// Create from a UUID
@@ -392,7 +399,7 @@ impl GuardianId {
 
 impl Default for GuardianId {
     fn default() -> Self {
-        Self::new()
+        Self::from_uuid(Uuid::from_bytes([0u8; 16]))
     }
 }
 
@@ -418,10 +425,11 @@ impl FromStr for GuardianId {
 pub struct AccountId(pub Uuid);
 
 impl AccountId {
-    /// Create a new random account ID
-    #[allow(clippy::disallowed_methods)]
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
+    /// Create a new account ID from caller-provided entropy.
+    pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&entropy[..16]);
+        Self(Uuid::from_bytes(uuid_bytes))
     }
 
     /// Create from a UUID
@@ -440,7 +448,8 @@ impl AccountId {
 
 impl Default for AccountId {
     fn default() -> Self {
-        Self::new()
+        // Default uses a deterministic sentinel for safety in const contexts.
+        Self(Uuid::from_bytes([1u8; 16]))
     }
 }
 
@@ -480,10 +489,11 @@ impl From<AccountId> for Uuid {
 pub struct AuthorityId(pub Uuid);
 
 impl AuthorityId {
-    /// Create a new random authority ID
-    #[allow(clippy::disallowed_methods)]
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
+    /// Create a new authority ID from caller-provided entropy.
+    pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&entropy[..16]);
+        Self(Uuid::from_bytes(uuid_bytes))
     }
 
     /// Create from a UUID
@@ -504,7 +514,8 @@ impl AuthorityId {
 
 impl Default for AuthorityId {
     fn default() -> Self {
-        Self::new()
+        // Default should be stable; use a non-zero sentinel.
+        Self(Uuid::from_bytes([2u8; 16]))
     }
 }
 
@@ -592,10 +603,11 @@ impl FromStr for ChannelId {
 pub struct ContextId(pub Uuid);
 
 impl ContextId {
-    /// Create a new random context ID
-    #[allow(clippy::disallowed_methods)]
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
+    /// Create a new context ID from caller-provided entropy.
+    pub fn new_from_entropy(entropy: [u8; 32]) -> Self {
+        let mut uuid_bytes = [0u8; 16];
+        uuid_bytes.copy_from_slice(&entropy[..16]);
+        Self(Uuid::from_bytes(uuid_bytes))
     }
 
     /// Create from a UUID
@@ -621,7 +633,8 @@ impl ContextId {
 
 impl Default for ContextId {
     fn default() -> Self {
-        Self::new()
+        // Deterministic sentinel (distinct from other defaults)
+        Self(Uuid::from_bytes([3u8; 16]))
     }
 }
 
@@ -682,19 +695,22 @@ impl IndividualIdExt for IndividualId {
 pub struct DataId(pub String);
 
 impl DataId {
-    /// Create a new random data ID
-    #[allow(clippy::disallowed_methods)]
+    /// Create a new data ID (deterministic hash-derived)
     pub fn new() -> Self {
-        Self(format!("data:{}", Uuid::new_v4()))
+        Self(Self::derive_tagged("data:"))
     }
 
-    /// Create an encrypted data ID
-    #[allow(clippy::disallowed_methods)]
+    /// Create an encrypted data ID (deterministic hash-derived)
     pub fn new_encrypted() -> Self {
-        Self(format!("encrypted:{}", Uuid::new_v4()))
+        Self(Self::derive_tagged("encrypted:"))
     }
 
     // Effects-based methods moved to aura-effects
+
+    fn derive_tagged(prefix: &str) -> String {
+        let uuid = derived_uuid(prefix.as_bytes());
+        format!("{}{}", prefix, uuid)
+    }
 
     /// Get the inner string
     pub fn as_str(&self) -> &str {

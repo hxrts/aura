@@ -192,7 +192,7 @@ impl DemoOrchestrator {
             return Err(anyhow::anyhow!("Demo session already running"));
         }
 
-        let session_id = Uuid::new_v4();
+        let session_id = crate::ids::uuid(&format!("demo-session:{}", self.config.seed));
         tracing::info!("Starting demo session: {}", session_id);
 
         // Create and configure the human-agent demo
@@ -225,7 +225,7 @@ impl DemoOrchestrator {
             .take()
             .ok_or_else(|| anyhow::anyhow!("No active demo session"))?;
 
-        let session_id = Uuid::new_v4();
+        let session_id = crate::ids::uuid(&format!("demo-session:completion:{}", self.config.seed));
         #[allow(clippy::disallowed_methods)]
         let start_time_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -417,6 +417,7 @@ impl DemoOrchestratorBuilder {
     /// Set deterministic seed
     pub fn with_seed(mut self, seed: u64) -> Self {
         self.config.seed = seed;
+        self.config.demo_config.seed = seed;
         self
     }
 
@@ -475,6 +476,7 @@ pub async fn execute_complete_demo(
         verbose_logging: verbose,
         guardian_response_time_ms: 3000,
         max_demo_duration_minutes: 15,
+        seed,
     };
 
     // Create and run orchestrator

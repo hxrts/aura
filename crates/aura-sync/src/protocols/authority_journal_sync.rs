@@ -294,7 +294,7 @@ impl AuthorityJournalSyncProtocol {
         (to_send, to_receive)
     }
 
-    /// Send facts to peer (storage-backed merge for now)
+    /// Send facts to peer (storage-backed merge)
     async fn send_facts<E: AuraEffects>(
         &self,
         effects: &E,

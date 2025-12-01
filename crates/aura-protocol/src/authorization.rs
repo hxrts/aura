@@ -15,26 +15,21 @@ impl BiscuitAuthorizationBridge {
         }
     }
 
-    /// Create a mock bridge for testing with a generated keypair
-    #[cfg(test)]
-    pub fn new_mock() -> Self {
-        use biscuit_auth::KeyPair;
-        let keypair = KeyPair::new();
-        Self {
-            root_public_key: keypair.public(),
-            authority_id: AuthorityId::default(),
-        }
+    /// Bridge for guard-chain evaluation using provided authority key material.
+    ///
+    /// Callers must supply the authority's Biscuit root public key; no mock fallback.
+    /// `operation_id` is retained for logging correlation.
+    pub fn for_guard(
+        root_public_key: PublicKey,
+        authority_id: AuthorityId,
+        _operation_id: &str,
+    ) -> Self {
+        Self::new(root_public_key, authority_id)
     }
 
-    /// Create a mock bridge for testing (non-test builds for integration)
-    #[cfg(not(test))]
-    pub fn new_mock() -> Self {
-        use biscuit_auth::KeyPair;
-        let keypair = KeyPair::new();
-        Self {
-            root_public_key: keypair.public(),
-            authority_id: AuthorityId::default(),
-        }
+    /// Get the authority ID for this bridge
+    pub fn authority_id(&self) -> AuthorityId {
+        self.authority_id
     }
 
     /// Production Biscuit authorization with cryptographic verification and Datalog policy evaluation
@@ -172,6 +167,8 @@ impl BiscuitAuthorizationBridge {
         }
 
         // Phase 4: Run Datalog evaluation
+        // Note: biscuit-auth 5.0.0 set_time() uses system clock; we add time as a fact instead
+        // Time fact already added above at line 67-70
         let authorization_result = authorizer.authorize();
 
         let authorized = match authorization_result {
@@ -183,7 +180,7 @@ impl BiscuitAuthorizationBridge {
         Ok(AuthorizationResult {
             authorized,
             delegation_depth: self.extract_delegation_depth_from_token(token),
-            token_facts: self.extract_token_facts_from_blocks(token),
+            token_facts: self.extract_token_facts_from_blocks(token, current_time_seconds),
         })
     }
 
@@ -214,6 +211,8 @@ impl BiscuitAuthorizationBridge {
             .add_fact(fact!("authority({authority})"))
             .map_err(BiscuitError::BiscuitLib)?;
 
+        // Note: biscuit-auth 5.0.0 set_time() uses system clock; we add time as a fact instead
+        // Cast to i64 for biscuit-auth ToAnyParam compatibility
         let time = current_time_seconds as i64;
         authorizer
             .add_fact(fact!("time({time})"))
@@ -248,13 +247,16 @@ impl BiscuitAuthorizationBridge {
     }
 
     /// Extract readable token facts from token blocks
-    fn extract_token_facts_from_blocks(&self, token: &Biscuit) -> Vec<String> {
+    fn extract_token_facts_from_blocks(
+        &self,
+        token: &Biscuit,
+        current_time_seconds: u64,
+    ) -> Vec<String> {
         let mut facts = Vec::new();
 
         // Add basic verification metadata
         facts.push(format!("authority(\"{}\")", self.authority_id));
-        // Note: This method should accept time parameter to avoid direct time access
-        // For now, facts are extracted without timestamps to maintain determinism
+        facts.push(format!("extracted_at({})", current_time_seconds));
         facts.push("extracted_from_token".to_string());
 
         // Try to extract facts from token using an authorizer

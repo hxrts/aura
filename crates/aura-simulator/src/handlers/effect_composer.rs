@@ -13,6 +13,7 @@ use super::{
 };
 use aura_agent::{AgentBuilder, AuraEffectSystem, EffectContext};
 use aura_core::effects::{ChaosEffects, ExecutionMode, TestingEffects};
+use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
 use std::sync::Arc;
@@ -53,8 +54,10 @@ impl SimulationEffectComposer {
 
     /// Add core effect system using agent runtime (async version for use within tokio runtime)
     pub async fn with_effect_system_async(mut self) -> Result<Self, SimulationComposerError> {
-        let authority_id = AuthorityId::new();
-        let context_id = ContextId::new();
+        let seed_bytes = self.seed.to_le_bytes();
+        let authority_id = AuthorityId::new_from_entropy(hash(&seed_bytes));
+        let context_seed = [seed_bytes.as_ref(), b"ctx".as_ref()].concat();
+        let context_id = ContextId::new_from_entropy(hash(&context_seed));
         let ctx = EffectContext::new(
             authority_id,
             context_id,
@@ -74,7 +77,7 @@ impl SimulationEffectComposer {
 
     /// Add core effect system using agent runtime (sync version - only use outside tokio runtime)
     pub fn with_effect_system(mut self) -> Result<Self, SimulationComposerError> {
-        let authority_id = AuthorityId::new();
+        let authority_id = AuthorityId::new_from_entropy(hash(&self.seed.to_le_bytes()));
         let _agent = AgentBuilder::new()
             .with_authority(authority_id)
             .build_testing()

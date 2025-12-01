@@ -11,7 +11,7 @@ use std::fmt;
 /// Note: authorization here still uses simplified capability strings; Biscuit token integration should replace it when available.
 #[derive(Debug, Clone)]
 pub struct StorageAccessCoordinator {
-    // Placeholder - legacy capability system removed
+    // Unit struct - internal state pending Biscuit authorization integration
 }
 
 /// Unified access request for storage operations
