@@ -126,7 +126,7 @@ impl DemoHandler {
         // Execute demo
         match setup_and_run_human_agent_demo(setup_config, demo_config, seed).await {
             Ok(()) => {
-                println!("\nHuman-agent demo completed successfully!");
+                println!("\nHuman-agent demo completed.");
 
                 if let Some(path) = record_to {
                     println!("Session recording would be saved to: {:?}", path);

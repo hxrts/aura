@@ -499,7 +499,7 @@ pub async fn execute_complete_demo(
     println!("\n{}", summary);
 
     if session_record.success {
-        println!("Demo completed successfully!");
+        println!("Demo completed.");
     } else {
         let error_msg = session_record
             .error

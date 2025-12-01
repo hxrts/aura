@@ -558,6 +558,13 @@ impl TuiApp {
             IrcCommand::Help { .. } => {
                 self.show_help = true;
             }
+            IrcCommand::Join { channel } => {
+                let _ = self
+                    .ctx
+                    .bridge()
+                    .dispatch(EffectCommand::JoinChannel { channel })
+                    .await;
+            }
 
             // === Moderator Commands ===
             IrcCommand::Kick { target, reason } => {

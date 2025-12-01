@@ -307,7 +307,7 @@ impl InvitationsScreen {
         }
 
         actions.push(Span::styled("[n]ew Invitation  ", styles.text_highlight()));
-        actions.push(Span::styled("[Tab] Filter  ", styles.text_muted()));
+        actions.push(Span::styled("[f] Filter  ", styles.text_muted()));
 
         let action_line = Line::from(actions);
         let actions_para = Paragraph::new(action_line);
@@ -391,6 +391,10 @@ impl Screen for InvitationsScreen {
             }
             KeyCode::Char('n') | KeyCode::Char('N') => {
                 Some(InputAction::Submit("action:new_invitation".to_string()))
+            }
+            KeyCode::Char('f') | KeyCode::Char('F') => {
+                self.next_filter();
+                None
             }
             _ => None,
         }

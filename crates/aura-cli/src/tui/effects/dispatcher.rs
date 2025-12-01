@@ -149,6 +149,8 @@ impl CommandDispatcher {
                 })
             }
 
+            IrcCommand::Join { channel } => Ok(EffectCommand::JoinChannel { channel }),
+
             IrcCommand::Kick { target, reason } => {
                 let channel =
                     self.current_channel

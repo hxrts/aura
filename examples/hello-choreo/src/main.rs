@@ -150,7 +150,7 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("Note: This example now uses the complete aura-macros choreography macro!");
     println!("The macro generates both Aura effects and rumpsteak session types.");
 
-    println!("\nHello Choreography demo completed successfully!");
+    println!("\nHello Choreography demo completed.");
 
     Ok(())
 }

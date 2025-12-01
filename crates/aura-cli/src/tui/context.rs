@@ -102,10 +102,93 @@ impl TuiContext {
 
     /// Start background tasks to sync data from QueryExecutor to Views
     fn start_view_sync_tasks(&self) {
+        // Start query executor sync loop
         let ctx = self.clone();
         tokio::spawn(async move {
             ctx.sync_views_loop().await;
         });
+
+        // Start bridge event listener loop
+        let ctx2 = self.clone();
+        tokio::spawn(async move {
+            ctx2.bridge_events_loop().await;
+        });
+    }
+
+    /// Background loop to process bridge events and update views
+    async fn bridge_events_loop(&self) {
+        let mut event_sub = self.bridge.subscribe(EventFilter::all());
+
+        loop {
+            match event_sub.recv().await {
+                Some(event) => {
+                    self.handle_bridge_event(event).await;
+                }
+                None => {
+                    // Channel closed, exit
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Handle a bridge event and update appropriate views
+    async fn handle_bridge_event(&self, event: AuraEvent) {
+        use super::reactive::queries::Message;
+
+        match event {
+            AuraEvent::MessageReceived {
+                channel,
+                from,
+                content,
+                timestamp,
+            } => {
+                let message = Message {
+                    id: format!("msg-{}-{}", channel, timestamp),
+                    channel_id: channel.clone(),
+                    sender_id: from.clone(),
+                    sender_name: from,
+                    content,
+                    timestamp,
+                    read: true,
+                    is_own: true, // Message we just sent
+                    reply_to: None,
+                };
+                self.chat_view.add_message(&channel, message).await;
+            }
+            AuraEvent::UserJoined { channel, user } => {
+                tracing::info!("User {} joined channel {}", user, channel);
+            }
+            AuraEvent::UserLeft { channel, user } => {
+                tracing::info!("User {} left channel {}", user, channel);
+            }
+            AuraEvent::RecoveryStarted { session_id } => {
+                tracing::info!("Recovery started: {}", session_id);
+            }
+            AuraEvent::GuardianApproved {
+                guardian_id,
+                current,
+                threshold,
+            } => {
+                tracing::info!(
+                    "Guardian {} approved ({}/{})",
+                    guardian_id,
+                    current,
+                    threshold
+                );
+                self.recovery_view.record_approval(guardian_id).await;
+            }
+            AuraEvent::RecoveryCompleted { session_id } => {
+                tracing::info!("Recovery completed: {}", session_id);
+            }
+            AuraEvent::Error { code, message } => {
+                tracing::error!("Bridge error {}: {}", code, message);
+            }
+            _ => {
+                // Other events logged but not specially handled
+                tracing::debug!("Bridge event: {:?}", event);
+            }
+        }
     }
 
     /// Background loop to sync query executor data to views

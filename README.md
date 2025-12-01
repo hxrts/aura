@@ -20,7 +20,7 @@ For more details see [System Architecture](docs/001_system_architecture.md) and 
 
 ## Quick Start
 
-```
+```sh
 # Enter dev shell
 nix develop
 

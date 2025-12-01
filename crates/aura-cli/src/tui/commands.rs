@@ -18,6 +18,8 @@ pub enum CommandCapability {
     UpdateContact,
     /// View member list
     ViewMembers,
+    /// Join a channel
+    JoinChannel,
     /// Leave current context
     LeaveContext,
     /// Kick users
@@ -45,6 +47,7 @@ impl CommandCapability {
             Self::SendMessage => "send_message",
             Self::UpdateContact => "update_contact",
             Self::ViewMembers => "view_members",
+            Self::JoinChannel => "join_channel",
             Self::LeaveContext => "leave_context",
             Self::ModerateKick => "moderate:kick",
             Self::ModerateBan => "moderate:ban",
@@ -92,6 +95,12 @@ pub enum IrcCommand {
 
     /// `/leave` - Leave current context
     Leave,
+
+    /// `/join <channel>` - Join or create a channel
+    Join {
+        /// Channel name to join/create
+        channel: String,
+    },
 
     /// `/help [command]` - Show help
     Help {
@@ -192,6 +201,7 @@ impl IrcCommand {
             Self::Who => CommandCapability::ViewMembers,
             Self::Whois { .. } => CommandCapability::ViewMembers,
             Self::Leave => CommandCapability::LeaveContext,
+            Self::Join { .. } => CommandCapability::JoinChannel,
             Self::Help { .. } => CommandCapability::None,
             Self::Kick { .. } => CommandCapability::ModerateKick,
             Self::Ban { .. } | Self::Unban { .. } => CommandCapability::ModerateBan,
@@ -213,6 +223,7 @@ impl IrcCommand {
             Self::Who => "who",
             Self::Whois { .. } => "whois",
             Self::Leave => "leave",
+            Self::Join { .. } => "join",
             Self::Help { .. } => "help",
             Self::Kick { .. } => "kick",
             Self::Ban { .. } => "ban",
@@ -239,6 +250,7 @@ impl IrcCommand {
                 | Self::Who
                 | Self::Whois { .. }
                 | Self::Leave
+                | Self::Join { .. }
                 | Self::Help { .. }
         )
     }
@@ -388,6 +400,18 @@ pub fn parse_command(input: &str) -> Result<IrcCommand, ParseError> {
         }
 
         "leave" | "part" | "quit" => Ok(IrcCommand::Leave),
+
+        "join" | "j" => {
+            if args.is_empty() {
+                return Err(ParseError::MissingArgument {
+                    command: "join".to_string(),
+                    argument: "channel".to_string(),
+                });
+            }
+            // Strip leading # if present for normalization
+            let channel = args.trim_start_matches('#').to_string();
+            Ok(IrcCommand::Join { channel })
+        }
 
         "help" | "h" | "?" => {
             let command = if args.is_empty() {
@@ -692,6 +716,13 @@ pub fn all_command_help() -> Vec<CommandHelp> {
             syntax: "/leave",
             description: "Leave the current context",
             capability: CommandCapability::LeaveContext,
+            category: CommandCategory::User,
+        },
+        CommandHelp {
+            name: "join",
+            syntax: "/join <channel>",
+            description: "Join or create a channel (e.g., /join general)",
+            capability: CommandCapability::JoinChannel,
             category: CommandCategory::User,
         },
         CommandHelp {

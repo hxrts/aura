@@ -52,11 +52,11 @@ Based on the formal verification strategy document:
 
 ## Current Status
 
-- ✅ Lean 4.23.0 installed via Nix
-- ✅ Lake project initialized
-- ✅ Core module structure created
-- ✅ Basic theorem statements defined (with `sorry` placeholders)
-- ⏸️ Executable runner (temporarily disabled - library builds successfully)
+- Lean 4.23.0 installed via Nix
+- Lake project initialized
+- Core module structure created
+- Basic theorem statements defined (with `sorry` placeholders)
+- Executable runner
 
 ## Next Steps
 
