@@ -5,16 +5,17 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
 use super::{Screen, ScreenType};
 use crate::tui::commands::{all_command_help, CommandCategory, CommandHelp};
 use crate::tui::input::InputAction;
+use crate::tui::layout::{splits, LayoutPresets, ScreenLayout};
 use crate::tui::styles::Styles;
 
 /// Help screen state
@@ -168,14 +169,12 @@ impl HelpScreen {
         }
 
         let title = match self.filter {
-            Some(filter) => format!(" Commands ({}) ", filter.name()),
-            None => " Commands (All) ".to_string(),
+            Some(filter) => format!("Commands ({})", filter.name()),
+            None => "Commands (All)".to_string(),
         };
 
-        let block = Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_style(styles.border_focused());
+        // Use consistent panel styling from Styles
+        let block = styles.panel_focused(title);
 
         let list = List::new(items).block(block).highlight_style(
             Style::default()
@@ -189,10 +188,8 @@ impl HelpScreen {
 
     /// Render the detail panel
     fn render_detail(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        let block = Block::default()
-            .title(" Command Details ")
-            .borders(Borders::ALL)
-            .border_style(styles.border());
+        // Use consistent panel styling from Styles
+        let block = styles.panel("Command Details");
 
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -242,6 +239,11 @@ impl HelpScreen {
 
     /// Render the search/filter bar
     fn render_footer(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
+        // Use consistent footer panel styling from Styles
+        let block = styles.panel_footer();
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
         let mut spans = vec![];
 
         if self.searching {
@@ -256,7 +258,7 @@ impl HelpScreen {
         }
 
         let footer = Paragraph::new(Line::from(spans)).style(styles.text());
-        f.render_widget(footer, area);
+        f.render_widget(footer, inner);
     }
 }
 
@@ -371,22 +373,14 @@ impl Screen for HelpScreen {
     }
 
     fn render(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        // Layout: list + details side by side, footer at bottom
-        let main_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(10),   // Main content
-                Constraint::Length(1), // Footer/shortcuts
-            ])
-            .split(area);
+        // Layout using consistent grid system: main content + footer
+        let main_chunks = ScreenLayout::new()
+            .flexible(10)                       // Main content (min 10 rows)
+            .fixed(3)                           // Footer/shortcuts (3 rows)
+            .build(area);
 
-        let content_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(55), // Command list
-                Constraint::Percentage(45), // Details
-            ])
-            .split(main_chunks[0]);
+        // Split content into list + details using percentage split
+        let content_chunks = LayoutPresets::two_columns(main_chunks[0], splits::SIDEBAR + 25);
 
         self.render_list(f, content_chunks[0], styles);
         self.render_detail(f, content_chunks[1], styles);

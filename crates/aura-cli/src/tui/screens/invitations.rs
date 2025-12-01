@@ -5,15 +5,16 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap},
+    widgets::{List, ListItem, ListState, Paragraph, Tabs, Wrap},
     Frame,
 };
 
 use super::{Screen, ScreenType};
 use crate::tui::input::InputAction;
+use crate::tui::layout::{heights, splits, LayoutPresets, ScreenLayout};
 use crate::tui::reactive::{Invitation, InvitationDirection, InvitationStatus, InvitationType};
 use crate::tui::styles::Styles;
 
@@ -136,8 +137,9 @@ impl InvitationsScreen {
             InvitationFilter::Received => 2,
         };
 
+        // Use consistent tab styling from Styles
         let tabs = Tabs::new(titles)
-            .block(Block::default().borders(Borders::BOTTOM))
+            .block(styles.panel_tabs())
             .select(selected_idx)
             .style(styles.text_muted())
             .highlight_style(
@@ -189,20 +191,16 @@ impl InvitationsScreen {
             })
             .collect();
 
-        let block = Block::default()
-            .title(format!(" Invitations ({}) ", filtered.len()))
-            .borders(Borders::ALL)
-            .border_style(if !self.detail_focused {
-                styles.border_focused()
-            } else {
-                styles.border()
-            });
+        // Use consistent panel styling from Styles
+        let block = if !self.detail_focused {
+            styles.panel_focused(format!("Invitations ({})", filtered.len()))
+        } else {
+            styles.panel_compact(format!("Invitations ({})", filtered.len()))
+        };
 
-        let list = List::new(items).block(block).highlight_style(
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .bg(styles.palette.surface),
-        );
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(styles.list_item_selected());
 
         let mut state = self.list_state.clone();
         f.render_stateful_widget(list, area, &mut state);
@@ -210,14 +208,12 @@ impl InvitationsScreen {
 
     /// Render the detail panel
     fn render_detail(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        let block = Block::default()
-            .title(" Details ")
-            .borders(Borders::ALL)
-            .border_style(if self.detail_focused {
-                styles.border_focused()
-            } else {
-                styles.border()
-            });
+        // Use consistent panel styling from Styles with focus state
+        let block = if self.detail_focused {
+            styles.panel_focused("Details")
+        } else {
+            styles.panel("Details")
+        };
 
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -290,6 +286,11 @@ impl InvitationsScreen {
 
     /// Render action hints
     fn render_actions(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
+        // Use consistent footer panel styling from Styles
+        let block = styles.panel_footer();
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
         let mut actions = Vec::new();
 
         if let Some(invitation) = self.selected_invitation() {
@@ -310,7 +311,7 @@ impl InvitationsScreen {
 
         let action_line = Line::from(actions);
         let actions_para = Paragraph::new(action_line);
-        f.render_widget(actions_para, area);
+        f.render_widget(actions_para, inner);
     }
 }
 
@@ -396,23 +397,15 @@ impl Screen for InvitationsScreen {
     }
 
     fn render(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        // Layout: tabs at top, list + details, actions at bottom
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(2), // Tabs
-                Constraint::Min(10),   // Content
-                Constraint::Length(2), // Actions
-            ])
-            .split(area);
+        // Layout using consistent grid system: tabs, content, actions
+        let chunks = ScreenLayout::new()
+            .fixed(2)                           // Tabs (2 rows)
+            .flexible(10)                       // Content (min 10 rows)
+            .fixed(heights::COMPACT)            // Actions footer (3 rows)
+            .build(area);
 
-        let content_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(45), // List
-                Constraint::Percentage(55), // Details
-            ])
-            .split(chunks[1]);
+        // Split content into list + details using percentage split
+        let content_chunks = LayoutPresets::two_columns(chunks[1], splits::SIDEBAR + 15);
 
         self.render_tabs(f, chunks[0], styles);
         self.render_list(f, content_chunks[0], styles);

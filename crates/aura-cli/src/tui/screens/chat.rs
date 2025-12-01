@@ -5,15 +5,16 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    layout::Rect,
+    style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
 use super::{Screen, ScreenType};
 use crate::tui::input::InputAction;
+use crate::tui::layout::{widths, LayoutPresets};
 use crate::tui::reactive::{Channel, Message};
 use crate::tui::styles::Styles;
 
@@ -239,20 +240,16 @@ impl ChatScreen {
             })
             .collect();
 
-        let block = Block::default()
-            .title(" Channels ")
-            .borders(Borders::ALL)
-            .border_style(if self.channel_focused {
-                styles.border_focused()
-            } else {
-                styles.border()
-            });
+        // Use consistent panel styling from Styles
+        let block = if self.channel_focused {
+            styles.panel_focused("Channels")
+        } else {
+            styles.panel_sidebar("Channels")
+        };
 
-        let list = List::new(items).block(block).highlight_style(
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .bg(styles.palette.surface),
-        );
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(styles.list_item_selected());
 
         let mut state = self.channel_list_state.clone();
         f.render_stateful_widget(list, area, &mut state);
@@ -260,19 +257,17 @@ impl ChatScreen {
 
     /// Render the message area
     fn render_messages(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        let block = Block::default()
-            .title(format!(
-                " {} ",
-                self.selected_channel()
-                    .map(|c| c.name.as_str())
-                    .unwrap_or("Messages")
-            ))
-            .borders(Borders::ALL)
-            .border_style(if !self.channel_focused && !self.input_active {
-                styles.border_focused()
-            } else {
-                styles.border()
-            });
+        let title = self
+            .selected_channel()
+            .map(|c| c.name.clone())
+            .unwrap_or_else(|| "Messages".to_string());
+
+        // Use consistent panel styling from Styles
+        let block = if !self.channel_focused && !self.input_active {
+            styles.panel_focused(title)
+        } else {
+            styles.panel(title)
+        };
 
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -313,14 +308,8 @@ impl ChatScreen {
 
     /// Render the input area
     fn render_input(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        let block = Block::default()
-            .title(" Compose ")
-            .borders(Borders::ALL)
-            .border_style(if self.input_active {
-                styles.border_focused()
-            } else {
-                styles.border()
-            });
+        // Use consistent input panel styling from Styles
+        let block = styles.panel_input("Compose", self.input_active);
 
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -442,27 +431,15 @@ impl Screen for ChatScreen {
     }
 
     fn render(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        // Main layout: channels sidebar + messages + input
-        let main_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Length(24), // Channel list
-                Constraint::Min(40),    // Messages
-            ])
-            .split(area);
+        // Main layout: sidebar + content using consistent widths
+        let main_chunks = LayoutPresets::sidebar_content(area, widths::SIDEBAR_STANDARD);
 
-        // Message area layout: messages + input
-        let message_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(10),   // Messages
-                Constraint::Length(3), // Input
-            ])
-            .split(main_chunks[1]);
+        // Content area: messages + input using consistent heights
+        let content_chunks = LayoutPresets::content_with_input(main_chunks[1]);
 
         self.render_channels(f, main_chunks[0], styles);
-        self.render_messages(f, message_chunks[0], styles);
-        self.render_input(f, message_chunks[1], styles);
+        self.render_messages(f, content_chunks[0], styles);
+        self.render_input(f, content_chunks[1], styles);
     }
 
     fn on_enter(&mut self) {

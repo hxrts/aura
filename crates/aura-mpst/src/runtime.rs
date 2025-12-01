@@ -87,11 +87,10 @@ use rumpsteak_aura_choreography::effects::{
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
 use aura_core::effects::choreographic::ChoreographicRole;
-use aura_core::effects::time::{PhysicalTimeEffects, TimeError};
-use aura_core::time::PhysicalTime;
+use aura_core::effects::time::PhysicalTimeEffects;
 
 /// Endpoint for choreographic protocol execution
 #[derive(Debug, Clone)]
@@ -367,7 +366,10 @@ pub enum ExecutionMode {
 
 impl AuraHandler {
     /// Create a new Aura handler for testing
-    pub fn for_testing(device_id: DeviceId) -> Result<Self, MpstError> {
+    pub fn for_testing(
+        device_id: DeviceId,
+        time: std::sync::Arc<dyn aura_core::effects::PhysicalTimeEffects>,
+    ) -> Result<Self, MpstError> {
         let runtime = HandlerRuntimeState::new(device_id, Cap::top(), Journal::new());
         let extension_registry = Self::create_extension_registry();
 
@@ -378,12 +380,15 @@ impl AuraHandler {
             flow_contexts: HashMap::new(),
             execution_mode: ExecutionMode::Testing,
             network_effects: None,
-            time: std::sync::Arc::new(LocalTimeProvider),
+            time,
         })
     }
 
     /// Create a new Aura handler for production
-    pub fn for_production(device_id: DeviceId) -> Result<Self, MpstError> {
+    pub fn for_production(
+        device_id: DeviceId,
+        time: std::sync::Arc<dyn aura_core::effects::PhysicalTimeEffects>,
+    ) -> Result<Self, MpstError> {
         let runtime = HandlerRuntimeState::new(device_id, Cap::top(), Journal::new());
         let extension_registry = Self::create_extension_registry();
 
@@ -394,7 +399,7 @@ impl AuraHandler {
             flow_contexts: HashMap::new(),
             execution_mode: ExecutionMode::Production,
             network_effects: None,
-            time: std::sync::Arc::new(LocalTimeProvider),
+            time,
         })
     }
 
@@ -402,6 +407,7 @@ impl AuraHandler {
     pub fn for_production_with_network(
         device_id: DeviceId,
         network_effects: std::sync::Arc<dyn NetworkEffects>,
+        time: std::sync::Arc<dyn aura_core::effects::PhysicalTimeEffects>,
     ) -> Result<Self, MpstError> {
         let runtime = HandlerRuntimeState::new(device_id, Cap::top(), Journal::new());
         let extension_registry = Self::create_extension_registry();
@@ -413,12 +419,15 @@ impl AuraHandler {
             flow_contexts: HashMap::new(),
             execution_mode: ExecutionMode::Production,
             network_effects: Some(network_effects),
-            time: std::sync::Arc::new(LocalTimeProvider),
+            time,
         })
     }
 
     /// Create a new Aura handler for simulation
-    pub fn for_simulation(device_id: DeviceId) -> Result<Self, MpstError> {
+    pub fn for_simulation(
+        device_id: DeviceId,
+        time: std::sync::Arc<dyn aura_core::effects::PhysicalTimeEffects>,
+    ) -> Result<Self, MpstError> {
         let runtime = HandlerRuntimeState::new(device_id, Cap::top(), Journal::new());
         let extension_registry = Self::create_extension_registry();
 
@@ -429,7 +438,7 @@ impl AuraHandler {
             flow_contexts: HashMap::new(),
             execution_mode: ExecutionMode::Simulation,
             network_effects: None,
-            time: std::sync::Arc::new(LocalTimeProvider),
+            time,
         })
     }
 
@@ -1288,30 +1297,5 @@ impl ExtensibleHandler for AuraHandler {
 
     fn extension_registry(&self) -> &ExtensionRegistry<Self::Endpoint> {
         &self.extension_registry
-    }
-}
-
-#[derive(Debug, Default)]
-struct LocalTimeProvider;
-
-#[async_trait]
-impl PhysicalTimeEffects for LocalTimeProvider {
-    #[allow(clippy::disallowed_methods)] // This IS the time handler implementation
-    async fn physical_time(&self) -> Result<PhysicalTime, TimeError> {
-        let now = std::time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| TimeError::OperationFailed {
-                reason: format!("System time error: {}", e),
-            })?;
-
-        Ok(PhysicalTime {
-            ts_ms: now.as_millis() as u64,
-            uncertainty: None,
-        })
-    }
-
-    async fn sleep_ms(&self, ms: u64) -> Result<(), TimeError> {
-        futures_timer::Delay::new(Duration::from_millis(ms)).await;
-        Ok(())
     }
 }

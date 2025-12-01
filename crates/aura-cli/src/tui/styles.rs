@@ -214,6 +214,123 @@ impl Styles {
             .title(Span::styled(title.into(), self.text_highlight()))
             .padding(Padding::uniform(1))
     }
+
+    /// Panel with focused border style
+    pub fn panel_focused<'a>(&self, title: impl Into<String>) -> Block<'a> {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(self.border_focused())
+            .title(Span::styled(title.into(), self.text_highlight()))
+            .padding(Padding::uniform(1))
+    }
+
+    /// Compact panel with minimal padding (for sidebars, lists)
+    pub fn panel_compact<'a>(&self, title: impl Into<String>) -> Block<'a> {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(self.border())
+            .title(Span::styled(title.into(), self.text_highlight()))
+            .padding(Padding::horizontal(1))
+    }
+
+    /// Panel without title (for content areas)
+    pub fn panel_untitled<'a>(&self) -> Block<'a> {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(self.border())
+            .padding(Padding::uniform(1))
+    }
+
+    /// Header panel with distinct styling
+    pub fn panel_header<'a>(&self, title: impl Into<String>) -> Block<'a> {
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(self.border())
+            .title(Span::styled(title.into(), self.text_highlight()))
+            .padding(Padding::horizontal(1))
+    }
+
+    /// Footer/status panel
+    pub fn panel_footer<'a>(&self) -> Block<'a> {
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(self.border())
+            .padding(Padding::horizontal(1))
+    }
+
+    /// Input field panel
+    pub fn panel_input<'a>(&self, title: impl Into<String>, focused: bool) -> Block<'a> {
+        let border_style = if focused {
+            self.border_focused()
+        } else {
+            self.border()
+        };
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(border_style)
+            .title(Span::styled(title.into(), self.text_muted()))
+            .padding(Padding::horizontal(1))
+    }
+
+    /// Card panel for dashboard items
+    pub fn panel_card<'a>(&self, title: impl Into<String>) -> Block<'a> {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Double)
+            .border_style(self.border())
+            .title(Span::styled(title.into(), self.text_highlight()))
+            .padding(Padding::uniform(1))
+    }
+
+    /// Status indicator panel (success/warning/error variants)
+    pub fn panel_status<'a>(&self, title: impl Into<String>, level: ToastLevel) -> Block<'a> {
+        let border_color = match level {
+            ToastLevel::Info => self.palette.info,
+            ToastLevel::Success => self.palette.success,
+            ToastLevel::Warning => self.palette.warning,
+            ToastLevel::Error => self.palette.error,
+        };
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_color))
+            .title(Span::styled(title.into(), Style::default().fg(border_color)))
+            .padding(Padding::uniform(1))
+    }
+
+    /// Sidebar panel (left border only for nested look)
+    pub fn panel_sidebar<'a>(&self, title: impl Into<String>) -> Block<'a> {
+        Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(self.border())
+            .title(Span::styled(title.into(), self.text_muted()))
+            .padding(Padding::new(1, 1, 0, 1))
+    }
+
+    /// Tabs panel (bottom border only for tab navigation)
+    pub fn panel_tabs<'a>(&self) -> Block<'a> {
+        Block::default()
+            .borders(Borders::BOTTOM)
+            .border_style(self.border())
+    }
+
+    /// List item block (for items in a list)
+    pub fn list_item_selected(&self) -> Style {
+        Style::default()
+            .fg(self.palette.primary)
+            .bg(self.palette.surface)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    /// List item unselected
+    pub fn list_item_normal(&self) -> Style {
+        Style::default().fg(self.palette.text_primary)
+    }
 }
 
 /// Toast notification severity level

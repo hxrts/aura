@@ -5,15 +5,16 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Wrap},
+    widgets::{Gauge, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 
 use super::{Screen, ScreenType};
 use crate::tui::input::InputAction;
+use crate::tui::layout::{heights, ScreenLayout};
 use crate::tui::reactive::{RecoveryState, RecoveryStatus};
 use crate::tui::styles::Styles;
 
@@ -71,10 +72,8 @@ impl RecoveryScreen {
 
     /// Render the status header
     fn render_status(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        let block = Block::default()
-            .title(" Recovery Status ")
-            .borders(Borders::ALL)
-            .border_style(styles.border());
+        // Use consistent panel styling from Styles
+        let block = styles.panel_header("Recovery Status");
 
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -111,10 +110,8 @@ impl RecoveryScreen {
 
     /// Render the progress gauge
     fn render_progress(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        let block = Block::default()
-            .title(" Progress ")
-            .borders(Borders::ALL)
-            .border_style(styles.border());
+        // Use consistent compact panel styling from Styles
+        let block = styles.panel_compact("Progress");
 
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -148,14 +145,12 @@ impl RecoveryScreen {
 
     /// Render the guardian approvals list
     fn render_approvals(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        let block = Block::default()
-            .title(" Guardian Approvals ")
-            .borders(Borders::ALL)
-            .border_style(if !self.action_focused {
-                styles.border_focused()
-            } else {
-                styles.border()
-            });
+        // Use consistent panel styling from Styles with focus state
+        let block = if !self.action_focused {
+            styles.panel_focused("Guardian Approvals")
+        } else {
+            styles.panel("Guardian Approvals")
+        };
 
         if let Some(ref status) = self.status {
             let items: Vec<ListItem> = status
@@ -195,14 +190,12 @@ impl RecoveryScreen {
 
     /// Render action buttons
     fn render_actions(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        let block = Block::default()
-            .title(" Actions ")
-            .borders(Borders::ALL)
-            .border_style(if self.action_focused {
-                styles.border_focused()
-            } else {
-                styles.border()
-            });
+        // Use consistent panel styling from Styles with focus state
+        let block = if self.action_focused {
+            styles.panel_focused("Actions")
+        } else {
+            styles.panel_compact("Actions")
+        };
 
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -235,6 +228,11 @@ impl RecoveryScreen {
 
     /// Render help text
     fn render_help(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
+        // Use consistent footer panel styling from Styles
+        let block = styles.panel_footer();
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+
         let help_text = match self.state() {
             RecoveryState::None => {
                 "Press 'S' to begin the account recovery process. You will need approval from your guardians."
@@ -261,7 +259,7 @@ impl RecoveryScreen {
             .style(styles.text_muted())
             .wrap(Wrap { trim: true });
 
-        f.render_widget(help, area);
+        f.render_widget(help, inner);
     }
 }
 
@@ -297,17 +295,14 @@ impl Screen for RecoveryScreen {
     }
 
     fn render(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        // Layout: status at top, progress, approvals, actions, help at bottom
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(5), // Status
-                Constraint::Length(3), // Progress
-                Constraint::Min(8),    // Approvals
-                Constraint::Length(5), // Actions
-                Constraint::Length(3), // Help
-            ])
-            .split(area);
+        // Layout using consistent grid system: status, progress, approvals, actions, help
+        let chunks = ScreenLayout::new()
+            .fixed(heights::STANDARD)           // Status header (5 rows)
+            .fixed(heights::COMPACT)            // Progress bar (3 rows)
+            .flexible(heights::MEDIUM)          // Approvals list (min 8 rows)
+            .fixed(heights::STANDARD)           // Actions (5 rows)
+            .fixed(heights::COMPACT)            // Help footer (3 rows)
+            .build(area);
 
         self.render_status(f, chunks[0], styles);
         self.render_progress(f, chunks[1], styles);

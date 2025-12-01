@@ -53,6 +53,7 @@ tracing = { workspace = true }
 # aura-testkit = { path = "../aura-testkit" }
 # aura-protocol = { path = "../aura-protocol" }
 aura-macros = { path = "../aura-macros" }
+aura-effects = { path = "../aura-effects" }
 tokio = { workspace = true }
 futures = { workspace = true }
 

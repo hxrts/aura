@@ -19,6 +19,7 @@ pub mod demo;
 pub mod effects;
 pub mod flow_budget;
 pub mod input;
+pub mod layout;
 pub mod reactive;
 pub mod screens;
 pub mod styles;
@@ -73,4 +74,9 @@ pub use local_store::{derive_key_material, TuiLocalStore};
 // Re-export demo types
 pub use demo::{
     DemoScenario, DemoTipProvider, MockStore, SimulatedBridge, Tip, TipContext, TipProvider,
+};
+
+// Re-export layout types
+pub use layout::{
+    heights, spacing, splits, widths, LayoutPresets, Margin, PanelLayout, ScreenLayout,
 };

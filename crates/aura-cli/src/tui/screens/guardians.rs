@@ -5,15 +5,15 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    layout::Rect,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{List, ListItem, ListState, Paragraph, Wrap},
     Frame,
 };
 
 use super::{Screen, ScreenType};
 use crate::tui::input::InputAction;
+use crate::tui::layout::{heights, splits, LayoutPresets, ScreenLayout};
 use crate::tui::reactive::{Guardian, GuardianStatus};
 use crate::tui::styles::Styles;
 
@@ -140,20 +140,16 @@ impl GuardiansScreen {
             })
             .collect();
 
-        let block = Block::default()
-            .title(" Guardians ")
-            .borders(Borders::ALL)
-            .border_style(if !self.detail_focused {
-                styles.border_focused()
-            } else {
-                styles.border()
-            });
+        // Use consistent panel styling from Styles
+        let block = if !self.detail_focused {
+            styles.panel_focused("Guardians")
+        } else {
+            styles.panel_compact("Guardians")
+        };
 
-        let list = List::new(items).block(block).highlight_style(
-            Style::default()
-                .add_modifier(Modifier::BOLD)
-                .bg(styles.palette.surface),
-        );
+        let list = List::new(items)
+            .block(block)
+            .highlight_style(styles.list_item_selected());
 
         let mut state = self.list_state.clone();
         f.render_stateful_widget(list, area, &mut state);
@@ -161,14 +157,12 @@ impl GuardiansScreen {
 
     /// Render the detail panel
     fn render_detail(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        let block = Block::default()
-            .title(" Details ")
-            .borders(Borders::ALL)
-            .border_style(if self.detail_focused {
-                styles.border_focused()
-            } else {
-                styles.border()
-            });
+        // Use consistent panel styling from Styles
+        let block = if self.detail_focused {
+            styles.panel_focused("Details")
+        } else {
+            styles.panel("Details")
+        };
 
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -232,10 +226,8 @@ impl GuardiansScreen {
 
     /// Render threshold status
     fn render_threshold(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        let block = Block::default()
-            .title(" Threshold ")
-            .borders(Borders::ALL)
-            .border_style(styles.border());
+        // Use consistent panel styling from Styles
+        let block = styles.panel_compact("Threshold");
 
         let inner = block.inner(area);
         f.render_widget(block, area);
@@ -334,22 +326,14 @@ impl Screen for GuardiansScreen {
     }
 
     fn render(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        // Layout: list + details side by side, threshold at bottom
-        let main_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(10),   // Main content
-                Constraint::Length(6), // Threshold status
-            ])
-            .split(area);
+        // Layout using consistent grid system: main content + threshold footer
+        let main_chunks = ScreenLayout::new()
+            .flexible(10)                       // Main content (min 10 rows)
+            .fixed(heights::STANDARD)           // Threshold status (5 rows)
+            .build(area);
 
-        let content_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(40), // Guardian list
-                Constraint::Percentage(60), // Details
-            ])
-            .split(main_chunks[0]);
+        // Split main content into list + details using percentage split
+        let content_chunks = LayoutPresets::two_columns(main_chunks[0], splits::SIDEBAR);
 
         self.render_list(f, content_chunks[0], styles);
         self.render_detail(f, content_chunks[1], styles);

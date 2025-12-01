@@ -5,15 +5,16 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Alignment, Rect},
     style::Modifier,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Paragraph, Wrap},
     Frame,
 };
 
 use super::{Screen, ScreenType};
 use crate::tui::input::InputAction;
+use crate::tui::layout::{LayoutPresets, ScreenLayout};
 use crate::tui::styles::Styles;
 
 /// Welcome screen state
@@ -165,13 +166,11 @@ impl WelcomeScreen {
             )),
         ];
 
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Length(14), // Logo
-                Constraint::Min(10),    // Content
-            ])
-            .split(area);
+        // Use consistent grid system: logo + content layout
+        let chunks = ScreenLayout::new()
+            .fixed(14)                      // Logo (fixed height)
+            .flexible(10)                   // Content (min 10 rows)
+            .build(area);
 
         let logo_para = Paragraph::new(logo)
             .style(styles.text_highlight())
@@ -237,13 +236,9 @@ impl WelcomeScreen {
             ]),
         ];
 
+        // Use consistent panel styling from Styles
         let para = Paragraph::new(content)
-            .block(
-                Block::default()
-                    .title(" Account Setup ")
-                    .borders(Borders::ALL)
-                    .border_style(styles.border()),
-            )
+            .block(styles.panel("Account Setup"))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
 
@@ -301,13 +296,9 @@ impl WelcomeScreen {
             ]),
         ];
 
+        // Use consistent panel styling from Styles
         let para = Paragraph::new(content)
-            .block(
-                Block::default()
-                    .title(" Guardian Setup ")
-                    .borders(Borders::ALL)
-                    .border_style(styles.border()),
-            )
+            .block(styles.panel("Guardian Setup"))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
 
@@ -368,13 +359,9 @@ impl WelcomeScreen {
             ]),
         ];
 
+        // Use consistent panel styling from Styles
         let para = Paragraph::new(content)
-            .block(
-                Block::default()
-                    .title(" Recovery Setup ")
-                    .borders(Borders::ALL)
-                    .border_style(styles.border()),
-            )
+            .block(styles.panel("Recovery Setup"))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
 
@@ -456,13 +443,9 @@ impl WelcomeScreen {
             ]
         };
 
+        // Use consistent panel styling from Styles
         let para = Paragraph::new(content)
-            .block(
-                Block::default()
-                    .title(" Aura ")
-                    .borders(Borders::ALL)
-                    .border_style(styles.border()),
-            )
+            .block(styles.panel("Aura"))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: true });
 
@@ -521,24 +504,17 @@ impl Screen for WelcomeScreen {
     }
 
     fn render(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
-        // Center the content
-        let centered = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(15),
-                Constraint::Percentage(70),
-                Constraint::Percentage(15),
-            ])
-            .split(area);
+        // Center the content using consistent layout system
+        // Horizontal centering: 15% margin on each side, 70% content
+        let centered = LayoutPresets::two_columns(area, 15);
+        let center_area = LayoutPresets::two_columns(centered[1], 82)[0]; // 70/(70+15) ≈ 82%
 
-        let vertical = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(10),
-                Constraint::Percentage(80),
-                Constraint::Percentage(10),
-            ])
-            .split(centered[1]);
+        // Vertical centering: 10% padding top/bottom
+        let vertical = ScreenLayout::new()
+            .percentage(10)
+            .percentage(80)
+            .percentage(10)
+            .build(center_area);
 
         match self.step {
             OnboardingStep::Welcome => self.render_welcome(f, vertical[1], styles),

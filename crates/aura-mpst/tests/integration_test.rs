@@ -21,16 +21,20 @@ fn test_extension_registry_operations() {
 
 #[test]
 fn test_aura_handler_creation() {
+    use aura_effects::time::PhysicalTimeHandler;
+    use std::sync::Arc;
+
     let device_id = DeviceId::new();
+    let time = Arc::new(PhysicalTimeHandler::new());
 
     // Test creating handlers for different execution modes
-    let _testing_handler = AuraHandler::for_testing(device_id);
+    let _testing_handler = AuraHandler::for_testing(device_id, time.clone());
     assert!(_testing_handler.is_ok());
 
-    let _production_handler = AuraHandler::for_production(device_id);
+    let _production_handler = AuraHandler::for_production(device_id, time.clone());
     assert!(_production_handler.is_ok());
 
-    let _simulation_handler = AuraHandler::for_simulation(device_id);
+    let _simulation_handler = AuraHandler::for_simulation(device_id, time);
     assert!(_simulation_handler.is_ok());
 }
 
