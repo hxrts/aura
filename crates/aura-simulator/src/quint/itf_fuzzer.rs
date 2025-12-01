@@ -1707,17 +1707,19 @@ impl PerformanceMonitor {
 
     #[cfg(target_os = "linux")]
     fn get_memory_usage() -> Option<u64> {
+        use sysinfo::ProcessesToUpdate;
         let mut system = System::new();
         let pid = sysinfo::get_current_pid().ok()?;
-        system.refresh_process(pid);
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]));
         system.process(pid).map(|p| p.memory() * 1024) // memory() returns KiB
     }
 
     #[cfg(target_os = "windows")]
     fn get_memory_usage() -> Option<u64> {
+        use sysinfo::ProcessesToUpdate;
         let mut system = System::new();
         let pid = sysinfo::get_current_pid().ok()?;
-        system.refresh_process(pid);
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]));
         system.process(pid).map(|p| p.memory() * 1024)
     }
 
