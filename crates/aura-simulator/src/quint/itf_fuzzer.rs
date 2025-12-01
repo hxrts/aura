@@ -1710,7 +1710,7 @@ impl PerformanceMonitor {
         use sysinfo::ProcessesToUpdate;
         let mut system = System::new();
         let pid = sysinfo::get_current_pid().ok()?;
-        system.refresh_processes(ProcessesToUpdate::Some(&[pid]));
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
         system.process(pid).map(|p| p.memory() * 1024) // memory() returns KiB
     }
 
@@ -1719,7 +1719,7 @@ impl PerformanceMonitor {
         use sysinfo::ProcessesToUpdate;
         let mut system = System::new();
         let pid = sysinfo::get_current_pid().ok()?;
-        system.refresh_processes(ProcessesToUpdate::Some(&[pid]));
+        system.refresh_processes(ProcessesToUpdate::Some(&[pid]), true);
         system.process(pid).map(|p| p.memory() * 1024)
     }
 
