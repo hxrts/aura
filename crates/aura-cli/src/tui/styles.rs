@@ -298,7 +298,10 @@ impl Styles {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(border_color))
-            .title(Span::styled(title.into(), Style::default().fg(border_color)))
+            .title(Span::styled(
+                title.into(),
+                Style::default().fg(border_color),
+            ))
             .padding(Padding::uniform(1))
     }
 

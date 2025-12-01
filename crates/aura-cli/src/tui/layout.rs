@@ -180,11 +180,7 @@ impl LayoutPresets {
 
     /// Header + content + footer layout
     /// Returns: [header, content, footer]
-    pub fn header_content_footer(
-        area: Rect,
-        header_height: u16,
-        footer_height: u16,
-    ) -> Vec<Rect> {
+    pub fn header_content_footer(area: Rect, header_height: u16, footer_height: u16) -> Vec<Rect> {
         Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -408,10 +404,12 @@ impl PanelLayout {
 
     /// Split area into a grid of cells
     pub fn grid(area: Rect, rows: u16, cols: u16) -> Vec<Vec<Rect>> {
-        let row_constraints: Vec<Constraint> =
-            (0..rows).map(|_| Constraint::Ratio(1, rows as u32)).collect();
-        let col_constraints: Vec<Constraint> =
-            (0..cols).map(|_| Constraint::Ratio(1, cols as u32)).collect();
+        let row_constraints: Vec<Constraint> = (0..rows)
+            .map(|_| Constraint::Ratio(1, rows as u32))
+            .collect();
+        let col_constraints: Vec<Constraint> = (0..cols)
+            .map(|_| Constraint::Ratio(1, cols as u32))
+            .collect();
 
         let row_areas = Layout::default()
             .direction(Direction::Vertical)

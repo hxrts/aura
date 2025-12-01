@@ -328,8 +328,8 @@ impl Screen for GuardiansScreen {
     fn render(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
         // Layout using consistent grid system: main content + threshold footer
         let main_chunks = ScreenLayout::new()
-            .flexible(10)                       // Main content (min 10 rows)
-            .fixed(heights::STANDARD)           // Threshold status (5 rows)
+            .flexible(10) // Main content (min 10 rows)
+            .fixed(heights::STANDARD) // Threshold status (5 rows)
             .build(area);
 
         // Split main content into list + details using percentage split

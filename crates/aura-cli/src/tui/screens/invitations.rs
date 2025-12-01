@@ -399,9 +399,9 @@ impl Screen for InvitationsScreen {
     fn render(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
         // Layout using consistent grid system: tabs, content, actions
         let chunks = ScreenLayout::new()
-            .fixed(2)                           // Tabs (2 rows)
-            .flexible(10)                       // Content (min 10 rows)
-            .fixed(heights::COMPACT)            // Actions footer (3 rows)
+            .fixed(2) // Tabs (2 rows)
+            .flexible(10) // Content (min 10 rows)
+            .fixed(heights::COMPACT) // Actions footer (3 rows)
             .build(area);
 
         // Split content into list + details using percentage split

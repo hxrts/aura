@@ -375,8 +375,8 @@ impl Screen for HelpScreen {
     fn render(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
         // Layout using consistent grid system: main content + footer
         let main_chunks = ScreenLayout::new()
-            .flexible(10)                       // Main content (min 10 rows)
-            .fixed(3)                           // Footer/shortcuts (3 rows)
+            .flexible(10) // Main content (min 10 rows)
+            .fixed(3) // Footer/shortcuts (3 rows)
             .build(area);
 
         // Split content into list + details using percentage split

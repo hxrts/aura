@@ -168,8 +168,8 @@ impl WelcomeScreen {
 
         // Use consistent grid system: logo + content layout
         let chunks = ScreenLayout::new()
-            .fixed(14)                      // Logo (fixed height)
-            .flexible(10)                   // Content (min 10 rows)
+            .fixed(14) // Logo (fixed height)
+            .flexible(10) // Content (min 10 rows)
             .build(area);
 
         let logo_para = Paragraph::new(logo)

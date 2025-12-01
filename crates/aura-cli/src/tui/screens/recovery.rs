@@ -297,11 +297,11 @@ impl Screen for RecoveryScreen {
     fn render(&self, f: &mut Frame<'_>, area: Rect, styles: &Styles) {
         // Layout using consistent grid system: status, progress, approvals, actions, help
         let chunks = ScreenLayout::new()
-            .fixed(heights::STANDARD)           // Status header (5 rows)
-            .fixed(heights::COMPACT)            // Progress bar (3 rows)
-            .flexible(heights::MEDIUM)          // Approvals list (min 8 rows)
-            .fixed(heights::STANDARD)           // Actions (5 rows)
-            .fixed(heights::COMPACT)            // Help footer (3 rows)
+            .fixed(heights::STANDARD) // Status header (5 rows)
+            .fixed(heights::COMPACT) // Progress bar (3 rows)
+            .flexible(heights::MEDIUM) // Approvals list (min 8 rows)
+            .fixed(heights::STANDARD) // Actions (5 rows)
+            .fixed(heights::COMPACT) // Help footer (3 rows)
             .build(area);
 
         self.render_status(f, chunks[0], styles);
