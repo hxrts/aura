@@ -422,7 +422,10 @@ impl CounterexampleGenerator {
             );
             Ok(Some(shrunk))
         } else {
-            debug!("No counterexample found within depth bound {}", self.max_depth);
+            debug!(
+                "No counterexample found within depth bound {}",
+                self.max_depth
+            );
             Ok(None)
         }
     }
@@ -455,8 +458,9 @@ impl CounterexampleGenerator {
             }
         }
 
-        serde_json::to_string(&ir_value)
-            .map_err(|e| AuraError::invalid(format!("Failed to serialize bounded search config: {}", e)))
+        serde_json::to_string(&ir_value).map_err(|e| {
+            AuraError::invalid(format!("Failed to serialize bounded search config: {}", e))
+        })
     }
 
     /// Shrink a counterexample to find a minimal reproduction
@@ -1345,8 +1349,8 @@ impl QuintRunner {
             CapabilityPropertyType::Authorization => {
                 // Verify guard chain compliance properties
                 let invariants_to_check = vec![
-                    "guardChainOrder",        // Guard chain order is always correct
-                    "noCapabilityWidening",   // Capabilities can only narrow
+                    "guardChainOrder",      // Guard chain order is always correct
+                    "noCapabilityWidening", // Capabilities can only narrow
                 ];
                 let properties_to_check = vec![
                     "authorizationSoundness", // All ops go through full guard chain
@@ -1370,14 +1374,14 @@ impl QuintRunner {
             CapabilityPropertyType::Budget => {
                 // Verify charge-before-send and budget invariants
                 let invariants_to_check = vec![
-                    "chargeBeforeSend",         // Budget charged before transport
-                    "spentWithinLimit",         // Spent never exceeds limit
+                    "chargeBeforeSend",            // Budget charged before transport
+                    "spentWithinLimit",            // Spent never exceeds limit
                     "noTransportWithoutFlowGuard", // Transport requires FlowGuard
                 ];
                 let properties_to_check = vec![
-                    "budgetMonotonicity",       // Spent counters only increase in epoch
-                    "flowBudgetFairness",       // Minimum headroom exists
-                    "epochBoundary",            // Old epoch receipts rejected
+                    "budgetMonotonicity", // Spent counters only increase in epoch
+                    "flowBudgetFairness", // Minimum headroom exists
+                    "epochBoundary",      // Old epoch receipts rejected
                 ];
 
                 let verification_result = self
@@ -1401,11 +1405,11 @@ impl QuintRunner {
             CapabilityPropertyType::Integrity => {
                 // Verify receipt chain and attenuation properties
                 let invariants_to_check = vec![
-                    "receiptChainIntegrity",    // Receipt hash chain is valid
-                    "attenuationOnlyNarrows",   // Capabilities only narrow
+                    "receiptChainIntegrity",  // Receipt hash chain is valid
+                    "attenuationOnlyNarrows", // Capabilities only narrow
                 ];
                 let properties_to_check = vec![
-                    "receiptIntegrity",         // Receipts form valid hash chain
+                    "receiptIntegrity", // Receipts form valid hash chain
                 ];
 
                 let verification_result = self
@@ -1883,6 +1887,7 @@ module TestModule {{
             max_counterexample_depth: 200,
             enable_caching: true,
             cache_size_limit: 2000,
+            cache_ttl: 1000,
             enable_parallel: true,
             max_workers: 8,
             optimize_traces: true,
