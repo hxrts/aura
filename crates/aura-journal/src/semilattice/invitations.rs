@@ -10,18 +10,21 @@ use std::collections::BTreeMap;
 pub enum InvitationStatus {
     /// Invitation was created and waits for acceptance.
     Pending,
-    /// Invitation was accepted and should not be reused.
-    Accepted,
+    /// Invitation was declined by the invitee.
+    Declined,
     /// Invitation expired locally.
     Expired,
+    /// Invitation was accepted and should not be reused.
+    Accepted,
 }
 
 impl InvitationStatus {
     fn priority(self) -> u8 {
         match self {
             InvitationStatus::Pending => 0,
-            InvitationStatus::Expired => 1,
-            InvitationStatus::Accepted => 2,
+            InvitationStatus::Declined => 1,
+            InvitationStatus::Expired => 2,
+            InvitationStatus::Accepted => 3,
         }
     }
 
@@ -123,6 +126,13 @@ impl InvitationRecordRegistry {
     pub fn mark_expired(&mut self, invitation_id: &str, timestamp: TimeStamp) {
         if let Some(record) = self.entries.get_mut(invitation_id) {
             record.set_status(InvitationStatus::Expired, timestamp);
+        }
+    }
+
+    /// Mark a record as declined.
+    pub fn mark_declined(&mut self, invitation_id: &str, timestamp: TimeStamp) {
+        if let Some(record) = self.entries.get_mut(invitation_id) {
+            record.set_status(InvitationStatus::Declined, timestamp);
         }
     }
 

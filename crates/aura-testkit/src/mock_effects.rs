@@ -18,6 +18,10 @@ use aura_core::effects::time::{
     LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeError,
 };
 use aura_core::effects::{
+    amp::{
+        AmpChannelEffects, AmpChannelError, AmpCiphertext, AmpHeader, ChannelCloseParams,
+        ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
+    },
     BiscuitAuthorizationEffects, CryptoEffects, FlowBudgetEffects, JournalEffects, NetworkEffects,
     RandomEffects, StorageEffects,
 };
@@ -26,7 +30,7 @@ use aura_core::flow::{FlowBudget, Receipt};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::scope::ResourceScope;
 use aura_core::time::{LogicalTime, OrderTime, PhysicalTime, VectorClock};
-use aura_core::{AuraError, Hash32, Journal};
+use aura_core::{AuraError, ChannelId, Hash32, Journal};
 use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -54,6 +58,15 @@ struct MockState {
     physical_time_ms: u64,
     /// Flow receipts per context/authority
     flow_receipts: HashMap<(ContextId, AuthorityId), Receipt>,
+    /// AMP channel state
+    amp_channels: HashMap<(ContextId, ChannelId), AmpChanState>,
+}
+
+#[derive(Debug, Clone)]
+struct AmpChanState {
+    epoch: u64,
+    gen: u64,
+    closed: bool,
 }
 
 impl MockEffects {
@@ -74,6 +87,7 @@ impl MockEffects {
                 },
                 physical_time_ms: 1640995200000, // Fixed: 2022-01-01 00:00:00 UTC
                 flow_receipts: HashMap::new(),
+                amp_channels: HashMap::new(),
             })),
         }
     }
@@ -87,12 +101,103 @@ impl MockEffects {
             lamport: 0,
         };
         state.flow_receipts.clear();
+        state.amp_channels.clear();
     }
 
     /// Get current storage state for inspection
     pub fn storage_keys(&self) -> Vec<String> {
         let state = self.state.lock().unwrap();
         state.storage.keys().cloned().collect()
+    }
+}
+
+#[async_trait]
+impl AmpChannelEffects for MockEffects {
+    async fn create_channel(
+        &self,
+        params: ChannelCreateParams,
+    ) -> Result<ChannelId, AmpChannelError> {
+        let ChannelCreateParams {
+            context, channel, ..
+        } = params;
+
+        let channel = match channel {
+            Some(channel) => channel,
+            None => {
+                let bytes = self.random_bytes(32).await;
+                ChannelId::from_bytes(aura_core::hash::hash(&bytes))
+            }
+        };
+
+        let mut state = self.state.lock().unwrap();
+        let entry = state
+            .amp_channels
+            .entry((context, channel))
+            .or_insert(AmpChanState {
+                epoch: 0,
+                gen: 0,
+                closed: false,
+            });
+        entry.closed = false;
+        Ok(channel)
+    }
+
+    async fn close_channel(&self, params: ChannelCloseParams) -> Result<(), AmpChannelError> {
+        let mut state = self.state.lock().unwrap();
+        let key = (params.context, params.channel);
+        let chan = state
+            .amp_channels
+            .get_mut(&key)
+            .ok_or(AmpChannelError::NotFound)?;
+        chan.closed = true;
+        chan.epoch += 1;
+        Ok(())
+    }
+
+    async fn join_channel(&self, params: ChannelJoinParams) -> Result<(), AmpChannelError> {
+        let state = self.state.lock().unwrap();
+        let key = (params.context, params.channel);
+        if !state.amp_channels.contains_key(&key) {
+            return Err(AmpChannelError::NotFound);
+        }
+        // Mock join - just verify channel exists
+        Ok(())
+    }
+
+    async fn leave_channel(&self, params: ChannelLeaveParams) -> Result<(), AmpChannelError> {
+        let state = self.state.lock().unwrap();
+        let key = (params.context, params.channel);
+        if !state.amp_channels.contains_key(&key) {
+            return Err(AmpChannelError::NotFound);
+        }
+        // Mock leave - just verify channel exists
+        Ok(())
+    }
+
+    async fn send_message(
+        &self,
+        params: ChannelSendParams,
+    ) -> Result<AmpCiphertext, AmpChannelError> {
+        let mut state = self.state.lock().unwrap();
+        let key = (params.context, params.channel);
+        let chan = state
+            .amp_channels
+            .get_mut(&key)
+            .ok_or(AmpChannelError::NotFound)?;
+        if chan.closed {
+            return Err(AmpChannelError::InvalidState("channel closed".into()));
+        }
+        let header = AmpHeader {
+            context: params.context,
+            channel: params.channel,
+            chan_epoch: chan.epoch,
+            ratchet_gen: chan.gen,
+        };
+        chan.gen += 1;
+        Ok(AmpCiphertext {
+            header,
+            ciphertext: params.plaintext.clone(),
+        })
     }
 }
 

@@ -316,6 +316,8 @@
 
 use aura_core::semilattice::{CvState, MsgKind, StateMsg};
 
+use super::handler_trait::{CrdtHandler, CrdtSemantics, HandlerDiagnostics, HandlerMetrics};
+
 /// State-based CRDT effect handler
 ///
 /// Enforces the join semilattice law: `state := state.join(&received_state)`
@@ -671,6 +673,34 @@ impl<S: CvState + std::fmt::Debug> std::fmt::Debug for CvHandler<S> {
         f.debug_struct("CvHandler")
             .field("state", &self.state)
             .finish()
+    }
+}
+
+impl<S: CvState> CrdtHandler<S> for CvHandler<S> {
+    fn semantics(&self) -> CrdtSemantics {
+        CrdtSemantics::JoinSemilattice
+    }
+
+    fn state(&self) -> &S {
+        &self.state
+    }
+
+    fn state_mut(&mut self) -> &mut S {
+        &mut self.state
+    }
+
+    fn has_pending_work(&self) -> bool {
+        // CvHandler has no buffering, so never has pending work
+        false
+    }
+
+    fn diagnostics(&self) -> HandlerDiagnostics {
+        HandlerDiagnostics {
+            semantics: CrdtSemantics::JoinSemilattice,
+            pending_count: 0,
+            is_idle: true,
+            metrics: HandlerMetrics::default(),
+        }
     }
 }
 

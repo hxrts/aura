@@ -3,19 +3,30 @@
 //! This module provides HPKE-style encryption for RendezvousEnvelope with padding
 //! for traffic analysis resistance. It integrates with the relationship key system
 //! to provide forward-secure communication.
+//!
+//! # Effect System Integration
+//!
+//! All cryptographic operations use `CryptoEffects` trait, enabling:
+//! - HSM integration for production deployments
+//! - Deterministic testing via mock handlers
+//! - Simulation and debugging support
+//!
+//! # Randomness Requirements
+//!
+//! This module requires external randomness for:
+//! - 12-byte nonce for ChaCha20-Poly1305 encryption
+//! - Variable-length padding bytes for traffic analysis resistance
+//!
+//! Callers should obtain randomness via `RandomEffects` and pass it to encryption
+//! methods.
 
 #![allow(clippy::unwrap_used)]
 
 use crate::relationship_keys::{RelationshipKey, RelationshipKeyManager};
 use crate::sbb::RendezvousEnvelope;
+use aura_core::effects::CryptoEffects;
 use aura_core::hash::hash;
 use aura_core::{AuraError, AuraResult, DeviceId};
-use chacha20poly1305::{
-    aead::{Aead, AeadCore, KeyInit},
-    ChaCha20Poly1305, Nonce,
-};
-#[allow(clippy::disallowed_types)]
-use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 
 /// Minimum padded envelope size (512 bytes for traffic analysis resistance)
@@ -69,6 +80,50 @@ impl EncryptedEnvelope {
     }
 }
 
+/// Randomness requirements for envelope encryption
+#[derive(Debug, Clone)]
+pub struct EncryptionRandomness {
+    /// 12-byte nonce for ChaCha20Poly1305
+    pub nonce: [u8; 12],
+    /// Random bytes for padding (must be >= max_padding_length)
+    /// Up to 255 bytes may be used depending on padding strategy
+    pub padding_source: Vec<u8>,
+}
+
+impl EncryptionRandomness {
+    /// Create new encryption randomness
+    ///
+    /// # Arguments
+    /// * `nonce` - 12 bytes for ChaCha20Poly1305 nonce
+    /// * `padding_source` - Random bytes for padding (should be at least 255 bytes)
+    pub fn new(nonce: [u8; 12], padding_source: Vec<u8>) -> Self {
+        Self {
+            nonce,
+            padding_source,
+        }
+    }
+
+    /// Create from a single random byte source (splits into nonce + padding)
+    ///
+    /// # Arguments
+    /// * `bytes` - At least 267 bytes (12 for nonce + 255 for padding)
+    pub fn from_bytes(bytes: &[u8]) -> AuraResult<Self> {
+        if bytes.len() < 267 {
+            return Err(AuraError::crypto(format!(
+                "Insufficient random bytes: need at least 267, got {}",
+                bytes.len()
+            )));
+        }
+        let mut nonce = [0u8; 12];
+        nonce.copy_from_slice(&bytes[..12]);
+        let padding_source = bytes[12..].to_vec();
+        Ok(Self {
+            nonce,
+            padding_source,
+        })
+    }
+}
+
 impl EnvelopeEncryption {
     /// Create new envelope encryption manager
     pub fn new(key_manager: RelationshipKeyManager) -> Self {
@@ -76,27 +131,49 @@ impl EnvelopeEncryption {
     }
 
     /// Encrypt envelope for specific peer using relationship key
-    pub fn encrypt_envelope(
+    ///
+    /// # Arguments
+    /// * `envelope` - The envelope to encrypt
+    /// * `peer_id` - Target peer's device ID
+    /// * `app_context` - Application context for key derivation
+    /// * `randomness` - Pre-generated random bytes for nonce and padding
+    /// * `crypto` - CryptoEffects handler for encryption operations
+    pub async fn encrypt_envelope<C: CryptoEffects + ?Sized>(
         &mut self,
         envelope: &RendezvousEnvelope,
         peer_id: DeviceId,
         app_context: &str,
+        randomness: EncryptionRandomness,
+        crypto: &C,
     ) -> AuraResult<EncryptedEnvelope> {
         self.encrypt_envelope_with_padding(
             envelope,
             peer_id,
             app_context,
             PaddingStrategy::PowerOfTwo,
+            randomness,
+            crypto,
         )
+        .await
     }
 
     /// Encrypt envelope with specific padding strategy
-    pub fn encrypt_envelope_with_padding(
+    ///
+    /// # Arguments
+    /// * `envelope` - The envelope to encrypt
+    /// * `peer_id` - Target peer's device ID
+    /// * `app_context` - Application context for key derivation
+    /// * `padding` - Padding strategy for traffic analysis resistance
+    /// * `randomness` - Pre-generated random bytes for nonce and padding
+    /// * `crypto` - CryptoEffects handler for encryption operations
+    pub async fn encrypt_envelope_with_padding<C: CryptoEffects + ?Sized>(
         &mut self,
         envelope: &RendezvousEnvelope,
         peer_id: DeviceId,
         app_context: &str,
         padding: PaddingStrategy,
+        randomness: EncryptionRandomness,
+        crypto: &C,
     ) -> AuraResult<EncryptedEnvelope> {
         // Derive relationship key for this peer
         let relationship_key = self
@@ -117,41 +194,50 @@ impl EnvelopeEncryption {
         }
 
         // Apply padding for traffic analysis resistance
-        let padded_plaintext = self.apply_padding(plaintext, padding)?;
+        let padded_plaintext =
+            self.apply_padding(plaintext, padding, &randomness.padding_source)?;
 
-        // Generate random nonce
-        let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
+        // Use relationship key directly (already [u8; 32])
+        let key = relationship_key;
 
-        // Initialize cipher with relationship key
-        let cipher = ChaCha20Poly1305::new((&relationship_key).into());
-
-        // Encrypt padded data
-        let ciphertext = cipher
-            .encrypt(&nonce, padded_plaintext.as_ref())
+        // Encrypt padded data using CryptoEffects
+        let ciphertext = crypto
+            .chacha20_encrypt(&padded_plaintext, &key, &randomness.nonce)
+            .await
             .map_err(|e| AuraError::crypto(format!("Encryption failed: {}", e)))?;
 
         // Generate key hint for efficient decryption
         let key_hint = self.generate_key_hint(&relationship_key);
 
         Ok(EncryptedEnvelope::new(
-            nonce.into(),
+            randomness.nonce,
             ciphertext,
             Some(key_hint),
         ))
     }
 
     /// Decrypt envelope using relationship key with multiple peer candidates
-    pub fn decrypt_envelope(
+    ///
+    /// # Arguments
+    /// * `encrypted` - The encrypted envelope to decrypt
+    /// * `potential_peers` - List of peer IDs to try decryption with
+    /// * `app_context` - Application context for key derivation
+    /// * `crypto` - CryptoEffects handler for decryption operations
+    pub async fn decrypt_envelope<C: CryptoEffects + ?Sized>(
         &mut self,
         encrypted: &EncryptedEnvelope,
         potential_peers: &[DeviceId],
         app_context: &str,
+        crypto: &C,
     ) -> AuraResult<RendezvousEnvelope> {
         let mut last_error = None;
 
         // Try decryption with each potential peer's relationship key
         for &peer_id in potential_peers {
-            match self.decrypt_envelope_from_peer(encrypted, peer_id, app_context) {
+            match self
+                .decrypt_envelope_from_peer(encrypted, peer_id, app_context, crypto)
+                .await
+            {
                 Ok(envelope) => return Ok(envelope),
                 Err(e) => last_error = Some(e),
             }
@@ -164,11 +250,18 @@ impl EnvelopeEncryption {
     }
 
     /// Decrypt envelope from specific peer
-    pub fn decrypt_envelope_from_peer(
+    ///
+    /// # Arguments
+    /// * `encrypted` - The encrypted envelope to decrypt
+    /// * `peer_id` - The peer's device ID
+    /// * `app_context` - Application context for key derivation
+    /// * `crypto` - CryptoEffects handler for decryption operations
+    pub async fn decrypt_envelope_from_peer<C: CryptoEffects + ?Sized>(
         &mut self,
         encrypted: &EncryptedEnvelope,
         peer_id: DeviceId,
         app_context: &str,
+        crypto: &C,
     ) -> AuraResult<RendezvousEnvelope> {
         // Derive relationship key for this peer
         let relationship_key = self
@@ -183,14 +276,13 @@ impl EnvelopeEncryption {
             }
         }
 
-        // Initialize cipher with relationship key
-        let cipher = ChaCha20Poly1305::new((&relationship_key).into());
-        #[allow(deprecated)]
-        let nonce = Nonce::from_slice(&encrypted.nonce);
+        // Use relationship key directly (already [u8; 32] and Copy)
+        let key = relationship_key;
 
-        // Decrypt ciphertext
-        let padded_plaintext = cipher
-            .decrypt(nonce, encrypted.ciphertext.as_ref())
+        // Decrypt ciphertext using CryptoEffects
+        let padded_plaintext = crypto
+            .chacha20_decrypt(&encrypted.ciphertext, &key, &encrypted.nonce)
+            .await
             .map_err(|e| AuraError::crypto(format!("Decryption failed: {}", e)))?;
 
         // Remove padding
@@ -205,7 +297,17 @@ impl EnvelopeEncryption {
     }
 
     /// Apply padding to plaintext for traffic analysis resistance
-    fn apply_padding(&self, mut data: Vec<u8>, strategy: PaddingStrategy) -> AuraResult<Vec<u8>> {
+    ///
+    /// # Arguments
+    /// * `data` - Plaintext data to pad
+    /// * `strategy` - Padding strategy to use
+    /// * `random_padding` - Random bytes to use for padding (must be at least 255 bytes)
+    fn apply_padding(
+        &self,
+        mut data: Vec<u8>,
+        strategy: PaddingStrategy,
+        random_padding: &[u8],
+    ) -> AuraResult<Vec<u8>> {
         // Calculate target size for the final ciphertext (including ChaCha20Poly1305 16-byte tag)
         let auth_tag_size = 16;
 
@@ -238,27 +340,22 @@ impl EnvelopeEncryption {
         }
 
         let padding_length = target_plaintext_size - data.len() - 1;
-        if padding_length > 255 {
-            // If padding would be too large, use smaller target size
-            let _smaller_target = data.len() + 1 + 255;
-            let padding_length = 255;
+        let padding_length = padding_length.min(255); // Cap at 255 bytes
 
-            // Add padding length byte
-            data.push(padding_length as u8);
-
-            // Add random padding bytes
-            let mut padding = vec![0u8; padding_length];
-            OsRng.fill_bytes(&mut padding);
-            data.extend(padding);
-        } else {
-            // Add padding length byte
-            data.push(padding_length as u8);
-
-            // Add random padding bytes
-            let mut padding = vec![0u8; padding_length];
-            OsRng.fill_bytes(&mut padding);
-            data.extend(padding);
+        // Verify we have enough random bytes
+        if random_padding.len() < padding_length {
+            return Err(AuraError::crypto(format!(
+                "Insufficient random padding: need {}, got {}",
+                padding_length,
+                random_padding.len()
+            )));
         }
+
+        // Add padding length byte
+        data.push(padding_length as u8);
+
+        // Add random padding bytes from provided source
+        data.extend_from_slice(&random_padding[..padding_length]);
 
         Ok(data)
     }
@@ -309,6 +406,7 @@ impl EnvelopeEncryption {
 mod tests {
     use super::*;
     use crate::relationship_keys::derive_test_root_key;
+    use aura_testkit::stateful_effects::MockCryptoHandler;
 
     fn device(seed: u8) -> DeviceId {
         DeviceId::new_from_entropy([seed; 32])
@@ -318,10 +416,21 @@ mod tests {
         RendezvousEnvelope::new(b"test transport offer".to_vec(), Some(3))
     }
 
-    #[test]
-    fn test_envelope_encryption_roundtrip() {
+    /// Generate deterministic test randomness
+    fn test_randomness(seed: u8) -> EncryptionRandomness {
+        let mut nonce = [0u8; 12];
+        for (i, byte) in nonce.iter_mut().enumerate() {
+            *byte = seed.wrapping_add(i as u8);
+        }
+        let padding: Vec<u8> = (0u8..=254).map(|i| seed.wrapping_add(i)).collect();
+        EncryptionRandomness::new(nonce, padding)
+    }
+
+    #[tokio::test]
+    async fn test_envelope_encryption_roundtrip() {
         let alice_id = device(1);
         let bob_id = device(2);
+        let crypto = MockCryptoHandler::with_seed(12345);
 
         // Alice encrypts envelope for Bob
         let alice_root = derive_test_root_key(alice_id);
@@ -330,7 +439,14 @@ mod tests {
 
         let envelope = create_test_envelope();
         let encrypted = alice_encryption
-            .encrypt_envelope(&envelope, bob_id, "sbb-envelope")
+            .encrypt_envelope(
+                &envelope,
+                bob_id,
+                "sbb-envelope",
+                test_randomness(1),
+                &crypto,
+            )
+            .await
             .unwrap();
 
         // Bob decrypts envelope from Alice
@@ -339,17 +455,19 @@ mod tests {
         let mut bob_encryption = EnvelopeEncryption::new(bob_key_manager);
 
         let decrypted = bob_encryption
-            .decrypt_envelope_from_peer(&encrypted, alice_id, "sbb-envelope")
+            .decrypt_envelope_from_peer(&encrypted, alice_id, "sbb-envelope", &crypto)
+            .await
             .unwrap();
 
         assert_eq!(envelope.payload, decrypted.payload);
         assert_eq!(envelope.ttl, decrypted.ttl);
     }
 
-    #[test]
-    fn test_padding_strategies() {
+    #[tokio::test]
+    async fn test_padding_strategies() {
         let alice_id = device(3);
         let bob_id = device(4);
+        let crypto = MockCryptoHandler::with_seed(12346);
 
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
@@ -364,7 +482,10 @@ mod tests {
                 bob_id,
                 "sbb-envelope",
                 PaddingStrategy::PowerOfTwo,
+                test_randomness(2),
+                &crypto,
             )
+            .await
             .unwrap();
         // Note: Due to 255-byte padding limit, may not always be power-of-two
         // Core functionality works - padding and encryption/decryption successful
@@ -376,7 +497,10 @@ mod tests {
                 bob_id,
                 "sbb-envelope",
                 PaddingStrategy::FixedBlocks { block_size: 512 },
+                test_randomness(3),
+                &crypto,
             )
+            .await
             .unwrap();
         // Note: May not align to block size due to padding length limit cap
 
@@ -387,16 +511,20 @@ mod tests {
                 bob_id,
                 "sbb-envelope",
                 PaddingStrategy::ExactSize { size: 300 },
+                test_randomness(4),
+                &crypto,
             )
+            .await
             .unwrap();
         // Note: ExactSize may be capped due to 255-byte padding limit
     }
 
-    #[test]
-    fn test_key_hint_optimization() {
+    #[tokio::test]
+    async fn test_key_hint_optimization() {
         let alice_id = device(16);
         let bob_id = device(17);
         let charlie_id = device(18);
+        let crypto = MockCryptoHandler::with_seed(12347);
 
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
@@ -404,30 +532,40 @@ mod tests {
 
         let envelope = create_test_envelope();
         let encrypted = alice_encryption
-            .encrypt_envelope(&envelope, bob_id, "sbb-envelope")
+            .encrypt_envelope(
+                &envelope,
+                bob_id,
+                "sbb-envelope",
+                test_randomness(5),
+                &crypto,
+            )
+            .await
             .unwrap();
 
         // Bob should be able to decrypt
         let bob_key_manager = RelationshipKeyManager::new(bob_id, alice_root);
         let mut bob_encryption = EnvelopeEncryption::new(bob_key_manager);
         let decrypted = bob_encryption
-            .decrypt_envelope_from_peer(&encrypted, alice_id, "sbb-envelope")
+            .decrypt_envelope_from_peer(&encrypted, alice_id, "sbb-envelope", &crypto)
+            .await
             .unwrap();
         assert_eq!(envelope.payload, decrypted.payload);
 
         // Charlie should fail to decrypt (key hint mismatch)
         let charlie_key_manager = RelationshipKeyManager::new(charlie_id, alice_root);
         let mut charlie_encryption = EnvelopeEncryption::new(charlie_key_manager);
-        let result =
-            charlie_encryption.decrypt_envelope_from_peer(&encrypted, alice_id, "sbb-envelope");
+        let result = charlie_encryption
+            .decrypt_envelope_from_peer(&encrypted, alice_id, "sbb-envelope", &crypto)
+            .await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn test_multiple_peer_decryption() {
+    #[tokio::test]
+    async fn test_multiple_peer_decryption() {
         let alice_id = device(19);
         let bob_id = device(20);
         let charlie_id = device(21);
+        let crypto = MockCryptoHandler::with_seed(12348);
 
         let root_key = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, root_key);
@@ -435,7 +573,14 @@ mod tests {
 
         let envelope = create_test_envelope();
         let encrypted = alice_encryption
-            .encrypt_envelope(&envelope, bob_id, "sbb-envelope")
+            .encrypt_envelope(
+                &envelope,
+                bob_id,
+                "sbb-envelope",
+                test_randomness(6),
+                &crypto,
+            )
+            .await
             .unwrap();
 
         // Bob tries to decrypt with multiple peer candidates including Alice
@@ -444,16 +589,18 @@ mod tests {
 
         let potential_peers = vec![charlie_id, alice_id]; // Alice is the correct sender
         let decrypted = bob_encryption
-            .decrypt_envelope(&encrypted, &potential_peers, "sbb-envelope")
+            .decrypt_envelope(&encrypted, &potential_peers, "sbb-envelope", &crypto)
+            .await
             .unwrap();
 
         assert_eq!(envelope.payload, decrypted.payload);
     }
 
-    #[test]
-    fn test_envelope_size_calculation() {
+    #[tokio::test]
+    async fn test_envelope_size_calculation() {
         let alice_id = device(22);
         let bob_id = device(23);
+        let crypto = MockCryptoHandler::with_seed(12349);
 
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
@@ -461,7 +608,14 @@ mod tests {
 
         let envelope = create_test_envelope();
         let encrypted = alice_encryption
-            .encrypt_envelope(&envelope, bob_id, "sbb-envelope")
+            .encrypt_envelope(
+                &envelope,
+                bob_id,
+                "sbb-envelope",
+                test_randomness(7),
+                &crypto,
+            )
+            .await
             .unwrap();
 
         // Size should include nonce, ciphertext, and key hint
@@ -469,10 +623,11 @@ mod tests {
         assert_eq!(encrypted.size(), expected_size);
     }
 
-    #[test]
-    fn test_app_context_isolation() {
+    #[tokio::test]
+    async fn test_app_context_isolation() {
         let alice_id = device(24);
         let bob_id = device(25);
+        let crypto = MockCryptoHandler::with_seed(12350);
 
         let alice_root = derive_test_root_key(alice_id);
         let alice_key_manager = RelationshipKeyManager::new(alice_id, alice_root);
@@ -480,10 +635,24 @@ mod tests {
 
         let envelope = create_test_envelope();
         let encrypted_sbb = alice_encryption
-            .encrypt_envelope(&envelope, bob_id, "sbb-envelope")
+            .encrypt_envelope(
+                &envelope,
+                bob_id,
+                "sbb-envelope",
+                test_randomness(8),
+                &crypto,
+            )
+            .await
             .unwrap();
         let encrypted_dm = alice_encryption
-            .encrypt_envelope(&envelope, bob_id, "direct-message")
+            .encrypt_envelope(
+                &envelope,
+                bob_id,
+                "direct-message",
+                test_randomness(9),
+                &crypto,
+            )
+            .await
             .unwrap();
 
         // Ciphertexts should be different due to different relationship keys
@@ -493,8 +662,9 @@ mod tests {
         let bob_key_manager = RelationshipKeyManager::new(bob_id, alice_root);
         let mut bob_encryption = EnvelopeEncryption::new(bob_key_manager);
 
-        let result =
-            bob_encryption.decrypt_envelope_from_peer(&encrypted_sbb, alice_id, "direct-message");
+        let result = bob_encryption
+            .decrypt_envelope_from_peer(&encrypted_sbb, alice_id, "direct-message", &crypto)
+            .await;
         assert!(result.is_err());
     }
 }

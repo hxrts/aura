@@ -1,7 +1,7 @@
 // Lock poisoning is fatal for this module - we prefer to panic than continue with corrupted state
 #![allow(clippy::expect_used)]
 
-use crate::effects::sync::{BloomDigest, SyncEffects, SyncError};
+use crate::effects::sync::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
 use async_trait::async_trait;
 use aura_core::hash;
 use aura_core::tree::AttestedOp;
@@ -32,9 +32,9 @@ impl LocalSyncHandler {
 
 #[async_trait]
 impl SyncEffects for LocalSyncHandler {
-    async fn sync_with_peer(&self, _peer_id: Uuid) -> Result<(), SyncError> {
+    async fn sync_with_peer(&self, _peer_id: Uuid) -> Result<SyncMetrics, SyncError> {
         // No-op local sync; real networking handled in higher layers.
-        Ok(())
+        Ok(SyncMetrics::empty())
     }
 
     async fn get_oplog_digest(&self) -> Result<BloomDigest, SyncError> {

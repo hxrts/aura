@@ -345,8 +345,44 @@ pub struct ChannelPolicy {
 }
 
 /// Relational fact for cross-authority relationships
+///
+/// # Protocol-Level vs Domain-Level Facts
+///
+/// This enum contains two categories of facts:
+///
+/// ## Protocol-Level Facts (stay in aura-journal)
+///
+/// These facts are core protocol constructs with complex reduction logic in
+/// `aura-journal/src/reduction.rs`. They participate directly in state derivation
+/// and have interdependencies that require specialized handling:
+///
+/// - `GuardianBinding` - Core guardian relationship protocol
+/// - `RecoveryGrant` - Core recovery protocol
+/// - `Consensus` - Aura Consensus results
+/// - `AmpChannelCheckpoint` - AMP ratchet window anchoring
+/// - `AmpProposedChannelEpochBump` - Optimistic epoch transitions
+/// - `AmpCommittedChannelEpochBump` - Finalized epoch transitions
+/// - `AmpChannelPolicy` - Channel-level policy overrides
+///
+/// ## Domain-Level Facts (via Generic + FactRegistry)
+///
+/// Application-specific facts use `Generic` and are reduced by registered
+/// `FactReducer` implementations in their respective domain crates:
+///
+/// - `aura-chat`: ChatFact (channels, messages)
+/// - `aura-invitation`: InvitationFact (invitation lifecycle)
+/// - `aura-relational`: ContactFact (contact management)
+/// - `aura-protocol/moderation`: Block/Mute/Ban/Kick facts
+///
+/// Domain crates implement `DomainFact` trait and register reducers in
+/// `aura-agent/src/fact_registry.rs`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RelationalFact {
+    // ========================================================================
+    // Protocol-Level Facts (core protocol, complex reduction logic)
+    // These facts have specialized handling in reduce_context() and should
+    // NOT be migrated to domain crates.
+    // ========================================================================
     /// Guardian binding established between two authorities
     GuardianBinding {
         /// Account being bound to a guardian
@@ -384,13 +420,39 @@ pub enum RelationalFact {
     AmpCommittedChannelEpochBump(CommittedChannelEpochBump),
     /// Channel policy overrides
     AmpChannelPolicy(ChannelPolicy),
+
+    // ========================================================================
+    // Domain-Level Facts (extensibility point for application facts)
+    // Domain crates define their own fact types and register reducers in
+    // aura-agent/src/fact_registry.rs. Facts are stored via to_generic().
+    // ========================================================================
     /// Generic relational binding for extensibility
+    ///
+    /// This is the extensibility mechanism for domain-specific fact types.
+    /// Higher-level crates define their own fact types implementing `DomainFact`
+    /// and store them via this variant using `DomainFact::to_generic()`.
+    ///
+    /// # Domain Fact Crates
+    ///
+    /// - `aura_chat::ChatFact` - Channel/message facts (ChannelCreated, MessageSent, etc.)
+    /// - `aura_invitation::InvitationFact` - Invitation lifecycle facts
+    /// - `aura_relational::ContactFact` - Contact management facts
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use aura_chat::ChatFact;
+    /// use aura_journal::DomainFact;
+    ///
+    /// let chat_fact = ChatFact::MessageSent { /* ... */ };
+    /// let generic = chat_fact.to_generic(); // Returns RelationalFact::Generic
+    /// ```
     Generic {
         /// Context in which this binding exists
         context_id: ContextId,
-        /// Type of binding (domain-specific)
+        /// Type of binding (domain-specific, e.g., "chat", "invitation", "contact")
         binding_type: String,
-        /// Serialized binding data
+        /// Serialized binding data (deserialize with `DomainFact::from_bytes`)
         binding_data: Vec<u8>,
     },
 }

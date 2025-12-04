@@ -216,11 +216,8 @@ async fn save_encrypted<C: CryptoEffects, S: StorageEffects>(
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use aura_core::effects::crypto::{
-        CryptoEffects, FrostKeyGenResult, FrostSigningPackage, KeyDerivationContext,
-    };
     use aura_core::effects::storage::{StorageError, StorageStats};
-    use aura_core::AuraError;
+    use aura_testkit::stateful_effects::MockCryptoHandler;
     use std::collections::HashMap;
     use std::sync::RwLock;
 
@@ -333,253 +330,6 @@ mod tests {
         }
     }
 
-    /// Mock CryptoEffects for testing
-    struct MockCrypto {
-        seed: u64,
-    }
-
-    impl MockCrypto {
-        fn new(seed: u64) -> Self {
-            Self { seed }
-        }
-
-        fn deterministic_bytes(&self, len: usize, context: u64) -> Vec<u8> {
-            let mut bytes = vec![0u8; len];
-            let mut state = self.seed.wrapping_add(context);
-            for byte in bytes.iter_mut() {
-                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-                *byte = (state >> 32) as u8;
-            }
-            bytes
-        }
-    }
-
-    #[async_trait]
-    impl aura_core::effects::RandomEffects for MockCrypto {
-        async fn random_bytes(&self, len: usize) -> Vec<u8> {
-            self.deterministic_bytes(len, 0)
-        }
-
-        async fn random_bytes_32(&self) -> [u8; 32] {
-            self.deterministic_bytes(32, 0).try_into().unwrap()
-        }
-
-        async fn random_u64(&self) -> u64 {
-            let bytes = self.deterministic_bytes(8, 0);
-            u64::from_le_bytes(bytes.try_into().unwrap())
-        }
-
-        async fn random_range(&self, min: u64, max: u64) -> u64 {
-            min + (self.random_u64().await % (max - min))
-        }
-
-        async fn random_uuid(&self) -> uuid::Uuid {
-            let bytes = self.deterministic_bytes(16, 0);
-            uuid::Uuid::from_slice(&bytes)
-                .unwrap_or_else(|_| uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, &bytes))
-        }
-    }
-
-    #[async_trait]
-    impl CryptoEffects for MockCrypto {
-        async fn hkdf_derive(
-            &self,
-            ikm: &[u8],
-            salt: &[u8],
-            info: &[u8],
-            output_len: usize,
-        ) -> Result<Vec<u8>, AuraError> {
-            // Simple deterministic derivation for testing
-            let mut result = vec![0u8; output_len];
-            let mut state = 0u64;
-            for byte in ikm {
-                state = state.wrapping_add(*byte as u64);
-            }
-            for byte in salt {
-                state = state.wrapping_mul(31).wrapping_add(*byte as u64);
-            }
-            for byte in info {
-                state = state.wrapping_mul(37).wrapping_add(*byte as u64);
-            }
-            for byte in result.iter_mut() {
-                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-                *byte = (state >> 32) as u8;
-            }
-            Ok(result)
-        }
-
-        async fn derive_key(
-            &self,
-            master_key: &[u8],
-            _context: &KeyDerivationContext,
-        ) -> Result<Vec<u8>, AuraError> {
-            Ok(master_key.to_vec())
-        }
-
-        async fn ed25519_generate_keypair(&self) -> Result<(Vec<u8>, Vec<u8>), AuraError> {
-            Ok((vec![0; 32], vec![0; 32]))
-        }
-
-        async fn ed25519_sign(
-            &self,
-            _message: &[u8],
-            _private_key: &[u8],
-        ) -> Result<Vec<u8>, AuraError> {
-            Ok(vec![0; 64])
-        }
-
-        async fn ed25519_verify(
-            &self,
-            _message: &[u8],
-            _signature: &[u8],
-            _public_key: &[u8],
-        ) -> Result<bool, AuraError> {
-            Ok(true)
-        }
-
-        async fn frost_generate_keys(
-            &self,
-            _threshold: u16,
-            _max_signers: u16,
-        ) -> Result<FrostKeyGenResult, AuraError> {
-            Ok(FrostKeyGenResult {
-                key_packages: vec![],
-                public_key_package: vec![],
-            })
-        }
-
-        async fn frost_generate_nonces(&self) -> Result<Vec<u8>, AuraError> {
-            Ok(vec![0; 32])
-        }
-
-        async fn frost_create_signing_package(
-            &self,
-            message: &[u8],
-            _nonces: &[Vec<u8>],
-            participants: &[u16],
-            public_key_package: &[u8],
-        ) -> Result<FrostSigningPackage, AuraError> {
-            Ok(FrostSigningPackage {
-                message: message.to_vec(),
-                package: vec![],
-                participants: participants.to_vec(),
-                public_key_package: public_key_package.to_vec(),
-            })
-        }
-
-        async fn frost_sign_share(
-            &self,
-            _signing_package: &FrostSigningPackage,
-            _key_share: &[u8],
-            _nonces: &[u8],
-        ) -> Result<Vec<u8>, AuraError> {
-            Ok(vec![0; 32])
-        }
-
-        async fn frost_aggregate_signatures(
-            &self,
-            _signing_package: &FrostSigningPackage,
-            _signature_shares: &[Vec<u8>],
-        ) -> Result<Vec<u8>, AuraError> {
-            Ok(vec![0; 64])
-        }
-
-        async fn frost_verify(
-            &self,
-            _message: &[u8],
-            _signature: &[u8],
-            _group_public_key: &[u8],
-        ) -> Result<bool, AuraError> {
-            Ok(true)
-        }
-
-        async fn ed25519_public_key(&self, _private_key: &[u8]) -> Result<Vec<u8>, AuraError> {
-            Ok(vec![0; 32])
-        }
-
-        async fn chacha20_encrypt(
-            &self,
-            plaintext: &[u8],
-            key: &[u8; 32],
-            nonce: &[u8; 12],
-        ) -> Result<Vec<u8>, AuraError> {
-            // Simple XOR "encryption" for testing - NOT SECURE
-            let mut result = plaintext.to_vec();
-            let key_stream = self.deterministic_bytes(
-                plaintext.len(),
-                u64::from_le_bytes(key[..8].try_into().unwrap()).wrapping_add(u64::from_le_bytes(
-                    [
-                        nonce[0], nonce[1], nonce[2], nonce[3], nonce[4], nonce[5], nonce[6],
-                        nonce[7],
-                    ],
-                )),
-            );
-            for (i, byte) in result.iter_mut().enumerate() {
-                *byte ^= key_stream[i];
-            }
-            Ok(result)
-        }
-
-        async fn chacha20_decrypt(
-            &self,
-            ciphertext: &[u8],
-            key: &[u8; 32],
-            nonce: &[u8; 12],
-        ) -> Result<Vec<u8>, AuraError> {
-            // XOR is symmetric
-            self.chacha20_encrypt(ciphertext, key, nonce).await
-        }
-
-        async fn aes_gcm_encrypt(
-            &self,
-            plaintext: &[u8],
-            key: &[u8; 32],
-            nonce: &[u8; 12],
-        ) -> Result<Vec<u8>, AuraError> {
-            self.chacha20_encrypt(plaintext, key, nonce).await
-        }
-
-        async fn aes_gcm_decrypt(
-            &self,
-            ciphertext: &[u8],
-            key: &[u8; 32],
-            nonce: &[u8; 12],
-        ) -> Result<Vec<u8>, AuraError> {
-            self.chacha20_decrypt(ciphertext, key, nonce).await
-        }
-
-        async fn frost_rotate_keys(
-            &self,
-            _old_shares: &[Vec<u8>],
-            _old_threshold: u16,
-            _new_threshold: u16,
-            _new_max_signers: u16,
-        ) -> Result<FrostKeyGenResult, AuraError> {
-            Ok(FrostKeyGenResult {
-                key_packages: vec![],
-                public_key_package: vec![],
-            })
-        }
-
-        fn is_simulated(&self) -> bool {
-            true
-        }
-
-        fn crypto_capabilities(&self) -> Vec<String> {
-            vec!["mock".to_string()]
-        }
-
-        fn constant_time_eq(&self, a: &[u8], b: &[u8]) -> bool {
-            a == b
-        }
-
-        fn secure_zero(&self, data: &mut [u8]) {
-            for byte in data.iter_mut() {
-                *byte = 0;
-            }
-        }
-    }
-
     #[tokio::test]
     async fn test_save_and_load() {
         let key_material = b"test-key-material-32-bytes-long!";
@@ -587,7 +337,7 @@ mod tests {
 
         let config = LocalStoreConfig::with_salt("/test/path.store", salt);
         let mut store = LocalStore::new(config.clone(), key_material);
-        let crypto = MockCrypto::new(12345);
+        let crypto = MockCryptoHandler::with_seed(12345);
         let storage = TestStorage::new();
 
         // Modify data
@@ -617,7 +367,7 @@ mod tests {
         let key_material = b"test-key-material-32-bytes-long!";
         let wrong_key = b"wrong-key-material-32bytes-long!";
         let salt = [42u8; 32];
-        let crypto = MockCrypto::new(12345);
+        let crypto = MockCryptoHandler::with_seed(12345);
         let storage = TestStorage::new();
 
         let config = LocalStoreConfig::with_salt("/test/path2.store", salt);

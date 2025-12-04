@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "RelationalContext implementation for cross-authority coordination in Aura"
-repository = "https://github.com/Aura-platform/aura"
+repository = "https://github.com/hxrts/aura"
 readme = "README.md"
 keywords = ["aura", "relational", "authority", "coordination", "crdt"]
 categories = ["cryptography", "data-structures"]
@@ -18,6 +18,7 @@ aura-protocol = { path = "../aura-protocol", version = "0.1.0" }  # Re-added for
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+bincode = { workspace = true }
 
 # Utilities
 uuid = { workspace = true, features = ["v4", "serde"] }

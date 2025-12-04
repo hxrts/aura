@@ -104,10 +104,12 @@ impl CommitFact {
     }
 
     /// Verify the commit fact is valid
-    pub fn verify(&self) -> Result<(), String> {
+    pub fn verify(&self) -> Result<(), crate::ProtocolError> {
         // Check threshold was met
         if self.participants.len() < self.threshold as usize {
-            return Err("Insufficient participants for threshold".to_string());
+            return Err(crate::ProtocolError::Other(
+                "Insufficient participants for threshold".to_string(),
+            ));
         }
 
         // Check participants are unique
@@ -115,25 +117,29 @@ impl CommitFact {
         unique_check.sort();
         unique_check.dedup();
         if unique_check.len() != self.participants.len() {
-            return Err("Duplicate participants".to_string());
+            return Err(crate::ProtocolError::Other(
+                "Duplicate participants".to_string(),
+            ));
         }
 
         // Verify threshold signature against provided group public key
-        let group_pkg = self
-            .group_public_key
-            .clone()
-            .ok_or_else(|| "Missing group public key for verification".to_string())?;
+        let group_pkg = self.group_public_key.clone().ok_or_else(|| {
+            crate::ProtocolError::Other("Missing group public key for verification".to_string())
+        })?;
 
-        let frost_pkg: frost_ed25519::keys::PublicKeyPackage = group_pkg
-            .try_into()
-            .map_err(|e: String| format!("Invalid group public key package: {}", e))?;
+        let frost_pkg: frost_ed25519::keys::PublicKeyPackage =
+            group_pkg.try_into().map_err(|e: String| {
+                crate::ProtocolError::Other(format!("Invalid group public key package: {}", e))
+            })?;
 
         frost_verify_aggregate(
             frost_pkg.verifying_key(),
             &self.operation_bytes,
             &self.threshold_signature.signature,
         )
-        .map_err(|e| format!("Threshold signature verification failed: {}", e))?;
+        .map_err(|e| {
+            crate::ProtocolError::Other(format!("Threshold signature verification failed: {}", e))
+        })?;
 
         Ok(())
     }

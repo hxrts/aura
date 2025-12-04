@@ -10,6 +10,60 @@ Consensus is single-shot. It agrees on a single operation and a single prestate.
 
 A consensus instance uses a context-scoped committee. The committee contains witnesses selected by the authority or relational context. Committee members may be offline. The protocol completes even under partitions.
 
+### 1.3 Consensus is NOT Linearizable by Default
+
+**Important:** Aura Consensus is single-shot agreement, not log-based linearization.
+
+Each consensus instance independently agrees on:
+- A single operation
+- A single prestate
+- Produces a single commit fact
+
+**Consensus does NOT provide:**
+- Global operation ordering
+- Sequential linearization across instances
+- Automatic operation dependencies
+
+**To sequence operations, use session types** (`docs/107_mpst_and_choreography.md`):
+
+```rust
+use aura_mpst::{choreography, Role};
+
+#[choreography]
+async fn sequential_device_updates<C: EffectContext>(
+    ctx: &C,
+    account: Role<Account>,
+    witnesses: Vec<Role<Witness>>,
+) -> Result<(), AuraError> {
+    // Session type enforces ordering:
+    // 1. Update policy (must complete first)
+    let policy_commit = consensus_single_shot(
+        ctx,
+        account.clone(),
+        witnesses.clone(),
+        TreeOp::UpdatePolicy { new_policy },
+        prestate1.hash(),
+    ).await?;
+
+    // 2. Remove device (uses policy_commit as prestate)
+    // Session type prevents op2 from starting until op1 completes
+    let prestate2 = account.read_tree_state(ctx).await?;
+    assert_eq!(prestate2.hash(), policy_commit.result_id.prestate_hash);
+
+    let remove_commit = consensus_single_shot(
+        ctx,
+        account,
+        witnesses,
+        TreeOp::RemoveLeaf { target: device_id },
+        prestate2.hash(),
+    ).await?;
+
+    Ok(())
+}
+```
+
+**Cross-reference:** See `docs/113_database.md` §8 for database transaction integration.
+
 ## 2. Core Protocol
 
 Aura Consensus has two paths. The fast path completes in one round trip. The fallback path uses epidemic gossip and a threshold race. Both paths produce the same commit fact once enough matching witness shares exist.

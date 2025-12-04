@@ -15,7 +15,13 @@ use aura_core::time::{
 };
 use rand::RngCore;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::time;
+use tokio::time::{self, Instant};
+
+/// Monotonic timestamp helper for layers that need batching or scheduling.
+#[allow(clippy::disallowed_methods)] // Monotonic clock access is permitted in effect handlers
+pub fn monotonic_now() -> Instant {
+    Instant::now()
+}
 
 /// Production physical clock handler backed by the system clock.
 #[derive(Debug, Clone, Default)]

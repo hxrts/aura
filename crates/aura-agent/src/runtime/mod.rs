@@ -20,8 +20,7 @@
 pub mod builder;
 pub mod container;
 
-// Effect system registry and builder (moved from aura-protocol)
-pub mod effect_builder;
+// Effect system registry
 pub mod registry;
 
 // Execution infrastructure
@@ -42,19 +41,12 @@ pub mod effects;
 pub mod effect_api;
 pub mod system;
 
-// Initialization - DISABLED: incomplete code with missing handler adapters
-// pub mod initialization;
-
 // Cross-cutting concerns
 pub mod migration;
 pub mod reliability;
 
-// Choreography integration (moved from aura-protocol)
+// Choreography integration
 pub mod choreography_adapter;
-
-// OTA orchestration (moved from aura-protocol)
-// Authority management
-pub mod authority_manager;
 
 // Re-export main types for convenience
 use aura_core::effects::ExecutionMode;
@@ -140,4 +132,8 @@ impl StorageConfig {
 }
 pub use executor::EffectExecutor;
 pub use lifecycle::LifecycleManager;
-pub use services::{FlowBudgetManager, ReceiptManager};
+#[allow(unused_imports)] // Re-exported for public API
+pub use services::{
+    AuthorityError, AuthorityManager, AuthorityState, AuthorityStatus, FlowBudgetManager,
+    ReceiptManager, SharedAuthorityManager,
+};

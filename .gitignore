@@ -38,6 +38,7 @@ aura-data/
 outcomes/
 *.txt
 leakage/
+secure_store/
 
 # Nix
 result

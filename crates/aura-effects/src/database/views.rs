@@ -254,7 +254,7 @@ impl<T: CvState + std::fmt::Debug + Send + Sync + 'static> std::fmt::Debug for M
 mod tests {
     use super::*;
     use aura_core::domain::journal::FactValue;
-    use aura_core::effects::indexed_journal::FactId;
+    use aura_core::effects::indexed::FactId;
     use aura_core::semilattice::{Bottom, JoinSemilattice};
 
     // Test CRDT type: max counter

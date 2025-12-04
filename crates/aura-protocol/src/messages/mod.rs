@@ -7,7 +7,6 @@
 //! - **crypto**: Threshold cryptography (FROST, resharing, key derivation)
 //! - **social_types**: Social coordination (peer discovery, rendezvous)
 //! - **common_envelope**: Message envelope infrastructure (versioning, wire format)
-//! - **common_error**: Protocol error types with error codes
 //!
 //! **Design Principles** (per docs/001_system_architecture.md, docs/107_mpst_and_choreography.md):
 //! - **Domain separation**: Each protocol namespace isolated (prevents message confusion)
@@ -36,11 +35,9 @@ pub mod social_types;
 
 // Shared infrastructure
 pub mod common_envelope;
-pub mod common_error;
 
 // Re-export main message types organized by domain
-pub use common_envelope::*;
-pub use common_error::*;
+pub use common_envelope::{Signed, WireEnvelope};
 pub use crypto::*;
 pub use social_types::*;
 

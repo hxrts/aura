@@ -115,6 +115,10 @@ serve: serve-book
 build:
     cargo build --workspace --verbose
 
+# Build Aura terminal in development mode (release profile with dev features)
+build-dev:
+    cargo build -p aura-terminal --bin aura --features development --release
+
 # Build in release mode
 build-release:
     cargo build --workspace --release --verbose
@@ -564,20 +568,21 @@ ci-dry-run:
     # Layer architecture:
     # - Layer 3 (aura-effects): Production handlers - MUST use SystemTime::now(), thread_rng()
     # - Layer 6 (aura-simulator): Runtime composition - allowed for instrumentation
+    # - Layer 7 (aura-terminal): User interface - allowed for TUI/CLI interaction
     # - Layer 8 (aura-testkit, tests/): Testing infrastructure - allowed
     # - All other layers: MUST use effect traits
 
-    # Check for direct time usage (exclude Layer 3, 6, 8, integration tests, demo code, CLI scenarios, and test modules)
+    # Check for direct time usage (exclude Layer 3, 6, 7, 8, integration tests, demo code, CLI scenarios, and test modules)
     # Note: May include false positives from code in comments or test modules
     time_violations=$(rg --type rust "SystemTime::now|Instant::now|chrono::Utc::now" crates/ --line-number \
         --glob '!**/aura-effects/**' \
         --glob '!**/aura-simulator/**' \
+        --glob '!**/aura-terminal/**' \
         --glob '!**/aura-testkit/**' \
         --glob '!**/tests/**' \
         --glob '!**/integration/**' \
         --glob '!**/demo/**' \
-        --glob '!**/examples/**' \
-        --glob '!**/aura-cli/src/handlers/scenarios.rs' 2>/dev/null | \
+        --glob '!**/examples/**' 2>/dev/null | \
         grep -v '^\s*//\|^\s\+//\|:\s*//' | \
         grep -v "#\[tokio::test\]" | \
         grep -v "#\[test\]" || true)
@@ -606,10 +611,11 @@ ci-dry-run:
         violations_found=1
     fi
 
-    # Check for direct randomness usage (exclude Layer 3, 6, 8, integration tests, and demo code)
+    # Check for direct randomness usage (exclude Layer 3, 6, 7, 8, integration tests, and demo code)
     if rg --type rust "rand::random|thread_rng\(\)|OsRng::new" crates/ --line-number \
         --glob '!**/aura-effects/**' \
         --glob '!**/aura-simulator/**' \
+        --glob '!**/aura-terminal/**' \
         --glob '!**/aura-testkit/**' \
         --glob '!**/tests/**' \
         --glob '!**/integration/**' \
@@ -626,7 +632,7 @@ ci-dry-run:
         --glob '!**/aura-simulator/**' \
         --glob '!**/aura-testkit/**' \
         --glob '!**/aura-quint/**' \
-        --glob '!**/aura-cli/**' \
+        --glob '!**/aura-terminal/**' \
         --glob '!**/tests/**' \
         --glob '!**/integration/**' \
         --glob '!**/demo/**' \
@@ -669,7 +675,7 @@ ci-dry-run:
         echo -e "${GREEN}[OK]${NC} No effects system violations found"
     else
         echo ""
-        echo -e "${YELLOW}Note:${NC} Layer 1 ID constructors (aura-core/identifiers.rs), Layer 3 (aura-effects), Layer 6 (aura-agent, aura-simulator), Layer 7 (aura-cli), Layer 8 (aura-testkit, tests/), property tests (aura-quint), demo/TUI code, operation ID generation (aura-composition/registry.rs), and sync service IDs (aura-sync/services, aura-sync/infrastructure) are exempt."
+        echo -e "${YELLOW}Note:${NC} Layer 1 ID constructors (aura-core/identifiers.rs), Layer 3 (aura-effects), Layer 6 (aura-agent, aura-simulator), Layer 7 (aura-terminal), Layer 8 (aura-testkit, tests/), property tests (aura-quint), demo/TUI code, operation ID generation (aura-composition/registry.rs), and sync service IDs (aura-sync/services, aura-sync/infrastructure) are exempt."
         exit_code=1
     fi
     echo ""
@@ -886,11 +892,11 @@ generate-cargo-nix:
     nix develop --command crate2nix generate
     echo "Cargo.nix regenerated successfully!"
     echo ""
-    echo "Run 'nix build .#aura-cli' to test hermetic build"
+    echo "Run 'nix build .#aura-terminal' to test hermetic build"
 
 # Build using hermetic Nix build (requires Cargo.nix to exist)
 build-nix:
-    nix build .#aura-cli
+    nix build .#aura-terminal
 
 # Build specific package with hermetic Nix
 build-nix-package package:
@@ -908,9 +914,9 @@ test-nix-all:
     echo "=================================="
     echo ""
 
-    echo "1. Building aura-cli..."
-    nix build .#aura-cli
-    echo "[OK] aura-cli built successfully"
+    echo "1. Building aura-terminal..."
+    nix build .#aura-terminal
+    echo "[OK] aura-terminal built successfully"
 
     echo "2. Building aura-agent..."
     nix build .#aura-agent

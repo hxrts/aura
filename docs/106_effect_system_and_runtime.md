@@ -57,6 +57,44 @@ Aura uses FROST directly without a `ThresholdSigEffects` trait because:
 
 See `crates/aura-core/src/crypto/README.md` for the detailed threshold signature deferral decision. We maintain a clear YAGNI gate: introduce the trait only when a second scheme is required or FROST needs replacement.
 
+**Example: Application-Specific Effect Traits**
+
+Application-specific effect traits (like `CliEffects`, `ConfigEffects`, `OutputEffects` in `aura-terminal`) should remain in their application layer (Layer 7) rather than moving to `aura-core` (Layer 1) when:
+- The traits compose core effects into application-specific operations
+- Only one implementation exists per application
+- The abstractions are domain-specific (CLI formatting, TUI rendering, etc.)
+- No cross-application reuse is needed
+
+This follows proper layer separation: `aura-core` provides infrastructure effects (ConsoleEffects, StorageEffects, PhysicalTimeEffects), while application layers compose these into domain-specific abstractions.
+
+### 1.4 DatabaseEffects Organization
+
+Database operations integrate consensus transparently through coordinated effect traits:
+
+**JournalEffects** (aura-core):
+- `insert_fact()` - Monotone operations (0 RTT)
+- `insert_relational_fact()` - Cross-authority facts
+
+**DatabaseWriteEffects** (aura-core):
+- `transact()` - Coordinates CRDT vs Consensus path
+- Returns `TransactionReceipt` indicating coordination used
+
+**DatabaseSubscriptionEffects** (aura-core):
+- `subscribe_query()` - Reactive queries with isolation levels
+- Returns `Dynamic<T>` that updates on fact changes
+
+The `transact()` method routes operations by two orthogonal dimensions:
+1. **Authority Scope**: Single vs Cross-authority
+2. **Agreement Level**: Monotone (CRDT, 0 RTT) vs Non-monotone (Consensus, 1-3 RTT)
+
+This enables four coordination quadrants:
+- **Monotone + Single**: Direct fact insertion
+- **Monotone + Cross-Authority**: CRDT merge via anti-entropy
+- **Consensus + Single**: Single-authority consensus
+- **Consensus + Cross-Authority**: Federated consensus
+
+See `docs/113_database.md` §8 and `work/reactive.md` §7.4 for details.
+
 ## 2. Handler Design
 
 Effect handlers implement effect traits. Stateless handlers execute operations without internal state. Stateful handlers coordinate multiple effects or maintain internal caches.
@@ -273,6 +311,90 @@ The relationship between the runtime, effects, sessions, and choreographies is a
 
 In essence, the session system is the generic, stateful **executor**, and a choreography is the specific, verifiable **script** that the executor runs.
 
-## 10. Summary
+## 10. Fact Registry Integration
+
+The `FactRegistry` provides domain-specific fact type registration and reduction for the reactive scheduling system. It is integrated into the effect system via the `AuraEffectSystem` rather than being constructed separately.
+
+### 10.1. Architecture
+
+The `FactRegistry` lives in `aura-journal` and allows domain crates to register their fact types along with custom reducers. The registry is built during effect system initialization and made accessible through the effect system:
+
+```rust
+// In AuraEffectSystem (aura-agent)
+pub struct AuraEffectSystem {
+    // ... other fields ...
+    fact_registry: Arc<FactRegistry>,
+}
+
+impl AuraEffectSystem {
+    pub fn fact_registry(&self) -> &FactRegistry {
+        &self.fact_registry
+    }
+}
+```
+
+### 10.2. Fact Registration
+
+Domain crates register their fact types during effect system assembly. Each domain provides a type ID and a reducer function:
+
+```rust
+// Example from aura-chat
+registry.register(
+    "chat",
+    ChatFact::type_id(),
+    |facts| ChatFact::reduce(facts),
+);
+```
+
+Registered domains include:
+- **Chat** (`aura-chat`): Message threading, reactions, edits
+- **Invitation** (`aura-invitation`): Device invitation workflow
+- **Contact** (`aura-relational`): Contact relationship management
+- **Moderation** (`aura-protocol`): Block/mute facts
+
+### 10.3. Reactive Scheduling
+
+The `ReactiveScheduler` in `aura-agent` uses the `FactRegistry` to process domain facts. When facts arrive, the scheduler:
+
+1. Looks up the registered reducer for the fact's domain
+2. Applies the reducer to compute derived state
+3. Notifies reactive subscribers of state changes
+
+The scheduler can obtain the registry either:
+- **From effect system**: Production code uses `effect_system.fact_registry()`
+- **Direct construction**: Tests may use `build_fact_registry()` for isolation
+
+### 10.4. Handler-Level Access
+
+The `JournalHandler` also holds an optional `FactRegistry` reference, enabling fact reduction during journal operations:
+
+```rust
+// In JournalHandler (aura-journal)
+impl JournalHandler {
+    pub fn with_fact_registry(mut self, registry: FactRegistry) -> Self {
+        self.fact_registry = Some(registry);
+        self
+    }
+
+    pub fn fact_registry(&self) -> Option<&FactRegistry> {
+        self.fact_registry.as_ref()
+    }
+}
+```
+
+This handler-level integration allows journal operations to trigger domain-specific reductions when facts are committed.
+
+### 10.5. Design Rationale
+
+The registry is integrated at the effect system level (not the trait level) because:
+
+1. **Simplicity**: No changes to `JournalEffects` trait required
+2. **Flexibility**: Different runtime configurations can use different registries
+3. **Testing**: Tests can construct isolated registries without full effect system
+4. **Layer separation**: Registry assembly stays in Layer 6 (runtime), not Layer 1 (core)
+
+Protocol-level facts (Guardian, Recovery, Consensus, AMP) use the built-in reduction pipeline in `aura-journal/src/reduction.rs` and do not require registry registration.
+
+## 11. Summary
 
 The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior. Performance optimizations improve scalability and responsiveness.

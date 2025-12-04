@@ -15,7 +15,7 @@ This demo shows Bob onboarding with guardians, losing his device, and recovering
 
 From the repo root (inside `nix develop`):
 ```bash
-cargo run -p aura-cli -- scenarios run --directory scenarios/integration --pattern cli_recovery_demo
+cargo run -p aura-terminal -- scenarios run --directory scenarios/integration --pattern cli_recovery_demo
 ```
 This uses the CLI scenario runner plus the simulator to execute the guardian setup and recovery choreography and logs to `work/scenario_logs/cli_recovery_demo.log`.
 

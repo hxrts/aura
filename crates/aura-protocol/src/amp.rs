@@ -5,6 +5,7 @@
 
 use crate::consensus::ConsensusId;
 use crate::effects::JournalEffects;
+pub mod channel_lifecycle;
 use aura_core::effects::StorageEffects;
 use aura_core::hash::hash;
 use aura_core::identifiers::AuthorityId;
@@ -185,6 +186,10 @@ pub struct AmpContextStore<
 > {
     effects: &'a E,
 }
+
+pub use channel_lifecycle::{
+    AmpChannelCoordinator, ChannelMembershipFact, ChannelParticipantEvent,
+};
 
 impl<'a, E: ?Sized + JournalEffects + StorageEffects + aura_core::effects::RandomEffects>
     AmpContextStore<'a, E>

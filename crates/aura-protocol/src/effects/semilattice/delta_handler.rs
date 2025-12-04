@@ -7,6 +7,8 @@
 use aura_core::semilattice::{CvState, Delta, DeltaMsg, DeltaProduce, DeltaState, MsgKind};
 use std::collections::VecDeque;
 
+use super::handler_trait::{CrdtHandler, CrdtSemantics, HandlerDiagnostics, HandlerMetrics};
+
 /// Delta-based CRDT effect handler
 ///
 /// Accumulates delta updates and folds them into state periodically.
@@ -290,6 +292,41 @@ where
             .field("delta_count", &self.delta_count())
             .field("fold_threshold", &self.fold_threshold)
             .finish()
+    }
+}
+
+impl<S, D> CrdtHandler<S> for DeltaHandler<S, D>
+where
+    S: CvState,
+    D: Delta,
+{
+    fn semantics(&self) -> CrdtSemantics {
+        CrdtSemantics::DeltaBased
+    }
+
+    fn state(&self) -> &S {
+        &self.state
+    }
+
+    fn state_mut(&mut self) -> &mut S {
+        &mut self.state
+    }
+
+    fn has_pending_work(&self) -> bool {
+        // DeltaHandler has pending work if there are buffered deltas
+        !self.delta_inbox.is_empty()
+    }
+
+    fn diagnostics(&self) -> HandlerDiagnostics {
+        HandlerDiagnostics {
+            semantics: CrdtSemantics::DeltaBased,
+            pending_count: self.delta_inbox.len(),
+            is_idle: self.delta_inbox.is_empty(),
+            metrics: HandlerMetrics {
+                fold_threshold: Some(self.fold_threshold),
+                ..Default::default()
+            },
+        }
     }
 }
 

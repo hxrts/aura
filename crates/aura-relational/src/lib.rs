@@ -72,10 +72,21 @@ use std::collections::BTreeSet;
 use std::sync::Mutex;
 
 pub mod consensus_adapter;
+pub mod facts;
 pub mod guardian;
+pub mod guardian_request;
+pub mod guardian_service;
+
+// Export domain fact types
+pub use facts::{ContactFact, ContactFactReducer, CONTACT_FACT_TYPE_ID};
 
 // Export consensus functions from adapter
 pub use consensus_adapter::{run_consensus, run_consensus_with_config, ConsensusConfig};
+pub use guardian_request::{
+    make_guardian_cancel_fact, make_guardian_request_fact, parse_guardian_request,
+    GuardianRequestPayload, BINDING_TYPE_CANCEL, BINDING_TYPE_REQUEST,
+};
+pub use guardian_service::GuardianService;
 
 /// RelationalContext manages cross-authority relationships
 ///

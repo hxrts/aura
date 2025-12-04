@@ -10,7 +10,7 @@
 
 use crate::messaging::NetworkTransport;
 use crate::{
-    crypto::encryption::{EnvelopeEncryption, PaddingStrategy},
+    crypto::encryption::{EncryptionRandomness, EnvelopeEncryption, PaddingStrategy},
     crypto::keys::{derive_test_root_key, RelationshipKeyManager},
     integration::capability_aware::{
         CapabilityAwareSbbCoordinator, SbbForwardingPolicy, TrustStatistics,
@@ -25,7 +25,6 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 /// Complete SBB system integrating all components
-#[derive(Debug)]
 pub struct IntegratedSbbSystem {
     /// Device ID for this node
     #[allow(dead_code)]
@@ -38,6 +37,21 @@ pub struct IntegratedSbbSystem {
     transport_bridge: SbbTransportBridge,
     /// Current forwarding policy
     forwarding_policy: SbbForwardingPolicy,
+    /// Effect system for randomness
+    effects: Arc<dyn AuraEffects>,
+}
+
+impl std::fmt::Debug for IntegratedSbbSystem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IntegratedSbbSystem")
+            .field("device_id", &self.device_id)
+            .field("flooding_coordinator", &self.flooding_coordinator)
+            .field("encryption", &self.encryption)
+            .field("transport_bridge", &self.transport_bridge)
+            .field("forwarding_policy", &self.forwarding_policy)
+            .field("effects", &"<AuraEffects>")
+            .finish()
+    }
 }
 
 /// SBB system configuration
@@ -97,8 +111,8 @@ impl IntegratedSbbSystem {
         let key_manager = RelationshipKeyManager::new(device_id, root_key);
         let encryption = EnvelopeEncryption::new(key_manager);
 
-        // Note: effect system cannot be cloned directly, so we pass it by value
-        let transport_bridge = SbbTransportBridge::new(device_id, effects);
+        // Clone effects for transport bridge
+        let transport_bridge = SbbTransportBridge::new(device_id, effects.clone());
 
         Self {
             device_id,
@@ -106,6 +120,7 @@ impl IntegratedSbbSystem {
             encryption,
             transport_bridge,
             forwarding_policy: config.forwarding_policy,
+            effects,
         }
     }
 
@@ -123,7 +138,7 @@ impl IntegratedSbbSystem {
         let encryption = EnvelopeEncryption::new(key_manager);
 
         let transport_bridge =
-            SbbTransportBridge::with_network_transport(device_id, transport, effects);
+            SbbTransportBridge::with_network_transport(device_id, transport, effects.clone());
 
         Self {
             device_id,
@@ -131,7 +146,15 @@ impl IntegratedSbbSystem {
             encryption,
             transport_bridge,
             forwarding_policy: config.forwarding_policy,
+            effects,
         }
+    }
+
+    /// Generate encryption randomness using the effect system
+    async fn generate_encryption_randomness(&self) -> AuraResult<EncryptionRandomness> {
+        // Get random bytes for nonce (12 bytes) and padding (255 bytes)
+        let random_bytes = self.effects.random_bytes(267).await;
+        EncryptionRandomness::from_bytes(&random_bytes)
     }
 
     /// Add friend relationship for SBB flooding
@@ -219,12 +242,19 @@ impl IntegratedSbbSystem {
             let mut forwarded = 0usize;
             let mut message_size = 0usize;
             for peer in peers {
-                let encrypted_envelope = self.encryption.encrypt_envelope_with_padding(
-                    &base_envelope,
-                    peer,
-                    &config.app_context,
-                    config.padding_strategy.clone(),
-                )?;
+                // Generate encryption randomness for each envelope
+                let randomness = self.generate_encryption_randomness().await?;
+                let encrypted_envelope = self
+                    .encryption
+                    .encrypt_envelope_with_padding(
+                        &base_envelope,
+                        peer,
+                        &config.app_context,
+                        config.padding_strategy.clone(),
+                        randomness,
+                        self.effects.as_ref(),
+                    )
+                    .await?;
 
                 let sbb_envelope = SbbEnvelope::new_encrypted(encrypted_envelope, request.ttl);
                 let serialized = bincode::serialize(&sbb_envelope).map_err(|e| {
@@ -303,13 +333,21 @@ impl IntegratedSbbSystem {
         // Create plaintext envelope
         let envelope = RendezvousEnvelope::new(payload_bytes, request.ttl);
 
+        // Generate encryption randomness using effect system
+        let randomness = self.generate_encryption_randomness().await?;
+
         // Encrypt envelope for specific peer
-        let encrypted_envelope = self.encryption.encrypt_envelope_with_padding(
-            &envelope,
-            peer_id,
-            &config.app_context,
-            config.padding_strategy,
-        )?;
+        let encrypted_envelope = self
+            .encryption
+            .encrypt_envelope_with_padding(
+                &envelope,
+                peer_id,
+                &config.app_context,
+                config.padding_strategy,
+                randomness,
+                self.effects.as_ref(),
+            )
+            .await?;
 
         // Create encrypted SBB envelope
         let sbb_envelope = SbbEnvelope::new_encrypted(encrypted_envelope, request.ttl);

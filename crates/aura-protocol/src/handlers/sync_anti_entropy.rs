@@ -1,4 +1,4 @@
-use crate::effects::sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
+use crate::effects::sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError, SyncMetrics};
 use crate::guards::effect_system_trait::GuardContextProvider;
 use crate::guards::send_guard::create_send_guard;
 use crate::guards::GuardEffects;
@@ -54,7 +54,7 @@ impl AntiEntropyHandler {
     /// 5. Push missing ops to peer
     /// 6. Pull missing ops from peer
     /// 7. Verify and merge received ops
-    async fn sync_with_peer_impl(&self, peer_id: Uuid) -> Result<(), SyncError> {
+    async fn sync_with_peer_impl(&self, peer_id: Uuid) -> Result<SyncMetrics, SyncError> {
         // Step 1: Get local digest
         let local_digest = self.get_oplog_digest().await?;
 
@@ -80,6 +80,9 @@ impl AntiEntropyHandler {
                 .await?;
         }
 
+        // Track applied operations count
+        let mut applied = 0;
+
         // Step 5: Pull missing ops from peer
         if !cids_to_pull.is_empty() {
             // Note: This now requires an effect system parameter to use guard chain
@@ -87,12 +90,13 @@ impl AntiEntropyHandler {
                 "sync_with_peer_impl: Cannot use guard chain without effect system parameter"
             );
             let missing_ops = self.request_ops_from_peer(peer_id, cids_to_pull).await?;
+            applied = missing_ops.len();
 
             // Step 6: Verify and merge
             self.merge_remote_ops(missing_ops).await?;
         }
 
-        Ok(())
+        Ok(SyncMetrics::with_applied(applied))
     }
 
     /// Request digest from peer using guard chain with proper effect system
@@ -233,7 +237,7 @@ impl AntiEntropyHandler {
 
 #[async_trait]
 impl SyncEffects for AntiEntropyHandler {
-    async fn sync_with_peer(&self, peer_id: Uuid) -> Result<(), SyncError> {
+    async fn sync_with_peer(&self, peer_id: Uuid) -> Result<SyncMetrics, SyncError> {
         self.sync_with_peer_impl(peer_id).await
     }
 
@@ -625,7 +629,8 @@ impl AntiEntropyHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_journal::commitment_tree::{TreeOp, TreeOpKind};
+    use aura_core::{TreeOp, TreeOpKind};
+    use aura_journal::{LeafId, LeafNode, LeafRole, NodeIndex};
 
     fn create_test_op(commitment: Hash32) -> AttestedOp {
         AttestedOp {
@@ -633,14 +638,14 @@ mod tests {
                 parent_commitment: commitment.0,
                 parent_epoch: 1,
                 op: TreeOpKind::AddLeaf {
-                    leaf: aura_journal::commitment_tree::LeafNode {
-                        leaf_id: aura_journal::commitment_tree::LeafId(1),
+                    leaf: LeafNode {
+                        leaf_id: LeafId(1),
                         device_id: aura_core::identifiers::DeviceId::deterministic_test_id(),
-                        role: aura_journal::commitment_tree::LeafRole::Device,
+                        role: LeafRole::Device,
                         public_key: vec![1, 2, 3],
                         meta: vec![],
                     },
-                    under: aura_journal::commitment_tree::NodeIndex(0),
+                    under: NodeIndex(0),
                 },
                 version: 1,
             },

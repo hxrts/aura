@@ -4,8 +4,6 @@
 //! This module tests the different handler implementations (real, mock, simulation)
 //! and their conformance to the effect trait contracts.
 
-mod common;
-
 use aura_composition::CompositeHandler;
 use aura_core::AuraResult;
 use aura_macros::aura_test;

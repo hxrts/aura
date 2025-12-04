@@ -686,7 +686,7 @@ pub fn validate_invariants(state: &TreeState) -> ApplicationResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commitment_tree::LeafNode;
+    use crate::LeafNode;
 
     #[test]
     fn test_policy_strictness() {

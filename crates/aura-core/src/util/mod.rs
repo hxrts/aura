@@ -1,12 +1,13 @@
 //! Utility Modules
 //!
 //! Common utilities for serialization, type conversions, context derivation,
-//! and testing infrastructure.
+//! graph algorithms, and testing infrastructure.
 //!
 //! **Layer 1**: Foundation utilities with no domain logic.
 
 pub mod context;
 pub mod conversions;
+pub mod graph;
 pub mod serialization;
 #[doc(hidden)]
 pub mod test_utils;
@@ -16,6 +17,7 @@ pub use context::{
     ContextDerivationService, ContextParams, DkdContextDerivation, GroupConfiguration,
     GroupContextDerivation, RelayContextDerivation,
 };
+pub use graph::{CycleError, DagNode};
 pub use serialization::{
     from_slice, hash_canonical, to_vec, SemanticVersion as SerVersion, SerializationError,
     VersionedMessage,

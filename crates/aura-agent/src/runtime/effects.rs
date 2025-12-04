@@ -3,6 +3,7 @@
 //! Core effect system components per Layer-6 spec.
 
 use crate::core::{AgentConfig, AgentResult};
+use crate::fact_registry::build_fact_registry;
 use async_trait::async_trait;
 use aura_composition::CompositeHandlerAdapter;
 use aura_core::effects::crypto::FrostSigningPackage;
@@ -11,14 +12,19 @@ use aura_core::effects::storage::{StorageError, StorageStats};
 use aura_core::effects::transport::{TransportEnvelope, TransportStats};
 use aura_core::effects::TransportEffects;
 use aura_core::effects::*;
+use aura_core::hash::hash;
 use aura_core::Journal;
-use aura_core::{AttestedOp, AuraError, AuthorityId, ContextId, DeviceId, FlowBudget, Hash32};
+use aura_core::{
+    AttestedOp, AuraError, AuthorityId, ChannelId, ContextId, DeviceId, FlowBudget, Hash32,
+};
 use aura_effects::{
     crypto::RealCryptoHandler,
     storage::FilesystemStorageHandler,
     time::{LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler},
 };
 use aura_journal::commitment_tree::state::TreeState as JournalTreeState;
+use aura_journal::extensibility::{DomainFact, FactRegistry};
+use aura_protocol::amp::{AmpJournalEffects, ChannelMembershipFact, ChannelParticipantEvent};
 use aura_protocol::effects::{
     AuraEffects, AuthorizationEffects, BloomDigest, ChoreographicEffects, ChoreographicRole,
     ChoreographyError, ChoreographyEvent, ChoreographyMetrics, EffectApiEffects, EffectApiError,
@@ -32,6 +38,8 @@ use rand::rngs::StdRng;
 use rand::{Rng, RngCore, SeedableRng};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+
+const DEFAULT_WINDOW: u32 = 1024;
 
 /// Effect executor for dispatching effect calls
 ///
@@ -118,6 +126,7 @@ pub struct AuraEffectSystem {
     transport_handler: aura_effects::transport::RealTransportHandler,
     transport_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     transport_stats: Arc<RwLock<TransportStats>>,
+    fact_registry: Arc<FactRegistry>,
 }
 
 #[derive(Clone, Default)]
@@ -148,184 +157,73 @@ impl BiscuitAuthorizationEffects for NoopBiscuitAuthorizationHandler {
 }
 
 impl AuraEffectSystem {
-    /// Create new effect system with configuration
+    /// Internal helper that builds the effect system with the given composite handler.
+    ///
+    /// All factory methods delegate to this to avoid code duplication.
+    fn build_internal(config: AgentConfig, composite: CompositeHandlerAdapter) -> Self {
+        let authority = AuthorityId::from_uuid(config.device_id().0);
+        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
+        let crypto_handler = RealCryptoHandler::new();
+        let authorization_handler =
+            Self::init_authorization_handler(authority, &crypto_handler, &journal_verifying_key);
+        let storage_handler = FilesystemStorageHandler::new(config.storage.base_path.clone());
+        let leakage_storage =
+            FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
+        let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
+            Arc::new(leakage_storage),
+        );
+        let oplog = Arc::new(RwLock::new(Vec::new()));
+        let tree_handler = InMemoryTreeHandler::new(oplog.clone());
+        let sync_handler = LocalSyncHandler::new(oplog);
+        let transport_handler = aura_effects::transport::RealTransportHandler::default();
+        let transport_inbox = Arc::new(RwLock::new(Vec::new()));
+        let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
+
+        Self {
+            config,
+            composite,
+            flow_budget: FlowBudgetHandler::new(authority),
+            crypto_handler,
+            storage_handler,
+            time_handler: PhysicalTimeHandler::new(),
+            logical_clock: LogicalClockHandler::new(),
+            order_clock: OrderClockHandler,
+            authorization_handler,
+            leakage_handler,
+            journal_policy,
+            journal_verifying_key,
+            authority_id: authority,
+            tree_handler,
+            sync_handler,
+            transport_handler,
+            transport_inbox,
+            transport_stats,
+            fact_registry: Arc::new(build_fact_registry()),
+        }
+    }
+
+    /// Create new effect system with configuration (testing mode).
     pub fn new(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = config.device_id();
-        let composite = CompositeHandlerAdapter::for_testing(device_id);
-        let authority = AuthorityId::from_uuid(config.device_id().0);
-        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
-        let storage_base = config.storage.base_path.clone();
-        let crypto_handler = RealCryptoHandler::new();
-        let authorization_handler =
-            Self::init_authorization_handler(authority, &crypto_handler, &journal_verifying_key);
-        let storage_handler = FilesystemStorageHandler::new(storage_base);
-        let leakage_storage =
-            FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
-        let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
-            Arc::new(leakage_storage),
-        );
-        let oplog = Arc::new(RwLock::new(Vec::new()));
-        let tree_handler = InMemoryTreeHandler::new(oplog.clone());
-        let sync_handler = LocalSyncHandler::new(oplog);
-        let transport_handler = aura_effects::transport::RealTransportHandler::default();
-        let transport_inbox = Arc::new(RwLock::new(Vec::new()));
-        let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
-        Ok(Self {
-            config,
-            composite,
-            flow_budget: FlowBudgetHandler::new(authority),
-            crypto_handler,
-            storage_handler,
-            time_handler: PhysicalTimeHandler::new(),
-            logical_clock: LogicalClockHandler::new(),
-            order_clock: OrderClockHandler,
-            authorization_handler,
-            leakage_handler,
-            journal_policy,
-            journal_verifying_key,
-            authority_id: authority,
-            tree_handler,
-            sync_handler,
-            transport_handler,
-            transport_inbox,
-            transport_stats,
-        })
+        let composite = CompositeHandlerAdapter::for_testing(config.device_id());
+        Ok(Self::build_internal(config, composite))
     }
 
-    /// Create effect system for production
+    /// Create effect system for production.
     pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = config.device_id();
-        let composite = CompositeHandlerAdapter::for_production(device_id);
-        let authority = AuthorityId::from_uuid(config.device_id().0);
-        let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
-        let storage_base = config.storage.base_path.clone();
-        let crypto_handler = RealCryptoHandler::new();
-        let authorization_handler =
-            Self::init_authorization_handler(authority, &crypto_handler, &journal_verifying_key);
-        let storage_handler = FilesystemStorageHandler::new(storage_base);
-        let leakage_storage =
-            FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
-        let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
-            Arc::new(leakage_storage),
-        );
-        let oplog = Arc::new(RwLock::new(Vec::new()));
-        let tree_handler = InMemoryTreeHandler::new(oplog.clone());
-        let sync_handler = LocalSyncHandler::new(oplog);
-        let transport_handler = aura_effects::transport::RealTransportHandler::default();
-        let transport_inbox = Arc::new(RwLock::new(Vec::new()));
-        let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
-        Ok(Self {
-            config,
-            composite,
-            flow_budget: FlowBudgetHandler::new(authority),
-            crypto_handler,
-            storage_handler,
-            time_handler: PhysicalTimeHandler::new(),
-            logical_clock: LogicalClockHandler::new(),
-            order_clock: OrderClockHandler,
-            authorization_handler,
-            leakage_handler,
-            journal_policy,
-            journal_verifying_key,
-            authority_id: authority,
-            tree_handler,
-            sync_handler,
-            transport_handler,
-            transport_inbox,
-            transport_stats,
-        })
+        let composite = CompositeHandlerAdapter::for_production(config.device_id());
+        Ok(Self::build_internal(config, composite))
     }
 
-    /// Create effect system for testing with default configuration
+    /// Create effect system for testing with default configuration.
     pub fn testing(config: &AgentConfig) -> Result<Self, crate::core::AgentError> {
-        let device_id = config.device_id();
-        let composite = CompositeHandlerAdapter::for_testing(device_id);
-        let (journal_policy, journal_verifying_key) =
-            Self::init_journal_policy(AuthorityId::from_uuid(config.device_id().0));
-        let crypto_handler = RealCryptoHandler::new();
-        let authorization_handler = Self::init_authorization_handler(
-            AuthorityId::from_uuid(config.device_id().0),
-            &crypto_handler,
-            &journal_verifying_key,
-        );
-        let storage_handler = FilesystemStorageHandler::new(config.storage.base_path.clone());
-        let leakage_storage =
-            FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
-        let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
-            Arc::new(leakage_storage),
-        );
-        let oplog = Arc::new(RwLock::new(Vec::new()));
-        let tree_handler = InMemoryTreeHandler::new(oplog.clone());
-        let sync_handler = LocalSyncHandler::new(oplog);
-        let transport_handler = aura_effects::transport::RealTransportHandler::default();
-        let transport_inbox = Arc::new(RwLock::new(Vec::new()));
-        let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
-        Ok(Self {
-            config: config.clone(),
-            composite,
-            flow_budget: FlowBudgetHandler::new(AuthorityId::from_uuid(config.device_id().0)),
-            crypto_handler,
-            storage_handler,
-            time_handler: PhysicalTimeHandler::new(),
-            logical_clock: LogicalClockHandler::new(),
-            order_clock: OrderClockHandler,
-            authorization_handler,
-            leakage_handler,
-            journal_policy,
-            journal_verifying_key,
-            authority_id: AuthorityId::from_uuid(config.device_id().0),
-            tree_handler,
-            sync_handler,
-            transport_handler,
-            transport_inbox,
-            transport_stats,
-        })
+        let composite = CompositeHandlerAdapter::for_testing(config.device_id());
+        Ok(Self::build_internal(config.clone(), composite))
     }
 
-    /// Create effect system for simulation with controlled seed
+    /// Create effect system for simulation with controlled seed.
     pub fn simulation(config: &AgentConfig, seed: u64) -> Result<Self, crate::core::AgentError> {
-        let device_id = config.device_id();
-        let composite = CompositeHandlerAdapter::for_simulation(device_id, seed);
-        let (journal_policy, journal_verifying_key) =
-            Self::init_journal_policy(AuthorityId::from_uuid(config.device_id().0));
-        let crypto_handler = RealCryptoHandler::new();
-        let authorization_handler = Self::init_authorization_handler(
-            AuthorityId::from_uuid(config.device_id().0),
-            &crypto_handler,
-            &journal_verifying_key,
-        );
-        let storage_handler = FilesystemStorageHandler::new(config.storage.base_path.clone());
-        let leakage_storage =
-            FilesystemStorageHandler::new(config.storage.base_path.join("leakage"));
-        let leakage_handler = aura_effects::leakage_handler::ProductionLeakageHandler::with_storage(
-            Arc::new(leakage_storage),
-        );
-        let oplog = Arc::new(RwLock::new(Vec::new()));
-        let tree_handler = InMemoryTreeHandler::new(oplog.clone());
-        let sync_handler = LocalSyncHandler::new(oplog);
-        let transport_handler = aura_effects::transport::RealTransportHandler::default();
-        let transport_inbox = Arc::new(RwLock::new(Vec::new()));
-        let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
-        Ok(Self {
-            config: config.clone(),
-            composite,
-            flow_budget: FlowBudgetHandler::new(AuthorityId::from_uuid(config.device_id().0)),
-            crypto_handler,
-            storage_handler,
-            time_handler: PhysicalTimeHandler::new(),
-            logical_clock: LogicalClockHandler::new(),
-            order_clock: OrderClockHandler,
-            authorization_handler,
-            leakage_handler,
-            journal_policy,
-            journal_verifying_key,
-            authority_id: AuthorityId::from_uuid(config.device_id().0),
-            tree_handler,
-            sync_handler,
-            transport_handler,
-            transport_inbox,
-            transport_stats,
-        })
+        let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
+        Ok(Self::build_internal(config.clone(), composite))
     }
 
     /// Get configuration
@@ -341,6 +239,11 @@ impl AuraEffectSystem {
     /// Get access to time effects
     pub fn time_effects(&self) -> &PhysicalTimeHandler {
         &self.time_handler
+    }
+
+    /// Get the fact registry for domain-specific fact reduction.
+    pub fn fact_registry(&self) -> &FactRegistry {
+        &self.fact_registry
     }
 
     /// Build a permissive Biscuit policy/bridge pair for journal enforcement.
@@ -402,6 +305,7 @@ impl AuraEffectSystem {
             authorization,
             Some(self.flow_budget.clone()),
             self.journal_verifying_key.clone(),
+            None, // Fact registry is accessed via AuraEffectSystem::fact_registry() instead
         )
     }
 }
@@ -567,7 +471,7 @@ impl RandomEffects for AuraEffectSystem {
 
 #[async_trait]
 impl SyncEffects for AuraEffectSystem {
-    async fn sync_with_peer(&self, peer_id: uuid::Uuid) -> Result<(), SyncError> {
+    async fn sync_with_peer(&self, peer_id: uuid::Uuid) -> Result<SyncMetrics, SyncError> {
         self.sync_handler.sync_with_peer(peer_id).await
     }
 
@@ -1389,6 +1293,160 @@ impl GuardContextProvider for AuraEffectSystem {
     }
 }
 
+#[async_trait::async_trait]
+impl AmpChannelEffects for AuraEffectSystem {
+    async fn create_channel(
+        &self,
+        params: ChannelCreateParams,
+    ) -> Result<ChannelId, AmpChannelError> {
+        let channel = if let Some(id) = params.channel {
+            id
+        } else {
+            let bytes = self.random_bytes(32).await;
+            ChannelId::from_bytes(hash(&bytes))
+        };
+
+        let window = params.skip_window.unwrap_or(DEFAULT_WINDOW);
+
+        let checkpoint = aura_journal::fact::ChannelCheckpoint {
+            context: params.context,
+            channel,
+            chan_epoch: 0,
+            base_gen: 0,
+            window,
+            ck_commitment: Default::default(),
+            skip_window_override: Some(window),
+        };
+
+        self.insert_relational_fact(aura_journal::fact::RelationalFact::AmpChannelCheckpoint(
+            checkpoint,
+        ))
+        .await
+        .map_err(map_amp_err)?;
+
+        if params.topic.is_some() || params.skip_window.is_some() {
+            let policy = aura_journal::fact::ChannelPolicy {
+                context: params.context,
+                channel,
+                skip_window: params.skip_window.or(Some(window)),
+            };
+            self.insert_relational_fact(aura_journal::fact::RelationalFact::AmpChannelPolicy(
+                policy,
+            ))
+            .await
+            .map_err(map_amp_err)?;
+        }
+        Ok(channel)
+    }
+
+    async fn close_channel(&self, params: ChannelCloseParams) -> Result<(), AmpChannelError> {
+        let state = aura_protocol::amp::get_channel_state(self, params.context, params.channel)
+            .await
+            .map_err(map_amp_err)?;
+        let committed = aura_journal::fact::CommittedChannelEpochBump {
+            context: params.context,
+            channel: params.channel,
+            parent_epoch: state.chan_epoch,
+            new_epoch: state.chan_epoch + 1,
+            chosen_bump_id: Default::default(),
+            consensus_id: Default::default(),
+        };
+
+        self.insert_relational_fact(
+            aura_journal::fact::RelationalFact::AmpCommittedChannelEpochBump(committed),
+        )
+        .await
+        .map_err(map_amp_err)?;
+
+        let policy = aura_journal::fact::ChannelPolicy {
+            context: params.context,
+            channel: params.channel,
+            skip_window: Some(0),
+        };
+
+        self.insert_relational_fact(aura_journal::fact::RelationalFact::AmpChannelPolicy(policy))
+            .await
+            .map_err(map_amp_err)?;
+
+        Ok(())
+    }
+
+    async fn join_channel(&self, params: ChannelJoinParams) -> Result<(), AmpChannelError> {
+        aura_protocol::amp::get_channel_state(self, params.context, params.channel)
+            .await
+            .map_err(map_amp_err)?;
+        let timestamp = ChannelMembershipFact::random_timestamp(self).await;
+        let membership = ChannelMembershipFact::new(
+            params.context,
+            params.channel,
+            params.participant,
+            ChannelParticipantEvent::Joined,
+            timestamp,
+        );
+        self.insert_relational_fact(membership.to_generic())
+            .await
+            .map_err(map_amp_err)?;
+
+        tracing::debug!(
+            "Participant {:?} joined channel {:?} in context {:?}",
+            params.participant,
+            params.channel,
+            params.context
+        );
+
+        Ok(())
+    }
+
+    async fn leave_channel(&self, params: ChannelLeaveParams) -> Result<(), AmpChannelError> {
+        aura_protocol::amp::get_channel_state(self, params.context, params.channel)
+            .await
+            .map_err(map_amp_err)?;
+        let timestamp = ChannelMembershipFact::random_timestamp(self).await;
+        let membership = ChannelMembershipFact::new(
+            params.context,
+            params.channel,
+            params.participant,
+            ChannelParticipantEvent::Left,
+            timestamp,
+        );
+        self.insert_relational_fact(membership.to_generic())
+            .await
+            .map_err(map_amp_err)?;
+
+        tracing::debug!(
+            "Participant {:?} left channel {:?} in context {:?}",
+            params.participant,
+            params.channel,
+            params.context
+        );
+
+        Ok(())
+    }
+
+    async fn send_message(
+        &self,
+        params: ChannelSendParams,
+    ) -> Result<AmpCiphertext, AmpChannelError> {
+        let state = aura_protocol::amp::get_channel_state(self, params.context, params.channel)
+            .await
+            .map_err(map_amp_err)?;
+
+        let header = AmpHeader {
+            context: params.context,
+            channel: params.channel,
+            chan_epoch: state.chan_epoch,
+            ratchet_gen: 0,
+        };
+
+        let cipher = AmpCiphertext {
+            header,
+            ciphertext: params.plaintext.clone(),
+        };
+
+        Ok(cipher)
+    }
+}
+
 // AuthorizationEffects implementation delegating to the handler
 #[async_trait]
 impl AuthorizationEffects for AuraEffectSystem {
@@ -1522,6 +1580,17 @@ impl AuraEffectSystem {
         } else {
             ExecutionMode::Production
         }
+    }
+}
+
+fn map_amp_err(e: aura_core::AuraError) -> AmpChannelError {
+    match e {
+        aura_core::AuraError::NotFound { .. } => AmpChannelError::NotFound,
+        aura_core::AuraError::PermissionDenied { .. } => AmpChannelError::Unauthorized,
+        aura_core::AuraError::Storage { message } => AmpChannelError::Storage(message),
+        aura_core::AuraError::Crypto { message } => AmpChannelError::Crypto(message),
+        aura_core::AuraError::Invalid { message } => AmpChannelError::InvalidState(message),
+        other => AmpChannelError::Internal(other.to_string()),
     }
 }
 

@@ -123,15 +123,15 @@ impl Default for NonceToken {
 }
 
 impl Nonce {
-    /// Create from FROST signing nonces
+    /// Create from FROST signing nonces with a pre-generated ID
     ///
     /// Note: FROST nonces cannot be serialized as they contain secret data.
     /// This stores only an identifier for tracking purposes.
-    pub fn from_frost(nonces: frost::round1::SigningNonces) -> Self {
-        let mut id = [0u8; 32];
-        #[allow(clippy::expect_used)]
-        getrandom::getrandom(&mut id).expect("Failed to generate nonce ID");
-
+    ///
+    /// # Arguments
+    /// * `nonces` - The FROST signing nonces to wrap
+    /// * `id` - A 32-byte random ID for tracking, should be generated via RandomEffects
+    pub fn from_frost(nonces: frost::round1::SigningNonces, id: [u8; 32]) -> Self {
         // Serialize nonces for secure persistence or in-memory caching
         let value = nonces
             .serialize()
@@ -457,7 +457,7 @@ pub fn generate_nonce_with_share(
     rng.fill_bytes(&mut nonce_id);
 
     // Serialize signing nonces for secure storage via Nonce::from_frost.
-    let nonce = Nonce::from_frost(frost_nonce);
+    let nonce = Nonce::from_frost(frost_nonce, nonce_id);
 
     let commitment = NonceCommitment::from_frost(identifier, frost_commitment);
 

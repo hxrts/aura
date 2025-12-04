@@ -1,5 +1,8 @@
-use crate::commitment_tree::{AttestedOp, Epoch, LeafId, NodeIndex, Snapshot, TreeOp, TreeOpKind};
 use crate::semilattice::OpLog;
+use aura_core::{
+    tree::{Epoch, Snapshot, TreeOp, TreeOpKind},
+    AttestedOp, LeafId, NodeIndex,
+};
 use std::collections::BTreeSet;
 
 /// Compact an OpLog by replacing history before a snapshot with the snapshot fact
@@ -321,7 +324,8 @@ pub enum CompactionError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commitment_tree::{LeafId, LeafNode, NodeIndex, Policy, TreeOp, TreeOpKind};
+    use aura_core::tree::{LeafNode, TreeOp, TreeOpKind};
+    use aura_core::{LeafId, NodeIndex, Policy};
     use std::collections::BTreeMap;
 
     fn create_test_op(epoch: u64, commitment: [u8; 32], leaf_id: u8) -> AttestedOp {

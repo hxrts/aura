@@ -990,7 +990,7 @@ pub fn compute_digest(journal: &Journal, operations: &[AttestedOp]) -> SyncResul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_journal::commitment_tree::{TreeOp, TreeOpKind};
+    use aura_core::{TreeOp, TreeOpKind};
 
     fn sample_journal() -> Journal {
         // Minimal journal for digest tests; facts/caps remain default

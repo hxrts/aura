@@ -1,7 +1,6 @@
 //! Rendezvous/SBB delivery logging hook used by the invitation flow.
 
 use crate::InvitationResult;
-// use aura_core::effects::ConsoleEffects; // Unused
 use aura_core::identifiers::DeviceId;
 use aura_protocol::orchestration::AuraEffects;
 

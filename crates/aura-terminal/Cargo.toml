@@ -1,0 +1,90 @@
+# Terminal interface for Aura - CLI + TUI
+[package]
+name = "aura-terminal"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Terminal interface for Aura"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "aura"
+path = "src/main.rs"
+
+[features]
+default = []
+
+# Development mode with extra debugging
+development = [
+    "aura-app/debug-serialize",
+    "aura-app/instrumented",
+    "dep:aura-simulator",
+    "dep:aura-testkit",
+]
+
+# Demo mode with simulator
+demo = []
+
+[dependencies]
+# Headless app core with native (signals) API
+aura-app = { path = "../aura-app", features = ["native"] }
+aura-core = { path = "../aura-core" }
+aura-agent = { path = "../aura-agent" }
+
+# Workspace crates (Layer 5 features)
+aura-protocol = { path = "../aura-protocol" }
+aura-recovery = { path = "../aura-recovery" }
+aura-invitation = { path = "../aura-invitation" }
+aura-authenticate = { path = "../aura-authenticate" }
+aura-sync = { path = "../aura-sync" }
+aura-effects = { path = "../aura-effects" }
+aura-wot = { path = "../aura-wot" }
+aura-chat = { path = "../aura-chat" }
+aura-journal = { path = "../aura-journal" }
+aura-relational = { path = "../aura-relational" }
+aura-store = { path = "../aura-store" }
+
+# Optional development dependencies - only included with "development" feature
+aura-simulator = { path = "../aura-simulator", optional = true }
+aura-testkit = { path = "../aura-testkit", optional = true, features = ["full-effect-system"] }
+
+# Effect system
+async-trait = { workspace = true }
+
+# Terminal UI (iocraft declarative framework)
+iocraft = "0.7"
+
+# Reactive signals for TUI state management
+futures-signals = "0.3"
+
+# CLI
+clap = { workspace = true }
+toml = { workspace = true }
+serde = { workspace = true }
+hex = { workspace = true }
+blake3 = { workspace = true }
+cfg-if = "1"
+
+# Async
+tokio = { workspace = true }
+
+# Other dependencies
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+once_cell = { workspace = true }
+chrono = { workspace = true }
+biscuit-auth = { workspace = true }
+
+[dev-dependencies]
+# Testing infrastructure (Layer 7 can use testkit with full effect system)
+aura-testkit = { path = "../aura-testkit", features = ["full-effect-system"] }
+aura-macros = { path = "../aura-macros" }
+tempfile = { workspace = true }
+insta = "1.34"  # Snapshot testing for TUI render tests

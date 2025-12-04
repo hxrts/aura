@@ -123,12 +123,12 @@
       in
       {
         packages = {
-          # Main CLI application
-          default = cargoNix.workspaceMembers.aura-cli.build;
-          aura-cli = cargoNix.workspaceMembers.aura-cli.build;
+          # Main CLI application (terminal interface)
+          default = cargoNix.workspaceMembers.aura-terminal.build;
+          aura-terminal = cargoNix.workspaceMembers.aura-terminal.build;
 
-          # CLI with development features (demo mode, simulator integration)
-          aura-cli-dev = cargoNix.workspaceMembers.aura-cli.build.override {
+          # Terminal with development features (demo mode, simulator integration)
+          aura-terminal-dev = cargoNix.workspaceMembers.aura-terminal.build.override {
             features = [ "development" ];
           };
 
@@ -233,7 +233,7 @@
               echo ""
               echo "Hermetic builds:"
               echo "  nix build            Build with crate2nix (hermetic)"
-              echo "  nix build .#aura-cli Build specific package"
+              echo "  nix build .#aura-terminal Build specific package"
               echo "  nix run              Run aura CLI hermetically"
               echo "  nix flake check      Run hermetic tests"
               echo ""

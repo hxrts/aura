@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
+// Re-export SyncMetrics from aura_core to ensure consistent type across crates
+pub use aura_core::effects::sync::SyncMetrics;
+
 /// Deterministic digest for efficient OpLog comparison.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BloomDigest {
@@ -107,6 +110,8 @@ pub enum SyncError {
     GuardChainFailure(String),
 }
 
+// SyncMetrics is re-exported from aura_core::effects::sync above
+
 /// Sync effect traits for anti-entropy and broadcast operations
 ///
 /// This trait defines the operations needed for tree synchronization across
@@ -124,7 +129,9 @@ pub trait SyncEffects: Send + Sync {
     /// 3. Compute missing operations (what peer has that we don't)
     /// 4. Request and receive missing operations
     /// 5. Merge operations into local OpLog via join
-    async fn sync_with_peer(&self, peer_id: Uuid) -> Result<(), SyncError>;
+    ///
+    /// Returns metrics about the sync operation including applied changes.
+    async fn sync_with_peer(&self, peer_id: Uuid) -> Result<SyncMetrics, SyncError>;
 
     /// Get digest of local OpLog
     ///

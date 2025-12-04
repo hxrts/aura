@@ -24,8 +24,8 @@ For more details see [System Architecture](docs/001_system_architecture.md) and 
 # Enter dev shell
 nix develop
 
-# Build CLI with development features (TUI + simulator + testkit)
-cargo build -p aura-cli --bin aura --features development --release
+# Build terminal interface with development features (TUI + simulator + testkit)
+cargo build -p aura-terminal --bin aura --features development --release
 
 # Demo
 ./target/release/aura demo human-agent

@@ -1,0 +1,126 @@
+[package]
+name = "aura-app"
+version = "0.1.0"
+edition = "2021"
+description = "Portable headless application core for Aura"
+license = "Apache-2.0"
+repository = "https://github.com/aura-org/aura"
+
+[features]
+default = []
+
+# =============================================================================
+# Platform Features
+# =============================================================================
+
+# Native Rust consumers (aura-terminal, tests)
+# Enables futures-signals API for fine-grained reactivity
+native = ["signals"]
+
+# iOS via UniFFI → Swift
+# Generates Swift bindings, uses callback-based reactivity
+ios = ["uniffi", "mobile"]
+
+# Android via UniFFI → Kotlin
+# Generates Kotlin bindings, uses callback-based reactivity
+android = ["uniffi", "mobile"]
+
+# Shared mobile configuration
+mobile = ["uniffi", "callbacks"]
+
+# Web via wasm-bindgen → JavaScript/TypeScript
+# For vanilla JS/TS consumers (React, Vue, etc.)
+web-js = ["wasm"]
+
+# Web via dominator (pure Rust WASM)
+# For Rust-based web apps using futures-signals
+web-dominator = ["wasm", "signals", "dep:dominator"]
+
+# =============================================================================
+# API Style Features
+# =============================================================================
+
+# Enable futures-signals based reactivity
+# Used by: native, web-dominator
+signals = ["dep:futures-signals"]
+
+# Enable callback-based reactivity (StateObserver trait)
+# Used by: ios, android, web-js
+callbacks = []
+
+# Enable both (for testing or hybrid scenarios)
+full = ["signals", "callbacks"]
+
+# =============================================================================
+# FFI Features
+# =============================================================================
+
+# UniFFI for native mobile bindings
+uniffi = ["dep:uniffi", "callbacks"]
+
+# WASM for web targets
+wasm = ["dep:wasm-bindgen", "dep:js-sys", "dep:web-sys"]
+
+# =============================================================================
+# Development Features
+# =============================================================================
+
+# Enable test utilities and mocks
+testutils = []
+
+# Enable tracing/logging instrumentation
+instrumented = ["dep:tracing"]
+
+# Serialize intents/state for debugging
+debug-serialize = ["dep:serde_json"]
+
+[dependencies]
+# Core Aura crates
+aura-core = { path = "../aura-core" }
+aura-agent = { path = "../aura-agent" }
+aura-journal = { path = "../aura-journal" }
+aura-wot = { path = "../aura-wot" }
+
+# Always required
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+cfg-if = "1"
+uuid = { version = "1.6", features = ["v4"] }
+async-trait = "0.1"
+
+# Async runtime (with platform-appropriate features)
+tokio = { version = "1", default-features = false, features = ["sync"] }
+
+# Optional: Signals-based reactivity
+futures-signals = { version = "0.3", optional = true }
+
+# Optional: FFI for mobile
+uniffi = { version = "0.25", optional = true }
+
+# Optional: WASM for web
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+web-sys = { version = "0.3", optional = true, features = ["console"] }
+
+# Optional: dominator for Rust web apps
+dominator = { version = "0.5", optional = true }
+
+# Optional: Development
+tracing = { version = "0.1", optional = true }
+serde_json = { version = "1", optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# WASM-specific async runtime
+wasm-bindgen-futures = "0.4"
+# Use browser crypto instead of ring
+getrandom = { version = "0.2", features = ["js"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Native tokio with full features for non-WASM
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
+
+[build-dependencies]
+uniffi = { version = "0.25", features = ["build"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

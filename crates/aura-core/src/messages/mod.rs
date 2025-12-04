@@ -12,21 +12,21 @@
 //!
 //! Domain-specific messages (FROST, rendezvous, recovery) live in their protocol crates (Layer 5).
 
-pub mod common_envelope;
-pub mod common_error;
 pub mod constants;
-pub mod typed_messages;
+pub mod envelope;
+pub mod error;
+pub mod typed;
 
 // Re-export commonly used types
-pub use common_envelope::WireEnvelope;
-pub use common_error::{
+pub use constants::WIRE_FORMAT_VERSION;
+pub use envelope::WireEnvelope;
+pub use error::{
     cid_mismatch_error, invalid_envelope_size_error, invalid_message_format_error,
     message_deserialization_error, message_serialization_error, message_too_large_error,
     unsupported_version_error, MessageError, MessageResult,
 };
-pub use constants::WIRE_FORMAT_VERSION;
 
 // Re-export typed message system types
-pub use typed_messages::{
+pub use typed::{
     AuthStrength, AuthTag, MessageValidation, MessageValidator, Msg, SemanticVersion, TypedMessage,
 };

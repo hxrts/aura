@@ -17,7 +17,11 @@ workspace = true
 # Core traits (interface layer)
 aura-core = { path = "../aura-core" }
 
-# Effect handler composition utilities
+# Journal for domain fact types
+aura-journal = { path = "../aura-journal" }
+
+# Effect handler composition utilities (for ViewDeltaReducer)
+aura-composition = { path = "../aura-composition" }
 
 # Session types and choreography
 

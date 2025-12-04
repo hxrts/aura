@@ -42,6 +42,7 @@
 
 // Core effect trait definitions
 pub mod agent;
+pub mod amp;
 pub mod authority;
 pub mod authorization;
 pub mod biometric;
@@ -53,7 +54,8 @@ pub mod console;
 pub mod crypto;
 pub mod flow; // Flow budget management
 pub mod guard; // Pure guard evaluation with effect commands
-pub mod indexed_journal; // Indexed journal lookups (B-tree, Bloom, Merkle)
+pub mod guardian; // Guardian relational coordination
+pub mod indexed; // Indexed journal lookups (B-tree, Bloom, Merkle)
 pub mod journal;
 pub mod leakage; // Privacy leakage tracking
 pub mod ledger; // Event sourcing and audit trails
@@ -79,6 +81,10 @@ pub use agent::{
     DeviceInfo, DeviceStorageEffects, HealthStatus, SessionHandle, SessionInfo,
     SessionManagementEffects, SessionMessage, SessionRole, SessionStatus, SessionType,
 };
+pub use amp::{
+    AmpChannelEffects, AmpChannelError, AmpCiphertext, AmpHeader, ChannelCloseParams,
+    ChannelCreateParams, ChannelJoinParams, ChannelLeaveParams, ChannelSendParams,
+};
 pub use authority::{AuthorityEffects, AuthorityRelationalEffects, RelationalEffects};
 pub use authorization::{
     AuthorizationDecision, AuthorizationEffects, AuthorizationError, BiscuitAuthorizationEffects,
@@ -98,7 +104,8 @@ pub use chaos::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, Resourc
 pub use console::ConsoleEffects;
 pub use crypto::{CryptoEffects, CryptoError};
 pub use flow::{FlowBudgetEffects, FlowHint};
-pub use indexed_journal::{FactId, IndexStats, IndexedFact, IndexedJournalEffects};
+pub use guardian::{GuardianAcceptInput, GuardianEffects, GuardianRequestInput};
+pub use indexed::{FactId, IndexStats, IndexedFact, IndexedJournalEffects};
 pub use journal::JournalEffects;
 pub use leakage::{
     LeakageBudget, LeakageChoreographyExt, LeakageEffects, LeakageEvent, ObserverClass,
@@ -161,7 +168,7 @@ pub use guard::{
     JournalEntry, MetadataView, SimulationEvent,
 };
 pub use ledger::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
-pub use sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError};
+pub use sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError, SyncMetrics};
 pub use tree::{Cut, Partial, ProposalId, Snapshot, TreeOperationEffects};
 
 // Re-export unified error system

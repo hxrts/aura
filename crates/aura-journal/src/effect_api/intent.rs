@@ -9,9 +9,9 @@ use aura_core::{Hash32 as Commitment, NodeIndex};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-// TreeOperation aliases commitment_tree::TreeOpKind until the intent system is fully
+// TreeOperation aliases aura_core::TreeOpKind until the intent system is fully
 // migrated to the new tree mutation types.
-use crate::commitment_tree::TreeOpKind as TreeOperation;
+use aura_core::TreeOpKind as TreeOperation;
 
 /// Import unified time types from aura-core
 use aura_core::time::TimeStamp;
@@ -338,11 +338,11 @@ mod tests {
 
     #[test]
     fn test_intent_creation() {
-        use crate::commitment_tree::LeafNode;
+        use crate::LeafNode;
 
         let op = TreeOperation::AddLeaf {
             leaf: LeafNode::new_device(
-                crate::commitment_tree::LeafId(0),
+                crate::LeafId(0),
                 DeviceId(uuid::Uuid::from_bytes([9u8; 16])),
                 vec![0u8; 32],
             ),
@@ -503,7 +503,7 @@ mod tests {
     #[test]
     #[allow(clippy::disallowed_methods)]
     fn test_intent_batch_add() {
-        use crate::commitment_tree::Policy;
+        use crate::Policy;
 
         let snapshot = [1u8; 32];
         let mut batch = IntentBatch::new(Hash32(snapshot));

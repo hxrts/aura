@@ -90,13 +90,30 @@ impl RandomEffects for MockCryptoHandler {
 impl CryptoEffects for MockCryptoHandler {
     async fn hkdf_derive(
         &self,
-        _ikm: &[u8],
-        _salt: &[u8],
-        _info: &[u8],
+        ikm: &[u8],
+        salt: &[u8],
+        info: &[u8],
         output_len: usize,
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - deterministic output based on seed
-        Ok(vec![self.seed as u8; output_len])
+        // Mock implementation - deterministic output based on seed and inputs
+        // Incorporates all inputs to ensure different keys produce different outputs
+        let mut state = self.seed;
+        for byte in ikm {
+            state = state.wrapping_mul(31).wrapping_add(*byte as u64);
+        }
+        for byte in salt {
+            state = state.wrapping_mul(37).wrapping_add(*byte as u64);
+        }
+        for byte in info {
+            state = state.wrapping_mul(41).wrapping_add(*byte as u64);
+        }
+
+        let mut result = vec![0u8; output_len];
+        for byte in result.iter_mut() {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            *byte = (state >> 32) as u8;
+        }
+        Ok(result)
     }
 
     async fn derive_key(
@@ -208,13 +225,24 @@ impl CryptoEffects for MockCryptoHandler {
     async fn chacha20_encrypt(
         &self,
         plaintext: &[u8],
-        _key: &[u8; 32],
-        _nonce: &[u8; 12],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - simple XOR
+        // Mock implementation - deterministic XOR incorporating key and nonce
+        // This ensures different keys produce different ciphertext
+        let mut key_state = self.seed;
+        for byte in key {
+            key_state = key_state.wrapping_mul(31).wrapping_add(*byte as u64);
+        }
+        for byte in nonce {
+            key_state = key_state.wrapping_mul(37).wrapping_add(*byte as u64);
+        }
+
         let mut result = plaintext.to_vec();
-        for (i, byte) in result.iter_mut().enumerate() {
-            *byte ^= (self.seed as u8).wrapping_add(i as u8);
+        let mut state = key_state;
+        for byte in result.iter_mut() {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            *byte ^= (state >> 32) as u8;
         }
         Ok(result)
     }
@@ -225,36 +253,28 @@ impl CryptoEffects for MockCryptoHandler {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // ChaCha20 is symmetric, so decrypt = encrypt
+        // XOR is symmetric, so decrypt = encrypt with same key stream
         self.chacha20_encrypt(ciphertext, key, nonce).await
     }
 
     async fn aes_gcm_encrypt(
         &self,
         plaintext: &[u8],
-        _key: &[u8; 32],
-        _nonce: &[u8; 12],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - simple XOR
-        let mut result = plaintext.to_vec();
-        for (i, byte) in result.iter_mut().enumerate() {
-            *byte ^= (self.seed as u8).wrapping_add(i as u8);
-        }
-        Ok(result)
+        // Mock implementation - use same key-sensitive XOR as chacha20
+        self.chacha20_encrypt(plaintext, key, nonce).await
     }
 
     async fn aes_gcm_decrypt(
         &self,
         ciphertext: &[u8],
-        _key: &[u8; 32],
-        _nonce: &[u8; 12],
+        key: &[u8; 32],
+        nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // Mock implementation - simple XOR (symmetric)
-        let mut result = ciphertext.to_vec();
-        for (i, byte) in result.iter_mut().enumerate() {
-            *byte ^= (self.seed as u8).wrapping_add(i as u8);
-        }
-        Ok(result)
+        // Mock implementation - use same key-sensitive XOR as chacha20
+        self.chacha20_decrypt(ciphertext, key, nonce).await
     }
 
     async fn frost_rotate_keys(

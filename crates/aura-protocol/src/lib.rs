@@ -125,12 +125,13 @@ pub mod authorization; // Biscuit-based authorization (moved up from authorizati
 pub mod choreography;
 pub mod consensus; // Real Aura Consensus implementation
 pub mod context;
-pub mod coordinators;
 pub mod effects;
+pub mod error;
 pub mod facades; // High-level facade traits (Layer 4 appropriate - traits only, implementations in Layer 6)
 pub mod guards;
 pub mod handlers;
 pub mod messages;
+pub mod moderation; // Query/reduction layer for moderation state from journal facts
 pub mod session; // Session orchestration types (SessionStatus, SessionOutcome)
 pub mod state;
 pub mod transport;
@@ -138,6 +139,7 @@ pub mod types; // Protocol orchestration types
 
 // Re-export authorization types for convenient access
 pub use authorization::{AuthorizationResult, BiscuitAuthorizationBridge};
+pub use error::ProtocolError;
 
 // Re-export session types for convenient access
 pub use session::{SessionOutcome, SessionStatus};

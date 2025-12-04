@@ -3,6 +3,7 @@
 //! This module implements guardian authentication using the RelationalContext
 //! model, replacing the device-centric guardian authentication.
 
+use aura_core::crypto::ed25519::{Ed25519Signature, Ed25519VerifyingKey};
 use aura_core::relational::GuardianBinding;
 use aura_core::{
     relational::{GenericBinding, RelationalFact},
@@ -10,7 +11,6 @@ use aura_core::{
 };
 use aura_macros::choreography;
 use aura_relational::RelationalContext;
-use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -180,7 +180,7 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
 
     // Derive verifying key from guardian commitment (the binding commits to the guardian's root key)
     let verifying_key_bytes: [u8; 32] = binding.guardian_commitment.0;
-    let verifying_key = VerifyingKey::from_bytes(&verifying_key_bytes).map_err(|e| {
+    let verifying_key = Ed25519VerifyingKey::from_bytes(&verifying_key_bytes).map_err(|e| {
         AuraError::crypto(format!(
             "Invalid guardian commitment (pubkey decode failed): {}",
             e
@@ -188,7 +188,8 @@ pub async fn verify_guardian_proof<T: aura_core::effects::PhysicalTimeEffects>(
     })?;
 
     // Verify signature
-    if let Err(err) = verifying_key.verify(&operation_bytes, &Signature::from_bytes(&sig_bytes)) {
+    let signature = Ed25519Signature::from_bytes(&sig_bytes);
+    if let Err(err) = verifying_key.verify(&operation_bytes, &signature) {
         return Ok(GuardianAuthResponse {
             success: false,
             authorized: false,

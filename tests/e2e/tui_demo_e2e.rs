@@ -15,9 +15,8 @@ use aura_core::effects::time::PhysicalTimeEffects;
 use tokio::sync::RwLock;
 
 // Import TUI types from aura-cli's public API
-use aura_cli::tui::{
-    AuraEvent, DemoScenario, EffectCommand, EventFilter, MockStore, RecoveryState, SimulatedBridge,
-};
+use aura_cli::demo::simulator_integration::SimulatedBridge;
+use aura_cli::tui::{AuraEvent, DemoScenario, EffectCommand, EventFilter, RecoveryState};
 
 /// Mock time effects for deterministic testing
 #[derive(Debug, Clone)]
@@ -110,11 +109,6 @@ impl TuiTestHarness {
     /// Get a reference to the bridge
     pub fn bridge(&self) -> &SimulatedBridge {
         &self.bridge
-    }
-
-    /// Get a reference to the mock store
-    pub fn store(&self) -> &MockStore {
-        self.bridge.store()
     }
 
     /// Dispatch a command

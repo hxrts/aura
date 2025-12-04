@@ -1,4 +1,4 @@
-use crate::effects::sync::{BloomDigest, SyncEffects, SyncError};
+use crate::effects::sync::{BloomDigest, SyncEffects, SyncError, SyncMetrics};
 use async_lock::RwLock;
 use async_trait::async_trait;
 use aura_core::identifiers::ContextId;
@@ -155,7 +155,7 @@ impl BroadcasterHandler {
 
 #[async_trait]
 impl SyncEffects for BroadcasterHandler {
-    async fn sync_with_peer(&self, _peer_id: Uuid) -> Result<(), SyncError> {
+    async fn sync_with_peer(&self, _peer_id: Uuid) -> Result<SyncMetrics, SyncError> {
         // Broadcaster doesn't implement full sync - delegate to AntiEntropyHandler
         Err(SyncError::OperationNotFound)
     }
@@ -321,9 +321,8 @@ impl BroadcasterHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_journal::commitment_tree::{
-        LeafId, LeafNode, LeafRole, NodeIndex, TreeOp, TreeOpKind,
-    };
+    use aura_core::{TreeOp, TreeOpKind};
+    use aura_journal::{LeafId, LeafNode, LeafRole, NodeIndex};
 
     fn create_test_op(commitment: Hash32) -> AttestedOp {
         AttestedOp {

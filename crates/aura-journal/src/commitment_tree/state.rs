@@ -10,8 +10,11 @@
 //! - **Navigation Helpers**: Query nodes, leaves, paths, policies
 //! - **Commitment Verification**: Validate tree integrity
 
-use crate::commitment_tree::{
-    BranchNode, BranchSigningKey, Epoch, LeafId, LeafNode, NodeIndex, Policy, TreeHash32,
+use aura_core::{
+    tree::{
+        BranchNode, BranchSigningKey, Epoch, LeafNode, SigningWitness, TreeHash32, TreeStateView,
+    },
+    LeafId, NodeIndex, Policy,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -447,25 +450,20 @@ impl TreeState {
     /// Get the signing witness for a node (key + threshold derived from policy)
     ///
     /// This is the complete information needed to verify an operation at this node.
-    pub fn signing_witness(
-        &self,
-        index: &NodeIndex,
-    ) -> Option<crate::commitment_tree::SigningWitness> {
+    pub fn signing_witness(&self, index: &NodeIndex) -> Option<SigningWitness> {
         let key = self.branch_signing_keys.get(index)?;
         let policy = self.get_policy(index)?;
         let child_count = self.get_children(*index).len();
         let threshold = policy.required_signers(child_count);
 
-        Some(crate::commitment_tree::SigningWitness::from_signing_key(
-            key, threshold,
-        ))
+        Some(SigningWitness::from_signing_key(key, threshold))
     }
 }
 
 /// Implementation of TreeStateView for TreeState
 ///
 /// This allows TreeState to be used with the verification module from aura-core.
-impl crate::commitment_tree::TreeStateView for TreeState {
+impl TreeStateView for TreeState {
     fn get_signing_key(&self, node: NodeIndex) -> Option<&BranchSigningKey> {
         self.branch_signing_keys.get(&node)
     }

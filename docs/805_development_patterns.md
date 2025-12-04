@@ -43,7 +43,7 @@ Use these questions to classify code and determine the correct crate.
 | Domain-specific types and semantics | Pure logic without handlers | Domain crate or `aura-mpst` |
 | Complete reusable protocol | End-to-end without UI | Feature/protocol crate |
 | Assembles handlers and protocols | Runtime composition | `aura-agent` or `aura-simulator` |
-| User-facing application | Has main() entry point | `aura-cli` or `app-*` |
+| User-facing application | Has main() entry point | `aura-terminal` or `app-*` |
 
 ### Boundary Questions for Edge Cases
 

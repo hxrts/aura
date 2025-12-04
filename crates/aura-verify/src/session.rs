@@ -194,23 +194,17 @@ mod tests {
     fn test_verify_session_ticket_success() {
         let ticket = create_test_ticket();
 
-        // Generate a key pair for testing using ed25519-dalek directly
-        use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
-        use ed25519_dalek::{Signer, SigningKey};
-        use rand::{rngs::StdRng, SeedableRng};
+        // Generate a key pair using aura-core wrappers with deterministic seed
+        use aura_core::crypto::ed25519::Ed25519SigningKey;
 
-        let mut rng = StdRng::seed_from_u64(42);
-        let signing_key = SigningKey::generate(&mut rng);
-        let verifying_key_dalek = signing_key.verifying_key();
+        // Use deterministic seed bytes for reproducible tests
+        let seed: [u8; 32] = [42u8; 32];
+        let signing_key = Ed25519SigningKey::from_bytes(&seed);
+        let verifying_key = signing_key.verifying_key().unwrap();
 
-        // Sign the ticket
+        // Sign the ticket using aura-core wrapper
         let ticket_bytes = serialize_session_ticket(&ticket).unwrap();
-        let signature_dalek = signing_key.sign(&ticket_bytes);
-
-        // Convert to aura-core wrapped types
-        let signature = Ed25519Signature::from(signature_dalek.to_bytes());
-        let verifying_key =
-            Ed25519VerifyingKey::from_bytes(&verifying_key_dalek.to_bytes()).unwrap();
+        let signature = signing_key.sign(&ticket_bytes).unwrap();
 
         let current_time = 1500; // Between issued_at and expires_at
 
@@ -223,20 +217,17 @@ mod tests {
     fn test_verify_session_ticket_expired() {
         let ticket = create_test_ticket();
 
-        use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
-        use ed25519_dalek::{Signer, SigningKey};
-        use rand::{rngs::StdRng, SeedableRng};
+        // Generate a key pair using aura-core wrappers with deterministic seed
+        use aura_core::crypto::ed25519::Ed25519SigningKey;
 
-        let mut rng = StdRng::seed_from_u64(1337);
-        let signing_key = SigningKey::generate(&mut rng);
-        let verifying_key_dalek = signing_key.verifying_key();
+        // Use different seed for this test
+        let seed: [u8; 32] = [137u8; 32];
+        let signing_key = Ed25519SigningKey::from_bytes(&seed);
+        let verifying_key = signing_key.verifying_key().unwrap();
+
+        // Sign the ticket using aura-core wrapper
         let ticket_bytes = serialize_session_ticket(&ticket).unwrap();
-        let signature_dalek = signing_key.sign(&ticket_bytes);
-
-        // Convert to aura-core wrapped types
-        let signature = Ed25519Signature::from(signature_dalek.to_bytes());
-        let verifying_key =
-            Ed25519VerifyingKey::from_bytes(&verifying_key_dalek.to_bytes()).unwrap();
+        let signature = signing_key.sign(&ticket_bytes).unwrap();
 
         let current_time = 3000; // After expires_at
 

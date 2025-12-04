@@ -30,8 +30,6 @@ pub mod operations;
 pub mod reduction;
 /// Commitment tree state representation
 pub mod state;
-/// Tree types (re-exported from aura-core during transition)
-pub mod tree_types;
 
 pub use application::{
     apply_verified, apply_verified_sync, validate_invariants, ApplicationError, ApplicationResult,
@@ -43,4 +41,3 @@ pub use operations::{
 };
 pub use reduction::{reduce, ReductionError};
 pub use state::{TreeState, TreeStateError};
-pub use tree_types::*;

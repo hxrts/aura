@@ -541,13 +541,16 @@ pub fn reduce_context(journal: &Journal) -> Result<RelationalState, ReductionNam
                                 .or_insert_with(|| policy.clone());
                             continue;
                         }
+                        // Generic bindings handle all domain-specific facts
+                        // (ChatFact, InvitationFact, ContactFact, etc.)
+                        // via DomainFact::to_generic()
                         RelationalFact::Generic {
-                            context_id: _,
+                            context_id: ctx,
                             binding_type,
                             binding_data,
                         } => RelationalBinding {
                             binding_type: RelationalBindingType::Generic(binding_type.clone()),
-                            context_id: *context_id,
+                            context_id: *ctx,
                             data: binding_data.clone(),
                         },
                     };

@@ -27,16 +27,60 @@ pub mod views;
 use async_trait::async_trait;
 use aura_core::{
     domain::journal::FactValue,
+    effects::indexed::{FactId, FactStreamReceiver, IndexedFact},
     effects::{BloomConfig, BloomFilter, IndexStats, IndexedJournalEffects, JournalEffects},
     time::TimeStamp,
     types::identifiers::AuthorityId,
     AuraError,
 };
 use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::RwLock;
 
 use crate::bloom::BloomHandler;
-use aura_core::effects::indexed_journal::{FactId, IndexedFact};
+
+/// Runtime-specific wrapper that implements `FactStreamReceiver` for tokio broadcast channels.
+///
+/// This adapter allows the Layer 3 (Implementation) to use tokio's concrete broadcast
+/// receiver while maintaining compatibility with the runtime-agnostic `FactStreamReceiver`
+/// trait defined in Layer 1 (Foundation).
+pub struct TokioFactStreamReceiver {
+    receiver: tokio::sync::broadcast::Receiver<Vec<IndexedFact>>,
+}
+
+impl TokioFactStreamReceiver {
+    /// Create a new tokio fact stream receiver wrapper.
+    pub fn new(receiver: tokio::sync::broadcast::Receiver<Vec<IndexedFact>>) -> Self {
+        Self { receiver }
+    }
+}
+
+impl FactStreamReceiver for TokioFactStreamReceiver {
+    fn recv(
+        &mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<IndexedFact>, AuraError>> + Send + '_>> {
+        Box::pin(async move {
+            self.receiver
+                .recv()
+                .await
+                .map_err(|e| AuraError::internal(format!("Fact stream recv error: {}", e)))
+        })
+    }
+
+    fn try_recv(&mut self) -> Result<Option<Vec<IndexedFact>>, AuraError> {
+        use tokio::sync::broadcast::error::TryRecvError;
+        match self.receiver.try_recv() {
+            Ok(facts) => Ok(Some(facts)),
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Lagged(n)) => Err(AuraError::internal(format!(
+                "Fact stream lagged by {} messages",
+                n
+            ))),
+            Err(TryRecvError::Closed) => Err(AuraError::internal("Fact stream closed")),
+        }
+    }
+}
 
 /// Orderable key for timestamp indexing
 ///
@@ -327,6 +371,8 @@ pub struct IndexedJournalHandler {
     merkle_root_cache: RwLock<Option<[u8; 32]>>,
     /// Set of fact hashes in the Merkle tree
     fact_hashes: RwLock<HashSet<[u8; 32]>>,
+    /// Broadcast channel for streaming fact updates to subscribers
+    fact_updates: tokio::sync::broadcast::Sender<Vec<IndexedFact>>,
 }
 
 impl IndexedJournalHandler {
@@ -341,12 +387,16 @@ impl IndexedJournalHandler {
         let bloom_config = BloomConfig::optimal(expected_elements, 0.01);
         let bloom_filter = BloomFilter::new(bloom_config).expect("Failed to create bloom filter");
 
+        // Create broadcast channel for fact streaming (capacity: 100 batches)
+        let (fact_updates_tx, _) = tokio::sync::broadcast::channel(100);
+
         Self {
             index: RwLock::new(AuthorityIndex::new()),
             _bloom_handler: bloom_handler,
             bloom_filter: RwLock::new(bloom_filter),
             merkle_root_cache: RwLock::new(None),
             fact_hashes: RwLock::new(HashSet::new()),
+            fact_updates: fact_updates_tx,
         }
     }
 
@@ -408,6 +458,19 @@ impl IndexedJournalHandler {
                 .write()
                 .expect("Merkle cache lock poisoned");
             *cache = None;
+        }
+
+        // Broadcast the new fact to stream subscribers
+        // We retrieve the fact we just added to broadcast it
+        let fact_to_broadcast = {
+            let index = self.index.read().expect("Index lock poisoned");
+            index.facts.get(&id).cloned()
+        };
+
+        if let Some(fact) = fact_to_broadcast {
+            // Send as a batch of one fact
+            // Ignore send errors (happens when there are no subscribers)
+            let _ = self.fact_updates.send(vec![fact]);
         }
 
         id
@@ -542,6 +605,10 @@ impl std::fmt::Debug for IndexedJournalHandler {
 
 #[async_trait]
 impl IndexedJournalEffects for IndexedJournalHandler {
+    fn watch_facts(&self) -> Box<dyn FactStreamReceiver> {
+        Box::new(TokioFactStreamReceiver::new(self.fact_updates.subscribe()))
+    }
+
     async fn facts_by_predicate(&self, predicate: &str) -> Result<Vec<IndexedFact>, AuraError> {
         let index = self.index.read().expect("Index lock poisoned");
         Ok(index.get_by_predicate(predicate))
@@ -771,6 +838,10 @@ impl<J: JournalEffects> JournalEffects for IndexedJournalWrapper<J> {
 
 #[async_trait]
 impl<J: JournalEffects> IndexedJournalEffects for IndexedJournalWrapper<J> {
+    fn watch_facts(&self) -> Box<dyn FactStreamReceiver> {
+        self.index.watch_facts()
+    }
+
     async fn facts_by_predicate(&self, predicate: &str) -> Result<Vec<IndexedFact>, AuraError> {
         self.index.facts_by_predicate(predicate).await
     }

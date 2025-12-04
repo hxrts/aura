@@ -12,6 +12,8 @@ use aura_core::semilattice::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::handler_trait::{CrdtHandler, CrdtSemantics, HandlerDiagnostics, HandlerMetrics};
+
 /// Event recording constraint application
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConstraintEvent<S> {
@@ -169,6 +171,38 @@ impl<S: MvState + Top> MvHandler<S> {
 impl<S: MvState + Top> Default for MvHandler<S> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<S: MvState + Top> CrdtHandler<S> for MvHandler<S> {
+    fn semantics(&self) -> CrdtSemantics {
+        CrdtSemantics::MeetSemilattice
+    }
+
+    fn state(&self) -> &S {
+        &self.state
+    }
+
+    fn state_mut(&mut self) -> &mut S {
+        &mut self.state
+    }
+
+    fn has_pending_work(&self) -> bool {
+        // MvHandler has no buffering for constraints
+        false
+    }
+
+    fn diagnostics(&self) -> HandlerDiagnostics {
+        HandlerDiagnostics {
+            semantics: CrdtSemantics::MeetSemilattice,
+            pending_count: 0,
+            is_idle: true,
+            metrics: HandlerMetrics {
+                constraints_applied: Some(self.constraint_history.len()),
+                consistency_proofs: Some(self.consistency_proofs.len()),
+                ..Default::default()
+            },
+        }
     }
 }
 

@@ -17,6 +17,9 @@ aura-effects = { path = "../aura-effects" }
 aura-composition = { path = "../aura-composition" }
 aura-protocol = { path = "../aura-protocol" }
 aura-journal = { path = "../aura-journal" }
+aura-relational = { path = "../aura-relational" }
+aura-chat = { path = "../aura-chat" }
+aura-invitation = { path = "../aura-invitation" }
 aura-wot = { path = "../aura-wot" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
@@ -49,6 +52,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 once_cell = { workspace = true }
 parking_lot = { workspace = true }
+hex = { workspace = true }
+cfg-if = "1"
 
 # Optional dependencies for features
 tokio-tungstenite = { workspace = true, optional = true }
@@ -79,7 +84,7 @@ default = []
 dev-console = [
     "dep:tokio-tungstenite",
     # "dep:axum",     # commented out - not in workspace
-    # "dep:tower",    # commented out - not in workspace  
+    # "dep:tower",    # commented out - not in workspace
     # "dep:tower-http", # commented out - not in workspace
 ]
 real-android-keystore = []  # Enable real Android Keystore implementation

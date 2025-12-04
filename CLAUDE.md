@@ -36,7 +36,7 @@ All commands below must be run within `nix develop`.
 
 ### Hermetic Builds (crate2nix)
 - `nix build` - Build with hermetic Nix (reproducible)
-- `nix build .#aura-cli` - Build specific package
+- `nix build .#aura-terminal` - Build specific package
 - `nix run` - Run aura CLI hermetically
 - `nix flake check` - Run hermetic tests
 - `crate2nix generate` - Regenerate Cargo.nix after dependency changes
@@ -77,9 +77,9 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 
 5. **Feature/Protocol** (`aura-authenticate`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-sync`): End-to-end protocol crates (auth, secure messaging, guardian recovery, rendezvous, storage, etc.) built atop the orchestration layer. `aura-frost` is deprecated; FROST primitives live in `aura-core::crypto::tree_signing`.
 
-6. **Runtime Composition** (`aura-agent`, `aura-simulator`): Runtime assembly of effect systems (agent) and deterministic simulation (simulator). `aura-agent` now owns the effect registry/builder infrastructure; `aura-protocol` no longer exports the legacy registry.
+6. **Runtime Composition** (`aura-agent`, `aura-simulator`, `aura-app`): Runtime assembly of effect systems (agent), deterministic simulation (simulator), and portable application core (app). `aura-agent` now owns the effect registry/builder infrastructure; `aura-protocol` no longer exports the legacy registry. `aura-app` provides the platform-agnostic business logic consumed by all frontends.
 
-7. **User Interface** (`aura-cli`): CLI entry points driving the agent runtime. Current CLI exposes scenario/admin/recovery/invitation flows plus the new authority/context inspection commands.
+7. **User Interface** (`aura-terminal`): Terminal-based CLI and TUI entry points driving the agent runtime. Exposes scenario/admin/recovery/invitation flows plus authority/context inspection commands.
 
 8. **Testing & Tools** (`aura-testkit`, `aura-quint`): Shared fixtures, simulation harnesses, property tests, Quint interop.
 
@@ -94,6 +94,7 @@ Aura now models identity via opaque authorities (`AuthorityId`) and relational c
 - Aura Consensus is the sole strong-agreement mechanism (`docs/104_consensus.md`). Fast path + fallback gossip integrate with the guard chain.
 - Guard chain sequence: `AuthorizationEffects` (Biscuit/capabilities) → `FlowBudgetEffects` (charge-before-send) → `LeakageEffects` (`docs/003_information_flow_contract.md`) → `JournalEffects` (fact commit) → `TransportEffects`.
 - Flow budgets: only the `spent` counters are facts; limits are derived at runtime from Biscuit + policy.
+- **Transaction Model**: Database operations coordinate via two orthogonal dimensions: (1) Authority Scope (Single vs Cross-authority) and (2) Agreement Level (Monotone/CRDT vs Consensus). Monotone operations use CRDT merge (0 RTT). Non-monotone operations use consensus (1-3 RTT). Cross-authority operations work with both. Consensus is NOT linearizable - use session types for operation sequencing. See `docs/113_database.md` §8 and `work/reactive.md` §7.4.
 
 ## Distributed Systems Contract
 
@@ -144,6 +145,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - Consensus: `docs/104_consensus.md`
 - Transport/receipts: `docs/108_transport_and_information_flow.md`, `docs/110_rendezvous.md`
 - Developer guides: `docs/107_mpst_and_choreography.md`, `docs/106_effect_system_and_runtime.md`
+- Cryptography: `docs/116_crypto.md`
 - Reference: `docs/999_project_structure.md`
 
 ## Agent Quick Reference
@@ -181,18 +183,19 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **Working on Layer 4 (Protocols)?** Read: `docs/107_mpst_and_choreography.md`
 - **Working on Layer 5 (Features)?** Read: `docs/803_coordination_guide.md`
 - **Working on Layer 6 (Runtime)?** Read: `aura-agent/` and `aura-simulator/`
-- **Working on Layer 7 (CLI)?** Read: `aura-cli/` + scenario docs
+- **Working on Layer 7 (Terminal)?** Read: `aura-terminal/` + `aura-app/` + scenario docs
 - **Working on Layer 8 (Testing)?** Read: `docs/805_testing_guide.md`
 
 ### Task-Oriented Crate Selection
 
 #### "I'm implementing..."
 - **A new hash function** → `aura-core` (pure function) + `aura-effects` (if OS integration needed)
+- **Cryptographic operations** → Use effect traits; see `docs/116_crypto.md` for layer rules
 - **FROST primitives** → `aura-core::crypto::tree_signing`; `aura-frost` deprecated
 - **Guardian recovery flow** → `aura-recovery`
 - **Journal fact validation** → `aura-journal`
 - **Network transport** → `aura-transport` (abstractions) + `aura-effects` (TCP implementation)
-- **CLI command** → `aura-cli`
+- **CLI command** → `aura-terminal`
 - **Test scenario** → `aura-testkit`
 - **Choreography protocol** → Feature crate + `aura-mpst`
 - **Authorization logic** → `aura-wot`
@@ -203,6 +206,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **How effects compose** → `docs/106_effect_system_and_runtime.md`
 - **How protocols are designed** → `docs/107_mpst_and_choreography.md`
 - **How the guard chain works** → `docs/001_system_architecture.md` (sections 2.1-2.3)
+- **How crypto architecture works** → `docs/116_crypto.md` + `just check-arch --crypto`
 - **How journals work** → `docs/102_journal.md`
 - **How testing works** → `docs/805_testing_guide.md` + `docs/806_simulation_guide.md`
 - **How to write tests** → `docs/805_testing_guide.md`

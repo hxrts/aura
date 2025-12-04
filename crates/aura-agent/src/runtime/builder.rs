@@ -42,7 +42,6 @@ use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
 };
 use crate::core::{AgentConfig, AuthorityContext};
-use aura_core::effects::ExecutionMode as CoreExecutionMode;
 use aura_core::identifiers::AuthorityId;
 use aura_core::EffectType;
 use aura_effects::{
@@ -128,16 +127,8 @@ impl EffectRegistryError {
     }
 }
 
-/// Execution mode for effect systems
-#[derive(Debug, Clone, PartialEq)]
-pub enum ExecutionMode {
-    /// Production mode with real handlers
-    Production,
-    /// Testing mode with mock handlers
-    Testing,
-    /// Simulation mode with deterministic behavior
-    Simulation { seed: u64 },
-}
+// Re-export ExecutionMode from aura_core for convenience
+pub use aura_core::effects::ExecutionMode;
 
 /// Authority-first runtime system builder
 pub struct EffectSystemBuilder {
@@ -194,17 +185,8 @@ impl EffectSystemBuilder {
         // Create lifecycle manager
         let lifecycle_manager = LifecycleManager::new();
 
-        // Convert execution mode to aura-core ExecutionMode
-        let core_execution_mode = match self.execution_mode {
-            ExecutionMode::Production => aura_core::effects::ExecutionMode::Production,
-            ExecutionMode::Testing => aura_core::effects::ExecutionMode::Testing,
-            ExecutionMode::Simulation { seed } => {
-                aura_core::effects::ExecutionMode::Simulation { seed }
-            }
-        };
-
         // Create a registry with appropriate execution mode
-        let registry = Arc::new(super::registry::EffectRegistry::new(core_execution_mode));
+        let registry = Arc::new(super::registry::EffectRegistry::new(self.execution_mode));
 
         // Create effect system components based on execution mode
         let (effect_executor, effect_system) = match self.execution_mode {
@@ -258,14 +240,7 @@ impl EffectSystemBuilder {
                 // Create a build-time context for wiring handlers
                 let authority_id = self.authority_id.ok_or("Authority ID required")?;
                 let context_id = aura_core::identifiers::ContextId::default();
-                let core_mode = match self.execution_mode {
-                    ExecutionMode::Testing => aura_core::effects::ExecutionMode::Testing,
-                    ExecutionMode::Simulation { seed } => {
-                        aura_core::effects::ExecutionMode::Simulation { seed }
-                    }
-                    _ => aura_core::effects::ExecutionMode::Testing,
-                };
-                let ctx = EffectContext::new(authority_id, context_id, core_mode);
+                let ctx = EffectContext::new(authority_id, context_id, self.execution_mode);
 
                 // Use a minimal async runtime just for building
                 let rt = tokio::runtime::Runtime::new()
@@ -295,7 +270,7 @@ fn map_registry_error(e: impl std::error::Error + Send + Sync + 'static) -> Buil
     }
 }
 
-fn build_base_registry(mode: CoreExecutionMode) -> Result<CompositionRegistry, BuilderError> {
+fn build_base_registry(mode: ExecutionMode) -> Result<CompositionRegistry, BuilderError> {
     let mut registry = CompositionRegistry::new(mode);
     registry
         .register_handler(
@@ -349,7 +324,7 @@ impl EffectRegistry {
     /// - Network: TCP/UDP networking with TLS
     /// - Time: System clock
     pub fn production() -> Result<Self, BuilderError> {
-        let composition_registry = build_base_registry(CoreExecutionMode::Production)?;
+        let composition_registry = build_base_registry(ExecutionMode::Production)?;
 
         Ok(Self {
             authority_context: None,
@@ -369,7 +344,7 @@ impl EffectRegistry {
     /// - Network: Local loopback or memory channels
     /// - Time: Controllable mock time
     pub fn testing() -> Result<Self, BuilderError> {
-        let composition_registry = build_base_registry(CoreExecutionMode::Testing)?;
+        let composition_registry = build_base_registry(ExecutionMode::Testing)?;
 
         Ok(Self {
             authority_context: None,
@@ -392,7 +367,7 @@ impl EffectRegistry {
     /// # Arguments
     /// * `seed` - Random seed for deterministic behavior
     pub fn simulation(seed: u64) -> Result<Self, BuilderError> {
-        let composition_registry = build_base_registry(CoreExecutionMode::Simulation { seed })?;
+        let composition_registry = build_base_registry(ExecutionMode::Simulation { seed })?;
 
         Ok(Self {
             authority_context: None,
@@ -406,7 +381,7 @@ impl EffectRegistry {
 
     /// Create a custom effect registry for advanced configuration
     pub fn custom() -> Result<Self, BuilderError> {
-        let composition_registry = build_base_registry(CoreExecutionMode::Testing)?;
+        let composition_registry = build_base_registry(ExecutionMode::Testing)?;
 
         Ok(Self {
             authority_context: None,

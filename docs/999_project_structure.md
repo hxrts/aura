@@ -12,10 +12,10 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 │         (aura-testkit, aura-quint)          │
 ├─────────────────────────────────────────────┤
 │ Layer 7: User Interface                     │
-│         (aura-cli)                          │
+│         (aura-terminal)                     │
 ├─────────────────────────────────────────────┤
 │ Layer 6: Runtime Composition                │
-│         (aura-agent, aura-simulator)        │
+│    (aura-agent, aura-simulator, aura-app)   │
 ├─────────────────────────────────────────────┤
 │ Layer 5: Feature/Protocol Implementation    │
 │    (aura-invitation, etc.)                  │
@@ -46,6 +46,7 @@ Aura's codebase is organized into 8 clean architectural layers. Each layer build
 - Error types: `AuraError`, error codes, and guard metadata
 - Configuration system with validation and multiple formats
 - Causal context types for CRDT ordering
+- AMP channel lifecycle effect surface: `aura-core::effects::amp::AmpChannelEffects` (implemented by runtime, simulator, and testkit mocks).
 
 **Key principle**: Interfaces only, no implementations or business logic.
 
@@ -116,6 +117,77 @@ This separation allows effect traits in Layer 1 to reference tree types without 
 
 **Key characteristics**: Implement domain logic without effect handlers or coordination.
 
+### Extensible Fact Types (`aura-journal`)
+
+The journal provides **generic fact infrastructure** that higher-level crates extend with domain-specific fact types. This follows the Open/Closed Principle: the journal is open for extension but closed for modification.
+
+#### Protocol-Level vs Domain-Level Facts
+
+The `RelationalFact` enum in `aura-journal/src/fact.rs` contains two categories:
+
+**Protocol-Level Facts** (stay in `aura-journal`):
+
+These are core protocol constructs with complex reduction logic in `reduce_context()`. They have interdependencies and specialized state derivation that cannot be delegated to simple domain reducers:
+
+| Fact | Purpose | Why Protocol-Level |
+|------|---------|-------------------|
+| `GuardianBinding` | Guardian relationship | Core recovery protocol |
+| `RecoveryGrant` | Recovery capability | Core recovery protocol |
+| `Consensus` | Aura Consensus results | Core agreement mechanism |
+| `AmpChannelCheckpoint` | Ratchet window anchoring | Complex epoch state computation |
+| `AmpProposedChannelEpochBump` | Optimistic epoch transitions | Spacing rules, bump selection |
+| `AmpCommittedChannelEpochBump` | Finalized epoch transitions | Epoch chain validation |
+| `AmpChannelPolicy` | Channel policy overrides | Skip window derivation |
+
+**Domain-Level Facts** (via `Generic` + `FactRegistry`):
+
+Application-specific facts use `RelationalFact::Generic` and are reduced by registered `FactReducer` implementations:
+
+| Domain Crate | Fact Type | Purpose |
+|-------------|-----------|---------|
+| `aura-chat` | `ChatFact` | Channels, messages |
+| `aura-invitation` | `InvitationFact` | Invitation lifecycle |
+| `aura-relational` | `ContactFact` | Contact management |
+| `aura-protocol/moderation` | `Block*Fact` | Block, mute, ban, kick |
+
+**Design Pattern**:
+1. **`aura-journal`** provides:
+   - `DomainFact` trait for fact type identity and serialization
+   - `FactReducer` trait for domain-specific reduction logic
+   - `FactRegistry` for runtime fact type registration
+   - `RelationalFact::Generic` as the extensibility mechanism
+
+2. **Domain crates** implement:
+   - Their own typed fact enums (e.g., `ChatFact`, `InvitationFact`)
+   - `DomainFact` trait with `to_generic()` for storage
+   - `FactReducer` for reduction to `RelationalBinding`
+
+3. **`aura-agent/src/fact_registry.rs`** registers all domain reducers:
+   ```rust
+   pub fn build_fact_registry() -> FactRegistry {
+       let mut registry = FactRegistry::new();
+       registry.register::<ChatFact>(CHAT_FACT_TYPE_ID, Box::new(ChatFactReducer));
+       registry.register::<InvitationFact>(INVITATION_FACT_TYPE_ID, Box::new(InvitationFactReducer));
+       registry.register::<ContactFact>(CONTACT_FACT_TYPE_ID, Box::new(ContactFactReducer));
+       register_moderation_facts(&mut registry);
+       registry
+   }
+   ```
+
+**Why This Architecture**:
+- **Open/Closed Principle**: New domain facts don't require modifying `aura-journal`
+- **Domain Isolation**: Each crate owns its fact semantics
+- **Protocol Integrity**: Core protocol facts with complex reduction stay in `aura-journal`
+- **Testability**: Domain facts can be tested independently
+- **Type Safety**: Compile-time guarantees within each domain
+
+**Core Fact Types in `aura-journal`**:
+Only facts fundamental to journal operation remain as direct enum variants:
+- `AttestedOp`: Commitment tree operations (cryptographic primitives)
+- `Snapshot`: Journal compaction checkpoints
+- `RendezvousReceipt`: Cross-authority coordination receipts
+- Protocol-level `RelationalFact` variants listed above
+
 ### Choreography Specification
 
 **`aura-mpst`**: Runtime library providing semantic abstractions for choreographic features including `CapabilityGuard`, `JournalCoupling`, `LeakageBudget`, and `ContextIsolation` traits. Integrates with the guard chain and works with both macro-generated and hand-written protocols.
@@ -156,6 +228,7 @@ This separation allows effect traits in Layer 1 to reference tree types without 
 - Handler composition utilities
 - Effect system configuration
 - Handler lifecycle management (start/stop/configure)
+- Reactive infrastructure: `Dynamic<T>` FRP primitives for composing view updates over effect changes
 
 **What doesn't go here**:
 - Individual handler implementations
@@ -210,11 +283,13 @@ This separation allows effect traits in Layer 1 to reference tree types without 
 
 **Dependencies**: `aura-core`, `aura-effects`, `aura-composition`, `aura-protocol`, `aura-mpst`.
 
-## Layer 6: Runtime Composition — `aura-agent` and `aura-simulator`
+## Layer 6: Runtime Composition — `aura-agent`, `aura-simulator`, and `aura-app`
 
 **Purpose**: Assemble complete running systems for production deployment.
 
 **`aura-agent`**: Production runtime for deployment with application lifecycle management, runtime-specific configuration, production deployment concerns, and system integration.
+
+**`aura-app`**: Portable headless application core providing the business logic and state management layer for all platforms. Exposes a platform-agnostic API consumed by terminal, iOS, Android, and web frontends. Contains intent processing, view derivation, and platform feature flags (`native`, `ios`, `android`, `web-js`, `web-dominator`).
 
 **`aura-simulator`**: Deterministic simulation runtime with virtual time, transport shims, and failure injection.
 
@@ -223,6 +298,7 @@ This separation allows effect traits in Layer 1 to reference tree types without 
 - Runtime-specific configuration and policies
 - Production deployment concerns
 - System integration and monitoring hooks
+- Reactive event loop: `ReactiveScheduler` (Tokio task) that orchestrates fact ingestion, journal updates, and view propagation
 
 **What doesn't go here**:
 - Effect handler implementations
@@ -234,15 +310,15 @@ This separation allows effect traits in Layer 1 to reference tree types without 
 
 **Dependencies**: All domain crates, `aura-effects`, `aura-composition`, `aura-protocol`.
 
-## Layer 7: User Interface
+## Layer 7: User Interface — `aura-terminal`
 
 **Purpose**: User-facing applications with main entry points.
 
-**`aura-cli`**: Command-line tools for account and device management, recovery status visualization, and scenario execution.
+**`aura-terminal`**: Terminal-based interface combining CLI commands and an interactive TUI (Terminal User Interface). Provides account and device management, recovery status visualization, chat interfaces, and scenario execution. Consumes `aura-app` for all business logic and state management.
 
-**Key characteristic**: Contains `main()` entry point that users run directly.
+**Key characteristic**: Contains `main()` entry point that users run directly. Binary is named `aura`.
 
-**Dependencies**: `aura-agent`, `aura-protocol`, `aura-core`, `aura-recovery`.
+**Dependencies**: `aura-app`, `aura-agent`, `aura-protocol`, `aura-core`, `aura-recovery`.
 
 ## Layer 8: Testing and Development Tools
 
@@ -265,25 +341,25 @@ This separation allows effect traits in Layer 1 to reference tree types without 
 ```
 crates/
 ├── aura-agent           Runtime composition and agent lifecycle
+├── aura-app             Portable headless application core (multi-platform)
 ├── aura-authenticate    Authentication protocols
 ├── aura-chat            Secure group messaging protocols
-├── aura-cli             Command-line interface
 ├── aura-composition     Handler composition and effect system assembly
 ├── aura-core            Foundation types and effect traits
 ├── aura-effects         Effect handler implementations
-├── aura-frost (removed)  FROST ceremonies (use core primitives)
 ├── aura-invitation      Invitation choreographies
 ├── aura-journal         Fact-based journal domain
 ├── aura-macros          Choreography DSL compiler
 ├── aura-mpst            Session types and choreography specs
 ├── aura-protocol        Orchestration and coordination
-├── aura-quint       Quint formal verification
+├── aura-quint           Quint formal verification
 ├── aura-recovery        Guardian recovery protocols
 ├── aura-relational      Cross-authority relationships
 ├── aura-rendezvous      Peer discovery and routing
 ├── aura-simulator       Deterministic simulation engine
 ├── aura-store           Storage domain types
 ├── aura-sync            Synchronization protocols
+├── aura-terminal        Terminal UI (CLI + TUI)
 ├── aura-testkit         Testing utilities and fixtures
 ├── aura-transport       P2P communication layer
 ├── aura-verify          Identity verification
@@ -329,9 +405,10 @@ graph TD
     %% Runtime Layer
     agent[aura-agent]
     simulator[aura-simulator]
+    app[aura-app]
 
     %% Application Layer
-    cli[aura-cli]
+    terminal[aura-terminal]
 
     %% Testing Layer
     testkit[aura-testkit]
@@ -408,10 +485,15 @@ graph TD
     agent --> invitation
     agent --> effects
     agent --> composition
-    cli --> agent
-    cli --> protocol
-    cli --> types
-    cli --> recovery
+    app --> types
+    app --> agent
+    app --> protocol
+    app --> composition
+    terminal --> app
+    terminal --> agent
+    terminal --> protocol
+    terminal --> types
+    terminal --> recovery
     simulator --> agent
     simulator --> journal
     simulator --> transport
@@ -443,8 +525,8 @@ graph TD
     class composition composition
     class protocol protocol
     class auth,chat,recovery,invitation,frost,relational,rendezvous,sync,store feature
-    class agent,simulator runtime
-    class cli app
+    class agent,simulator,app runtime
+    class terminal app
     class testkit,quint test
 ```
 
@@ -1019,7 +1101,7 @@ Run before every commit to maintain architectural compliance and simulation dete
 - **Guardian recovery flow** → `aura-recovery`
 - **Journal fact validation** → `aura-journal`
 - **Network transport** → `aura-transport` (abstractions) + `aura-effects` (TCP implementation)
-- **CLI command** → `aura-cli`
+- **CLI command** → `aura-terminal`
 - **Test scenario** → `aura-testkit`
 - **Choreography protocol** → Feature crate + `aura-mpst`
 - **Authorization logic** → `aura-wot`
@@ -1062,7 +1144,7 @@ Run before every commit to maintain architectural compliance and simulation dete
 **Working on Layer 4 (Protocols)?** Read: `docs/107_mpst_and_choreography.md`  
 **Working on Layer 5 (Features)?** Read: `docs/803_coordination_guide.md`  
 **Working on Layer 6 (Runtime)?** Read: `aura-agent/` and `aura-simulator/`  
-**Working on Layer 7 (CLI)?** Read: `aura-cli/` + scenario docs  
+**Working on Layer 7 (Terminal)?** Read: `aura-terminal/` + `aura-app/` + scenario docs  
 **Working on Layer 8 (Testing)?** Read: `docs/805_testing_guide.md`
 
 ## Crate Summary
@@ -1075,6 +1157,8 @@ Signature verification and identity validation interfaces.
 
 ### aura-journal
 CRDT semantics for fact-based journals and commitment trees. Implements tree state machine, deterministic reduction, and domain validation. Re-exports tree types from `aura-core` for convenience.
+
+**Extensibility**: Provides `FactType` and `FactReducer` traits plus `FactRegistry` for domain crates to register their own fact types. Domain-specific facts (chat, invitations, contacts) should use `RelationalFact::Generic` with registered reducers rather than hardcoded enum variants. Only core journal facts (`AttestedOp`, `Snapshot`, `RendezvousReceipt`) remain hardcoded.
 
 ### aura-relational
 Cross-authority relationships, including Guardian relationship protocols with cross-authority consensus coordination and relational state management.
@@ -1098,7 +1182,7 @@ DSL compiler for choreographies with Aura-specific annotations.
 Production-grade stateless effect handlers that delegate to OS services for crypto, network, storage, and time operations.
 
 ### aura-composition
-Effect handler composition, registry, and builder infrastructure for assembling handlers into cohesive effect systems.
+Effect handler composition, registry, and builder infrastructure for assembling handlers into cohesive effect systems. Includes reactive infrastructure (`Dynamic<T>`) for composing view updates over effect changes.
 
 ### aura-protocol
 Multi-party coordination and distributed protocol orchestration including guard chain and CRDT coordination.
@@ -1125,13 +1209,16 @@ Social Bulletin Board peer discovery with relationship-based routing.
 Journal synchronization and anti-entropy protocols.
 
 ### aura-agent
-Production runtime assembling handlers and protocols into executable systems.
+Production runtime assembling handlers and protocols into executable systems. Includes `ReactiveScheduler` (Tokio event loop) for orchestrating fact ingestion, journal updates, and view propagation.
+
+### aura-app
+Portable headless application core providing platform-agnostic business logic and state management. Exposes a unified API for all frontends (terminal, iOS, Android, web). Contains intent processing, view derivation, and platform feature flags (`native`, `ios`, `android`, `web-js`, `web-dominator`). Supports UniFFI bindings for Swift/Kotlin integration.
 
 ### aura-simulator
 Deterministic simulation with chaos injection and property verification.
 
-### aura-cli
-Command-line interface for account management and recovery visualization.
+### aura-terminal
+Terminal-based user interface combining CLI commands and interactive TUI. Provides account and device management, recovery status visualization, chat interfaces, and scenario execution. Consumes `aura-app` for all business logic. Binary is named `aura`.
 
 ### aura-testkit
 Comprehensive testing infrastructure including test fixtures, scenario builders, property test helpers, and mock effect handlers with controllable stateful behavior for deterministic testing.

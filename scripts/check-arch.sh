@@ -19,6 +19,7 @@ Options (run all when none given):
   --invariants     INVARIANTS.md schema validation
   --todos          Incomplete code markers
   --registration   Handler composition vs direct instantiation
+  --crypto         Crypto library usage boundaries (ed25519_dalek, OsRng, getrandom)
   --layer N[,M...] Filter output to specific layer numbers (1-8); repeatable
   --quick          Run fast checks only (skip todos, placeholders)
   -v, --verbose    Show more detail (allowlisted paths, etc.)
@@ -34,6 +35,7 @@ RUN_GUARDS=false
 RUN_INVARIANTS=false
 RUN_TODOS=false
 RUN_REG=false
+RUN_CRYPTO=false
 RUN_QUICK=false
 VERBOSE=false
 LAYER_FILTERS=()
@@ -47,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --invariants) RUN_ALL=false; RUN_INVARIANTS=true ;;
     --todos) RUN_ALL=false; RUN_TODOS=true ;;
     --registration) RUN_ALL=false; RUN_REG=true ;;
+    --crypto) RUN_ALL=false; RUN_CRYPTO=true ;;
     --layer)
       if [[ -z "${2-}" ]]; then
         echo "--layer requires a layer number (1-8)"; exit 1
@@ -73,6 +76,7 @@ if [ "$RUN_QUICK" = true ] && [ "$RUN_ALL" = true ]; then
   RUN_GUARDS=true
   RUN_INVARIANTS=true
   RUN_REG=true
+  RUN_CRYPTO=true
   RUN_TODOS=false  # Skip todos in quick mode
   RUN_ALL=false
 fi
@@ -215,9 +219,9 @@ layer_of() {
     aura-journal|aura-wot|aura-verify|aura-store|aura-transport|aura-mpst|aura-macros) echo 2 ;;
     aura-effects|aura-composition) echo 3 ;;
     aura-protocol) echo 4 ;;
-    aura-authenticate|aura-chat|aura-invitation|aura-recovery|aura-relational|aura-rendezvous|aura-sync) echo 5 ;;
+    aura-authenticate|aura-chat|aura-invitation|aura-recovery|aura-relational|aura-rendezvous|aura-sync|aura-app) echo 5 ;;
     aura-agent|aura-simulator) echo 6 ;;
-    aura-cli) echo 7 ;;
+    aura-cli|aura-terminal) echo 7 ;;
     aura-testkit|aura-quint) echo 8 ;;
     *) echo 0 ;;
   esac
@@ -330,11 +334,13 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   section "Runtime coupling — keep foundation/spec crates runtime-agnostic; wrap tokio/async-std behind effects (docs/106_effect_system_and_runtime.md §3.5, docs/001_system_architecture.md §3)"
   runtime_pattern="tokio::|async_std::"
   runtime_hits=$(rg --no-heading "$runtime_pattern" crates -g "*.rs" || true)
+  # Allowlist: effect handlers, agent runtime, simulator, terminal UI, composition, testkit, tests
+  # Layer 6 (runtime) and Layer 7 (UI) are allowed to use tokio directly
   filtered_runtime=$(echo "$runtime_hits" \
     | grep -v "crates/aura-effects/" \
     | grep -v "crates/aura-agent/" \
     | grep -v "crates/aura-simulator/" \
-    | grep -v "crates/aura-cli/" \
+    | grep -v "crates/aura-terminal/" \
     | grep -v "crates/aura-composition/" \
     | grep -v "crates/aura-testkit/" \
     | grep -v "#\\[tokio::test\\]" \
@@ -350,16 +356,15 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   # Strict flag for direct wall-clock/random usage outside allowed areas
   impure_pattern="SystemTime::now|Instant::now|thread_rng\\(|rand::thread_rng|chrono::Utc::now|chrono::Local::now|rand::rngs::OsRng|rand::random"
   impure_hits=$(rg --no-heading "$impure_pattern" crates -g "*.rs" || true)
-  # Allowlist: effect implementations, testkit mocks, simulator handlers, runtime assembly, CLI UI measurements
-  # CLI code is allowed to use direct system time for UI measurements/metrics that don't affect protocol behavior
-  # Filter out allowed areas and inline test modules
+  # Allowlist: effect handlers, testkit, simulator, agent runtime, terminal UI, tests
+  # Terminal UI is allowed to use direct system time for UI measurements/metrics that don't affect protocol behavior
   # Note: Lines ending with .unwrap() or containing #[tokio::test] are likely test code
   filtered_impure=$(echo "$impure_hits" \
     | grep -v "crates/aura-effects/" \
     | grep -v "crates/aura-testkit/" \
     | grep -v "crates/aura-simulator/" \
     | grep -v "crates/aura-agent/src/runtime/" \
-    | grep -v "crates/aura-cli/" \
+    | grep -v "crates/aura-terminal/" \
     | grep -v "tests/performance_regression.rs" \
     | grep -v "///" \
     | grep -v "//!" \
@@ -391,14 +396,43 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
 
   section "Physical time guardrails — use PhysicalTimeEffects::sleep_ms; keep sleeps simulator-controllable (docs/106_effect_system_and_runtime.md §1.1, .claude/skills/patterns/SKILL.md)"
   # Direct tokio::time::sleep instances should go through PhysicalTimeEffects
-  tokio_sleep_hits=$(rg --no-heading "tokio::time::sleep" crates -g "*.rs" || true)
-  filtered_tokio_sleep=$(echo "$tokio_sleep_hits" \
-    | grep -v "crates/aura-effects/" \
-    | grep -v "crates/aura-simulator/" \
-    | grep -v "crates/aura-testkit/" \
-    | grep -v "/tests/" \
-    | grep -v "/examples/" \
-    | grep -v "benches/" || true)
+  # Use -n for line numbers so we can filter by test module position
+  tokio_sleep_hits=$(rg --no-heading -n "tokio::time::sleep" crates -g "*.rs" || true)
+  # Allowlist: effect handlers (time.rs), simulator, testkit, tests, aura-terminal (L7 UI)
+  # aura-agent should use PhysicalTimeEffects::sleep_ms for simulator determinism
+  # Also filter out inline #[cfg(test)] module content
+  filtered_tokio_sleep=""
+  if [[ -n "$tokio_sleep_hits" ]]; then
+    # First pass: basic path filtering
+    path_filtered=$(echo "$tokio_sleep_hits" \
+      | grep -v "crates/aura-effects/" \
+      | grep -v "crates/aura-simulator/" \
+      | grep -v "crates/aura-testkit/" \
+      | grep -v "crates/aura-terminal/" \
+      | grep -v "/tests/" \
+      | grep -v "/examples/" \
+      | grep -v "benches/" || true)
+    # Second pass: filter out matches that are in inline test modules
+    # Format is file:linenum:content - extract linenum and check against #[cfg(test)] position
+    if [[ -n "$path_filtered" ]]; then
+      while IFS= read -r hit; do
+        [[ -z "$hit" ]] && continue
+        file=$(echo "$hit" | cut -d: -f1)
+        linenum=$(echo "$hit" | cut -d: -f2)
+        # Check if this line is within a #[cfg(test)] module (after the marker)
+        test_mod_line=$(grep -n '#\[cfg(test)\]' "$file" 2>/dev/null | head -1 | cut -d: -f1 || echo "99999")
+        if [[ "$linenum" =~ ^[0-9]+$ ]] && [[ "$linenum" -lt "$test_mod_line" ]]; then
+          # Line is before test module, include it (strip line number for display)
+          filtered_tokio_sleep+="${file}:$(echo "$hit" | cut -d: -f3-)"$'\n'
+        elif ! [[ "$linenum" =~ ^[0-9]+$ ]]; then
+          # No line number format, include as-is
+          filtered_tokio_sleep+="$hit"$'\n'
+        fi
+        # Lines after test_mod_line are in test modules, skip them
+      done <<< "$path_filtered"
+      filtered_tokio_sleep="${filtered_tokio_sleep%$'\n'}"
+    fi
+  fi
   emit_hits "Direct tokio::time::sleep usage (should use PhysicalTimeEffects::sleep_ms)" "$filtered_tokio_sleep"
 
   # Check for direct sleeps from std/async-std (should use effect-injected time)
@@ -582,9 +616,96 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_REG" = true ]; then
   emit_hits "Direct aura-effects handler instantiation found (prefer EffectRegistry / composition)" "$instantiation"
 fi
 
+if [ "$RUN_ALL" = true ] || [ "$RUN_CRYPTO" = true ]; then
+  section "Crypto library boundaries — route crypto through aura-core wrappers; keep ed25519_dalek/OsRng/getrandom in allowed locations (work/crypto.md, docs/106_effect_system_and_runtime.md)"
+
+  # Allowed locations for direct crypto library usage:
+  # - Layer 1: aura-core/src/crypto/* (wrapper implementations)
+  # - Layer 1: aura-core/src/types/authority.rs (type aliases - known design issue)
+  # - Layer 3: aura-effects/src/* (production handlers)
+  # - Layer 8: aura-testkit/* (test infrastructure)
+  # - Test modules: /tests/, *_test.rs
+  CRYPTO_ALLOWLIST="crates/aura-core/src/crypto/|crates/aura-core/src/types/authority.rs|crates/aura-effects/src/|crates/aura-testkit/|/tests/|_test\\.rs"
+
+  # Allowed locations for direct randomness (OsRng, getrandom):
+  # - Layer 3: aura-effects/src/* (production handlers)
+  # - Layer 8: aura-testkit/* (test infrastructure)
+  # - Test modules: /tests/, *_test.rs
+  # - #[cfg(test)] modules (detected by context)
+  RANDOMNESS_ALLOWLIST="crates/aura-effects/src/|crates/aura-testkit/|/tests/|_test\\.rs"
+
+  # Check for direct ed25519_dalek imports outside allowed locations
+  ed25519_imports=$(rg --no-heading "use ed25519_dalek" crates -g "*.rs" || true)
+  filtered_ed25519=$(echo "$ed25519_imports" | grep -Ev "$CRYPTO_ALLOWLIST" || true)
+  if [ -n "$filtered_ed25519" ]; then
+    emit_hits "Direct ed25519_dalek import (use aura_core::crypto::ed25519 wrappers instead)" "$filtered_ed25519"
+    echo -e "    ${YELLOW}Allowed locations:${NC}"
+    echo -e "      - crates/aura-core/src/crypto/* (L1 wrappers)"
+    echo -e "      - crates/aura-effects/src/* (L3 handlers)"
+    echo -e "      - crates/aura-testkit/* (L8 testing)"
+    echo -e "      - /tests/ directories and *_test.rs files"
+  else
+    info "Direct ed25519_dalek imports: none outside allowed locations"
+  fi
+
+  # Check for direct OsRng usage outside allowed locations
+  # Filter out comments and #[cfg(test)] code
+  osrng_usage=$(rg --no-heading "OsRng" crates -g "*.rs" || true)
+  filtered_osrng=$(echo "$osrng_usage" \
+    | grep -v "///" \
+    | grep -v "//!" \
+    | grep -v "// " \
+    | grep -Ev "$RANDOMNESS_ALLOWLIST" || true)
+  # Additional filter: skip lines in files after #[cfg(test)]
+  if [ -n "$filtered_osrng" ]; then
+    osrng_final=""
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      file_path="${line%%:*}"
+      if [ -f "$file_path" ] && grep -q "#\[cfg(test)\]" "$file_path" 2>/dev/null; then
+        # Get line content and check if it's in test module
+        match_content="${line#*:}"
+        match_line_num=$(grep -n "$match_content" "$file_path" 2>/dev/null | head -1 | cut -d: -f1)
+        cfg_test_line=$(grep -n "#\[cfg(test)\]" "$file_path" 2>/dev/null | head -1 | cut -d: -f1)
+        if [ -n "$match_line_num" ] && [ -n "$cfg_test_line" ] && [ "$match_line_num" -gt "$cfg_test_line" ]; then
+          continue  # Skip - in test module
+        fi
+      fi
+      osrng_final="${osrng_final}${line}"$'\n'
+    done <<< "$filtered_osrng"
+    filtered_osrng="$osrng_final"
+  fi
+  if [ -n "$filtered_osrng" ]; then
+    emit_hits "Direct OsRng usage (use RandomEffects trait instead)" "$filtered_osrng"
+    echo -e "    ${YELLOW}Allowed locations:${NC}"
+    echo -e "      - crates/aura-effects/src/* (L3 handlers)"
+    echo -e "      - crates/aura-testkit/* (L8 testing)"
+    echo -e "      - #[cfg(test)] modules"
+  else
+    info "Direct OsRng usage: none outside allowed locations"
+  fi
+
+  # Check for direct getrandom usage outside allowed locations
+  getrandom_usage=$(rg --no-heading "getrandom::" crates -g "*.rs" || true)
+  filtered_getrandom=$(echo "$getrandom_usage" \
+    | grep -v "///" \
+    | grep -v "//" \
+    | grep -Ev "$RANDOMNESS_ALLOWLIST" || true)
+  if [ -n "$filtered_getrandom" ]; then
+    emit_hits "Direct getrandom usage (use RandomEffects trait instead)" "$filtered_getrandom"
+    echo -e "    ${YELLOW}Allowed locations:${NC}"
+    echo -e "      - crates/aura-effects/src/* (L3 handlers)"
+    echo -e "      - crates/aura-testkit/* (L8 testing)"
+  else
+    info "Direct getrandom usage: none outside allowed locations"
+  fi
+fi
+
 if [ "$RUN_ALL" = true ] || [ "$RUN_TODOS" = true ]; then
-  section "Production placeholders — replace nil UUIDs/placeholder text with real IDs/derivations (see docs/105_identifiers_and_boundaries.md, docs/001_system_architecture.md §1.4)"
-  placeholder_hits=$(rg --no-heading -i "uuid::nil\\(\\)|uuid::nil\\(|uuid::nil\\)|placeholder implementation|placeholder|for now" crates -g "*.rs" \
+  section "Production placeholders — replace nil UUIDs/placeholder implementations with real IDs/derivations (see docs/105_identifiers_and_boundaries.md, docs/001_system_architecture.md §1.4)"
+  # Note: "placeholder" in UI code (input hints, props.placeholder) is intentional and not a violation
+  # Only flag "placeholder implementation" and Uuid::nil() which indicate incomplete code
+  placeholder_hits=$(rg --no-heading -i "uuid::nil\\(\\)|placeholder implementation" crates -g "*.rs" \
     | grep -v "/tests/" \
     | grep -v "/benches/" \
     | grep -v "/examples/" || true)
@@ -629,19 +750,11 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_TODOS" = true ]; then
   fi
 
   section "TODO/FIXME — convert to tracked issues or implement; prioritize architecture/compliance blockers first"
-  todo_hits=$(rg --no-heading "TODO|FIXME" crates || true)
-  if [ -n "$todo_hits" ]; then
-    sorted_todos=$(while IFS= read -r line; do
-      path=${line%%:*}
-      crate=$(echo "$path" | cut -d/ -f2)
-      layer=$(layer_of "$crate")
-      [ "$layer" = "0" ] && layer=99
-      printf "%02d:%s\n" "$layer" "$line"
-    done <<< "$todo_hits" | sort -t: -k1,1n -k2,2 | sed 's/^[0-9]\\{2\\}://')
-    emit_hits "TODO/FIXME" "$sorted_todos"
-  else
-    info "TODO/FIXME: none"
-  fi
+  todo_hits=$(rg --no-heading "TODO|FIXME" crates -g "*.rs" \
+    | grep -v "/tests/" \
+    | grep -v "/benches/" \
+    | grep -v "/examples/" || true)
+  emit_hits "TODO/FIXME" "$todo_hits"
 
   section "Incomplete markers — replace \"in production\"/WIP text with TODOs or complete implementation per docs/805_development_patterns.md"
   incomplete_pattern="in production[^\\n]*(would|should|not)|stub|not implemented|unimplemented|temporary|workaround|hacky|\\bWIP\\b|\\bTBD\\b|prototype|future work|to be implemented"

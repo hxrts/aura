@@ -32,7 +32,7 @@ use aura_core::{
     domain::journal::FactValue,
     effects::{
         authorization::{AuthorizationError, BiscuitAuthorizationEffects},
-        indexed_journal::{IndexedFact, IndexedJournalEffects},
+        indexed::{IndexedFact, IndexedJournalEffects},
     },
     scope::ResourceScope,
     types::identifiers::AuthorityId,

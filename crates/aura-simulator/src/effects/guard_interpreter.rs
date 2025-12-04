@@ -4,7 +4,7 @@
 //! for simulation and testing. It records all effect commands as events and maintains
 //! deterministic state that can be inspected and replayed.
 //!
-//! Per ADR-014, this interpreter executes effect commands in a controlled environment,
+//! This interpreter executes effect commands in a controlled environment,
 //! enabling deterministic simulation, replay capabilities, and comprehensive testing
 //! of distributed protocols.
 

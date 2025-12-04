@@ -1,8 +1,10 @@
 //! Agent Configuration
 //!
-//! Configuration types for agent runtime behavior.
+//! Configuration types for agent runtime behavior, including guardian consensus policy.
 
-use aura_core::{hash::hash, DeviceId};
+use super::guardian::GuardianConsensusPolicy;
+use aura_core::hash;
+use aura_core::DeviceId;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -24,6 +26,23 @@ pub struct AgentConfig {
 
     /// Choreography configuration
     pub choreography: ChoreographyConfig,
+
+    /// Guardian consensus policy
+    #[serde(default)]
+    pub guardian: GuardianConsensusPolicy,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            device_id: DeviceId::new_from_entropy([0u8; 32]),
+            storage: StorageConfig::default(),
+            network: NetworkConfig::default(),
+            reliability: ReliabilityConfig::default(),
+            choreography: ChoreographyConfig::default(),
+            guardian: GuardianConsensusPolicy::default(),
+        }
+    }
 }
 
 /// Storage configuration
@@ -39,6 +58,16 @@ pub struct StorageConfig {
     pub enable_compression: bool,
 }
 
+impl Default for StorageConfig {
+    fn default() -> Self {
+        Self {
+            base_path: PathBuf::from("./.aura"),
+            cache_size: 50 * 1024 * 1024,
+            enable_compression: true,
+        }
+    }
+}
+
 /// Network configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkConfig {
@@ -50,6 +79,16 @@ pub struct NetworkConfig {
 
     /// Connection timeout in seconds
     pub connection_timeout: u64,
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            bind_address: "127.0.0.1:0".to_string(),
+            max_connections: 64,
+            connection_timeout: 10,
+        }
+    }
 }
 
 /// Reliability configuration
@@ -65,6 +104,16 @@ pub struct ReliabilityConfig {
     pub max_backoff_ms: u64,
 }
 
+impl Default for ReliabilityConfig {
+    fn default() -> Self {
+        Self {
+            max_retries: 5,
+            base_backoff_ms: 200,
+            max_backoff_ms: 10_000,
+        }
+    }
+}
+
 /// Choreography configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChoreographyConfig {
@@ -78,95 +127,58 @@ pub struct ChoreographyConfig {
     pub max_concurrent: usize,
 }
 
-impl Default for AgentConfig {
-    fn default() -> Self {
-        Self {
-            // Derive a deterministic device identifier from the default storage path
-            device_id: DeviceId::new_from_entropy(hash(b"./aura-data")),
-            storage: StorageConfig::default(),
-            network: NetworkConfig::default(),
-            reliability: ReliabilityConfig::default(),
-            choreography: ChoreographyConfig::default(),
-        }
-    }
-}
-
-impl Default for StorageConfig {
-    fn default() -> Self {
-        Self {
-            base_path: PathBuf::from("./aura-data"),
-            cache_size: 64 * 1024 * 1024, // 64MB
-            enable_compression: true,
-        }
-    }
-}
-
-impl Default for NetworkConfig {
-    fn default() -> Self {
-        Self {
-            bind_address: "0.0.0.0:0".to_string(),
-            max_connections: 100,
-            connection_timeout: 30,
-        }
-    }
-}
-
-impl Default for ReliabilityConfig {
-    fn default() -> Self {
-        Self {
-            max_retries: 3,
-            base_backoff_ms: 100,
-            max_backoff_ms: 5000,
-        }
-    }
-}
-
 impl Default for ChoreographyConfig {
     fn default() -> Self {
         Self {
             enable_debug: false,
-            timeout_secs: 60,
-            max_concurrent: 10,
+            timeout_secs: 30,
+            max_concurrent: 16,
         }
     }
 }
 
-impl AgentConfig {
-    /// Get the device ID for this agent
-    pub fn device_id(&self) -> DeviceId {
-        self.device_id
-    }
-
-    /// Check if this is a testing configuration
-    pub fn is_testing(&self) -> bool {
-        // Treat configurations whose base path explicitly contains "test" as test fixtures
-        self.storage.base_path.to_string_lossy().contains("test")
-    }
-
-    /// Check if this is a simulation configuration
-    pub fn is_simulation(&self) -> bool {
-        // Treat configurations whose base path explicitly contains "sim" as simulator runs
-        self.storage.base_path.to_string_lossy().contains("sim")
-    }
-}
-
-/// Serde support for DeviceId
+// Custom serde for DeviceId to keep DeviceId opaque in config
 mod device_id_serde {
     use super::*;
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserializer, Serializer};
 
-    pub fn serialize<S>(device_id: &DeviceId, serializer: S) -> Result<S::Ok, S::Error>
+    pub fn serialize<S>(id: &DeviceId, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        device_id.0.serialize(serializer)
+        serializer.serialize_str(&hex::encode(id.0))
     }
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<DeviceId, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let uuid = uuid::Uuid::deserialize(deserializer)?;
-        Ok(DeviceId(uuid))
+        let s = String::deserialize(deserializer)?;
+        let bytes = hex::decode(s).map_err(serde::de::Error::custom)?;
+        let mut arr = [0u8; 32];
+        if bytes.len() != 32 {
+            return Err(serde::de::Error::custom("device_id must be 32 bytes"));
+        }
+        arr.copy_from_slice(&bytes);
+        Ok(DeviceId::new_from_entropy(arr))
+    }
+}
+
+/// Derive a deterministic DeviceId from an arbitrary label (helper for tests/config)
+#[allow(dead_code)]
+pub fn derive_device_id(label: &str) -> DeviceId {
+    let digest = hash::hash(label.as_bytes());
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&digest);
+    DeviceId::new_from_entropy(arr)
+}
+
+impl AgentConfig {
+    pub fn device_id(&self) -> DeviceId {
+        self.device_id
+    }
+
+    pub fn is_simulation(&self) -> bool {
+        false
     }
 }

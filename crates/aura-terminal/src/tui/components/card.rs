@@ -1,0 +1,142 @@
+//! # Card Component
+//!
+//! A selectable container for list items.
+
+use iocraft::prelude::*;
+
+use crate::tui::theme::{Spacing, Theme};
+
+/// Card style helper for applying card styling to custom layouts
+pub struct CardStyle;
+
+impl CardStyle {
+    /// Get background and border colors based on selection/focus state
+    pub fn colors(selected: bool, focused: bool) -> (Color, Color) {
+        match (selected, focused) {
+            (true, true) => (Theme::BG_SELECTED, Theme::BORDER_FOCUS),
+            (true, false) => (Theme::BG_SELECTED, Theme::BORDER),
+            (false, true) => (Theme::BG_HOVER, Theme::BORDER_FOCUS),
+            (false, false) => (Color::Reset, Theme::BORDER),
+        }
+    }
+}
+
+/// Props for CardHeader
+#[derive(Default, Props)]
+pub struct CardHeaderProps {
+    /// Title text
+    pub title: String,
+    /// Optional subtitle
+    pub subtitle: String,
+    /// Optional right-side content (e.g., status indicator)
+    pub trailing: String,
+    /// Trailing content color
+    pub trailing_color: Option<Color>,
+    /// Whether the card is selected
+    pub selected: bool,
+    /// Whether the card is focused
+    pub focused: bool,
+    /// Whether to show a border
+    pub bordered: bool,
+}
+
+/// A styled card header with title, subtitle, and trailing text
+#[component]
+pub fn CardHeader(props: &CardHeaderProps) -> impl Into<AnyElement<'static>> {
+    let title = props.title.clone();
+    let subtitle = props.subtitle.clone();
+    let trailing = props.trailing.clone();
+    let trailing_color = props.trailing_color.unwrap_or(Theme::TEXT_MUTED);
+    let has_subtitle = !subtitle.is_empty();
+    let has_trailing = !trailing.is_empty();
+
+    let (bg, border_color) = CardStyle::colors(props.selected, props.focused);
+
+    element! {
+        View(
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::SpaceBetween,
+            background_color: bg,
+            border_style: if props.bordered { BorderStyle::Round } else { BorderStyle::None },
+            border_color: border_color,
+            padding: Spacing::LIST_ITEM_PADDING,
+            margin_bottom: Spacing::XS,
+        ) {
+            View(flex_direction: FlexDirection::Column, flex_shrink: 1.0) {
+                Text(content: title, weight: Weight::Bold, color: Theme::TEXT)
+                #(if has_subtitle {
+                    Some(element! {
+                        Text(content: subtitle, color: Theme::TEXT_MUTED)
+                    })
+                } else {
+                    None
+                })
+            }
+            #(if has_trailing {
+                Some(element! {
+                    Text(content: trailing, color: trailing_color)
+                })
+            } else {
+                None
+            })
+        }
+    }
+}
+
+/// Props for SimpleCard
+#[derive(Default, Props)]
+pub struct SimpleCardProps {
+    /// Card content text
+    pub content: String,
+    /// Whether the card is selected
+    pub selected: bool,
+    /// Whether the card is focused
+    pub focused: bool,
+    /// Whether to show a border
+    pub bordered: bool,
+}
+
+/// A simple card with just content text
+#[component]
+pub fn SimpleCard(props: &SimpleCardProps) -> impl Into<AnyElement<'static>> {
+    let content = props.content.clone();
+    let (bg, border_color) = CardStyle::colors(props.selected, props.focused);
+
+    element! {
+        View(
+            flex_direction: FlexDirection::Column,
+            background_color: bg,
+            border_style: if props.bordered { BorderStyle::Round } else { BorderStyle::None },
+            border_color: border_color,
+            padding: Spacing::LIST_ITEM_PADDING,
+            margin_bottom: Spacing::XS,
+        ) {
+            Text(content: content)
+        }
+    }
+}
+
+/// Props for CardFooter
+#[derive(Default, Props)]
+pub struct CardFooterProps {
+    /// Footer text (muted)
+    pub text: String,
+}
+
+/// Footer section for a card (to be used inside a View)
+#[component]
+pub fn CardFooter(props: &CardFooterProps) -> impl Into<AnyElement<'static>> {
+    let text = props.text.clone();
+
+    element! {
+        View(
+            margin_top: Spacing::XS,
+            border_style: BorderStyle::Single,
+            border_edges: Edges::Top,
+            border_color: Theme::BORDER,
+            padding_top: Spacing::XS,
+        ) {
+            Text(content: text, color: Theme::TEXT_MUTED)
+        }
+    }
+}

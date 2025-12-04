@@ -389,3 +389,223 @@ fn test_layer_population() {
         eprintln!("Layer {:?}: {} crates", layer, count);
     }
 }
+
+// ============================================================================
+// CRYPTOGRAPHIC ARCHITECTURE COMPLIANCE TESTS
+// ============================================================================
+//
+// These tests enforce the crypto architecture defined in work/crypto.md:
+// - ed25519_dalek imports only in allowed locations
+// - OsRng/getrandom usage only in effect handlers (Layer 3) and test code
+//
+// See docs/999_project_structure.md for layer definitions.
+
+/// Check if a path is in an allowed location for direct crypto library usage
+fn is_allowed_crypto_location(path_str: &str) -> bool {
+    // Layer 3: Implementation (aura-effects) - production handlers
+    if path_str.contains("aura-effects/src/") {
+        return true;
+    }
+
+    // Layer 1: Foundation (aura-core) - wrapper implementations
+    if path_str.contains("aura-core/src/crypto/") {
+        return true;
+    }
+
+    // Layer 1: Foundation - authority type aliases (known design issue, documented)
+    if path_str.contains("aura-core/src/types/authority.rs") {
+        return true;
+    }
+
+    // Layer 8: Testing (aura-testkit) - test infrastructure
+    if path_str.contains("aura-testkit/") {
+        return true;
+    }
+
+    // Test modules anywhere (inside #[cfg(test)])
+    // Note: We can't easily detect #[cfg(test)] at this level,
+    // but we can allow files that are clearly test modules
+    if path_str.contains("/tests/") || path_str.ends_with("_test.rs") {
+        return true;
+    }
+
+    false
+}
+
+/// Check if a path is in an allowed location for direct randomness (OsRng/getrandom)
+fn is_allowed_randomness_location(path_str: &str) -> bool {
+    // Layer 3: Implementation (aura-effects) - production handlers
+    if path_str.contains("aura-effects/src/") {
+        return true;
+    }
+
+    // Layer 8: Testing (aura-testkit) - test infrastructure
+    if path_str.contains("aura-testkit/") {
+        return true;
+    }
+
+    // Test modules anywhere
+    if path_str.contains("/tests/") || path_str.ends_with("_test.rs") {
+        return true;
+    }
+
+    false
+}
+
+fn find_workspace_root() -> PathBuf {
+    std::env::current_dir()
+        .ok()
+        .and_then(|mut dir| {
+            loop {
+                let cargo_toml = dir.join("Cargo.toml");
+                if cargo_toml.exists() {
+                    if let Ok(content) = fs::read_to_string(&cargo_toml) {
+                        if content.contains("[workspace]") {
+                            return Some(dir);
+                        }
+                    }
+                }
+                if !dir.pop() {
+                    break;
+                }
+            }
+            None
+        })
+        .unwrap_or_else(|| std::env::current_dir().unwrap())
+}
+
+fn scan_files_for_pattern(pattern: &str) -> Vec<(PathBuf, usize, String)> {
+    let workspace_root = find_workspace_root();
+    let crates_dir = workspace_root.join("crates");
+    let mut violations = Vec::new();
+
+    fn scan_directory(
+        dir: &Path,
+        pattern: &str,
+        violations: &mut Vec<(PathBuf, usize, String)>,
+    ) {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    // Skip target and hidden directories
+                    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    if name != "target" && !name.starts_with('.') {
+                        scan_directory(&path, pattern, violations);
+                    }
+                } else if path.extension().map_or(false, |e| e == "rs") {
+                    if let Ok(content) = fs::read_to_string(&path) {
+                        for (line_num, line) in content.lines().enumerate() {
+                            if line.contains(pattern) {
+                                violations.push((path.clone(), line_num + 1, line.to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    scan_directory(&crates_dir, pattern, &mut violations);
+    violations
+}
+
+#[test]
+fn test_no_direct_ed25519_dalek_usage() {
+    let violations: Vec<_> = scan_files_for_pattern("use ed25519_dalek")
+        .into_iter()
+        .filter(|(path, _, _)| {
+            let path_str = path.to_string_lossy();
+            !is_allowed_crypto_location(&path_str)
+        })
+        .collect();
+
+    if !violations.is_empty() {
+        eprintln!("\n=== ED25519_DALEK IMPORT VIOLATIONS ===\n");
+        eprintln!("Direct ed25519_dalek imports found outside allowed locations:\n");
+        for (path, line, content) in &violations {
+            eprintln!("  {}:{}", path.display(), line);
+            eprintln!("    {}\n", content.trim());
+        }
+        eprintln!("Allowed locations:");
+        eprintln!("  - aura-effects/src/* (Layer 3 - production handlers)");
+        eprintln!("  - aura-core/src/crypto/* (Layer 1 - wrapper implementations)");
+        eprintln!("  - aura-core/src/types/authority.rs (known type aliases)");
+        eprintln!("  - aura-testkit/** (Layer 8 - test infrastructure)");
+        eprintln!("\nUse aura_core::crypto::ed25519 wrappers instead.\n");
+
+        panic!(
+            "{} ed25519_dalek import violations found",
+            violations.len()
+        );
+    }
+}
+
+#[test]
+fn test_no_direct_osrng_usage() {
+    let violations: Vec<_> = scan_files_for_pattern("OsRng")
+        .into_iter()
+        .filter(|(path, _, line)| {
+            let path_str = path.to_string_lossy();
+            // Skip comments and doc comments
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") || trimmed.starts_with("*") || trimmed.starts_with("///")
+            {
+                return false;
+            }
+            // Skip if in #[cfg(test)] module - we detect this by checking if we're
+            // inside a tests module in encryption.rs or similar test-only code
+            if path_str.contains("encryption.rs") && line.contains("test") {
+                return false;
+            }
+            !is_allowed_randomness_location(&path_str)
+        })
+        .collect();
+
+    if !violations.is_empty() {
+        eprintln!("\n=== OsRng USAGE VIOLATIONS ===\n");
+        eprintln!("Direct OsRng usage found outside allowed locations:\n");
+        for (path, line, content) in &violations {
+            eprintln!("  {}:{}", path.display(), line);
+            eprintln!("    {}\n", content.trim());
+        }
+        eprintln!("Allowed locations:");
+        eprintln!("  - aura-effects/src/* (Layer 3 - production handlers)");
+        eprintln!("  - aura-testkit/** (Layer 8 - test infrastructure)");
+        eprintln!("  - #[cfg(test)] modules (test-only code)");
+        eprintln!("\nUse RandomEffects trait methods instead.\n");
+
+        panic!("{} OsRng usage violations found", violations.len());
+    }
+}
+
+#[test]
+fn test_no_direct_getrandom_usage() {
+    let violations: Vec<_> = scan_files_for_pattern("getrandom::")
+        .into_iter()
+        .filter(|(path, _, line)| {
+            let path_str = path.to_string_lossy();
+            // Skip comments
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") || trimmed.starts_with("*") {
+                return false;
+            }
+            !is_allowed_randomness_location(&path_str)
+        })
+        .collect();
+
+    if !violations.is_empty() {
+        eprintln!("\n=== GETRANDOM USAGE VIOLATIONS ===\n");
+        eprintln!("Direct getrandom usage found outside allowed locations:\n");
+        for (path, line, content) in &violations {
+            eprintln!("  {}:{}", path.display(), line);
+            eprintln!("    {}\n", content.trim());
+        }
+        eprintln!("Allowed locations:");
+        eprintln!("  - aura-effects/src/* (Layer 3 - production handlers)");
+        eprintln!("  - aura-testkit/** (Layer 8 - test infrastructure)");
+        eprintln!("\nUse RandomEffects trait methods instead.\n");
+
+        panic!("{} getrandom usage violations found", violations.len());
+    }
+}

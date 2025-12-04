@@ -78,9 +78,9 @@ The layers are as follows:
 
 5. Feature implementation: End-to-end protocol crates for authentication, secure messaging, recovery, relational contexts, rendezvous, and storage.
 
-6. Runtime composition (`aura-agent`, `aura-simulator`): Complete system assembly and deterministic simulation.
+6. Runtime composition (`aura-agent`, `aura-simulator`, `aura-app`): Complete system assembly, deterministic simulation, and portable application core.
 
-7. User interface (`aura-cli`): CLI entry points.
+7. User interface (`aura-terminal`): Terminal-based CLI and TUI entry points.
 
 8. Testing and tools (`aura-testkit`, `aura-quint`): Test fixtures, mock effect handlers, and simulation harnesses.
 

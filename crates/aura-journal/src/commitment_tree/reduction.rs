@@ -25,12 +25,74 @@
 
 use super::state::{TreeState, TreeStateError};
 use aura_core::hash;
+use aura_core::util::graph::DagNode;
 use aura_core::{
     tree::{commit_leaf, AttestedOp, Epoch, NodeIndex, Policy, TreeHash32, TreeOp, TreeOpKind},
     Hash32,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
+
+// =============================================================================
+// OpNode - DagNode Implementation for AttestedOp
+// =============================================================================
+
+/// Parent key for operation DAG dependencies.
+///
+/// Operations form a DAG where each operation references its parent by
+/// (epoch, commitment). This type provides a hashable, comparable key
+/// for tracking dependencies.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ParentKey {
+    /// Epoch of the parent state
+    pub epoch: Epoch,
+    /// Commitment hash of the parent state
+    pub commitment: TreeHash32,
+}
+
+impl ParentKey {
+    /// Create a new parent key from epoch and commitment
+    pub fn new(epoch: Epoch, commitment: TreeHash32) -> Self {
+        Self { epoch, commitment }
+    }
+}
+
+/// Wrapper type that implements `DagNode` for `AttestedOp`.
+///
+/// This wrapper allows operations to be used with generic DAG algorithms
+/// from `aura_core::util::graph`. The operation's hash serves as its ID,
+/// and its parent (epoch, commitment) serves as the dependency.
+///
+/// ## Note on Dependencies
+///
+/// Unlike view dependencies (explicit list of view IDs), operation dependencies
+/// are parent references that may point to state rather than other operations.
+/// The DAG sorting algorithm gracefully handles missing dependencies.
+#[derive(Clone)]
+pub struct OpNode<'a>(pub &'a AttestedOp);
+
+impl DagNode for OpNode<'_> {
+    type Id = TreeHash32;
+
+    /// Returns the hash of this operation as its unique identifier.
+    fn dag_id(&self) -> Self::Id {
+        hash_op(self.0)
+    }
+
+    /// Returns the parent key as a hash for dependency tracking.
+    ///
+    /// The parent is identified by (epoch, commitment) but we convert this
+    /// to a hash for the DagNode interface. The actual sorting function
+    /// uses specialized logic with tie-breaking for concurrent operations.
+    fn dag_dependencies(&self) -> Vec<Self::Id> {
+        // Convert parent key to a deterministic hash
+        let mut hasher = hash::hasher();
+        hasher.update(b"PARENT_KEY");
+        hasher.update(&self.0.op.parent_epoch.to_le_bytes());
+        hasher.update(&self.0.op.parent_commitment);
+        vec![hasher.finalize()]
+    }
+}
 
 /// Reduce an OpLog to a TreeState
 ///
@@ -558,8 +620,9 @@ fn get_tree_level(state: &TreeState, node: NodeIndex) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use super::TreeOp;
     use super::*;
-    use crate::commitment_tree::{LeafId, LeafNode, NodeIndex, TreeOp};
+    use crate::{LeafId, LeafNode, NodeIndex};
 
     fn create_test_op(parent_epoch: Epoch, leaf_id: u32) -> AttestedOp {
         AttestedOp {

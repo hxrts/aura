@@ -262,7 +262,7 @@ async fn my_operation<T: TimeEffects + RandomEffects>(
 
 This ensures WASM compatibility, predictable testing, and simulation determinism. The architectural compliance checker validates these constraints across the codebase.
 
-## 4. Choreographic Protocol System
+## 4. Choreographic System
 
 ### 4.1 Global Protocol Specification
 
@@ -374,7 +374,7 @@ The codebase follows strict 8-layer architecture with zero circular dependencies
 
 Layer 1 Foundation contains `aura-core` with effect traits, domain types, cryptographic utilities (including FROST primitives in `crypto::tree_signing`), semilattice traits, and unified errors. Layer 2 Specification contains domain crates, `aura-mpst`, and `aura-macros` that define semantics without implementations. Layer 3 Implementation contains `aura-effects` and `aura-composition` for stateless handlers and composition infrastructure. The legacy `aura-frost` crate has been removed; higher-level ceremonies should be colocated with their callers and use the core primitives via adapters/effects.
 
-Layer 4 Orchestration contains `aura-protocol` for multi-party coordination and guard infrastructure. Layer 5 Feature contains protocol crates for authentication, recovery, rendezvous, and storage. Layer 6 Runtime contains `aura-agent` and `aura-simulator` for system assembly. Layer 7 Interface contains `aura-cli` for user applications. Layer 8 Testing contains `aura-testkit` and `aura-quint` for shared fixtures and verification.
+Layer 4 Orchestration contains `aura-protocol` for multi-party coordination and guard infrastructure. Layer 5 Feature contains protocol crates for authentication, recovery, rendezvous, and storage. Layer 6 Runtime contains `aura-agent`, `aura-simulator`, and `aura-app` for system assembly and portable application core. Layer 7 Interface contains `aura-terminal` for user applications. Layer 8 Testing contains `aura-testkit` and `aura-quint` for shared fixtures and verification.
 
 ### 6.2 Code Location Decision Framework
 

@@ -284,9 +284,106 @@ pub struct ProductionDatabaseEffects {
 
 The journal provides fact storage. The index provides efficient lookups. The Biscuit bridge provides authorization. The CRDT coordinator provides replication.
 
-## 8. Federation
+## 8. Transaction Support via Aura Consensus
 
-### 8.1 Federated Queries
+### 8.1 Coordination Matrix
+
+Database operations use two orthogonal dimensions:
+
+**Authority Scope:**
+- Single authority operations (local facts)
+- Cross-authority operations (relational context)
+
+**Agreement Level:**
+- Monotone (CRDT merge, 0 RTT)
+- Non-monotone (Consensus required, 1-3 RTT)
+
+See `docs/104_consensus.md` for consensus protocol details.
+
+### 8.2 Transaction Types
+
+| | Single Authority | Cross-Authority |
+|---|---|---|
+| **Monotone** | Direct fact insertion<br>(0 RTT) | CRDT merge via anti-entropy<br>(0 RTT + sync) |
+| **Consensus** | Single-authority consensus<br>(1-2 RTT) | Multi-authority consensus<br>(2-3 RTT) |
+
+**Examples:**
+
+- **Monotone + Single**: Append message to own channel (`journal.insert_fact()`)
+- **Monotone + Cross-Authority**: Guardian adds trust fact (`journal.insert_relational_fact()`)
+- **Consensus + Single**: Remove device from account (`consensus_single_shot()`)
+- **Consensus + Cross-Authority**: Recovery grant with guardian approval (`federated_consensus()`)
+
+### 8.3 DatabaseWriteEffects Trait
+
+```rust
+#[async_trait]
+pub trait DatabaseWriteEffects: JournalEffects {
+    async fn transact(
+        &self,
+        ctx: &EffectContext,
+        operation: DatabaseOperation,
+    ) -> AuraResult<TransactionReceipt>;
+}
+
+pub enum TransactionReceipt {
+    /// Monotone operation completed immediately
+    Immediate {
+        fact_ids: Vec<FactId>,
+        timestamp: PhysicalTime
+    },
+
+    /// Non-monotone operation required consensus
+    Consensus {
+        consensus_id: ConsensusId,
+        result_id: ResultId,
+        commit_fact: CommitFact,
+        latency: Duration
+    },
+}
+```
+
+The `transact()` method routes operations to the appropriate coordination path:
+
+1. **Monotone operations**: Direct fact insertion (0 RTT)
+2. **Non-monotone operations**: Consensus protocol (1-3 RTT)
+3. **Result**: Receipt indicating coordination method used
+
+### 8.4 Query Isolation Levels
+
+Queries can specify consistency requirements:
+
+```rust
+pub enum QueryIsolation {
+    /// See all facts including uncommitted (CRDT state)
+    ReadUncommitted,
+
+    /// Only see facts with consensus commit
+    /// Wait for specific consensus instances if needed
+    ReadCommitted {
+        wait_for: Vec<ConsensusId>,
+    },
+
+    /// Snapshot at specific prestate (time-travel query)
+    Snapshot {
+        prestate_hash: Hash32,
+    },
+
+    /// Wait for all pending consensus in scope to complete
+    /// NOT linearizable - just ensures pending commits visible
+    ReadLatest {
+        scope: ResourceScope,
+    },
+}
+```
+
+**Important:** Aura Consensus is **NOT linearizable by default**. Each consensus instance independently agrees on a single operation and prestate. To sequence operations, use session types (`docs/107_mpst_and_choreography.md`).
+
+See `work/reactive.md` §7.4 for reactive integration with consensus-backed queries.
+
+## 9. Federation
+
+### 9.1 Federated Queries
 
 Cross-authority queries use existing choreography infrastructure. The initiator collects authorization tokens. Queries execute in parallel across authorities. Results merge using `JoinSemilattice`.
 
@@ -297,7 +394,7 @@ let merged = partial_results.into_iter()
 
 The merge operation guarantees consistent results regardless of response order.
 
-### 8.2 Effect Delegation
+### 9.2 Effect Delegation
 
 Delegation uses Biscuit token attenuation.
 
@@ -310,7 +407,7 @@ let delegation = account_authority
 
 Delegated tokens can only narrow capabilities. Time limits and result limits provide additional constraints.
 
-## 9. Implementation Location
+## 10. Implementation Location
 
 The indexing layer lives in `aura-effects/src/database/`. The query wrapper lives in the same location. The subscription API extends `JournalEffects` from `aura-journal`.
 

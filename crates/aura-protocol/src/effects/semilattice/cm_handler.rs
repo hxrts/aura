@@ -8,6 +8,8 @@ use aura_core::semilattice::{CausalOp, CmApply, Dedup, OpWithCtx};
 use aura_journal::{CausalContext, OperationId, VectorClock, VectorClockExt};
 use std::collections::{HashMap, VecDeque};
 
+use super::handler_trait::{CrdtHandler, CrdtSemantics, HandlerDiagnostics, HandlerMetrics};
+
 /// Operation-based CRDT effect handler with proper causal ordering
 ///
 /// Enforces causal ordering and deduplication for commutative
@@ -180,6 +182,42 @@ where
             .field("current_clock", &self.current_clock)
             .field("applied_operations_count", &self.applied_operations.len())
             .finish()
+    }
+}
+
+impl<S, Op, Id> CrdtHandler<S> for CmHandler<S, Op, Id>
+where
+    S: CmApply<Op> + Dedup<Id>,
+    Op: CausalOp<Id = Id, Ctx = CausalContext>,
+    Id: Clone + PartialEq,
+{
+    fn semantics(&self) -> CrdtSemantics {
+        CrdtSemantics::OperationBased
+    }
+
+    fn state(&self) -> &S {
+        &self.state
+    }
+
+    fn state_mut(&mut self) -> &mut S {
+        &mut self.state
+    }
+
+    fn has_pending_work(&self) -> bool {
+        // CmHandler has pending work if there are buffered operations
+        !self.buffer.is_empty()
+    }
+
+    fn diagnostics(&self) -> HandlerDiagnostics {
+        HandlerDiagnostics {
+            semantics: CrdtSemantics::OperationBased,
+            pending_count: self.buffer.len(),
+            is_idle: self.buffer.is_empty(),
+            metrics: HandlerMetrics {
+                applied_operations: Some(self.applied_operations.len()),
+                ..Default::default()
+            },
+        }
     }
 }
 

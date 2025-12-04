@@ -66,15 +66,19 @@
 
 use aura_core::AuraError;
 
+pub mod facts;
 pub mod group;
 pub mod history;
 pub mod service;
 pub mod types;
+pub mod view;
 
+pub use facts::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
 pub use group::ChatGroup;
 pub use history::ChatHistory;
 pub use service::ChatService;
 pub use types::*;
+pub use view::{ChatDelta, ChatViewReducer};
 
 /// Chat-specific errors
 #[derive(Debug, thiserror::Error)]

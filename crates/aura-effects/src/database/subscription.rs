@@ -28,7 +28,7 @@ use tokio::sync::broadcast;
 use super::IndexedJournalHandler;
 
 // Re-export FactId for convenience
-pub use aura_core::effects::indexed_journal::FactId;
+pub use aura_core::effects::indexed::FactId;
 
 /// A fact delta representing a change to the fact store.
 ///

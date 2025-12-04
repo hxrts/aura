@@ -1,4 +1,5 @@
 //! Journal Effects Implementation (Layer 2 - Clean Architecture)
+use crate::extensibility::FactRegistry;
 use async_trait::async_trait;
 use aura_core::effects::{BiscuitAuthorizationEffects, FlowBudgetEffects};
 use aura_core::effects::{CryptoEffects, JournalEffects, StorageEffects};
@@ -65,6 +66,8 @@ fn relational_context_id(rel: &crate::fact::RelationalFact) -> ContextId {
         AmpProposedChannelEpochBump(proposed) => proposed.context,
         AmpCommittedChannelEpochBump(committed) => committed.context,
         AmpChannelPolicy(policy) => policy.context,
+        // Generic handles all domain-specific facts (ChatFact, InvitationFact, ContactFact)
+        // via DomainFact::to_generic() - context_id is always stored in the binding
         Generic { context_id, .. } => *context_id,
     }
 }
@@ -83,6 +86,7 @@ pub struct JournalHandler<
     policy_token: Option<Vec<u8>>, // Raw Biscuit token bytes
     authority_id: AuthorityId,
     verifying_key: Option<Vec<u8>>,
+    fact_registry: Option<FactRegistry>,
     _phantom: PhantomData<()>,
 }
 
@@ -104,6 +108,7 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects, F: Flo
             policy_token: None,
             authority_id,
             verifying_key: None,
+            fact_registry: None,
             _phantom: PhantomData,
         }
     }
@@ -127,6 +132,12 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects, F: Flo
         self
     }
 
+    /// Attach a fact registry for domain-specific fact reduction.
+    pub fn with_fact_registry(mut self, registry: FactRegistry) -> Self {
+        self.fact_registry = Some(registry);
+        self
+    }
+
     fn with_authorization_if(mut self, auth: Option<(Vec<u8>, A)>) -> Self {
         if let Some((token_data, auth_effects)) = auth {
             self = self.with_authorization(token_data, auth_effects);
@@ -146,6 +157,18 @@ impl<C: CryptoEffects, S: StorageEffects, A: BiscuitAuthorizationEffects, F: Flo
             self = self.with_verifying_key(pk);
         }
         self
+    }
+
+    fn with_fact_registry_if(mut self, registry: Option<FactRegistry>) -> Self {
+        if let Some(reg) = registry {
+            self = self.with_fact_registry(reg);
+        }
+        self
+    }
+
+    /// Get a reference to the fact registry if one is attached.
+    pub fn fact_registry(&self) -> Option<&FactRegistry> {
+        self.fact_registry.as_ref()
     }
 
     async fn authorize_fact(&self, content: &crate::fact::FactContent) -> Result<(), AuraError> {
@@ -373,7 +396,7 @@ where
 pub struct JournalHandlerFactory;
 
 impl JournalHandlerFactory {
-    /// Creates a journal handler with optional Biscuit authorization, flow budget, and verifying key.
+    /// Creates a journal handler with optional Biscuit authorization, flow budget, verifying key, and fact registry.
     pub fn create<
         C: CryptoEffects,
         S: StorageEffects,
@@ -386,10 +409,12 @@ impl JournalHandlerFactory {
         authorization: Option<(Vec<u8>, A)>,
         flow_budget: Option<F>,
         verifying_key: Option<Vec<u8>>,
+        fact_registry: Option<FactRegistry>,
     ) -> JournalHandler<C, S, A, F> {
         JournalHandler::with_authority(authority_id, crypto, storage)
             .with_authorization_if(authorization)
             .with_flow_budget_if(flow_budget)
             .with_verifying_key_if(verifying_key)
+            .with_fact_registry_if(fact_registry)
     }
 }

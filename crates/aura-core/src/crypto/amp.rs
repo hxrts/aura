@@ -191,6 +191,4 @@ mod tests {
             "Different chan_epoch should produce different keys"
         );
     }
-
-    // XOR cipher test removed - function was insecure and has been deleted
 }

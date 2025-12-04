@@ -91,6 +91,33 @@ pub enum SyncError {
     AuthorizationFailed,
 }
 
+/// Metrics returned from a sync operation
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SyncMetrics {
+    /// Number of operations applied during sync
+    pub applied: usize,
+    /// Number of duplicate operations skipped
+    pub duplicates: usize,
+    /// Number of sync rounds performed
+    pub rounds: usize,
+}
+
+impl SyncMetrics {
+    /// Create empty metrics
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Create metrics with just an applied count
+    pub fn with_applied(applied: usize) -> Self {
+        Self {
+            applied,
+            duplicates: 0,
+            rounds: 1,
+        }
+    }
+}
+
 /// Sync effect traits for anti-entropy and broadcast operations
 ///
 /// This trait defines the operations needed for tree synchronization across
@@ -108,7 +135,9 @@ pub trait SyncEffects: Send + Sync {
     /// 3. Compute missing operations (what peer has that we don't)
     /// 4. Request and receive missing operations
     /// 5. Merge operations into local OpLog via join
-    async fn sync_with_peer(&self, peer_id: Uuid) -> Result<(), SyncError>;
+    ///
+    /// Returns metrics about the sync operation including applied changes.
+    async fn sync_with_peer(&self, peer_id: Uuid) -> Result<SyncMetrics, SyncError>;
 
     /// Get digest of local OpLog
     ///

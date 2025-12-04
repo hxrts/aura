@@ -9,6 +9,8 @@ pub mod keys;
 mod primitives;
 
 pub use derivation::derive_test_root_key;
-pub use encryption::{EncryptedEnvelope, EnvelopeEncryption, PaddingStrategy};
+pub use encryption::{
+    EncryptedEnvelope, EncryptionRandomness, EnvelopeEncryption, PaddingStrategy,
+};
 pub use keys::{RelationshipContext, RelationshipKey, RelationshipKeyManager};
 pub use primitives::{BlindSignature, SecretBrand, UnlinkableCredential};

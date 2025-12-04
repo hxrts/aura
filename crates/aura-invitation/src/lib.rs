@@ -54,6 +54,12 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
+/// Domain fact types for invitation state changes
+pub mod facts;
+
+/// View delta and reducer for invitation facts
+pub mod view;
+
 /// Main invitation and acceptance choreography (G_invitation)
 pub mod invitation_acceptance;
 
@@ -117,6 +123,12 @@ pub type AuthError = AuthenticationError;
 /// Compatibility alias for authentication operation results
 pub type AuthResult<T> = Result<T, AuthenticationError>;
 
+// Re-export domain fact types
+pub use facts::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYPE_ID};
+
+// Re-export view delta types
+pub use view::{InvitationDelta, InvitationViewReducer};
+
 // Re-export core types
 pub use aura_core::{
     AccountId, AuraError, AuraResult, DeviceId, GuardianId, Journal, RelationshipId,
@@ -136,7 +148,3 @@ pub use aura_authenticate::{
 pub use aura_core::effects::{
     ConsoleEffects, CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects,
 };
-
-// MPST types removed - using stateless effect system instead
-
-// Error re-exports removed - use aura_core::AuraError directly

@@ -51,6 +51,9 @@ pub mod commitment_integration;
 pub mod fact;
 pub mod reduction;
 
+// Extensible fact type infrastructure (Open/Closed Principle)
+pub mod extensibility;
+
 // Domain-specific fact schemas (Phase 2.3)
 pub mod facts;
 
@@ -93,26 +96,14 @@ pub use journal_api::{AccountSummary, Journal, JournalFact};
 #[doc(hidden)]
 pub use semilattice::{AccountState, EpochLog, GuardianRegistry, IntentPool, MaxCounter, OpLog};
 
-// New commitment tree re-exports (tree types moved from aura-core)
-pub use commitment_tree::{
-    // Re-export tree types for consumers that expect them from aura-journal
-    commit_branch,
-    commit_leaf,
-    compute_root_commitment,
-    policy_hash,
-    reduce,
-    AttestedOp,
-    BranchNode,
-    Epoch,
-    LeafId,
-    LeafNode,
-    LeafRole,
-    NodeIndex,
-    NodeKind,
-    Policy,
-    TreeCommitment,
-    TreeState,
+// Re-export tree types from aura-core for consumers that expect them from aura-journal
+pub use aura_core::tree::{
+    commit_branch, commit_leaf, compute_root_commitment, policy_hash, AttestedOp, BranchNode,
+    Epoch, LeafId, LeafNode, LeafRole, NodeIndex, NodeKind, Policy, TreeCommitment,
 };
+
+// Re-export commitment tree reduction and TreeState
+pub use commitment_tree::{reduce, TreeState};
 
 // Causal context re-exports
 pub use aura_core::time::VectorClock;
@@ -123,6 +114,9 @@ pub use types::GuardianMetadata;
 
 // Event type re-exports
 pub use events::{AdminReplaced, MaintenanceEvent};
+
+// Extensibility infrastructure re-exports
+pub use extensibility::{parse_generic_fact, DomainFact, FactReducer, FactRegistry};
 
 // Social fact schema re-exports (Phase 2.3)
 pub use facts::{

@@ -12,6 +12,7 @@ pub mod api;
 pub mod config;
 pub mod context;
 pub mod error;
+pub mod guardian;
 
 pub use api::{AgentBuilder, AuraAgent};
 pub use config::AgentConfig;

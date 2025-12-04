@@ -84,6 +84,12 @@ mod runtime;
 // Handler modules (internal)
 mod handlers;
 
+// Reactive programming infrastructure (public)
+pub mod reactive;
+
+// Journal fact registry helpers (public helper functions)
+pub mod fact_registry;
+
 // Public API - authority-first design
 pub use core::{AgentBuilder, AgentConfig, AgentError, AgentResult, AuraAgent, AuthorityContext};
 
@@ -102,6 +108,8 @@ pub use runtime::AuraEffectSystem;
 
 // Re-export core types for convenience (authority-first)
 pub use aura_core::identifiers::{AuthorityId, ContextId, SessionId};
+
+pub use fact_registry::build_fact_registry;
 
 /// Create a production agent (convenience function)
 pub async fn create_production_agent(

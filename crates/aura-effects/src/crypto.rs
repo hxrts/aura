@@ -688,13 +688,15 @@ impl CryptoEffects for RealCryptoHandler {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        use chacha20::cipher::{KeyIvInit, StreamCipher};
-        use chacha20::ChaCha20;
+        use chacha20poly1305::aead::Aead;
+        use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
 
-        let mut cipher = ChaCha20::new(key.into(), nonce.into());
-        let mut ciphertext = plaintext.to_vec();
-        cipher.apply_keystream(&mut ciphertext);
-        Ok(ciphertext)
+        let cipher = ChaCha20Poly1305::new(key.into());
+        let nonce = Nonce::from_slice(nonce);
+
+        cipher.encrypt(nonce, plaintext).map_err(|e| {
+            CryptoError::invalid(format!("ChaCha20-Poly1305 encryption failed: {}", e))
+        })
     }
 
     async fn chacha20_decrypt(
@@ -703,8 +705,15 @@ impl CryptoEffects for RealCryptoHandler {
         key: &[u8; 32],
         nonce: &[u8; 12],
     ) -> Result<Vec<u8>, CryptoError> {
-        // ChaCha20 is symmetric, so decrypt = encrypt
-        self.chacha20_encrypt(ciphertext, key, nonce).await
+        use chacha20poly1305::aead::Aead;
+        use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
+
+        let cipher = ChaCha20Poly1305::new(key.into());
+        let nonce = Nonce::from_slice(nonce);
+
+        cipher.decrypt(nonce, ciphertext).map_err(|e| {
+            CryptoError::invalid(format!("ChaCha20-Poly1305 decryption failed: {}", e))
+        })
     }
 
     async fn aes_gcm_encrypt(

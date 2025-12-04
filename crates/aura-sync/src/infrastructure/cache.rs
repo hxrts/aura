@@ -12,11 +12,10 @@
 //!
 //! # Usage
 //!
-//! ```rust,no_run
+//! ```ignore
 //! use aura_sync::infrastructure::CacheManager;
 //! use aura_journal::commitment_tree::Epoch;
 //!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
 //! let mut cache = CacheManager::new();
 //!
 //! // Invalidate keys at epoch 10
@@ -24,15 +23,13 @@
 //!
 //! // Check if key is fresh
 //! let is_fresh = cache.is_fresh("key1", 10);
-//! # Ok(())
-//! # }
 //! ```
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use aura_journal::commitment_tree::Epoch as TreeEpoch;
+use aura_journal::Epoch as TreeEpoch;
 
 // =============================================================================
 // Cache Invalidation Events

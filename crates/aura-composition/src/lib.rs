@@ -56,6 +56,7 @@
 pub mod adapters;
 pub mod composite;
 pub mod registry;
+pub mod view_delta;
 
 // Re-export core types for convenience
 pub use registry::{
@@ -70,4 +71,9 @@ pub use composite::{
 pub use adapters::{
     ConsoleHandlerAdapter, CryptoHandlerAdapter, LoggingSystemHandlerAdapter, RandomHandlerAdapter,
     StorageHandlerAdapter, TimeHandlerAdapter, TransportHandlerAdapter,
+};
+
+pub use view_delta::{
+    downcast_delta, downcast_delta_owned, IntoViewDelta, ViewDelta, ViewDeltaReducer,
+    ViewDeltaRegistry,
 };

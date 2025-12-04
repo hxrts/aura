@@ -4,12 +4,12 @@
 //! replacing the device-centric authentication model. Authorities are opaque
 //! cryptographic actors that hide internal device structure.
 
+use aura_core::crypto::ed25519::Ed25519SigningKey;
 use aura_core::{AuraError, Authority, AuthorityId, Hash32, Result};
 use aura_macros::choreography;
 use aura_protocol::effects::AuraEffects;
 use aura_verify::session::{SessionScope, SessionTicket};
 use aura_verify::{IdentityProof, VerifiedIdentity};
-use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -99,30 +99,15 @@ pub async fn verify_authority_proof(
         return Ok(false);
     }
 
-    // Verify signature over nonce
-    use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+    // Verify signature over nonce using aura-core wrappers
+    use aura_core::crypto::ed25519::{Ed25519Signature, Ed25519VerifyingKey};
 
-    let public_key = VerifyingKey::from_bytes(
-        &proof
-            .public_key
-            .as_slice()
-            .try_into()
-            .map_err(|_| AuraError::crypto("Invalid public key"))?,
-    )
-    .map_err(|e| AuraError::crypto(format!("Public key error: {}", e)))?;
+    let public_key = Ed25519VerifyingKey::from_bytes(&proof.public_key)
+        .map_err(|e| AuraError::crypto(format!("Public key error: {}", e)))?;
 
-    let signature = Signature::from_bytes(
-        &proof
-            .signature
-            .as_slice()
-            .try_into()
-            .map_err(|_| AuraError::crypto("Invalid signature"))?,
-    );
+    let signature = Ed25519Signature::from_bytes(&proof.signature);
 
-    public_key
-        .verify(&request.nonce, &signature)
-        .map(|_| true)
-        .map_err(|e| AuraError::crypto(format!("Signature verification failed: {}", e)))
+    public_key.verify(&request.nonce, &signature).map(|_| true)
 }
 
 // Authority Authentication Choreography Protocol
@@ -223,13 +208,17 @@ impl<E: AuraEffects> AuthorityAuthHandler<E> {
 
         // Derive signing key deterministically from authority_id to avoid ambient randomness.
         let seed = aura_core::hash::hash(&request.authority_id.to_bytes());
-        let signing_key = SigningKey::from_bytes(&seed);
-        let verifying_key = signing_key.verifying_key();
-        let signature = signing_key.sign(&challenge.nonce);
+        let signing_key = Ed25519SigningKey::from_bytes(&seed);
+        let verifying_key = signing_key
+            .verifying_key()
+            .map_err(|e| AuraError::crypto(format!("Failed to derive verifying key: {}", e)))?;
+        let signature = signing_key
+            .sign(&challenge.nonce)
+            .map_err(|e| AuraError::crypto(format!("Failed to sign: {}", e)))?;
 
         let proof = AuthorityAuthProof {
             authority_id: request.authority_id,
-            signature: signature.to_bytes().to_vec(),
+            signature: signature.as_bytes().to_vec(),
             public_key: verifying_key.as_bytes().to_vec(),
             commitment: request.commitment,
         };

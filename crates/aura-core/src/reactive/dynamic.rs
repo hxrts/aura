@@ -505,4 +505,131 @@ mod tests {
         assert_eq!(sub.poll(), Some(3));
         assert_eq!(sub.poll(), None);
     }
+
+    // =============================================================================
+    // Glitch Freedom Tests
+    // =============================================================================
+    // These tests verify that the FRP system maintains consistency and doesn't
+    // show intermediate inconsistent states (glitches) during updates.
+
+    #[test]
+    fn test_glitch_freedom_no_intermediate_states() {
+        // Test that derived values never show inconsistent intermediate states
+        let a = Dynamic::new(1);
+        let b = Dynamic::new(2);
+
+        // Create a derived value that sums a and b
+        let sum = {
+            let a_val = a.get();
+            let b_val = b.get();
+            Dynamic::new(a_val + b_val)
+        };
+
+        // Update both values
+        a.set(10);
+        b.set(20);
+
+        // Before propagation, sum should still show old value (no glitch)
+        // Since Dynamic doesn't auto-propagate, sum keeps its initial value
+        assert_eq!(sum.get(), 3, "Sum should not update until propagation");
+
+        // After explicit update, sum should show consistent new value
+        sum.set(30);
+        assert_eq!(sum.get(), 30);
+    }
+
+    #[test]
+    fn test_glitch_freedom_consistent_reads() {
+        // Test that multiple reads during an update window see consistent state
+        let source = Dynamic::new(0);
+        let (derived, mut link) = source.map(|x| x * 2);
+
+        // Update source
+        source.set(5);
+
+        // Multiple reads before propagation should all see old consistent state
+        assert_eq!(derived.get(), 0);
+        assert_eq!(derived.get(), 0);
+        assert_eq!(derived.get(), 0);
+
+        // Propagate
+        link.propagate();
+
+        // Multiple reads after propagation should all see new consistent state
+        assert_eq!(derived.get(), 10);
+        assert_eq!(derived.get(), 10);
+        assert_eq!(derived.get(), 10);
+    }
+
+    #[test]
+    fn test_glitch_freedom_atomic_compound_updates() {
+        // Test that updates to multiple related values are perceived atomically
+        let x = Dynamic::new(5);
+        let y = Dynamic::new(10);
+
+        // Both should update "simultaneously" from observer perspective
+        let old_x = x.get();
+        let old_y = y.get();
+
+        x.set(50);
+        y.set(100);
+
+        let new_x = x.get();
+        let new_y = y.get();
+
+        // Verify we never see mixed old/new state (both old or both new)
+        assert_eq!((old_x, old_y), (5, 10));
+        assert_eq!((new_x, new_y), (50, 100));
+    }
+
+    #[test]
+    fn test_glitch_freedom_no_propagation_ordering_issues() {
+        // Test that propagation order doesn't create visible inconsistencies
+        let source = Dynamic::new(1);
+        let (a, mut a_link) = source.map(|x| x + 1);
+        let (b, mut b_link) = source.map(|x| x * 2);
+
+        source.set(10);
+
+        // Before any propagation, both should show old values
+        assert_eq!(a.get(), 2); // 1 + 1
+        assert_eq!(b.get(), 2); // 1 * 2
+
+        // Propagate in different orders shouldn't matter
+        b_link.propagate();
+        a_link.propagate();
+
+        // Both should show new values consistently
+        assert_eq!(a.get(), 11); // 10 + 1
+        assert_eq!(b.get(), 20); // 10 * 2
+    }
+
+    #[test]
+    fn test_glitch_freedom_transitive_consistency() {
+        // Test that transitive dependencies maintain consistency
+        let source = Dynamic::new(1);
+        let (intermediate, mut int_link) = source.map(|x| x * 2);
+        let (final_val, mut final_link) = intermediate.map(|x| x + 10);
+
+        source.set(5);
+
+        // Before propagation, all should show old consistent state
+        assert_eq!(source.get(), 5);
+        assert_eq!(intermediate.get(), 2); // Still old: 1 * 2
+        assert_eq!(final_val.get(), 12); // Still old: 2 + 10
+
+        // Propagate intermediate
+        int_link.propagate();
+        assert_eq!(intermediate.get(), 10); // New: 5 * 2
+        assert_eq!(final_val.get(), 12); // Still old: 2 + 10 (not yet propagated)
+
+        // Propagate final
+        final_link.propagate();
+        assert_eq!(final_val.get(), 20); // New: 10 + 10
+
+        // All values now consistent
+        assert_eq!(source.get(), 5);
+        assert_eq!(intermediate.get(), 10);
+        assert_eq!(final_val.get(), 20);
+    }
 }

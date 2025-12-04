@@ -16,11 +16,11 @@
 
 #![allow(clippy::expect_used)] // Test utilities use expect for fixed-size slice conversions
 
+use crate::crypto::ed25519::{Ed25519SigningKey, Ed25519VerifyingKey};
 use crate::crypto::hash::hash;
 use crate::types::identifiers::AuthorityId;
 use crate::types::identifiers::DeviceId;
 use crate::{AccountId, SessionId};
-use ed25519_dalek::{SigningKey, VerifyingKey};
 use uuid::Uuid;
 
 /// Create a deterministic DeviceId from a seed
@@ -109,7 +109,7 @@ pub fn test_session_id(seed: u64) -> SessionId {
 
 /// Create a deterministic Ed25519 key pair from a seed
 ///
-/// Returns (SigningKey, VerifyingKey) tuple for testing.
+/// Returns `(Ed25519SigningKey, Ed25519VerifyingKey)` tuple for testing.
 /// The same seed always produces the same key pair.
 ///
 /// # Example
@@ -120,11 +120,13 @@ pub fn test_session_id(seed: u64) -> SessionId {
 /// let (sk2, vk2) = test_key_pair(42);
 /// assert_eq!(vk1, vk2);
 /// ```
-pub fn test_key_pair(seed: u64) -> (SigningKey, VerifyingKey) {
+pub fn test_key_pair(seed: u64) -> (Ed25519SigningKey, Ed25519VerifyingKey) {
     let mut key_bytes = [0u8; 32];
     key_bytes[..8].copy_from_slice(&seed.to_le_bytes());
-    let signing_key = SigningKey::from_bytes(&key_bytes);
-    let verifying_key = signing_key.verifying_key();
+    let signing_key = Ed25519SigningKey::from_bytes(&key_bytes);
+    let verifying_key = signing_key
+        .verifying_key()
+        .expect("valid signing key should produce valid verifying key");
     (signing_key, verifying_key)
 }
 
@@ -181,5 +183,14 @@ mod tests {
 
         let (_, vk3) = test_key_pair(43);
         assert_ne!(vk1, vk3);
+    }
+
+    #[test]
+    fn test_key_pair_can_sign_and_verify() {
+        let (sk, vk) = test_key_pair(42);
+        let message = b"test message";
+        let signature = sk.sign(message).expect("signing should succeed");
+        vk.verify(message, &signature)
+            .expect("verification should succeed");
     }
 }
