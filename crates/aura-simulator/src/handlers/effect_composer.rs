@@ -466,7 +466,10 @@ impl ComposedSimulationEnvironment {
         // Initialize scenario from ITF metadata
         let mut event_data = std::collections::HashMap::new();
         event_data.insert("source".to_string(), itf_trace.meta.source.clone());
-        event_data.insert("trace_states".to_string(), itf_trace.states.len().to_string());
+        event_data.insert(
+            "trace_states".to_string(),
+            itf_trace.states.len().to_string(),
+        );
 
         scenario_handler
             .record_event("itf_scenario_start", event_data)
@@ -491,10 +494,7 @@ impl ComposedSimulationEnvironment {
 
             // Record state variable values
             for (var_name, var_value) in &itf_state.variables {
-                tick_data.insert(
-                    format!("var_{}", var_name),
-                    var_value.to_string(),
-                );
+                tick_data.insert(format!("var_{}", var_name), var_value.to_string());
             }
 
             scenario_handler
@@ -547,15 +547,12 @@ impl ComposedSimulationEnvironment {
             SimulationComposerError::MissingRequiredComponent("itf_fuzzer".to_string())
         })?;
 
-        fuzzer
-            .verify_properties(spec_file)
-            .await
-            .map_err(|e| {
-                SimulationComposerError::EffectOperationFailed(format!(
-                    "Property verification failed: {}",
-                    e
-                ))
-            })
+        fuzzer.verify_properties(spec_file).await.map_err(|e| {
+            SimulationComposerError::EffectOperationFailed(format!(
+                "Property verification failed: {}",
+                e
+            ))
+        })
     }
 }
 

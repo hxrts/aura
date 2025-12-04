@@ -1176,8 +1176,15 @@ impl TraceConverter {
             // Extract remaining data excluding metadata fields
             let mut data = HashMap::new();
             for (key, value) in &state.variables {
-                if !["fact_type", "authority_id", "context_id", "step", "time", "causal_deps"]
-                    .contains(&key.as_str())
+                if ![
+                    "fact_type",
+                    "authority_id",
+                    "context_id",
+                    "step",
+                    "time",
+                    "causal_deps",
+                ]
+                .contains(&key.as_str())
                 {
                     data.insert(key.clone(), value.clone());
                 }
