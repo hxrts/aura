@@ -707,6 +707,7 @@ fn topological_sort(views: Vec<Arc<dyn AnyView>>) -> Vec<Arc<dyn AnyView>> {
 use aura_chat::{ChatDelta, ChatViewReducer, CHAT_FACT_TYPE_ID};
 use aura_composition::{downcast_delta, ViewDeltaReducer};
 use aura_invitation::{InvitationDelta, InvitationViewReducer, INVITATION_FACT_TYPE_ID};
+use aura_recovery::{RecoveryDelta, RecoveryViewReducer, RECOVERY_FACT_TYPE_ID};
 
 /// Reduction adapter for chat view
 ///
@@ -797,83 +798,29 @@ impl ViewReduction<GuardianDelta> for GuardianReduction {
     }
 }
 
-/// Delta type for recovery view
-#[derive(Debug, Clone, PartialEq)]
-pub enum RecoveryDelta {
-    /// Recovery session was initiated
-    SessionInitiated {
-        session_id: String,
-        threshold: u32,
-        total_guardians: u32,
-        started_at: u64,
-        expires_at: Option<u64>,
-    },
-    /// A guardian approved the recovery request
-    ApprovalReceived {
-        session_id: String,
-        guardian_id: String,
-        guardian_name: String,
-        approved_at: u64,
-        approval_count: u32,
-    },
-    /// Recovery threshold met, ready to complete
-    ThresholdMet {
-        session_id: String,
-        approval_count: u32,
-        threshold: u32,
-    },
-    /// Recovery session completed successfully
-    SessionCompleted {
-        session_id: String,
-        completed_at: u64,
-    },
-    /// Recovery session failed
-    SessionFailed {
-        session_id: String,
-        reason: String,
-        failed_at: u64,
-    },
-    /// Recovery session cancelled
-    SessionCancelled {
-        session_id: String,
-        cancelled_at: u64,
-    },
-}
-
-/// Reduction function for recovery view
+/// Reduction adapter for recovery view
+///
+/// Delegates to `RecoveryViewReducer` from `aura-recovery` crate.
 pub struct RecoveryReduction;
 
 impl ViewReduction<RecoveryDelta> for RecoveryReduction {
     fn reduce(&self, facts: &[Fact]) -> Vec<RecoveryDelta> {
+        let reducer = RecoveryViewReducer;
+
         facts
             .iter()
             .filter_map(|fact| match &fact.content {
-                FactContent::Relational(RelationalFact::RecoveryGrant { guardian_id, .. }) => {
-                    Some(RecoveryDelta::ApprovalReceived {
-                        session_id: "session_1".to_string(),
-                        guardian_id: format!("{:?}", guardian_id),
-                        guardian_name: "unknown".to_string(),
-                        approved_at: 0,
-                        approval_count: 1,
-                    })
-                }
-                FactContent::Relational(RelationalFact::Generic { binding_type, .. }) => {
-                    if binding_type == "recovery_initiated" {
-                        Some(RecoveryDelta::SessionInitiated {
-                            session_id: "session_1".to_string(),
-                            threshold: 1,
-                            total_guardians: 1,
-                            started_at: 0,
-                            expires_at: None,
-                        })
-                    } else if binding_type == "recovery_completed" {
-                        Some(RecoveryDelta::SessionCompleted {
-                            session_id: "session_1".to_string(),
-                            completed_at: 0,
-                        })
-                    } else {
-                        None
-                    }
+                FactContent::Relational(RelationalFact::Generic {
+                    binding_type,
+                    binding_data,
+                    ..
+                }) if binding_type == RECOVERY_FACT_TYPE_ID => {
+                    // Use the domain reducer and downcast back to RecoveryDelta
+                    let view_deltas = reducer.reduce_fact(binding_type, binding_data);
+                    view_deltas
+                        .into_iter()
+                        .filter_map(|vd| downcast_delta::<RecoveryDelta>(&vd).cloned())
+                        .next()
                 }
                 _ => None,
             })
@@ -1270,41 +1217,78 @@ mod tests {
 
     #[test]
     fn test_recovery_reduction() {
-        use aura_core::{identifiers::AuthorityId, Hash32};
+        use aura_core::identifiers::AuthorityId;
+        use aura_journal::DomainFact;
+        use aura_recovery::{RecoveryFact, RECOVERY_FACT_TYPE_ID};
 
         let reduction = RecoveryReduction;
+
+        // Create proper RecoveryFact instances
+        let setup_initiated = RecoveryFact::GuardianSetupInitiated {
+            context_id: test_context_id(),
+            initiator_id: AuthorityId::new_from_entropy([1u8; 32]),
+            guardian_ids: vec![
+                AuthorityId::new_from_entropy([2u8; 32]),
+                AuthorityId::new_from_entropy([3u8; 32]),
+            ],
+            threshold: 2,
+            initiated_at_ms: 1234567890,
+        };
+
+        let guardian_accepted = RecoveryFact::GuardianAccepted {
+            context_id: test_context_id(),
+            guardian_id: AuthorityId::new_from_entropy([2u8; 32]),
+            accepted_at_ms: 1234567900,
+        };
+
+        let setup_completed = RecoveryFact::GuardianSetupCompleted {
+            context_id: test_context_id(),
+            guardian_ids: vec![
+                AuthorityId::new_from_entropy([2u8; 32]),
+                AuthorityId::new_from_entropy([3u8; 32]),
+            ],
+            threshold: 2,
+            completed_at_ms: 1234567999,
+        };
+
         let facts = vec![
             make_test_fact(
                 1,
                 FactContent::Relational(RelationalFact::Generic {
                     context_id: test_context_id(),
-                    binding_type: "recovery_initiated".to_string(),
-                    binding_data: vec![1, 2, 3],
+                    binding_type: RECOVERY_FACT_TYPE_ID.to_string(),
+                    binding_data: setup_initiated.to_bytes(),
                 }),
             ),
             make_test_fact(
                 2,
-                FactContent::Relational(RelationalFact::RecoveryGrant {
-                    account_id: AuthorityId::new_from_entropy([1u8; 32]),
-                    guardian_id: AuthorityId::new_from_entropy([2u8; 32]),
-                    grant_hash: Hash32([0u8; 32]),
+                FactContent::Relational(RelationalFact::Generic {
+                    context_id: test_context_id(),
+                    binding_type: RECOVERY_FACT_TYPE_ID.to_string(),
+                    binding_data: guardian_accepted.to_bytes(),
                 }),
             ),
             make_test_fact(
                 3,
                 FactContent::Relational(RelationalFact::Generic {
                     context_id: test_context_id(),
-                    binding_type: "recovery_completed".to_string(),
-                    binding_data: vec![4, 5, 6],
+                    binding_type: RECOVERY_FACT_TYPE_ID.to_string(),
+                    binding_data: setup_completed.to_bytes(),
                 }),
             ),
         ];
 
         let deltas = reduction.reduce(&facts);
         assert_eq!(deltas.len(), 3);
-        assert!(matches!(&deltas[0], RecoveryDelta::SessionInitiated { .. }));
-        assert!(matches!(&deltas[1], RecoveryDelta::ApprovalReceived { .. }));
-        assert!(matches!(&deltas[2], RecoveryDelta::SessionCompleted { .. }));
+        assert!(matches!(
+            &deltas[0],
+            RecoveryDelta::GuardianSetupStarted { .. }
+        ));
+        assert!(matches!(&deltas[1], RecoveryDelta::GuardianResponded { .. }));
+        assert!(matches!(
+            &deltas[2],
+            RecoveryDelta::GuardianSetupCompleted { .. }
+        ));
     }
 
     #[test]

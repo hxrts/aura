@@ -70,6 +70,12 @@ pub mod guards;
 /// All operations return `GuardOutcome` for the caller to execute.
 pub mod service;
 
+/// MPST choreography definitions for invitation protocols
+///
+/// Provides `InvitationExchange` and `GuardianInvitation` choreographies
+/// with guard annotations for capability and flow budget enforcement.
+pub mod protocol;
+
 /// Domain fact types for invitation state changes
 pub mod facts;
 
@@ -148,6 +154,25 @@ pub use facts::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYPE_ID};
 
 // Re-export view delta types
 pub use view::{InvitationDelta, InvitationViewReducer};
+
+// Re-export protocol types
+pub use protocol::{
+    GuardianAccept, GuardianConfirm, GuardianDecline, GuardianInvitationState, GuardianRequest,
+    InvitationAck, InvitationExchangeState, InvitationOffer, InvitationResponse,
+    EXCHANGE_PROTOCOL_ID, GUARDIAN_PROTOCOL_ID, PROTOCOL_NAMESPACE, PROTOCOL_VERSION,
+};
+
+// Re-export guard types
+pub use guards::{
+    check_capability, check_flow_budget, EffectCommand, GuardDecision, GuardOutcome, GuardRequest,
+    GuardSnapshot,
+};
+
+// Re-export service types
+pub use service::{
+    Invitation, InvitationConfig, InvitationResult, InvitationService, InvitationStatus,
+    InvitationType,
+};
 
 // Re-export core types
 pub use aura_core::{

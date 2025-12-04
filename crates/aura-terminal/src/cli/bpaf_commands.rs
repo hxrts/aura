@@ -2,6 +2,7 @@ use bpaf::{construct, command, long, short, Parser};
 use std::path::PathBuf;
 
 use crate::cli::bpaf_init::{InitArgs, init_parser};
+use crate::cli::bpaf_node::{NodeArgs, node_parser};
 use crate::cli::bpaf_status::{StatusArgs, status_parser};
 
 /// Top-level CLI commands exposed to the terminal.
@@ -9,6 +10,7 @@ use crate::cli::bpaf_status::{StatusArgs, status_parser};
 pub enum Commands {
     Init(InitArgs),
     Status(StatusArgs),
+    Node(NodeArgs),
     Version,
 }
 
@@ -22,8 +24,12 @@ fn status_command() -> impl Parser<Commands> {
         .help("Show account status")
 }
 
+fn node_command() -> impl Parser<Commands> {
+    command("node", node_parser().map(Commands::Node)).help("Run node/agent daemon")
+}
+
 fn commands_parser() -> impl Parser<Commands> {
-    construct!([init_command(), status_command()])
+    construct!([init_command(), status_command(), node_command()])
 }
 
 #[derive(Debug, Clone)]

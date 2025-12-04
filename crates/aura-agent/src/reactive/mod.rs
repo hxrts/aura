@@ -42,10 +42,10 @@ pub use frp::Dynamic;
 pub use scheduler::{
     topological_sort_dag, AnyView, BlockDelta, BlockReduction, ChatReduction, FactSource,
     GuardianDelta, GuardianReduction, InvitationReduction, ReactiveScheduler, ReactiveView,
-    RecoveryDelta, RecoveryReduction, SchedulerConfig, ViewAdapter, ViewNode, ViewReduction,
-    ViewUpdate,
+    RecoveryReduction, SchedulerConfig, ViewAdapter, ViewNode, ViewReduction, ViewUpdate,
 };
 
 // Re-export domain delta types from their source crates
 pub use aura_chat::ChatDelta;
 pub use aura_invitation::InvitationDelta;
+pub use aura_recovery::RecoveryDelta;
