@@ -326,10 +326,10 @@ impl AppCore {
         let count = facts.len();
 
         // Get the authority for delta application
-        let own_authority = self.authority.unwrap_or_else(|| {
-            // Fallback to a default authority if none set
-            AuthorityId::from(uuid::Uuid::nil())
-        });
+        // Use deterministic placeholder when no authority is set
+        let own_authority = self
+            .authority
+            .unwrap_or_else(|| AuthorityId::new_from_entropy([0u8; 32]));
 
         // Reduce and apply each fact
         for fact in facts {
@@ -352,7 +352,10 @@ impl AppCore {
     ///
     /// This is the main method to call after dispatch() to ensure facts are:
     /// 1. Applied to ViewState (via reducer)
-    /// 2. Persisted to disk (if journal_path is set)
+    /// 2. Persisted to disk (if journal_path is set) - **native platforms only**
+    ///
+    /// On WASM, persistence must be handled via platform-specific APIs
+    /// (e.g., IndexedDB via web-sys).
     ///
     /// Returns the number of facts committed, or an error if persistence fails.
     pub fn commit_and_persist(&mut self) -> Result<usize, IntentError> {
@@ -366,9 +369,10 @@ impl AppCore {
         }
 
         // Get the authority for delta application
+        // Use deterministic placeholder when no authority is set
         let own_authority = self
             .authority
-            .unwrap_or_else(|| AuthorityId::from(uuid::Uuid::nil()));
+            .unwrap_or_else(|| AuthorityId::new_from_entropy([0u8; 32]));
 
         // Reduce and apply each fact to views
         for fact in &facts {
@@ -383,17 +387,29 @@ impl AppCore {
             }
         }
 
-        // Persist to storage if journal path is set
+        // Persist to storage if journal path is set (native platforms only)
+        #[cfg(not(target_arch = "wasm32"))]
         if let Some(ref path) = self.journal_path {
             self.append_facts_to_storage(path, &facts)?;
         }
 
         Ok(count)
     }
+}
 
+// =============================================================================
+// Native file storage (non-WASM only)
+// =============================================================================
+// These methods use std::fs directly for simplicity on native platforms.
+// For full effect injection, integrate with aura-agent runtime which provides
+// StorageEffects handlers. See docs/106_effect_system_and_runtime.md.
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AppCore {
     /// Load journal facts from storage and rebuild ViewState.
     ///
     /// This is called on startup to restore state from persisted facts.
+    /// **Native platforms only** - uses std::fs directly.
     ///
     /// Returns the number of facts loaded, or an error if loading fails.
     pub fn load_from_storage(&mut self, path: &std::path::Path) -> Result<usize, IntentError> {
@@ -418,9 +434,10 @@ impl AppCore {
         let count = facts.len();
 
         // Get own authority for delta application
+        // Use deterministic placeholder when no authority is set
         let own_authority = self
             .authority
-            .unwrap_or_else(|| AuthorityId::from(uuid::Uuid::nil()));
+            .unwrap_or_else(|| AuthorityId::new_from_entropy([0u8; 32]));
 
         // Reduce and apply each fact
         for fact in facts {
@@ -441,6 +458,7 @@ impl AppCore {
     /// Save all committed facts to storage.
     ///
     /// This persists the journal facts to disk as JSON.
+    /// **Native platforms only** - uses std::fs directly.
     pub fn save_to_storage(&self, path: &std::path::Path) -> Result<(), IntentError> {
         use std::fs::File;
         use std::io::BufWriter;
@@ -473,6 +491,7 @@ impl AppCore {
     /// Append facts to storage (for incremental persistence).
     ///
     /// This appends new facts to the journal file rather than rewriting it.
+    /// **Native platforms only** - uses std::fs directly.
     pub fn append_facts_to_storage(
         &self,
         path: &std::path::Path,
@@ -804,7 +823,11 @@ mod tests {
             name: "test-channel".to_string(),
             channel_type: ChannelType::Block,
         });
-        assert!(result.is_ok(), "CreateChannel dispatch failed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "CreateChannel dispatch failed: {:?}",
+            result
+        );
 
         // Step 2: Commit pending facts and apply to ViewState
         let committed = app.commit_pending_facts();
@@ -840,7 +863,11 @@ mod tests {
         // the channel's ID (from CreateChannel fact hash). This is expected behavior.
         // The test verifies that the fact pipeline works correctly.
         let snapshot = app.snapshot();
-        assert_eq!(snapshot.chat.channels.len(), 1, "Channel should still exist");
+        assert_eq!(
+            snapshot.chat.channels.len(),
+            1,
+            "Channel should still exist"
+        );
     }
 
     /// E2E test: Verify full fact pipeline (create → commit → verify)

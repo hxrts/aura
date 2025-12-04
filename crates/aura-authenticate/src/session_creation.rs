@@ -526,9 +526,15 @@ mod tests {
 
         // Verify successful session creation
         assert!(response.success, "Session creation should succeed");
-        assert!(response.session_ticket.is_some(), "Session ticket should be present");
+        assert!(
+            response.session_ticket.is_some(),
+            "Session ticket should be present"
+        );
         assert!(response.error.is_none(), "No error should be present");
-        assert!(!response.participants.is_empty(), "Participants should not be empty");
+        assert!(
+            !response.participants.is_empty(),
+            "Participants should not be empty"
+        );
 
         // Verify the session ticket details
         let ticket = response.session_ticket.unwrap();
@@ -565,8 +571,14 @@ mod tests {
         let response = coordinator.create_session(request).await?;
 
         // Verify the request was rejected
-        assert!(!response.success, "Session creation should fail for excessive duration");
-        assert!(response.session_ticket.is_none(), "No ticket should be created");
+        assert!(
+            !response.success,
+            "Session creation should fail for excessive duration"
+        );
+        assert!(
+            response.session_ticket.is_none(),
+            "No ticket should be created"
+        );
         assert!(response.error.is_some(), "Error message should be present");
 
         Ok(())
@@ -600,8 +612,14 @@ mod tests {
         let response = coordinator.create_session(request).await?;
 
         // Verify the request was rejected
-        assert!(!response.success, "Session creation should fail for identity mismatch");
-        assert!(response.session_ticket.is_none(), "No ticket should be created");
+        assert!(
+            !response.success,
+            "Session creation should fail for identity mismatch"
+        );
+        assert!(
+            response.session_ticket.is_none(),
+            "No ticket should be created"
+        );
 
         Ok(())
     }

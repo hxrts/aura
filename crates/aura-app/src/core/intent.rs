@@ -717,13 +717,15 @@ impl Intent {
             }
 
             // Invitation intents
+            // Note: Invitation ID is generated deterministically from type for reproducibility.
+            // Actual unique IDs are assigned when the fact is created via content hash.
             Self::CreateInvitation { invitation_type } => {
                 let it = match invitation_type {
                     InvitationType::Block => "Block",
                     InvitationType::Guardian => "Guardian",
                     InvitationType::Chat => "Chat",
                 };
-                format!("CreateInvitation::invitation_type={}&invitation_id=inv_{}", it, uuid::Uuid::new_v4().simple())
+                format!("CreateInvitation::invitation_type={}", it)
             }
             Self::AcceptInvitation { invitation_fact } => {
                 format!("AcceptInvitation::invitation_id={}", invitation_fact)
@@ -763,7 +765,10 @@ impl Intent {
                 block_id,
                 invitee_id,
             } => {
-                format!("InviteToBlock::block_id={}&invitee_id={}", block_id, invitee_id)
+                format!(
+                    "InviteToBlock::block_id={}&invitee_id={}",
+                    block_id, invitee_id
+                )
             }
             Self::SetBlockName { block_id, name } => {
                 format!("SetBlockName::block_id={}&name={}", block_id, name)
@@ -849,10 +854,7 @@ impl Intent {
 
             // AMP
             Self::InspectAmpChannel { context, channel } => {
-                format!(
-                    "InspectAmpChannel::context={}&channel={}",
-                    context, channel
-                )
+                format!("InspectAmpChannel::context={}&channel={}", context, channel)
             }
             Self::BumpChannelEpoch {
                 context,
