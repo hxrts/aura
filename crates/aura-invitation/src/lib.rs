@@ -170,8 +170,7 @@ pub use guards::{
 
 // Re-export service types
 pub use service::{
-    Invitation, InvitationConfig, InvitationResult, InvitationService, InvitationStatus,
-    InvitationType,
+    Invitation, InvitationConfig, InvitationService, InvitationStatus, InvitationType,
 };
 
 // Re-export core types
