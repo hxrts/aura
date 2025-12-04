@@ -18,14 +18,14 @@
 
 pub mod amp;
 pub mod authority;
-pub mod bpaf_commands;
-pub mod bpaf_init;
-pub mod bpaf_node;
-pub mod bpaf_status;
 pub mod chat;
 pub mod context;
 #[cfg(feature = "development")]
 pub mod demo;
+pub mod bpaf_commands;
+pub mod bpaf_init;
+pub mod bpaf_node;
+pub mod bpaf_status;
 pub mod sync;
 #[cfg(feature = "terminal")]
 pub mod tui;

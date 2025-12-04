@@ -107,69 +107,7 @@ pub fn cli_parser() -> impl Parser<GlobalArgs> {
 }
 
 fn commands_parser() -> impl Parser<Commands> {
-    // Build command list with conditional features
-    #[cfg(all(feature = "terminal", feature = "development"))]
-    let parser = construct!([
-        init_command(),
-        status_command(),
-        node_command(),
-        threshold_command(),
-        snapshot_command(),
-        admin_command(),
-        recovery_command(),
-        invite_command(),
-        authority_command(),
-        version_command(),
-        context_command(),
-        amp_command(),
-        chat_command(),
-        sync_command(),
-        tui_command(),
-        scenarios_command(),
-        demo_command(),
-    ]);
-
-    #[cfg(all(feature = "terminal", not(feature = "development")))]
-    let parser = construct!([
-        init_command(),
-        status_command(),
-        node_command(),
-        threshold_command(),
-        snapshot_command(),
-        admin_command(),
-        recovery_command(),
-        invite_command(),
-        authority_command(),
-        version_command(),
-        context_command(),
-        amp_command(),
-        chat_command(),
-        sync_command(),
-        tui_command(),
-    ]);
-
-    #[cfg(all(not(feature = "terminal"), feature = "development"))]
-    let parser = construct!([
-        init_command(),
-        status_command(),
-        node_command(),
-        threshold_command(),
-        snapshot_command(),
-        admin_command(),
-        recovery_command(),
-        invite_command(),
-        authority_command(),
-        version_command(),
-        context_command(),
-        amp_command(),
-        chat_command(),
-        sync_command(),
-        scenarios_command(),
-        demo_command(),
-    ]);
-
-    #[cfg(not(any(feature = "terminal", feature = "development")))]
-    let parser = construct!([
+    let base = construct!([
         init_command(),
         status_command(),
         node_command(),
@@ -186,7 +124,13 @@ fn commands_parser() -> impl Parser<Commands> {
         sync_command(),
     ]);
 
-    parser
+    #[cfg(feature = "terminal")]
+    let base = construct!([base, tui_command()]);
+
+    #[cfg(feature = "development")]
+    let base = construct!([base, scenarios_command(), demo_command()]);
+
+    base
 }
 
 fn init_command() -> impl Parser<Commands> {
