@@ -131,7 +131,10 @@ impl RendezvousFact {
                 responder,
                 ..
             } => {
-                vec![authority_hash_bytes(initiator), authority_hash_bytes(responder)]
+                vec![
+                    authority_hash_bytes(initiator),
+                    authority_hash_bytes(responder),
+                ]
             }
             RendezvousFact::DescriptorRevoked { authority_id, .. } => {
                 vec![authority_hash_bytes(authority_id)]

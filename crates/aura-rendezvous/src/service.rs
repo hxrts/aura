@@ -42,7 +42,7 @@ pub struct RendezvousConfig {
 impl Default for RendezvousConfig {
     fn default() -> Self {
         Self {
-            descriptor_validity_ms: 3600_000, // 1 hour
+            descriptor_validity_ms: 3_600_000, // 1 hour
             stun_server: None,
             probe_timeout_ms: 5000, // 5 seconds
             max_relay_hops: 3,
@@ -73,9 +73,7 @@ pub struct GuardSnapshot {
 #[derive(Debug, Clone)]
 pub enum GuardRequest {
     /// Publishing a descriptor to the journal
-    PublishDescriptor {
-        descriptor: RendezvousDescriptor,
-    },
+    PublishDescriptor { descriptor: RendezvousDescriptor },
     /// Establishing a channel with a peer
     EstablishChannel {
         peer: AuthorityId,
@@ -87,10 +85,7 @@ pub enum GuardRequest {
         handshake: NoiseHandshake,
     },
     /// Sending data on an established channel
-    ChannelSend {
-        peer: AuthorityId,
-        size: usize,
-    },
+    ChannelSend { peer: AuthorityId, size: usize },
 }
 
 /// Decision from guard evaluation
@@ -130,7 +125,10 @@ pub enum EffectCommand {
         message: HandshakeComplete,
     },
     /// Record receipt for operation
-    RecordReceipt { operation: String, peer: AuthorityId },
+    RecordReceipt {
+        operation: String,
+        peer: AuthorityId,
+    },
 }
 
 /// Outcome of guard evaluation
@@ -210,10 +208,7 @@ impl RendezvousService {
         {
             return GuardOutcome {
                 decision: GuardDecision::Deny {
-                    reason: format!(
-                        "Missing capability: {}",
-                        guards::CAP_RENDEZVOUS_PUBLISH
-                    ),
+                    reason: format!("Missing capability: {}", guards::CAP_RENDEZVOUS_PUBLISH),
                 },
                 effects: vec![],
             };
@@ -234,7 +229,9 @@ impl RendezvousService {
         }
 
         // Build descriptor
-        let descriptor = self.descriptor_builder.build(context_id, transport_hints, now_ms);
+        let descriptor = self
+            .descriptor_builder
+            .build(context_id, transport_hints, now_ms);
 
         // Create fact
         let fact = RendezvousFact::Descriptor(descriptor);
@@ -293,10 +290,7 @@ impl RendezvousService {
         {
             return Ok(GuardOutcome {
                 decision: GuardDecision::Deny {
-                    reason: format!(
-                        "Missing capability: {}",
-                        guards::CAP_RENDEZVOUS_CONNECT
-                    ),
+                    reason: format!("Missing capability: {}", guards::CAP_RENDEZVOUS_CONNECT),
                 },
                 effects: vec![],
             });
@@ -342,7 +336,10 @@ impl RendezvousService {
             EffectCommand::ChargeFlowBudget {
                 cost: guards::CONNECT_DIRECT_COST,
             },
-            EffectCommand::SendHandshake { peer, message: init },
+            EffectCommand::SendHandshake {
+                peer,
+                message: init,
+            },
             EffectCommand::RecordReceipt {
                 operation: "establish_channel".to_string(),
                 peer,
@@ -377,10 +374,7 @@ impl RendezvousService {
         {
             return GuardOutcome {
                 decision: GuardDecision::Deny {
-                    reason: format!(
-                        "Missing capability: {}",
-                        guards::CAP_RENDEZVOUS_CONNECT
-                    ),
+                    reason: format!("Missing capability: {}", guards::CAP_RENDEZVOUS_CONNECT),
                 },
                 effects: vec![],
             };
@@ -484,7 +478,11 @@ impl RendezvousService {
     }
 
     /// Get all descriptors for a context that need refresh
-    pub fn descriptors_needing_refresh(&self, context_id: ContextId, now_ms: u64) -> Vec<AuthorityId> {
+    pub fn descriptors_needing_refresh(
+        &self,
+        context_id: ContextId,
+        now_ms: u64,
+    ) -> Vec<AuthorityId> {
         self.descriptor_cache
             .iter()
             .filter(|((ctx, _), desc)| *ctx == context_id && desc.needs_refresh(now_ms))
@@ -493,7 +491,12 @@ impl RendezvousService {
     }
 
     /// Check if our descriptor for a context needs refresh
-    pub fn needs_refresh(&self, context_id: ContextId, now_ms: u64, refresh_window_ms: u64) -> bool {
+    pub fn needs_refresh(
+        &self,
+        context_id: ContextId,
+        now_ms: u64,
+        refresh_window_ms: u64,
+    ) -> bool {
         self.descriptor_cache
             .get(&(context_id, self.authority_id))
             .map(|desc| {
@@ -582,7 +585,11 @@ fn compute_psk_commitment(psk: &[u8; 32]) -> [u8; 32] {
 }
 
 /// Generate deterministic channel ID from participants and epoch
-fn generate_channel_id(authority_a: &AuthorityId, authority_b: &AuthorityId, epoch: u64) -> [u8; 32] {
+fn generate_channel_id(
+    authority_a: &AuthorityId,
+    authority_b: &AuthorityId,
+    epoch: u64,
+) -> [u8; 32] {
     let mut hasher = Sha256::new();
 
     // Sort authorities for determinism
@@ -733,11 +740,15 @@ mod tests {
 
         // At time 500, descriptor is still valid
         service.prune_expired_descriptors(500);
-        assert!(service.get_cached_descriptor(test_context(), peer).is_some());
+        assert!(service
+            .get_cached_descriptor(test_context(), peer)
+            .is_some());
 
         // At time 1500, descriptor is expired
         service.prune_expired_descriptors(1500);
-        assert!(service.get_cached_descriptor(test_context(), peer).is_none());
+        assert!(service
+            .get_cached_descriptor(test_context(), peer)
+            .is_none());
     }
 
     #[test]

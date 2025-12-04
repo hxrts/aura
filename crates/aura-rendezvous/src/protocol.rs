@@ -4,6 +4,9 @@
 //! These define the message flow and guard annotations for peer discovery
 //! and channel establishment.
 
+// The choreography! macro generates unit returns which trigger this lint
+#![allow(clippy::unused_unit)]
+
 use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 

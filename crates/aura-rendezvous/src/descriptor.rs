@@ -168,11 +168,7 @@ pub struct DescriptorBuilder {
 
 impl DescriptorBuilder {
     /// Create a new descriptor builder
-    pub fn new(
-        authority_id: AuthorityId,
-        validity_ms: u64,
-        stun_server: Option<String>,
-    ) -> Self {
+    pub fn new(authority_id: AuthorityId, validity_ms: u64, stun_server: Option<String>) -> Self {
         Self {
             authority_id,
             validity_ms,
@@ -357,7 +353,10 @@ fn generate_nonce(authority_id: &AuthorityId, context_id: ContextId, now_ms: u64
 ///
 /// In production, this would derive the PSK from the context shared secret
 /// and compute a proper commitment.
-fn compute_psk_commitment_placeholder(context_id: ContextId, authority_id: &AuthorityId) -> [u8; 32] {
+fn compute_psk_commitment_placeholder(
+    context_id: ContextId,
+    authority_id: &AuthorityId,
+) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(b"PSK_COMMITMENT_V1");
     hasher.update(context_id.as_bytes());

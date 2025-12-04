@@ -62,6 +62,9 @@ pub mod facts;
 /// Recovery view deltas for reactive UI updates
 pub mod view;
 
+/// Effect composition for recovery operations
+pub mod effects;
+
 /// Common utilities for recovery operations (DRY infrastructure)
 pub mod utils;
 
@@ -121,3 +124,6 @@ pub use facts::{MembershipChangeType, RecoveryFact, RecoveryFactReducer, RECOVER
 
 // Re-export view deltas for UI integration
 pub use view::{RecoveryDelta, RecoveryViewReducer};
+
+// Re-export composed effect traits for minimal effect bounds
+pub use effects::{RecoveryEffects, RecoveryNetworkEffects};

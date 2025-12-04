@@ -411,12 +411,8 @@ impl Handshaker {
         ));
 
         // Placeholder: In production, this would create actual Noise IKpsk2 message
-        let message = create_placeholder_handshake_message(
-            &self.config.local,
-            &self.config.psk,
-            epoch,
-            true,
-        );
+        let message =
+            create_placeholder_handshake_message(&self.config.local, &self.config.psk, epoch, true);
 
         self.state = HandshakeState::InitSent;
         Ok(message)
@@ -480,9 +476,9 @@ impl Handshaker {
             return Err(AuraError::invalid("Invalid state for complete"));
         }
 
-        let channel_id = self.channel_id.ok_or_else(|| {
-            AuraError::internal("Channel ID not generated")
-        })?;
+        let channel_id = self
+            .channel_id
+            .ok_or_else(|| AuraError::internal("Channel ID not generated"))?;
 
         self.state = HandshakeState::Complete;
 
