@@ -26,16 +26,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-sha2 = { workspace = true }
 async-trait = { workspace = true }
 hex = { workspace = true }
-uuid = { workspace = true }
 futures = { workspace = true }
-tokio = { workspace = true }
-once_cell = { workspace = true }
-
-# Biscuit token authorization
-biscuit-auth = { workspace = true }
 
 
 [dev-dependencies]

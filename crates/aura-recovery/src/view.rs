@@ -357,7 +357,7 @@ impl ViewDeltaReducer for RecoveryViewReducer {
             RecoveryFact::RecoveryDisputeFiled { filed_at_ms, .. } => {
                 // Assume 1 hour dispute window
                 Some(RecoveryDelta::RecoveryDisputeWindow {
-                    dispute_end_ms: filed_at_ms + 3600_000,
+                    dispute_end_ms: filed_at_ms + 3_600_000,
                     disputes_filed: 1, // Would need accumulated state
                 })
             }

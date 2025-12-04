@@ -44,7 +44,11 @@
 //! registry.register::<RecoveryFact>(RECOVERY_FACT_TYPE_ID, Box::new(RecoveryFactReducer));
 //! ```
 
-use aura_core::{identifiers::{AuthorityId, ContextId}, Hash32};
+use aura_core::{
+    hash,
+    identifiers::{AuthorityId, ContextId},
+    Hash32,
+};
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
@@ -381,7 +385,11 @@ impl FactReducer for RecoveryFactReducer {
             RecoveryFact::MembershipChangeProposed { proposal_hash, .. } => {
                 proposal_hash.0.to_vec()
             }
-            RecoveryFact::MembershipVoteCast { proposal_hash, voter_id, .. } => {
+            RecoveryFact::MembershipVoteCast {
+                proposal_hash,
+                voter_id,
+                ..
+            } => {
                 let mut data = proposal_hash.0.to_vec();
                 data.extend_from_slice(&voter_id.to_bytes());
                 data
@@ -392,12 +400,20 @@ impl FactReducer for RecoveryFactReducer {
             RecoveryFact::MembershipChangeRejected { proposal_hash, .. } => {
                 proposal_hash.0.to_vec()
             }
-            RecoveryFact::RecoveryInitiated { account_id, request_hash, .. } => {
+            RecoveryFact::RecoveryInitiated {
+                account_id,
+                request_hash,
+                ..
+            } => {
                 let mut data = account_id.to_bytes().to_vec();
                 data.extend_from_slice(&request_hash.0);
                 data
             }
-            RecoveryFact::RecoveryShareSubmitted { guardian_id, share_hash, .. } => {
+            RecoveryFact::RecoveryShareSubmitted {
+                guardian_id,
+                share_hash,
+                ..
+            } => {
                 let mut data = guardian_id.to_bytes().to_vec();
                 data.extend_from_slice(&share_hash.0);
                 data
@@ -405,7 +421,11 @@ impl FactReducer for RecoveryFactReducer {
             RecoveryFact::RecoveryDisputeFiled { disputer_id, .. } => {
                 disputer_id.to_bytes().to_vec()
             }
-            RecoveryFact::RecoveryCompleted { account_id, evidence_hash, .. } => {
+            RecoveryFact::RecoveryCompleted {
+                account_id,
+                evidence_hash,
+                ..
+            } => {
                 let mut data = account_id.to_bytes().to_vec();
                 data.extend_from_slice(&evidence_hash.0);
                 data
@@ -418,6 +438,79 @@ impl FactReducer for RecoveryFactReducer {
             context_id,
             data,
         })
+    }
+}
+
+// ============================================================================
+// Fact Emission Helpers
+// ============================================================================
+
+/// Helper for emitting recovery facts to the journal.
+///
+/// This struct provides convenience methods for serializing `RecoveryFact`
+/// instances and generating fact keys. Coordinators can use this to
+/// emit facts via `JournalEffects::insert_with_context`.
+///
+/// # Usage Pattern
+///
+/// The recommended pattern for emitting facts is:
+///
+/// ```ignore
+/// use aura_recovery::facts::{RecoveryFact, RecoveryFactEmitter, RECOVERY_FACT_TYPE_ID};
+///
+/// async fn emit_fact<E: RecoveryEffects>(effects: &E, fact: RecoveryFact) -> AuraResult<()> {
+///     // Get timestamp from effects (respects effect system)
+///     let timestamp = effects.now_physical().await;
+///
+///     // Get journal and insert fact
+///     let mut journal = effects.get_journal().await?;
+///     journal.facts.insert_with_context(
+///         RecoveryFactEmitter::fact_key(&fact),
+///         aura_core::FactValue::Bytes(fact.to_bytes()),
+///         fact.context_id().to_string(),
+///         timestamp,
+///         None,
+///     );
+///     effects.persist_journal(&journal).await
+/// }
+/// ```
+pub struct RecoveryFactEmitter;
+
+impl RecoveryFactEmitter {
+    /// Generate a unique key for a recovery fact.
+    ///
+    /// Keys are formatted as `{type_id}:{sub_type}:{context_id}:{content_hash}` for uniqueness.
+    /// Uses content hash to ensure different facts with the same context get unique keys.
+    pub fn fact_key(fact: &RecoveryFact) -> String {
+        let content_hash = hash::hash(&fact.to_bytes());
+        format!(
+            "{}:{}:{}:{}",
+            RECOVERY_FACT_TYPE_ID,
+            fact.sub_type(),
+            fact.context_id(),
+            hex::encode(&content_hash[..8])
+        )
+    }
+
+    /// Generate a deterministic key for a recovery fact (for idempotent operations).
+    ///
+    /// Use this when you need the same fact to always have the same key,
+    /// such as for setup completion or membership finalization.
+    pub fn deterministic_key(fact: &RecoveryFact, discriminator: &str) -> String {
+        format!(
+            "{}:{}:{}",
+            RECOVERY_FACT_TYPE_ID,
+            fact.sub_type(),
+            discriminator
+        )
+    }
+
+    /// Serialize a recovery fact to bytes for storage.
+    ///
+    /// This is equivalent to calling `fact.to_bytes()` but provided
+    /// here for consistency with the emitter pattern.
+    pub fn to_bytes(fact: &RecoveryFact) -> Vec<u8> {
+        fact.to_bytes()
     }
 }
 
@@ -678,8 +771,15 @@ mod tests {
         ];
 
         // All sub-types should be unique
-        let unique_count = sub_types.iter().collect::<std::collections::HashSet<_>>().len();
-        assert_eq!(unique_count, sub_types.len(), "All sub-types must be unique");
+        let unique_count = sub_types
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert_eq!(
+            unique_count,
+            sub_types.len(),
+            "All sub-types must be unique"
+        );
     }
 
     #[test]

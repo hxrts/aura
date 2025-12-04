@@ -1,25 +1,22 @@
 //! Recovery coordinator infrastructure
 //!
-//! This module provides the base coordinator trait and common implementations
-//! for all recovery operations, eliminating code duplication while maintaining
-//! flexibility for specialized coordinator logic.
+//! Provides stateless coordinator traits and base implementations for recovery operations.
+//! All coordinators use the authority model and derive state from facts.
 
-use crate::utils::{AuthorizationHelper, EvidenceBuilder, SignatureUtils};
+use crate::effects::RecoveryEffects;
+use crate::types::{RecoveryEvidence, RecoveryResponse, RecoveryShare};
 use crate::RecoveryResult;
 use async_trait::async_trait;
-use aura_core::scope::ContextOp;
-use aura_core::{effects::PhysicalTimeEffects, AccountId, DeviceId};
-use aura_protocol::effects::AuraEffects;
-use aura_protocol::guards::BiscuitGuardEvaluator;
-use aura_wot::BiscuitTokenManager;
+use aura_core::frost::ThresholdSignature;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use std::sync::Arc;
 
-/// Base trait for all recovery coordinators
+/// Base trait for all recovery coordinators.
 ///
-/// This trait provides common functionality that all recovery coordinators need,
-/// while allowing each coordinator to implement its specific recovery logic.
+/// Coordinators are stateless - they derive state from facts in the journal.
+/// Authorization is handled by the guard chain via choreography annotations.
 #[async_trait]
-pub trait RecoveryCoordinator<E: AuraEffects> {
+pub trait RecoveryCoordinator<E: RecoveryEffects> {
     /// The request type for this coordinator
     type Request;
     /// The response type for this coordinator
@@ -28,194 +25,89 @@ pub trait RecoveryCoordinator<E: AuraEffects> {
     /// Get the effect system
     fn effect_system(&self) -> &Arc<E>;
 
-    /// Get the token manager (if available)
-    fn token_manager(&self) -> Option<&BiscuitTokenManager>;
-
-    /// Get the guard evaluator (if available)
-    fn guard_evaluator(&self) -> Option<&BiscuitGuardEvaluator>;
-
     /// Execute the recovery operation
     async fn execute_recovery(&self, request: Self::Request) -> RecoveryResult<Self::Response>;
 
-    /// Check authorization for the operation
-    async fn check_authorization(
-        &self,
-        account_id: &AccountId,
-        operation_type: ContextOp,
-    ) -> Result<(), String> {
-        AuthorizationHelper::check_recovery_authorization(
-            self.token_manager(),
-            self.guard_evaluator(),
-            self.operation_name(),
-            account_id,
-            operation_type,
-            self.effect_system().as_ref() as &dyn PhysicalTimeEffects,
-        )
-        .await
-    }
-
-    /// Get the operation name for authorization checks
+    /// Get the operation name (for logging and fact emission)
     fn operation_name(&self) -> &str;
 
-    /// Generate a unique ID for this recovery operation
-    fn generate_operation_id(&self, account_id: &AccountId, device_id: &DeviceId) -> String {
-        AuthorizationHelper::generate_ceremony_id(self.operation_name(), account_id, device_id)
-    }
-
-    /// Create evidence for a successful operation
-    fn create_success_evidence(
-        &self,
-        account_id: AccountId,
-        device_id: DeviceId,
-        shares: &[crate::types::RecoveryShare],
-    ) -> crate::types::RecoveryEvidence {
-        let mut evidence = EvidenceBuilder::create_success_evidence(account_id, device_id, shares);
-
-        // Add threshold signature if we have shares
-        if !shares.is_empty() {
-            let signature = SignatureUtils::aggregate_signature(shares);
-            EvidenceBuilder::set_threshold_signature(&mut evidence, signature);
-        }
-
-        evidence
-    }
-
-    /// Create evidence for a failed operation
-    fn create_failed_evidence(
-        &self,
-        account_id: AccountId,
-        device_id: DeviceId,
-    ) -> crate::types::RecoveryEvidence {
-        EvidenceBuilder::create_failed_evidence(account_id, device_id)
-    }
-
-    /// Create an empty signature for error responses
-    fn create_empty_signature(&self) -> aura_core::frost::ThresholdSignature {
-        SignatureUtils::create_empty_signature()
-    }
-
-    /// Aggregate signatures from recovery shares
-    fn aggregate_signature(
-        &self,
-        shares: &[crate::types::RecoveryShare],
-    ) -> aura_core::frost::ThresholdSignature {
-        SignatureUtils::aggregate_signature(shares)
+    /// Generate a unique context ID for this operation
+    fn generate_context_id(&self, account_id: &AuthorityId, discriminator: &str) -> ContextId {
+        use aura_core::hash;
+        let mut input = account_id.to_bytes().to_vec();
+        input.extend_from_slice(discriminator.as_bytes());
+        ContextId::new_from_entropy(hash::hash(&input))
     }
 }
 
-/// Concrete base coordinator implementation
+/// Stateless base coordinator.
 ///
-/// This provides the common fields and basic implementations that most
-/// coordinators will use, reducing boilerplate while maintaining flexibility.
-pub struct BaseCoordinator<E: AuraEffects + ?Sized> {
-    /// Effect system for accessing capabilities
-    pub effect_system: Arc<E>,
-    /// Optional token manager for Biscuit authorization
-    pub token_manager: Option<BiscuitTokenManager>,
-    /// Optional guard evaluator for Biscuit authorization
-    pub guard_evaluator: Option<BiscuitGuardEvaluator>,
+/// Provides effect system access and common response builders.
+/// Does not hold mutable state - all state is derived from facts.
+pub struct BaseCoordinator<E: RecoveryEffects> {
+    effect_system: Arc<E>,
 }
 
-impl<E: AuraEffects + ?Sized> BaseCoordinator<E> {
-    /// Create a new base coordinator without Biscuit authorization
+impl<E: RecoveryEffects> BaseCoordinator<E> {
+    /// Create a new base coordinator.
     pub fn new(effect_system: Arc<E>) -> Self {
-        Self {
-            effect_system,
-            token_manager: None,
-            guard_evaluator: None,
-        }
+        Self { effect_system }
     }
 
-    /// Create a new base coordinator with Biscuit authorization
-    pub fn new_with_biscuit(
-        effect_system: Arc<E>,
-        token_manager: BiscuitTokenManager,
-        guard_evaluator: BiscuitGuardEvaluator,
-    ) -> Self {
-        Self {
-            effect_system,
-            token_manager: Some(token_manager),
-            guard_evaluator: Some(guard_evaluator),
-        }
+    /// Get the effect system.
+    pub fn effect_system(&self) -> &Arc<E> {
+        &self.effect_system
     }
 
-    /// Check if Biscuit authorization is available
-    pub fn has_biscuit_authorization(&self) -> bool {
-        self.token_manager.is_some() && self.guard_evaluator.is_some()
-    }
-
-    /// Create a recovery response indicating success
-    pub fn create_success_response(
-        &self,
+    /// Create a success response.
+    pub fn success_response(
         key_material: Option<Vec<u8>>,
-        shares: Vec<crate::types::RecoveryShare>,
-        evidence: crate::types::RecoveryEvidence,
-    ) -> crate::types::RecoveryResponse {
-        let signature = if shares.is_empty() {
-            SignatureUtils::create_empty_signature()
+        shares: Vec<RecoveryShare>,
+        evidence: RecoveryEvidence,
+    ) -> RecoveryResponse {
+        let signature = Self::aggregate_signatures(&shares);
+        RecoveryResponse::success(key_material, shares, evidence, signature)
+    }
+
+    /// Create an error response.
+    pub fn error_response(message: impl Into<String>) -> RecoveryResponse {
+        RecoveryResponse::error(message)
+    }
+
+    /// Aggregate partial signatures from shares.
+    pub fn aggregate_signatures(shares: &[RecoveryShare]) -> ThresholdSignature {
+        if shares.is_empty() {
+            return ThresholdSignature::new(vec![0u8; 64], Vec::new());
+        }
+
+        // Aggregate partial signatures
+        let mut combined = Vec::new();
+        for share in shares {
+            combined.extend_from_slice(&share.partial_signature);
+        }
+
+        // Pad or truncate to 64 bytes
+        let signature_bytes = if combined.len() >= 64 {
+            combined[..64].to_vec()
         } else {
-            SignatureUtils::aggregate_signature(&shares)
+            combined.resize(64, 0);
+            combined
         };
 
-        crate::types::RecoveryResponse {
-            success: true,
-            error: None,
-            key_material,
-            guardian_shares: shares,
-            evidence,
-            signature,
-        }
-    }
+        // Use indices for signers
+        let signers: Vec<u16> = (0..shares.len() as u16).collect();
 
-    /// Create a recovery response indicating failure
-    pub fn create_error_response(
-        &self,
-        error_message: String,
-        account_id: AccountId,
-        device_id: DeviceId,
-    ) -> crate::types::RecoveryResponse {
-        crate::types::RecoveryResponse {
-            success: false,
-            error: Some(error_message),
-            key_material: None,
-            guardian_shares: Vec::new(),
-            evidence: EvidenceBuilder::create_failed_evidence(account_id, device_id),
-            signature: SignatureUtils::create_empty_signature(),
-        }
+        ThresholdSignature::new(signature_bytes, signers)
     }
 }
 
-/// Helper trait to provide common coordinator methods
-///
-/// This trait can be implemented by coordinators that compose a BaseCoordinator
-/// to get access to the common functionality without inheritance.
-pub trait BaseCoordinatorAccess<E: AuraEffects + ?Sized> {
+/// Helper trait for coordinators that use BaseCoordinator.
+pub trait BaseCoordinatorAccess<E: RecoveryEffects> {
     /// Get access to the base coordinator
     fn base(&self) -> &BaseCoordinator<E>;
 
     /// Shortcut to effect system
     fn base_effect_system(&self) -> &Arc<E> {
-        &self.base().effect_system
-    }
-
-    /// Shortcut to token manager
-    fn base_token_manager(&self) -> Option<&BiscuitTokenManager>
-    where
-        E: 'static,
-    {
-        self.base().token_manager.as_ref()
-    }
-
-    /// Shortcut to guard evaluator
-    fn base_guard_evaluator(&self) -> Option<&BiscuitGuardEvaluator>
-    where
-        E: 'static,
-    {
-        self.base().guard_evaluator.as_ref()
-    }
-
-    /// Check if authorization is available
-    fn has_authorization(&self) -> bool {
-        self.base().has_biscuit_authorization()
+        self.base().effect_system()
     }
 }

@@ -3,15 +3,18 @@
 //! This module implements the recovery protocol using RelationalContexts,
 //! replacing the device-centric recovery model with authority-based recovery.
 
+use crate::facts::{RecoveryFact, RecoveryFactEmitter};
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
 use aura_core::epochs::Epoch;
 use aura_core::frost::{PublicKeyPackage, Share};
 use aura_core::hash;
+use aura_core::identifiers::ContextId;
 use aura_core::relational::fact::RelationalFact;
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
 use aura_core::time::TimeStamp;
 use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
+use aura_journal::DomainFact;
 use aura_macros::choreography;
 use aura_relational::RelationalContext;
 use futures::lock::Mutex;
@@ -89,9 +92,9 @@ pub struct GuardianApproval {
     pub timestamp: TimeStamp,
 }
 
-/// Recovery result
+/// Recovery outcome from a ceremony
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RecoveryResult {
+pub struct RecoveryOutcome {
     /// Whether recovery succeeded
     pub success: bool,
     /// Recovery grant if successful
@@ -158,7 +161,7 @@ impl RecoveryProtocol {
     }
 
     /// Initiate recovery ceremony
-    pub async fn initiate_recovery(&mut self, request: RecoveryRequest) -> Result<RecoveryResult> {
+    pub async fn initiate_recovery(&mut self, request: RecoveryRequest) -> Result<RecoveryOutcome> {
         // Validate request
         if request.account_authority != self.account_authority {
             return Err(AuraError::invalid("Account authority mismatch"));
@@ -198,7 +201,7 @@ impl RecoveryProtocol {
         self.recovery_context
             .add_fact(RelationalFact::RecoveryGrant(grant.clone()))?;
 
-        let result = RecoveryResult {
+        let result = RecoveryOutcome {
             success: true,
             recovery_grant: Some(grant),
             error: None,
@@ -267,7 +270,7 @@ choreography! {
 
         // Step 4: Coordinator aggregates and responds
         Coordinator[guard_capability = "finalize_recovery", flow_cost = 100]
-        -> Account: RecoveryComplete(RecoveryResult);
+        -> Account: RecoveryComplete(RecoveryOutcome);
     }
 }
 
@@ -286,6 +289,27 @@ impl RecoveryProtocolHandler {
         }
     }
 
+    /// Emit a recovery fact to the journal
+    async fn emit_fact(
+        &self,
+        fact: RecoveryFact,
+        time_effects: &dyn PhysicalTimeEffects,
+        journal_effects: &dyn JournalEffects,
+    ) -> Result<()> {
+        let timestamp = time_effects.physical_time().await?.ts_ms;
+
+        let mut journal = journal_effects.get_journal().await?;
+        journal.facts.insert_with_context(
+            RecoveryFactEmitter::fact_key(&fact),
+            aura_core::FactValue::Bytes(DomainFact::to_bytes(&fact)),
+            fact.context_id().to_string(),
+            timestamp,
+            None,
+        );
+        journal_effects.persist_journal(&journal).await?;
+        Ok(())
+    }
+
     /// Handle recovery initiation
     pub async fn handle_recovery_initiation(
         &self,
@@ -297,6 +321,21 @@ impl RecoveryProtocolHandler {
         // Initialize approval tracking
         let mut approvals = self.approvals.lock().await;
         approvals.insert(request.recovery_id.clone(), Vec::new());
+
+        // Create context ID for this recovery ceremony
+        let context_id = ContextId::new_from_entropy(hash::hash(request.recovery_id.as_bytes()));
+
+        // Emit RecoveryInitiated fact
+        let timestamp = time_effects.physical_time().await?.ts_ms;
+        let request_hash = Hash32(hash::hash(request.recovery_id.as_bytes()));
+        let initiated_fact = RecoveryFact::RecoveryInitiated {
+            context_id,
+            account_id: request.account_authority,
+            request_hash,
+            initiated_at_ms: timestamp,
+        };
+        self.emit_fact(initiated_fact, time_effects, journal)
+            .await?;
 
         // Notify guardians via effects
         self.notify_guardians_via_effects(&request, time_effects, network, journal)
@@ -313,6 +352,20 @@ impl RecoveryProtocolHandler {
         network: &dyn NetworkEffects,
         journal: &dyn JournalEffects,
     ) -> Result<bool> {
+        // Create context ID for this recovery ceremony
+        let context_id = ContextId::new_from_entropy(hash::hash(approval.recovery_id.as_bytes()));
+
+        // Emit RecoveryShareSubmitted fact
+        let timestamp = time_effects.physical_time().await?.ts_ms;
+        let share_hash = Hash32(hash::hash(&approval.signature));
+        let share_fact = RecoveryFact::RecoveryShareSubmitted {
+            context_id,
+            guardian_id: approval.guardian_id,
+            share_hash,
+            submitted_at_ms: timestamp,
+        };
+        self.emit_fact(share_fact, time_effects, journal).await?;
+
         // Add approval
         let mut approvals = self.approvals.lock().await;
         let ceremony_approvals = approvals
@@ -381,8 +434,23 @@ impl RecoveryProtocolHandler {
         network: &dyn NetworkEffects,
         journal: &dyn JournalEffects,
     ) -> Result<()> {
-        // Create recovery result
-        let result = RecoveryResult {
+        // Create context ID for this recovery ceremony
+        let context_id = ContextId::new_from_entropy(hash::hash(recovery_id.as_bytes()));
+
+        // Emit RecoveryCompleted fact
+        let timestamp = time_effects.physical_time().await?.ts_ms;
+        let evidence_hash = Hash32(hash::hash(recovery_id.as_bytes()));
+        let completed_fact = RecoveryFact::RecoveryCompleted {
+            context_id,
+            account_id: self.protocol.account_authority,
+            evidence_hash,
+            completed_at_ms: timestamp,
+        };
+        self.emit_fact(completed_fact, time_effects, journal)
+            .await?;
+
+        // Create recovery outcome
+        let result = RecoveryOutcome {
             success: true,
             recovery_grant: None, // Would be populated from actual consensus
             error: None,

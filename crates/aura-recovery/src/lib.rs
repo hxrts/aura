@@ -15,8 +15,8 @@
 //!
 //! This crate depends on:
 //! - **Layer 1** (aura-core): Core types, effects, errors
-//! - **Layer 2** (aura-journal, aura-verify, aura-transport): Domain semantics
-//! - **Layer 3** (aura-effects): Effect handler implementations
+//! - **Layer 2** (aura-journal, aura-verify, aura-wot, aura-macros, aura-mpst): Domain semantics and choreography
+//! - **Layer 3** (aura-effects, aura-composition): Effect handler implementations
 //! - **Layer 4** (aura-protocol): Orchestration and guard chain
 //! - **Layer 5** (aura-authenticate): Authentication coordination
 //! - **Layer 5** (aura-relational): Relational context management for recovery
@@ -65,6 +65,9 @@ pub mod view;
 /// Effect composition for recovery operations
 pub mod effects;
 
+/// Fact-derived state for recovery operations
+pub mod state;
+
 /// Common utilities for recovery operations (DRY infrastructure)
 pub mod utils;
 
@@ -109,21 +112,25 @@ pub use guardian_membership::GuardianMembershipCoordinator;
 pub use guardian_setup::GuardianSetupCoordinator;
 
 // Re-export new recovery protocol
-pub use recovery_protocol::{RecoveryProtocol, RecoveryProtocolHandler};
-
-// Re-export Biscuit types for convenience
-pub use aura_core::scope::ResourceScope;
-pub use aura_protocol::guards::BiscuitGuardEvaluator;
-pub use aura_wot::BiscuitTokenManager;
+pub use recovery_protocol::{RecoveryOutcome, RecoveryProtocol, RecoveryProtocolHandler};
 
 // Re-export membership change types
 pub use guardian_membership::{MembershipChange, MembershipChangeRequest};
 
 // Re-export facts for registry integration
-pub use facts::{MembershipChangeType, RecoveryFact, RecoveryFactReducer, RECOVERY_FACT_TYPE_ID};
+pub use facts::{
+    MembershipChangeType, RecoveryFact, RecoveryFactEmitter, RecoveryFactReducer,
+    RECOVERY_FACT_TYPE_ID,
+};
 
 // Re-export view deltas for UI integration
 pub use view::{RecoveryDelta, RecoveryViewReducer};
 
 // Re-export composed effect traits for minimal effect bounds
 pub use effects::{RecoveryEffects, RecoveryNetworkEffects};
+
+// Re-export state types for fact-derived state
+pub use state::{
+    MembershipProposalState, ProposalStatus, RecoveryOperationState, RecoveryState, RecoveryStatus,
+    SetupState, SetupStatus,
+};

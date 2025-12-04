@@ -1,22 +1,23 @@
 //! Guardian Setup Choreography
 //!
 //! Initial establishment of guardian relationships for a threshold account.
-//! This choreography handles the initial invitation and acceptance process.
+//! Uses the authority model - guardians are identified by AuthorityId.
 
 use crate::{
     coordinator::{BaseCoordinator, BaseCoordinatorAccess, RecoveryCoordinator},
-    types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
+    effects::RecoveryEffects,
+    facts::{RecoveryFact, RecoveryFactEmitter},
+    types::{GuardianSet, RecoveryRequest, RecoveryResponse, RecoveryShare},
+    utils::EvidenceBuilder,
     RecoveryResult,
 };
 use async_trait::async_trait;
-use aura_authenticate::guardian_auth::RecoveryContext;
-use aura_core::scope::ContextOp;
+use aura_core::effects::{JournalEffects, PhysicalTimeEffects};
+use aura_core::hash;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
-use aura_core::{hash, identifiers::GuardianId, AccountId, DeviceId};
+use aura_journal::DomainFact;
 use aura_macros::choreography;
-use aura_protocol::effects::AuraEffects;
-use aura_protocol::guards::BiscuitGuardEvaluator;
-use aura_wot::BiscuitTokenManager;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -25,54 +26,43 @@ use std::sync::Arc;
 pub struct GuardianInvitation {
     /// Unique identifier for this setup ceremony
     pub setup_id: String,
-    /// Account being set up for guardian protection
-    pub account_id: AccountId,
-    /// Device initiating the setup invitation
-    pub inviting_device: DeviceId,
-    /// Guardian profile being invited
-    pub guardian_role: GuardianProfile,
-    /// Required threshold of guardian approvals
+    /// Account authority being set up
+    pub account_id: AuthorityId,
+    /// Target guardian authorities
+    pub target_guardians: Vec<AuthorityId>,
+    /// Required threshold
     pub threshold: usize,
-    /// Total number of guardians in the set
-    pub total_guardians: usize,
-    /// Recovery context and justification
-    pub context: RecoveryContext,
+    /// Timestamp of invitation
+    pub timestamp: TimeStamp,
 }
 
-/// Guardian acceptance response
+/// Guardian acceptance of setup invitation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GuardianAcceptance {
-    /// Guardian identifier for the accepting party
-    pub guardian_id: GuardianId,
-    /// Unique identifier for the setup ceremony
+    /// Guardian's authority
+    pub guardian_id: AuthorityId,
+    /// Setup ID being accepted
     pub setup_id: String,
-    /// Whether the guardian accepted the invitation
+    /// Whether the guardian accepted
     pub accepted: bool,
-    /// Guardian's public key for verification
+    /// Guardian's public key for this relationship
     pub public_key: Vec<u8>,
-    /// Cryptographic attestation from the guardian's device
-    pub device_attestation: Vec<u8>,
-    /// Timestamp when acceptance was generated
+    /// Timestamp of acceptance
     pub timestamp: TimeStamp,
 }
 
 /// Setup completion notification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetupCompletion {
-    /// Unique identifier for the setup ceremony
+    /// Setup ceremony ID
     pub setup_id: String,
-    /// Whether the setup was successful
+    /// Whether setup succeeded
     pub success: bool,
-    /// Final guardian set after successful setup
-    pub final_guardian_set: GuardianSet,
-    /// Required threshold for guardian operations
+    /// Final guardian set
+    pub guardian_set: GuardianSet,
+    /// Final threshold
     pub threshold: usize,
-    /// Serialized evidence of the setup completion
-    pub setup_evidence: Vec<u8>,
 }
-
-// Guardian Setup Choreography
-// 3-phase protocol: Invitation -> Acceptance -> Completion
 
 // Guardian Setup Choreography - 3 phase protocol
 choreography! {
@@ -80,110 +70,77 @@ choreography! {
     protocol GuardianSetup {
         roles: SetupInitiator, Guardian1, Guardian2, Guardian3;
 
-        // Phase 1: Setup invitation to all guardians
+        // Phase 1: Send invitations to all guardians
         SetupInitiator[guard_capability = "initiate_guardian_setup",
+                       flow_cost = 300,
                        journal_facts = "guardian_setup_initiated",
                        leakage_budget = [1, 0, 0]]
         -> Guardian1: SendInvitation(GuardianInvitation);
 
         SetupInitiator[guard_capability = "initiate_guardian_setup",
-                       journal_facts = "guardian_setup_initiated",
-                       leakage_budget = [1, 0, 0]]
+                       flow_cost = 300]
         -> Guardian2: SendInvitation(GuardianInvitation);
 
         SetupInitiator[guard_capability = "initiate_guardian_setup",
-                       journal_facts = "guardian_setup_initiated",
-                       leakage_budget = [1, 0, 0]]
+                       flow_cost = 300]
         -> Guardian3: SendInvitation(GuardianInvitation);
 
-        // Phase 2: Guardian acceptances back to setup initiator
-        Guardian1[guard_capability = "accept_guardian_invitation,verify_setup_context",
-                   journal_facts = "guardian_setup_accepted",
-                   leakage_budget = [0, 1, 0]]
+        // Phase 2: Guardians respond with acceptance
+        Guardian1[guard_capability = "accept_guardian_invitation,verify_setup_invitation",
+                  flow_cost = 200,
+                  journal_facts = "guardian_setup_accepted",
+                  leakage_budget = [0, 1, 0]]
         -> SetupInitiator: AcceptInvitation(GuardianAcceptance);
 
-        Guardian2[guard_capability = "accept_guardian_invitation,verify_setup_context",
-                   journal_facts = "guardian_setup_accepted"]
+        Guardian2[guard_capability = "accept_guardian_invitation,verify_setup_invitation",
+                  flow_cost = 200,
+                  journal_facts = "guardian_setup_accepted"]
         -> SetupInitiator: AcceptInvitation(GuardianAcceptance);
 
-        Guardian3[guard_capability = "accept_guardian_invitation,verify_setup_context",
-                   journal_facts = "guardian_setup_accepted"]
+        Guardian3[guard_capability = "accept_guardian_invitation,verify_setup_invitation",
+                  flow_cost = 200,
+                  journal_facts = "guardian_setup_accepted"]
         -> SetupInitiator: AcceptInvitation(GuardianAcceptance);
 
-        // Phase 3: Setup completion broadcast
+        // Phase 3: Broadcast completion to all guardians
         SetupInitiator[guard_capability = "complete_guardian_setup",
+                       flow_cost = 150,
                        journal_facts = "guardian_setup_completed",
                        journal_merge = true]
         -> Guardian1: CompleteSetup(SetupCompletion);
 
         SetupInitiator[guard_capability = "complete_guardian_setup",
+                       flow_cost = 150,
                        journal_merge = true]
         -> Guardian2: CompleteSetup(SetupCompletion);
 
         SetupInitiator[guard_capability = "complete_guardian_setup",
+                       flow_cost = 150,
                        journal_merge = true]
         -> Guardian3: CompleteSetup(SetupCompletion);
     }
 }
 
-/// Guardian setup coordinator
-pub struct GuardianSetupCoordinator<E>
-where
-    E: AuraEffects + 'static,
-{
+/// Guardian setup coordinator.
+///
+/// Stateless coordinator that derives state from facts.
+pub struct GuardianSetupCoordinator<E: RecoveryEffects> {
     base: BaseCoordinator<E>,
 }
 
-impl<E> GuardianSetupCoordinator<E>
-where
-    E: AuraEffects + 'static,
-{
-    /// Create new coordinator
-    pub fn new(effect_system: Arc<E>) -> Self {
-        Self {
-            base: BaseCoordinator::new(effect_system),
-        }
-    }
-
-    /// Create new coordinator with Biscuit authorization
-    pub fn new_with_biscuit(
-        effect_system: Arc<E>,
-        token_manager: BiscuitTokenManager,
-        guard_evaluator: BiscuitGuardEvaluator,
-    ) -> Self {
-        Self {
-            base: BaseCoordinator::new_with_biscuit(effect_system, token_manager, guard_evaluator),
-        }
-    }
-}
-
-impl<E> BaseCoordinatorAccess<E> for GuardianSetupCoordinator<E>
-where
-    E: AuraEffects + 'static,
-{
+impl<E: RecoveryEffects> BaseCoordinatorAccess<E> for GuardianSetupCoordinator<E> {
     fn base(&self) -> &BaseCoordinator<E> {
         &self.base
     }
 }
 
 #[async_trait]
-impl<E> RecoveryCoordinator<E> for GuardianSetupCoordinator<E>
-where
-    E: AuraEffects + 'static,
-{
+impl<E: RecoveryEffects + 'static> RecoveryCoordinator<E> for GuardianSetupCoordinator<E> {
     type Request = RecoveryRequest;
     type Response = RecoveryResponse;
 
     fn effect_system(&self) -> &Arc<E> {
         self.base_effect_system()
-    }
-
-    fn token_manager(&self) -> Option<&BiscuitTokenManager> {
-        self.base_token_manager()
-    }
-
-    fn guard_evaluator(&self) -> Option<&BiscuitGuardEvaluator> {
-        self.base_guard_evaluator()
     }
 
     fn operation_name(&self) -> &str {
@@ -195,192 +152,313 @@ where
     }
 }
 
-impl<E> GuardianSetupCoordinator<E>
-where
-    E: AuraEffects + 'static,
-{
-    /// Execute guardian setup ceremony as setup initiator using choreography
+impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
+    /// Create a new coordinator.
+    pub fn new(effect_system: Arc<E>) -> Self {
+        Self {
+            base: BaseCoordinator::new(effect_system),
+        }
+    }
+
+    /// Emit a recovery fact to the journal.
+    async fn emit_fact(&self, fact: RecoveryFact) -> RecoveryResult<()> {
+        let timestamp = self
+            .effect_system()
+            .physical_time()
+            .await
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
+
+        let mut journal = self.effect_system().get_journal().await?;
+        journal.facts.insert_with_context(
+            RecoveryFactEmitter::fact_key(&fact),
+            aura_core::FactValue::Bytes(DomainFact::to_bytes(&fact)),
+            fact.context_id().to_string(),
+            timestamp,
+            None,
+        );
+        self.effect_system().persist_journal(&journal).await?;
+        Ok(())
+    }
+
+    /// Execute guardian setup ceremony.
     pub async fn execute_setup(
         &self,
         request: RecoveryRequest,
     ) -> RecoveryResult<RecoveryResponse> {
-        // Check authorization using the common helper
-        if let Err(auth_error) = self
-            .check_authorization(&request.account_id, ContextOp::UpdateGuardianSet)
+        // Get current timestamp for unique ID generation
+        let now_ms = self
+            .effect_system()
+            .physical_time()
             .await
-        {
-            return Ok(self.base.create_error_response(
-                format!("Authorization failed: {}", auth_error),
-                request.account_id,
-                request.requesting_device,
-            ));
-        }
+            .map(|t| t.ts_ms)
+            .unwrap_or(0);
 
-        let setup_id = self.generate_operation_id(&request.account_id, &request.requesting_device);
+        // Create context ID for this setup ceremony using hash of account + timestamp
+        let setup_id = format!("setup_{}_{}", request.account_id, now_ms);
+        let context_id = ContextId::new_from_entropy(hash::hash(setup_id.as_bytes()));
+
+        // Emit GuardianSetupInitiated fact
+        let guardian_ids: Vec<AuthorityId> =
+            request.guardians.iter().map(|g| g.authority_id).collect();
+
+        let initiated_fact = RecoveryFact::GuardianSetupInitiated {
+            context_id,
+            initiator_id: request.initiator_id,
+            guardian_ids: guardian_ids.clone(),
+            threshold: request.threshold as u16,
+            initiated_at_ms: now_ms,
+        };
+        self.emit_fact(initiated_fact).await?;
 
         // Validate that we have guardians
         if request.guardians.is_empty() {
-            return Ok(self.base.create_error_response(
-                "No guardians in request".to_string(),
-                request.account_id,
-                request.requesting_device,
-            ));
+            let failed_fact = RecoveryFact::GuardianSetupFailed {
+                context_id,
+                reason: "No guardians specified".to_string(),
+                failed_at_ms: now_ms,
+            };
+            let _ = self.emit_fact(failed_fact).await;
+            return Ok(RecoveryResponse::error("No guardians specified"));
         }
 
-        // Get first guardian as sample for choreography structure
-        let sample_guardian = request
-            .guardians
-            .iter()
-            .next()
-            .ok_or_else(|| aura_core::AuraError::invalid("No guardians available"))?;
-
-        // Convert generic request to choreography-specific invitation
+        // Create invitation
         let invitation = GuardianInvitation {
             setup_id: setup_id.clone(),
             account_id: request.account_id,
-            inviting_device: request.requesting_device,
-            guardian_role: sample_guardian.clone(),
+            target_guardians: guardian_ids.clone(),
             threshold: request.threshold,
-            total_guardians: request.guardians.len(),
-            context: request.context.clone(),
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: now_ms,
+                uncertainty: None,
+            }),
         };
 
-        // Execute the choreographic protocol
-        // Note: In full implementation, this would use the generated choreography runtime
+        // Execute the choreographic protocol (simulated)
         let acceptances = self.execute_choreographic_setup(invitation).await?;
 
         // Check if we have enough acceptances
         if acceptances.len() < request.threshold {
-            return Ok(self.base.create_error_response(
-                format!(
+            let failed_fact = RecoveryFact::GuardianSetupFailed {
+                context_id,
+                reason: format!(
                     "Insufficient guardian acceptances: got {}, need {}",
                     acceptances.len(),
                     request.threshold
                 ),
-                request.account_id,
-                request.requesting_device,
-            ));
+                failed_at_ms: self
+                    .effect_system()
+                    .physical_time()
+                    .await
+                    .map(|t| t.ts_ms)
+                    .unwrap_or(0),
+            };
+            let _ = self.emit_fact(failed_fact).await;
+
+            return Ok(RecoveryResponse::error(format!(
+                "Insufficient guardian acceptances: got {}, need {}",
+                acceptances.len(),
+                request.threshold
+            )));
         }
 
-        // Create guardian shares from acceptances
-        let shares = acceptances
-            .into_iter()
-            .map(|acceptance| RecoveryShare {
-                guardian: GuardianProfile {
-                    guardian_id: acceptance.guardian_id,
-                    device_id: DeviceId::new_from_entropy(hash::hash(
-                        acceptance.guardian_id.to_string().as_bytes(),
-                    )),
-                    label: "Guardian".to_string(),
-                    trust_level: aura_core::TrustLevel::High,
-                    cooldown_secs: 900,
-                },
-                share: acceptance.public_key,
-                partial_signature: acceptance.device_attestation,
-                issued_at: acceptance.timestamp.to_index_ms() as u64,
+        // Create shares from acceptances
+        let shares: Vec<RecoveryShare> = acceptances
+            .iter()
+            .map(|a| RecoveryShare {
+                guardian_id: a.guardian_id,
+                guardian_label: None,
+                share: a.public_key.clone(),
+                partial_signature: hash::hash(&a.public_key).to_vec(),
+                issued_at_ms: now_ms,
             })
-            .collect::<Vec<_>>();
+            .collect();
 
-        // Create evidence using the common utility
-        let evidence =
-            self.create_success_evidence(request.account_id, request.requesting_device, &shares);
-
-        // Create completion message for final phase
-        let completion = SetupCompletion {
-            setup_id: setup_id.clone(),
-            success: true,
-            final_guardian_set: GuardianSet::new(
-                shares.iter().map(|s| s.guardian.clone()).collect(),
-            ),
-            threshold: request.threshold,
-            setup_evidence: serde_json::to_vec(&evidence).unwrap_or_default(),
+        // Emit completion fact
+        let completed_fact = RecoveryFact::GuardianSetupCompleted {
+            context_id,
+            guardian_ids: shares.iter().map(|s| s.guardian_id).collect(),
+            threshold: request.threshold as u16,
+            completed_at_ms: self
+                .effect_system()
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0),
         };
+        self.emit_fact(completed_fact).await?;
 
-        // Phase 3 would broadcast completion through choreography
-        self.broadcast_completion(completion).await?;
+        // Create evidence
+        let evidence = EvidenceBuilder::success(context_id, request.account_id, &shares, now_ms);
 
-        // Use the common response builder
-        Ok(self.base.create_success_response(
-            None, // Setup doesn't produce key material
-            shares, evidence,
+        Ok(BaseCoordinator::<E>::success_response(
+            None, shares, evidence,
         ))
     }
 
-    /// Execute as guardian (accept setup invitation)
+    /// Execute as guardian (accept setup invitation).
     pub async fn accept_as_guardian(
         &self,
         invitation: GuardianInvitation,
+        guardian_id: AuthorityId,
     ) -> RecoveryResult<GuardianAcceptance> {
-        let base = hash::hash(invitation.setup_id.as_bytes());
-        let guardian_id = GuardianId::new_from_entropy(base);
-        let public_key = base[..32].to_vec();
-        let mut attestation = Vec::with_capacity(64);
-        attestation.extend_from_slice(&base);
-        attestation.extend_from_slice(&hash::hash(&base));
+        let physical_time = self
+            .effect_system()
+            .physical_time()
+            .await
+            .unwrap_or(PhysicalTime {
+                ts_ms: 0,
+                uncertainty: None,
+            });
+
+        // Generate public key for this relationship
+        let public_key =
+            hash::hash(format!("{}_{}", invitation.setup_id, guardian_id).as_bytes()).to_vec();
+
+        // Emit GuardianAccepted fact
+        let context_id = ContextId::new_from_entropy(hash::hash(invitation.setup_id.as_bytes()));
+        let accepted_fact = RecoveryFact::GuardianAccepted {
+            context_id,
+            guardian_id,
+            accepted_at_ms: physical_time.ts_ms,
+        };
+        self.emit_fact(accepted_fact).await?;
 
         Ok(GuardianAcceptance {
             guardian_id,
             setup_id: invitation.setup_id,
             accepted: true,
             public_key,
-            device_attestation: attestation,
-            timestamp: TimeStamp::PhysicalClock(
-                self.effect_system()
-                    .physical_time()
-                    .await
-                    .unwrap_or(PhysicalTime {
-                        ts_ms: 0,
-                        uncertainty: None,
-                    }),
-            ),
+            timestamp: TimeStamp::PhysicalClock(physical_time),
         })
     }
 
-    /// Execute choreographic setup protocol (Phase 1-2)
+    /// Execute choreographic setup protocol (Phase 1-2).
     async fn execute_choreographic_setup(
         &self,
         invitation: GuardianInvitation,
     ) -> RecoveryResult<Vec<GuardianAcceptance>> {
-        // Phase 1: invitations are dispatched via choreography runtime (generated code)
-        // Phase 2: collect guardian acceptances; here we build deterministic acceptances to drive tests
         let physical_time = self
             .effect_system()
             .physical_time()
             .await
             .map_err(|e| aura_core::AuraError::internal(format!("Time error: {}", e)))?;
-        let timestamp = TimeStamp::PhysicalClock(physical_time);
-        let base = hash::hash(invitation.setup_id.as_bytes());
+
+        // Simulate guardian acceptances
         let mut acceptances = Vec::new();
-        for (i, salt) in [0u8, 1u8].iter().enumerate() {
-            let mut entropy = [0u8; 32];
-            for (j, b) in base.iter().enumerate().take(32) {
-                entropy[j] = b ^ salt;
-            }
-            let guardian_id = GuardianId::new_from_entropy(entropy);
-            let public_key = hash::hash(&entropy).to_vec();
-            let mut attestation = Vec::with_capacity(64);
-            attestation.extend_from_slice(&public_key);
-            attestation.extend_from_slice(&entropy);
+        for guardian_id in &invitation.target_guardians {
+            let public_key =
+                hash::hash(format!("{}_{}", invitation.setup_id, guardian_id).as_bytes()).to_vec();
+
             acceptances.push(GuardianAcceptance {
-                guardian_id,
+                guardian_id: *guardian_id,
                 setup_id: invitation.setup_id.clone(),
                 accepted: true,
                 public_key,
-                device_attestation: attestation,
-                timestamp: timestamp.clone(),
+                timestamp: TimeStamp::PhysicalClock(physical_time.clone()),
             });
-            if i == 0 {
-                // share same timestamp clone above for first acceptance
-            }
         }
 
         Ok(acceptances)
     }
+}
 
-    /// Broadcast setup completion (Phase 3)
-    async fn broadcast_completion(&self, _completion: SetupCompletion) -> RecoveryResult<()> {
-        // This would be handled by the choreographic broadcast in the generated code
-        // The choreography runtime would send completion messages to all guardians
-        Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::GuardianProfile;
+    use aura_testkit::MockEffects;
+    use std::sync::Arc;
+
+    fn test_authority_id(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn create_test_request() -> crate::types::RecoveryRequest {
+        let guardians = vec![
+            GuardianProfile::with_label(test_authority_id(1), "Guardian 1".to_string()),
+            GuardianProfile::with_label(test_authority_id(2), "Guardian 2".to_string()),
+            GuardianProfile::with_label(test_authority_id(3), "Guardian 3".to_string()),
+        ];
+
+        crate::types::RecoveryRequest {
+            initiator_id: test_authority_id(0),
+            account_id: test_authority_id(10),
+            context: aura_authenticate::guardian_auth::RecoveryContext {
+                operation_type:
+                    aura_authenticate::guardian_auth::RecoveryOperationType::DeviceKeyRecovery,
+                justification: "Test recovery".to_string(),
+                is_emergency: false,
+                timestamp: 0,
+            },
+            threshold: 2,
+            guardians: crate::types::GuardianSet::new(guardians),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_guardian_setup_coordinator_creation() {
+        let effects = Arc::new(MockEffects::deterministic());
+        let coordinator = GuardianSetupCoordinator::new(effects);
+
+        assert_eq!(coordinator.operation_name(), "guardian_setup");
+    }
+
+    #[tokio::test]
+    async fn test_guardian_setup_execute() {
+        let effects = Arc::new(MockEffects::deterministic());
+        let coordinator = GuardianSetupCoordinator::new(effects);
+
+        let request = create_test_request();
+        let response = coordinator.execute_setup(request).await;
+
+        assert!(response.is_ok());
+        let resp = response.unwrap();
+        assert!(resp.success);
+        assert!(!resp.guardian_shares.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_guardian_setup_empty_guardians() {
+        let effects = Arc::new(MockEffects::deterministic());
+        let coordinator = GuardianSetupCoordinator::new(effects);
+
+        let mut request = create_test_request();
+        request.guardians = crate::types::GuardianSet::new(vec![]);
+
+        let response = coordinator.execute_setup(request).await;
+
+        assert!(response.is_ok());
+        let resp = response.unwrap();
+        assert!(!resp.success);
+        assert!(resp.error.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_accept_as_guardian() {
+        let effects = Arc::new(MockEffects::deterministic());
+        let coordinator = GuardianSetupCoordinator::new(effects);
+
+        let invitation = GuardianInvitation {
+            setup_id: "test-setup-123".to_string(),
+            account_id: test_authority_id(10),
+            target_guardians: vec![test_authority_id(1), test_authority_id(2)],
+            threshold: 2,
+            timestamp: TimeStamp::PhysicalClock(PhysicalTime {
+                ts_ms: 1000,
+                uncertainty: None,
+            }),
+        };
+
+        let guardian_id = test_authority_id(1);
+        let acceptance = coordinator
+            .accept_as_guardian(invitation, guardian_id)
+            .await;
+
+        assert!(acceptance.is_ok());
+        let acc = acceptance.unwrap();
+        assert!(acc.accepted);
+        assert_eq!(acc.guardian_id, guardian_id);
+        assert!(!acc.public_key.is_empty());
     }
 }

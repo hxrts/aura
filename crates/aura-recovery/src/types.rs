@@ -1,19 +1,23 @@
-//! Shared types for guardian operations.
+//! Shared types for guardian recovery operations.
+//!
+//! All types use the authority model - guardians are identified by `AuthorityId`,
+//! not by device. Device information is obtained via commitment tree queries.
 
 use aura_core::frost::ThresholdSignature;
-use aura_core::{identifiers::GuardianId, AccountId, DeviceId, TrustLevel};
-use biscuit_auth::Biscuit;
+use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::TrustLevel;
 use serde::{Deserialize, Serialize};
 
-/// Metadata describing a guardian that can participate in recovery.
+/// Guardian profile in the authority model.
+///
+/// Guardians are identified by their authority, not their device.
+/// Device information is derived from the commitment tree at runtime.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GuardianProfile {
-    /// Stable guardian identifier (journal namespace)
-    pub guardian_id: GuardianId,
-    /// Device that will receive recovery traffic
-    pub device_id: DeviceId,
+    /// Guardian's authority identifier
+    pub authority_id: AuthorityId,
     /// Human readable label for operator UX
-    pub label: String,
+    pub label: Option<String>,
     /// Trust level attached to this guardian edge
     pub trust_level: TrustLevel,
     /// Cooldown (seconds) enforced between approvals from this guardian
@@ -21,19 +25,28 @@ pub struct GuardianProfile {
 }
 
 impl GuardianProfile {
-    /// Helper constructor with default cooldown (15m) and High trust.
-    pub fn new(guardian_id: GuardianId, device_id: DeviceId, label: impl Into<String>) -> Self {
+    /// Create a new guardian profile with default settings.
+    pub fn new(authority_id: AuthorityId) -> Self {
         Self {
-            guardian_id,
-            device_id,
-            label: label.into(),
+            authority_id,
+            label: None,
+            trust_level: TrustLevel::High,
+            cooldown_secs: 900, // 15 minutes default
+        }
+    }
+
+    /// Create a guardian profile with a label.
+    pub fn with_label(authority_id: AuthorityId, label: impl Into<String>) -> Self {
+        Self {
+            authority_id,
+            label: Some(label.into()),
             trust_level: TrustLevel::High,
             cooldown_secs: 900,
         }
     }
 }
 
-/// Collection wrapper to make it harder to misuse raw vectors.
+/// Collection of guardian profiles.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GuardianSet {
     guardians: Vec<GuardianProfile>,
@@ -60,18 +73,11 @@ impl GuardianSet {
         self.guardians.iter()
     }
 
-    /// Lookup guardian by device id.
-    pub fn by_device(&self, device_id: &DeviceId) -> Option<&GuardianProfile> {
+    /// Lookup guardian by authority.
+    pub fn by_authority(&self, authority_id: &AuthorityId) -> Option<&GuardianProfile> {
         self.guardians
             .iter()
-            .find(|guardian| &guardian.device_id == device_id)
-    }
-
-    /// Lookup guardian by identifier.
-    pub fn by_guardian_id(&self, guardian_id: &GuardianId) -> Option<&GuardianProfile> {
-        self.guardians
-            .iter()
-            .find(|guardian| &guardian.guardian_id == guardian_id)
+            .find(|g| &g.authority_id == authority_id)
     }
 
     /// Convert into inner vector.
@@ -89,71 +95,83 @@ impl<'a> IntoIterator for &'a GuardianSet {
     }
 }
 
-/// Evidence recorded after a successful guardian recovery flow.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RecoveryEvidence {
-    /// Account being recovered.
-    pub account_id: AccountId,
-    /// Device that initiated recovery.
-    pub recovering_device: DeviceId,
-    /// Guardians that approved.
-    pub guardians: Vec<GuardianId>,
-    /// Epoch-second timestamp when ceremony completed.
-    pub issued_at: u64,
-    /// When the guardians exiting cooldown may approve again.
-    pub cooldown_expires_at: u64,
-    /// Timestamp when the dispute window closes.
-    pub dispute_window_ends_at: u64,
-    /// Guardian metadata for auditing.
-    pub guardian_profiles: Vec<GuardianProfile>,
-    /// Disputes filed during the dispute window.
-    pub disputes: Vec<RecoveryDispute>,
-    /// Optional aggregate signature for audits.
-    pub threshold_signature: Option<ThresholdSignature>,
-}
-
-/// Record produced per guardian approval.
+/// Recovery share produced by a guardian.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecoveryShare {
-    /// Guardian metadata.
-    pub guardian: GuardianProfile,
-    /// Encrypted key share.
+    /// Guardian's authority
+    pub guardian_id: AuthorityId,
+    /// Guardian's label (for display)
+    pub guardian_label: Option<String>,
+    /// Encrypted key share
     pub share: Vec<u8>,
-    /// Guardian's partial signature over the recovery grant.
+    /// Guardian's partial signature over the recovery grant
     pub partial_signature: Vec<u8>,
-    /// Timestamp when share was produced.
-    pub issued_at: u64,
+    /// Timestamp when share was produced (ms since epoch)
+    pub issued_at_ms: u64,
 }
 
 /// Dispute filed by a guardian during the dispute window.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RecoveryDispute {
-    /// Guardian raising the dispute.
-    pub guardian_id: GuardianId,
-    /// Human-readable reason.
+    /// Guardian raising the dispute
+    pub guardian_id: AuthorityId,
+    /// Human-readable reason
     pub reason: String,
-    /// Timestamp when the dispute was filed.
-    pub filed_at: u64,
+    /// Timestamp when the dispute was filed (ms since epoch)
+    pub filed_at_ms: u64,
 }
 
-/// Generic request for guardian operations
+/// Evidence of a completed recovery operation.
+///
+/// This can be derived from facts in the journal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecoveryEvidence {
+    /// Context in which recovery occurred
+    pub context_id: ContextId,
+    /// Account authority being recovered
+    pub account_id: AuthorityId,
+    /// Guardians that approved
+    pub approving_guardians: Vec<AuthorityId>,
+    /// Timestamp when ceremony completed (ms since epoch)
+    pub completed_at_ms: u64,
+    /// When the dispute window closes (ms since epoch)
+    pub dispute_window_ends_at_ms: u64,
+    /// Disputes filed during the dispute window
+    pub disputes: Vec<RecoveryDispute>,
+    /// Optional aggregate signature
+    pub threshold_signature: Option<ThresholdSignature>,
+}
+
+impl Default for RecoveryEvidence {
+    fn default() -> Self {
+        Self {
+            context_id: ContextId::new_from_entropy([0u8; 32]),
+            account_id: AuthorityId::new_from_entropy([0u8; 32]),
+            approving_guardians: Vec::new(),
+            completed_at_ms: 0,
+            dispute_window_ends_at_ms: 0,
+            disputes: Vec::new(),
+            threshold_signature: None,
+        }
+    }
+}
+
+/// Request to initiate a recovery operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryRequest {
-    /// Device making the request
-    pub requesting_device: DeviceId,
-    /// Account being operated on
-    pub account_id: AccountId,
+    /// Authority initiating the request
+    pub initiator_id: AuthorityId,
+    /// Account authority being operated on
+    pub account_id: AuthorityId,
     /// Recovery context and justification
     pub context: aura_authenticate::guardian_auth::RecoveryContext,
     /// Required threshold of guardian approvals
     pub threshold: usize,
     /// Available guardians for the operation
     pub guardians: GuardianSet,
-    /// Biscuit token for authorization (serialized)
-    pub auth_token: Option<Vec<u8>>,
 }
 
-/// Generic response for guardian operations
+/// Response from a recovery operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecoveryResponse {
     /// Whether the operation succeeded
@@ -170,20 +188,33 @@ pub struct RecoveryResponse {
     pub signature: ThresholdSignature,
 }
 
-impl RecoveryRequest {
-    /// Deserialize the auth token if present
-    pub fn get_auth_token(
-        &self,
-        root_public_key: &biscuit_auth::PublicKey,
-    ) -> Option<Result<Biscuit, biscuit_auth::error::Token>> {
-        self.auth_token
-            .as_ref()
-            .map(|bytes| Biscuit::from(bytes.as_slice(), *root_public_key))
+impl RecoveryResponse {
+    /// Create a success response.
+    pub fn success(
+        key_material: Option<Vec<u8>>,
+        shares: Vec<RecoveryShare>,
+        evidence: RecoveryEvidence,
+        signature: ThresholdSignature,
+    ) -> Self {
+        Self {
+            success: true,
+            error: None,
+            key_material,
+            guardian_shares: shares,
+            evidence,
+            signature,
+        }
     }
 
-    /// Set the auth token from a Biscuit
-    pub fn with_auth_token(mut self, token: &Biscuit) -> Result<Self, biscuit_auth::error::Token> {
-        self.auth_token = Some(token.to_vec()?);
-        Ok(self)
+    /// Create an error response.
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            error: Some(message.into()),
+            key_material: None,
+            guardian_shares: Vec::new(),
+            evidence: RecoveryEvidence::default(),
+            signature: ThresholdSignature::new(vec![0u8; 64], Vec::new()),
+        }
     }
 }

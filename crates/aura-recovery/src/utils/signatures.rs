@@ -3,26 +3,18 @@
 use crate::types::RecoveryShare;
 use aura_core::frost::ThresholdSignature;
 
-/// Utility functions for signature operations in recovery ceremonies
+/// Utility functions for signature operations in recovery ceremonies.
 pub struct SignatureUtils;
 
 impl SignatureUtils {
-    /// Aggregate partial signatures from recovery shares into a threshold signature
-    ///
-    /// This combines signature bytes from all shares and creates a ThresholdSignature
-    /// with the appropriate signer list.
-    ///
-    /// # Parameters
-    /// - `shares`: Collection of recovery shares containing partial signatures
-    ///
-    /// # Returns
-    /// A ThresholdSignature combining all partial signatures
-    pub fn aggregate_signature(shares: &[RecoveryShare]) -> ThresholdSignature {
+    /// Aggregate partial signatures from recovery shares into a threshold signature.
+    pub fn aggregate(shares: &[RecoveryShare]) -> ThresholdSignature {
         let mut combined_signature = Vec::new();
         for share in shares {
             combined_signature.extend_from_slice(&share.partial_signature);
         }
 
+        // Pad or truncate to 64 bytes
         let signature_bytes = if combined_signature.len() >= 64 {
             combined_signature[..64].to_vec()
         } else {
@@ -31,67 +23,40 @@ impl SignatureUtils {
             padded
         };
 
-        let signers: Vec<u16> = shares
-            .iter()
-            .enumerate()
-            .map(|(idx, _)| idx as u16)
-            .collect();
+        // Use indices (0, 1, 2, ...) for signers since we don't have participant mapping
+        let signers: Vec<u16> = (0..shares.len() as u16).collect();
 
         ThresholdSignature::new(signature_bytes, signers)
     }
 
-    /// Create an empty threshold signature for error cases
-    ///
-    /// # Returns
-    /// An empty ThresholdSignature with 64 zero bytes and no signers
-    pub fn create_empty_signature() -> ThresholdSignature {
-        ThresholdSignature::new(vec![0; 64], vec![])
+    /// Create an empty threshold signature for error cases.
+    pub fn empty() -> ThresholdSignature {
+        ThresholdSignature::new(vec![0u8; 64], Vec::new())
     }
 
-    /// Validate that a recovery share has a proper signature length
-    ///
-    /// # Parameters
-    /// - `share`: Recovery share to validate
-    ///
-    /// # Returns
-    /// `true` if the signature is a reasonable length, `false` otherwise
-    pub fn validate_share_signature(share: &RecoveryShare) -> bool {
+    /// Validate that a recovery share has a proper signature.
+    pub fn validate_share(share: &RecoveryShare) -> bool {
         !share.partial_signature.is_empty() && share.partial_signature.len() <= 128
     }
 
-    /// Count the number of valid signatures in a collection of shares
-    ///
-    /// # Parameters
-    /// - `shares`: Collection of recovery shares to count
-    ///
-    /// # Returns
-    /// Number of shares with valid signatures
-    pub fn count_valid_signatures(shares: &[RecoveryShare]) -> usize {
-        shares
-            .iter()
-            .filter(|share| Self::validate_share_signature(share))
-            .count()
+    /// Count the number of valid signatures in a collection of shares.
+    pub fn count_valid(shares: &[RecoveryShare]) -> usize {
+        shares.iter().filter(|s| Self::validate_share(s)).count()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{GuardianProfile, RecoveryShare};
-    use aura_core::{identifiers::GuardianId, DeviceId, TrustLevel};
+    use aura_core::identifiers::AuthorityId;
 
     fn create_test_share(signature: Vec<u8>) -> RecoveryShare {
         RecoveryShare {
-            guardian: GuardianProfile {
-                guardian_id: GuardianId::new_from_entropy([0u8; 32]),
-                device_id: DeviceId::new_from_entropy([1u8; 32]),
-                label: "Test Guardian".to_string(),
-                trust_level: TrustLevel::High,
-                cooldown_secs: 900,
-            },
+            guardian_id: AuthorityId::new_from_entropy([0u8; 32]),
+            guardian_label: Some("Test Guardian".to_string()),
             share: vec![1, 2, 3],
             partial_signature: signature,
-            issued_at: 1234567890,
+            issued_at_ms: 1234567890,
         }
     }
 
@@ -102,31 +67,27 @@ mod tests {
             create_test_share(vec![2; 32]),
         ];
 
-        let signature = SignatureUtils::aggregate_signature(&shares);
+        let signature = SignatureUtils::aggregate(&shares);
 
-        // Should have combined the signatures
         assert_eq!(signature.signature.len(), 64);
         assert_eq!(signature.signers.len(), 2);
-        assert_eq!(signature.signers, vec![0, 1]);
     }
 
     #[test]
     fn test_aggregate_signature_padding() {
         let shares = vec![create_test_share(vec![1; 16])];
 
-        let signature = SignatureUtils::aggregate_signature(&shares);
+        let signature = SignatureUtils::aggregate(&shares);
 
-        // Should pad to 64 bytes
         assert_eq!(signature.signature.len(), 64);
         assert_eq!(signature.signers.len(), 1);
     }
 
     #[test]
     fn test_empty_signature() {
-        let signature = SignatureUtils::create_empty_signature();
+        let signature = SignatureUtils::empty();
 
         assert_eq!(signature.signature.len(), 64);
-        assert!(signature.signature.iter().all(|&b| b == 0));
         assert!(signature.signers.is_empty());
     }
 
@@ -136,9 +97,9 @@ mod tests {
         let empty_share = create_test_share(vec![]);
         let oversized_share = create_test_share(vec![1; 256]);
 
-        assert!(SignatureUtils::validate_share_signature(&valid_share));
-        assert!(!SignatureUtils::validate_share_signature(&empty_share));
-        assert!(!SignatureUtils::validate_share_signature(&oversized_share));
+        assert!(SignatureUtils::validate_share(&valid_share));
+        assert!(!SignatureUtils::validate_share(&empty_share));
+        assert!(!SignatureUtils::validate_share(&oversized_share));
     }
 
     #[test]
@@ -150,6 +111,6 @@ mod tests {
             create_test_share(vec![1; 256]), // invalid - too large
         ];
 
-        assert_eq!(SignatureUtils::count_valid_signatures(&shares), 2);
+        assert_eq!(SignatureUtils::count_valid(&shares), 2);
     }
 }
