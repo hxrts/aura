@@ -141,14 +141,7 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
             // Each choreography must have a unique namespace within the same compilation unit.
             #[doc(hidden)]
             #[allow(non_upper_case_globals)]
-            const #marker_name: () = {
-                // This constant ensures namespace uniqueness at compile time.
-                // Duplicate namespaces will cause a "duplicate definition" error pointing here.
-                //
-                // ERROR RESOLUTION: Change one of your #[namespace = "..."] attributes
-                // to use a different, unique name for each choreography.
-                ()
-            };
+            const #marker_name: () = ();
         }
     } else {
         // No namespace specified - generate a helpful compile error
