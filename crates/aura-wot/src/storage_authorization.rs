@@ -494,8 +494,8 @@ pub fn check_biscuit_access(
 // Authorized Storage Handler Wrapper
 // ============================================================================
 
-use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use async_trait::async_trait;
+use aura_core::effects::{StorageEffects, StorageError, StorageStats};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -540,7 +540,12 @@ impl<S: StorageEffects> AuthorizedStorageHandler<S> {
     }
 
     /// Create with an initial token
-    pub fn with_token(inner: S, evaluator: BiscuitStorageEvaluator, token: Biscuit, budget: FlowBudget) -> Self {
+    pub fn with_token(
+        inner: S,
+        evaluator: BiscuitStorageEvaluator,
+        token: Biscuit,
+        budget: FlowBudget,
+    ) -> Self {
         Self {
             inner,
             evaluator,
@@ -596,19 +601,22 @@ impl<S: StorageEffects> AuthorizedStorageHandler<S> {
 impl<S: StorageEffects + Send + Sync> StorageEffects for AuthorizedStorageHandler<S> {
     async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
         let resource = StorageResource::content(key);
-        self.check_authorization(&resource, &StoragePermission::Write).await?;
+        self.check_authorization(&resource, &StoragePermission::Write)
+            .await?;
         self.inner.store(key, value).await
     }
 
     async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
         let resource = StorageResource::content(key);
-        self.check_authorization(&resource, &StoragePermission::Read).await?;
+        self.check_authorization(&resource, &StoragePermission::Read)
+            .await?;
         self.inner.retrieve(key).await
     }
 
     async fn remove(&self, key: &str) -> Result<bool, StorageError> {
         let resource = StorageResource::content(key);
-        self.check_authorization(&resource, &StoragePermission::Admin).await?;
+        self.check_authorization(&resource, &StoragePermission::Admin)
+            .await?;
         self.inner.remove(key).await
     }
 
@@ -617,13 +625,15 @@ impl<S: StorageEffects + Send + Sync> StorageEffects for AuthorizedStorageHandle
             Some(p) => StorageResource::namespace(p),
             None => StorageResource::Global,
         };
-        self.check_authorization(&resource, &StoragePermission::Read).await?;
+        self.check_authorization(&resource, &StoragePermission::Read)
+            .await?;
         self.inner.list_keys(prefix).await
     }
 
     async fn exists(&self, key: &str) -> Result<bool, StorageError> {
         let resource = StorageResource::content(key);
-        self.check_authorization(&resource, &StoragePermission::Read).await?;
+        self.check_authorization(&resource, &StoragePermission::Read)
+            .await?;
         self.inner.exists(key).await
     }
 
@@ -631,30 +641,37 @@ impl<S: StorageEffects + Send + Sync> StorageEffects for AuthorizedStorageHandle
         // Check authorization for each key (batch write requires write permission on all)
         for key in pairs.keys() {
             let resource = StorageResource::content(key);
-            self.check_authorization(&resource, &StoragePermission::Write).await?;
+            self.check_authorization(&resource, &StoragePermission::Write)
+                .await?;
         }
         self.inner.store_batch(pairs).await
     }
 
-    async fn retrieve_batch(&self, keys: &[String]) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+    async fn retrieve_batch(
+        &self,
+        keys: &[String],
+    ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
         // Check authorization for each key
         for key in keys {
             let resource = StorageResource::content(key);
-            self.check_authorization(&resource, &StoragePermission::Read).await?;
+            self.check_authorization(&resource, &StoragePermission::Read)
+                .await?;
         }
         self.inner.retrieve_batch(keys).await
     }
 
     async fn clear_all(&self) -> Result<(), StorageError> {
         let resource = StorageResource::Global;
-        self.check_authorization(&resource, &StoragePermission::Admin).await?;
+        self.check_authorization(&resource, &StoragePermission::Admin)
+            .await?;
         self.inner.clear_all().await
     }
 
     async fn stats(&self) -> Result<StorageStats, StorageError> {
         // Stats are generally safe to read without per-item authorization
         let resource = StorageResource::Global;
-        self.check_authorization(&resource, &StoragePermission::Read).await?;
+        self.check_authorization(&resource, &StoragePermission::Read)
+            .await?;
         self.inner.stats().await
     }
 }
