@@ -176,6 +176,9 @@ SIMULATOR_ALLOWLIST="crates/aura-simulator/src/handlers/"
 # Runtime assembly (Layer 6) - where effects are composed with real impls
 RUNTIME_ALLOWLIST="crates/aura-agent/src/runtime/"
 
+# App core storage (Layer 5) - cfg-gated for native builds only (#[cfg(not(target_arch = "wasm32"))])
+APP_NATIVE_STORAGE_ALLOWLIST="crates/aura-app/src/core/app.rs"
+
 # CLI entry points (Layer 7) - main.rs where production starts
 CLI_ENTRY_ALLOWLIST="crates/aura-cli/src/main.rs"
 
@@ -316,12 +319,12 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   emit_hits "Direct OS operations in domain crates (should use effect injection)" "$os_violations"
 
   # Check for direct std::fs usage outside handler layers (should use StorageEffects)
-  # Allowed: effect handler impls (storage.rs), runtime assembly, tests
+  # Allowed: effect handler impls (storage.rs), runtime assembly, tests, cfg-gated native code
   fs_pattern="std::fs::|std::io::File|std::io::BufReader|std::io::BufWriter"
   fs_hits=$(rg --no-heading "$fs_pattern" crates -g "*.rs" || true)
-  filtered_fs=$(filter_common_allowlist "$fs_hits" "$RUNTIME_ALLOWLIST")
+  filtered_fs=$(filter_common_allowlist "$fs_hits" "$RUNTIME_ALLOWLIST|$APP_NATIVE_STORAGE_ALLOWLIST")
   emit_hits "Direct std::fs usage (should use StorageEffects)" "$filtered_fs"
-  verbose "Allowed: aura-effects/src/, aura-simulator/src/handlers/, aura-agent/src/runtime/, tests/"
+  verbose "Allowed: aura-effects/src/, aura-simulator/src/handlers/, aura-agent/src/runtime/, aura-app/src/core/app.rs (cfg-gated), tests/"
 
   # Check for direct std::net usage outside handler layers (should use NetworkEffects)
   # Allowed: effect handler impls (network.rs), runtime assembly, tests
@@ -336,6 +339,8 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   runtime_hits=$(rg --no-heading "$runtime_pattern" crates -g "*.rs" || true)
   # Allowlist: effect handlers, agent runtime, simulator, terminal UI, composition, testkit, tests
   # Layer 6 (runtime) and Layer 7 (UI) are allowed to use tokio directly
+  # Note: aura-wot/storage_authorization.rs uses tokio::sync::RwLock for AuthorizedStorageHandler
+  # which is a handler wrapper that should eventually move to aura-composition (tracked technical debt)
   filtered_runtime=$(echo "$runtime_hits" \
     | grep -v "crates/aura-effects/" \
     | grep -v "crates/aura-agent/" \
@@ -343,6 +348,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-terminal/" \
     | grep -v "crates/aura-composition/" \
     | grep -v "crates/aura-testkit/" \
+    | grep -v "crates/aura-wot/src/storage_authorization.rs" \
     | grep -v "#\\[tokio::test\\]" \
     | grep -v "#\\[async_std::test\\]" \
     | grep -v "#\\[tokio::main\\]" \
@@ -759,10 +765,12 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_TODOS" = true ]; then
   section "Incomplete markers — replace \"in production\"/WIP text with TODOs or complete implementation per docs/805_development_patterns.md"
   incomplete_pattern="in production[^\\n]*(would|should|not)|stub|not implemented|unimplemented|temporary|workaround|hacky|\\bWIP\\b|\\bTBD\\b|prototype|future work|to be implemented"
   incomplete_hits=$(rg --no-heading -i "$incomplete_pattern" crates -g "*.rs" || true)
+  # Filter out tests, benches, examples, and bin/ directories (entry point stubs are legitimate)
   filtered_incomplete=$(echo "$incomplete_hits" \
     | grep -v "/tests/" \
     | grep -v "/benches/" \
     | grep -v "/examples/" \
+    | grep -v "/bin/" \
     | grep -E "//" || true)
   if [ -n "$filtered_incomplete" ]; then
     emit_hits "Incomplete/WIP marker" "$filtered_incomplete"
