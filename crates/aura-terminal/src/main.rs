@@ -11,9 +11,11 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use aura_terminal::ids;
+#[cfg(feature = "terminal")]
+use aura_terminal::TuiArgs;
 use aura_terminal::{
     AdminAction, AmpAction, AuthorityCommands, ChatCommands, CliHandler, ContextAction,
-    InvitationAction, RecoveryAction, SnapshotAction, TuiArgs,
+    InvitationAction, RecoveryAction, SnapshotAction, SyncAction,
 };
 
 cfg_if! {
@@ -157,7 +159,14 @@ enum Commands {
         command: ChatCommands,
     },
 
+    /// Journal synchronization (daemon mode by default)
+    Sync {
+        #[command(subcommand)]
+        action: Option<SyncAction>,
+    },
+
     /// Interactive terminal user interface
+    #[cfg(feature = "terminal")]
     Tui(#[command(flatten)] TuiArgs),
 }
 
@@ -231,6 +240,17 @@ async fn main() -> Result<()> {
         Commands::Context { action } => cli_handler.handle_context(action).await,
         Commands::Amp { action } => cli_handler.handle_amp(action).await,
         Commands::Chat { command } => cli_handler.handle_chat(command).await,
+        Commands::Sync { action } => {
+            // Default to daemon mode if no subcommand specified
+            let sync_action = action.clone().unwrap_or(SyncAction::Daemon {
+                interval: 60,
+                max_concurrent: 5,
+                peers: None,
+                config: None,
+            });
+            cli_handler.handle_sync(&sync_action).await
+        }
+        #[cfg(feature = "terminal")]
         Commands::Tui(args) => cli_handler.handle_tui(args).await,
         Commands::Version => cli_handler.handle_version().await,
     }
@@ -279,6 +299,43 @@ mod tests {
             assert_eq!(output, PathBuf::from("/tmp/test"));
         } else {
             panic!("Expected Init command");
+        }
+    }
+
+    #[test]
+    fn test_cli_sync_default() {
+        // Test that `aura sync` parses with no subcommand (daemon mode default)
+        let cli = Cli::try_parse_from(["aura", "sync"]).unwrap();
+        if let Commands::Sync { action } = cli.command {
+            assert!(action.is_none()); // No subcommand = daemon mode by default
+        } else {
+            panic!("Expected Sync command");
+        }
+    }
+
+    #[test]
+    fn test_cli_sync_daemon() {
+        // Test explicit daemon subcommand with options
+        let cli = Cli::try_parse_from([
+            "aura", "sync", "daemon", "--interval", "30", "--max-concurrent", "3",
+        ])
+        .unwrap();
+        if let Commands::Sync { action: Some(SyncAction::Daemon { interval, max_concurrent, .. }) } = cli.command {
+            assert_eq!(interval, 30);
+            assert_eq!(max_concurrent, 3);
+        } else {
+            panic!("Expected Sync daemon command");
+        }
+    }
+
+    #[test]
+    fn test_cli_sync_once() {
+        // Test one-shot sync mode
+        let cli = Cli::try_parse_from(["aura", "sync", "once", "--peers", "peer1,peer2"]).unwrap();
+        if let Commands::Sync { action: Some(SyncAction::Once { peers, .. }) } = cli.command {
+            assert_eq!(peers, "peer1,peer2");
+        } else {
+            panic!("Expected Sync once command");
         }
     }
 

@@ -82,9 +82,9 @@ pub use biscuit_authorization::{AuthorizationResult, BiscuitAuthorizationBridge}
 
 // Re-export storage authorization types (moved from aura-store)
 pub use storage_authorization::{
-    check_biscuit_access, evaluate_biscuit_access, AccessDecision, BiscuitAccessRequest,
-    BiscuitStorageError, BiscuitStorageEvaluator, PermissionMappings, StoragePermission,
-    StorageResource,
+    check_biscuit_access, evaluate_biscuit_access, AccessDecision, AuthorizedStorageHandler,
+    BiscuitAccessRequest, BiscuitStorageError, BiscuitStorageEvaluator, PermissionMappings,
+    StoragePermission, StorageResource,
 };
 
 /// Type alias for capability meet operation results

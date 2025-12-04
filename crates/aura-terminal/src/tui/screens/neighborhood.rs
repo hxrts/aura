@@ -1,11 +1,18 @@
 //! # Neighborhood Screen
 //!
 //! Block traversal and neighborhood navigation
+//!
+//! ## Reactive Signal Subscription
+//!
+//! When `AppCoreContext` is available, this screen subscribes to neighborhood state
+//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! component automatically, triggering re-renders when data changes.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::components::KeyHintsBar;
+use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::Theme;
 use crate::tui::types::{BlockSummary, KeyHint, TraversalDepth};
 
@@ -181,12 +188,104 @@ pub struct NeighborhoodScreenProps {
     pub on_back_to_street: Option<GoHomeCallback>,
 }
 
+/// Convert aura-app neighbor block to TUI block summary
+fn convert_neighbor_block(
+    n: &aura_app::views::NeighborBlock,
+    home_block_id: &str,
+) -> BlockSummary {
+    BlockSummary {
+        id: n.id.clone(),
+        name: Some(n.name.clone()),
+        resident_count: n.resident_count.unwrap_or(0) as u8,
+        max_residents: 8, // Default max
+        is_home: n.id == home_block_id,
+        can_enter: n.can_traverse,
+    }
+}
+
+/// Convert aura-app traversal depth to TUI traversal depth
+fn convert_traversal_depth(depth: u32) -> TraversalDepth {
+    match depth {
+        0 => TraversalDepth::Interior,  // At home
+        1 => TraversalDepth::Frontage,  // One hop away
+        _ => TraversalDepth::Street,    // Two or more hops
+    }
+}
+
 /// The neighborhood screen
+///
+/// ## Reactive Updates
+///
+/// When `AppCoreContext` is available in the context tree, this component will
+/// subscribe to neighborhood state signals and automatically update when:
+/// - Neighbor blocks are discovered
+/// - Traversal position changes
+/// - Block accessibility changes
 #[component]
 pub fn NeighborhoodScreen(
     props: &NeighborhoodScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
+    // Try to get AppCoreContext for reactive signal subscription
+    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+
+    // Initialize reactive state from props
+    let reactive_neighborhood_name = hooks.use_state({
+        let initial = props.neighborhood_name.clone();
+        move || initial
+    });
+    let reactive_blocks = hooks.use_state({
+        let initial = props.blocks.clone();
+        move || initial
+    });
+    let reactive_depth = hooks.use_state(|| props.depth);
+
+    // Subscribe to neighborhood signal updates if AppCoreContext is available
+    if let Some(ctx) = app_ctx {
+        hooks.use_future({
+            let mut reactive_neighborhood_name = reactive_neighborhood_name.clone();
+            let mut reactive_blocks = reactive_blocks.clone();
+            let mut reactive_depth = reactive_depth.clone();
+            let app_core = ctx.app_core.clone();
+            async move {
+                use futures_signals::signal::SignalExt;
+
+                let signal = {
+                    let core = app_core.read().await;
+                    core.neighborhood_signal()
+                };
+
+                signal
+                    .for_each(|neighborhood_state| {
+                        let home_id = &neighborhood_state.home_block_id;
+
+                        let blocks: Vec<BlockSummary> = neighborhood_state
+                            .neighbors
+                            .iter()
+                            .map(|n| convert_neighbor_block(n, home_id))
+                            .collect();
+
+                        let depth = neighborhood_state
+                            .position
+                            .as_ref()
+                            .map(|p| convert_traversal_depth(p.depth))
+                            .unwrap_or(TraversalDepth::Interior);
+
+                        reactive_neighborhood_name.set(neighborhood_state.home_block_name.clone());
+                        reactive_blocks.set(blocks);
+                        reactive_depth.set(depth);
+                        async {}
+                    })
+                    .await;
+            }
+        });
+    }
+
+    // Use reactive state for rendering
+    let neighborhood_name = reactive_neighborhood_name.read().clone();
+    let blocks = reactive_blocks.read().clone();
+    let depth = reactive_depth.get();
+
     let selected = hooks.use_state(|| 0usize);
 
     let hints = vec![
@@ -197,9 +296,6 @@ pub fn NeighborhoodScreen(
         KeyHint::new("Esc", "Back"),
     ];
 
-    let neighborhood_name = props.neighborhood_name.clone();
-    let blocks = props.blocks.clone();
-    let depth = props.depth;
     let current_selected = selected.get();
 
     // Clone callbacks for event handler

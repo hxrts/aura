@@ -82,11 +82,12 @@ impl AuthorityState {
             device_count
         );
 
-        // Step 1: Generate FROST nonces for signing session
-        let nonces = effects
-            .frost_generate_nonces()
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to generate FROST nonces: {}", e)))?;
+        // Step 1: Get the key packages from stored threshold context
+        let frost_keygen_result = self.threshold_context.as_ref().ok_or_else(|| {
+            AuraError::internal(
+                "Threshold signing keys not available. Load FrostKeyGenResult into AuthorityState",
+            )
+        })?;
 
         // Step 2: Select deterministic participant set from tree state leaves
         // Device IDs are derived from leaf indices in the tree (1-indexed for FROST)
@@ -95,12 +96,16 @@ impl AuthorityState {
         device_ids.truncate(threshold as usize);
         let participants = device_ids;
 
-        // Step 3: Get the public key package from stored threshold context
-        let frost_keygen_result = self.threshold_context.as_ref().ok_or_else(|| {
-            AuraError::internal(
-                "Threshold signing keys not available. Load FrostKeyGenResult into AuthorityState",
-            )
-        })?;
+        // Step 3: Generate FROST nonces using the first participant's key package
+        // (In a real multi-party scenario, each participant would generate their own nonces)
+        let first_participant_key = frost_keygen_result
+            .key_packages
+            .first()
+            .ok_or_else(|| AuraError::internal("No key packages available in threshold context"))?;
+        let nonces = effects
+            .frost_generate_nonces(first_participant_key)
+            .await
+            .map_err(|e| AuraError::internal(format!("Failed to generate FROST nonces: {}", e)))?;
 
         let public_key_package = frost_keygen_result.public_key_package.clone();
 

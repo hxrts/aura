@@ -292,7 +292,8 @@ impl SessionOperations {
         operation: &str,
         cost: u32,
     ) -> AgentResult<()> {
-        if cfg!(test) {
+        // Skip guard enforcement in test mode
+        if effects.is_testing() {
             return Ok(());
         }
         let guard = aura_protocol::guards::send_guard::create_send_guard(

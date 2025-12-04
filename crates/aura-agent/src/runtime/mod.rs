@@ -38,7 +38,6 @@ pub mod services;
 // Effect system implementation
 pub mod effects;
 
-pub mod effect_api;
 pub mod system;
 
 // Cross-cutting concerns
@@ -135,5 +134,6 @@ pub use lifecycle::LifecycleManager;
 #[allow(unused_imports)] // Re-exported for public API
 pub use services::{
     AuthorityError, AuthorityManager, AuthorityState, AuthorityStatus, FlowBudgetManager,
-    ReceiptManager, SharedAuthorityManager,
+    ReceiptManager, SharedAuthorityManager, SyncManagerConfig, SyncManagerState,
+    SyncServiceManager,
 };

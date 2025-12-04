@@ -171,7 +171,7 @@ impl CryptoEffects for MockCryptoHandler {
         })
     }
 
-    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
+    async fn frost_generate_nonces(&self, _key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
         Ok(vec![self.seed as u8; 64])
     }
 

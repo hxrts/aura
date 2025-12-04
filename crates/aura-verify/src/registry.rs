@@ -18,8 +18,7 @@ pub type IdentityResult<T> = AuraResult<T>;
 pub struct IdentityVerifier {
     /// Known device identities
     known_devices: HashMap<DeviceId, DeviceInfo>,
-    /// Account policies
-    #[allow(dead_code)]
+    /// Account policies for authorization enforcement
     account_policies: HashMap<AccountId, Policy>,
 }
 
@@ -312,6 +311,21 @@ impl IdentityVerifier {
     /// Get known devices
     pub fn known_devices(&self) -> &HashMap<DeviceId, DeviceInfo> {
         &self.known_devices
+    }
+
+    /// Get account policies
+    pub fn account_policies(&self) -> &HashMap<AccountId, Policy> {
+        &self.account_policies
+    }
+
+    /// Set policy for an account
+    pub fn set_account_policy(&mut self, account_id: AccountId, policy: Policy) {
+        self.account_policies.insert(account_id, policy);
+    }
+
+    /// Get policy for a specific account
+    pub fn get_account_policy(&self, account_id: &AccountId) -> Option<&Policy> {
+        self.account_policies.get(account_id)
     }
 
     /// Update device status

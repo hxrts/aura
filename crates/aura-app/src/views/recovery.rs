@@ -133,4 +133,39 @@ impl RecoveryState {
             }
         }
     }
+
+    /// Toggle guardian status for a contact
+    ///
+    /// If is_guardian is true, adds/activates the guardian.
+    /// If is_guardian is false, removes/revokes the guardian.
+    pub fn toggle_guardian(&mut self, contact_id: String, is_guardian: bool) {
+        if is_guardian {
+            // Check if guardian already exists
+            if let Some(guardian) = self.guardians.iter_mut().find(|g| g.id == contact_id) {
+                // Reactivate existing guardian
+                guardian.status = GuardianStatus::Active;
+            } else {
+                // Add new guardian
+                self.guardians.push(Guardian {
+                    id: contact_id,
+                    name: String::new(), // Will be resolved from contacts
+                    status: GuardianStatus::Active,
+                    added_at: 0, // Timestamp would come from fact
+                    last_seen: None,
+                });
+                self.guardian_count += 1;
+            }
+        } else {
+            // Revoke guardian status
+            if let Some(guardian) = self.guardians.iter_mut().find(|g| g.id == contact_id) {
+                guardian.status = GuardianStatus::Revoked;
+                // Note: We don't remove from list to preserve history
+            }
+        }
+    }
+
+    /// Set the recovery threshold
+    pub fn set_threshold(&mut self, threshold: u32) {
+        self.threshold = threshold;
+    }
 }

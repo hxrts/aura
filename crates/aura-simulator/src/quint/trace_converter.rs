@@ -983,6 +983,339 @@ impl TraceConverter {
 
         Ok(true)
     }
+
+    // ===== Bidirectional Conversion: Fault History =====
+
+    /// Convert fault injection history to Quint trace events
+    ///
+    /// Takes a sequence of fault injection records from the simulator
+    /// and converts them to QuintTraceEvents that can be included
+    /// in traces for verification against fault-tolerance properties.
+    pub fn convert_fault_history_to_events(
+        &self,
+        fault_history: &[FaultInjectionRecord],
+    ) -> Result<Vec<QuintTraceEvent>> {
+        let mut events = Vec::with_capacity(fault_history.len());
+
+        for (index, record) in fault_history.iter().enumerate() {
+            let mut parameters = HashMap::new();
+            parameters.insert(
+                "fault_type".to_string(),
+                QuintValue::String(record.fault_type.clone()),
+            );
+            parameters.insert(
+                "target".to_string(),
+                QuintValue::String(record.target.clone()),
+            );
+            parameters.insert(
+                "duration_ms".to_string(),
+                QuintValue::Int(record.duration_ms as i64),
+            );
+            parameters.insert(
+                "severity".to_string(),
+                QuintValue::String(record.severity.clone()),
+            );
+
+            // Include affected participants if available
+            if !record.affected_participants.is_empty() {
+                parameters.insert(
+                    "affected_participants".to_string(),
+                    QuintValue::List(
+                        record
+                            .affected_participants
+                            .iter()
+                            .map(|p| QuintValue::String(p.clone()))
+                            .collect(),
+                    ),
+                );
+            }
+
+            events.push(QuintTraceEvent {
+                event_id: format!("fault_{}", index),
+                event_type: "fault_injection".to_string(),
+                timestamp: record.timestamp,
+                parameters,
+                pre_state: record.pre_fault_state.clone(),
+                post_state: record.post_fault_state.clone(),
+            });
+        }
+
+        Ok(events)
+    }
+
+    /// Merge fault events into an existing Quint trace
+    ///
+    /// Inserts fault injection events at the appropriate time points
+    /// in the trace, preserving temporal ordering.
+    pub fn merge_fault_events_into_trace(
+        &self,
+        quint_trace: &mut QuintTrace,
+        fault_events: Vec<QuintTraceEvent>,
+    ) {
+        // Merge and sort by timestamp
+        quint_trace.events.extend(fault_events);
+        quint_trace.events.sort_by_key(|e| e.timestamp);
+
+        // Update metadata
+        quint_trace.metadata.event_count = quint_trace.events.len();
+    }
+
+    // ===== Bidirectional Conversion: Journal Facts =====
+
+    /// Convert journal facts to Quint trace states
+    ///
+    /// Takes a sequence of journal fact records and converts them
+    /// to QuintTraceStates that can be verified against invariants.
+    pub fn convert_journal_facts_to_states(
+        &self,
+        journal_facts: &[JournalFactRecord],
+    ) -> Result<Vec<QuintTraceState>> {
+        let mut states = Vec::with_capacity(journal_facts.len());
+
+        for (step, fact) in journal_facts.iter().enumerate() {
+            let mut variables = HashMap::new();
+
+            // Core fact data
+            variables.insert(
+                "fact_type".to_string(),
+                QuintValue::String(fact.fact_type.clone()),
+            );
+            variables.insert(
+                "authority_id".to_string(),
+                QuintValue::String(fact.authority_id.clone()),
+            );
+            variables.insert(
+                "context_id".to_string(),
+                QuintValue::String(fact.context_id.clone()),
+            );
+            variables.insert("step".to_string(), QuintValue::Int(step as i64));
+            variables.insert("time".to_string(), QuintValue::Int(fact.timestamp as i64));
+
+            // Include fact-specific data
+            for (key, value) in &fact.data {
+                variables.insert(key.clone(), value.clone());
+            }
+
+            // Include causal dependencies
+            if !fact.causal_deps.is_empty() {
+                variables.insert(
+                    "causal_deps".to_string(),
+                    QuintValue::List(
+                        fact.causal_deps
+                            .iter()
+                            .map(|d| QuintValue::String(d.clone()))
+                            .collect(),
+                    ),
+                );
+            }
+
+            states.push(QuintTraceState {
+                step: step as u64,
+                time: fact.timestamp,
+                variables,
+                protocol_state: QuintProtocolState {
+                    active_sessions: QuintValue::List(vec![]),
+                    current_phase: QuintValue::String(fact.fact_type.clone()),
+                    variables: HashMap::new(),
+                },
+                network_state: QuintNetworkState {
+                    partitions: QuintValue::List(vec![]),
+                    message_stats: HashMap::new(),
+                    failure_conditions: HashMap::new(),
+                },
+            });
+        }
+
+        Ok(states)
+    }
+
+    /// Convert Quint trace states back to journal-compatible records
+    ///
+    /// This enables round-trip verification: simulation -> Quint -> simulation
+    pub fn convert_states_to_journal_facts(
+        &self,
+        quint_states: &[QuintTraceState],
+    ) -> Result<Vec<JournalFactRecord>> {
+        let mut facts = Vec::with_capacity(quint_states.len());
+
+        for state in quint_states {
+            let fact_type = state
+                .variables
+                .get("fact_type")
+                .and_then(|v| v.as_string())
+                .unwrap_or("unknown")
+                .to_string();
+
+            let authority_id = state
+                .variables
+                .get("authority_id")
+                .and_then(|v| v.as_string())
+                .unwrap_or("")
+                .to_string();
+
+            let context_id = state
+                .variables
+                .get("context_id")
+                .and_then(|v| v.as_string())
+                .unwrap_or("")
+                .to_string();
+
+            let causal_deps = state
+                .variables
+                .get("causal_deps")
+                .and_then(|v| match v {
+                    QuintValue::List(list) => Some(
+                        list.iter()
+                            .filter_map(|item| item.as_string().map(String::from))
+                            .collect(),
+                    ),
+                    _ => None,
+                })
+                .unwrap_or_default();
+
+            // Extract remaining data excluding metadata fields
+            let mut data = HashMap::new();
+            for (key, value) in &state.variables {
+                if !["fact_type", "authority_id", "context_id", "step", "time", "causal_deps"]
+                    .contains(&key.as_str())
+                {
+                    data.insert(key.clone(), value.clone());
+                }
+            }
+
+            facts.push(JournalFactRecord {
+                fact_type,
+                authority_id,
+                context_id,
+                timestamp: state.time,
+                data,
+                causal_deps,
+            });
+        }
+
+        Ok(facts)
+    }
+
+    /// Export trace to ITF format for Quint verification
+    ///
+    /// Creates an ITF trace that can be fed back to Quint for
+    /// property verification against the formal specification.
+    pub fn export_to_itf(&self, quint_trace: &QuintTrace) -> Result<ItfTrace> {
+        let mut itf_states = Vec::with_capacity(quint_trace.states.len());
+
+        for state in &quint_trace.states {
+            let mut itf_variables = HashMap::new();
+
+            for (key, value) in &state.variables {
+                itf_variables.insert(key.clone(), self.quint_value_to_itf(value)?);
+            }
+
+            itf_states.push(ItfState {
+                meta: Some(HashMap::from([(
+                    "index".to_string(),
+                    serde_json::Value::Number(state.step.into()),
+                )])),
+                variables: itf_variables,
+            });
+        }
+
+        Ok(ItfTrace {
+            meta: Some(ItfMetadata {
+                format_version: Some("1.0".to_string()),
+                source: Some(quint_trace.metadata.source.clone()),
+                created_at: Some(format!("{}", quint_trace.metadata.created_at)),
+                additional: HashMap::new(),
+            }),
+            params: None,
+            vars: quint_trace
+                .states
+                .first()
+                .map(|s| s.variables.keys().cloned().collect())
+                .unwrap_or_default(),
+            states: itf_states,
+            loop_index: None,
+        })
+    }
+
+    /// Convert QuintValue to ITF expression
+    fn quint_value_to_itf(&self, value: &QuintValue) -> Result<ItfExpression> {
+        Ok(match value {
+            QuintValue::Bool(b) => ItfExpression::Bool(*b),
+            QuintValue::Int(i) => ItfExpression::int(*i),
+            QuintValue::String(s) => ItfExpression::String(s.clone()),
+            QuintValue::List(list) => {
+                let elements: Vec<ItfExpression> = list
+                    .iter()
+                    .map(|v| self.quint_value_to_itf(v))
+                    .collect::<Result<Vec<_>>>()?;
+                ItfExpression::List(elements)
+            }
+            QuintValue::Set(set) => {
+                let elements: Vec<ItfExpression> = set
+                    .iter()
+                    .map(|v| self.quint_value_to_itf(v))
+                    .collect::<Result<Vec<_>>>()?;
+                ItfExpression::Set { elements }
+            }
+            QuintValue::Map(map) => {
+                let pairs: Vec<(ItfExpression, ItfExpression)> = map
+                    .iter()
+                    .map(|(k, v)| {
+                        Ok((
+                            ItfExpression::String(k.clone()),
+                            self.quint_value_to_itf(v)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                ItfExpression::Map { pairs }
+            }
+            QuintValue::Record(record) => {
+                let mut itf_record = HashMap::new();
+                for (k, v) in record {
+                    itf_record.insert(k.clone(), self.quint_value_to_itf(v)?);
+                }
+                ItfExpression::Record(itf_record)
+            }
+        })
+    }
+}
+
+/// Record of a fault injection for trace conversion
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FaultInjectionRecord {
+    /// Type of fault (network_delay, message_drop, partition, byzantine, etc.)
+    pub fault_type: String,
+    /// Target of the fault (device ID, connection, etc.)
+    pub target: String,
+    /// When the fault was injected
+    pub timestamp: u64,
+    /// Duration of the fault in milliseconds
+    pub duration_ms: u64,
+    /// Severity level
+    pub severity: String,
+    /// Participants affected by this fault
+    pub affected_participants: Vec<String>,
+    /// State reference before the fault
+    pub pre_fault_state: Option<String>,
+    /// State reference after the fault
+    pub post_fault_state: Option<String>,
+}
+
+/// Record of a journal fact for trace conversion
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JournalFactRecord {
+    /// Type of the fact (e.g., "commitment", "attestation", "delta")
+    pub fact_type: String,
+    /// Authority that produced this fact
+    pub authority_id: String,
+    /// Context in which the fact was produced
+    pub context_id: String,
+    /// Timestamp when the fact was recorded
+    pub timestamp: u64,
+    /// Fact-specific data as Quint values
+    pub data: HashMap<String, QuintValue>,
+    /// Causal dependencies (hashes of prior facts)
+    pub causal_deps: Vec<String>,
 }
 
 impl ConversionStatistics {

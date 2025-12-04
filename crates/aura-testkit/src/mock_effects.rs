@@ -302,6 +302,7 @@ impl CryptoEffects for MockEffects {
 
     async fn frost_generate_nonces(
         &self,
+        _key_package: &[u8],
     ) -> Result<Vec<u8>, aura_core::effects::crypto::CryptoError> {
         Ok(vec![0x88; 32])
     }

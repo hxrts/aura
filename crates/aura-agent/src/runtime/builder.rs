@@ -35,6 +35,7 @@ use aura_composition::{
 };
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::sync::RwLock;
 
 use super::services::{ContextManager, FlowBudgetManager, ReceiptManager};
 use super::system::RuntimeSystem;
@@ -135,6 +136,8 @@ pub struct EffectSystemBuilder {
     config: Option<AgentConfig>,
     authority_id: Option<AuthorityId>,
     execution_mode: ExecutionMode,
+    sync_config: Option<super::services::SyncManagerConfig>,
+    rendezvous_config: Option<super::services::RendezvousManagerConfig>,
 }
 
 impl EffectSystemBuilder {
@@ -144,6 +147,8 @@ impl EffectSystemBuilder {
             config: None,
             authority_id: None,
             execution_mode: ExecutionMode::Production,
+            sync_config: None,
+            rendezvous_config: None,
         }
     }
 
@@ -153,6 +158,8 @@ impl EffectSystemBuilder {
             config: None,
             authority_id: None,
             execution_mode: ExecutionMode::Testing,
+            sync_config: None,
+            rendezvous_config: None,
         }
     }
 
@@ -162,6 +169,8 @@ impl EffectSystemBuilder {
             config: None,
             authority_id: None,
             execution_mode: ExecutionMode::Simulation { seed },
+            sync_config: None,
+            rendezvous_config: None,
         }
     }
 
@@ -177,8 +186,37 @@ impl EffectSystemBuilder {
         self
     }
 
+    /// Enable sync service with default configuration
+    pub fn with_sync(mut self) -> Self {
+        self.sync_config = Some(super::services::SyncManagerConfig::default());
+        self
+    }
+
+    /// Enable sync service with custom configuration
+    pub fn with_sync_config(mut self, config: super::services::SyncManagerConfig) -> Self {
+        self.sync_config = Some(config);
+        self
+    }
+
+    /// Enable rendezvous service with default configuration
+    pub fn with_rendezvous(mut self) -> Self {
+        self.rendezvous_config = Some(super::services::RendezvousManagerConfig::default());
+        self
+    }
+
+    /// Enable rendezvous service with custom configuration
+    pub fn with_rendezvous_config(
+        mut self,
+        config: super::services::RendezvousManagerConfig,
+    ) -> Self {
+        self.rendezvous_config = Some(config);
+        self
+    }
+
     /// Build the runtime system (async)
     pub async fn build(self, _ctx: &EffectContext) -> Result<RuntimeSystem, String> {
+        use aura_protocol::guards::pure::GuardChain;
+
         let config = self.config.unwrap_or_default();
         let authority_id = self.authority_id.ok_or("Authority ID required")?;
 
@@ -218,14 +256,28 @@ impl EffectSystemBuilder {
         // Create choreography adapter
         let choreography_adapter = ChoreographyAdapter::new(authority_id);
 
-        Ok(RuntimeSystem::new(
+        // Create optional sync service manager
+        let sync_manager = self
+            .sync_config
+            .map(super::services::SyncServiceManager::new);
+
+        // Create optional rendezvous manager
+        let rendezvous_manager = self.rendezvous_config.map(|rendezvous_config| {
+            let guard_chain = Arc::new(GuardChain::standard());
+            super::services::RendezvousManager::new(authority_id, guard_chain, rendezvous_config)
+        });
+
+        // Build runtime system with configured services
+        Ok(RuntimeSystem::new_with_services(
             effect_executor,
-            Arc::new(effect_system),
+            Arc::new(RwLock::new(effect_system)),
             context_manager,
             flow_budget_manager,
             receipt_manager,
             choreography_adapter,
             lifecycle_manager,
+            sync_manager,
+            rendezvous_manager,
             config,
             authority_id,
         ))

@@ -200,15 +200,16 @@ pub struct SessionCreationFailed {
 
 /// Internal approval response for choreography simulation
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct ApprovalResponse {
-    /// Session ID being responded to
+    /// Session ID being responded to (for audit logging in full implementation)
+    #[allow(dead_code)] // Infrastructure for session audit trail
     pub session_id: String,
     /// Whether the session was approved
     pub approved: bool,
     /// Reason for approval/rejection
     pub reason: String,
-    /// Device that made the approval decision
+    /// Device that made the approval decision (for audit logging in full implementation)
+    #[allow(dead_code)] // Infrastructure for approver audit trail
     pub approver_device_id: DeviceId,
 }
 
@@ -226,9 +227,11 @@ where
 {
     /// Shared effect system implementing AuraEffects
     effects: Arc<E>,
-    /// Biscuit token manager for authorization
+    /// Biscuit token manager for authorization (infrastructure for full Biscuit validation)
+    #[allow(dead_code)] // Infrastructure for future Biscuit token validation
     token_manager: Option<BiscuitTokenManager>,
-    /// Biscuit guard evaluator for permission checks
+    /// Biscuit guard evaluator for permission checks (infrastructure for full Biscuit validation)
+    #[allow(dead_code)] // Infrastructure for future Biscuit guard evaluation
     guard_evaluator: Option<BiscuitGuardEvaluator>,
 }
 
@@ -492,6 +495,114 @@ mod tests {
         // Just verify the coordinator was created successfully
         // Test passes if we can create and access the coordinator
         let _ = coordinator.effects();
+        Ok(())
+    }
+
+    #[aura_test]
+    async fn test_session_creation_choreography_execution() -> aura_core::AuraResult<()> {
+        let device_id = test_device_id(3);
+        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+        let mut coordinator = SessionCreationCoordinator::new(fixture.effect_system_arc());
+
+        // Create a session creation request with proper verified identity
+        let request = SessionCreationRequest {
+            device_id,
+            account_id: AccountId::new_from_entropy([3u8; 32]),
+            verified_identity: VerifiedIdentity {
+                proof: aura_verify::IdentityProof::Device {
+                    device_id,
+                    signature: [0u8; 64].into(),
+                },
+                message_hash: [0u8; 32],
+            },
+            requested_scope: SessionScope::Protocol {
+                protocol_type: "test_protocol".to_string(),
+            },
+            duration_seconds: 3600, // 1 hour
+        };
+
+        // Execute the choreography through create_session
+        let response = coordinator.create_session(request).await?;
+
+        // Verify successful session creation
+        assert!(response.success, "Session creation should succeed");
+        assert!(response.session_ticket.is_some(), "Session ticket should be present");
+        assert!(response.error.is_none(), "No error should be present");
+        assert!(!response.participants.is_empty(), "Participants should not be empty");
+
+        // Verify the session ticket details
+        let ticket = response.session_ticket.unwrap();
+        assert_eq!(ticket.issuer_device_id, device_id);
+        assert!(ticket.expires_at > ticket.issued_at);
+
+        Ok(())
+    }
+
+    #[aura_test]
+    async fn test_session_creation_rejects_long_duration() -> aura_core::AuraResult<()> {
+        let device_id = test_device_id(4);
+        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+        let mut coordinator = SessionCreationCoordinator::new(fixture.effect_system_arc());
+
+        // Create a request with duration exceeding 24 hours
+        let request = SessionCreationRequest {
+            device_id,
+            account_id: AccountId::new_from_entropy([4u8; 32]),
+            verified_identity: VerifiedIdentity {
+                proof: aura_verify::IdentityProof::Device {
+                    device_id,
+                    signature: [0u8; 64].into(),
+                },
+                message_hash: [0u8; 32],
+            },
+            requested_scope: SessionScope::Protocol {
+                protocol_type: "test_protocol".to_string(),
+            },
+            duration_seconds: 86401, // More than 24 hours
+        };
+
+        // Execute the choreography
+        let response = coordinator.create_session(request).await?;
+
+        // Verify the request was rejected
+        assert!(!response.success, "Session creation should fail for excessive duration");
+        assert!(response.session_ticket.is_none(), "No ticket should be created");
+        assert!(response.error.is_some(), "Error message should be present");
+
+        Ok(())
+    }
+
+    #[aura_test]
+    async fn test_session_creation_rejects_mismatched_identity() -> aura_core::AuraResult<()> {
+        let device_id = test_device_id(5);
+        let other_device_id = test_device_id(99);
+        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
+        let mut coordinator = SessionCreationCoordinator::new(fixture.effect_system_arc());
+
+        // Create a request where verified identity doesn't match requester device
+        let request = SessionCreationRequest {
+            device_id,
+            account_id: AccountId::new_from_entropy([5u8; 32]),
+            verified_identity: VerifiedIdentity {
+                proof: aura_verify::IdentityProof::Device {
+                    device_id: other_device_id, // Mismatch!
+                    signature: [0u8; 64].into(),
+                },
+                message_hash: [0u8; 32],
+            },
+            requested_scope: SessionScope::Protocol {
+                protocol_type: "test_protocol".to_string(),
+            },
+            duration_seconds: 3600,
+        };
+
+        // Execute the choreography
+        let response = coordinator.create_session(request).await?;
+
+        // Verify the request was rejected
+        assert!(!response.success, "Session creation should fail for identity mismatch");
+        assert!(response.session_ticket.is_none(), "No ticket should be created");
+
         Ok(())
     }
 }

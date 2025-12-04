@@ -5,6 +5,7 @@
 
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
+#![allow(dead_code)] // Test helpers may not all be used
 
 use aura_core::effects::PhysicalTimeEffects;
 use aura_core::{AccountId, DeviceId, TrustLevel};
@@ -33,7 +34,6 @@ struct InvitationIntegrationTest {
 }
 
 impl InvitationIntegrationTest {
-    #[allow(dead_code)]
     async fn new() -> Self {
         // Use deterministic UUIDs to avoid conflicts
         let inviter_device = DeviceId(Uuid::from_bytes([0x01; 16]));

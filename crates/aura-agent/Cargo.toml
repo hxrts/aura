@@ -20,12 +20,15 @@ aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }
 aura-chat = { path = "../aura-chat" }
 aura-invitation = { path = "../aura-invitation" }
+aura-rendezvous = { path = "../aura-rendezvous" }
+aura-sync = { path = "../aura-sync" }
 aura-wot = { path = "../aura-wot" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
 
 # Cryptography dependencies
 ed25519-dalek = { workspace = true }
+frost-ed25519 = { workspace = true }
 rand_core = { workspace = true }
 rand = { workspace = true }
 subtle = { workspace = true }

@@ -107,6 +107,34 @@ impl HandlerUtilities {
             .map_err(|e| crate::core::AgentError::effects(format!("persist fact: {e}")))
     }
 
+    /// Append a generic fact (raw bytes) into the authority-scoped journal.
+    ///
+    /// This is used for domain facts like `InvitationFact` that serialize to bytes
+    /// via their own serialization (e.g., `DomainFact::to_bytes()`).
+    pub async fn append_generic_fact(
+        authority: &AuthorityContext,
+        effects: &AuraEffectSystem,
+        _context_id: ContextId,
+        binding_type: &str,
+        binding_data: &[u8],
+    ) -> AgentResult<()> {
+        let order = effects
+            .order_time()
+            .await
+            .map_err(|e| crate::core::AgentError::effects(format!("order_time: {e}")))?;
+
+        // Persist deterministic fact record; journal wiring can migrate from storage.
+        let suffix: String = order.0.iter().map(|b| format!("{:02x}", b)).collect();
+        let key = format!(
+            "journal/{}/{}:{}",
+            authority.authority_id, binding_type, suffix
+        );
+        effects
+            .store(&key, binding_data.to_vec())
+            .await
+            .map_err(|e| crate::core::AgentError::effects(format!("persist fact: {e}")))
+    }
+
     /// Create effect context from authority
     #[allow(dead_code)] // Part of future handler utilities API
     pub fn create_effect_context(

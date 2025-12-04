@@ -20,12 +20,18 @@ pub mod amp;
 pub mod authority;
 pub mod chat;
 pub mod context;
+#[cfg(feature = "development")]
 pub mod demo;
+pub mod sync;
+#[cfg(feature = "terminal")]
 pub mod tui;
 
 pub use amp::AmpAction;
 pub use authority::AuthorityCommands;
 pub use chat::ChatCommands;
 pub use context::ContextAction;
+#[cfg(feature = "development")]
 pub use demo::DemoCommands;
+pub use sync::SyncAction;
+#[cfg(feature = "terminal")]
 pub use tui::TuiArgs;

@@ -3,6 +3,9 @@
 //! This example demonstrates how Aura's choreography system handles
 //! basic choreographic patterns and prepares for future dynamic role support.
 
+// Example code defines types for demonstration that aren't directly called
+#![allow(dead_code)]
+
 use aura_mpst::ast_extraction::{extract_aura_annotations, AuraEffect};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use rumpsteak_aura::*;
@@ -10,32 +13,26 @@ use rumpsteak_aura_choreography::Label;
 use serde::{Deserialize, Serialize};
 
 // Required type definitions for the generated choreography
-#[allow(dead_code)]
 type Channel = channel::Bidirectional<UnboundedSender<Label>, UnboundedReceiver<Label>>;
 
 // Message types for the threshold ceremony
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 struct SetupRequest {
     ceremony_id: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 struct Commitment {
     value: Vec<u8>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 struct Challenge {
     nonce: u64,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 struct Response {
     signature: Vec<u8>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 struct FinalSignature {
     signature: Vec<u8>,
 }

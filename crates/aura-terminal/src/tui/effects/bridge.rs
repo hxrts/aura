@@ -16,6 +16,7 @@ pub use crate::tui::effects::bridge_config::BridgeConfig;
 pub use crate::tui::effects::command_parser::{
     AuraEvent, EffectCommand, EventFilter, EventSubscription,
 };
+use aura_app::AppCore;
 use aura_core::effects::amp::AmpChannelEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
 use aura_effects::time::PhysicalTimeHandler;
@@ -43,6 +44,9 @@ pub struct EffectBridge {
     /// Optional full effect system (provides access to all effect handlers)
     #[allow(dead_code)]
     effect_system: Option<Arc<aura_agent::AuraEffectSystem>>,
+    /// Optional AppCore for intent-based state management
+    #[allow(dead_code)]
+    app_core: Option<Arc<RwLock<AppCore>>>,
 }
 
 impl EffectBridge {
@@ -83,6 +87,17 @@ impl EffectBridge {
         amp_effects: Option<Arc<dyn AmpChannelEffects + Send + Sync>>,
         effect_system: Option<Arc<aura_agent::AuraEffectSystem>>,
     ) -> Self {
+        Self::with_full_config(config, time_effects, amp_effects, effect_system, None)
+    }
+
+    /// Create a new effect bridge with full configuration including effect system and AppCore
+    pub fn with_full_config(
+        config: BridgeConfig,
+        time_effects: Arc<dyn PhysicalTimeEffects>,
+        amp_effects: Option<Arc<dyn AmpChannelEffects + Send + Sync>>,
+        effect_system: Option<Arc<aura_agent::AuraEffectSystem>>,
+        app_core: Option<Arc<RwLock<AppCore>>>,
+    ) -> Self {
         let (command_tx, command_rx) = mpsc::channel(config.command_buffer_size);
         let (event_tx, _) = broadcast::channel(config.event_buffer_size);
 
@@ -93,6 +108,7 @@ impl EffectBridge {
             state: Arc::new(RwLock::new(BridgeState::default())),
             time_effects: time_effects.clone(),
             effect_system: effect_system.clone(),
+            app_core: app_core.clone(),
         };
 
         // Start command consumer loop in background
@@ -104,6 +120,7 @@ impl EffectBridge {
             time_effects,
             amp_effects,
             effect_system,
+            app_core,
         ));
 
         bridge
@@ -220,6 +237,7 @@ impl EffectBridge {
         time_effects: Arc<dyn PhysicalTimeEffects>,
         amp_effects: Option<Arc<dyn AmpChannelEffects + Send + Sync>>,
         effect_system: Option<Arc<aura_agent::AuraEffectSystem>>,
+        app_core: Option<Arc<RwLock<AppCore>>>,
     ) {
         tracing::info!("EffectBridge command consumer loop started");
 
@@ -233,6 +251,7 @@ impl EffectBridge {
                 &time_effects,
                 amp_effects.as_deref(),
                 effect_system.as_ref(),
+                app_core.as_ref(),
             )
             .await;
 
@@ -260,6 +279,7 @@ impl EffectBridge {
         time_effects: &Arc<dyn PhysicalTimeEffects>,
         amp_effects: Option<&(dyn AmpChannelEffects + Send + Sync)>,
         effect_system: Option<&Arc<aura_agent::AuraEffectSystem>>,
+        app_core: Option<&Arc<RwLock<AppCore>>>,
     ) -> Result<(), String> {
         let mut attempts = 0;
         let mut last_error = None;
@@ -272,6 +292,7 @@ impl EffectBridge {
                 time_effects,
                 amp_effects,
                 effect_system,
+                app_core,
             )
             .await
             {

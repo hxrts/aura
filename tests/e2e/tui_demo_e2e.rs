@@ -38,10 +38,7 @@ impl MockTimeEffects {
         *time += ms;
     }
 
-    #[allow(dead_code)]
-    pub async fn get_sleep_calls(&self) -> Vec<u64> {
-        self.sleep_calls.read().await.clone()
-    }
+
 }
 
 impl Default for MockTimeEffects {
@@ -116,32 +113,7 @@ impl TuiTestHarness {
         self.bridge.dispatch(command).await
     }
 
-    /// Wait for a specific event type with timeout
-    #[allow(dead_code)]
-    pub async fn wait_for_event(
-        &mut self,
-        predicate: impl Fn(&AuraEvent) -> bool,
-        timeout_ms: u64,
-    ) -> Option<AuraEvent> {
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
 
-        loop {
-            // Check for event
-            if let Some(event) = self.event_sub.try_recv() {
-                if predicate(&event) {
-                    return Some(event);
-                }
-            }
-
-            // Check timeout
-            if tokio::time::Instant::now() >= deadline {
-                return None;
-            }
-
-            // Small yield to allow async tasks to progress
-            tokio::task::yield_now().await;
-        }
-    }
 
     /// Try to receive an event without waiting
     pub fn try_recv_event(&mut self) -> Option<AuraEvent> {
@@ -162,15 +134,7 @@ impl TuiTestHarness {
         self.time_effects.advance(ms).await;
     }
 
-    /// Get current simulated time
-    #[allow(dead_code)]
-    pub async fn current_time(&self) -> u64 {
-        self.time_effects
-            .physical_time()
-            .await
-            .map(|t| t.ts_ms)
-            .unwrap_or(0)
-    }
+
 
     // ─── High-Level Test Actions ───────────────────────────────────────────
 
@@ -193,11 +157,7 @@ impl TuiTestHarness {
         self.dispatch(EffectCommand::CancelRecovery).await
     }
 
-    /// Simulate completing recovery
-    #[allow(dead_code)]
-    pub async fn complete_recovery(&self) -> Result<(), String> {
-        self.dispatch(EffectCommand::CompleteRecovery).await
-    }
+
 
     /// Simulate guardian approval
     pub async fn submit_guardian_approval(&self, guardian_id: &str) -> Result<(), String> {

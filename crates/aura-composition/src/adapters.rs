@@ -646,7 +646,6 @@ impl RegistrableHandler for TransportHandlerAdapter {
 
 /// Adapter for LoggingSystemHandler
 pub struct LoggingSystemHandlerAdapter {
-    #[allow(dead_code)]
     handler: LoggingSystemHandler,
 }
 

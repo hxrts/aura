@@ -7,22 +7,128 @@
 //! These hooks allow iocraft components to subscribe to futures-signals
 //! and automatically re-render when data changes.
 //!
-//! ## Usage
+//! ## Push-Based Signal Subscription
+//!
+//! iocraft's `use_future` hook enables true push-based reactive updates by
+//! spawning async tasks that subscribe to futures-signals. When a signal emits
+//! a new value, the task updates iocraft's `State<T>`, which triggers a re-render.
 //!
 //! ```ignore
-//! use crate::tui::hooks::snapshot_state;
+//! use futures_signals::signal::SignalExt;
+//! use iocraft::prelude::*;
 //!
 //! #[component]
-//! fn MyComponent(props: &Props) -> impl Into<AnyElement<'static>> {
-//!     let value = snapshot_state(&props.reactive_state);
+//! fn ChatScreen(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+//!     // Get AppCore from context
+//!     let app_core = hooks.use_context::<AppCoreContext>();
+//!
+//!     // Initialize state from current value
+//!     let chat_state = hooks.use_state(|| app_core.snapshot().chat);
+//!
+//!     // Subscribe to signal updates via use_future
+//!     hooks.use_future({
+//!         let mut chat_state = chat_state.clone();
+//!         let signal = app_core.chat_signal();
+//!         async move {
+//!             signal.for_each(|new_value| {
+//!                 chat_state.set(new_value);
+//!                 async {}
+//!             }).await;
+//!         }
+//!     });
 //!
 //!     element! {
-//!         Text(content: format!("Value: {}", value))
+//!         Text(content: format!("Messages: {}", chat_state.read().messages.len()))
 //!     }
 //! }
 //! ```
+//!
+//! ## Snapshot Utilities
+//!
+//! For components that don't need live updates, snapshot functions provide
+//! point-in-time reads of reactive state.
 
+use std::sync::Arc;
+
+use aura_app::AppCore;
+use tokio::sync::RwLock;
+
+use crate::tui::context::IoContext;
 use crate::tui::reactive::signals::{ReactiveState, ReactiveVec};
+
+// =============================================================================
+// AppCore Context for iocraft
+// =============================================================================
+
+/// Context type for sharing AppCore with iocraft components.
+///
+/// This enables components to access AppCore via `hooks.use_context::<AppCoreContext>()`.
+/// Components can then use `use_future` to subscribe to signals for reactive updates.
+///
+/// ## Example
+///
+/// ```ignore
+/// use crate::tui::hooks::AppCoreContext;
+///
+/// #[component]
+/// fn MyComponent(mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+///     let ctx = hooks.use_context::<AppCoreContext>();
+///
+///     // Initialize state from current value
+///     let messages = hooks.use_state(|| ctx.snapshot().chat.messages.clone());
+///
+///     // Subscribe to signal updates
+///     hooks.use_future({
+///         let mut messages = messages.clone();
+///         let app_core = ctx.app_core.clone();
+///         async move {
+///             use futures_signals::signal::SignalExt;
+///             let signal = {
+///                 let core = app_core.read().await;
+///                 core.chat_signal()
+///             };
+///             signal.for_each(|state| {
+///                 messages.set(state.messages.clone());
+///                 async {}
+///             }).await;
+///         }
+///     });
+///
+///     element! { ... }
+/// }
+/// ```
+#[derive(Clone)]
+pub struct AppCoreContext {
+    /// The shared AppCore instance
+    pub app_core: Arc<RwLock<AppCore>>,
+
+    /// The IoContext for effect dispatch
+    pub io_context: Arc<IoContext>,
+}
+
+impl AppCoreContext {
+    /// Create a new AppCoreContext
+    pub fn new(app_core: Arc<RwLock<AppCore>>, io_context: Arc<IoContext>) -> Self {
+        Self { app_core, io_context }
+    }
+
+    /// Get a snapshot of the current state
+    ///
+    /// This is useful for initializing iocraft State<T> values.
+    pub fn snapshot(&self) -> aura_app::StateSnapshot {
+        // Use try_read to avoid blocking in sync context
+        // Fall back to default if lock is held
+        self.app_core
+            .try_read()
+            .map(|guard| guard.snapshot())
+            .unwrap_or_default()
+    }
+
+    /// Dispatch an effect command through IoContext
+    pub async fn dispatch(&self, cmd: crate::tui::effects::EffectCommand) -> Result<(), String> {
+        self.io_context.dispatch(cmd).await
+    }
+}
 
 /// Trait for types that can be used with reactive hooks
 pub trait ReactiveValue: Clone + Send + Sync + 'static {}
@@ -30,11 +136,8 @@ impl<T: Clone + Send + Sync + 'static> ReactiveValue for T {}
 
 /// Snapshot of a ReactiveState for use in iocraft components
 ///
-/// Since iocraft doesn't have a built-in way to subscribe to external signals,
-/// we use a snapshot approach: read the current value when rendering.
-///
-/// For real-time updates, the parent component should poll or use
-/// iocraft's use_future hook to periodically check for changes.
+/// Returns the current value. For real-time push-based updates, use `use_future`
+/// with signal subscription (see module documentation).
 pub fn snapshot_state<T: Clone>(state: &ReactiveState<T>) -> T {
     state.get()
 }
@@ -72,13 +175,12 @@ pub trait HasReactiveData {
 }
 
 // =============================================================================
-// View Snapshot Extraction
+// View Snapshot Types
 // =============================================================================
-
-use crate::tui::reactive::views::{
-    BlockView, ChatView, ContactsView, GuardiansView, InvitationsView, NeighborhoodView,
-    ReactiveViewModel, RecoveryView,
-};
+//
+// These snapshot structs are populated from AppCore's ViewState. The old
+// View classes (ChatView, GuardiansView, etc.) have been removed - screens
+// now subscribe directly to AppCore signals for reactive updates.
 
 /// Snapshot of chat-related data for rendering
 #[derive(Debug, Clone)]
@@ -227,129 +329,9 @@ impl Default for NeighborhoodSnapshot {
     }
 }
 
-/// Extract a snapshot from ChatView
-pub fn snapshot_chat(view: &ChatView) -> ChatSnapshot {
-    let selected = view.get_selected_channel();
-    let messages = selected
-        .as_ref()
-        .and_then(|id| view.get_channel_state(id))
-        .map(|state| state.messages)
-        .unwrap_or_default();
-
-    ChatSnapshot {
-        channels: view.get_channels(),
-        selected_channel: selected,
-        messages,
-    }
-}
-
-/// Extract a snapshot from GuardiansView
-pub fn snapshot_guardians(view: &GuardiansView) -> GuardiansSnapshot {
-    GuardiansSnapshot {
-        guardians: view.get_guardians(),
-        threshold: view.get_threshold(),
-    }
-}
-
-/// Extract a snapshot from RecoveryView
-pub fn snapshot_recovery(view: &RecoveryView) -> RecoverySnapshot {
-    RecoverySnapshot {
-        status: view.get_status(),
-        progress_percent: view.progress_percent(),
-        is_in_progress: view.is_in_progress(),
-    }
-}
-
-/// Extract a snapshot from InvitationsView
-pub fn snapshot_invitations(view: &InvitationsView) -> InvitationsSnapshot {
-    InvitationsSnapshot {
-        invitations: view.get_invitations(),
-        pending_count: view.pending_count(),
-    }
-}
-
-/// Extract a snapshot from BlockView
-pub fn snapshot_block(view: &BlockView) -> BlockSnapshot {
-    BlockSnapshot {
-        block: view.get_block(),
-        residents: view.get_residents(),
-        storage: view.get_storage(),
-        is_resident: view.get_is_resident(),
-        is_steward: view.get_is_steward(),
-    }
-}
-
-/// Extract a snapshot from ContactsView
-pub fn snapshot_contacts(view: &ContactsView) -> ContactsSnapshot {
-    ContactsSnapshot {
-        contacts: view.contacts(),
-        policy: view.policy(),
-    }
-}
-
-/// Extract a snapshot from NeighborhoodView
-pub fn snapshot_neighborhood(view: &NeighborhoodView) -> NeighborhoodSnapshot {
-    NeighborhoodSnapshot {
-        neighborhood_id: view.neighborhood_id(),
-        neighborhood_name: view.neighborhood_name(),
-        blocks: view.blocks(),
-        position: view.position(),
-    }
-}
-
-/// Complete snapshot of the entire view model
-#[derive(Debug, Clone)]
-pub struct ViewModelSnapshot {
-    /// Chat data
-    pub chat: ChatSnapshot,
-    /// Guardians data
-    pub guardians: GuardiansSnapshot,
-    /// Recovery data
-    pub recovery: RecoverySnapshot,
-    /// Invitations data
-    pub invitations: InvitationsSnapshot,
-    /// Block data
-    pub block: BlockSnapshot,
-    /// Contacts data
-    pub contacts: ContactsSnapshot,
-    /// Neighborhood data
-    pub neighborhood: NeighborhoodSnapshot,
-    /// Total pending notifications
-    pub pending_notifications: usize,
-    /// Whether any critical action is required
-    pub has_critical_notifications: bool,
-}
-
-impl Default for ViewModelSnapshot {
-    fn default() -> Self {
-        Self {
-            chat: ChatSnapshot::default(),
-            guardians: GuardiansSnapshot::default(),
-            recovery: RecoverySnapshot::default(),
-            invitations: InvitationsSnapshot::default(),
-            block: BlockSnapshot::default(),
-            contacts: ContactsSnapshot::default(),
-            neighborhood: NeighborhoodSnapshot::default(),
-            pending_notifications: 0,
-            has_critical_notifications: false,
-        }
-    }
-}
-
-/// Extract a complete snapshot from ReactiveViewModel
-pub fn snapshot_view_model(vm: &ReactiveViewModel) -> ViewModelSnapshot {
-    ViewModelSnapshot {
-        chat: snapshot_chat(&vm.chat),
-        guardians: snapshot_guardians(&vm.guardians),
-        recovery: snapshot_recovery(&vm.recovery),
-        invitations: snapshot_invitations(&vm.invitations),
-        block: snapshot_block(&vm.block),
-        contacts: snapshot_contacts(&vm.contacts),
-        neighborhood: snapshot_neighborhood(&vm.neighborhood),
-        pending_notifications: vm.pending_notifications_count(),
-        has_critical_notifications: vm.has_critical_notifications(),
-    }
-}
+// Note: The old View-based snapshot functions have been removed.
+// Snapshots are now created directly from AppCore's ViewState in IoContext.
+// See context.rs for the snapshot_* implementations.
 
 #[cfg(test)]
 mod tests {
@@ -387,9 +369,8 @@ mod tests {
     }
 
     #[test]
-    fn test_chat_snapshot() {
-        let view = ChatView::new();
-        let snapshot = snapshot_chat(&view);
+    fn test_chat_snapshot_default() {
+        let snapshot = ChatSnapshot::default();
 
         assert!(snapshot.channels.is_empty());
         assert!(snapshot.selected_channel.is_none());
@@ -397,13 +378,27 @@ mod tests {
     }
 
     #[test]
-    fn test_view_model_snapshot() {
-        let vm = ReactiveViewModel::new();
-        let snapshot = snapshot_view_model(&vm);
+    fn test_snapshot_defaults() {
+        // All snapshot types should have sensible defaults
+        let chat = ChatSnapshot::default();
+        assert!(chat.channels.is_empty());
 
-        assert!(snapshot.chat.channels.is_empty());
-        assert!(snapshot.guardians.guardians.is_empty());
-        assert!(!snapshot.recovery.is_in_progress);
-        assert!(snapshot.invitations.invitations.is_empty());
+        let guardians = GuardiansSnapshot::default();
+        assert!(guardians.guardians.is_empty());
+
+        let recovery = RecoverySnapshot::default();
+        assert!(!recovery.is_in_progress);
+
+        let invitations = InvitationsSnapshot::default();
+        assert!(invitations.invitations.is_empty());
+
+        let block = BlockSnapshot::default();
+        assert!(block.block.is_none());
+
+        let contacts = ContactsSnapshot::default();
+        assert!(contacts.contacts.is_empty());
+
+        let neighborhood = NeighborhoodSnapshot::default();
+        assert!(neighborhood.blocks.is_empty());
     }
 }

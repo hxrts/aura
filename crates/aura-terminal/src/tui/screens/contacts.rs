@@ -1,11 +1,18 @@
 //! # Contacts Screen
 //!
 //! Petname management
+//!
+//! ## Reactive Signal Subscription
+//!
+//! When `AppCoreContext` is available, this screen subscribes to contacts state
+//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! component automatically, triggering re-renders when data changes.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::components::{EmptyState, KeyHintsBar, StatusIndicator};
+use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Contact, ContactStatus, KeyHint};
 
@@ -194,12 +201,80 @@ pub struct ContactsScreenProps {
     pub on_toggle_guardian: Option<ToggleGuardianCallback>,
 }
 
+/// Convert aura-app contact to TUI contact
+fn convert_contact(c: &aura_app::views::Contact) -> Contact {
+    // Determine contact status based on online state
+    let status = if c.is_online {
+        ContactStatus::Active
+    } else {
+        ContactStatus::Pending
+    };
+
+    Contact {
+        id: c.id.clone(),
+        petname: c.petname.clone(),
+        suggested_name: c.suggested_name.clone(),
+        status,
+        is_guardian: c.is_guardian,
+    }
+}
+
 /// The contacts screen
+///
+/// ## Reactive Updates
+///
+/// When `AppCoreContext` is available in the context tree, this component will
+/// subscribe to contacts state signals and automatically update when:
+/// - Contacts are added/removed
+/// - Petnames are changed
+/// - Guardian status is toggled
+/// - Online status changes
 #[component]
 pub fn ContactsScreen(
     props: &ContactsScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
+    // Try to get AppCoreContext for reactive signal subscription
+    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+
+    // Initialize reactive state from props
+    let reactive_contacts = hooks.use_state({
+        let initial = props.contacts.clone();
+        move || initial
+    });
+
+    // Subscribe to contacts signal updates if AppCoreContext is available
+    if let Some(ctx) = app_ctx {
+        hooks.use_future({
+            let mut reactive_contacts = reactive_contacts.clone();
+            let app_core = ctx.app_core.clone();
+            async move {
+                use futures_signals::signal::SignalExt;
+
+                let signal = {
+                    let core = app_core.read().await;
+                    core.contacts_signal()
+                };
+
+                signal
+                    .for_each(|contacts_state| {
+                        let contacts: Vec<Contact> = contacts_state
+                            .contacts
+                            .iter()
+                            .map(convert_contact)
+                            .collect();
+
+                        reactive_contacts.set(contacts);
+                        async {}
+                    })
+                    .await;
+            }
+        });
+    }
+
+    // Use reactive state for rendering
+    let contacts = reactive_contacts.read().clone();
+
     let selected = hooks.use_state(|| 0usize);
     let detail_focused = hooks.use_state(|| false);
 
@@ -211,7 +286,6 @@ pub fn ContactsScreen(
         KeyHint::new("Esc", "Back"),
     ];
 
-    let contacts = props.contacts.clone();
     let current_selected = selected.get();
     let is_detail_focused = detail_focused.get();
     let selected_contact = contacts.get(current_selected).cloned();

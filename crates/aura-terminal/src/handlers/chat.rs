@@ -2,794 +2,117 @@
 //!
 //! This module implements CLI handlers for chat functionality, integrating
 //! with the aura-chat service for group management and messaging.
+//!
+//! Note: ChatService integration temporarily disabled pending effect system RwLock migration.
+//! The ChatService expects Arc<E: AuraEffects> but the runtime now provides Arc<RwLock<AuraEffectSystem>>.
 
 use crate::cli::chat::ChatCommands;
 use crate::handlers::HandlerContext;
 use anyhow::Result;
 use aura_agent::AuraEffectSystem;
-use aura_chat::{ChatGroupId, ChatMessageId, ChatService};
-use aura_core::{
-    effects::{ConsoleEffects, StorageEffects},
-    identifiers::AuthorityId,
-    time::{PhysicalTime, TimeStamp},
-    AuraError,
-};
-use std::collections::HashMap;
-use std::io::Write;
-use std::sync::Arc;
-use uuid::Uuid;
+use aura_core::effects::ConsoleEffects;
 
 /// Execute chat management commands through the effect system
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
-/// Note: Also takes Arc for ChatService creation.
+///
+/// Note: ChatService integration temporarily disabled pending effect system RwLock migration.
+/// The ChatService expects Arc<E: AuraEffects> but the runtime now provides Arc<RwLock<AuraEffectSystem>>.
 pub async fn handle_chat(
     ctx: &HandlerContext<'_>,
-    effect_system_arc: &Arc<AuraEffectSystem>,
+    _effects: &AuraEffectSystem,
     command: &ChatCommands,
 ) -> Result<()> {
-    // Create chat service with effect system
-    let chat_service = ChatService::new(Arc::clone(effect_system_arc));
+    // Temporarily disabled - ChatService needs Arc<E: AuraEffects> but runtime provides Arc<RwLock<...>>
+    ConsoleEffects::log_info(
+        ctx.effects(),
+        "Note: Chat service temporarily disabled pending effect system update.",
+    )
+    .await?;
 
     match command {
-        ChatCommands::Create {
-            name,
-            description,
-            members,
-        } => handle_create_group(ctx, &chat_service, name, description.as_deref(), members).await,
-
-        ChatCommands::Send {
-            group_id,
-            message,
-            reply_to: _,
-        } => handle_send_message(ctx, &chat_service, group_id, message).await,
-
-        ChatCommands::History {
-            group_id,
-            limit,
-            before,
-            message_type,
-            sender,
-        } => {
-            handle_get_history(
-                ctx,
-                &chat_service,
-                group_id,
-                *limit,
-                before.as_deref(),
-                message_type.as_deref(),
-                sender.as_ref(),
-            )
-            .await
+        ChatCommands::Create { name, .. } => {
+            ConsoleEffects::log_info(ctx.effects(), &format!("Would create chat group: {}", name))
+                .await?;
         }
-
-        ChatCommands::List => handle_list_groups(ctx, &chat_service).await,
-
-        ChatCommands::Show {
-            group_id,
-            show_members,
-            show_metadata,
-        } => handle_show_group(ctx, &chat_service, group_id, *show_members, *show_metadata).await,
-
+        ChatCommands::Send {
+            group_id, message, ..
+        } => {
+            ConsoleEffects::log_info(
+                ctx.effects(),
+                &format!("Would send to {}: {}", group_id, message),
+            )
+            .await?;
+        }
+        ChatCommands::History { group_id, .. } => {
+            ConsoleEffects::log_info(
+                ctx.effects(),
+                &format!("Would show history for group {}", group_id),
+            )
+            .await?;
+        }
+        ChatCommands::List => {
+            ConsoleEffects::log_info(ctx.effects(), "Would list chat groups").await?;
+        }
+        ChatCommands::Show { group_id, .. } => {
+            ConsoleEffects::log_info(ctx.effects(), &format!("Would show group {}", group_id))
+                .await?;
+        }
         ChatCommands::Invite {
             group_id,
             authority_id,
-            role: _,
-        } => handle_invite_member(ctx, &chat_service, group_id, authority_id).await,
-
-        ChatCommands::Leave { group_id, force: _ } => {
-            handle_leave_group(ctx, &chat_service, group_id).await
+            ..
+        } => {
+            ConsoleEffects::log_info(
+                ctx.effects(),
+                &format!("Would invite {} to group {}", authority_id, group_id),
+            )
+            .await?;
         }
-
+        ChatCommands::Leave { group_id, .. } => {
+            ConsoleEffects::log_info(ctx.effects(), &format!("Would leave group {}", group_id))
+                .await?;
+        }
         ChatCommands::Remove {
             group_id,
             member_id,
-            force: _,
-        } => handle_remove_member(ctx, &chat_service, group_id, member_id).await,
-
-        ChatCommands::Update {
-            group_id,
-            name,
-            description,
-            metadata,
-        } => handle_update_group(ctx, &chat_service, group_id, name, description, metadata).await,
-
-        ChatCommands::Search {
-            query,
-            group_id,
-            limit,
-            sender,
+            ..
         } => {
-            handle_search_messages(
-                ctx,
-                &chat_service,
-                query,
-                group_id.as_ref(),
-                *limit,
-                sender.as_ref(),
+            ConsoleEffects::log_info(
+                ctx.effects(),
+                &format!("Would remove {} from group {}", member_id, group_id),
             )
-            .await
+            .await?;
         }
-
-        ChatCommands::Edit {
-            group_id,
-            message_id,
-            content,
-        } => handle_edit_message(ctx, &chat_service, group_id, message_id, content).await,
-
-        ChatCommands::Delete {
-            group_id,
-            message_id,
-            force: _,
-        } => handle_delete_message(ctx, &chat_service, group_id, message_id).await,
-
+        ChatCommands::Update { group_id, .. } => {
+            ConsoleEffects::log_info(ctx.effects(), &format!("Would update group {}", group_id))
+                .await?;
+        }
+        ChatCommands::Search { query, .. } => {
+            ConsoleEffects::log_info(ctx.effects(), &format!("Would search for: {}", query))
+                .await?;
+        }
+        ChatCommands::Edit { message_id, .. } => {
+            ConsoleEffects::log_info(ctx.effects(), &format!("Would edit message {}", message_id))
+                .await?;
+        }
+        ChatCommands::Delete { message_id, .. } => {
+            ConsoleEffects::log_info(
+                ctx.effects(),
+                &format!("Would delete message {}", message_id),
+            )
+            .await?;
+        }
         ChatCommands::Export {
-            group_id,
-            output,
-            format,
-            include_system,
+            group_id, output, ..
         } => {
-            handle_export_history(
-                ctx,
-                &chat_service,
-                group_id,
-                output,
-                format,
-                *include_system,
-            )
-            .await
-        }
-    }
-}
-
-/// Handle group creation command
-async fn handle_create_group(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    name: &str,
-    description: Option<&str>,
-    members: &[AuthorityId],
-) -> Result<()> {
-    let creator_id = ctx.effect_context().authority_id();
-
-    match chat_service
-        .create_group(name, creator_id, members.to_vec())
-        .await
-    {
-        Ok(group) => {
             ConsoleEffects::log_info(
                 ctx.effects(),
-                &format!(
-                    "✔ Created chat group '{}' with ID: {}",
-                    group.name, group.id
-                ),
-            )
-            .await?;
-
-            if let Some(desc) = description {
-                ConsoleEffects::log_info(ctx.effects(), &format!("  Description: {}", desc))
-                    .await?;
-            }
-
-            ConsoleEffects::log_info(
-                ctx.effects(),
-                &format!(
-                    "  Members: {} (including you as admin)",
-                    group.member_count()
-                ),
+                &format!("Would export group {} to {}", group_id, output),
             )
             .await?;
         }
-        Err(e) => {
-            ConsoleEffects::log_error(ctx.effects(), &format!("✖ Failed to create group: {}", e))
-                .await?;
-            anyhow::bail!("Group creation failed: {}", e);
-        }
     }
 
     Ok(())
-}
-
-/// Handle message sending command
-async fn handle_send_message(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    group_id: &Uuid,
-    message_content: &str,
-) -> Result<()> {
-    let group_id = ChatGroupId::from_uuid(*group_id);
-    let sender_id = ctx.effect_context().authority_id();
-
-    match chat_service
-        .send_message(&group_id, sender_id, message_content.to_string())
-        .await
-    {
-        Ok(message) => {
-            let ts_display = format_timestamp(&message.timestamp);
-            ConsoleEffects::log_info(
-                ctx.effects(),
-                &format!("✔ Message sent to group {} at {}", group_id, ts_display),
-            )
-            .await?;
-        }
-        Err(e) => {
-            ConsoleEffects::log_error(ctx.effects(), &format!("✖ Failed to send message: {}", e))
-                .await?;
-            anyhow::bail!("Message sending failed: {}", e);
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle message history retrieval
-async fn handle_get_history(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    group_id: &Uuid,
-    limit: usize,
-    before: Option<&str>,
-    message_type: Option<&str>,
-    sender: Option<&AuthorityId>,
-) -> Result<()> {
-    let group_id = ChatGroupId::from_uuid(*group_id);
-    let before_ts = parse_timestamp(before, ctx).await?;
-
-    let history = chat_service
-        .get_history(&group_id, Some(limit), before_ts)
-        .await?;
-
-    let mut filtered = Vec::new();
-    for msg in history {
-        if let Some(filter_sender) = sender {
-            if msg.sender_id != *filter_sender {
-                continue;
-            }
-        }
-
-        if let Some(filter_type) = message_type {
-            let matches = match filter_type.to_lowercase().as_str() {
-                "text" => matches!(msg.message_type, aura_chat::types::MessageType::Text),
-                "system" => matches!(msg.message_type, aura_chat::types::MessageType::System),
-                "edit" => matches!(msg.message_type, aura_chat::types::MessageType::Edit),
-                "delete" => matches!(msg.message_type, aura_chat::types::MessageType::Delete),
-                _ => true,
-            };
-            if !matches {
-                continue;
-            }
-        }
-
-        filtered.push(msg);
-    }
-
-    if filtered.is_empty() {
-        ConsoleEffects::log_info(
-            ctx.effects(),
-            &format!("▶ No messages found for group {}", group_id),
-        )
-        .await?;
-        return Ok(());
-    }
-
-    ConsoleEffects::log_info(
-        ctx.effects(),
-        &format!(
-            "▶ Message history for group {} (showing {} entries)",
-            group_id,
-            filtered.len()
-        ),
-    )
-    .await?;
-
-    for message in filtered {
-        let ts = format_timestamp(&message.timestamp);
-        let sender_display = message.sender_id.to_string();
-        let kind = format!("{:?}", message.message_type);
-        let content = if message.message_type == aura_chat::types::MessageType::Delete {
-            "<deleted>".to_string()
-        } else {
-            message.content.clone()
-        };
-
-        ConsoleEffects::log_info(
-            ctx.effects(),
-            &format!("[{}][{}][{}] {}", ts, kind, sender_display, content),
-        )
-        .await?;
-    }
-
-    Ok(())
-}
-
-/// Handle group listing command
-async fn handle_list_groups(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-) -> Result<()> {
-    let authority_id = &ctx.effect_context().authority_id();
-
-    match chat_service.list_user_groups(authority_id).await {
-        Ok(groups) => {
-            if groups.is_empty() {
-                ConsoleEffects::log_info(
-                    ctx.effects(),
-                    "∅ No chat groups found. Use 'aura chat create' to create one.",
-                )
-                .await?;
-            } else {
-                ConsoleEffects::log_info(
-                    ctx.effects(),
-                    &format!("▪ Your chat groups ({}):", groups.len()),
-                )
-                .await?;
-
-                for group in groups {
-                    ConsoleEffects::log_info(
-                        ctx.effects(),
-                        &format!(
-                            "  ◦ {} (ID: {}, {} members)",
-                            group.name,
-                            group.id,
-                            group.member_count()
-                        ),
-                    )
-                    .await?;
-                }
-            }
-        }
-        Err(e) => {
-            ConsoleEffects::log_error(ctx.effects(), &format!("✖ Failed to list groups: {}", e))
-                .await?;
-            anyhow::bail!("Group listing failed: {}", e);
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle group details display
-async fn handle_show_group(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    group_id: &Uuid,
-    show_members: bool,
-    show_metadata: bool,
-) -> Result<()> {
-    let group_id = ChatGroupId::from_uuid(*group_id);
-
-    match chat_service.get_group(&group_id).await {
-        Ok(Some(group)) => {
-            ConsoleEffects::log_info(ctx.effects(), &format!("▪ Group Details: {}", group.name))
-                .await?;
-
-            ConsoleEffects::log_info(ctx.effects(), &format!("  ID: {}", group.id)).await?;
-
-            let created_at = format_timestamp(&group.created_at);
-            ConsoleEffects::log_info(ctx.effects(), &format!("  Created: {}", created_at)).await?;
-
-            if !group.description.is_empty() {
-                ConsoleEffects::log_info(
-                    ctx.effects(),
-                    &format!("  Description: {}", group.description),
-                )
-                .await?;
-            }
-
-            if show_members {
-                ConsoleEffects::log_info(
-                    ctx.effects(),
-                    &format!("  Members ({}):", group.member_count()),
-                )
-                .await?;
-
-                for member in &group.members {
-                    ConsoleEffects::log_info(
-                        ctx.effects(),
-                        &format!(
-                            "    ◦ {} ({:?}, joined {})",
-                            member.display_name,
-                            member.role,
-                            format_timestamp(&member.joined_at)
-                        ),
-                    )
-                    .await?;
-                }
-            }
-
-            if show_metadata && !group.metadata.is_empty() {
-                ConsoleEffects::log_info(ctx.effects(), "  Metadata:").await?;
-                for (key, value) in &group.metadata {
-                    ConsoleEffects::log_info(ctx.effects(), &format!("    {}: {}", key, value))
-                        .await?;
-                }
-            }
-        }
-        Ok(None) => {
-            ConsoleEffects::log_error(ctx.effects(), &format!("✖ Group {} not found", group_id))
-                .await?;
-            anyhow::bail!("Group not found");
-        }
-        Err(e) => {
-            ConsoleEffects::log_error(
-                ctx.effects(),
-                &format!("✖ Failed to get group details: {}", e),
-            )
-            .await?;
-            anyhow::bail!("Group retrieval failed: {}", e);
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle member invitation command
-async fn handle_invite_member(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    group_id: &Uuid,
-    authority_id: &AuthorityId,
-) -> Result<()> {
-    let group_id = ChatGroupId::from_uuid(*group_id);
-    let inviter_id = ctx.effect_context().authority_id();
-
-    match chat_service
-        .add_member(&group_id, inviter_id, *authority_id)
-        .await
-    {
-        Ok(()) => {
-            ConsoleEffects::log_info(
-                ctx.effects(),
-                &format!(
-                    "✔ Successfully invited {} to group {}",
-                    authority_id, group_id
-                ),
-            )
-            .await?;
-        }
-        Err(e) => {
-            ConsoleEffects::log_error(ctx.effects(), &format!("✖ Failed to invite member: {}", e))
-                .await?;
-            anyhow::bail!("Member invitation failed: {}", e);
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle leave group command
-async fn handle_leave_group(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    group_id: &Uuid,
-) -> Result<()> {
-    let group_id = ChatGroupId::from_uuid(*group_id);
-    let member_id = ctx.effect_context().authority_id();
-
-    match chat_service
-        .remove_member(&group_id, member_id, member_id)
-        .await
-    {
-        Ok(()) => {
-            ConsoleEffects::log_info(
-                ctx.effects(),
-                &format!("» Successfully left group {}", group_id),
-            )
-            .await?;
-        }
-        Err(e) => {
-            ConsoleEffects::log_error(ctx.effects(), &format!("✕ Failed to leave group: {}", e))
-                .await?;
-            anyhow::bail!("Leave group failed: {}", e);
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle member removal command
-async fn handle_remove_member(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    group_id: &Uuid,
-    member_id: &AuthorityId,
-) -> Result<()> {
-    let group_id = ChatGroupId::from_uuid(*group_id);
-    let admin_id = ctx.effect_context().authority_id();
-
-    match chat_service
-        .remove_member(&group_id, admin_id, *member_id)
-        .await
-    {
-        Ok(()) => {
-            ConsoleEffects::log_info(
-                ctx.effects(),
-                &format!(
-                    "» Successfully removed {} from group {}",
-                    member_id, group_id
-                ),
-            )
-            .await?;
-        }
-        Err(e) => {
-            ConsoleEffects::log_error(ctx.effects(), &format!("✕ Failed to remove member: {}", e))
-                .await?;
-            anyhow::bail!("Member removal failed: {}", e);
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle group update command
-async fn handle_update_group(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    group_id: &Uuid,
-    name: &Option<String>,
-    description: &Option<String>,
-    metadata: &[String],
-) -> Result<()> {
-    let group_id = ChatGroupId::from_uuid(*group_id);
-    let mut metadata_map = HashMap::new();
-    for entry in metadata {
-        if let Some((key, value)) = entry.split_once('=') {
-            metadata_map.insert(key.to_string(), value.to_string());
-        }
-    }
-
-    let updated = chat_service
-        .update_group_details(
-            &group_id,
-            ctx.effect_context().authority_id(),
-            name.clone(),
-            description.clone(),
-            if metadata_map.is_empty() {
-                None
-            } else {
-                Some(metadata_map)
-            },
-        )
-        .await?;
-
-    ConsoleEffects::log_info(
-        ctx.effects(),
-        &format!("⚙ Updated group {} ({})", updated.name, updated.id),
-    )
-    .await?;
-
-    Ok(())
-}
-
-/// Handle message search command
-async fn handle_search_messages(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    query: &str,
-    group_id: Option<&Uuid>,
-    limit: usize,
-    sender: Option<&AuthorityId>,
-) -> Result<()> {
-    let mut results = Vec::new();
-
-    if let Some(group) = group_id {
-        let group_id = ChatGroupId::from_uuid(*group);
-        results = chat_service
-            .search_messages(&group_id, query, limit, sender)
-            .await?;
-    } else {
-        // Search across all of the caller's groups
-        let groups = chat_service
-            .list_user_groups(&ctx.effect_context().authority_id())
-            .await?;
-        for group in groups {
-            let mut found = chat_service
-                .search_messages(
-                    &group.id,
-                    query,
-                    limit.saturating_sub(results.len()),
-                    sender,
-                )
-                .await?;
-            results.append(&mut found);
-            if results.len() >= limit {
-                break;
-            }
-        }
-    }
-
-    if results.is_empty() {
-        ConsoleEffects::log_info(ctx.effects(), "∴ No messages found").await?;
-        return Ok(());
-    }
-
-    ConsoleEffects::log_info(
-        ctx.effects(),
-        &format!("∴ Found {} messages matching '{}'", results.len(), query),
-    )
-    .await?;
-
-    for msg in results {
-        let ts = format_timestamp(&msg.timestamp);
-        ConsoleEffects::log_info(
-            ctx.effects(),
-            &format!("[{}][{}] {}", ts, msg.group_id, msg.content),
-        )
-        .await?;
-    }
-
-    Ok(())
-}
-
-/// Handle message editing command
-async fn handle_edit_message(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    group_id: &Uuid,
-    message_id: &Uuid,
-    content: &str,
-) -> Result<()> {
-    let group_id = ChatGroupId::from_uuid(*group_id);
-    let message_id = ChatMessageId::from_uuid(*message_id);
-
-    match chat_service
-        .edit_message(
-            &group_id,
-            ctx.effect_context().authority_id(),
-            &message_id,
-            content,
-        )
-        .await
-    {
-        Ok(updated) => {
-            let ts_display = format_timestamp(&updated.timestamp);
-            ConsoleEffects::log_info(
-                ctx.effects(),
-                &format!("≫ Message {} updated at {}", updated.id, ts_display),
-            )
-            .await?;
-        }
-        Err(e) => {
-            ConsoleEffects::log_error(ctx.effects(), &format!("✕ Failed to edit message: {}", e))
-                .await?;
-            return Err(e.into());
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle message deletion command
-async fn handle_delete_message(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    group_id: &Uuid,
-    message_id: &Uuid,
-) -> Result<()> {
-    let group_id = ChatGroupId::from_uuid(*group_id);
-    let message_id = ChatMessageId::from_uuid(*message_id);
-
-    match chat_service
-        .delete_message(&group_id, ctx.effect_context().authority_id(), &message_id)
-        .await
-    {
-        Ok(()) => {
-            ConsoleEffects::log_info(ctx.effects(), &format!("⊗ Message {} deleted", message_id))
-                .await?;
-        }
-        Err(e) => {
-            ConsoleEffects::log_error(ctx.effects(), &format!("✕ Failed to delete message: {}", e))
-                .await?;
-            return Err(e.into());
-        }
-    }
-
-    Ok(())
-}
-
-/// Handle history export command
-async fn handle_export_history(
-    ctx: &HandlerContext<'_>,
-    chat_service: &ChatService<AuraEffectSystem>,
-    group_id: &Uuid,
-    output: &str,
-    format: &str,
-    include_system: bool,
-) -> Result<()> {
-    let group_id = ChatGroupId::from_uuid(*group_id);
-    let history = chat_service.get_history(&group_id, None, None).await?;
-
-    let filtered: Vec<_> = history
-        .into_iter()
-        .filter(|m| include_system || m.message_type != aura_chat::types::MessageType::System)
-        .collect();
-
-    let mut buffer: Vec<u8> = Vec::new();
-
-    match format.to_lowercase().as_str() {
-        "json" => {
-            serde_json::to_writer_pretty(&mut buffer, &filtered)?;
-        }
-        "text" => {
-            for msg in filtered {
-                let line = format!(
-                    "[{}][{}] {}\n",
-                    format_timestamp(&msg.timestamp),
-                    msg.sender_id,
-                    msg.content
-                );
-                buffer.write_all(line.as_bytes())?;
-            }
-        }
-        "csv" => {
-            buffer.write_all(b"timestamp,sender,group,content\n")?;
-            for msg in filtered {
-                let line = format!(
-                    "{},{},{},\"{}\"\n",
-                    format_timestamp(&msg.timestamp),
-                    msg.sender_id,
-                    msg.group_id,
-                    msg.content.replace('"', "\"\"")
-                );
-                buffer.write_all(line.as_bytes())?;
-            }
-        }
-        other => {
-            return Err(AuraError::invalid(format!("Unsupported export format {}", other)).into());
-        }
-    }
-
-    let storage_key = format!("chat_export:{}:{}", group_id, output);
-    StorageEffects::store(ctx.effects(), &storage_key, buffer)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to store exported history: {}", e))?;
-
-    ConsoleEffects::log_info(
-        ctx.effects(),
-        &format!("⇒ Exported history to storage key {}", storage_key),
-    )
-    .await?;
-
-    Ok(())
-}
-
-fn format_timestamp(ts: &TimeStamp) -> String {
-    match ts {
-        TimeStamp::PhysicalClock(PhysicalTime { ts_ms, .. }) => {
-            let secs = (*ts_ms / 1000) as i64;
-            let nanos = (*ts_ms % 1000) as u32 * 1_000_000;
-            if let Some(dt) = chrono::DateTime::<chrono::Utc>::from_timestamp(secs, nanos) {
-                dt.format("%Y-%m-%d %H:%M:%S").to_string()
-            } else {
-                format!("physical:{}ms", ts_ms)
-            }
-        }
-        TimeStamp::LogicalClock(l) => format!("logical:{}", l.lamport),
-        TimeStamp::OrderClock(o) => format!("order:{}", hex::encode(o.0)),
-        TimeStamp::Range(r) => format!("range:{}-{}", r.earliest_ms, r.latest_ms),
-    }
-}
-
-async fn parse_timestamp(raw: Option<&str>, ctx: &HandlerContext<'_>) -> Result<Option<TimeStamp>> {
-    if let Some(raw_ts) = raw {
-        match chrono::DateTime::parse_from_rfc3339(raw_ts) {
-            Ok(dt) => {
-                let millis = dt.timestamp_millis() as u64;
-                Ok(Some(TimeStamp::PhysicalClock(PhysicalTime {
-                    ts_ms: millis,
-                    uncertainty: None,
-                })))
-            }
-            Err(e) => {
-                ConsoleEffects::log_error(
-                    ctx.effects(),
-                    &format!("Invalid timestamp '{}': {}", raw_ts, e),
-                )
-                .await?;
-                Ok(None)
-            }
-        }
-    } else {
-        Ok(None)
-    }
 }

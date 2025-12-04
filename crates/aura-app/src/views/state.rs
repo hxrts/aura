@@ -323,6 +323,15 @@ cfg_if! {
                     ViewDelta::InvitationRejected { invitation_id } => {
                         self.invitations.lock_mut().reject_invitation(&invitation_id);
                     }
+                    ViewDelta::GuardianToggled {
+                        contact_id,
+                        is_guardian,
+                    } => {
+                        self.recovery.lock_mut().toggle_guardian(contact_id, is_guardian);
+                    }
+                    ViewDelta::GuardianThresholdSet { threshold } => {
+                        self.recovery.lock_mut().set_threshold(threshold);
+                    }
                     ViewDelta::Unknown { .. } => {
                         // Unknown deltas are ignored
                     }
@@ -392,6 +401,15 @@ cfg_if! {
                     }
                     ViewDelta::InvitationRejected { invitation_id } => {
                         self.invitations.reject_invitation(&invitation_id);
+                    }
+                    ViewDelta::GuardianToggled {
+                        contact_id,
+                        is_guardian,
+                    } => {
+                        self.recovery.toggle_guardian(contact_id, is_guardian);
+                    }
+                    ViewDelta::GuardianThresholdSet { threshold } => {
+                        self.recovery.set_threshold(threshold);
                     }
                     ViewDelta::Unknown { .. } => {
                         // Unknown deltas are ignored

@@ -260,7 +260,7 @@ pub trait SessionManagementEffects: Send + Sync {
 }
 
 /// Types of sessions the agent can participate in
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SessionType {
     Recovery,
     KeyRotation,

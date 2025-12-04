@@ -29,9 +29,16 @@ fn derived_device_id(label: &str) -> DeviceId {
     DeviceId(Uuid::from_bytes(uuid_bytes))
 }
 
-/// Helper function to convert guard capability strings to appropriate ResourceScope
-#[allow(dead_code)]
-fn map_guard_capability_to_resource(
+/// Convert guard capability strings from choreography annotations to ResourceScope
+///
+/// This function maps choreography `guard_capability` annotation values (like
+/// "notify_guardians_success") to the appropriate `ResourceScope::Context` values
+/// that can be evaluated by the authorization system.
+///
+/// Used during guard chain execution to translate choreography annotations into
+/// authorization checks. See docs/107_mpst_and_choreography.md for choreography
+/// annotation syntax.
+pub fn map_guard_capability_to_resource(
     guard_capability: &str,
     account_id: Option<&AccountId>,
     recovery_type: Option<&RecoveryOperationType>,
@@ -372,7 +379,6 @@ impl GuardianRole {
 }
 
 /// Guardian authentication choreography state
-#[allow(dead_code)]
 pub struct GuardianAuthState {
     /// Current request being processed
     current_request: Option<GuardianAuthRequest>,

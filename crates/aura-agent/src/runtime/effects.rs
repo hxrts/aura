@@ -127,6 +127,8 @@ pub struct AuraEffectSystem {
     transport_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     transport_stats: Arc<RwLock<TransportStats>>,
     fact_registry: Arc<FactRegistry>,
+    /// Test mode flag to bypass authorization guards
+    test_mode: bool,
 }
 
 #[derive(Clone, Default)]
@@ -160,10 +162,21 @@ impl AuraEffectSystem {
     /// Internal helper that builds the effect system with the given composite handler.
     ///
     /// All factory methods delegate to this to avoid code duplication.
-    fn build_internal(config: AgentConfig, composite: CompositeHandlerAdapter) -> Self {
+    ///
+    /// When `crypto_seed` is provided, the crypto handler will use deterministic
+    /// randomness for reproducible tests and simulations.
+    fn build_internal(
+        config: AgentConfig,
+        composite: CompositeHandlerAdapter,
+        test_mode: bool,
+        crypto_seed: Option<[u8; 32]>,
+    ) -> Self {
         let authority = AuthorityId::from_uuid(config.device_id().0);
         let (journal_policy, journal_verifying_key) = Self::init_journal_policy(authority);
-        let crypto_handler = RealCryptoHandler::new();
+        let crypto_handler = match crypto_seed {
+            Some(seed) => RealCryptoHandler::seeded(seed),
+            None => RealCryptoHandler::new(),
+        };
         let authorization_handler =
             Self::init_authorization_handler(authority, &crypto_handler, &journal_verifying_key);
         let storage_handler = FilesystemStorageHandler::new(config.storage.base_path.clone());
@@ -199,31 +212,60 @@ impl AuraEffectSystem {
             transport_inbox,
             transport_stats,
             fact_registry: Arc::new(build_fact_registry()),
+            test_mode,
         }
     }
+
+    /// Check if the effect system is in test mode (bypasses authorization guards)
+    pub fn is_testing(&self) -> bool {
+        self.test_mode
+    }
+
+    /// Default crypto seed for deterministic testing.
+    /// Uses a fixed seed to ensure reproducible FROST key generation and crypto operations.
+    const TEST_CRYPTO_SEED: [u8; 32] = [42u8; 32];
 
     /// Create new effect system with configuration (testing mode).
     pub fn new(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
-        Ok(Self::build_internal(config, composite))
+        Ok(Self::build_internal(
+            config,
+            composite,
+            true,
+            Some(Self::TEST_CRYPTO_SEED),
+        ))
     }
 
     /// Create effect system for production.
     pub fn production(config: AgentConfig) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_production(config.device_id());
-        Ok(Self::build_internal(config, composite))
+        // Production uses OS entropy, no seed
+        Ok(Self::build_internal(config, composite, false, None))
     }
 
     /// Create effect system for testing with default configuration.
     pub fn testing(config: &AgentConfig) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_testing(config.device_id());
-        Ok(Self::build_internal(config.clone(), composite))
+        Ok(Self::build_internal(
+            config.clone(),
+            composite,
+            true,
+            Some(Self::TEST_CRYPTO_SEED),
+        ))
     }
 
     /// Create effect system for simulation with controlled seed.
     pub fn simulation(config: &AgentConfig, seed: u64) -> Result<Self, crate::core::AgentError> {
         let composite = CompositeHandlerAdapter::for_simulation(config.device_id(), seed);
-        Ok(Self::build_internal(config.clone(), composite))
+        // Convert u64 seed to [u8; 32] for crypto handler
+        let mut crypto_seed = [0u8; 32];
+        crypto_seed[0..8].copy_from_slice(&seed.to_le_bytes());
+        Ok(Self::build_internal(
+            config.clone(),
+            composite,
+            true,
+            Some(crypto_seed),
+        ))
     }
 
     /// Get configuration
@@ -688,8 +730,8 @@ impl CryptoEffects for AuraEffectSystem {
             .await
     }
 
-    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
-        self.crypto_handler.frost_generate_nonces().await
+    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        self.crypto_handler.frost_generate_nonces(key_package).await
     }
 
     async fn frost_sign_share(
@@ -1522,6 +1564,57 @@ mod tests {
     use aura_core::identifiers::ContextId;
     use aura_protocol::amp::AmpJournalEffects;
     use aura_protocol::effects::TreeEffects;
+
+    #[tokio::test]
+    async fn test_frost_integration_through_effect_system() {
+        let config = AgentConfig::default();
+        let effect_system = AuraEffectSystem::testing(&config).unwrap();
+
+        // Generate 2-of-3 FROST keys through the effect system
+        let result = effect_system.frost_generate_keys(2, 3).await;
+        assert!(result.is_ok(), "FROST key generation should succeed");
+
+        let key_gen_result = result.unwrap();
+        assert_eq!(
+            key_gen_result.key_packages.len(),
+            3,
+            "Should have 3 key packages for 3 signers"
+        );
+        assert!(
+            !key_gen_result.public_key_package.is_empty(),
+            "Public key package should not be empty"
+        );
+
+        // Generate nonces using the first key package
+        let first_key_package = &key_gen_result.key_packages[0];
+        let nonces_result = effect_system.frost_generate_nonces(first_key_package).await;
+        assert!(
+            nonces_result.is_ok(),
+            "FROST nonce generation should succeed: {:?}",
+            nonces_result.err()
+        );
+
+        let nonces = nonces_result.unwrap();
+        assert!(!nonces.is_empty(), "Nonces should not be empty");
+    }
+
+    #[tokio::test]
+    async fn test_frost_seeded_determinism() {
+        // Create two effect systems with the same seed
+        let config = AgentConfig::default();
+        let effect_system1 = AuraEffectSystem::testing(&config).unwrap();
+        let effect_system2 = AuraEffectSystem::testing(&config).unwrap();
+
+        // Generate keys from both - they should produce identical results
+        // because testing mode uses the same TEST_CRYPTO_SEED
+        let result1 = effect_system1.frost_generate_keys(2, 3).await.unwrap();
+        let result2 = effect_system2.frost_generate_keys(2, 3).await.unwrap();
+
+        assert_eq!(
+            result1.public_key_package, result2.public_key_package,
+            "Seeded crypto should produce deterministic public key packages"
+        );
+    }
 
     #[tokio::test]
     async fn test_guard_effect_system_enables_amp_journal_effects() {

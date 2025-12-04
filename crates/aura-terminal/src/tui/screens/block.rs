@@ -1,11 +1,18 @@
 //! # Block Screen
 //!
 //! Homepage showing the user's block with residents and storage.
+//!
+//! ## Reactive Signal Subscription
+//!
+//! When `AppCoreContext` is available, this screen subscribes to block state
+//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! component automatically, triggering re-renders when data changes.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::components::KeyHintsBar;
+use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::Theme;
 use crate::tui::types::{BlockBudget, KeyHint, Message, Resident};
 
@@ -190,9 +197,112 @@ pub struct BlockScreenProps {
     pub on_go_neighborhood: Option<BlockNavCallback>,
 }
 
+/// Convert aura-app resident role to TUI is_steward flag
+fn is_steward_role(role: aura_app::views::block::ResidentRole) -> bool {
+    matches!(
+        role,
+        aura_app::views::block::ResidentRole::Admin | aura_app::views::block::ResidentRole::Owner
+    )
+}
+
+/// Convert aura-app resident to TUI resident
+fn convert_resident(r: &aura_app::views::block::Resident, my_id: &str) -> Resident {
+    Resident {
+        id: r.id.clone(),
+        name: r.name.clone(),
+        is_steward: is_steward_role(r.role),
+        is_self: r.id == my_id,
+    }
+}
+
+/// Convert aura-app storage budget to TUI block budget
+fn convert_budget(
+    storage: &aura_app::views::block::StorageBudget,
+    resident_count: u32,
+) -> BlockBudget {
+    BlockBudget {
+        total: storage.total_bytes,
+        used: storage.used_bytes,
+        resident_count: resident_count as u8,
+        max_residents: 8, // Default max
+    }
+}
+
 /// The block screen (homepage)
+///
+/// ## Reactive Updates
+///
+/// When `AppCoreContext` is available in the context tree, this component will
+/// subscribe to block state signals and automatically update when:
+/// - Residents join/leave
+/// - Storage usage changes
+/// - Block name changes
 #[component]
 pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
+    // Try to get AppCoreContext for reactive signal subscription
+    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+
+    // Initialize reactive state from props
+    let reactive_block_name = hooks.use_state({
+        let initial = props.block_name.clone();
+        move || initial
+    });
+    let reactive_residents = hooks.use_state({
+        let initial = props.residents.clone();
+        move || initial
+    });
+    let reactive_budget = hooks.use_state({
+        let initial = props.budget.clone();
+        move || initial
+    });
+
+    // Subscribe to block signal updates if AppCoreContext is available
+    if let Some(ctx) = app_ctx {
+        hooks.use_future({
+            let mut reactive_block_name = reactive_block_name.clone();
+            let mut reactive_residents = reactive_residents.clone();
+            let mut reactive_budget = reactive_budget.clone();
+            let app_core = ctx.app_core.clone();
+            async move {
+                use futures_signals::signal::SignalExt;
+
+                let signal = {
+                    let core = app_core.read().await;
+                    core.block_signal()
+                };
+
+                signal
+                    .for_each(|block_state| {
+                        // Use the block id as a proxy for "my_id" since we don't have access to identity
+                        let my_id = &block_state.id;
+
+                        let residents: Vec<Resident> = block_state
+                            .residents
+                            .iter()
+                            .map(|r| convert_resident(r, my_id))
+                            .collect();
+
+                        let budget = convert_budget(&block_state.storage, block_state.resident_count);
+
+                        reactive_block_name.set(block_state.name.clone());
+                        reactive_residents.set(residents);
+                        reactive_budget.set(budget);
+                        async {}
+                    })
+                    .await;
+            }
+        });
+    }
+
+    // Use reactive state for rendering
+    let block_name = reactive_block_name.read().clone();
+    let residents = reactive_residents.read().clone();
+    let budget = reactive_budget.read().clone();
+
+    // Messages come from props (would need chat signal integration)
+    let messages = props.messages.clone();
+    let channel_name = props.channel_name.clone();
+
     let resident_index = hooks.use_state(|| 0usize);
 
     let hints = vec![
@@ -203,11 +313,6 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
         KeyHint::new("Esc", "Menu"),
     ];
 
-    let block_name = props.block_name.clone();
-    let residents = props.residents.clone();
-    let messages = props.messages.clone();
-    let budget = props.budget.clone();
-    let channel_name = props.channel_name.clone();
     let current_resident_index = resident_index.get();
 
     // Clone callbacks for event handler

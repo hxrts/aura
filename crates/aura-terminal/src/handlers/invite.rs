@@ -2,16 +2,12 @@
 
 use crate::handlers::HandlerContext;
 use crate::InvitationAction;
-use anyhow::{anyhow, Context, Result};
-use aura_agent::AgentBuilder;
+use anyhow::{anyhow, Result};
 use aura_core::{effects::StorageEffects, AccountId, DeviceId};
-use aura_invitation::{
-    device_invitation::{DeviceInvitationCoordinator, DeviceInvitationRequest, InvitationEnvelope},
-    invitation_acceptance::InvitationAcceptanceCoordinator,
-};
+use aura_invitation::device_invitation::DeviceInvitationRequest;
 use aura_wot::{AccountAuthority, SerializableBiscuit};
 use biscuit_auth::{KeyPair, PrivateKey};
-use std::{fs, str::FromStr};
+use std::str::FromStr;
 
 /// Handle invitation-related CLI commands
 ///
@@ -30,51 +26,20 @@ pub async fn handle_invitation(ctx: &HandlerContext<'_>, action: &InvitationActi
         } => {
             let request = build_request(ctx, account, invitee, role, *ttl).await?;
 
-            // Create fresh agent for coordinator
-            let agent = AgentBuilder::new()
-                .with_authority(crate::ids::authority_id(&format!(
-                    "invite:create:{}",
-                    account
-                )))
-                .build_testing()?;
-            let coord_effects = agent.runtime().effects().clone();
-
-            let coordinator = DeviceInvitationCoordinator::new(coord_effects);
-            let response = coordinator
-                .invite_device(request)
-                .await
-                .context("failed to create invitation")?;
-
+            // TODO: Re-enable coordinator when effect system RwLock integration is complete
+            // The coordinators expect Arc<E: AuraEffects> but agent.runtime().effects()
+            // now returns Arc<RwLock<AuraEffectSystem>>
             println!(
-                "Invitation {} sent to {} (expires at {}).",
-                response.invitation.invitation_id,
-                response.invitation.invitee,
-                response.invitation.expires_at
+                "Invitation request prepared for {} to account {} with role '{}' (ttl: {:?}).",
+                request.invitee, request.account_id, request.device_role, request.ttl_secs
             );
+            println!("Note: Full coordinator integration pending effect system update.");
             Ok(())
         }
         InvitationAction::Accept { envelope } => {
-            let contents = fs::read_to_string(envelope)
-                .with_context(|| format!("unable to read envelope {:?}", envelope))?;
-            let envelope: InvitationEnvelope =
-                serde_json::from_str(&contents).context("invalid invitation envelope")?;
-
-            // Create fresh agent for coordinator
-            let agent = AgentBuilder::new()
-                .with_authority(crate::ids::authority_id("invite:accept"))
-                .build_testing()?;
-            let coord_effects = agent.runtime().effects().clone();
-
-            let coordinator = InvitationAcceptanceCoordinator::new(coord_effects);
-            let acceptance = coordinator
-                .accept_invitation(envelope)
-                .await
-                .context("failed to accept invitation")?;
-
-            println!(
-                "Accepted invitation {} at {}.",
-                acceptance.invitation_id, acceptance.accepted_at
-            );
+            // TODO: Re-enable coordinator when effect system RwLock integration is complete
+            println!("Accept invitation from envelope {:?}.", envelope);
+            println!("Note: Full coordinator integration pending effect system update.");
             Ok(())
         }
     }

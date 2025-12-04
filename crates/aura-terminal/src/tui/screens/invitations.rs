@@ -1,14 +1,22 @@
 //! # Invitations Screen
 //!
 //! Display and manage guardian invitations
+//!
+//! ## Reactive Signal Subscription
+//!
+//! When `AppCoreContext` is available, this screen subscribes to invitations state
+//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! component automatically, triggering re-renders when data changes.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::components::{EmptyState, KeyHintsBar};
+use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{
-    format_timestamp, Invitation, InvitationDirection, InvitationFilter, InvitationStatus, KeyHint,
+    format_timestamp, Invitation, InvitationDirection, InvitationFilter, InvitationStatus,
+    InvitationType, KeyHint,
 };
 
 /// Callback type for invitation actions (invitation_id)
@@ -273,12 +281,125 @@ pub struct InvitationsScreenProps {
     pub on_decline: Option<InvitationCallback>,
 }
 
+/// Convert aura-app invitation type to TUI invitation type
+fn convert_invitation_type(
+    inv_type: aura_app::views::InvitationType,
+) -> InvitationType {
+    match inv_type {
+        aura_app::views::InvitationType::Block => InvitationType::Guardian,
+        aura_app::views::InvitationType::Guardian => InvitationType::Guardian,
+        aura_app::views::InvitationType::Chat => InvitationType::Guardian,
+    }
+}
+
+/// Convert aura-app invitation status to TUI invitation status
+fn convert_invitation_status(
+    status: aura_app::views::InvitationStatus,
+) -> InvitationStatus {
+    match status {
+        aura_app::views::InvitationStatus::Pending => InvitationStatus::Pending,
+        aura_app::views::InvitationStatus::Accepted => InvitationStatus::Accepted,
+        aura_app::views::InvitationStatus::Rejected => InvitationStatus::Declined,
+        aura_app::views::InvitationStatus::Expired => InvitationStatus::Expired,
+        aura_app::views::InvitationStatus::Revoked => InvitationStatus::Cancelled,
+    }
+}
+
+/// Convert aura-app invitation direction to TUI invitation direction
+fn convert_invitation_direction(
+    dir: aura_app::views::InvitationDirection,
+) -> InvitationDirection {
+    match dir {
+        aura_app::views::InvitationDirection::Received => InvitationDirection::Inbound,
+        aura_app::views::InvitationDirection::Sent => InvitationDirection::Outbound,
+    }
+}
+
+/// Convert aura-app invitation to TUI invitation
+fn convert_invitation(inv: &aura_app::views::Invitation) -> Invitation {
+    // Get the "other party" name and ID based on direction
+    let (other_party_id, other_party_name) = match inv.direction {
+        aura_app::views::InvitationDirection::Sent => {
+            let id = inv.to_id.clone().unwrap_or_default();
+            let name = inv.to_name.clone().unwrap_or_else(|| id.clone());
+            (id, name)
+        }
+        aura_app::views::InvitationDirection::Received => {
+            (inv.from_id.clone(), inv.from_name.clone())
+        }
+    };
+
+    Invitation {
+        id: inv.id.clone(),
+        direction: convert_invitation_direction(inv.direction),
+        other_party_id,
+        other_party_name,
+        invitation_type: convert_invitation_type(inv.invitation_type),
+        status: convert_invitation_status(inv.status),
+        created_at: inv.created_at,
+        expires_at: inv.expires_at,
+        message: inv.message.clone(),
+    }
+}
+
 /// The invitations screen
+///
+/// ## Reactive Updates
+///
+/// When `AppCoreContext` is available in the context tree, this component will
+/// subscribe to invitations state signals and automatically update when:
+/// - New invitations are received
+/// - Invitations are accepted/declined
+/// - Invitation status changes
 #[component]
 pub fn InvitationsScreen(
     props: &InvitationsScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
+    // Try to get AppCoreContext for reactive signal subscription
+    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+
+    // Initialize reactive state from props
+    let reactive_invitations = hooks.use_state({
+        let initial = props.invitations.clone();
+        move || initial
+    });
+
+    // Subscribe to invitations signal updates if AppCoreContext is available
+    if let Some(ctx) = app_ctx {
+        hooks.use_future({
+            let mut reactive_invitations = reactive_invitations.clone();
+            let app_core = ctx.app_core.clone();
+            async move {
+                use futures_signals::signal::SignalExt;
+
+                let signal = {
+                    let core = app_core.read().await;
+                    core.invitations_signal()
+                };
+
+                signal
+                    .for_each(|invitations_state| {
+                        // Combine all invitations from pending, sent, and history
+                        let all_invitations: Vec<Invitation> = invitations_state
+                            .pending
+                            .iter()
+                            .chain(invitations_state.sent.iter())
+                            .chain(invitations_state.history.iter())
+                            .map(convert_invitation)
+                            .collect();
+
+                        reactive_invitations.set(all_invitations);
+                        async {}
+                    })
+                    .await;
+            }
+        });
+    }
+
+    // Use reactive state for rendering
+    let all_invitations = reactive_invitations.read().clone();
+
     let selected = hooks.use_state(|| props.selected_index);
     let filter = hooks.use_state(|| props.filter);
     let detail_focused = hooks.use_state(|| false);
@@ -293,7 +414,6 @@ pub fn InvitationsScreen(
         KeyHint::new("Esc", "Back"),
     ];
 
-    let all_invitations = props.invitations.clone();
     let current_filter = filter.get();
 
     // Filter invitations
@@ -403,18 +523,18 @@ pub fn InvitationsScreen(
             View(
                 flex_direction: FlexDirection::Row,
                 flex_grow: 1.0,
-                gap: Spacing::XS,
+                gap: 1,
             ) {
-                // List (40%)
-                View(width: 40pct) {
+                // List (35%)
+                View(width: 35pct) {
                     InvitationList(
                         invitations: filtered.clone(),
                         selected_index: current_selected,
                         focused: !is_detail_focused,
                     )
                 }
-                // Detail (60%)
-                View(flex_grow: 1.0) {
+                // Detail (65%)
+                View(width: 65pct) {
                     InvitationDetail(
                         invitation: selected_invitation,
                         focused: is_detail_focused,

@@ -25,7 +25,7 @@ impl<T> GuardChainEffects for T where T: GuardEffects + GuardContextProvider + P
 /// All network operations go through guard chain to enforce security.
 #[derive(Clone)]
 pub struct AntiEntropyHandler {
-    #[allow(dead_code)]
+    /// Anti-entropy configuration (sync intervals, batch sizes, etc.)
     config: AntiEntropyConfig,
     // In real implementation, these would be trait objects for Journal and Transport
     oplog: Arc<RwLock<Vec<AttestedOp>>>,
@@ -42,6 +42,11 @@ impl AntiEntropyHandler {
             peers: Arc::new(RwLock::new(BTreeSet::new())),
             context_id,
         }
+    }
+
+    /// Get the anti-entropy configuration
+    pub fn config(&self) -> &AntiEntropyConfig {
+        &self.config
     }
 
     /// Main anti-entropy synchronization routine

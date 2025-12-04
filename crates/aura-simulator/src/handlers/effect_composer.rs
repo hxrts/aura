@@ -11,11 +11,13 @@ use super::{
     stateless_simulator::SimulationTickResult, SimulationFaultHandler, SimulationScenarioHandler,
     SimulationTimeHandler,
 };
+use crate::quint::itf_fuzzer::{ITFBasedFuzzer, ITFFuzzConfig, ITFTrace};
 use aura_agent::{AgentBuilder, AuraEffectSystem, EffectContext};
 use aura_core::effects::{ChaosEffects, ExecutionMode, TestingEffects};
 use aura_core::hash::hash;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::DeviceId;
+use std::path::Path;
 use std::sync::Arc;
 use tracing::info;
 
@@ -30,6 +32,7 @@ pub struct SimulationEffectComposer {
     time_handler: Option<Arc<SimulationTimeHandler>>,
     fault_handler: Option<Arc<SimulationFaultHandler>>,
     scenario_handler: Option<Arc<SimulationScenarioHandler>>,
+    itf_fuzzer: Option<ITFBasedFuzzer>,
     seed: u64,
 }
 
@@ -42,6 +45,7 @@ impl SimulationEffectComposer {
             time_handler: None,
             fault_handler: None,
             scenario_handler: None,
+            itf_fuzzer: None,
             seed: 42, // Default deterministic seed
         }
     }
@@ -107,6 +111,36 @@ impl SimulationEffectComposer {
         self
     }
 
+    /// Add ITF-based fuzzing capabilities for model-based testing
+    ///
+    /// Enables generation of test scenarios from Quint specifications
+    /// and verification of simulation results against formal properties.
+    pub fn with_itf_fuzzer(mut self) -> Result<Self, SimulationComposerError> {
+        let fuzzer = ITFBasedFuzzer::new().map_err(|e| {
+            SimulationComposerError::EffectSystemCreationFailed(format!(
+                "Failed to create ITF fuzzer: {}",
+                e
+            ))
+        })?;
+        self.itf_fuzzer = Some(fuzzer);
+        Ok(self)
+    }
+
+    /// Add ITF-based fuzzing with custom configuration
+    pub fn with_itf_fuzzer_config(
+        mut self,
+        config: ITFFuzzConfig,
+    ) -> Result<Self, SimulationComposerError> {
+        let fuzzer = ITFBasedFuzzer::with_config(config).map_err(|e| {
+            SimulationComposerError::EffectSystemCreationFailed(format!(
+                "Failed to create ITF fuzzer: {}",
+                e
+            ))
+        })?;
+        self.itf_fuzzer = Some(fuzzer);
+        Ok(self)
+    }
+
     /// Build the composed simulation environment
     pub fn build(self) -> Result<ComposedSimulationEnvironment, SimulationComposerError> {
         let effect_system =
@@ -121,6 +155,7 @@ impl SimulationEffectComposer {
             time_handler: self.time_handler,
             fault_handler: self.fault_handler,
             scenario_handler: self.scenario_handler,
+            itf_fuzzer: self.itf_fuzzer,
             seed: self.seed,
         })
     }
@@ -192,6 +227,7 @@ pub struct ComposedSimulationEnvironment {
     time_handler: Option<Arc<SimulationTimeHandler>>,
     fault_handler: Option<Arc<SimulationFaultHandler>>,
     scenario_handler: Option<Arc<SimulationScenarioHandler>>,
+    itf_fuzzer: Option<ITFBasedFuzzer>,
     seed: u64,
 }
 
@@ -372,6 +408,154 @@ impl ComposedSimulationEnvironment {
         );
 
         Ok(results)
+    }
+
+    /// Get the ITF fuzzer (if available)
+    pub fn itf_fuzzer(&self) -> Option<&ITFBasedFuzzer> {
+        self.itf_fuzzer.as_ref()
+    }
+
+    /// Get mutable access to the ITF fuzzer (if available)
+    pub fn itf_fuzzer_mut(&mut self) -> Option<&mut ITFBasedFuzzer> {
+        self.itf_fuzzer.as_mut()
+    }
+
+    /// Generate ITF traces from a Quint specification for model-based testing
+    ///
+    /// Uses the ITF fuzzer to generate traces from a Quint spec,
+    /// which can then be used to drive simulation scenarios.
+    pub async fn generate_itf_scenarios(
+        &self,
+        spec_file: &Path,
+        count: u32,
+    ) -> Result<Vec<ITFTrace>, SimulationComposerError> {
+        let fuzzer = self.itf_fuzzer.as_ref().ok_or_else(|| {
+            SimulationComposerError::MissingRequiredComponent("itf_fuzzer".to_string())
+        })?;
+
+        fuzzer
+            .generate_mbt_traces(spec_file, count)
+            .await
+            .map_err(|e| {
+                SimulationComposerError::EffectOperationFailed(format!(
+                    "Failed to generate ITF traces: {}",
+                    e
+                ))
+            })
+    }
+
+    /// Run a simulation scenario driven by an ITF trace
+    ///
+    /// Converts the ITF trace states to simulation events and executes
+    /// the scenario, recording the results for property verification.
+    pub async fn run_itf_scenario(
+        &mut self,
+        itf_trace: &ITFTrace,
+        scenario_name: String,
+    ) -> Result<SimulationResults, SimulationComposerError> {
+        info!(
+            scenario_name = %scenario_name,
+            trace_states = itf_trace.states.len(),
+            "Running ITF-driven simulation scenario"
+        );
+
+        let scenario_handler = self.scenario_handler.as_ref().ok_or_else(|| {
+            SimulationComposerError::MissingRequiredComponent("scenario_handler".to_string())
+        })?;
+
+        // Initialize scenario from ITF metadata
+        let mut event_data = std::collections::HashMap::new();
+        event_data.insert("source".to_string(), itf_trace.meta.source.clone());
+        event_data.insert("trace_states".to_string(), itf_trace.states.len().to_string());
+
+        scenario_handler
+            .record_event("itf_scenario_start", event_data)
+            .await
+            .map_err(|e| SimulationComposerError::EffectOperationFailed(e.to_string()))?;
+
+        let mut results = SimulationResults::new(scenario_name.clone());
+
+        // Execute each ITF state as a simulation tick
+        for (tick, itf_state) in itf_trace.states.iter().enumerate() {
+            let tick_start = std::time::Instant::now();
+
+            // Record state variables
+            let mut tick_data = std::collections::HashMap::new();
+            tick_data.insert("tick".to_string(), tick.to_string());
+            tick_data.insert("itf_index".to_string(), itf_state.meta.index.to_string());
+
+            // Include action if available (MBT mode)
+            if let Some(action) = &itf_state.action_taken {
+                tick_data.insert("action".to_string(), action.clone());
+            }
+
+            // Record state variable values
+            for (var_name, var_value) in &itf_state.variables {
+                tick_data.insert(
+                    format!("var_{}", var_name),
+                    var_value.to_string(),
+                );
+            }
+
+            scenario_handler
+                .record_event("itf_state_execute", tick_data)
+                .await
+                .map_err(|e| SimulationComposerError::EffectOperationFailed(e.to_string()))?;
+
+            let execution_time = tick_start.elapsed();
+
+            let tick_result = SimulationTickResult {
+                tick_number: (tick + 1) as u64,
+                execution_time,
+                simulation_elapsed: std::time::Duration::from_millis((tick + 1) as u64 * 100),
+                delta_time: std::time::Duration::from_millis(100),
+            };
+
+            results.add_tick_result(tick_result);
+        }
+
+        // Record completion
+        let mut completion_data = std::collections::HashMap::new();
+        completion_data.insert(
+            "ticks_executed".to_string(),
+            results.tick_results.len().to_string(),
+        );
+
+        scenario_handler
+            .record_event("itf_scenario_complete", completion_data)
+            .await
+            .map_err(|e| SimulationComposerError::EffectOperationFailed(e.to_string()))?;
+
+        info!(
+            scenario_name = %scenario_name,
+            ticks_executed = results.tick_results.len(),
+            "ITF-driven simulation scenario completed"
+        );
+
+        Ok(results)
+    }
+
+    /// Verify simulation results against a Quint specification
+    ///
+    /// Uses the ITF fuzzer to check properties defined in the spec
+    /// against the recorded simulation state.
+    pub async fn verify_against_spec(
+        &self,
+        spec_file: &Path,
+    ) -> Result<bool, SimulationComposerError> {
+        let fuzzer = self.itf_fuzzer.as_ref().ok_or_else(|| {
+            SimulationComposerError::MissingRequiredComponent("itf_fuzzer".to_string())
+        })?;
+
+        fuzzer
+            .verify_properties(spec_file)
+            .await
+            .map_err(|e| {
+                SimulationComposerError::EffectOperationFailed(format!(
+                    "Property verification failed: {}",
+                    e
+                ))
+            })
     }
 }
 

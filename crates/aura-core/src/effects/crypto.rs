@@ -130,8 +130,17 @@ pub trait CryptoEffects: RandomEffects + Send + Sync {
         max_signers: u16,
     ) -> Result<FrostKeyGenResult, CryptoError>;
 
-    /// Generate FROST signing nonces
-    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError>;
+    /// Generate FROST signing nonces for a participant
+    ///
+    /// The nonces are generated from the participant's key package signing share,
+    /// ensuring they are valid for use in the threshold signing protocol.
+    ///
+    /// # Arguments
+    /// * `key_package` - The participant's serialized FROST key package
+    ///
+    /// # Returns
+    /// Serialized nonces and commitments bundle
+    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError>;
 
     /// Create FROST signing package
     async fn frost_create_signing_package(
@@ -281,8 +290,8 @@ impl<T: CryptoEffects + ?Sized> CryptoEffects for std::sync::Arc<T> {
         (**self).frost_generate_keys(threshold, max_signers).await
     }
 
-    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
-        (**self).frost_generate_nonces().await
+    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        (**self).frost_generate_nonces(key_package).await
     }
 
     async fn frost_create_signing_package(

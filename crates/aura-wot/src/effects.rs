@@ -25,9 +25,7 @@ use uuid::Uuid;
 /// them by composing infrastructure effects with business logic.
 #[derive(Clone)]
 pub struct WotAuthorizationHandler<C: CryptoEffects> {
-    #[allow(dead_code)]
     crypto: C,
-    #[allow(dead_code)]
     biscuit_bridge: BiscuitAuthorizationBridge,
     _phantom: PhantomData<()>,
 }

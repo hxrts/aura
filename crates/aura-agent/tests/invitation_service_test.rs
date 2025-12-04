@@ -1,0 +1,326 @@
+//! Invitation Service Integration Tests
+//!
+//! Tests for the InvitationService public API exposed through AuraAgent.
+
+use aura_agent::{
+    AgentBuilder, AuthorityId, EffectContext, ExecutionMode, InvitationStatus, InvitationType,
+};
+use aura_core::hash::hash;
+use aura_core::identifiers::ContextId;
+
+/// Create a test effect context for async tests
+fn test_context(authority_id: AuthorityId) -> EffectContext {
+    let context_entropy = hash(&authority_id.to_bytes());
+    EffectContext::new(
+        authority_id,
+        ContextId::new_from_entropy(context_entropy),
+        ExecutionMode::Testing,
+    )
+}
+
+#[tokio::test]
+async fn test_invitation_service_via_agent() {
+    let authority_id = AuthorityId::new_from_entropy([70u8; 32]);
+    let ctx = test_context(authority_id);
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing_async(&ctx)
+        .await
+        .expect("Failed to build testing agent");
+
+    let invitations = agent
+        .invitations()
+        .await
+        .expect("Failed to get invitation service");
+
+    // Initially no pending invitations
+    let pending = invitations.list_pending().await;
+    assert!(pending.is_empty());
+}
+
+#[tokio::test]
+async fn test_invite_as_contact_via_agent() {
+    let authority_id = AuthorityId::new_from_entropy([71u8; 32]);
+    let ctx = test_context(authority_id);
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing_async(&ctx)
+        .await
+        .expect("Failed to build testing agent");
+
+    let invitations = agent
+        .invitations()
+        .await
+        .expect("Failed to get invitation service");
+
+    let receiver_id = AuthorityId::new_from_entropy([72u8; 32]);
+    let invitation = invitations
+        .invite_as_contact(
+            receiver_id,
+            Some("alice".to_string()),
+            Some("Hi Alice!".to_string()),
+            None,
+        )
+        .await
+        .expect("Failed to create invitation");
+
+    assert!(invitation.invitation_id.starts_with("inv-"));
+    assert_eq!(invitation.sender_id, authority_id);
+    assert_eq!(invitation.receiver_id, receiver_id);
+    assert_eq!(invitation.status, InvitationStatus::Pending);
+    assert_eq!(invitation.message, Some("Hi Alice!".to_string()));
+}
+
+#[tokio::test]
+async fn test_invite_as_guardian_via_agent() {
+    let authority_id = AuthorityId::new_from_entropy([73u8; 32]);
+    let ctx = test_context(authority_id);
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing_async(&ctx)
+        .await
+        .expect("Failed to build testing agent");
+
+    let invitations = agent
+        .invitations()
+        .await
+        .expect("Failed to get invitation service");
+
+    let receiver_id = AuthorityId::new_from_entropy([74u8; 32]);
+    let invitation = invitations
+        .invite_as_guardian(
+            receiver_id,
+            authority_id, // guarding self
+            Some("Please be my guardian".to_string()),
+            Some(604800000), // 1 week
+        )
+        .await
+        .expect("Failed to create guardian invitation");
+
+    assert!(invitation.invitation_id.starts_with("inv-"));
+    assert!(invitation.expires_at.is_some());
+    match &invitation.invitation_type {
+        InvitationType::Guardian { subject_authority } => {
+            assert_eq!(*subject_authority, authority_id);
+        }
+        _ => panic!("Expected Guardian invitation type"),
+    }
+}
+
+#[tokio::test]
+async fn test_invite_to_channel_via_agent() {
+    let authority_id = AuthorityId::new_from_entropy([75u8; 32]);
+    let ctx = test_context(authority_id);
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing_async(&ctx)
+        .await
+        .expect("Failed to build testing agent");
+
+    let invitations = agent
+        .invitations()
+        .await
+        .expect("Failed to get invitation service");
+
+    let receiver_id = AuthorityId::new_from_entropy([76u8; 32]);
+    let invitation = invitations
+        .invite_to_channel(receiver_id, "channel-123".to_string(), None, None)
+        .await
+        .expect("Failed to create channel invitation");
+
+    assert!(invitation.invitation_id.starts_with("inv-"));
+    match &invitation.invitation_type {
+        InvitationType::Channel { block_id } => {
+            assert_eq!(block_id, "channel-123");
+        }
+        _ => panic!("Expected Channel invitation type"),
+    }
+}
+
+#[tokio::test]
+async fn test_accept_invitation_via_agent() {
+    let authority_id = AuthorityId::new_from_entropy([77u8; 32]);
+    let ctx = test_context(authority_id);
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing_async(&ctx)
+        .await
+        .expect("Failed to build testing agent");
+
+    let invitations = agent
+        .invitations()
+        .await
+        .expect("Failed to get invitation service");
+
+    let receiver_id = AuthorityId::new_from_entropy([78u8; 32]);
+    let invitation = invitations
+        .invite_as_contact(receiver_id, None, None, None)
+        .await
+        .expect("Failed to create invitation");
+
+    let result = invitations
+        .accept(&invitation.invitation_id)
+        .await
+        .expect("Failed to accept invitation");
+
+    assert!(result.success);
+    assert_eq!(result.new_status, Some(InvitationStatus::Accepted));
+}
+
+#[tokio::test]
+async fn test_decline_invitation_via_agent() {
+    let authority_id = AuthorityId::new_from_entropy([79u8; 32]);
+    let ctx = test_context(authority_id);
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing_async(&ctx)
+        .await
+        .expect("Failed to build testing agent");
+
+    let invitations = agent
+        .invitations()
+        .await
+        .expect("Failed to get invitation service");
+
+    let receiver_id = AuthorityId::new_from_entropy([80u8; 32]);
+    let invitation = invitations
+        .invite_as_contact(receiver_id, None, None, None)
+        .await
+        .expect("Failed to create invitation");
+
+    let result = invitations
+        .decline(&invitation.invitation_id)
+        .await
+        .expect("Failed to decline invitation");
+
+    assert!(result.success);
+    assert_eq!(result.new_status, Some(InvitationStatus::Declined));
+}
+
+#[tokio::test]
+async fn test_cancel_invitation_via_agent() {
+    let authority_id = AuthorityId::new_from_entropy([81u8; 32]);
+    let ctx = test_context(authority_id);
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing_async(&ctx)
+        .await
+        .expect("Failed to build testing agent");
+
+    let invitations = agent
+        .invitations()
+        .await
+        .expect("Failed to get invitation service");
+
+    let receiver_id = AuthorityId::new_from_entropy([82u8; 32]);
+    let invitation = invitations
+        .invite_as_contact(receiver_id, None, None, None)
+        .await
+        .expect("Failed to create invitation");
+
+    // Verify it's pending
+    assert!(invitations.is_pending(&invitation.invitation_id).await);
+
+    let result = invitations
+        .cancel(&invitation.invitation_id)
+        .await
+        .expect("Failed to cancel invitation");
+
+    assert!(result.success);
+    assert_eq!(result.new_status, Some(InvitationStatus::Cancelled));
+
+    // Verify it's no longer pending
+    assert!(!invitations.is_pending(&invitation.invitation_id).await);
+}
+
+#[tokio::test]
+async fn test_list_pending_via_agent() {
+    let authority_id = AuthorityId::new_from_entropy([83u8; 32]);
+    let ctx = test_context(authority_id);
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing_async(&ctx)
+        .await
+        .expect("Failed to build testing agent");
+
+    let invitations = agent
+        .invitations()
+        .await
+        .expect("Failed to get invitation service");
+
+    // Create 3 invitations
+    let inv1 = invitations
+        .invite_as_contact(AuthorityId::new_from_entropy([84u8; 32]), None, None, None)
+        .await
+        .expect("Failed to create invitation 1");
+
+    let inv2 = invitations
+        .invite_as_contact(AuthorityId::new_from_entropy([85u8; 32]), None, None, None)
+        .await
+        .expect("Failed to create invitation 2");
+
+    let _inv3 = invitations
+        .invite_as_contact(AuthorityId::new_from_entropy([86u8; 32]), None, None, None)
+        .await
+        .expect("Failed to create invitation 3");
+
+    // All 3 should be pending
+    let pending = invitations.list_pending().await;
+    assert_eq!(pending.len(), 3);
+
+    // Accept one
+    invitations
+        .accept(&inv1.invitation_id)
+        .await
+        .expect("Failed to accept");
+
+    // Decline another
+    invitations
+        .decline(&inv2.invitation_id)
+        .await
+        .expect("Failed to decline");
+
+    // Only 1 should remain pending
+    let pending = invitations.list_pending().await;
+    assert_eq!(pending.len(), 1);
+}
+
+#[tokio::test]
+async fn test_get_invitation_via_agent() {
+    let authority_id = AuthorityId::new_from_entropy([87u8; 32]);
+    let ctx = test_context(authority_id);
+    let agent = AgentBuilder::new()
+        .with_authority(authority_id)
+        .build_testing_async(&ctx)
+        .await
+        .expect("Failed to build testing agent");
+
+    let invitations = agent
+        .invitations()
+        .await
+        .expect("Failed to get invitation service");
+
+    let receiver_id = AuthorityId::new_from_entropy([88u8; 32]);
+    let invitation = invitations
+        .invite_as_contact(
+            receiver_id,
+            Some("bob".to_string()),
+            Some("Hello Bob!".to_string()),
+            None,
+        )
+        .await
+        .expect("Failed to create invitation");
+
+    // Should be able to retrieve it
+    let retrieved = invitations
+        .get(&invitation.invitation_id)
+        .await
+        .expect("Invitation should exist");
+
+    assert_eq!(retrieved.invitation_id, invitation.invitation_id);
+    assert_eq!(retrieved.message, Some("Hello Bob!".to_string()));
+
+    // Non-existent invitation should return None
+    let non_existent = invitations.get("non-existent-id").await;
+    assert!(non_existent.is_none());
+}

@@ -229,6 +229,25 @@ pub enum EffectCommand {
         target: String,
     },
 
+    // === Contact Commands ===
+    /// Update a contact's petname
+    UpdateContactPetname {
+        /// Contact ID
+        contact_id: String,
+        /// New petname
+        petname: String,
+    },
+    /// Toggle guardian status for a contact
+    ToggleContactGuardian {
+        /// Contact ID
+        contact_id: String,
+    },
+    /// Invite a contact to become a guardian
+    InviteGuardian {
+        /// Contact ID (optional - if None, opens selection modal)
+        contact_id: Option<String>,
+    },
+
     // === Invitation Commands ===
     /// Accept an invitation
     AcceptInvitation {
@@ -285,6 +304,18 @@ pub enum EffectCommand {
         /// Peer ID
         peer_id: String,
     },
+    /// Add a peer to the known peers list
+    AddPeer {
+        /// Peer ID (UUID string)
+        peer_id: String,
+    },
+    /// Remove a peer from the known peers list
+    RemovePeer {
+        /// Peer ID (UUID string)
+        peer_id: String,
+    },
+    /// List known peers
+    ListPeers,
 
     // === Neighborhood Traversal Commands ===
     /// Move to adjacent position in neighborhood
@@ -318,6 +349,9 @@ impl EffectCommand {
             Self::RefreshAccount
             | Self::ForceSync
             | Self::RequestState { .. }
+            | Self::AddPeer { .. }
+            | Self::RemovePeer { .. }
+            | Self::ListPeers
             | Self::Ping
             | Self::ListParticipants { .. }
             | Self::GetUserInfo { .. } => CommandAuthorizationLevel::Public,
@@ -331,6 +365,7 @@ impl EffectCommand {
             | Self::JoinChannel { .. }
             | Self::LeaveChannel { .. }
             | Self::UpdateNickname { .. }
+            | Self::UpdateContactPetname { .. }
             | Self::SetTopic { .. }
             | Self::PinMessage { .. }
             | Self::UnpinMessage { .. }
@@ -353,6 +388,8 @@ impl EffectCommand {
             | Self::SubmitGuardianApproval { .. }
             | Self::CompleteRecovery
             | Self::CancelRecovery
+            | Self::ToggleContactGuardian { .. }
+            | Self::InviteGuardian { .. }
             | Self::MuteUser { .. }
             | Self::UnmuteUser { .. } => CommandAuthorizationLevel::Sensitive,
 
@@ -508,6 +545,21 @@ pub enum AuraEvent {
         /// Failure reason
         reason: String,
     },
+    /// Peer added to known peers list
+    PeerAdded {
+        /// Peer ID
+        peer_id: String,
+    },
+    /// Peer removed from known peers list
+    PeerRemoved {
+        /// Peer ID
+        peer_id: String,
+    },
+    /// List of known peers
+    PeersListed {
+        /// Known peer IDs
+        peers: Vec<String>,
+    },
 
     // === Block Events ===
     /// Block created
@@ -653,6 +705,27 @@ pub enum AuraEvent {
     NicknameUpdated {
         /// New nickname
         nickname: String,
+    },
+    /// Contact petname updated
+    ContactPetnameUpdated {
+        /// Contact ID
+        contact_id: String,
+        /// New petname
+        petname: String,
+    },
+    /// Contact guardian status toggled
+    ContactGuardianToggled {
+        /// Contact ID
+        contact_id: String,
+        /// New guardian status
+        is_guardian: bool,
+    },
+    /// Guardian invitation sent
+    GuardianInvitationSent {
+        /// Invitation ID
+        invitation_id: String,
+        /// Contact ID (if specified)
+        contact_id: Option<String>,
     },
 
     // === Neighborhood Traversal Events ===
@@ -823,7 +896,10 @@ impl EventFilter {
             | AuraEvent::DeviceAdded { .. }
             | AuraEvent::DeviceRemoved { .. }
             | AuraEvent::NicknameUpdated { .. }
-            | AuraEvent::PositionUpdated { .. } => self.account,
+            | AuraEvent::PositionUpdated { .. }
+            | AuraEvent::ContactPetnameUpdated { .. }
+            | AuraEvent::ContactGuardianToggled { .. }
+            | AuraEvent::GuardianInvitationSent { .. } => self.account,
             AuraEvent::MessageReceived { .. }
             | AuraEvent::UserJoined { .. }
             | AuraEvent::UserLeft { .. }
@@ -831,7 +907,10 @@ impl EventFilter {
             | AuraEvent::ChannelClosed { .. } => self.chat,
             AuraEvent::SyncStarted { .. }
             | AuraEvent::SyncCompleted { .. }
-            | AuraEvent::SyncFailed { .. } => self.sync,
+            | AuraEvent::SyncFailed { .. }
+            | AuraEvent::PeerAdded { .. }
+            | AuraEvent::PeerRemoved { .. }
+            | AuraEvent::PeersListed { .. } => self.sync,
             AuraEvent::BlockCreated { .. } | AuraEvent::BlockJoined { .. } => self.block,
             AuraEvent::InvitationAccepted { .. }
             | AuraEvent::InvitationDeclined { .. }

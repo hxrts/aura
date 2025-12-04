@@ -3,12 +3,15 @@
 //! Minimal public API surface for the agent runtime.
 
 use super::{AgentConfig, AgentError, AgentResult, AuthorityContext};
+use crate::handlers::{AuthService, InvitationService, RecoveryService, SessionService};
 use crate::runtime::system::RuntimeSystem;
 use crate::runtime::{EffectContext, EffectSystemBuilder};
 use aura_core::{
     hash::hash,
-    identifiers::{AuthorityId, ContextId},
+    identifiers::{AccountId, AuthorityId, ContextId},
 };
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Main agent interface - thin facade delegating to runtime
 pub struct AuraAgent {
@@ -17,6 +20,18 @@ pub struct AuraAgent {
 
     /// Authority context for this agent
     context: AuthorityContext,
+
+    /// Session management service (lazily initialized)
+    session_service: Arc<RwLock<Option<SessionService>>>,
+
+    /// Authentication service (lazily initialized)
+    auth_service: Arc<RwLock<Option<AuthService>>>,
+
+    /// Invitation service (lazily initialized)
+    invitation_service: Arc<RwLock<Option<InvitationService>>>,
+
+    /// Recovery service (lazily initialized)
+    recovery_service: Arc<RwLock<Option<RecoveryService>>>,
 }
 
 impl AuraAgent {
@@ -25,6 +40,10 @@ impl AuraAgent {
         Self {
             runtime,
             context: AuthorityContext::new(authority_id),
+            session_service: Arc::new(RwLock::new(None)),
+            auth_service: Arc::new(RwLock::new(None)),
+            invitation_service: Arc::new(RwLock::new(None)),
+            recovery_service: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -41,6 +60,135 @@ impl AuraAgent {
     /// Access the runtime system (for advanced operations)
     pub fn runtime(&self) -> &RuntimeSystem {
         &self.runtime
+    }
+
+    /// Get the session management service
+    ///
+    /// Provides access to session creation, management, and lifecycle operations.
+    pub async fn sessions(&self) -> SessionService {
+        // Check if already initialized
+        {
+            let guard = self.session_service.read().await;
+            if guard.is_some() {
+                return SessionService::new(
+                    self.runtime.effects(),
+                    self.context.clone(),
+                    AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
+                );
+            }
+        }
+
+        // Initialize lazily
+        let service = SessionService::new(
+            self.runtime.effects(),
+            self.context.clone(),
+            AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
+        );
+
+        // Store for future use (though we return a new instance each time for simplicity)
+        {
+            let mut guard = self.session_service.write().await;
+            *guard = Some(SessionService::new(
+                self.runtime.effects(),
+                self.context.clone(),
+                AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
+            ));
+        }
+
+        service
+    }
+
+    /// Get the authentication service
+    ///
+    /// Provides access to authentication operations including challenge-response
+    /// flows and device key verification.
+    pub async fn auth(&self) -> AgentResult<AuthService> {
+        // Check if already initialized
+        {
+            let guard = self.auth_service.read().await;
+            if guard.is_some() {
+                return AuthService::new(
+                    self.runtime.effects(),
+                    self.context.clone(),
+                    AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
+                );
+            }
+        }
+
+        // Initialize lazily
+        let service = AuthService::new(
+            self.runtime.effects(),
+            self.context.clone(),
+            AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
+        )?;
+
+        // Store for future use
+        {
+            let mut guard = self.auth_service.write().await;
+            *guard = Some(AuthService::new(
+                self.runtime.effects(),
+                self.context.clone(),
+                AccountId::new_from_entropy(hash(&self.context.authority_id.to_bytes())),
+            )?);
+        }
+
+        Ok(service)
+    }
+
+    /// Get the invitation service
+    ///
+    /// Provides access to invitation operations including creating, accepting,
+    /// and declining invitations for channels, guardians, and contacts.
+    pub async fn invitations(&self) -> AgentResult<InvitationService> {
+        // Check if already initialized
+        {
+            let guard = self.invitation_service.read().await;
+            if guard.is_some() {
+                return InvitationService::new(self.runtime.effects(), self.context.clone());
+            }
+        }
+
+        // Initialize lazily
+        let service = InvitationService::new(self.runtime.effects(), self.context.clone())?;
+
+        // Store for future use
+        {
+            let mut guard = self.invitation_service.write().await;
+            *guard = Some(InvitationService::new(
+                self.runtime.effects(),
+                self.context.clone(),
+            )?);
+        }
+
+        Ok(service)
+    }
+
+    /// Get the recovery service
+    ///
+    /// Provides access to guardian-based recovery operations including device
+    /// addition/removal, tree replacement, and guardian set updates.
+    pub async fn recovery(&self) -> AgentResult<RecoveryService> {
+        // Check if already initialized
+        {
+            let guard = self.recovery_service.read().await;
+            if guard.is_some() {
+                return RecoveryService::new(self.runtime.effects(), self.context.clone());
+            }
+        }
+
+        // Initialize lazily
+        let service = RecoveryService::new(self.runtime.effects(), self.context.clone())?;
+
+        // Store for future use
+        {
+            let mut guard = self.recovery_service.write().await;
+            *guard = Some(RecoveryService::new(
+                self.runtime.effects(),
+                self.context.clone(),
+            )?);
+        }
+
+        Ok(service)
     }
 
     /// Shutdown the agent

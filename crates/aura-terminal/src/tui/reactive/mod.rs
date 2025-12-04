@@ -42,10 +42,8 @@ pub use queries::{
     TuiQuery,
 };
 pub use views::{
-    BlockAdjacency, BlockInfo, BlockView, ChatView, Contact, ContactsView, GuardiansView,
-    InvitationsView, MySuggestion, NeighborhoodBlock, NeighborhoodView, RecoveryView, Resident,
-    ResidentRole, StorageInfo, SuggestionPolicy, TraversalDepth, TraversalPosition, ViewState,
-    WelcomeView,
+    BlockAdjacency, BlockInfo, Contact, MySuggestion, NeighborhoodBlock, Resident, ResidentRole,
+    StorageInfo, SuggestionPolicy, TraversalDepth, TraversalPosition, ViewState,
 };
 
-// pub use scheduler::ReactiveScheduler; // TODO: Uncomment when implemented
+pub use aura_agent::reactive::ReactiveScheduler;

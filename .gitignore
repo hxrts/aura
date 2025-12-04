@@ -5,6 +5,9 @@ target/
 *.pdb
 Cargo.lock
 
+# Local binary symlinks
+/bin/
+
 # Documentation builds
 /docs/book/
 

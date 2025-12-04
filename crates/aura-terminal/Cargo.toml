@@ -11,15 +11,21 @@ description = "Terminal interface for Aura"
 [lints]
 workspace = true
 
+[lib]
+required-features = ["terminal"]
+
 [[bin]]
 name = "aura"
 path = "src/main.rs"
+required-features = ["terminal"]
 
 [features]
-default = []
+default = ["terminal"]
+terminal = []
 
 # Development mode with extra debugging
 development = [
+    "terminal",
     "aura-app/debug-serialize",
     "aura-app/instrumented",
     "dep:aura-simulator",
@@ -68,6 +74,7 @@ serde = { workspace = true }
 hex = { workspace = true }
 blake3 = { workspace = true }
 cfg-if = "1"
+bpaf = "0.6"
 
 # Async
 tokio = { workspace = true }

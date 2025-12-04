@@ -33,6 +33,7 @@ use aura_invitation::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYP
 use aura_journal::FactRegistry;
 use aura_protocol::moderation::register_moderation_facts;
 use aura_relational::{ContactFact, ContactFactReducer, CONTACT_FACT_TYPE_ID};
+use aura_rendezvous::{RendezvousFact, RendezvousFactReducer, RENDEZVOUS_FACT_TYPE_ID};
 
 /// Assembles the journal fact registry with all domain reducers.
 ///
@@ -46,6 +47,7 @@ pub fn build_fact_registry() -> FactRegistry {
     registry.register::<ChatFact>(CHAT_FACT_TYPE_ID, Box::new(ChatFactReducer));
     registry.register::<InvitationFact>(INVITATION_FACT_TYPE_ID, Box::new(InvitationFactReducer));
     registry.register::<ContactFact>(CONTACT_FACT_TYPE_ID, Box::new(ContactFactReducer));
+    registry.register::<RendezvousFact>(RENDEZVOUS_FACT_TYPE_ID, Box::new(RendezvousFactReducer));
     register_moderation_facts(&mut registry);
 
     registry
@@ -60,6 +62,8 @@ mod tests {
         let registry = build_fact_registry();
         assert!(registry.is_registered(CHAT_FACT_TYPE_ID));
         assert!(registry.is_registered(INVITATION_FACT_TYPE_ID));
+        assert!(registry.is_registered(CONTACT_FACT_TYPE_ID));
+        assert!(registry.is_registered(RENDEZVOUS_FACT_TYPE_ID));
         assert!(registry.is_registered("moderation:block-mute"));
         assert!(registry.is_registered("moderation:block-unmute"));
     }

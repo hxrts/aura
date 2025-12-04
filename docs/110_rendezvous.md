@@ -1,14 +1,24 @@
 # Rendezvous Architecture
 
-This document describes the rendezvous architecture in Aura. It explains peer discovery, envelope propagation, transport selection, and channel establishment. It aligns with the current authority and context model. It removes device identifiers from public structures. It scopes all rendezvous behavior to relational contexts.
+This document describes the rendezvous architecture in Aura. It explains peer discovery, descriptor propagation, transport selection, and channel establishment. It aligns with the authority and context model. It scopes all rendezvous behavior to relational contexts.
 
 ## 1. Overview
 
-Rendezvous establishes secure channels between authorities. Each authority uses a rendezvous manager that exposes `establish_channel(ContextId)`. The manager returns a handle implementing `TransportEffects`. Rendezvous operates inside a relational context and uses the context key for encryption. Envelopes appear as facts in the context journal. Flooding uses the same gossip loop that synchronizes journals.
+Rendezvous establishes secure channels between authorities. The `RendezvousService` exposes `publish_descriptor()` and `establish_channel()` methods. The service returns guard outcomes that the caller executes through an effect interpreter. Rendezvous operates inside a relational context and uses the context key for encryption. Descriptors appear as facts in the context journal. Propagation uses journal synchronization (`aura-sync`), not custom flooding.
 
-Rendezvous does not establish global identity. All operations are scoped to a `ContextId`. A context defines which authorities may see envelopes. Only participating authorities have the keys required to decrypt descriptors.
+Rendezvous does not establish global identity. All operations are scoped to a `ContextId`. A context defines which authorities may see descriptors. Only participating authorities have the keys required to decrypt descriptor payloads.
 
-## 2. Transport Strategy
+## 2. Architecture Changes
+
+The refactored rendezvous crate follows Aura's evolved architecture:
+
+1. **Guard Chain First**: All network sends flow through `CapGuard → FlowGuard → JournalCoupler → TransportEffects`
+2. **Facts Not Flooding**: Descriptors are journal facts propagated via `aura-sync`, not custom flooding
+3. **Standard Receipts**: Uses the system `Receipt` type with epoch binding and cost tracking
+4. **Session-Typed Protocol**: Protocols expressed as MPST choreographies with guard annotations
+5. **Unified Transport**: Channels established via `SecureChannel` with Noise IKpsk2
+
+## 3. Transport Strategy
 
 The transport layer uses a priority sequence of connection attempts. Direct QUIC is attempted first. QUIC using reflexive addresses via STUN is attempted next. WebSocket relay is attempted last. The first successful connection is used.
 
@@ -16,137 +26,266 @@ Aura uses relay-first fallback. Relays use guardians or designated peers. Relay 
 
 STUN discovery identifies the external address of each participant. Devices query STUN servers periodically. The reflexive address appears in rendezvous descriptors as a transport hint. STUN failure does not prevent rendezvous because relay is always available.
 
-Hole punching uses simultaneous UDP packets. Each peer includes a `punch_nonce` in its descriptor. Both peers send packets containing the nonce and ephemeral keys. NATs allow these packets to establish bidirectional mappings. QUIC completes the handshake after mappings appear.
+## 4. Data Structures
 
-## 3. Data Structures
+### 4.1 Domain Facts
 
-Rendezvous uses two fact types in the relational context journal. The envelope contains routing metadata. The descriptor contains transport information and handshake parameters. Payloads are encrypted using the context-derived key.
+Rendezvous uses domain facts in the relational context journal. Facts are propagated via journal synchronization.
 
 ```rust
-pub struct RendezvousEnvelope {
-    pub context: ContextId,
-    pub role: OfferOrAnswer,
-    pub epoch: u64,
-    pub counter: u32,
-    pub flow_cost: u32,
-    pub payload_cid: Cid,
-    pub signature: Vec<u8>,
+/// Rendezvous domain facts stored in context journals
+pub enum RendezvousFact {
+    /// Transport descriptor advertisement
+    Descriptor(RendezvousDescriptor),
+
+    /// Channel established acknowledgment
+    ChannelEstablished {
+        initiator: AuthorityId,
+        responder: AuthorityId,
+        channel_id: [u8; 32],
+        epoch: u64,
+    },
 }
 ```
 
-This structure defines an envelope stored in the context journal. The envelope header is visible for gossip. The payload is encrypted. The `flow_cost` field expresses the cost to forward the envelope.
+### 4.2 Transport Descriptors
 
 ```rust
+/// Transport descriptor for peer discovery
 pub struct RendezvousDescriptor {
-    pub context: ContextId,
+    /// Authority publishing this descriptor
+    pub authority_id: AuthorityId,
+    /// Available transport endpoints
     pub transport_hints: Vec<TransportHint>,
-    pub punch_nonce: Option<[u8; 32]>,
-    pub handshake_psk: [u8; 32],
-    pub validity: Interval,
-    pub signature: Vec<u8>,
+    /// Handshake PSK derived from context
+    pub handshake_psk_commitment: [u8; 32],
+    /// Validity window
+    pub valid_from: u64,
+    pub valid_until: u64,
+    /// Nonce for uniqueness
+    pub nonce: [u8; 32],
 }
 ```
 
-This structure defines a descriptor encrypted in the payload. The descriptor lists transport hints and handshake parameters. The `handshake_psk` binds Noise IKpsk2 to the context.
+### 4.3 Transport Hints
 
 ```rust
-enum TransportHint {
-    QuicDirect { addr: SocketAddr },
-    QuicReflexive { addr: SocketAddr },
-    WebSocketRelay { relay: AuthorityId },
-    WebSocketDirect { url: String },
+/// Transport endpoint hint
+pub enum TransportHint {
+    QuicDirect { addr: String },
+    QuicReflexive { addr: String, stun_server: String },
+    WebSocketRelay { relay_authority: AuthorityId },
 }
 ```
 
-This enum defines transport options. Relay hints require valid relay capabilities.
+## 5. MPST Choreographies
 
-## 4. Envelope Propagation
+Rendezvous protocols are defined as MPST choreographies with guard annotations.
 
-Envelopes propagate using the gossip loop. Each participant floods new envelopes to its neighbors. Neighbors forward envelopes if they have flow budget and if the envelope is new. Duplicate envelopes are ignored.
+### 5.1 Direct Exchange Protocol
 
-Encrypted payloads are stored in a content store keyed by `payload_cid`. Authorities decrypt payloads using the context key. Only participants in the relational context have the required keys.
+```rust
+choreography! {
+    #[namespace = "rendezvous_exchange"]
+    protocol RendezvousExchange {
+        roles: Initiator, Responder;
 
-Flow budget is charged before forwarding. Each hop charges its local flow budget for the `(context, neighbor)` pair. Flow failures prevent forwarding but do not reveal failures to the network.
+        // Initiator publishes descriptor (fact insertion, propagates via sync)
+        Initiator[guard_capability = "rendezvous:publish",
+                  flow_cost = 1,
+                  journal_facts = "descriptor_offered"]
+        -> Responder: DescriptorOffer(RendezvousDescriptor);
 
-Receipts document successful forwarding. Receipts allow downstream authorities to prove that upstream hops charged their budgets.
+        // Responder publishes response descriptor
+        Responder[guard_capability = "rendezvous:publish",
+                  flow_cost = 1,
+                  journal_facts = "descriptor_answered"]
+        -> Initiator: DescriptorAnswer(RendezvousDescriptor);
 
-## 5. Protocol Flow
+        // Direct channel establishment
+        Initiator[guard_capability = "rendezvous:connect",
+                  flow_cost = 2]
+        -> Responder: HandshakeInit(NoiseHandshake);
 
-The rendezvous sequence uses the context between two authorities. Each authority derives a per-context key used for encryption and handshake.
+        Responder[guard_capability = "rendezvous:connect",
+                  flow_cost = 2,
+                  journal_facts = "channel_established"]
+        -> Initiator: HandshakeComplete(NoiseHandshake);
+    }
+}
+```
+
+### 5.2 Relayed Protocol
+
+```rust
+choreography! {
+    #[namespace = "relayed_rendezvous"]
+    protocol RelayedRendezvous {
+        roles: Initiator, Relay, Responder;
+
+        Initiator[guard_capability = "rendezvous:relay",
+                  flow_cost = 2]
+        -> Relay: RelayRequest(RelayEnvelope);
+
+        Relay[guard_capability = "relay:forward",
+              flow_cost = 1,
+              leak = "neighbor:1"]
+        -> Responder: RelayForward(RelayEnvelope);
+
+        Responder[guard_capability = "rendezvous:relay",
+                  flow_cost = 2]
+        -> Relay: RelayResponse(RelayEnvelope);
+
+        Relay[guard_capability = "relay:forward",
+              flow_cost = 1,
+              leak = "neighbor:1"]
+        -> Initiator: RelayComplete(RelayEnvelope);
+    }
+}
+```
+
+## 6. Descriptor Propagation
+
+Descriptors propagate via journal synchronization. This replaces custom flooding.
+
+1. Authority creates a `RendezvousFact::Descriptor` fact
+2. Guard chain evaluates the publication request
+3. On success, fact is inserted into the context journal
+4. Journal sync (`aura-sync`) propagates facts to context participants
+5. Peers query journal for peer descriptors
+
+This model provides:
+- **Deduplication**: Journal sync handles duplicate facts naturally
+- **Ordering**: Facts have causal ordering via journal timestamps
+- **Authorization**: Guard chain validates before insertion
+- **Consistency**: Same propagation mechanism as other domain facts
+
+## 7. Protocol Flow
+
+The rendezvous sequence uses the context between two authorities.
 
 ```mermaid
 sequenceDiagram
     participant A as Authority A
-    participant R as Relay
+    participant J as Context Journal
     participant B as Authority B
 
-    A->>A: Create descriptor
-    A->>A: Encrypt descriptor
-    A->>A: Create envelope
-    A->>R: Flood envelope
-    R->>B: Forward envelope
-    B->>B: Decrypt payload
-    B->>B: Create response descriptor
-    B->>R: Flood response
-    R->>A: Forward response
-    A->>A: Decrypt response
-    A->>B: Establish transport
+    A->>A: Build descriptor
+    A->>A: Evaluate guards
+    A->>J: Insert descriptor fact
+    J-->>B: Sync descriptor fact
+    B->>B: Query descriptor
+    B->>A: Select transport
+    A->>B: Noise IKpsk2 handshake
+    B->>J: Record ChannelEstablished fact
 ```
 
-A constructs a descriptor. A encrypts it with the context key. A publishes an envelope fact. Neighbors forward the envelope. B decrypts the descriptor and publishes a response. A receives the response and selects a transport. A completes a Noise IKpsk2 handshake with B.
+## 8. Guard Chain Integration
 
-## 6. Flow Budget Integration
+All rendezvous operations flow through the guard chain.
 
-Flow budgets limit the rate of envelope propagation. Each envelope includes a cost. The rendezvous manager charges this cost before sending or forwarding. Cost is scoped to `(ContextId, neighbor_authority)`.
-
-The budget charge uses the guard chain. `CapGuard` ensures authorization for propagation. `FlowGuard` charges the budget. `JournalCoupler` inserts forwarding receipts into the journal. Guard evaluation runs over a prepared `GuardSnapshot` and returns `EffectCommand` items that an async interpreter executes so guards remain pure and no transport work occurs until the entire sequence succeeds.
+### 8.1 Guard Capabilities
 
 ```rust
-pub struct Receipt {
-    pub context: ContextId,
-    pub from: AuthorityId,
-    pub to: AuthorityId,
-    pub epoch: u64,
-    pub cost: u32,
-    pub signature: Vec<u8>,
+pub mod guards {
+    pub const RENDEZVOUS_PUBLISH: &str = "rendezvous:publish";
+    pub const RENDEZVOUS_CONNECT: &str = "rendezvous:connect";
+    pub const RENDEZVOUS_RELAY: &str = "rendezvous:relay";
+    pub const RELAY_FORWARD: &str = "relay:forward";
 }
 ```
 
-This structure defines per-hop receipts. Receipts verify that forwarding charged budget correctly.
+### 8.2 Flow Costs
 
-## 7. Secure Channel Establishment
+```rust
+pub const DESCRIPTOR_PUBLISH_COST: u32 = 1;
+pub const HANDSHAKE_COST: u32 = 2;
+pub const RELAY_REQUEST_COST: u32 = 2;
+pub const RELAY_FORWARD_COST: u32 = 1;
+```
 
-After receiving a valid descriptor, the initiator selects a transport. Both sides run Noise IKpsk2 using the descriptor handshake key. Successful handshake yields a `SecureChannel`. The channel binds the authorities and context.
+### 8.3 Guard Evaluation
+
+The service prepares a `GuardSnapshot` and evaluates guards synchronously. The outcome contains effect commands that the caller executes asynchronously.
+
+```rust
+// 1. Prepare snapshot
+let snapshot = service.prepare_snapshot(context_id).await?;
+
+// 2. Evaluate guards (pure, sync)
+let outcome = guards.evaluate(&snapshot, &request);
+
+// 3. Execute effect commands (async)
+for cmd in outcome.effects {
+    interpreter.exec(cmd).await?;
+}
+```
+
+## 9. Secure Channel Establishment
+
+After receiving a valid descriptor, the initiator selects a transport. Both sides run Noise IKpsk2 using the descriptor handshake key. Successful handshake yields a `SecureChannel`.
 
 ```rust
 pub struct SecureChannel {
-    pub context: ContextId,
-    pub peer: AuthorityId,
-    pub channel_id: Uuid,
+    /// Context this channel belongs to
+    context_id: ContextId,
+    /// Remote peer
+    peer: AuthorityId,
+    /// Current epoch (for key rotation)
+    epoch: u64,
+    /// Channel identifier
+    channel_id: [u8; 32],
 }
 ```
 
-This structure represents a live channel. Channel failure triggers re-establishment. Channel keys refresh when epochs change.
+### 9.1 Key Rotation
 
-## 8. Failure Modes and Privacy
-
-Failures occur during budget charging, decryption, or transport establishment. These failures are local. No network packets reveal capability or budget failures.
-
-Context isolation prevents unauthorized authorities from reading envelopes. Transport hints do not reveal authority structure. Relay identifiers reveal only the relay authority. Payload contents remain private.
-
-## 9. Interfaces
-
-The rendezvous manager exposes a publication function and a channel establishment function. The publication function creates updated descriptors. The establishment function drives the rendezvous process.
+Channels support epoch-based key rotation. When the epoch advances, channels rekey using the new context-derived PSK.
 
 ```rust
-pub trait RendezvousEffects {
-    async fn publish_descriptor(&self, context: ContextId) -> Result<()>;
-    async fn establish_channel(&self, context: ContextId) -> Result<SecureChannel>;
+impl SecureChannel {
+    pub fn needs_rotation(&self, current_epoch: u64) -> bool {
+        self.epoch < current_epoch
+    }
+
+    pub async fn rotate(&mut self, new_epoch: u64, new_psk: &[u8]) -> AuraResult<()> {
+        self.inner.rekey(new_psk).await?;
+        self.epoch = new_epoch;
+        Ok(())
+    }
 }
 ```
 
-This trait defines rendezvous behavior. Implementations manage envelopes, flow budgets, decryption, and transport negotiation.
+## 10. Service Interface
 
-## 10. Summary
+The rendezvous service coordinates descriptor publication and channel establishment.
 
-Rendezvous provides encrypted peer discovery and channel establishment scoped to relational contexts. Envelopes propagate through context-aware gossip with flow budget enforcement. Secure channels use Noise IKpsk2 and QUIC. All behavior remains private to the context and reveals no structural information.
+```rust
+impl<I: EffectInterpreter> RendezvousService<I> {
+    /// Prepare to publish descriptor to context journal
+    pub fn prepare_publish_descriptor(
+        &self,
+        context_id: ContextId,
+        transport_hints: Vec<TransportHint>,
+        snapshot: &GuardSnapshot,
+    ) -> (RendezvousDescriptor, GuardOutcome);
+
+    /// Prepare to establish channel with peer
+    pub fn prepare_establish_channel(
+        &self,
+        context_id: ContextId,
+        peer: AuthorityId,
+        snapshot: &GuardSnapshot,
+    ) -> GuardOutcome;
+}
+```
+
+## 11. Failure Modes and Privacy
+
+Failures occur during guard evaluation, descriptor validation, or transport establishment. These failures are local. No network packets reveal capability or budget failures.
+
+Context isolation prevents unauthorized authorities from reading descriptors. Transport hints do not reveal authority structure. Relay identifiers reveal only the relay authority. Descriptor contents remain encrypted for transit.
+
+## 12. Summary
+
+Rendezvous provides encrypted peer discovery and channel establishment scoped to relational contexts. Descriptors propagate through journal synchronization with guard chain enforcement. Secure channels use Noise IKpsk2 and QUIC. All behavior remains private to the context and reveals no structural information. The architecture uses standard Aura primitives: domain facts, guard chains, MPST choreographies, and effect interpretation.

@@ -27,7 +27,9 @@ The legacy monolithic `TimeEffects` trait is replaced by domain-specific traits:
 - `OrderClockEffects` – produces opaque, privacy-preserving total order tokens without temporal meaning.
 - `TimeAttestationEffects` – wraps physical claims in provenance proofs when consensus/peer attestation is required.
 
-Callers select the domain appropriate to their semantics (guards/transport use physical, CRDT uses logical, privacy-preserving ordering uses order tokens). Cross-domain comparisons are explicit via `TimeStamp::compare(policy)`. Direct `SystemTime::now()` or chrono usage is forbidden outside effect implementations; testkit and simulator provide deterministic handlers for all four traits.
+Callers select the domain appropriate to their semantics. Guards and transport use physical time. CRDT operations use logical clocks. Privacy-preserving ordering uses order tokens. Cross-domain comparisons are explicit via `TimeStamp::compare(policy)`.
+
+Direct `SystemTime::now()` or chrono usage is forbidden outside effect implementations. The testkit and simulator provide deterministic handlers for all four traits.
 
 ### 1.2 When to Create Effect Traits
 
@@ -39,61 +41,35 @@ Create new effect traits when:
 
 ### 1.3 When NOT to Create Effect Traits
 
-Follow YAGNI (You Aren't Gonna Need It) principles:
+Follow YAGNI (You Aren't Gonna Need It) principles. Defer abstraction when only one implementation exists. Avoid abstractions that add complexity without clear benefit. Do not abstract "just in case" without concrete need.
 
-**Defer abstraction when:**
-- Only one implementation exists and will likely remain single
-- The abstraction adds complexity without clear benefit
-- You're abstracting "just in case" without concrete need
-- Testing can be achieved through higher-level mocking
+#### Threshold Signatures
 
-**Example: Threshold Signatures**
+Aura uses FROST directly without a `ThresholdSigEffects` trait. Only FROST is needed currently. There are no plans for alternative threshold signature schemes. Direct usage is simpler and clearer. Testing happens at the consensus level, not the crypto level.
 
-Aura uses FROST directly without a `ThresholdSigEffects` trait because:
-- Only FROST is needed currently
-- No plans for alternative threshold signature schemes
-- Direct usage is simpler and clearer
-- Testing happens at the consensus level, not crypto level
+See [Cryptography](116_crypto.md) for the detailed threshold signature deferral decision. Introduce the trait only when a second scheme is required or FROST needs replacement.
 
-See `crates/aura-core/src/crypto/README.md` for the detailed threshold signature deferral decision. We maintain a clear YAGNI gate: introduce the trait only when a second scheme is required or FROST needs replacement.
+#### Application-Specific Effect Traits
 
-**Example: Application-Specific Effect Traits**
+Application-specific effect traits (like `CliEffects`, `ConfigEffects`, `OutputEffects` in `aura-terminal`) should remain in their application layer (Layer 7). Do not move them to `aura-core` (Layer 1) when the traits compose core effects into application-specific operations. The same applies when only one implementation exists per application.
 
-Application-specific effect traits (like `CliEffects`, `ConfigEffects`, `OutputEffects` in `aura-terminal`) should remain in their application layer (Layer 7) rather than moving to `aura-core` (Layer 1) when:
-- The traits compose core effects into application-specific operations
-- Only one implementation exists per application
-- The abstractions are domain-specific (CLI formatting, TUI rendering, etc.)
-- No cross-application reuse is needed
-
-This follows proper layer separation: `aura-core` provides infrastructure effects (ConsoleEffects, StorageEffects, PhysicalTimeEffects), while application layers compose these into domain-specific abstractions.
+This follows proper layer separation. The `aura-core` crate provides infrastructure effects such as `ConsoleEffects`, `StorageEffects`, and `PhysicalTimeEffects`. Application layers compose these into domain-specific abstractions.
 
 ### 1.4 DatabaseEffects Organization
 
-Database operations integrate consensus transparently through coordinated effect traits:
+Database operations integrate consensus transparently through coordinated effect traits.
 
-**JournalEffects** (aura-core):
-- `insert_fact()` - Monotone operations (0 RTT)
-- `insert_relational_fact()` - Cross-authority facts
+`JournalEffects` in `aura-core` provides `insert_fact()` for monotone operations (0 RTT) and `insert_relational_fact()` for cross-authority facts.
 
-**DatabaseWriteEffects** (aura-core):
-- `transact()` - Coordinates CRDT vs Consensus path
-- Returns `TransactionReceipt` indicating coordination used
+`DatabaseWriteEffects` in `aura-core` provides `transact()` which coordinates the CRDT vs Consensus path. It returns a `TransactionReceipt` indicating which coordination was used.
 
-**DatabaseSubscriptionEffects** (aura-core):
-- `subscribe_query()` - Reactive queries with isolation levels
-- Returns `Dynamic<T>` that updates on fact changes
+`DatabaseSubscriptionEffects` in `aura-core` provides `subscribe_query()` for reactive queries with isolation levels. It returns `Dynamic<T>` that updates on fact changes.
 
-The `transact()` method routes operations by two orthogonal dimensions:
-1. **Authority Scope**: Single vs Cross-authority
-2. **Agreement Level**: Monotone (CRDT, 0 RTT) vs Non-monotone (Consensus, 1-3 RTT)
+The `transact()` method routes operations by two orthogonal dimensions. The first is authority scope: single vs cross-authority. The second is agreement level: monotone (CRDT, 0 RTT) vs non-monotone (Consensus, 1-3 RTT).
 
-This enables four coordination quadrants:
-- **Monotone + Single**: Direct fact insertion
-- **Monotone + Cross-Authority**: CRDT merge via anti-entropy
-- **Consensus + Single**: Single-authority consensus
-- **Consensus + Cross-Authority**: Federated consensus
+This enables four coordination quadrants. Monotone with single authority uses direct fact insertion. Monotone with cross-authority uses CRDT merge via anti-entropy. Consensus with single authority uses single-authority consensus. Consensus with cross-authority uses federated consensus.
 
-See `docs/113_database.md` §8 and `work/reactive.md` §7.4 for details.
+See [Database](113_database.md) and the reactive design document for details.
 
 ## 2. Handler Design
 
@@ -258,71 +234,105 @@ pub trait EffectInterpreter {
 
 Pure guard evaluation over `GuardSnapshot` avoids blocking sync/async bridges, prevents WASM deadlocks, and ensures simulation/production share identical logic. Effects become algebraic data, making them observable, testable, and replayable across deterministic runs. This design lets the guard chain enforce authorization, flow budgets, leakage budgets, and journal coupling without leaking implementation details into protocol handlers.
 
-## 9. Session Management and Choreography Execution
+## 9. Handler Service Pattern
 
-The effect system provides the framework for managing the lifecycle of distributed protocols. Choreographies define the logic of a protocol, while a **session** represents a single, stateful execution of that choreography. The runtime uses the effect system to create, manage, and execute these sessions.
-
-### 9.1. The Session Management Interface
-
-The abstract interface for all session-related operations is the `SessionManagementEffects` trait defined in `aura-core`. This trait provides the API for creating sessions, joining them, sending and receiving messages within a session's context, and querying their status.
+The runtime exposes domain handlers as services through `AuraAgent`. Each handler becomes a service with a public API. Services share `AuraEffectSystem`, `AuthorityContext`, and `HandlerContext`.
 
 ```rust
-// Defined in aura-core::effects::agent
+impl AuraAgent {
+    pub fn sessions(&self) -> &SessionService { ... }
+    pub fn auth(&self) -> &AuthService { ... }
+    pub fn invitations(&self) -> &InvitationService { ... }
+    pub fn recovery(&self) -> &RecoveryService { ... }
+}
+```
+
+This code shows the service accessor pattern. Each service provides domain-specific operations while delegating to the shared effect system for execution.
+
+### 9.1 Service Registry
+
+The `ServiceRegistry` initializes all services during agent startup. It holds references to each service and manages their lifecycle.
+
+```rust
+pub struct ServiceRegistry {
+    sessions: Arc<SessionService>,
+    auth: Arc<AuthService>,
+    invitations: Arc<InvitationService>,
+    recovery: Arc<RecoveryService>,
+}
+```
+
+Services register with the `LifecycleManager` for initialization and shutdown coordination. The lifecycle manager executes initialization in dependency order and shutdown in reverse order.
+
+### 9.2 Guard Chain Integration
+
+All service operations use the guard chain pattern. Requests flow through capability, flow budget, and journal coupling guards before reaching the handler.
+
+```
+Request → CapGuard → FlowGuard → JournalCoupler → Handler → Response
+                                        │
+                                        ▼
+                               Fact Journaling
+```
+
+This diagram shows the request flow through the guard chain. The guard chain enforces authorization, budgets, and journaling for every operation. See [System Architecture](001_system_architecture.md) for guard chain details.
+
+## 10. Session Management and Choreography Execution
+
+The effect system provides the framework for managing the lifecycle of distributed protocols. Choreographies define the logic of a protocol. A session represents a single, stateful execution of that choreography. The runtime uses the effect system to create, manage, and execute these sessions.
+
+### 10.1 The Session Management Interface
+
+The abstract interface for all session-related operations is the `SessionManagementEffects` trait defined in `aura-core`. This trait provides the API for creating sessions, joining them, sending and receiving messages, and querying their status.
+
+```rust
 pub trait SessionManagementEffects: Send + Sync {
-    /// Create new choreographic session with participants and roles
     async fn create_choreographic_session(
         &self,
         session_type: SessionType,
         participants: Vec<ParticipantInfo>,
     ) -> Result<SessionId>;
 
-    /// Send choreographic message within a session context
     async fn send_choreographic_message(
         &self,
         session_id: SessionId,
         message: Vec<u8>,
     ) -> Result<()>;
-
-    // ... other methods for joining, leaving, and status checks
 }
 ```
 
-By abstracting session management into an effect, the application logic remains decoupled from the underlying implementation (e.g., in-memory vs. persistent session state).
+This trait abstracts session management into an effect. The application logic remains decoupled from the underlying implementation such as in-memory or persistent session state.
 
-### 9.2. Session Handlers and State
+### 10.2 Session Handlers and State
 
-Concrete implementations of `SessionManagementEffects`, such as the `MemorySessionHandler` in `aura-protocol`, act as the engine for the session system. This handler maintains the state of all active sessions, including:
-- **`SessionId`**: A unique identifier for the session instance.
-- **`SessionStatus`**: The current phase of the session's lifecycle (e.g., `Initializing`, `Active`, `Completed`).
-- **`SessionEpoch`**: A version number for the session's state. It is incremented to coordinate significant state changes and invalidate old credentials or messages, which is critical for security and preventing replay attacks.
-- **Participants**: The list of devices involved in the choreography.
+Concrete implementations of `SessionManagementEffects`, such as the `MemorySessionHandler` in `aura-protocol`, act as the engine for the session system. This handler maintains the state of all active sessions.
 
-The creation and lifecycle of sessions are themselves managed as a choreographic protocol (`SessionLifecycleChoreography` in `aura-protocol`) to ensure consistency across all participants.
+Each session has a `SessionId` for unique identification. It has a `SessionStatus` indicating the current phase (Initializing, Active, Completed). It has a `SessionEpoch` version number for coordinating state changes and invalidating old credentials. It has a list of participants involved in the choreography.
 
-### 9.3. Execution Flow
+The creation and lifecycle of sessions are themselves managed as a choreographic protocol. The `SessionLifecycleChoreography` in `aura-protocol` ensures consistency across all participants.
 
-The relationship between the runtime, effects, sessions, and choreographies is as follows:
+### 10.3 Execution Flow
 
-1.  **Request**: An event triggers the need to execute a distributed protocol (e.g., FROST signing).
-2.  **Session Creation**: The `aura-agent` runtime calls `create_choreographic_session` via the effect system. The handler creates a new session instance with a unique `SessionId` and an initial `SessionEpoch`.
-3.  **Execution**: The session becomes the stateful context for executing the choreography. The agent uses the `SessionId` to route messages and drive the protocol's state machine as defined by its session type.
-4.  **State Management**: The handler updates the `SessionStatus` as the choreography progresses. If the protocol requires it, the `SessionEpoch` can be incremented to securely evolve the session state.
-5.  **Completion**: Once the choreography finishes, the handler transitions the session to a terminal state (`Completed` or `Failed`), and resources are cleaned up.
+The relationship between the runtime, effects, sessions, and choreographies follows a defined sequence.
 
-In essence, the session system is the generic, stateful **executor**, and a choreography is the specific, verifiable **script** that the executor runs.
+1. An event triggers the need to execute a distributed protocol such as FROST signing.
+2. The `aura-agent` runtime calls `create_choreographic_session` via the effect system. The handler creates a new session instance with a unique `SessionId` and an initial `SessionEpoch`.
+3. The session becomes the stateful context for executing the choreography. The agent uses the `SessionId` to route messages and drive the protocol state machine.
+4. The handler updates the `SessionStatus` as the choreography progresses. If needed, the `SessionEpoch` can be incremented to securely evolve the session state.
+5. Once the choreography finishes, the handler transitions the session to a terminal state (Completed or Failed) and resources are cleaned up.
 
-## 10. Fact Registry Integration
+The session system is a generic, stateful executor. A choreography is the specific, verifiable script that the executor runs.
+
+## 11. Fact Registry Integration
 
 The `FactRegistry` provides domain-specific fact type registration and reduction for the reactive scheduling system. It is integrated into the effect system via the `AuraEffectSystem` rather than being constructed separately.
 
-### 10.1. Architecture
+### 11.1 Architecture
 
-The `FactRegistry` lives in `aura-journal` and allows domain crates to register their fact types along with custom reducers. The registry is built during effect system initialization and made accessible through the effect system:
+The `FactRegistry` lives in `aura-journal` and allows domain crates to register their fact types along with custom reducers. The registry is built during effect system initialization. It is made accessible through the effect system.
 
 ```rust
-// In AuraEffectSystem (aura-agent)
 pub struct AuraEffectSystem {
-    // ... other fields ...
     fact_registry: Arc<FactRegistry>,
 }
 
@@ -333,12 +343,13 @@ impl AuraEffectSystem {
 }
 ```
 
-### 10.2. Fact Registration
+This code shows how `AuraEffectSystem` holds the registry. The `fact_registry()` method provides access to registered reducers.
 
-Domain crates register their fact types during effect system assembly. Each domain provides a type ID and a reducer function:
+### 11.2 Fact Registration
+
+Domain crates register their fact types during effect system assembly. Each domain provides a type ID and a reducer function.
 
 ```rust
-// Example from aura-chat
 registry.register(
     "chat",
     ChatFact::type_id(),
@@ -346,30 +357,19 @@ registry.register(
 );
 ```
 
-Registered domains include:
-- **Chat** (`aura-chat`): Message threading, reactions, edits
-- **Invitation** (`aura-invitation`): Device invitation workflow
-- **Contact** (`aura-relational`): Contact relationship management
-- **Moderation** (`aura-protocol`): Block/mute facts
+This code shows how `aura-chat` registers its fact type. Registered domains include Chat for message threading, Invitation for device invitations, Contact for relationship management, and Moderation for block/mute facts.
 
-### 10.3. Reactive Scheduling
+### 11.3 Reactive Scheduling
 
-The `ReactiveScheduler` in `aura-agent` uses the `FactRegistry` to process domain facts. When facts arrive, the scheduler:
+The `ReactiveScheduler` in `aura-agent` uses the `FactRegistry` to process domain facts. When facts arrive, the scheduler looks up the registered reducer for the domain. It applies the reducer to compute derived state. It then notifies reactive subscribers of state changes.
 
-1. Looks up the registered reducer for the fact's domain
-2. Applies the reducer to compute derived state
-3. Notifies reactive subscribers of state changes
+Production code obtains the registry via `effect_system.fact_registry()`. Tests may use `build_fact_registry()` for isolation.
 
-The scheduler can obtain the registry either:
-- **From effect system**: Production code uses `effect_system.fact_registry()`
-- **Direct construction**: Tests may use `build_fact_registry()` for isolation
+### 11.4 Handler-Level Access
 
-### 10.4. Handler-Level Access
-
-The `JournalHandler` also holds an optional `FactRegistry` reference, enabling fact reduction during journal operations:
+The `JournalHandler` holds an optional `FactRegistry` reference. This enables fact reduction during journal operations.
 
 ```rust
-// In JournalHandler (aura-journal)
 impl JournalHandler {
     pub fn with_fact_registry(mut self, registry: FactRegistry) -> Self {
         self.fact_registry = Some(registry);
@@ -382,19 +382,14 @@ impl JournalHandler {
 }
 ```
 
-This handler-level integration allows journal operations to trigger domain-specific reductions when facts are committed.
+This code shows the handler-level integration. Journal operations can trigger domain-specific reductions when facts are committed.
 
-### 10.5. Design Rationale
+### 11.5 Design Rationale
 
-The registry is integrated at the effect system level (not the trait level) because:
+The registry is integrated at the effect system level, not the trait level. This avoids changes to the `JournalEffects` trait. Different runtime configurations can use different registries. Tests can construct isolated registries without the full effect system. Registry assembly stays in Layer 6 (runtime), not Layer 1 (core).
 
-1. **Simplicity**: No changes to `JournalEffects` trait required
-2. **Flexibility**: Different runtime configurations can use different registries
-3. **Testing**: Tests can construct isolated registries without full effect system
-4. **Layer separation**: Registry assembly stays in Layer 6 (runtime), not Layer 1 (core)
+Protocol-level facts (Guardian, Recovery, Consensus, AMP) use the built-in reduction pipeline in `aura-journal/src/reduction.rs`. They do not require registry registration.
 
-Protocol-level facts (Guardian, Recovery, Consensus, AMP) use the built-in reduction pipeline in `aura-journal/src/reduction.rs` and do not require registry registration.
+## 12. Summary
 
-## 11. Summary
-
-The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior. Performance optimizations improve scalability and responsiveness.
+The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems as services accessible through `AuraAgent`. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior.

@@ -47,6 +47,13 @@ pub enum IntentError {
         /// Reason for network error
         reason: String,
     },
+
+    /// Storage error during persistence
+    #[error("Storage error: {reason}")]
+    StorageError {
+        /// Reason for storage error
+        reason: String,
+    },
 }
 
 impl IntentError {
@@ -74,6 +81,13 @@ impl IntentError {
     /// Create an internal error
     pub fn internal_error(reason: impl Into<String>) -> Self {
         Self::InternalError {
+            reason: reason.into(),
+        }
+    }
+
+    /// Create a storage error
+    pub fn storage_error(reason: impl Into<String>) -> Self {
+        Self::StorageError {
             reason: reason.into(),
         }
     }

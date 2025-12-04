@@ -41,6 +41,13 @@ pub enum ViewDelta {
     RecoveryRequested { session_id: String },
     /// A guardian approval was granted
     GuardianApproved { guardian_id: String },
+    /// Guardian status was toggled for a contact
+    GuardianToggled {
+        contact_id: String,
+        is_guardian: bool,
+    },
+    /// Guardian threshold was configured
+    GuardianThresholdSet { threshold: u32 },
     /// An invitation was created
     InvitationCreated { invitation_id: String },
     /// An invitation was accepted
@@ -76,6 +83,10 @@ pub fn reduce_fact(fact: &JournalFact, own_authority: &AuthorityId) -> ViewDelta
         reduce_initiate_recovery(content)
     } else if content.starts_with("ApproveRecovery::") {
         reduce_approve_recovery(content)
+    } else if content.starts_with("ToggleGuardian::") {
+        reduce_toggle_guardian(content)
+    } else if content.starts_with("SetGuardianThreshold::") {
+        reduce_set_guardian_threshold(content)
     } else if content.starts_with("CreateInvitation::") {
         reduce_create_invitation(content)
     } else if content.starts_with("AcceptInvitation::") {
@@ -269,6 +280,32 @@ fn reduce_approve_recovery(content: &str) -> ViewDelta {
         .to_string();
 
     ViewDelta::GuardianApproved { guardian_id }
+}
+
+fn reduce_toggle_guardian(content: &str) -> ViewDelta {
+    let params = content.strip_prefix("ToggleGuardian::").unwrap_or(content);
+    let contact_id = parse_param(params, "contact_id")
+        .unwrap_or("unknown")
+        .to_string();
+    let is_guardian = parse_param(params, "is_guardian")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+
+    ViewDelta::GuardianToggled {
+        contact_id,
+        is_guardian,
+    }
+}
+
+fn reduce_set_guardian_threshold(content: &str) -> ViewDelta {
+    let params = content
+        .strip_prefix("SetGuardianThreshold::")
+        .unwrap_or(content);
+    let threshold = parse_param(params, "threshold")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2);
+
+    ViewDelta::GuardianThresholdSet { threshold }
 }
 
 fn reduce_create_invitation(content: &str) -> ViewDelta {

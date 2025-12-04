@@ -1,6 +1,12 @@
 //! # Chat Screen
 //!
 //! Main chat interface using iocraft components.
+//!
+//! ## Reactive Signal Subscription
+//!
+//! When `AppCoreContext` is available, this screen subscribes to chat state
+//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! component automatically, triggering re-renders when data changes.
 
 use iocraft::prelude::*;
 
@@ -9,11 +15,32 @@ use std::sync::{Arc, RwLock};
 use crate::tui::components::{
     navigate_list, KeyHintsBar, ListNavigation, MessageBubble, MessageInput,
 };
+use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Channel, KeyHint, Message};
 
 /// Callback type for sending messages
 pub type SendCallback = Arc<dyn Fn(String, String) + Send + Sync>;
+
+/// Format a timestamp (ms since epoch) as a human-readable time string
+fn format_timestamp(ts_ms: u64) -> String {
+    use std::time::{Duration, UNIX_EPOCH};
+
+    if ts_ms == 0 {
+        return String::new();
+    }
+
+    let timestamp = UNIX_EPOCH + Duration::from_millis(ts_ms);
+    if let Ok(duration) = timestamp.duration_since(UNIX_EPOCH) {
+        // Simple HH:MM format from the duration
+        let total_secs = duration.as_secs();
+        let hours = (total_secs / 3600) % 24;
+        let minutes = (total_secs / 60) % 60;
+        format!("{:02}:{:02}", hours, minutes)
+    } else {
+        String::new()
+    }
+}
 
 /// Input text shared between render and event handler (thread-safe)
 type SharedText = Arc<RwLock<String>>;
@@ -135,11 +162,89 @@ pub struct ChatScreenProps {
 }
 
 /// The main chat screen component with keyboard navigation
+///
+/// ## Reactive Updates
+///
+/// When `AppCoreContext` is available in the context tree, this component will
+/// subscribe to chat state signals and automatically update when:
+/// - New messages arrive
+/// - Channels are created/updated
+/// - The selected channel changes
+///
+/// This uses iocraft's `use_future` hook to spawn an async task that subscribes
+/// to futures-signals and updates local State<T> when the signal emits.
 #[component]
 pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
-    // Clone data for use in element
-    let channels = props.channels.clone();
-    let messages = props.messages.clone();
+    // Try to get AppCoreContext for reactive signal subscription
+    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+
+    // Initialize reactive state from props (used when no context or as initial values)
+    // These will be updated by signal subscription when available
+    let reactive_channels = hooks.use_state({
+        let initial = props.channels.clone();
+        move || initial
+    });
+    let reactive_messages = hooks.use_state({
+        let initial = props.messages.clone();
+        move || initial
+    });
+
+    // Subscribe to chat signal updates if AppCoreContext is available
+    if let Some(ctx) = app_ctx {
+        hooks.use_future({
+            let mut reactive_channels = reactive_channels.clone();
+            let mut reactive_messages = reactive_messages.clone();
+            let app_core = ctx.app_core.clone();
+            async move {
+                use futures_signals::signal::SignalExt;
+
+                // Get the signal from AppCore
+                // Note: This requires a brief lock to get the signal, then releases it
+                let signal = {
+                    let core = app_core.read().await;
+                    core.chat_signal()
+                };
+
+                // Subscribe to signal updates - this runs indefinitely until component unmounts
+                signal
+                    .for_each(|chat_state| {
+                        // Convert aura-app ChatState to TUI types
+                        let channels: Vec<Channel> = chat_state
+                            .channels
+                            .iter()
+                            .map(|c| {
+                                Channel::new(&c.id, &c.name)
+                                    .with_unread(c.unread_count as usize)
+                                    .selected(Some(c.id.clone()) == chat_state.selected_channel_id)
+                            })
+                            .collect();
+
+                        let messages: Vec<Message> = chat_state
+                            .messages
+                            .iter()
+                            .map(|m| {
+                                // Convert timestamp from u64 ms to human-readable string
+                                let ts_str = format_timestamp(m.timestamp);
+                                Message::new(&m.id, &m.sender_name, &m.content)
+                                    .with_timestamp(ts_str)
+                                    .own(m.is_own)
+                            })
+                            .collect();
+
+                        // Update reactive state - this triggers re-render
+                        reactive_channels.set(channels);
+                        reactive_messages.set(messages);
+
+                        async {}
+                    })
+                    .await;
+            }
+        });
+    }
+
+    // Use reactive state for rendering (updated by signal or initialized from props)
+    let channels = reactive_channels.read().clone();
+    let messages = reactive_messages.read().clone();
     let hints = props.hints.clone();
     let channel_count = channels.len();
     let on_send = props.on_send.clone();

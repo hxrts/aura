@@ -1,11 +1,18 @@
 //! # Recovery Screen
 //!
-//! Guardian management and account recovery using
+//! Guardian management and account recovery
+//!
+//! ## Reactive Signal Subscription
+//!
+//! When `AppCoreContext` is available, this screen subscribes to recovery state
+//! changes via `use_future` and futures-signals. Updates are pushed to the
+//! component automatically, triggering re-renders when data changes.
 
 use iocraft::prelude::*;
 use std::sync::Arc;
 
 use crate::tui::components::{EmptyState, KeyHintsBar};
+use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Icons, Spacing, Theme};
 use crate::tui::types::{
     Guardian, GuardianApproval, GuardianStatus, KeyHint, RecoveryState, RecoveryStatus, RecoveryTab,
@@ -236,12 +243,146 @@ pub struct RecoveryScreenProps {
     pub on_add_guardian: Option<RecoveryCallback>,
 }
 
+/// Convert aura-app guardian status to TUI guardian status
+fn convert_guardian_status(status: aura_app::views::GuardianStatus) -> GuardianStatus {
+    match status {
+        aura_app::views::GuardianStatus::Active => GuardianStatus::Active,
+        aura_app::views::GuardianStatus::Pending => GuardianStatus::Pending,
+        aura_app::views::GuardianStatus::Revoked => GuardianStatus::Removed,
+        aura_app::views::GuardianStatus::Offline => GuardianStatus::Offline,
+    }
+}
+
+/// Convert aura-app guardian to TUI guardian
+fn convert_guardian(g: &aura_app::views::Guardian) -> Guardian {
+    Guardian {
+        id: g.id.clone(),
+        name: g.name.clone(),
+        status: convert_guardian_status(g.status),
+        has_share: g.status == aura_app::views::GuardianStatus::Active,
+    }
+}
+
+/// Convert aura-app recovery process status to TUI recovery state
+fn convert_recovery_state(
+    status: aura_app::views::RecoveryProcessStatus,
+) -> RecoveryState {
+    match status {
+        aura_app::views::RecoveryProcessStatus::Idle => RecoveryState::None,
+        aura_app::views::RecoveryProcessStatus::Initiated => RecoveryState::Initiated,
+        aura_app::views::RecoveryProcessStatus::WaitingForApprovals => RecoveryState::InProgress,
+        aura_app::views::RecoveryProcessStatus::Approved => RecoveryState::ThresholdMet,
+        aura_app::views::RecoveryProcessStatus::Completed => RecoveryState::Completed,
+        aura_app::views::RecoveryProcessStatus::Failed => RecoveryState::Failed,
+    }
+}
+
+/// Convert aura-app recovery state to TUI recovery status
+fn convert_recovery_status(
+    state: &aura_app::views::RecoveryState,
+    guardians: &[aura_app::views::Guardian],
+) -> RecoveryStatus {
+    match &state.active_recovery {
+        Some(process) => {
+            // Build approvals list
+            let approvals: Vec<GuardianApproval> = guardians
+                .iter()
+                .map(|g| GuardianApproval {
+                    guardian_name: g.name.clone(),
+                    approved: process.approved_by.contains(&g.id),
+                })
+                .collect();
+
+            RecoveryStatus {
+                state: convert_recovery_state(process.status),
+                approvals_received: process.approvals_received,
+                threshold: process.approvals_required,
+                approvals,
+            }
+        }
+        None => RecoveryStatus {
+            state: RecoveryState::None,
+            approvals_received: 0,
+            threshold: state.threshold,
+            approvals: vec![],
+        },
+    }
+}
+
 /// The recovery screen
+///
+/// ## Reactive Updates
+///
+/// When `AppCoreContext` is available in the context tree, this component will
+/// subscribe to recovery state signals and automatically update when:
+/// - Guardians are added/removed
+/// - Recovery is initiated
+/// - Guardian approvals are received
 #[component]
 pub fn RecoveryScreen(
     props: &RecoveryScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
+    // Try to get AppCoreContext for reactive signal subscription
+    let app_ctx = hooks.try_use_context::<AppCoreContext>();
+
+    // Initialize reactive state from props
+    let reactive_guardians = hooks.use_state({
+        let initial = props.guardians.clone();
+        move || initial
+    });
+    let reactive_threshold_required = hooks.use_state(|| props.threshold_required);
+    let reactive_threshold_total = hooks.use_state(|| props.threshold_total);
+    let reactive_recovery_status = hooks.use_state({
+        let initial = props.recovery_status.clone();
+        move || initial
+    });
+
+    // Subscribe to recovery signal updates if AppCoreContext is available
+    if let Some(ctx) = app_ctx {
+        hooks.use_future({
+            let mut reactive_guardians = reactive_guardians.clone();
+            let mut reactive_threshold_required = reactive_threshold_required.clone();
+            let mut reactive_threshold_total = reactive_threshold_total.clone();
+            let mut reactive_recovery_status = reactive_recovery_status.clone();
+            let app_core = ctx.app_core.clone();
+            async move {
+                use futures_signals::signal::SignalExt;
+
+                let signal = {
+                    let core = app_core.read().await;
+                    core.recovery_signal()
+                };
+
+                signal
+                    .for_each(|recovery_state| {
+                        // Convert guardians
+                        let guardians: Vec<Guardian> = recovery_state
+                            .guardians
+                            .iter()
+                            .map(convert_guardian)
+                            .collect();
+
+                        // Convert recovery status
+                        let status = convert_recovery_status(&recovery_state, &recovery_state.guardians);
+
+                        reactive_guardians.set(guardians);
+                        reactive_threshold_required.set(recovery_state.threshold);
+                        reactive_threshold_total.set(recovery_state.guardian_count);
+                        reactive_recovery_status.set(status);
+                        async {}
+                    })
+                    .await;
+            }
+        });
+    }
+
+    // Use reactive state for rendering
+    let guardians = reactive_guardians.read().clone();
+    let threshold_required = reactive_threshold_required.get();
+    let threshold_total = reactive_threshold_total.get();
+    let recovery_status = reactive_recovery_status.read().clone();
+
     let active_tab = hooks.use_state(|| RecoveryTab::Guardians);
     let guardian_index = hooks.use_state(|| 0usize);
 
@@ -255,10 +396,6 @@ pub fn RecoveryScreen(
 
     let current_tab = active_tab.get();
     let current_guardian_index = guardian_index.get();
-    let guardians = props.guardians.clone();
-    let threshold_required = props.threshold_required;
-    let threshold_total = props.threshold_total;
-    let recovery_status = props.recovery_status.clone();
 
     // Clone callbacks for event handler
     let on_start_recovery = props.on_start_recovery.clone();

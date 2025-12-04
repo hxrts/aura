@@ -18,6 +18,7 @@ hex = { workspace = true }
 uuid = { workspace = true }
 biscuit-auth = { workspace = true }
 bincode = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 
 # For property-based testing of semilattice laws
 [dev-dependencies]

@@ -419,21 +419,30 @@ impl CryptoEffects for RealCryptoHandler {
             generation_result = Ok((duplicated, fallback_public));
         }
 
-        let (shares, public_key_package) = generation_result
+        let (secret_shares, public_key_package) = generation_result
             .map_err(|e| CryptoError::invalid(format!("FROST key generation failed: {e}")))?;
 
-        // Convert key shares to byte vectors
-        let key_packages: Vec<Vec<u8>> = shares
+        // Convert SecretShares to KeyPackages and serialize using FROST's native method
+        let key_packages: Vec<Vec<u8>> = secret_shares
             .values()
-            .map(|key_package| {
-                bincode::serialize(key_package).map_err(|e| {
+            .map(|secret_share| {
+                // Convert SecretShare to KeyPackage (verifies the share)
+                let key_package: frost::keys::KeyPackage =
+                    secret_share.clone().try_into().map_err(|e: frost::Error| {
+                        CryptoError::invalid(format!(
+                            "Failed to convert secret share to key package: {}",
+                            e
+                        ))
+                    })?;
+                // Serialize using FROST's native serialize method
+                key_package.serialize().map_err(|e| {
                     CryptoError::invalid(format!("Failed to serialize key package: {}", e))
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        // Serialize the public key package
-        let public_key_package_bytes = bincode::serialize(&public_key_package).map_err(|e| {
+        // Serialize the public key package using FROST's native method
+        let public_key_package_bytes = public_key_package.serialize().map_err(|e| {
             CryptoError::invalid(format!("Failed to serialize public key package: {}", e))
         })?;
 
@@ -443,57 +452,43 @@ impl CryptoEffects for RealCryptoHandler {
         })
     }
 
-    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
-        use frost::Field;
+    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
         use frost_ed25519 as frost;
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
 
-        // Generate a canonical signing share deterministically (seeded) or from
-        // the OS RNG. Using the field's `random` ensures we always get a valid
-        // scalar, eliminating spurious `MalformedScalar` errors during tests.
-        let signing_share_scalar = match self.seed {
-            Some(seed) => {
-                let mut rng = ChaCha20Rng::from_seed(seed);
-                <<frost::Ed25519Sha512 as frost::Ciphersuite>::Group as frost::Group>::Field::random(
-                    &mut rng,
-                )
-            }
-            None => {
-                let mut rng = rand::rngs::OsRng;
-                <<frost::Ed25519Sha512 as frost::Ciphersuite>::Group as frost::Group>::Field::random(
-                    &mut rng,
-                )
-            }
-        };
+        // Deserialize the key package using FROST's native deserialize method
+        let key_pkg: frost::keys::KeyPackage = frost::keys::KeyPackage::deserialize(key_package)
+            .map_err(|e| {
+                CryptoError::invalid(format!("Failed to deserialize key package: {}", e))
+            })?;
 
-        let canonical_bytes =
-            <<frost::Ed25519Sha512 as frost::Ciphersuite>::Group as frost::Group>::Field::serialize(
-                &signing_share_scalar,
-            );
+        // Extract the signing share from the key package
+        let signing_share = key_pkg.signing_share();
 
-        let signing_share = frost::keys::SigningShare::deserialize(canonical_bytes)
-            .map_err(|e| CryptoError::invalid(format!("Failed to derive signing share: {}", e)))?;
-
+        // Generate nonces using the actual signing share from the key package
         let (nonces, commitments) = {
             match self.seed {
                 Some(seed) => {
                     let mut rng = ChaCha20Rng::from_seed(seed);
-                    frost::round1::commit(&signing_share, &mut rng)
+                    frost::round1::commit(signing_share, &mut rng)
                 }
                 None => {
                     let mut rng = rand::rngs::OsRng;
-                    frost::round1::commit(&signing_share, &mut rng)
+                    frost::round1::commit(signing_share, &mut rng)
                 }
             }
         };
 
-        // Serialize both nonces and commitments
-        let nonces_bytes = bincode::serialize(&nonces)
+        // Serialize both nonces and commitments using FROST's native method
+        let nonces_bytes = nonces
+            .serialize()
             .map_err(|e| CryptoError::invalid(format!("Failed to serialize nonces: {}", e)))?;
-        let commitments_bytes = bincode::serialize(&commitments)
+        let commitments_bytes = commitments
+            .serialize()
             .map_err(|e| CryptoError::invalid(format!("Failed to serialize commitments: {}", e)))?;
 
+        // Use bincode for the outer tuple since it's our internal format
         bincode::serialize(&(nonces_bytes, commitments_bytes)).map_err(|e| {
             CryptoError::invalid(format!("Failed to serialize FROST signing bundle: {}", e))
         })
@@ -536,24 +531,34 @@ impl CryptoEffects for RealCryptoHandler {
                 )));
             }
 
-            let (_signing_nonces, signing_commitments): (
-                frost::round1::SigningNonces,
-                frost::round1::SigningCommitments,
-            ) = bincode::deserialize(nonce_bytes).map_err(|e| {
-                CryptoError::invalid(format!(
-                    "Invalid signing nonces for participant {}: {}",
-                    participant_id, e
-                ))
-            })?;
+            // First deserialize the outer tuple (nonces_bytes, commitments_bytes) using bincode
+            let (_nonces_bytes, commitments_bytes): (Vec<u8>, Vec<u8>) =
+                bincode::deserialize(nonce_bytes).map_err(|e| {
+                    CryptoError::invalid(format!(
+                        "Invalid signing nonces bundle for participant {}: {}",
+                        participant_id, e
+                    ))
+                })?;
+
+            // Then deserialize the commitments from the inner bytes using FROST's native method
+            let signing_commitments: frost::round1::SigningCommitments =
+                frost::round1::SigningCommitments::deserialize(&commitments_bytes).map_err(
+                    |e| {
+                        CryptoError::invalid(format!(
+                            "Invalid signing commitments for participant {}: {}",
+                            participant_id, e
+                        ))
+                    },
+                )?;
 
             let identifier = frost::Identifier::try_from(participant_id)
                 .map_err(|e| CryptoError::invalid(format!("Invalid participant ID: {}", e)))?;
             commitments.insert(identifier, signing_commitments);
         }
 
-        // Create signing package
+        // Create signing package and serialize using FROST's native method
         let package = frost::SigningPackage::new(commitments, message);
-        let package_bytes = bincode::serialize(&package).map_err(|e| {
+        let package_bytes = package.serialize().map_err(|e| {
             CryptoError::invalid(format!("Failed to serialize signing package: {}", e))
         })?;
 
@@ -576,27 +581,30 @@ impl CryptoEffects for RealCryptoHandler {
         let mut key_share_buf = key_share.to_vec();
         let mut nonce_buf = nonces.to_vec();
 
-        // Deserialize components
-        let signing_package: frost::SigningPackage = bincode::deserialize(&package.package)
-            .map_err(|e| CryptoError::invalid(format!("Invalid signing package: {}", e)))?;
+        // Deserialize components using FROST's native methods
+        let signing_package: frost::SigningPackage =
+            frost::SigningPackage::deserialize(&package.package)
+                .map_err(|e| CryptoError::invalid(format!("Invalid signing package: {}", e)))?;
 
-        let key_package: frost::keys::KeyPackage = bincode::deserialize(&key_share_buf)
-            .map_err(|e| CryptoError::invalid(format!("Invalid key share: {}", e)))?;
+        let key_package: frost::keys::KeyPackage =
+            frost::keys::KeyPackage::deserialize(&key_share_buf)
+                .map_err(|e| CryptoError::invalid(format!("Invalid key share: {}", e)))?;
 
+        // Outer tuple uses bincode, inner nonces use FROST's native method
         let (signing_nonces_bytes, _): (Vec<u8>, Vec<u8>) = bincode::deserialize(&nonce_buf)
             .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces: {}", e)))?;
 
-        let signing_nonces = frost::round1::SigningNonces::deserialize(&signing_nonces_bytes)
-            .map_err(|e| CryptoError::invalid(format!("Invalid signing nonces format: {}", e)))?;
+        let signing_nonces: frost::round1::SigningNonces =
+            frost::round1::SigningNonces::deserialize(&signing_nonces_bytes).map_err(|e| {
+                CryptoError::invalid(format!("Invalid signing nonces format: {}", e))
+            })?;
 
         // Create signature share
         let signature_share = frost::round2::sign(&signing_package, &signing_nonces, &key_package)
             .map_err(|e| CryptoError::invalid(format!("FROST signing failed: {}", e)))?;
 
-        // Serialize result
-        let serialized = bincode::serialize(&signature_share).map_err(|e| {
-            CryptoError::invalid(format!("Failed to serialize signature share: {}", e))
-        })?;
+        // Serialize result using FROST's native method (returns fixed-size array)
+        let serialized = signature_share.serialize().to_vec();
 
         key_share_buf.zeroize();
         nonce_buf.zeroize();
@@ -612,21 +620,27 @@ impl CryptoEffects for RealCryptoHandler {
         use frost_ed25519 as frost;
         use std::collections::BTreeMap;
 
-        // Deserialize signing package
-        let signing_package: frost::SigningPackage = bincode::deserialize(&package.package)
-            .map_err(|e| CryptoError::invalid(format!("Invalid signing package: {}", e)))?;
+        // Deserialize signing package using FROST's native method
+        let signing_package: frost::SigningPackage =
+            frost::SigningPackage::deserialize(&package.package)
+                .map_err(|e| CryptoError::invalid(format!("Invalid signing package: {}", e)))?;
 
-        // Deserialize public key package
+        // Deserialize public key package using FROST's native method
         let pubkey_package: frost::keys::PublicKeyPackage =
-            bincode::deserialize(&package.public_key_package)
+            frost::keys::PublicKeyPackage::deserialize(&package.public_key_package)
                 .map_err(|e| CryptoError::invalid(format!("Invalid public key package: {}", e)))?;
 
-        // Deserialize signature shares
+        // Deserialize signature shares using FROST's native method
         let mut shares = BTreeMap::new();
         for (i, share_bytes) in signature_shares.iter().enumerate() {
             if let Some(&participant_id) = package.participants.get(i) {
+                // SignatureShare::deserialize takes the serialization type, convert Vec to array
+                let share_array: [u8; 32] = share_bytes
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| CryptoError::invalid("Signature share must be 32 bytes"))?;
                 let signature_share: frost::round2::SignatureShare =
-                    bincode::deserialize(share_bytes).map_err(|e| {
+                    frost::round2::SignatureShare::deserialize(share_array).map_err(|e| {
                         CryptoError::invalid(format!("Invalid signature share: {}", e))
                     })?;
                 let identifier = frost::Identifier::try_from(participant_id)
@@ -853,9 +867,15 @@ mod frost_tests {
         assert_eq!(key_gen_result.key_packages.len(), max_signers as usize);
         assert!(!key_gen_result.public_key_package.is_empty());
 
-        // 2. Test nonce generation works
-        let nonces1 = crypto.frost_generate_nonces().await.unwrap();
-        let nonces2 = crypto.frost_generate_nonces().await.unwrap();
+        // 2. Test nonce generation works with the generated key packages
+        let nonces1 = crypto
+            .frost_generate_nonces(&key_gen_result.key_packages[0])
+            .await
+            .unwrap();
+        let nonces2 = crypto
+            .frost_generate_nonces(&key_gen_result.key_packages[1])
+            .await
+            .unwrap();
         assert!(!nonces1.is_empty());
         assert!(!nonces2.is_empty());
 
@@ -931,5 +951,61 @@ mod frost_tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_frost_key_package_roundtrip() {
+        use frost_ed25519 as frost;
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha20Rng;
+
+        // Generate keys directly
+        let seed = [0xA5u8; 32];
+        let rng = ChaCha20Rng::from_seed(seed);
+
+        // generate_with_dealer returns SecretShare, not KeyPackage
+        let (secret_shares, _pubkey) = frost::keys::generate_with_dealer(
+            3, // max_signers
+            2, // threshold
+            frost::keys::IdentifierList::Default,
+            rng,
+        )
+        .expect("Key generation should succeed");
+
+        // Convert SecretShare to KeyPackage (this verifies the share)
+        let secret_share = secret_shares
+            .values()
+            .next()
+            .expect("Should have at least one share");
+        let key_package: frost::keys::KeyPackage = secret_share
+            .clone()
+            .try_into()
+            .expect("SecretShare to KeyPackage conversion should succeed");
+        println!(
+            "Original key package identifier: {:?}",
+            key_package.identifier()
+        );
+
+        // Serialize using FROST's native serialize() method (uses postcard internally)
+        let serialized: Vec<u8> = key_package
+            .serialize()
+            .expect("Serialization should succeed");
+        println!("Serialized length: {} bytes", serialized.len());
+        println!(
+            "First 32 bytes: {:02x?}",
+            &serialized[..32.min(serialized.len())]
+        );
+
+        // Deserialize using FROST's native deserialize() method
+        let deserialized: frost::keys::KeyPackage =
+            frost::keys::KeyPackage::deserialize(&serialized)
+                .expect("Deserialization should succeed");
+        println!(
+            "Deserialized key package identifier: {:?}",
+            deserialized.identifier()
+        );
+
+        // Verify they match
+        assert_eq!(key_package.identifier(), deserialized.identifier());
     }
 }

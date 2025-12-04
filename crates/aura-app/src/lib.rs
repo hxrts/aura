@@ -73,7 +73,10 @@ pub mod platform;
 // Re-exports
 // =============================================================================
 
-pub use crate::core::{AppConfig, AppCore, Intent, IntentError, StateSnapshot};
+pub use crate::core::{
+    AppConfig, AppCore, Intent, IntentChannelType, IntentError, InvitationType, Screen,
+    StateSnapshot,
+};
 pub use crate::queries::Query;
 pub use crate::views::{
     BlockState, Channel, ChannelType, ChatState, ContactsState, InvitationsState, Message,

@@ -584,8 +584,13 @@ impl<'a, E: RelationshipFormationEffects> RelationshipFormationCoordinator<'a, E
     }
 }
 
-/// Initiator's role in relationship formation ceremony (legacy manual implementation)
-#[allow(dead_code)]
+/// Initiator's role in relationship formation ceremony
+///
+/// NOTE: This is a reference implementation kept for documentation purposes.
+/// The active implementation uses the `choreography!` macro above which provides
+/// type-safe, deadlock-free session types. This manual implementation shows
+/// the protocol flow explicitly.
+#[allow(dead_code)] // Reference implementation - active version uses choreography! macro
 async fn initiator_session<E: RelationshipFormationEffects>(
     effects: &E,
     config: &RelationshipFormationConfig,
@@ -778,7 +783,12 @@ async fn initiator_session<E: RelationshipFormationEffects>(
 }
 
 /// Responder's role in relationship formation ceremony
-#[allow(dead_code)]
+///
+/// NOTE: This is a reference implementation kept for documentation purposes.
+/// The active implementation uses the `choreography!` macro above which provides
+/// type-safe, deadlock-free session types. This manual implementation shows
+/// the protocol flow explicitly.
+#[allow(dead_code)] // Reference implementation - active version uses choreography! macro
 async fn responder_session<E: RelationshipFormationEffects>(
     effects: &E,
     config: &RelationshipFormationConfig,
@@ -1524,7 +1534,10 @@ mod tests {
             })
         }
 
-        async fn frost_generate_nonces(&self) -> Result<Vec<u8>, aura_core::AuraError> {
+        async fn frost_generate_nonces(
+            &self,
+            _key_package: &[u8],
+        ) -> Result<Vec<u8>, aura_core::AuraError> {
             Ok(vec![0x44; 32])
         }
 

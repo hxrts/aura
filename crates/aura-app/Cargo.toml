@@ -71,8 +71,16 @@ testutils = []
 # Enable tracing/logging instrumentation
 instrumented = ["dep:tracing"]
 
-# Serialize intents/state for debugging
-debug-serialize = ["dep:serde_json"]
+# Serialize intents/state for debugging (now always available via serde_json)
+debug-serialize = []
+
+# Host binding stub for downstream integrations (iOS/Swift, etc.)
+host = ["dep:anyhow"]
+
+[[bin]]
+name = "app-host"
+path = "src/bin/app_host.rs"
+required-features = ["host"]
 
 [dependencies]
 # Core Aura crates
@@ -107,7 +115,12 @@ dominator = { version = "0.5", optional = true }
 
 # Optional: Development
 tracing = { version = "0.1", optional = true }
-serde_json = { version = "1", optional = true }
+
+# Required for journal persistence
+serde_json = "1"
+
+# Optional: Host binding stub
+anyhow = { version = "1", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # WASM-specific async runtime

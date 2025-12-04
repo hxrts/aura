@@ -123,7 +123,7 @@ The `evaluator` module provides subprocess-based parsing using `quint parse --ou
 
 ### Quint Specifications
 
-Formal specifications are organized in the `specs/quint/` directory. Each protocol has a core specification and a harness for simulator integration.
+Formal specifications are organized in `specs/quint/` and `crates/aura-simulator/tests/quint_specs/`. Each protocol has a core specification and a harness for simulator integration.
 
 | Specification | Description |
 |---------------|-------------|
@@ -134,6 +134,9 @@ Formal specifications are organized in the `specs/quint/` directory. Each protoc
 | `protocol_counter.qnt` | Counter reservation with Lamport clocks |
 | `protocol_sessions.qnt` | Session management |
 | `protocol_journal.qnt` | Ledger event tracking |
+| `capability_properties.qnt` | Guard chain, budget, and integrity verification |
+| `session_types.qnt` | Session type state machine properties |
+| `journal_effect_api.qnt` | Journal CRDT and event authorization |
 
 Harness specifications expose standard action entry points. The `register()` action initializes protocols. The `complete()` action handles successful completion. The `abort()` action handles failure with reason codes.
 
@@ -170,6 +173,60 @@ Quint specifications define several property types for verification.
 | Temporal | Property holds across state sequences |
 
 Safety properties verify that invalid states cannot occur. Liveness properties verify that the system makes progress. Invariants define conditions that must hold in every reachable state.
+
+### Capability Property Verification
+
+The `capability_properties.qnt` specification verifies Aura's core security properties. These properties correspond to the guard chain architecture documented in `docs/003_information_flow_contract.md`.
+
+#### Property Categories
+
+| Category | Guard | Purpose |
+|----------|-------|---------|
+| Authorization | CapGuard | Verify capability grants follow meet-semilattice rules |
+| Budget | FlowGuard | Verify charge-before-send and resource accounting |
+| Integrity | JournalCoupler | Verify attenuation-only and receipt chain correctness |
+
+The `aura-quint` runner automatically classifies properties by detecting keywords in property names. Authorization properties contain keywords like `grant`, `permit`, `guard`, or `authorization`. Budget properties contain `budget`, `charge`, `spent`, or `flowguard`. Integrity properties contain `attenuation`, `signature`, or `chain`.
+
+#### Authorization Invariants
+
+```
+guardChainOrder: All completed operations follow CapGuard → FlowGuard → JournalCoupler → TransportSend
+noCapabilityWidening: Attenuation count only increases (capabilities never widen)
+authorizationSoundness: Temporal property ensuring all operations pass full guard chain
+```
+
+Authorization verification ensures that every transport operation passes through the complete guard chain in the correct order. The meet-semilattice property guarantees capabilities can only be narrowed, never expanded.
+
+#### Budget Invariants
+
+```
+chargeBeforeSend: Every TransportSend operation has charged=true
+spentWithinLimit: spent ≤ limit for all flow budgets
+noTransportWithoutFlowGuard: TransportSend implies FlowGuard in guard steps
+budgetMonotonicity: Spent counters are always non-negative
+flowBudgetFairness: All budget limits are positive
+```
+
+Budget verification ensures the charge-before-send invariant holds. No message can be sent without first charging the flow budget. The `spent + cost ≤ limit` constraint prevents resource exhaustion attacks.
+
+#### Integrity Invariants
+
+```
+attenuationOnlyNarrows: Capability levels remain within valid bounds after attenuation
+receiptChainIntegrity: Receipt chain hashes are preserved (verified via hash consistency)
+receiptIntegrity: Temporal property for receipt chain correctness
+```
+
+Integrity verification ensures Biscuit tokens can only be attenuated (narrowed), never forged or expanded. Receipt chains provide cryptographic accountability for all transport operations.
+
+#### Running Capability Verification
+
+```bash
+just quint-parse crates/aura-simulator/tests/quint_specs/capability_properties.qnt output.json
+```
+
+The specification models the guard chain state machine with actions for context initialization, authority creation, transport operations, and capability attenuation. The `step` relation explores the state space through non-deterministic choices.
 
 ### Simulator Integration
 

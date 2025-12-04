@@ -60,6 +60,7 @@ pub mod cli;
 pub mod effects;
 pub mod handlers;
 pub mod ids;
+#[cfg(feature = "terminal")]
 pub mod tui;
 
 // Demo module requires simulator - only available with development feature
@@ -67,7 +68,11 @@ pub mod tui;
 pub mod demo;
 
 // Re-export CLI handler and command enums
-pub use cli::{AmpAction, AuthorityCommands, ChatCommands, ContextAction, DemoCommands, TuiArgs};
+#[cfg(feature = "development")]
+pub use cli::DemoCommands;
+#[cfg(feature = "terminal")]
+pub use cli::TuiArgs;
+pub use cli::{AmpAction, AuthorityCommands, ChatCommands, ContextAction, SyncAction};
 pub use handlers::CliHandler;
 
 // Action types defined in this module (no re-export needed)

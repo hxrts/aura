@@ -92,6 +92,11 @@ impl PhysicalTimeEffects for PhysicalTimeHandler {
     }
 }
 
+/// Implement TimeEffects for PhysicalTimeHandler using default implementations
+/// (current_timestamp derives from physical_time via the trait default)
+#[async_trait]
+impl aura_core::effects::TimeEffects for PhysicalTimeHandler {}
+
 /// Simple logical clock handler - stateless pure functions for logical clock operations.
 #[derive(Debug, Clone, Default)]
 pub struct LogicalClockHandler;

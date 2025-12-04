@@ -187,16 +187,17 @@ pub fn get_device_auth_choreography() {
 }
 
 /// Device authentication coordinator using choreographic protocol
-#[allow(dead_code)]
 pub struct DeviceAuthCoordinator<E>
 where
     E: AuraEffects + ?Sized,
 {
     /// Shared effect system implementing AuraEffects
     effects: Arc<E>,
-    /// Biscuit token manager for authorization
+    /// Biscuit token manager for authorization (infrastructure for full Biscuit validation)
+    #[allow(dead_code)] // Infrastructure for future Biscuit token validation
     token_manager: Option<BiscuitTokenManager>,
-    /// Biscuit guard evaluator for permission checks
+    /// Biscuit guard evaluator for permission checks (infrastructure for full Biscuit validation)
+    #[allow(dead_code)] // Infrastructure for future Biscuit guard evaluation
     guard_evaluator: Option<BiscuitGuardEvaluator>,
 }
 

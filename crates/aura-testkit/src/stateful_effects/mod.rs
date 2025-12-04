@@ -36,7 +36,7 @@
 //! async fn test_with_stateful_mocks() {
 //!     let console = MockConsoleHandler::new();
 //!     let crypto = MockCryptoHandler::with_seed(42);
-//!     
+//!
 //!     // Use handlers for testing...
 //!     console.log_info("Test message").await?;
 //!     assert_eq!(console.captured_logs().len(), 1);
@@ -65,7 +65,7 @@ pub use crypto::MockCryptoHandler;
 pub use journal::MockJournalHandler;
 // leakage_handler types removed - use aura_effects::ProductionLeakageHandler<S> with MemoryStorageHandler
 pub use random::MockRandomHandler;
-pub use secure::MockSecureStorageHandler;
+// secure::MockSecureStorageHandler removed - module is now a placeholder
 pub use simulation::MockSimulationHandler;
 pub use storage::MemoryStorageHandler;
 pub use system::{LoggingHandler, MetricsHandler, MonitoringHandler};

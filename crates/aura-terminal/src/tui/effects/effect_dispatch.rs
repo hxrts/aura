@@ -42,6 +42,7 @@ use std::sync::Arc;
 use crate::ids;
 use crate::tui::effects::bridge::{frost_sign_tree_op, frost_sign_tree_op_with_keys};
 use crate::tui::effects::command_parser::{AuraEvent, CommandAuthorizationLevel, EffectCommand};
+use aura_app::{Intent, IntentChannelType};
 use aura_core::effects::{
     amp::{
         AmpChannelEffects, ChannelCloseParams, ChannelCreateParams, ChannelJoinParams,
@@ -53,7 +54,6 @@ use aura_core::effects::{
 use aura_core::hash::{self, hash};
 use aura_core::identifiers::{ChannelId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
-use aura_invitation::device_invitation::InvitationEnvelope;
 use aura_journal::semilattice::{InvitationRecordRegistry, InvitationStatus};
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
@@ -443,6 +443,36 @@ impl CapabilityTokenStore {
     }
 }
 
+/// Status of a guardian invitation
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GuardianInvitationStatus {
+    /// Invitation is pending response
+    Pending,
+    /// Invitation was accepted
+    Accepted,
+    /// Invitation was declined
+    Declined,
+    /// Invitation expired
+    Expired,
+}
+
+/// A guardian invitation record
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct GuardianInvitation {
+    /// Unique invitation ID
+    pub invitation_id: String,
+    /// Contact ID if specified
+    pub contact_id: Option<String>,
+    /// When the invitation was created
+    pub created_at: u64,
+    /// When the invitation expires
+    pub expires_at: u64,
+    /// Current status of the invitation
+    pub status: GuardianInvitationStatus,
+}
+
 /// Internal state for the effect bridge
 pub(super) struct BridgeState {
     /// Whether the bridge is connected
@@ -473,18 +503,20 @@ pub(super) struct BridgeState {
     pub user_token: Option<biscuit_auth::Biscuit>,
     /// FROST threshold signing state
     pub frost_state: FrostState,
-    /// Pending invitation envelopes (keyed by invitation_id)
-    /// These are received via transport and stored for accept/decline
-    pub pending_invitations: HashMap<String, InvitationEnvelope>,
     /// Invitation record registry for tracking invitation status
+    /// NOTE: This duplicates AppCore.view_state.invitations but is kept for demo implementations
     pub invitation_registry: InvitationRecordRegistry,
     /// Blocks created or joined by the user (keyed by block_id)
+    /// NOTE: This duplicates AppCore.view_state.block but is kept for demo implementations
     pub blocks: HashMap<String, BlockState>,
     /// Currently active block (if any)
+    /// NOTE: This duplicates AppCore selection state but is kept for demo implementations
     pub current_block: Option<String>,
     /// Pending block invitations received (keyed by invitation_id)
+    /// NOTE: This should be migrated to AppCore.view_state.invitations
     pub pending_block_invitations: HashMap<String, BlockInvitationEnvelope>,
     /// Sent block invitations (keyed by invitation_id)
+    /// NOTE: This should be migrated to AppCore.view_state.invitations
     pub sent_block_invitations: HashMap<String, BlockInvitationEnvelope>,
     /// User's current nickname/display name (local preference)
     pub user_nickname: Option<String>,
@@ -498,6 +530,10 @@ pub(super) struct BridgeState {
     pub capability_token_store: CapabilityTokenStore,
     /// Tracks whether tokens have already been loaded
     pub tokens_loaded: bool,
+    /// Known peers for sync operations
+    /// Populated via AddPeer command or peer discovery
+    pub known_peers: Vec<uuid::Uuid>,
+    // NOTE: contacts and guardian_invitations removed - use AppCore.view_state instead
 }
 
 impl Default for BridgeState {
@@ -516,7 +552,6 @@ impl Default for BridgeState {
             // Production: Set via authentication flow with real token from auth ceremony
             user_token: None,
             frost_state: FrostState::default(),
-            pending_invitations: HashMap::new(),
             invitation_registry: InvitationRecordRegistry::new(),
             blocks: HashMap::new(),
             current_block: None,
@@ -531,6 +566,8 @@ impl Default for BridgeState {
             // Start with in-memory token store; persistence can be added via with_persistence
             capability_token_store: CapabilityTokenStore::new(),
             tokens_loaded: false,
+            // Start with no known peers; add via AddPeer command or discovery
+            known_peers: Vec::new(),
         }
     }
 }
@@ -635,6 +672,7 @@ pub(super) async fn execute_command(
     time_effects: &Arc<dyn PhysicalTimeEffects>,
     amp_effects: Option<&(dyn AmpChannelEffects + Send + Sync)>,
     effect_system: Option<&Arc<aura_agent::AuraEffectSystem>>,
+    app_core: Option<&Arc<tokio::sync::RwLock<aura_app::AppCore>>>,
 ) -> Result<(), String> {
     tracing::debug!("Executing command: {:?}", command);
 
@@ -685,14 +723,61 @@ pub(super) async fn execute_command(
         EffectCommand::StartRecovery => {
             tracing::info!("StartRecovery command executing");
 
-            // Create demo recovery session
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let intent = Intent::InitiateRecovery;
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for InitiateRecovery: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
+
+            // Create recovery session from AppCore guardian configuration
             let session_id = ids::uuid("tui:recovery-session").to_string();
             let account_authority = ids::authority_id("tui:demo-account");
-            let guardian1 = ids::authority_id("tui:demo-guardian-1");
-            let guardian2 = ids::authority_id("tui:demo-guardian-2");
-            let guardian3 = ids::authority_id("tui:demo-guardian-3");
-            let guardians = vec![guardian1, guardian2, guardian3];
-            let threshold = 2; // 2-of-3 threshold
+
+            // Get guardians and threshold from AppCore if available, otherwise use demo data
+            let (guardians, threshold) = if let Some(core) = app_core.as_ref() {
+                let core_guard = core.read().await;
+                let snapshot = core_guard.snapshot();
+                let recovery_state = &snapshot.recovery;
+
+                // Convert configured guardians to AuthorityIds
+                let configured_guardians: Vec<aura_core::AuthorityId> = recovery_state
+                    .guardians
+                    .iter()
+                    .filter(|g| g.status == aura_app::views::GuardianStatus::Active)
+                    .map(|g| ids::authority_id(&g.id))
+                    .collect();
+
+                let threshold = recovery_state.threshold as usize;
+
+                if configured_guardians.is_empty() || threshold == 0 {
+                    // No guardians configured - use demo data
+                    tracing::info!("No guardians configured, using demo data for recovery");
+                    let guardian1 = ids::authority_id("tui:demo-guardian-1");
+                    let guardian2 = ids::authority_id("tui:demo-guardian-2");
+                    let guardian3 = ids::authority_id("tui:demo-guardian-3");
+                    (vec![guardian1, guardian2, guardian3], 2)
+                } else {
+                    tracing::info!(
+                        "Using configured guardians: count={}, threshold={}",
+                        configured_guardians.len(),
+                        threshold
+                    );
+                    (configured_guardians, threshold)
+                }
+            } else {
+                // No AppCore - use demo data
+                let guardian1 = ids::authority_id("tui:demo-guardian-1");
+                let guardian2 = ids::authority_id("tui:demo-guardian-2");
+                let guardian3 = ids::authority_id("tui:demo-guardian-3");
+                (vec![guardian1, guardian2, guardian3], 2)
+            };
 
             // Create recovery context (relational context is derived from participants)
             let recovery_context = Arc::new(RelationalContext::new(guardians.clone()));
@@ -738,6 +823,21 @@ pub(super) async fn execute_command(
                 "SubmitGuardianApproval command executing for guardian: {}",
                 guardian_id
             );
+
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                // Use a deterministic recovery context ID for now
+                let recovery_context = ContextId::default();
+                let intent = Intent::ApproveRecovery { recovery_context };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for ApproveRecovery: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
 
             // Get current recovery session from state
             let mut bridge_state = state.write().await;
@@ -797,6 +897,20 @@ pub(super) async fn execute_command(
 
         EffectCommand::CompleteRecovery => {
             tracing::info!("CompleteRecovery command executing");
+
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let recovery_context = ContextId::default();
+                let intent = Intent::CompleteRecovery { recovery_context };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for CompleteRecovery: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
 
             // Get recovery session from state
             let mut bridge_state = state.write().await;
@@ -863,6 +977,31 @@ pub(super) async fn execute_command(
                 .unwrap_or_else(|_| ChannelId::from_bytes(hash::hash(channel.as_bytes())));
             let sender = ids::authority_id("tui:self");
 
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                // Convert channel string to ContextId - use string parse or generate from hash
+                let context_id = ContextId::from_str(&channel).unwrap_or_else(|_| {
+                    let h = hash::hash(channel.as_bytes());
+                    let mut uuid_bytes = [0u8; 16];
+                    uuid_bytes.copy_from_slice(&h[..16]);
+                    ContextId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes))
+                });
+                let intent = Intent::SendMessage {
+                    channel_id: context_id,
+                    content: content.clone(),
+                    reply_to: None,
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
+
+            // Also send via amp_effects for network side effects
             if let Some(amp) = amp_effects {
                 let params = ChannelSendParams {
                     context,
@@ -891,6 +1030,28 @@ pub(super) async fn execute_command(
             topic,
             members,
         } => {
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let channel_type = if members.len() == 1 {
+                    IntentChannelType::DirectMessage
+                } else {
+                    IntentChannelType::Block
+                };
+                let intent = Intent::CreateChannel {
+                    name: name.clone(),
+                    channel_type,
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for CreateChannel: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
+
+            // Also create via amp_effects for network side effects
             if let Some(amp) = amp_effects {
                 let params = ChannelCreateParams {
                     context,
@@ -1042,6 +1203,27 @@ pub(super) async fn execute_command(
         }
 
         EffectCommand::JoinChannel { channel } => {
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let context_id = ContextId::from_str(&channel).unwrap_or_else(|_| {
+                    let h = hash::hash(channel.as_bytes());
+                    let mut uuid_bytes = [0u8; 16];
+                    uuid_bytes.copy_from_slice(&h[..16]);
+                    ContextId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes))
+                });
+                let intent = Intent::JoinChannel {
+                    channel_id: context_id,
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for JoinChannel: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
+
             // Wire to AmpChannelEffects for channel membership
             if let Some(amp) = amp_effects {
                 let channel_id = ChannelId::from_bytes(hash(channel.as_bytes()));
@@ -1074,6 +1256,27 @@ pub(super) async fn execute_command(
         }
 
         EffectCommand::LeaveChannel { channel } => {
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let context_id = ContextId::from_str(&channel).unwrap_or_else(|_| {
+                    let h = hash::hash(channel.as_bytes());
+                    let mut uuid_bytes = [0u8; 16];
+                    uuid_bytes.copy_from_slice(&h[..16]);
+                    ContextId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes))
+                });
+                let intent = Intent::LeaveChannel {
+                    channel_id: context_id,
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for LeaveChannel: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
+
             // Wire to AmpChannelEffects for channel membership
             if let Some(amp) = amp_effects {
                 let channel_id = ChannelId::from_bytes(hash(channel.as_bytes()));
@@ -1112,21 +1315,14 @@ pub(super) async fn execute_command(
             bridge_state.user_nickname = Some(name.clone());
             drop(bridge_state);
 
-            // TODO: Persist nickname to local store (see wiring.md Section 6.1)
-            //
-            // Full implementation requires:
-            // 1. Add local_store: Option<Arc<Mutex<TuiLocalStore<...>>>> to BridgeState
-            // 2. Initialize local_store in BridgeState::default() or new constructor
-            // 3. Persist nickname using local_store like:
-            //    ```rust
-            //    if let Some(store) = &bridge_state.local_store {
-            //        let mut store = store.lock().await;
-            //        store.data_mut().settings.insert("user_nickname".to_string(), name.clone());
-            //        if let Err(e) = store.save().await {
-            //            tracing::warn!("Failed to persist nickname to local store: {:?}", e);
-            //        }
-            //    }
-            //    ```
+            // Persist nickname to storage via effect system
+            if let Some(effects) = &effect_system {
+                use aura_core::effects::StorageEffects;
+                let nickname_key = "tui/settings/user_nickname";
+                if let Err(e) = effects.store(nickname_key, name.as_bytes().to_vec()).await {
+                    tracing::warn!("Failed to persist nickname to storage: {:?}", e);
+                }
+            }
 
             // Emit nickname updated event
             let _ = event_tx.send(AuraEvent::NicknameUpdated {
@@ -1137,11 +1333,187 @@ pub(super) async fn execute_command(
             Ok(())
         }
 
+        // === Contact Commands ===
+        // NOTE: Contact state is now managed via AppCore.view_state.contacts
+        // These commands dispatch intents to AppCore for state updates
+        EffectCommand::UpdateContactPetname {
+            contact_id,
+            petname,
+        } => {
+            tracing::info!("Updating petname for contact {}: {}", contact_id, petname);
+
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let intent = Intent::SetPetname {
+                    contact_id: contact_id.clone(),
+                    petname: petname.clone(),
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for SetPetname: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
+
+            // Persist petname to storage (backup to journal)
+            if let Some(effects) = &effect_system {
+                use aura_core::effects::StorageEffects;
+                let petname_key = format!("tui/contacts/{}/petname", contact_id);
+                if let Err(e) = effects
+                    .store(&petname_key, petname.as_bytes().to_vec())
+                    .await
+                {
+                    tracing::warn!("Failed to persist contact petname to storage: {:?}", e);
+                }
+            }
+
+            // Emit event for UI update
+            let _ = event_tx.send(AuraEvent::ContactPetnameUpdated {
+                contact_id: contact_id.clone(),
+                petname: petname.clone(),
+            });
+
+            tracing::info!("Contact petname updated successfully");
+            Ok(())
+        }
+
+        EffectCommand::ToggleContactGuardian { contact_id } => {
+            tracing::info!("Toggling guardian status for contact: {}", contact_id);
+
+            // Read current guardian status from AppCore
+            let current_is_guardian = if let Some(core) = app_core {
+                let core_guard = core.read().await;
+                let snapshot = core_guard.snapshot();
+                snapshot
+                    .contacts
+                    .contacts
+                    .iter()
+                    .find(|c| c.id == *contact_id)
+                    .map(|c| c.is_guardian)
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            let new_is_guardian = !current_is_guardian;
+
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let intent = Intent::ToggleGuardian {
+                    contact_id: contact_id.clone(),
+                    is_guardian: new_is_guardian,
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for ToggleGuardian: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
+
+            // Persist guardian status to storage (backup to journal)
+            if let Some(effects) = &effect_system {
+                use aura_core::effects::StorageEffects;
+                let guardian_key = format!("tui/contacts/{}/is_guardian", contact_id);
+                let value = if new_is_guardian {
+                    b"true".to_vec()
+                } else {
+                    b"false".to_vec()
+                };
+                if let Err(e) = effects.store(&guardian_key, value).await {
+                    tracing::warn!(
+                        "Failed to persist contact guardian status to storage: {:?}",
+                        e
+                    );
+                }
+            }
+
+            // Emit event for UI update
+            let _ = event_tx.send(AuraEvent::ContactGuardianToggled {
+                contact_id: contact_id.clone(),
+                is_guardian: new_is_guardian,
+            });
+
+            tracing::info!(
+                "Contact {} guardian status toggled to {}",
+                contact_id,
+                new_is_guardian
+            );
+
+            Ok(())
+        }
+
+        EffectCommand::InviteGuardian { contact_id } => {
+            tracing::info!("Initiating guardian invitation: {:?}", contact_id);
+
+            // Get current timestamp for invitation
+            let now_ts = time_effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0);
+
+            let invitation_id = format!("guardian-inv-{}", now_ts);
+
+            // NOTE: Guardian invitation state is now managed via AppCore.view_state.invitations
+            // We only persist to storage and emit event here
+
+            // Persist to storage
+            if let Some(effects) = &effect_system {
+                use aura_core::effects::StorageEffects;
+                let inv_key = format!("tui/guardian_invitations/{}", invitation_id);
+                #[derive(serde::Serialize)]
+                struct StoredGuardianInvitation {
+                    contact_id: Option<String>,
+                    created_at: u64,
+                    expires_at: u64,
+                }
+                let stored = StoredGuardianInvitation {
+                    contact_id: contact_id.clone(),
+                    created_at: now_ts,
+                    expires_at: now_ts + (7 * 24 * 60 * 60 * 1000),
+                };
+                let inv_data = serde_json::to_vec(&stored).unwrap_or_default();
+                if let Err(e) = effects.store(&inv_key, inv_data).await {
+                    tracing::warn!("Failed to persist guardian invitation to storage: {:?}", e);
+                }
+            }
+
+            // Emit event for UI update
+            let _ = event_tx.send(AuraEvent::GuardianInvitationSent {
+                invitation_id: invitation_id.clone(),
+                contact_id: contact_id.clone(),
+            });
+
+            tracing::info!("Guardian invitation {} created", invitation_id);
+            Ok(())
+        }
+
         // Invitation commands - wired to aura-invitation protocol
-        // Uses BridgeState.pending_invitations for envelope storage
         // Uses BridgeState.invitation_registry for status tracking
+        // NOTE: Invitation state is now primarily managed via AppCore.view_state.invitations
         EffectCommand::AcceptInvitation { invitation_id } => {
             tracing::info!("Accepting invitation: {}", invitation_id);
+
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let intent = Intent::AcceptInvitation {
+                    invitation_fact: invitation_id.clone(),
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for AcceptInvitation: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
 
             // Get current timestamp for registry update
             let now = time_effects.physical_time().await.unwrap_or(PhysicalTime {
@@ -1150,13 +1522,8 @@ pub(super) async fn execute_command(
             });
             let timestamp = TimeStamp::PhysicalClock(now);
 
-            // Try to retrieve and process the invitation
+            // Update invitation registry
             let mut bridge_state = state.write().await;
-
-            // Check if invitation exists in pending invitations
-            let envelope_opt = bridge_state
-                .pending_invitations
-                .remove(invitation_id.as_str());
 
             // Check registry status to validate invitation
             let registry_record = bridge_state.invitation_registry.get(&invitation_id);
@@ -1189,23 +1556,7 @@ pub(super) async fn execute_command(
                 .invitation_registry
                 .mark_accepted(&invitation_id, timestamp);
 
-            // If we have the envelope, log details
-            if let Some(envelope) = envelope_opt {
-                tracing::info!(
-                    "Accepted invitation {} from {:?} with role {}",
-                    invitation_id,
-                    envelope.inviter,
-                    envelope.device_role
-                );
-                // Future: Use InvitationAcceptanceCoordinator to send acceptance acknowledgment
-                // let coordinator = InvitationAcceptanceCoordinator::new(effect_system.clone());
-                // let result = coordinator.accept_invitation(envelope).await?;
-            } else {
-                tracing::info!(
-                    "Accepted invitation {} (envelope not in cache, but tracked in registry)",
-                    invitation_id
-                );
-            }
+            tracing::info!("Accepted invitation {} and updated registry", invitation_id);
 
             drop(bridge_state);
 
@@ -1219,6 +1570,21 @@ pub(super) async fn execute_command(
 
         EffectCommand::DeclineInvitation { invitation_id } => {
             tracing::info!("Declining invitation: {}", invitation_id);
+
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let intent = Intent::RejectInvitation {
+                    invitation_fact: invitation_id.clone(),
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for RejectInvitation: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
 
             // Get current timestamp for registry update
             let now = time_effects.physical_time().await.unwrap_or(PhysicalTime {
@@ -1258,11 +1624,6 @@ pub(super) async fn execute_command(
                     // OK to decline
                 }
             }
-
-            // Remove from pending invitations cache
-            let _ = bridge_state
-                .pending_invitations
-                .remove(invitation_id.as_str());
 
             // Mark as declined in registry
             bridge_state
@@ -2069,13 +2430,56 @@ pub(super) async fn execute_command(
                 return Ok(());
             }
 
-            // TODO: Create and send invitation via AmpChannelEffects once wired
+            // Get current block and create invitation
+            let now_ts = time_effects
+                .physical_time()
+                .await
+                .map(|t| t.ts_ms)
+                .unwrap_or(0);
+            let expires_at = now_ts + (7 * 24 * 60 * 60 * 1000); // 7 days
 
-            tracing::info!("InviteUser successful: {} invited", target);
-            let _ = event_tx.send(AuraEvent::UserInvited {
-                target: target.clone(),
-                actor: actor_id.to_string(),
-            });
+            let invitation_id = format!("inv-{}", now_ts);
+            let target_authority = ids::authority_id(&format!("tui:user:{}", target));
+
+            let mut bridge_state = state.write().await;
+            let current_block_id = bridge_state.current_block.clone();
+            let block_name = current_block_id
+                .as_ref()
+                .and_then(|id| bridge_state.blocks.get(id))
+                .and_then(|b| b.name.clone());
+
+            if let Some(block_id) = current_block_id {
+                let envelope = BlockInvitationEnvelope {
+                    invitation_id: invitation_id.clone(),
+                    block_id: block_id.clone(),
+                    block_name,
+                    inviter_authority: actor_id.clone(),
+                    invitee_authority: target_authority,
+                    created_at: now_ts,
+                    expires_at,
+                };
+                bridge_state
+                    .sent_block_invitations
+                    .insert(invitation_id.clone(), envelope);
+                drop(bridge_state);
+
+                tracing::info!(
+                    "InviteUser successful: {} invited to block {}",
+                    target,
+                    block_id
+                );
+                let _ = event_tx.send(AuraEvent::UserInvited {
+                    target: target.clone(),
+                    actor: actor_id.to_string(),
+                });
+            } else {
+                drop(bridge_state);
+                tracing::warn!("InviteUser failed: no current block set");
+                let _ = event_tx.send(AuraEvent::Error {
+                    code: "NO_CURRENT_BLOCK".to_string(),
+                    message: "No current block to invite user to".to_string(),
+                });
+            }
 
             Ok(())
         }
@@ -2488,9 +2892,14 @@ pub(super) async fn execute_command(
                 }
             }
 
-            // TODO: Update AMP channel metadata once AmpChannelEffects integration is complete
-            // let metadata = ChannelMetadata { topic: Some(text), .. };
-            // amp_effects.update_channel_metadata(channel_id, metadata).await?;
+            // Persist topic to storage via effect system
+            if let Some(effects) = &effect_system {
+                use aura_core::effects::StorageEffects;
+                let topic_key = format!("tui/blocks/{}/topic", channel);
+                if let Err(e) = effects.store(&topic_key, text.as_bytes().to_vec()).await {
+                    tracing::warn!("Failed to persist topic to storage: {:?}", e);
+                }
+            }
 
             Ok(())
         }
@@ -2556,7 +2965,7 @@ pub(super) async fn execute_command(
                             );
                             let _ = event_tx.send(AuraEvent::MessagePinned {
                                 message_id: message_id.clone(),
-                                channel,
+                                channel: channel.clone(),
                                 actor: actor_id.to_string(),
                             });
                         } else {
@@ -2565,8 +2974,19 @@ pub(super) async fn execute_command(
                     }
                 }
 
-                // TODO: Update AMP channel metadata once AmpChannelEffects integration is complete
-                // amp_effects.pin_message(channel_id, message_id).await?;
+                // Persist pinned messages to storage via effect system
+                if let Some(effects) = &effect_system {
+                    use aura_core::effects::StorageEffects;
+                    let bridge_state = state.read().await;
+                    if let Some(block) = bridge_state.blocks.get(channel.as_str()) {
+                        let pins_key = format!("tui/blocks/{}/pinned", channel);
+                        let pins_data =
+                            serde_json::to_vec(&block.pinned_messages).unwrap_or_default();
+                        if let Err(e) = effects.store(&pins_key, pins_data).await {
+                            tracing::warn!("Failed to persist pinned messages to storage: {:?}", e);
+                        }
+                    }
+                }
             } else {
                 tracing::warn!("PinMessage failed: actor not found in any channel");
                 let _ = event_tx.send(AuraEvent::Error {
@@ -2643,7 +3063,7 @@ pub(super) async fn execute_command(
                             );
                             let _ = event_tx.send(AuraEvent::MessageUnpinned {
                                 message_id: message_id.clone(),
-                                channel,
+                                channel: channel.clone(),
                                 actor: actor_id.to_string(),
                             });
                         } else {
@@ -2655,8 +3075,19 @@ pub(super) async fn execute_command(
                     }
                 }
 
-                // TODO: Update AMP channel metadata once AmpChannelEffects integration is complete
-                // amp_effects.unpin_message(channel_id, message_id).await?;
+                // Persist pinned messages to storage via effect system
+                if let Some(effects) = &effect_system {
+                    use aura_core::effects::StorageEffects;
+                    let bridge_state = state.read().await;
+                    if let Some(block) = bridge_state.blocks.get(channel.as_str()) {
+                        let pins_key = format!("tui/blocks/{}/pinned", channel);
+                        let pins_data =
+                            serde_json::to_vec(&block.pinned_messages).unwrap_or_default();
+                        if let Err(e) = effects.store(&pins_key, pins_data).await {
+                            tracing::warn!("Failed to persist pinned messages to storage: {:?}", e);
+                        }
+                    }
+                }
             } else {
                 tracing::warn!("UnpinMessage failed: message not found in any pinned list");
                 let _ = event_tx.send(AuraEvent::Error {
@@ -2740,9 +3171,14 @@ pub(super) async fn execute_command(
                 }
             }
 
-            // TODO: Update AMP channel permissions once AmpChannelEffects integration is complete
-            // let permissions = ChannelPermissions::from_flags(&flags);
-            // amp_effects.update_channel_permissions(channel_id, permissions).await?;
+            // Persist channel mode to storage via effect system
+            if let Some(effects) = &effect_system {
+                use aura_core::effects::StorageEffects;
+                let mode_key = format!("tui/blocks/{}/mode", channel);
+                if let Err(e) = effects.store(&mode_key, flags.as_bytes().to_vec()).await {
+                    tracing::warn!("Failed to persist channel mode to storage: {:?}", e);
+                }
+            }
 
             Ok(())
         }
@@ -2793,6 +3229,21 @@ pub(super) async fn execute_command(
                 "CreateAccount: Creating single-device account for '{}'",
                 display_name
             );
+
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let intent = Intent::CreateAccount {
+                    name: display_name.clone(),
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for CreateAccount: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
 
             // HYBRID IMPLEMENTATION: Real TreeEffects + FROST threshold signing
             // Uses real tree operations with real FROST 1-of-1 ceremony for bootstrap
@@ -2950,6 +3401,21 @@ pub(super) async fn execute_command(
                 "CreateBlock: {:?} - creating block with state tracking",
                 name
             );
+
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let intent = Intent::CreateBlock {
+                    name: name.clone().unwrap_or_else(|| "unnamed".to_string()),
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for CreateBlock: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
 
             // Get current timestamp for block creation
             let now = time_effects
@@ -3118,6 +3584,36 @@ pub(super) async fn execute_command(
                 contact_id
             );
 
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                // Get current block ID from bridge state
+                let block_id_str = {
+                    let bridge_state = state.read().await;
+                    bridge_state.current_block.clone()
+                };
+                if let Some(block_id_str) = block_id_str {
+                    let block_context_id =
+                        ContextId::from_str(&block_id_str).unwrap_or_else(|_| {
+                            let h = hash::hash(block_id_str.as_bytes());
+                            let mut uuid_bytes = [0u8; 16];
+                            uuid_bytes.copy_from_slice(&h[..16]);
+                            ContextId::from_uuid(uuid::Uuid::from_bytes(uuid_bytes))
+                        });
+                    let intent = Intent::InviteToBlock {
+                        block_id: block_context_id,
+                        invitee_id: contact_id.clone(),
+                    };
+                    let mut core_guard = core.write().await;
+                    if let Err(e) = core_guard.dispatch(intent) {
+                        tracing::warn!("AppCore dispatch failed for InviteToBlock: {}", e);
+                    }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+                }
+            }
+
             // Get current timestamp
             let now = time_effects
                 .physical_time()
@@ -3213,46 +3709,79 @@ pub(super) async fn execute_command(
         EffectCommand::ForceSync => {
             // Wire to SyncEffects (AuraEffectSystem implements SyncEffects)
             //
-            // NOTE: Full peer discovery requires PeerManager infrastructure.
-            // For now, we use a demo peer UUID and call sync_with_peer when effect_system
-            // is available. When peer discovery is implemented, this should iterate over
-            // discovered peers.
+            // Sync with all known peers. If no peers are registered, fall back to demo peer.
+            // Use AddPeer command to register peers for sync.
 
-            let peer_uuid = ids::uuid("tui:sync-peer");
-            let peer_id = peer_uuid.to_string();
+            // Get known peers from state
+            let bridge_state = state.read().await;
+            let known_peers = bridge_state.known_peers.clone();
+            drop(bridge_state);
 
-            let _ = event_tx.send(AuraEvent::SyncStarted {
-                peer_id: peer_id.clone(),
-            });
-
-            // Call sync_with_peer if effect_system is available
-            if let Some(effect_system) = effect_system {
-                match effect_system.sync_with_peer(peer_uuid).await {
-                    Ok(metrics) => {
-                        tracing::info!(
-                            "Sync completed with peer {}: {} applied, {} duplicates, {} rounds",
-                            peer_id, metrics.applied, metrics.duplicates, metrics.rounds
-                        );
-                        let _ = event_tx.send(AuraEvent::SyncCompleted {
-                            peer_id,
-                            changes: metrics.applied as u32,
-                        });
-                    }
-                    Err(e) => {
-                        tracing::error!("Sync failed with peer {}: {:?}", peer_id, e);
-                        // Still emit completed event but with 0 changes to indicate failure
-                        let _ = event_tx.send(AuraEvent::SyncCompleted {
-                            peer_id,
-                            changes: 0,
-                        });
-                    }
-                }
+            // Determine which peers to sync with
+            let peers_to_sync: Vec<uuid::Uuid> = if known_peers.is_empty() {
+                // No known peers - use demo peer for backwards compatibility
+                tracing::info!("No known peers registered, using demo peer");
+                vec![ids::uuid("tui:sync-peer")]
             } else {
-                tracing::debug!("Effect system not available for sync, emitting stub events");
-                let _ = event_tx.send(AuraEvent::SyncCompleted {
-                    peer_id,
-                    changes: 0,
+                tracing::info!("Syncing with {} known peers", known_peers.len());
+                known_peers
+            };
+
+            let mut total_changes = 0u32;
+            let mut sync_errors = 0u32;
+
+            // Sync with each peer
+            for peer_uuid in peers_to_sync {
+                let peer_id = peer_uuid.to_string();
+
+                let _ = event_tx.send(AuraEvent::SyncStarted {
+                    peer_id: peer_id.clone(),
                 });
+
+                // Call sync_with_peer if effect_system is available
+                if let Some(effect_system) = effect_system {
+                    match effect_system.sync_with_peer(peer_uuid).await {
+                        Ok(metrics) => {
+                            tracing::info!(
+                                "Sync completed with peer {}: {} applied, {} duplicates, {} rounds",
+                                peer_id,
+                                metrics.applied,
+                                metrics.duplicates,
+                                metrics.rounds
+                            );
+                            total_changes += metrics.applied as u32;
+                            let _ = event_tx.send(AuraEvent::SyncCompleted {
+                                peer_id,
+                                changes: metrics.applied as u32,
+                            });
+                        }
+                        Err(e) => {
+                            tracing::error!("Sync failed with peer {}: {:?}", peer_id, e);
+                            sync_errors += 1;
+                            // Emit failed event for this peer
+                            let _ = event_tx.send(AuraEvent::SyncFailed {
+                                peer_id,
+                                reason: format!("{:?}", e),
+                            });
+                        }
+                    }
+                } else {
+                    tracing::debug!("Effect system not available for sync, emitting stub events");
+                    let _ = event_tx.send(AuraEvent::SyncCompleted {
+                        peer_id,
+                        changes: 0,
+                    });
+                }
+            }
+
+            if sync_errors > 0 {
+                tracing::warn!(
+                    "ForceSync completed with {} errors, {} total changes",
+                    sync_errors,
+                    total_changes
+                );
+            } else {
+                tracing::info!("ForceSync completed: {} total changes", total_changes);
             }
 
             Ok(())
@@ -3310,67 +3839,88 @@ pub(super) async fn execute_command(
             Ok(())
         }
 
+        EffectCommand::AddPeer { peer_id } => {
+            tracing::info!("AddPeer command: {}", peer_id);
+
+            // Parse peer_id string to UUID
+            let peer_uuid = uuid::Uuid::parse_str(&peer_id).map_err(|e| {
+                tracing::error!("Invalid peer UUID '{}': {:?}", peer_id, e);
+                format!("Invalid peer UUID: {:?}", e)
+            })?;
+
+            // Add to known peers list
+            let mut bridge_state = state.write().await;
+            if !bridge_state.known_peers.contains(&peer_uuid) {
+                bridge_state.known_peers.push(peer_uuid);
+                tracing::info!("Added peer {} to known peers list", peer_id);
+            } else {
+                tracing::debug!("Peer {} already in known peers list", peer_id);
+            }
+            drop(bridge_state);
+
+            // Emit event
+            let _ = event_tx.send(AuraEvent::PeerAdded {
+                peer_id: peer_id.clone(),
+            });
+
+            Ok(())
+        }
+
+        EffectCommand::RemovePeer { peer_id } => {
+            tracing::info!("RemovePeer command: {}", peer_id);
+
+            // Parse peer_id string to UUID
+            let peer_uuid = uuid::Uuid::parse_str(&peer_id).map_err(|e| {
+                tracing::error!("Invalid peer UUID '{}': {:?}", peer_id, e);
+                format!("Invalid peer UUID: {:?}", e)
+            })?;
+
+            // Remove from known peers list
+            let mut bridge_state = state.write().await;
+            bridge_state.known_peers.retain(|p| *p != peer_uuid);
+            drop(bridge_state);
+
+            tracing::info!("Removed peer {} from known peers list", peer_id);
+
+            // Emit event
+            let _ = event_tx.send(AuraEvent::PeerRemoved {
+                peer_id: peer_id.clone(),
+            });
+
+            Ok(())
+        }
+
+        EffectCommand::ListPeers => {
+            tracing::info!("ListPeers command");
+
+            // Get known peers
+            let bridge_state = state.read().await;
+            let peers: Vec<String> = bridge_state
+                .known_peers
+                .iter()
+                .map(|p| p.to_string())
+                .collect();
+            let peer_count = peers.len();
+            drop(bridge_state);
+
+            tracing::info!("Known peers: {}", peer_count);
+
+            // Emit event
+            let _ = event_tx.send(AuraEvent::PeersListed { peers });
+
+            Ok(())
+        }
+
         // === Section 9: Neighborhood Traversal ===
         EffectCommand::MovePosition {
             neighborhood_id,
             block_id,
             depth,
         } => {
-            // TODO: Wire to traversal protocol (see wiring.md Section 9.1)
-            //
-            // Current implementation: Basic position tracking in local state + events.
-            //
-            // Full traversal protocol implementation requires:
-            // 1. **Adjacency Graph**: Define and store block adjacency edges
-            //    - Neighborhood topology (which blocks are connected)
-            //    - Valid movement paths between blocks
-            //    - Graph storage in neighborhood protocol state
-            //
-            // 2. **Authorization**: Verify Biscuit capabilities for depth levels
-            //    - Street depth: public access (no special capability needed)
-            //    - Frontage depth: requires "enter-frontage" capability
-            //    - Interior depth: requires "enter-interior" capability
-            //    - Use AuthorizationEffects to check capabilities
-            //
-            // 3. **Movement Validation**: Check if movement is allowed
-            //    - Verify target block exists in neighborhood
-            //    - Check adjacency: can only move to connected blocks
-            //    - Validate depth transition (can't skip from Street to Interior)
-            //    - Return error if movement is invalid
-            //
-            // 4. **Protocol State Update**: Persist traversal state
-            //    - Store current position in neighborhood protocol
-            //    - Broadcast position updates to other neighborhood participants
-            //    - Sync traversal history for audit trail
-            //
-            // Implementation sketch:
-            // ```rust
-            // if let Some(effect_system) = _effect_system {
-            //     // Validate movement
-            //     let current_pos = state.read().await.traversal_position.clone();
-            //     if let Some(current) = current_pos {
-            //         // Check adjacency
-            //         let is_adjacent = effect_system.neighborhood_effects()
-            //             .check_adjacency(&current.block_id, &block_id).await?;
-            //         if !is_adjacent {
-            //             return Err("Cannot move to non-adjacent block".into());
-            //         }
-            //     }
-            //
-            //     // Check depth authorization
-            //     let has_capability = effect_system.authorization_effects()
-            //         .check_capability(&format!("enter-{}", depth)).await?;
-            //     if !has_capability {
-            //         return Err(format!("Missing capability for {} depth", depth));
-            //     }
-            //
-            //     // Update protocol state
-            //     effect_system.neighborhood_effects()
-            //         .update_position(neighborhood_id, block_id, depth).await?;
-            // }
-            // ```
-            //
-            // For now: Update local state and emit events for UI.
+            // Traversal protocol implementation:
+            // - Basic position tracking in local state + events
+            // - Persists traversal position to storage
+            // - Full adjacency/authorization validation deferred to neighborhood protocol
 
             tracing::info!(
                 "MovePosition: neighborhood={}, block={}, depth={}",
@@ -3395,6 +3945,27 @@ pub(super) async fn execute_command(
                 depth: depth.clone(),
             });
 
+            // Persist traversal position to storage via effect system
+            if let Some(effects) = &effect_system {
+                use aura_core::effects::StorageEffects;
+                let pos_key = format!("tui/traversal/{}", neighborhood_id);
+                #[derive(serde::Serialize)]
+                struct StoredPosition {
+                    neighborhood_id: String,
+                    block_id: String,
+                    depth: String,
+                }
+                let stored = StoredPosition {
+                    neighborhood_id: neighborhood_id.clone(),
+                    block_id: block_id.clone(),
+                    depth: depth.clone(),
+                };
+                let pos_data = serde_json::to_vec(&stored).unwrap_or_default();
+                if let Err(e) = effects.store(&pos_key, pos_data).await {
+                    tracing::warn!("Failed to persist traversal position to storage: {:?}", e);
+                }
+            }
+
             tracing::info!("Position updated in local state");
             Ok(())
         }
@@ -3418,6 +3989,21 @@ pub(super) async fn execute_command(
                 threshold_k,
                 threshold_n
             );
+
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                let intent = Intent::UpdateThreshold {
+                    threshold: *threshold_k as u32,
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for UpdateThreshold: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
 
             // Get effect system reference
             let effect_sys =
@@ -3502,6 +4088,33 @@ pub(super) async fn execute_command(
             use aura_protocol::effects::TreeEffects;
 
             tracing::info!("AddDevice: Adding new device '{}' to account", device_name);
+
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                // Get authority ID from bridge state
+                let authority_id = {
+                    let bridge_state = state.read().await;
+                    bridge_state
+                        .account_authority
+                        .as_ref()
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "default".to_string())
+                };
+                // Note: Intent::AddDevice expects public_key, using device_name as placeholder
+                // Real implementation would generate/receive actual public key
+                let intent = Intent::AddDevice {
+                    authority_id,
+                    public_key: device_name.clone(),
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for AddDevice: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
 
             // HYBRID IMPLEMENTATION: Real TreeEffects + FROST threshold signing
             // Uses real tree operations with stored FROST keys for authorization
@@ -3621,6 +4234,31 @@ pub(super) async fn execute_command(
             use aura_protocol::effects::TreeEffects;
 
             tracing::info!("RemoveDevice: Removing device '{}'", device_id);
+
+            // Dispatch intent to AppCore for state management
+            if let Some(core) = app_core {
+                // Get authority ID from bridge state
+                let authority_id = {
+                    let bridge_state = state.read().await;
+                    bridge_state
+                        .account_authority
+                        .as_ref()
+                        .map(|a| a.to_string())
+                        .unwrap_or_else(|| "default".to_string())
+                };
+                let intent = Intent::RemoveDevice {
+                    authority_id,
+                    device_id: device_id.clone(),
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for RemoveDevice: {}", e);
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+            }
 
             // HYBRID IMPLEMENTATION: Real TreeEffects + simplified attestation
             // Uses real tree operations but simplified signing for demo/testing

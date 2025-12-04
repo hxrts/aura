@@ -3,33 +3,31 @@
 //! This example shows how Aura's choreography system supports namespacing
 //! for organizing different protocols and avoiding naming conflicts.
 
+// Example code defines types for demonstration that aren't directly called
+#![allow(dead_code)]
+
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender};
 use rumpsteak_aura::*;
 use rumpsteak_aura_choreography::Label;
 use serde::{Deserialize, Serialize};
 
 // Required type definitions for the generated choreography
-#[allow(dead_code)]
 type Channel = channel::Bidirectional<UnboundedSender<Label>, UnboundedReceiver<Label>>;
 
 // Message types for the authentication protocol
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 struct LoginRequest {
     username: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 struct UserQuery {
     user_id: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 struct UserData {
     user_info: String,
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
 struct AuthResponse {
     token: String,
 }

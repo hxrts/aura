@@ -8,6 +8,7 @@ use std::sync::Arc;
 use crate::tui::components::KeyHintsBar;
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
+use crate::tui::hooks::AppCoreContext;
 use crate::tui::screens::block::{BlockInviteCallback, BlockNavCallback, BlockSendCallback};
 use crate::tui::screens::chat::SendCallback;
 use crate::tui::screens::contacts::{EditPetnameCallback, ToggleGuardianCallback};
@@ -114,6 +115,13 @@ pub struct IoAppProps {
 #[component]
 pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let screen = hooks.use_state(|| Screen::Block);
+    let should_exit = hooks.use_state(|| false);
+    let mut system = hooks.use_context_mut::<SystemContext>();
+
+    // Handle exit request
+    if should_exit.get() {
+        system.exit();
+    }
 
     // Clone props for use
     let channels = props.channels.clone();
@@ -155,9 +163,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let on_block_navigate_neighborhood = props.on_block_navigate_neighborhood.clone();
 
     let hints = vec![
-        KeyHint::new("1-8", "Switch screen"),
         KeyHint::new("Tab", "Next screen"),
         KeyHint::new("S-Tab", "Prev screen"),
+        KeyHint::new("1-8", "Switch screen"),
         KeyHint::new("q", "Quit"),
     ];
 
@@ -165,6 +173,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
     hooks.use_terminal_events({
         let mut screen = screen.clone();
+        let mut should_exit = should_exit.clone();
         move |event| match event {
             TerminalEvent::Key(KeyEvent {
                 code, modifiers, ..
@@ -184,9 +193,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         screen.set(screen.get().next());
                     }
                 }
-                KeyCode::Char('q') => {
-                    // Would use system context to exit
-                }
+                KeyCode::Char('q') => should_exit.set(true),
                 _ => {}
             },
             _ => {}
@@ -583,11 +590,16 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         });
     });
 
-    // RecoveryCallback for adding a guardian (logs for now, would open modal)
-    let on_add_guardian: RecoveryCallback = Arc::new(|| {
-        // TODO: This should open a modal to invite a guardian
-        // For now, just log the action
-        tracing::info!("Add guardian action triggered - would open invitation modal");
+    // RecoveryCallback for adding a guardian - dispatches InviteGuardian command
+    let ctx_for_guardian = ctx_arc.clone();
+    let on_add_guardian: RecoveryCallback = Arc::new(move || {
+        let ctx = ctx_for_guardian.clone();
+        let cmd = EffectCommand::InviteGuardian { contact_id: None };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to invite guardian: {}", e);
+            }
+        });
     });
 
     // MfaCallback for updating MFA policy
@@ -602,42 +614,65 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         });
     });
 
-    // EditPetnameCallback for editing a contact's petname (placeholder - would open modal)
+    // EditPetnameCallback for editing a contact's petname
+    // Note: Full implementation requires modal dialog to get new petname from user
+    // The UpdateContactPetname command is ready, but modal UI is needed to collect input
     let on_edit_petname: EditPetnameCallback = Arc::new(|contact_id: String| {
-        // TODO: This should open a modal to edit the petname
-        // For now, just log the action
-        tracing::info!("Edit petname action triggered for contact: {}", contact_id);
-    });
-
-    // ToggleGuardianCallback for toggling guardian status (placeholder - would dispatch effect)
-    let on_toggle_guardian: ToggleGuardianCallback = Arc::new(|contact_id: String| {
-        // TODO: This should dispatch an effect to toggle guardian status
-        // For now, just log the action
+        // Log the action - modal implementation needed to collect new petname
+        // When modal is implemented: dispatch UpdateContactPetname { contact_id, petname }
         tracing::info!(
-            "Toggle guardian action triggered for contact: {}",
+            "Edit petname triggered for contact: {} - awaiting modal implementation",
             contact_id
         );
     });
 
-    // BlockSendCallback for sending a message in the block channel (placeholder - would open compose modal)
-    let on_block_send: BlockSendCallback = Arc::new(|_content: String| {
-        // TODO: This should open a message compose modal or focus input
-        // For now, just log the action
-        tracing::info!("Block send action triggered - would open compose modal");
+    // ToggleGuardianCallback for toggling guardian status - dispatches ToggleContactGuardian command
+    let ctx_for_toggle = ctx_arc.clone();
+    let on_toggle_guardian: ToggleGuardianCallback = Arc::new(move |contact_id: String| {
+        let ctx = ctx_for_toggle.clone();
+        let cmd = EffectCommand::ToggleContactGuardian { contact_id };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to toggle guardian status: {}", e);
+            }
+        });
     });
 
-    // BlockInviteCallback for inviting someone to the block (placeholder - would open invite modal)
+    // BlockSendCallback for sending a message in the block channel
+    // Note: Full implementation requires compose modal/input focus UI
+    // The SendMessage command is ready for use when UI provides the message content
+    let on_block_send: BlockSendCallback = Arc::new(|content: String| {
+        // Log the action - compose modal implementation needed
+        // When modal is implemented: dispatch SendMessage { channel, content }
+        tracing::info!(
+            "Block send triggered with content '{}' - awaiting compose UI",
+            content
+        );
+    });
+
+    // BlockInviteCallback for inviting someone to the block
+    // Note: Full implementation requires modal to select contact to invite
+    // The InviteUser and SendBlockInvitation commands are ready for use
     let on_block_invite: BlockInviteCallback = Arc::new(|| {
-        // TODO: This should open an invitation modal
-        // For now, just log the action
-        tracing::info!("Block invite action triggered - would open invitation modal");
+        // Log the action - invitation modal needed to select contact
+        // When modal is implemented: dispatch InviteUser { target } or SendBlockInvitation { contact_id }
+        tracing::info!("Block invite triggered - awaiting invitation modal to select contact");
     });
 
-    // BlockNavCallback for navigating to neighborhood view (placeholder - would switch screen)
-    let on_block_navigate_neighborhood: BlockNavCallback = Arc::new(|| {
-        // TODO: This should switch to the neighborhood screen
-        // For now, just log the action
-        tracing::info!("Navigate to neighborhood action triggered");
+    // BlockNavCallback for navigating to neighborhood view - dispatches MovePosition to Street depth
+    let ctx_for_nav = ctx_arc.clone();
+    let on_block_navigate_neighborhood: BlockNavCallback = Arc::new(move || {
+        let ctx = ctx_for_nav.clone();
+        let cmd = EffectCommand::MovePosition {
+            neighborhood_id: "current".to_string(),
+            block_id: "current".to_string(),
+            depth: "Street".to_string(),
+        };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to navigate to neighborhood: {}", e);
+            }
+        });
     });
 
     // Get data from IoContext
@@ -707,58 +742,122 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         ),
     ];
 
-    // TODO: Get devices from context when available
+    // Device list: Currently hardcoded as placeholder
+    // Future: Retrieve from TreeEffects::get_current_state() via commitment tree LeafNodes
+    // See docs/001_system_architecture.md for device information derived from LeafNode
     let devices = vec![Device::new("d1", "Current Device").current()];
 
     // Get threshold info from recovery status
     let threshold_k = recovery_status.threshold as u8;
     let threshold_n = guardians.len().max(recovery_status.threshold as usize) as u8;
 
-    element! {
-        IoApp(
-            channels: channels,
-            messages: messages,
-            help_commands: help_commands,
-            invitations: invitations,
-            guardians: guardians,
-            devices: devices,
-            display_name: "You".to_string(),
-            threshold_k: threshold_k,
-            threshold_n: threshold_n,
-            mfa_policy: MfaPolicy::SensitiveOnly,
-            recovery_status: recovery_status,
-            // Block screen data
-            block_name: block_name,
-            residents: residents,
-            block_budget: block_budget,
-            channel_name: channel_name,
-            // Contacts screen data
-            contacts: contacts,
-            // Neighborhood screen data
-            neighborhood_name: neighborhood_name,
-            blocks: blocks,
-            traversal_depth: TraversalDepth::Street,
-            // Effect dispatch callbacks
-            on_send: Some(on_send),
-            on_accept_invitation: Some(on_accept_invitation),
-            on_decline_invitation: Some(on_decline_invitation),
-            on_enter_block: Some(on_enter_block),
-            on_go_home: Some(on_go_home),
-            on_back_to_street: Some(on_back_to_street),
-            // Recovery callbacks
-            on_start_recovery: Some(on_start_recovery),
-            on_add_guardian: Some(on_add_guardian),
-            // Settings callbacks
-            on_update_mfa: Some(on_update_mfa),
-            // Contacts callbacks
-            on_edit_petname: Some(on_edit_petname),
-            on_toggle_guardian: Some(on_toggle_guardian),
-            // Block callbacks
-            on_block_send: Some(on_block_send),
-            on_block_invite: Some(on_block_invite),
-            on_block_navigate_neighborhood: Some(on_block_navigate_neighborhood),
-        )
+    // Create AppCoreContext for components to access AppCore and signals
+    let app_core_context = ctx_arc
+        .app_core()
+        .cloned()
+        .map(|app_core| AppCoreContext::new(app_core, ctx_arc.clone()));
+
+    // Wrap the app in ContextProvider when AppCore is available
+    // This enables components to use `hooks.use_context::<AppCoreContext>()` for
+    // reactive signal subscription via `use_future`
+    if let Some(context) = app_core_context {
+        element! {
+            ContextProvider(value: Context::owned(context)) {
+                IoApp(
+                    channels: channels,
+                    messages: messages,
+                    help_commands: help_commands,
+                    invitations: invitations,
+                    guardians: guardians,
+                    devices: devices,
+                    display_name: "You".to_string(),
+                    threshold_k: threshold_k,
+                    threshold_n: threshold_n,
+                    mfa_policy: MfaPolicy::SensitiveOnly,
+                    recovery_status: recovery_status,
+                    // Block screen data
+                    block_name: block_name,
+                    residents: residents,
+                    block_budget: block_budget,
+                    channel_name: channel_name,
+                    // Contacts screen data
+                    contacts: contacts,
+                    // Neighborhood screen data
+                    neighborhood_name: neighborhood_name,
+                    blocks: blocks,
+                    traversal_depth: TraversalDepth::Street,
+                    // Effect dispatch callbacks
+                    on_send: Some(on_send),
+                    on_accept_invitation: Some(on_accept_invitation),
+                    on_decline_invitation: Some(on_decline_invitation),
+                    on_enter_block: Some(on_enter_block),
+                    on_go_home: Some(on_go_home),
+                    on_back_to_street: Some(on_back_to_street),
+                    // Recovery callbacks
+                    on_start_recovery: Some(on_start_recovery),
+                    on_add_guardian: Some(on_add_guardian),
+                    // Settings callbacks
+                    on_update_mfa: Some(on_update_mfa),
+                    // Contacts callbacks
+                    on_edit_petname: Some(on_edit_petname),
+                    on_toggle_guardian: Some(on_toggle_guardian),
+                    // Block callbacks
+                    on_block_send: Some(on_block_send),
+                    on_block_invite: Some(on_block_invite),
+                    on_block_navigate_neighborhood: Some(on_block_navigate_neighborhood),
+                )
+            }
+        }
+        .fullscreen()
+        .await
+    } else {
+        // Fallback without context (demo mode or no AppCore)
+        element! {
+            IoApp(
+                channels: channels,
+                messages: messages,
+                help_commands: help_commands,
+                invitations: invitations,
+                guardians: guardians,
+                devices: devices,
+                display_name: "You".to_string(),
+                threshold_k: threshold_k,
+                threshold_n: threshold_n,
+                mfa_policy: MfaPolicy::SensitiveOnly,
+                recovery_status: recovery_status,
+                // Block screen data
+                block_name: block_name,
+                residents: residents,
+                block_budget: block_budget,
+                channel_name: channel_name,
+                // Contacts screen data
+                contacts: contacts,
+                // Neighborhood screen data
+                neighborhood_name: neighborhood_name,
+                blocks: blocks,
+                traversal_depth: TraversalDepth::Street,
+                // Effect dispatch callbacks
+                on_send: Some(on_send),
+                on_accept_invitation: Some(on_accept_invitation),
+                on_decline_invitation: Some(on_decline_invitation),
+                on_enter_block: Some(on_enter_block),
+                on_go_home: Some(on_go_home),
+                on_back_to_street: Some(on_back_to_street),
+                // Recovery callbacks
+                on_start_recovery: Some(on_start_recovery),
+                on_add_guardian: Some(on_add_guardian),
+                // Settings callbacks
+                on_update_mfa: Some(on_update_mfa),
+                // Contacts callbacks
+                on_edit_petname: Some(on_edit_petname),
+                on_toggle_guardian: Some(on_toggle_guardian),
+                // Block callbacks
+                on_block_send: Some(on_block_send),
+                on_block_invite: Some(on_block_invite),
+                on_block_navigate_neighborhood: Some(on_block_navigate_neighborhood),
+            )
+        }
+        .fullscreen()
+        .await
     }
-    .fullscreen()
-    .await
 }

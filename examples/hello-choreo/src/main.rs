@@ -18,8 +18,10 @@ pub struct Ping;
 pub struct Pong;
 
 // Use the choreography macro - generates both rumpsteak and Aura modules
+// Note: Each choreography must have a unique namespace within the same file
 use aura_macros::choreography;
 choreography! {
+    #[namespace = "pingpong"]
     choreography PingPong {
         roles: Alice, Bob;
         Alice -> Bob: Ping;
@@ -27,14 +29,14 @@ choreography! {
     }
 }
 
-// The macro generates the aura_choreography module with all the required components
+// The macro generates the aura_choreography_pingpong module (namespace-prefixed)
 
 /// Demonstration of the choreography system using the actual macro
 #[tokio::main]
 async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     println!("=== Hello Choreography: Aura Macro Demo ===\n");
 
-    use aura_choreography::*;
+    use aura_choreography_pingpong::*;
 
     println!("1. Creating Aura handlers with capabilities:");
 
@@ -161,7 +163,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_choreography_execution() {
-        use aura_choreography::*;
+        use aura_choreography_pingpong::*;
 
         let mut handler = create_simple_handler(AuraRole::Alice);
         let program = builder()
@@ -181,7 +183,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_example_choreography() {
-        use aura_choreography::*;
+        use aura_choreography_pingpong::*;
 
         let example = example_aura_choreography();
         let mut handler = create_simple_handler(AuraRole::Alice);
@@ -196,7 +198,7 @@ mod tests {
 
     #[test]
     fn test_role_display() {
-        use aura_choreography::AuraRole;
+        use aura_choreography_pingpong::AuraRole;
 
         assert_eq!(format!("{}", AuraRole::Alice), "Alice");
         assert_eq!(format!("{}", AuraRole::Bob), "Bob");

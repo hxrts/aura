@@ -265,7 +265,17 @@ impl SyncService {
         // 4. Update metrics
         self.update_sync_metrics(&sync_results).await?;
 
-        // 5. Clean up sessions
+        // 5. Update peer scores based on sync success/failure
+        let score_results: Vec<(DeviceId, bool)> = sync_results
+            .iter()
+            .map(|&(peer, ops)| (peer, ops > 0)) // ops > 0 = success
+            .collect();
+        Self::update_peer_scores_from_sync(&self.peer_manager, &score_results).await?;
+
+        // 6. Log aggregate metrics
+        Self::update_auto_sync_metrics(&score_results).await?;
+
+        // 7. Clean up sessions
         self.cleanup_sync_sessions(&session_peers).await?;
 
         tracing::info!("Completed journal sync with {} peers", sync_results.len());
@@ -291,20 +301,39 @@ impl SyncService {
     {
         // Implement peer synchronization using journal_sync
 
-        // 1. Discover peers via peer_manager
+        // 1. Discover available peers via peer_manager
         let available_peers = self.discover_available_peers().await?;
 
-        // 2. Sync with discovered peers using the full protocol integration
         if available_peers.is_empty() {
             tracing::debug!("No suitable peers found for synchronization");
             return Ok(());
         }
 
-        self.sync_with_peers(effects, available_peers.clone(), now_instant)
+        // 2. Apply peer selection algorithm to choose best peers
+        let selected_peers = Self::select_best_auto_sync_peers(
+            &self.peer_manager,
+            &available_peers,
+            self.config.max_concurrent_syncs,
+        )
+        .await?;
+
+        if selected_peers.is_empty() {
+            tracing::debug!("No peers selected after scoring");
+            return Ok(());
+        }
+
+        tracing::info!(
+            "Selected {} best peers from {} available for sync",
+            selected_peers.len(),
+            available_peers.len()
+        );
+
+        // 3. Sync with selected peers using the full protocol integration
+        self.sync_with_peers(effects, selected_peers.clone(), now_instant)
             .await?;
 
         // 4. Update peer states based on sync results
-        self.update_peer_states(&available_peers).await?;
+        self.update_peer_states(&selected_peers).await?;
 
         Ok(())
     }
@@ -673,7 +702,6 @@ impl SyncService {
     }
 
     /// Select best auto-sync peers based on health and priority (static helper)
-    #[allow(dead_code)]
     async fn select_best_auto_sync_peers(
         peer_manager: &Arc<RwLock<PeerManager>>,
         peers: &[DeviceId],
@@ -753,7 +781,6 @@ impl SyncService {
     }
 
     /// Update peer scores based on sync results (static method)
-    #[allow(dead_code)]
     async fn update_peer_scores_from_sync(
         peer_manager: &Arc<RwLock<PeerManager>>,
         results: &[(DeviceId, bool)],
@@ -775,7 +802,6 @@ impl SyncService {
     }
 
     /// Update auto-sync metrics (static method)
-    #[allow(dead_code)]
     async fn update_auto_sync_metrics(results: &[(DeviceId, bool)]) -> SyncResult<()> {
         let total_peers = results.len();
         let successful_syncs = results.iter().filter(|(_, success)| *success).count();

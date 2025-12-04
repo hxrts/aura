@@ -45,9 +45,9 @@ pub(super) async fn frost_sign_tree_op(
     let message =
         serde_json::to_vec(tree_op).map_err(|e| format!("Failed to serialize TreeOp: {}", e))?;
 
-    // 3. Generate signing nonces
+    // 3. Generate signing nonces using the key package
     let nonces_bytes = crypto_effects
-        .frost_generate_nonces()
+        .frost_generate_nonces(&frost_keys.key_packages[0])
         .await
         .map_err(|e| format!("FROST nonce generation failed: {}", e))?;
 
@@ -100,9 +100,9 @@ pub(super) async fn frost_sign_tree_op_with_keys(
     let message =
         serde_json::to_vec(tree_op).map_err(|e| format!("Failed to serialize TreeOp: {}", e))?;
 
-    // 2. Generate signing nonces
+    // 2. Generate signing nonces using the stored key package
     let nonces_bytes = crypto_effects
-        .frost_generate_nonces()
+        .frost_generate_nonces(key_package)
         .await
         .map_err(|e| format!("FROST nonce generation failed: {}", e))?;
 

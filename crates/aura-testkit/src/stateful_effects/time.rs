@@ -9,23 +9,13 @@ use aura_core::effects::{
     time::TimeComparison, LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects, TimeError,
 };
 use aura_core::time::{LogicalTime, OrderTime, TimeStamp, VectorClock};
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use uuid::Uuid;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Mock time handler for deterministic testing
 #[derive(Debug, Clone)]
 pub struct SimulatedTimeHandler {
     current_time: Arc<Mutex<u64>>,
-    #[allow(dead_code)]
-    base_instant: Arc<Mutex<Instant>>,
-    #[allow(dead_code)]
-    timeout_counter: Arc<Mutex<u64>>,
-    #[allow(dead_code)]
-    active_timeouts: Arc<Mutex<HashMap<Uuid, u64>>>,
-    #[allow(dead_code)]
-    registered_contexts: Arc<Mutex<Vec<Uuid>>>,
     time_scale: f64,
 }
 
@@ -44,10 +34,6 @@ impl SimulatedTimeHandler {
             .as_millis() as u64;
         Self {
             current_time: Arc::new(Mutex::new(now)),
-            base_instant: Arc::new(Mutex::new(Instant::now())),
-            timeout_counter: Arc::new(Mutex::new(0)),
-            active_timeouts: Arc::new(Mutex::new(HashMap::new())),
-            registered_contexts: Arc::new(Mutex::new(Vec::new())),
             time_scale: 1.0,
         }
     }
@@ -56,10 +42,6 @@ impl SimulatedTimeHandler {
     pub fn new_deterministic(start_time_ms: u64, time_scale: f64) -> Self {
         Self {
             current_time: Arc::new(Mutex::new(start_time_ms)),
-            base_instant: Arc::new(Mutex::new(Instant::now())),
-            timeout_counter: Arc::new(Mutex::new(0)),
-            active_timeouts: Arc::new(Mutex::new(HashMap::new())),
-            registered_contexts: Arc::new(Mutex::new(Vec::new())),
             time_scale,
         }
     }

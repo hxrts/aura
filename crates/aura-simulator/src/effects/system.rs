@@ -217,8 +217,8 @@ impl CryptoEffects for SimulationEffectSystem {
             .await
     }
 
-    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
-        self.crypto.frost_generate_nonces().await
+    async fn frost_generate_nonces(&self, key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        self.crypto.frost_generate_nonces(key_package).await
     }
 
     async fn frost_create_signing_package(

@@ -22461,10 +22461,10 @@ even WASM!
       opt-level = 3;
       debug = false;
       # split-debuginfo = "...";
-      strip = "none";
-      lto = false;
-      panic = "unwind";
-      codegen-units = 16;
+      strip = "debuginfo";
+      lto = true;
+      panic = "abort";
+      codegen-units = 1;
       debug-assertions = false;
     };
   };
@@ -22525,4 +22525,3 @@ even WASM!
   #
   };
 }
-

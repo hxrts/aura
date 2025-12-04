@@ -31,6 +31,14 @@ struct ChoreographyInput {
 
 impl Parse for ChoreographyInput {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+        // Skip any attributes (like #[namespace = "..."]) before the choreography keyword
+        while input.peek(Token![#]) {
+            let _: syn::Attribute = input
+                .call(syn::Attribute::parse_outer)?
+                .pop()
+                .ok_or_else(|| syn::Error::new(input.span(), "Expected attribute"))?;
+        }
+
         // Parse "choreography ProtocolName" or "protocol ProtocolName"
         let _keyword: Ident = input.parse()?; // "choreography" or "protocol"
         let protocol_name: Ident = input.parse()?;
@@ -101,7 +109,7 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
     // Generate the Aura wrapper module with namespace support
     let aura_wrapper = if let Some(parsed) = &parsed_input {
         // Extract namespace from the original input - we need to re-parse to get namespace
-        let namespace = extract_namespace_from_input(input);
+        let namespace = extract_namespace_from_input(input.clone());
         generate_aura_wrapper(parsed, namespace.as_deref())
     } else {
         // Fallback: generate with default Alice/Bob roles
@@ -118,8 +126,45 @@ pub fn choreography_impl(input: TokenStream) -> Result<TokenStream, syn::Error> 
         )
     };
 
-    // Return both namespace-aware modules
+    // Extract namespace for uniqueness check (reuse from aura_wrapper if available)
+    let namespace = extract_namespace_from_input(input.clone());
+
+    // Generate a uniqueness marker to catch duplicate namespaces at compile time
+    let namespace_uniqueness_check = if let Some(ns) = &namespace {
+        let marker_name = quote::format_ident!(
+            "_CHOREOGRAPHY_NAMESPACE_{}_MUST_BE_UNIQUE",
+            ns.to_uppercase()
+        );
+        quote! {
+            // Compile-time uniqueness check for choreography namespace
+            // If you see an error here, it means you have two choreographies with the same namespace.
+            // Each choreography must have a unique namespace within the same compilation unit.
+            #[doc(hidden)]
+            #[allow(non_upper_case_globals)]
+            const #marker_name: () = {
+                // This constant ensures namespace uniqueness at compile time.
+                // Duplicate namespaces will cause a "duplicate definition" error pointing here.
+                //
+                // ERROR RESOLUTION: Change one of your #[namespace = "..."] attributes
+                // to use a different, unique name for each choreography.
+                ()
+            };
+        }
+    } else {
+        // No namespace specified - generate a helpful compile error
+        quote! {
+            compile_error!(
+                "Choreography is missing a namespace attribute. \
+                 Add #[namespace = \"unique_name\"] before your choreography! macro. \
+                 Each choreography in the same file must have a unique namespace."
+            );
+        }
+    };
+
+    // Return both namespace-aware modules with uniqueness check
     Ok(quote! {
+        #namespace_uniqueness_check
+
         // Rumpsteak-aura generated choreography (session types, projections) - namespace-aware
         #rumpsteak_output
 
@@ -824,7 +869,12 @@ fn generate_leakage_integration(annotations: &[AuraEffect]) -> TokenStream {
 ///
 /// This follows the external-demo pattern exactly and provides full
 /// rumpsteak-aura feature inheritance without extension conflicts.
-#[allow(dead_code)]
+///
+/// NOTE: This is an alternative implementation strategy kept for reference.
+/// The active implementation uses `choreography_impl_namespace_aware` which
+/// provides proper namespace isolation. This standard version is preserved
+/// for cases where namespace isolation is not needed.
+#[allow(dead_code)] // Alternative implementation - active version uses namespace_aware
 fn choreography_impl_standard(input: TokenStream) -> Result<TokenStream, syn::Error> {
     // Convert token stream to string for parsing
     let input_str = input.to_string();

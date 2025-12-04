@@ -20,18 +20,22 @@
 //! // Dispatch effects
 //! ctx.dispatch_send_message("channel-1", "Hello!").await;
 //! ```
+//!
+//! ## Note on Reactive Updates
+//!
+//! Screen components now subscribe directly to AppCore signals for reactive
+//! updates. The snapshot methods in this context provide synchronous access
+//! for initial rendering and fallback cases.
 
 use std::sync::Arc;
 
+use aura_app::AppCore;
+use tokio::sync::RwLock;
+
 use crate::tui::effects::{AuraEvent, EffectBridge, EffectCommand, EventFilter, EventSubscription};
 use crate::tui::hooks::{
-    snapshot_block, snapshot_chat, snapshot_contacts, snapshot_guardians, snapshot_invitations,
-    snapshot_neighborhood, snapshot_recovery, BlockSnapshot, ChatSnapshot, ContactsSnapshot,
-    GuardiansSnapshot, InvitationsSnapshot, NeighborhoodSnapshot, RecoverySnapshot,
-};
-use crate::tui::reactive::views::{
-    BlockView, ChatView, ContactsView, GuardiansView, InvitationsView, NeighborhoodView,
-    RecoveryView,
+    BlockSnapshot, ChatSnapshot, ContactsSnapshot, GuardiansSnapshot, InvitationsSnapshot,
+    NeighborhoodSnapshot, RecoverySnapshot,
 };
 use crate::tui::types::{
     BlockBudget, Channel, Contact, Guardian, Invitation, Message, RecoveryStatus, Resident,
@@ -39,115 +43,290 @@ use crate::tui::types::{
 
 /// iocraft-friendly context
 ///
-/// Self-contained context providing snapshot-based access to reactive views
+/// Self-contained context providing snapshot-based access to AppCore ViewState
 /// and effect dispatch for iocraft components.
+///
+/// ## AppCore Integration
+///
+/// This context delegates to aura-app's ViewState for all data access,
+/// enabling the full intent-based state management flow:
+///
+/// ```text
+/// Intent → Journal → Reduce → ViewState → TUI Snapshot
+/// ```
+///
+/// ## Reactive Updates
+///
+/// Screen components subscribe directly to AppCore signals for push-based
+/// reactive updates. This context provides synchronous snapshot access for
+/// initial rendering.
 #[derive(Clone)]
 pub struct IoContext {
     /// Effect bridge for command dispatch
     bridge: Arc<EffectBridge>,
 
-    /// Reactive views
-    chat_view: Arc<ChatView>,
-    guardians_view: Arc<GuardiansView>,
-    recovery_view: Arc<RecoveryView>,
-    invitations_view: Arc<InvitationsView>,
-    block_view: Arc<BlockView>,
-    contacts_view: Arc<ContactsView>,
-    neighborhood_view: Arc<NeighborhoodView>,
+    /// AppCore for intent-based state management
+    /// This is the portable application core from aura-app
+    app_core: Option<Arc<RwLock<AppCore>>>,
 }
 
 impl IoContext {
-    /// Create a new IoContext with an effect bridge
+    /// Create a new IoContext with an effect bridge (demo mode, no AppCore)
     pub fn new(bridge: EffectBridge) -> Self {
         Self {
             bridge: Arc::new(bridge),
-            chat_view: Arc::new(ChatView::new()),
-            guardians_view: Arc::new(GuardiansView::new()),
-            recovery_view: Arc::new(RecoveryView::new()),
-            invitations_view: Arc::new(InvitationsView::new()),
-            block_view: Arc::new(BlockView::new()),
-            contacts_view: Arc::new(ContactsView::new()),
-            neighborhood_view: Arc::new(NeighborhoodView::new()),
+            app_core: None,
         }
     }
 
-    /// Create with default bridge configuration
+    /// Create a new IoContext with AppCore integration
+    ///
+    /// This is the production constructor that enables the full intent-based
+    /// state management flow from aura-app.
+    pub fn with_app_core(bridge: EffectBridge, app_core: Arc<RwLock<AppCore>>) -> Self {
+        Self {
+            bridge: Arc::new(bridge),
+            app_core: Some(app_core),
+        }
+    }
+
+    /// Create with default bridge configuration (demo mode)
     pub fn with_defaults() -> Self {
         Self::new(EffectBridge::new())
     }
 
-    // ─── View Accessors ─────────────────────────────────────────────────────
-
-    /// Get the chat view
-    pub fn chat_view(&self) -> &ChatView {
-        &self.chat_view
+    /// Check if this context has AppCore integration
+    pub fn has_app_core(&self) -> bool {
+        self.app_core.is_some()
     }
 
-    /// Get the guardians view
-    pub fn guardians_view(&self) -> &GuardiansView {
-        &self.guardians_view
+    /// Get the AppCore (if available)
+    pub fn app_core(&self) -> Option<&Arc<RwLock<AppCore>>> {
+        self.app_core.as_ref()
     }
 
-    /// Get the recovery view
-    pub fn recovery_view(&self) -> &RecoveryView {
-        &self.recovery_view
-    }
-
-    /// Get the invitations view
-    pub fn invitations_view(&self) -> &InvitationsView {
-        &self.invitations_view
-    }
-
-    /// Get the block view
-    pub fn block_view(&self) -> &BlockView {
-        &self.block_view
-    }
-
-    /// Get the contacts view
-    pub fn contacts_view(&self) -> &ContactsView {
-        &self.contacts_view
-    }
-
-    /// Get the neighborhood view
-    pub fn neighborhood_view(&self) -> &NeighborhoodView {
-        &self.neighborhood_view
+    /// Get a snapshot from AppCore (blocking read lock)
+    ///
+    /// Returns None if no AppCore is configured or if the lock is busy.
+    fn app_core_snapshot(&self) -> Option<aura_app::StateSnapshot> {
+        if let Some(app_core) = &self.app_core {
+            // Use try_read to avoid blocking indefinitely
+            if let Ok(core) = app_core.try_read() {
+                return Some(core.snapshot());
+            }
+        }
+        None
     }
 
     // ─── Snapshot Accessors ─────────────────────────────────────────────────
+    //
+    // These methods read from AppCore's ViewState and provide snapshots
+    // for initial rendering. Screens subscribe to AppCore signals directly
+    // for reactive updates.
 
     /// Get a snapshot of chat data (channels and messages)
     pub fn snapshot_chat(&self) -> ChatSnapshot {
-        snapshot_chat(&self.chat_view)
+        if let Some(snapshot) = self.app_core_snapshot() {
+            ChatSnapshot {
+                channels: snapshot.chat.channels,
+                selected_channel: snapshot.chat.selected_channel_id,
+                messages: snapshot.chat.messages,
+            }
+        } else {
+            ChatSnapshot::default()
+        }
     }
 
     /// Get a snapshot of guardians data
     pub fn snapshot_guardians(&self) -> GuardiansSnapshot {
-        snapshot_guardians(&self.guardians_view)
+        if let Some(snapshot) = self.app_core_snapshot() {
+            GuardiansSnapshot {
+                guardians: snapshot
+                    .recovery
+                    .guardians
+                    .iter()
+                    .map(|g| crate::tui::reactive::queries::Guardian {
+                        authority_id: g.id.clone(),
+                        name: g.name.clone(),
+                        status: convert_guardian_status(&g.status),
+                        added_at: g.added_at,
+                        last_seen: g.last_seen,
+                        share_index: None,
+                    })
+                    .collect(),
+                threshold: Some(crate::tui::reactive::views::ThresholdConfig {
+                    threshold: snapshot.recovery.threshold,
+                    total: snapshot.recovery.guardian_count,
+                }),
+            }
+        } else {
+            GuardiansSnapshot::default()
+        }
     }
 
     /// Get a snapshot of recovery data
     pub fn snapshot_recovery(&self) -> RecoverySnapshot {
-        snapshot_recovery(&self.recovery_view)
+        // Try AppCore first
+        if let Some(snapshot) = self.app_core_snapshot() {
+            // Compute progress and in_progress status
+            let is_in_progress = snapshot.recovery.active_recovery.is_some();
+            let progress_percent = if let Some(ref process) = snapshot.recovery.active_recovery {
+                if process.approvals_required > 0 {
+                    ((process.approvals_received as f32 / process.approvals_required as f32)
+                        * 100.0) as u32
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+
+            return RecoverySnapshot {
+                status: convert_recovery_status(&snapshot.recovery),
+                progress_percent,
+                is_in_progress,
+            };
+        }
+        RecoverySnapshot::default()
     }
 
     /// Get a snapshot of invitations data
     pub fn snapshot_invitations(&self) -> InvitationsSnapshot {
-        snapshot_invitations(&self.invitations_view)
+        // Try AppCore first
+        if let Some(snapshot) = self.app_core_snapshot() {
+            // Combine pending, sent, and history into one list
+            let invitations: Vec<_> = snapshot
+                .invitations
+                .pending
+                .iter()
+                .chain(snapshot.invitations.sent.iter())
+                .chain(snapshot.invitations.history.iter())
+                .map(|i| convert_invitation(i))
+                .collect();
+            let pending_count = snapshot.invitations.pending_count as usize;
+            return InvitationsSnapshot {
+                invitations,
+                pending_count,
+            };
+        }
+        InvitationsSnapshot::default()
     }
 
     /// Get a snapshot of block data
     pub fn snapshot_block(&self) -> BlockSnapshot {
-        snapshot_block(&self.block_view)
+        // Try AppCore first
+        if let Some(snapshot) = self.app_core_snapshot() {
+            // Map aura-app BlockState to TUI BlockSnapshot
+            let block_info = if !snapshot.block.name.is_empty() {
+                Some(crate::tui::reactive::views::BlockInfo {
+                    id: snapshot.block.id.clone(),
+                    name: Some(snapshot.block.name.clone()),
+                    description: None,
+                    created_at: 0, // Not tracked in aura-app BlockState
+                })
+            } else {
+                None
+            };
+
+            // Map aura-app Resident (has role) to TUI Resident (has role enum)
+            let convert_role = |role: &aura_app::views::block::ResidentRole| match role {
+                aura_app::views::block::ResidentRole::Admin
+                | aura_app::views::block::ResidentRole::Owner => {
+                    crate::tui::reactive::views::ResidentRole::Steward
+                }
+                aura_app::views::block::ResidentRole::Resident => {
+                    crate::tui::reactive::views::ResidentRole::Resident
+                }
+            };
+
+            return BlockSnapshot {
+                block: block_info,
+                residents: snapshot
+                    .block
+                    .residents
+                    .iter()
+                    .map(|r| crate::tui::reactive::views::Resident {
+                        authority_id: r.id.clone(),
+                        name: r.name.clone(),
+                        is_self: false, // Not tracked in aura-app Resident
+                        is_online: r.is_online,
+                        role: convert_role(&r.role),
+                    })
+                    .collect(),
+                storage: crate::tui::reactive::views::StorageInfo {
+                    used_bytes: snapshot.block.storage.used_bytes,
+                    total_bytes: snapshot.block.storage.total_bytes,
+                },
+                is_resident: snapshot.block.resident_count > 0,
+                is_steward: snapshot.block.is_admin(),
+            };
+        }
+        BlockSnapshot::default()
     }
 
     /// Get a snapshot of contacts data
     pub fn snapshot_contacts(&self) -> ContactsSnapshot {
-        snapshot_contacts(&self.contacts_view)
+        // Try AppCore first
+        if let Some(snapshot) = self.app_core_snapshot() {
+            return ContactsSnapshot {
+                contacts: snapshot
+                    .contacts
+                    .contacts
+                    .iter()
+                    .map(|c| crate::tui::reactive::views::Contact {
+                        authority_id: c.id.clone(),
+                        petname: c.petname.clone(),
+                        suggested_name: c.suggested_name.clone(),
+                        is_online: Some(c.is_online),
+                        added_at: 0, // Not tracked in aura-app Contact
+                        last_seen: c.last_interaction,
+                        has_pending_suggestion: false, // Not tracked in aura-app Contact
+                    })
+                    .collect(),
+                policy: crate::tui::reactive::views::SuggestionPolicy::default(),
+            };
+        }
+        ContactsSnapshot::default()
     }
 
     /// Get a snapshot of neighborhood data
     pub fn snapshot_neighborhood(&self) -> NeighborhoodSnapshot {
-        snapshot_neighborhood(&self.neighborhood_view)
+        // Try AppCore first
+        if let Some(snapshot) = self.app_core_snapshot() {
+            // Map aura-app NeighborhoodState to TUI NeighborhoodSnapshot
+            let home_block_id = &snapshot.neighborhood.home_block_id;
+            let current_block_id = snapshot
+                .neighborhood
+                .position
+                .as_ref()
+                .map(|p| p.current_block_id.clone());
+
+            return NeighborhoodSnapshot {
+                neighborhood_id: Some(snapshot.neighborhood.home_block_id.clone()),
+                neighborhood_name: Some(snapshot.neighborhood.home_block_name.clone()),
+                blocks: snapshot
+                    .neighborhood
+                    .neighbors
+                    .iter()
+                    .map(|b| crate::tui::reactive::views::NeighborhoodBlock {
+                        id: b.id.clone(),
+                        name: Some(b.name.clone()),
+                        resident_count: b.resident_count.unwrap_or(0) as u8,
+                        max_residents: 8, // Default max residents
+                        is_home: &b.id == home_block_id,
+                        can_enter: b.can_traverse,
+                        is_current: current_block_id.as_ref() == Some(&b.id),
+                    })
+                    .collect(),
+                position: crate::tui::reactive::views::TraversalPosition {
+                    neighborhood_id: Some(snapshot.neighborhood.home_block_id.clone()),
+                    block_id: current_block_id,
+                    depth: crate::tui::reactive::views::TraversalDepth::Street, // Default depth
+                    entered_at: 0, // Not tracked in aura-app
+                },
+            };
+        }
+        NeighborhoodSnapshot::default()
     }
 
     // ─── iocraft-Compatible Getters ────────────────────────────────────────
@@ -298,6 +477,134 @@ impl IoContext {
 impl Default for IoContext {
     fn default() -> Self {
         Self::with_defaults()
+    }
+}
+
+// =============================================================================
+// Conversion Helpers (aura-app → TUI types)
+// =============================================================================
+
+/// Convert aura-app GuardianStatus to TUI GuardianStatus
+fn convert_guardian_status(
+    status: &aura_app::views::recovery::GuardianStatus,
+) -> crate::tui::reactive::queries::GuardianStatus {
+    match status {
+        aura_app::views::recovery::GuardianStatus::Active => {
+            crate::tui::reactive::queries::GuardianStatus::Active
+        }
+        aura_app::views::recovery::GuardianStatus::Pending => {
+            crate::tui::reactive::queries::GuardianStatus::Pending
+        }
+        aura_app::views::recovery::GuardianStatus::Offline => {
+            crate::tui::reactive::queries::GuardianStatus::Offline
+        }
+        aura_app::views::recovery::GuardianStatus::Revoked => {
+            crate::tui::reactive::queries::GuardianStatus::Removed
+        }
+    }
+}
+
+/// Convert aura-app RecoveryState to TUI RecoveryStatus
+fn convert_recovery_status(
+    recovery: &aura_app::RecoveryState,
+) -> crate::tui::reactive::queries::RecoveryStatus {
+    use crate::tui::reactive::queries::{GuardianApproval, RecoveryState, RecoveryStatus};
+
+    // Derive state from active_recovery process status
+    let state = if let Some(process) = &recovery.active_recovery {
+        match process.status {
+            aura_app::views::recovery::RecoveryProcessStatus::Idle => RecoveryState::None,
+            aura_app::views::recovery::RecoveryProcessStatus::Initiated => RecoveryState::Initiated,
+            aura_app::views::recovery::RecoveryProcessStatus::WaitingForApprovals => {
+                RecoveryState::Initiated
+            }
+            aura_app::views::recovery::RecoveryProcessStatus::Approved => {
+                RecoveryState::ThresholdMet
+            }
+            aura_app::views::recovery::RecoveryProcessStatus::Completed => RecoveryState::Completed,
+            aura_app::views::recovery::RecoveryProcessStatus::Failed => RecoveryState::Failed,
+        }
+    } else {
+        RecoveryState::None
+    };
+
+    // Convert guardian approvals if there's an active recovery process
+    let approvals: Vec<GuardianApproval> = if let Some(process) = &recovery.active_recovery {
+        process
+            .approved_by
+            .iter()
+            .map(|guardian_id| GuardianApproval {
+                guardian_id: guardian_id.clone(),
+                guardian_name: String::new(), // Name not stored in approval
+                approved: true,
+                timestamp: Some(process.initiated_at),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    RecoveryStatus {
+        session_id: recovery.active_recovery.as_ref().map(|p| p.id.clone()),
+        state,
+        approvals_received: recovery
+            .active_recovery
+            .as_ref()
+            .map(|p| p.approvals_received)
+            .unwrap_or(0),
+        threshold: recovery.threshold,
+        total_guardians: recovery.guardian_count,
+        approvals,
+        started_at: recovery.active_recovery.as_ref().map(|p| p.initiated_at),
+        expires_at: recovery.active_recovery.as_ref().and_then(|p| p.expires_at),
+        error: None,
+    }
+}
+
+/// Convert aura-app Invitation to TUI Invitation
+fn convert_invitation(
+    invitation: &aura_app::views::invitations::Invitation,
+) -> crate::tui::reactive::queries::Invitation {
+    use crate::tui::reactive::queries::{InvitationDirection, InvitationStatus, InvitationType};
+
+    let direction = match invitation.direction {
+        aura_app::views::invitations::InvitationDirection::Sent => InvitationDirection::Outbound,
+        aura_app::views::invitations::InvitationDirection::Received => InvitationDirection::Inbound,
+    };
+
+    let status = match invitation.status {
+        aura_app::views::invitations::InvitationStatus::Pending => InvitationStatus::Pending,
+        aura_app::views::invitations::InvitationStatus::Accepted => InvitationStatus::Accepted,
+        aura_app::views::invitations::InvitationStatus::Rejected => InvitationStatus::Declined,
+        aura_app::views::invitations::InvitationStatus::Expired => InvitationStatus::Expired,
+        aura_app::views::invitations::InvitationStatus::Revoked => InvitationStatus::Cancelled,
+    };
+
+    let invitation_type = match invitation.invitation_type {
+        aura_app::views::invitations::InvitationType::Guardian => InvitationType::Guardian,
+        aura_app::views::invitations::InvitationType::Chat => InvitationType::Channel,
+        aura_app::views::invitations::InvitationType::Block => InvitationType::Channel,
+    };
+
+    // Determine other party based on direction
+    let (other_party_id, other_party_name) = match direction {
+        InvitationDirection::Outbound => (
+            invitation.to_id.clone().unwrap_or_default(),
+            invitation.to_name.clone().unwrap_or_default(),
+        ),
+        InvitationDirection::Inbound => (invitation.from_id.clone(), invitation.from_name.clone()),
+    };
+
+    crate::tui::reactive::queries::Invitation {
+        id: invitation.id.clone(),
+        direction,
+        other_party_id,
+        other_party_name,
+        invitation_type,
+        status,
+        created_at: invitation.created_at,
+        expires_at: invitation.expires_at,
+        message: invitation.message.clone(),
     }
 }
 

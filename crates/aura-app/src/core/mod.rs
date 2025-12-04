@@ -18,6 +18,6 @@ mod snapshot;
 
 pub use app::{AppConfig, AppCore};
 pub use error::IntentError;
-pub use intent::Intent;
+pub use intent::{ChannelType as IntentChannelType, Intent, InvitationType, Screen};
 pub use reducer::{reduce_fact, ViewDelta};
 pub use snapshot::StateSnapshot;

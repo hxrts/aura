@@ -60,8 +60,11 @@
 
 use crate::{
     AdminAction, AmpAction, AuthorityCommands, ChatCommands, ContextAction, InvitationAction,
-    OtaAction, RecoveryAction, SnapshotAction, TuiArgs,
+    OtaAction, RecoveryAction, SnapshotAction, SyncAction,
 };
+
+#[cfg(feature = "terminal")]
+use crate::cli::tui::TuiArgs;
 
 #[cfg(feature = "development")]
 use crate::{DemoCommands, ScenarioAction};
@@ -70,6 +73,7 @@ use aura_agent::{AuraEffectSystem, EffectContext};
 use aura_core::identifiers::DeviceId;
 use std::path::Path;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 
 pub mod admin;
 pub mod amp;
@@ -85,7 +89,9 @@ pub mod recovery;
 pub mod recovery_status;
 pub mod snapshot;
 pub mod status;
+pub mod sync;
 pub mod threshold;
+#[cfg(feature = "terminal")]
 pub mod tui;
 pub mod version;
 
@@ -100,8 +106,8 @@ pub mod scenarios;
 
 /// Main CLI handler that coordinates all operations through effects
 pub struct CliHandler {
-    /// The Aura effect system instance
-    effect_system: Arc<AuraEffectSystem>,
+    /// The Aura effect system instance (with interior mutability)
+    effect_system: Arc<RwLock<AuraEffectSystem>>,
     /// The device ID for this handler
     device_id: DeviceId,
     /// Execution context propagated through effect calls
@@ -111,7 +117,7 @@ pub struct CliHandler {
 impl CliHandler {
     /// Create a new CLI handler with the given effect system and device ID
     pub fn new(
-        effect_system: Arc<AuraEffectSystem>,
+        effect_system: Arc<RwLock<AuraEffectSystem>>,
         device_id: DeviceId,
         effect_context: EffectContext,
     ) -> Self {
@@ -134,93 +140,115 @@ impl CliHandler {
 
     /// Handle init command through effects
     pub async fn handle_init(&self, num_devices: u32, threshold: u32, output: &Path) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         init::handle_init(&ctx, num_devices, threshold, output).await
     }
 
     /// Handle status command through effects
     pub async fn handle_status(&self, config_path: &Path) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         status::handle_status(&ctx, config_path).await
     }
 
     /// Handle node command through effects
     pub async fn handle_node(&self, port: u16, daemon: bool, config_path: &Path) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         node::handle_node(&ctx, port, daemon, config_path).await
     }
 
     /// Handle threshold command through effects
     pub async fn handle_threshold(&self, configs: &str, threshold: u32, mode: &str) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         threshold::handle_threshold(&ctx, configs, threshold, mode).await
     }
 
     /// Handle scenarios command through effects (requires development feature)
     #[cfg(feature = "development")]
     pub async fn handle_scenarios(&self, action: &ScenarioAction) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         scenarios::handle_scenarios(&ctx, action).await
     }
 
     /// Handle version command through effects
     pub async fn handle_version(&self) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         version::handle_version(&ctx).await
     }
 
     /// Handle snapshot maintenance commands.
     pub async fn handle_snapshot(&self, action: &SnapshotAction) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         snapshot::handle_snapshot(&ctx, action).await
     }
 
     /// Handle admin maintenance commands.
     pub async fn handle_admin(&self, action: &AdminAction) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         admin::handle_admin(&ctx, action).await
     }
 
     /// Handle guardian recovery commands
     pub async fn handle_recovery(&self, action: &RecoveryAction) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         recovery::handle_recovery(&ctx, action).await
     }
 
     /// Handle invitation commands
     pub async fn handle_invitation(&self, action: &InvitationAction) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         invite::handle_invitation(&ctx, action).await
     }
 
     /// Handle authority management commands
     pub async fn handle_authority(&self, command: &AuthorityCommands) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         authority::handle_authority(&ctx, command).await
     }
 
     /// Handle context inspection commands
     pub async fn handle_context(&self, action: &ContextAction) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         context::handle_context(&ctx, action).await
     }
 
     /// Handle OTA upgrade commands
     pub async fn handle_ota(&self, action: &OtaAction) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         ota::handle_ota(&ctx, action).await
     }
 
     /// Handle AMP commands routed through the effect system.
     pub async fn handle_amp(&self, action: &AmpAction) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
         amp::handle_amp(&ctx, action).await
     }
 
     /// Handle chat commands
     pub async fn handle_chat(&self, command: &ChatCommands) -> Result<()> {
-        let ctx = HandlerContext::new(&self.effect_context, &self.effect_system, self.device_id);
-        chat::handle_chat(&ctx, &self.effect_system, command).await
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
+        chat::handle_chat(&ctx, &effects, command).await
+    }
+
+    /// Handle sync commands (daemon mode by default)
+    pub async fn handle_sync(&self, action: &SyncAction) -> Result<()> {
+        let effects = self.effect_system.read().await;
+        let ctx = HandlerContext::new(&self.effect_context, &*effects, self.device_id);
+        sync::handle_sync(&ctx, action).await
     }
 
     /// Handle demo commands (requires development feature)
@@ -232,6 +260,7 @@ impl CliHandler {
     }
 
     /// Handle TUI commands for production terminal interface
+    #[cfg(feature = "terminal")]
     pub async fn handle_tui(&self, args: &TuiArgs) -> Result<()> {
         tui::handle_tui(args)
             .await

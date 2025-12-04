@@ -81,8 +81,8 @@ pub mod core;
 // Runtime modules (internal)
 mod runtime;
 
-// Handler modules (internal)
-mod handlers;
+// Handler modules (public for service access)
+pub mod handlers;
 
 // Reactive programming infrastructure (public)
 pub mod reactive;
@@ -93,12 +93,41 @@ pub mod fact_registry;
 // Public API - authority-first design
 pub use core::{AgentBuilder, AgentConfig, AgentError, AgentResult, AuraAgent, AuthorityContext};
 
+// Session management types
+pub use handlers::{SessionHandle, SessionService, SessionStats};
+
+// Authentication types
+pub use handlers::{AuthChallenge, AuthMethod, AuthResponse, AuthResult, AuthService};
+
+// Invitation types
+pub use handlers::{
+    Invitation, InvitationResult, InvitationService, InvitationStatus, InvitationType,
+};
+
+// Recovery types
+pub use handlers::{
+    GuardianApproval, RecoveryOperation, RecoveryRequest, RecoveryResult, RecoveryService,
+    RecoveryState,
+};
+
+// OTA types
+pub use handlers::{OtaHandler, UpdateInfo, UpdateResult, UpdateStatus};
+
+// Rendezvous types
+pub use handlers::{ChannelResult, RendezvousHandler, RendezvousResult, RendezvousServiceApi};
+
 // Runtime types for advanced usage
 pub use runtime::{
     AuraHandlerAdapter as ChoreographyAdapter, EffectContext, EffectExecutor, EffectRegistry,
     EffectRegistryError, EffectRegistryExt, EffectSystemBuilder, FlowBudgetManager,
     LifecycleManager, ReceiptManager, RuntimeBuilder, RuntimeSystem,
 };
+
+// Sync service types
+pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceManager};
+
+// Rendezvous service types
+pub use runtime::services::{RendezvousManager, RendezvousManagerConfig};
 
 // Re-export core types for convenience
 pub use aura_core::effects::ExecutionMode;

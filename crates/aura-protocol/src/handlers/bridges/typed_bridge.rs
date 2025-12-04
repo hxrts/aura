@@ -290,7 +290,7 @@ impl CryptoEffects for TypedHandlerBridge {
         ))
     }
 
-    async fn frost_generate_nonces(&self) -> Result<Vec<u8>, CryptoError> {
+    async fn frost_generate_nonces(&self, _key_package: &[u8]) -> Result<Vec<u8>, CryptoError> {
         Err(AuraError::crypto(
             "FROST operations not supported through bridge",
         ))

@@ -352,227 +352,46 @@ impl PeerManager {
     /// - Uses `NetworkEffects` for peer discovery
     /// - Uses `StorageEffects` to persist discovered peers
     /// - Filters by capabilities via aura-wot integration
-    pub async fn discover_peers<E>(&mut self, effects: &E, now: u64) -> SyncResult<Vec<DeviceId>>
+    ///
+    /// # Note
+    /// Full rendezvous-based peer discovery is Week 2 work. Currently returns
+    /// only manually-added/tracked peers. When rendezvous integration is complete,
+    /// this will query `aura_rendezvous::discovery::DiscoveryService` for peers.
+    pub async fn discover_peers<E>(&mut self, _effects: &E, now: u64) -> SyncResult<Vec<DeviceId>>
     where
         E: aura_core::effects::NetworkEffects + aura_core::effects::StorageEffects + Send + Sync,
     {
-        tracing::info!("Starting peer discovery via aura-rendezvous DiscoveryService");
-
-        // Create discovery service and query for sync-capable peers
-        let mut discovery_service = self.create_discovery_service(effects).await?;
-        let discovery_query = self.create_sync_discovery_query();
-
-        // Query for peers using aura-rendezvous
-        let discovery_results = discovery_service
-            .query_peers(discovery_query)
-            .await
-            .map_err(|e| {
-                sync_peer_error("discovery", format!("Rendezvous discovery failed: {}", e))
-            })?;
-
-        // Convert discovered peers to DeviceIds and validate
-        let mut discovered_peers = Vec::new();
-        for peer_result in discovery_results.peers {
-            match self.validate_discovered_peer(&peer_result, effects).await {
-                Ok(device_id) => {
-                    discovered_peers.push(device_id);
-                    // Add to our tracking if not already present
-                    if !self.peers.contains_key(&device_id) {
-                        self.add_peer(device_id, now)?;
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to validate discovered peer: {}", e);
-                }
-            }
-        }
+        tracing::info!("Starting peer discovery (using tracked peers - rendezvous integration pending)");
 
         // Update last refresh time
         self.last_refresh = Some(now);
 
-        // Combine with existing tracked peers
-        let mut all_peers: Vec<DeviceId> = self.peers.keys().copied().collect();
-        for peer in discovered_peers {
-            if !all_peers.contains(&peer) {
-                all_peers.push(peer);
-            }
-        }
+        // Return currently tracked peers (full rendezvous discovery is Week 2 work)
+        let all_peers: Vec<DeviceId> = self.peers.keys().copied().collect();
 
         tracing::info!(
-            "Peer discovery completed: {} new peers discovered, {} total tracked peers",
-            discovery_results.total_matches,
+            "Peer discovery completed: {} tracked peers available",
             all_peers.len()
         );
 
         Ok(all_peers)
     }
 
-    /// Create discovery service instance for peer discovery
-    async fn create_discovery_service<E>(
-        &self,
-        _effects: &E,
-    ) -> SyncResult<aura_rendezvous::discovery::DiscoveryService>
-    where
-        E: aura_core::effects::NetworkEffects + Send + Sync,
-    {
-        // Create discovery service with our device ID
-        let service_id = aura_core::DeviceId::new_from_entropy([2u8; 32]); // In practice, use actual device ID
-
-        let discovery_service = aura_rendezvous::discovery::DiscoveryService::new(service_id);
-
-        tracing::debug!(
-            "Created rendezvous discovery service with ID: {}",
-            service_id
-        );
-        Ok(discovery_service)
-    }
-
-    /// Create discovery query for sync-capable peers
-    fn create_sync_discovery_query(&self) -> aura_rendezvous::discovery::DiscoveryQuery {
-        use aura_rendezvous::discovery::*;
-
-        #[allow(clippy::disallowed_methods)]
-        // [VERIFIED] Acceptable in discovery query ID generation
-        let query_id: QueryId = hash::hash(Uuid::from_bytes(3u128.to_be_bytes()).as_bytes());
-
-        // Create query for sync-capable peers using generic capabilities
-        DiscoveryQuery {
-            query_id,
-            encrypted_relationship_context: Vec::new(),
-            required_capabilities: vec![
-                DiscoveryCapability::Custom("sync".to_string()),
-                DiscoveryCapability::Custom("transport".to_string()),
-            ],
-            trust_constraints: TrustConstraints {
-                min_trust_level: trust_level_threshold(self.config.min_trust_level),
-                required_attestations: Vec::new(),
-                excluded_devices: Vec::new(),
-                required_relationship_types: vec!["peer".to_string(), "guardian".to_string()],
-            },
-            privacy_requirements: DiscoveryPrivacyLevel::FullAnonymity,
-            timestamp: now_secs(),
-        }
-    }
-
-    /// Validate and convert a discovered peer result to DeviceId
-    async fn validate_discovered_peer<E>(
-        &self,
-        peer_result: &aura_rendezvous::discovery::PeerAdvertisement,
-        effects: &E,
-    ) -> SyncResult<DeviceId>
-    where
-        E: aura_core::effects::StorageEffects + Send + Sync,
-    {
-        // Extract DeviceId from peer token (implementation specific)
-        let device_id = self.extract_device_id_from_peer_token(&peer_result.peer_token)?;
-
-        // Validate peer capabilities match our sync requirements
-        self.validate_peer_sync_capabilities(&peer_result.capabilities)?;
-
-        // Optional: Verify peer identity using aura-verify
-        self.verify_peer_identity(&device_id, peer_result, effects)
-            .await?;
-
-        // Check trust level meets our requirements
-        if trust_level_score(peer_result.required_trust_level) < self.config.min_trust_level {
-            return Err(sync_peer_error(
-                "trust_validation",
-                format!(
-                    "Peer {} required trust level {:?} below minimum {:?}",
-                    device_id, peer_result.required_trust_level, self.config.min_trust_level
-                ),
-            ));
-        }
-
-        tracing::debug!(
-            "Validated discovered peer {} with required trust level {:?}",
-            device_id,
-            peer_result.required_trust_level
-        );
-
-        Ok(device_id)
-    }
-
-    /// Extract DeviceId from peer token
-    fn extract_device_id_from_peer_token(
-        &self,
-        peer_token: &aura_rendezvous::discovery::PeerToken,
-    ) -> SyncResult<DeviceId> {
-        // Decode the peer token by treating it as raw bytes for deterministic tests
-        let token_bytes = peer_token;
-        if token_bytes.len() >= 32 {
-            let mut device_bytes = [0u8; 32];
-            device_bytes.copy_from_slice(&token_bytes[..32]);
-            Ok(DeviceId::from_bytes(device_bytes))
-        } else {
-            Err(sync_peer_error(
-                "peer_token",
-                "Invalid peer token: insufficient length",
-            ))
-        }
-    }
-
-    /// Validate that discovered peer has required sync capabilities
-    fn validate_peer_sync_capabilities(
-        &self,
-        capabilities: &[aura_rendezvous::discovery::DiscoveryCapability],
-    ) -> SyncResult<()> {
-        // Check for required sync capability
-        let has_sync = capabilities.iter().any(|cap| {
-            matches!(cap, aura_rendezvous::discovery::DiscoveryCapability::Custom(value) if value == "sync")
-        });
-
-        if !has_sync {
-            return Err(sync_peer_error(
-                "capabilities",
-                "Discovered peer lacks sync capabilities",
-            ));
-        }
-
-        // Check for required transport capability
-        let has_transport = capabilities.iter().any(|cap| {
-            matches!(cap, aura_rendezvous::discovery::DiscoveryCapability::Custom(value) if value == "transport")
-        });
-
-        if !has_transport {
-            return Err(sync_peer_error(
-                "capabilities",
-                "Discovered peer lacks transport capabilities",
-            ));
-        }
-
-        tracing::debug!(
-            "Peer capabilities validation passed: {} capabilities",
-            capabilities.len()
-        );
-        Ok(())
-    }
-
-    /// Verify peer identity using aura-verify if available
-    async fn verify_peer_identity<E>(
-        &self,
-        device_id: &DeviceId,
-        peer_result: &aura_rendezvous::discovery::PeerAdvertisement,
-        _effects: &E,
-    ) -> SyncResult<()>
-    where
-        E: aura_core::effects::StorageEffects + Send + Sync,
-    {
-        // In a full implementation, this would use aura-verify to verify
-        // the peer's identity credentials and signatures
-
-        // Validate fields deterministically
-        if peer_result.peer_token == [0u8; 32] {
-            return Err(sync_peer_error("validation", "Empty peer token"));
-        }
-
-        if peer_result.capabilities.is_empty() {
-            return Err(sync_peer_error("validation", "No capabilities advertised"));
-        }
-
-        tracing::debug!("Peer identity verification passed for device {}", device_id);
-        Ok(())
-    }
+    // =============================================================================
+    // Rendezvous Discovery Integration (Week 2 - not yet implemented)
+    // =============================================================================
+    // The following functions are gated because they reference types from
+    // `aura_rendezvous::discovery` which don't exist yet. These will be enabled
+    // when the rendezvous peer discovery integration is completed (Week 2 tasks).
+    //
+    // Functions:
+    // - create_discovery_service: Creates rendezvous discovery service
+    // - create_sync_discovery_query: Builds sync-specific discovery query
+    // - validate_discovered_peer: Validates peers from discovery results
+    // - extract_device_id_from_peer_token: Extracts DeviceId from peer token
+    // - validate_peer_sync_capabilities: Validates peer has sync capabilities
+    // - verify_peer_identity: Verifies peer identity using aura-verify
+    // =============================================================================
 
     /// Add a discovered peer to tracking
     pub fn add_peer(&mut self, device_id: DeviceId, now: u64) -> SyncResult<()> {

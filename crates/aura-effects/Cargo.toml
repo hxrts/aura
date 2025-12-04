@@ -35,9 +35,11 @@ url = "2.5"
 serde = { workspace = true }
 serde_json = { workspace = true }
 bincode = { workspace = true }
+postcard = { workspace = true }
 
 # Cryptography
 ed25519-dalek = { workspace = true }
+frost-core = { workspace = true }
 frost-ed25519 = { workspace = true }
 hkdf = { workspace = true }
 sha2 = { workspace = true }

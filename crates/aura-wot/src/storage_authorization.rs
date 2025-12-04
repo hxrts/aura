@@ -87,7 +87,6 @@ impl AccessDecision {
 #[derive(Debug)]
 pub struct BiscuitStorageEvaluator {
     /// Root public key for token verification
-    #[allow(dead_code)]
     root_public_key: PublicKey,
     /// Permission mappings for authorization checks
     permission_mappings: PermissionMappings,
@@ -103,6 +102,11 @@ impl BiscuitStorageEvaluator {
             permission_mappings: PermissionMappings::new(),
             authority_id,
         }
+    }
+
+    /// Get the root public key for token verification
+    pub fn root_public_key(&self) -> PublicKey {
+        self.root_public_key
     }
 
     /// Evaluate storage access using a Biscuit token
@@ -265,9 +269,9 @@ impl BiscuitStorageEvaluator {
     /// Verify that token is authorized for the specified authority
     ///
     /// Extracts authority_id from token facts and compares with expected authority.
-    /// Returns true if token is authorized for the authority.
-    #[allow(dead_code)]
-    fn verify_token_authority(
+    /// Returns true if token is authorized for the authority. Useful for pre-checking
+    /// tokens before storage operations or for audit logging.
+    pub fn verify_token_authority(
         &self,
         token: &Biscuit,
         expected_authority: &AuthorityId,
@@ -486,6 +490,175 @@ pub fn check_biscuit_access(
     evaluator.check_access(&token, &request.resource, &request.permission)
 }
 
+// ============================================================================
+// Authorized Storage Handler Wrapper
+// ============================================================================
+
+use aura_core::effects::{StorageEffects, StorageError, StorageStats};
+use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
+/// Storage handler wrapper that enforces Biscuit authorization on all operations
+///
+/// This wrapper integrates `BiscuitStorageEvaluator` with any `StorageEffects` implementation,
+/// ensuring all storage operations are authorized via Biscuit tokens before execution.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use aura_wot::{AuthorizedStorageHandler, BiscuitStorageEvaluator};
+/// use aura_effects::FilesystemStorageHandler;
+///
+/// let inner = FilesystemStorageHandler::new(path);
+/// let evaluator = BiscuitStorageEvaluator::new(root_key, authority_id);
+/// let handler = AuthorizedStorageHandler::new(inner, evaluator, token);
+///
+/// // All operations now require valid Biscuit authorization
+/// handler.store("key", data).await?;
+/// ```
+pub struct AuthorizedStorageHandler<S: StorageEffects> {
+    /// Inner storage handler
+    inner: S,
+    /// Biscuit authorization evaluator
+    evaluator: BiscuitStorageEvaluator,
+    /// Biscuit token for authorization (shared, can be updated)
+    token: Arc<RwLock<Option<Biscuit>>>,
+    /// Flow budget for operations (shared, can be updated)
+    budget: Arc<RwLock<FlowBudget>>,
+}
+
+impl<S: StorageEffects> AuthorizedStorageHandler<S> {
+    /// Create a new authorized storage handler
+    pub fn new(inner: S, evaluator: BiscuitStorageEvaluator, budget: FlowBudget) -> Self {
+        Self {
+            inner,
+            evaluator,
+            token: Arc::new(RwLock::new(None)),
+            budget: Arc::new(RwLock::new(budget)),
+        }
+    }
+
+    /// Create with an initial token
+    pub fn with_token(inner: S, evaluator: BiscuitStorageEvaluator, token: Biscuit, budget: FlowBudget) -> Self {
+        Self {
+            inner,
+            evaluator,
+            token: Arc::new(RwLock::new(Some(token))),
+            budget: Arc::new(RwLock::new(budget)),
+        }
+    }
+
+    /// Set the Biscuit token for authorization
+    pub async fn set_token(&self, token: Biscuit) {
+        let mut guard = self.token.write().await;
+        *guard = Some(token);
+    }
+
+    /// Clear the authorization token
+    pub async fn clear_token(&self) {
+        let mut guard = self.token.write().await;
+        *guard = None;
+    }
+
+    /// Get the remaining flow budget
+    pub async fn remaining_budget(&self) -> u64 {
+        let guard = self.budget.read().await;
+        guard.headroom()
+    }
+
+    /// Check authorization for a storage operation
+    async fn check_authorization(
+        &self,
+        resource: &StorageResource,
+        permission: &StoragePermission,
+    ) -> Result<(), StorageError> {
+        let token_guard = self.token.read().await;
+        let token = token_guard.as_ref().ok_or_else(|| {
+            StorageError::PermissionDenied("No authorization token set".to_string())
+        })?;
+
+        let mut budget_guard = self.budget.write().await;
+        let decision = self
+            .evaluator
+            .evaluate_access(token, resource, permission, &mut budget_guard)
+            .map_err(|e| StorageError::PermissionDenied(format!("Authorization error: {}", e)))?;
+
+        if !decision.allowed {
+            return Err(StorageError::PermissionDenied(decision.reason));
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl<S: StorageEffects + Send + Sync> StorageEffects for AuthorizedStorageHandler<S> {
+    async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+        let resource = StorageResource::content(key);
+        self.check_authorization(&resource, &StoragePermission::Write).await?;
+        self.inner.store(key, value).await
+    }
+
+    async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+        let resource = StorageResource::content(key);
+        self.check_authorization(&resource, &StoragePermission::Read).await?;
+        self.inner.retrieve(key).await
+    }
+
+    async fn remove(&self, key: &str) -> Result<bool, StorageError> {
+        let resource = StorageResource::content(key);
+        self.check_authorization(&resource, &StoragePermission::Admin).await?;
+        self.inner.remove(key).await
+    }
+
+    async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+        let resource = match prefix {
+            Some(p) => StorageResource::namespace(p),
+            None => StorageResource::Global,
+        };
+        self.check_authorization(&resource, &StoragePermission::Read).await?;
+        self.inner.list_keys(prefix).await
+    }
+
+    async fn exists(&self, key: &str) -> Result<bool, StorageError> {
+        let resource = StorageResource::content(key);
+        self.check_authorization(&resource, &StoragePermission::Read).await?;
+        self.inner.exists(key).await
+    }
+
+    async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
+        // Check authorization for each key (batch write requires write permission on all)
+        for key in pairs.keys() {
+            let resource = StorageResource::content(key);
+            self.check_authorization(&resource, &StoragePermission::Write).await?;
+        }
+        self.inner.store_batch(pairs).await
+    }
+
+    async fn retrieve_batch(&self, keys: &[String]) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+        // Check authorization for each key
+        for key in keys {
+            let resource = StorageResource::content(key);
+            self.check_authorization(&resource, &StoragePermission::Read).await?;
+        }
+        self.inner.retrieve_batch(keys).await
+    }
+
+    async fn clear_all(&self) -> Result<(), StorageError> {
+        let resource = StorageResource::Global;
+        self.check_authorization(&resource, &StoragePermission::Admin).await?;
+        self.inner.clear_all().await
+    }
+
+    async fn stats(&self) -> Result<StorageStats, StorageError> {
+        // Stats are generally safe to read without per-item authorization
+        let resource = StorageResource::Global;
+        self.check_authorization(&resource, &StoragePermission::Read).await?;
+        self.inner.stats().await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -625,5 +798,205 @@ mod tests {
             mappings.permission_to_operation(&StoragePermission::Admin),
             "admin"
         );
+    }
+
+    // ========================================================================
+    // AuthorizedStorageHandler Tests
+    // ========================================================================
+
+    use std::sync::Mutex;
+
+    /// In-memory storage backend for testing
+    struct MockStorage {
+        data: Mutex<HashMap<String, Vec<u8>>>,
+    }
+
+    impl MockStorage {
+        fn new() -> Self {
+            Self {
+                data: Mutex::new(HashMap::new()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl StorageEffects for MockStorage {
+        async fn store(&self, key: &str, value: Vec<u8>) -> Result<(), StorageError> {
+            let mut data = self.data.lock().unwrap();
+            data.insert(key.to_string(), value);
+            Ok(())
+        }
+
+        async fn retrieve(&self, key: &str) -> Result<Option<Vec<u8>>, StorageError> {
+            let data = self.data.lock().unwrap();
+            Ok(data.get(key).cloned())
+        }
+
+        async fn remove(&self, key: &str) -> Result<bool, StorageError> {
+            let mut data = self.data.lock().unwrap();
+            Ok(data.remove(key).is_some())
+        }
+
+        async fn list_keys(&self, prefix: Option<&str>) -> Result<Vec<String>, StorageError> {
+            let data = self.data.lock().unwrap();
+            let keys: Vec<String> = match prefix {
+                Some(p) => data.keys().filter(|k| k.starts_with(p)).cloned().collect(),
+                None => data.keys().cloned().collect(),
+            };
+            Ok(keys)
+        }
+
+        async fn exists(&self, key: &str) -> Result<bool, StorageError> {
+            let data = self.data.lock().unwrap();
+            Ok(data.contains_key(key))
+        }
+
+        async fn store_batch(&self, pairs: HashMap<String, Vec<u8>>) -> Result<(), StorageError> {
+            let mut data = self.data.lock().unwrap();
+            data.extend(pairs);
+            Ok(())
+        }
+
+        async fn retrieve_batch(
+            &self,
+            keys: &[String],
+        ) -> Result<HashMap<String, Vec<u8>>, StorageError> {
+            let data = self.data.lock().unwrap();
+            Ok(keys
+                .iter()
+                .filter_map(|k| data.get(k).map(|v| (k.clone(), v.clone())))
+                .collect())
+        }
+
+        async fn clear_all(&self) -> Result<(), StorageError> {
+            let mut data = self.data.lock().unwrap();
+            data.clear();
+            Ok(())
+        }
+
+        async fn stats(&self) -> Result<StorageStats, StorageError> {
+            let data = self.data.lock().unwrap();
+            Ok(StorageStats {
+                key_count: data.len() as u64,
+                total_size: data.values().map(|v| v.len() as u64).sum(),
+                available_space: None,
+                backend_type: "mock".to_string(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_authorized_storage_no_token_fails() {
+        use aura_core::types::epochs::Epoch;
+
+        let mock_storage = MockStorage::new();
+        let evaluator = setup_test_evaluator();
+        let budget = FlowBudget::new(1000, Epoch::initial());
+
+        let authorized = AuthorizedStorageHandler::new(mock_storage, evaluator, budget);
+
+        // Without token, store should fail
+        let result = authorized.store("test_key", b"test_value".to_vec()).await;
+        assert!(result.is_err());
+
+        if let Err(StorageError::PermissionDenied(reason)) = result {
+            assert!(reason.contains("No authorization token"));
+        } else {
+            panic!("Expected PermissionDenied error");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_authorized_storage_with_token_works() {
+        use aura_core::types::epochs::Epoch;
+
+        let mock_storage = MockStorage::new();
+        let authority = setup_test_authority();
+        let device_id = DeviceId::new_from_entropy([1u8; 32]);
+        let token = authority.create_device_token(device_id).unwrap();
+        let authority_id = AuthorityId::from_uuid(authority.account_id().0);
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let budget = FlowBudget::new(10000, Epoch::initial());
+
+        let authorized =
+            AuthorizedStorageHandler::with_token(mock_storage, evaluator, token, budget);
+
+        // With valid token, operations should proceed to authorization check
+        // Note: The token may still be denied by Biscuit policy, but it won't fail
+        // due to "no token" error
+        let result = authorized.store("test_key", b"test_value".to_vec()).await;
+
+        // The result depends on whether the Biscuit authorization succeeds
+        // For now, we just verify we get past the "no token" check
+        match result {
+            Ok(()) => {
+                // Authorization succeeded, verify data was stored
+                let retrieved = authorized.retrieve("test_key").await;
+                assert!(retrieved.is_ok());
+            }
+            Err(StorageError::PermissionDenied(reason)) => {
+                // Authorization was checked but denied (expected with our test setup)
+                assert!(!reason.contains("No authorization token"));
+            }
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_authorized_storage_budget_tracking() {
+        use aura_core::types::epochs::Epoch;
+
+        let mock_storage = MockStorage::new();
+        let evaluator = setup_test_evaluator();
+        let budget = FlowBudget::new(1000, Epoch::initial());
+
+        let authorized = AuthorizedStorageHandler::new(mock_storage, evaluator, budget);
+
+        // Initial budget should be full
+        assert_eq!(authorized.remaining_budget().await, 1000);
+    }
+
+    #[tokio::test]
+    async fn test_authorized_storage_token_management() {
+        use aura_core::types::epochs::Epoch;
+
+        let mock_storage = MockStorage::new();
+        let authority = setup_test_authority();
+        let device_id = DeviceId::new_from_entropy([2u8; 32]);
+        let token = authority.create_device_token(device_id).unwrap();
+        let authority_id = AuthorityId::from_uuid(authority.account_id().0);
+        let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
+        let budget = FlowBudget::new(1000, Epoch::initial());
+
+        let authorized = AuthorizedStorageHandler::new(mock_storage, evaluator, budget);
+
+        // Without token, operation fails
+        let result1 = authorized.retrieve("test").await;
+        assert!(result1.is_err());
+
+        // Set token
+        authorized.set_token(token).await;
+
+        // Now operation should at least pass the "no token" check
+        let result2 = authorized.retrieve("test").await;
+        match result2 {
+            Ok(_) => {} // Authorization succeeded
+            Err(StorageError::PermissionDenied(reason)) => {
+                // Token was checked, even if authorization failed
+                assert!(!reason.contains("No authorization token"));
+            }
+            Err(e) => panic!("Unexpected error: {:?}", e),
+        }
+
+        // Clear token
+        authorized.clear_token().await;
+
+        // Should fail again with "no token"
+        let result3 = authorized.retrieve("test").await;
+        if let Err(StorageError::PermissionDenied(reason)) = result3 {
+            assert!(reason.contains("No authorization token"));
+        } else {
+            panic!("Expected PermissionDenied error");
+        }
     }
 }

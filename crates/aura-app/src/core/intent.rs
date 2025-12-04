@@ -121,6 +121,12 @@ pub enum Intent {
         member_id: String,
     },
 
+    /// Join a channel
+    JoinChannel {
+        /// Channel to join
+        channel_id: ContextId,
+    },
+
     /// Leave a channel
     LeaveChannel {
         /// Channel to leave
@@ -163,6 +169,18 @@ pub enum Intent {
         recovery_context: ContextId,
         /// Reason for rejection
         reason: String,
+    },
+
+    /// Complete the recovery process after threshold approvals
+    CompleteRecovery {
+        /// Recovery context to complete
+        recovery_context: ContextId,
+    },
+
+    /// Set the guardian threshold for recovery
+    SetGuardianThreshold {
+        /// Required number of guardian approvals
+        threshold: u32,
     },
 
     // =========================================================================
@@ -209,9 +227,31 @@ pub enum Intent {
         contact_id: String,
     },
 
+    /// Toggle guardian status for a contact
+    ToggleGuardian {
+        /// Contact authority ID as string
+        contact_id: String,
+        /// Whether to enable or disable guardian status
+        is_guardian: bool,
+    },
+
     // =========================================================================
     // Block Intents
     // =========================================================================
+    /// Create a new block
+    CreateBlock {
+        /// Block name
+        name: String,
+    },
+
+    /// Invite someone to a block
+    InviteToBlock {
+        /// Block ID to invite to
+        block_id: ContextId,
+        /// Authority ID to invite
+        invitee_id: String,
+    },
+
     /// Set the block name
     SetBlockName {
         /// Block ID
@@ -280,6 +320,26 @@ pub enum Intent {
         authority_id: String,
         /// Public key of the device to add
         public_key: String,
+    },
+
+    /// Remove a device from an authority
+    RemoveDevice {
+        /// Target authority ID
+        authority_id: String,
+        /// Device ID to remove
+        device_id: String,
+    },
+
+    /// Update the signing threshold for an authority
+    UpdateThreshold {
+        /// New threshold value
+        threshold: u32,
+    },
+
+    /// Create a new account (simplified account initialization)
+    CreateAccount {
+        /// Account name/label
+        name: String,
     },
 
     // =========================================================================
@@ -431,6 +491,7 @@ impl Intent {
             Self::EditMessage { channel_id, .. } => Some(*channel_id),
             Self::DeleteMessage { channel_id, .. } => Some(*channel_id),
             Self::InviteMember { channel_id, .. } => Some(*channel_id),
+            Self::JoinChannel { channel_id } => Some(*channel_id),
             Self::LeaveChannel { channel_id } => Some(*channel_id),
             Self::RemoveMember { channel_id, .. } => Some(*channel_id),
             Self::UpdateChannel { channel_id, .. } => Some(*channel_id),
@@ -440,8 +501,12 @@ impl Intent {
             Self::RejectRecovery {
                 recovery_context, ..
             } => Some(*recovery_context),
+            Self::CompleteRecovery {
+                recovery_context, ..
+            } => Some(*recovery_context),
             Self::SetBlockName { block_id, .. } => Some(*block_id),
             Self::UpdateBlockStorage { block_id, .. } => Some(*block_id),
+            Self::InviteToBlock { block_id, .. } => Some(*block_id),
             _ => None,
         }
     }
@@ -455,18 +520,24 @@ impl Intent {
             Self::EditMessage { .. } => "edit message",
             Self::DeleteMessage { .. } => "delete message",
             Self::InviteMember { .. } => "invite member",
+            Self::JoinChannel { .. } => "join channel",
             Self::LeaveChannel { .. } => "leave channel",
             Self::RemoveMember { .. } => "remove member",
             Self::UpdateChannel { .. } => "update channel",
             Self::InitiateRecovery => "initiate recovery",
             Self::ApproveRecovery { .. } => "approve recovery",
             Self::RejectRecovery { .. } => "reject recovery",
+            Self::CompleteRecovery { .. } => "complete recovery",
+            Self::SetGuardianThreshold { .. } => "set guardian threshold",
             Self::CreateInvitation { .. } => "create invitation",
             Self::AcceptInvitation { .. } => "accept invitation",
             Self::RejectInvitation { .. } => "reject invitation",
             Self::RevokeInvitation { .. } => "revoke invitation",
             Self::SetPetname { .. } => "set petname",
             Self::RemoveContact { .. } => "remove contact",
+            Self::ToggleGuardian { .. } => "toggle guardian",
+            Self::CreateBlock { .. } => "create block",
+            Self::InviteToBlock { .. } => "invite to block",
             Self::SetBlockName { .. } => "set block name",
             Self::UpdateBlockStorage { .. } => "update block storage",
             Self::NavigateTo { .. } => "navigate",
@@ -479,6 +550,9 @@ impl Intent {
             Self::ShowAuthority { .. } => "show authority",
             Self::ListAuthorities => "list authorities",
             Self::AddDevice { .. } => "add device",
+            Self::RemoveDevice { .. } => "remove device",
+            Self::UpdateThreshold { .. } => "update threshold",
+            Self::CreateAccount { .. } => "create account",
             // Context/Inspection
             Self::InspectContext { .. } => "inspect context",
             Self::ShowReceipts { .. } => "show receipts",
@@ -525,6 +599,9 @@ impl Intent {
     }
 
     /// Convert this intent to a fact content string
+    ///
+    /// Uses the format: `FactType::key1=value1&key2=value2`
+    /// This format is parsed by the reducer in `crate::core::reducer::reduce_fact`.
     fn to_fact_content(&self) -> String {
         match self {
             // Chat intents
@@ -533,45 +610,71 @@ impl Intent {
                 content,
                 reply_to,
             } => {
-                let reply = reply_to.as_deref().unwrap_or("");
-                format!("SendMessage:{}:{}:{}", channel_id, content, reply)
+                let reply = reply_to.as_deref().unwrap_or("None");
+                format!(
+                    "SendMessage::channel_id={}&content={}&reply_to={}",
+                    channel_id, content, reply
+                )
             }
             Self::CreateChannel { name, channel_type } => {
-                format!("CreateChannel:{}:{:?}", name, channel_type)
+                let ct = match channel_type {
+                    ChannelType::Block => "Block",
+                    ChannelType::DirectMessage => "DirectMessage",
+                    ChannelType::Guardian => "Guardian",
+                };
+                format!("CreateChannel::name={}&channel_type={}", name, ct)
             }
             Self::MarkAsRead {
                 channel_id,
                 up_to_message,
             } => {
-                format!("MarkAsRead:{}:{}", channel_id, up_to_message)
+                format!(
+                    "MarkAsRead::channel_id={}&up_to_message={}",
+                    channel_id, up_to_message
+                )
             }
             Self::EditMessage {
                 channel_id,
                 message_id,
                 content,
             } => {
-                format!("EditMessage:{}:{}:{}", channel_id, message_id, content)
+                format!(
+                    "EditMessage::channel_id={}&message_id={}&content={}",
+                    channel_id, message_id, content
+                )
             }
             Self::DeleteMessage {
                 channel_id,
                 message_id,
             } => {
-                format!("DeleteMessage:{}:{}", channel_id, message_id)
+                format!(
+                    "DeleteMessage::channel_id={}&message_id={}",
+                    channel_id, message_id
+                )
             }
             Self::InviteMember {
                 channel_id,
                 member_id,
             } => {
-                format!("InviteMember:{}:{}", channel_id, member_id)
+                format!(
+                    "InviteMember::channel_id={}&member_id={}",
+                    channel_id, member_id
+                )
+            }
+            Self::JoinChannel { channel_id } => {
+                format!("JoinChannel::channel_id={}", channel_id)
             }
             Self::LeaveChannel { channel_id } => {
-                format!("LeaveChannel:{}", channel_id)
+                format!("LeaveChannel::channel_id={}", channel_id)
             }
             Self::RemoveMember {
                 channel_id,
                 member_id,
             } => {
-                format!("RemoveMember:{}:{}", channel_id, member_id)
+                format!(
+                    "RemoveMember::channel_id={}&member_id={}",
+                    channel_id, member_id
+                )
             }
             Self::UpdateChannel {
                 channel_id,
@@ -579,7 +682,7 @@ impl Intent {
                 description,
             } => {
                 format!(
-                    "UpdateChannel:{}:{}:{}",
+                    "UpdateChannel::channel_id={}&name={}&description={}",
                     channel_id,
                     name.as_deref().unwrap_or(""),
                     description.as_deref().unwrap_or("")
@@ -587,29 +690,49 @@ impl Intent {
             }
 
             // Recovery intents
-            Self::InitiateRecovery => "InitiateRecovery".to_string(),
+            Self::InitiateRecovery => {
+                // Generate a session ID for tracking
+                "InitiateRecovery::session_id=recovery_session".to_string()
+            }
             Self::ApproveRecovery { recovery_context } => {
-                format!("ApproveRecovery:{}", recovery_context)
+                format!(
+                    "ApproveRecovery::guardian_id={}&recovery_context={}",
+                    "self", recovery_context
+                )
             }
             Self::RejectRecovery {
                 recovery_context,
                 reason,
             } => {
-                format!("RejectRecovery:{}:{}", recovery_context, reason)
+                format!(
+                    "RejectRecovery::recovery_context={}&reason={}",
+                    recovery_context, reason
+                )
+            }
+            Self::CompleteRecovery { recovery_context } => {
+                format!("CompleteRecovery::recovery_context={}", recovery_context)
+            }
+            Self::SetGuardianThreshold { threshold } => {
+                format!("SetGuardianThreshold::threshold={}", threshold)
             }
 
             // Invitation intents
             Self::CreateInvitation { invitation_type } => {
-                format!("CreateInvitation:{:?}", invitation_type)
+                let it = match invitation_type {
+                    InvitationType::Block => "Block",
+                    InvitationType::Guardian => "Guardian",
+                    InvitationType::Chat => "Chat",
+                };
+                format!("CreateInvitation::invitation_type={}&invitation_id=inv_{}", it, uuid::Uuid::new_v4().simple())
             }
             Self::AcceptInvitation { invitation_fact } => {
-                format!("AcceptInvitation:{}", invitation_fact)
+                format!("AcceptInvitation::invitation_id={}", invitation_fact)
             }
             Self::RejectInvitation { invitation_fact } => {
-                format!("RejectInvitation:{}", invitation_fact)
+                format!("RejectInvitation::invitation_id={}", invitation_fact)
             }
             Self::RevokeInvitation { invitation_fact } => {
-                format!("RevokeInvitation:{}", invitation_fact)
+                format!("RevokeInvitation::invitation_id={}", invitation_fact)
             }
 
             // Contact intents
@@ -617,25 +740,46 @@ impl Intent {
                 contact_id,
                 petname,
             } => {
-                format!("SetPetname:{}:{}", contact_id, petname)
+                format!("SetPetname::target={}&petname={}", contact_id, petname)
             }
             Self::RemoveContact { contact_id } => {
-                format!("RemoveContact:{}", contact_id)
+                format!("RemoveContact::contact_id={}", contact_id)
+            }
+            Self::ToggleGuardian {
+                contact_id,
+                is_guardian,
+            } => {
+                format!(
+                    "ToggleGuardian::contact_id={}&is_guardian={}",
+                    contact_id, is_guardian
+                )
             }
 
             // Block intents
+            Self::CreateBlock { name } => {
+                format!("CreateBlock::name={}", name)
+            }
+            Self::InviteToBlock {
+                block_id,
+                invitee_id,
+            } => {
+                format!("InviteToBlock::block_id={}&invitee_id={}", block_id, invitee_id)
+            }
             Self::SetBlockName { block_id, name } => {
-                format!("SetBlockName:{}:{}", block_id, name)
+                format!("SetBlockName::block_id={}&name={}", block_id, name)
             }
             Self::UpdateBlockStorage {
                 block_id,
                 storage_budget,
             } => {
-                format!("UpdateBlockStorage:{}:{}", block_id, storage_budget)
+                format!(
+                    "UpdateBlockStorage::block_id={}&storage_budget={}",
+                    block_id, storage_budget
+                )
             }
 
             // Navigation intents (typically not journaled, but included for completeness)
-            Self::NavigateTo { screen } => format!("NavigateTo:{:?}", screen),
+            Self::NavigateTo { screen } => format!("NavigateTo::screen={:?}", screen),
             Self::GoBack => "GoBack".to_string(),
 
             // Admin/Maintenance
@@ -645,51 +789,83 @@ impl Intent {
                 activation_epoch,
             } => {
                 format!(
-                    "ReplaceAdmin:{}:{}:{}",
+                    "ReplaceAdmin::account={}&new_admin={}&activation_epoch={}",
                     account, new_admin, activation_epoch
                 )
             }
             Self::ProposeSnapshot => "ProposeSnapshot".to_string(),
 
             // Authority intents
-            Self::CreateAuthority { threshold } => format!("CreateAuthority:{}", threshold),
-            Self::ShowAuthority { authority_id } => format!("ShowAuthority:{}", authority_id),
+            Self::CreateAuthority { threshold } => {
+                format!("CreateAuthority::threshold={}", threshold)
+            }
+            Self::ShowAuthority { authority_id } => {
+                format!("ShowAuthority::authority_id={}", authority_id)
+            }
             Self::ListAuthorities => "ListAuthorities".to_string(),
             Self::AddDevice {
                 authority_id,
                 public_key,
             } => {
-                format!("AddDevice:{}:{}", authority_id, public_key)
+                format!(
+                    "AddDevice::authority_id={}&public_key={}",
+                    authority_id, public_key
+                )
             }
+            Self::RemoveDevice {
+                authority_id,
+                device_id,
+            } => {
+                format!(
+                    "RemoveDevice::authority_id={}&device_id={}",
+                    authority_id, device_id
+                )
+            }
+            Self::UpdateThreshold { threshold } => {
+                format!("UpdateThreshold::threshold={}", threshold)
+            }
+            Self::CreateAccount { name } => format!("CreateAccount::name={}", name),
 
             // Context/Inspection
             Self::InspectContext {
                 context,
                 state_file,
             } => {
-                format!("InspectContext:{}:{}", context, state_file)
+                format!(
+                    "InspectContext::context={}&state_file={}",
+                    context, state_file
+                )
             }
             Self::ShowReceipts {
                 context,
                 state_file,
                 detailed,
             } => {
-                format!("ShowReceipts:{}:{}:{}", context, state_file, detailed)
+                format!(
+                    "ShowReceipts::context={}&state_file={}&detailed={}",
+                    context, state_file, detailed
+                )
             }
 
             // AMP
             Self::InspectAmpChannel { context, channel } => {
-                format!("InspectAmpChannel:{}:{}", context, channel)
+                format!(
+                    "InspectAmpChannel::context={}&channel={}",
+                    context, channel
+                )
             }
             Self::BumpChannelEpoch {
                 context,
                 channel,
                 reason,
             } => {
-                format!("BumpChannelEpoch:{}:{}:{}", context, channel, reason)
+                format!(
+                    "BumpChannelEpoch::context={}&channel={}&reason={}",
+                    context, channel, reason
+                )
             }
             Self::CheckpointChannel { context, channel } => {
-                format!("CheckpointChannel:{}:{}", context, channel)
+                format!("CheckpointChannel::context={}&channel={}", context, channel)
             }
 
             // OTA
@@ -701,13 +877,15 @@ impl Intent {
                 description,
             } => {
                 format!(
-                    "ProposeUpgrade:{}:{}:{}:{}:{}",
+                    "ProposeUpgrade::from_version={}&to_version={}&upgrade_type={}&download_url={}&description={}",
                     from_version, to_version, upgrade_type, download_url, description
                 )
             }
-            Self::SetOtaPolicy { policy } => format!("SetOtaPolicy:{}", policy),
+            Self::SetOtaPolicy { policy } => format!("SetOtaPolicy::policy={}", policy),
             Self::GetOtaStatus => "GetOtaStatus".to_string(),
-            Self::OptInUpgrade { proposal_id } => format!("OptInUpgrade:{}", proposal_id),
+            Self::OptInUpgrade { proposal_id } => {
+                format!("OptInUpgrade::proposal_id={}", proposal_id)
+            }
             Self::ListUpgradeProposals => "ListUpgradeProposals".to_string(),
             Self::GetUpgradeStats => "GetUpgradeStats".to_string(),
 
@@ -717,7 +895,10 @@ impl Intent {
                 daemon,
                 config_path,
             } => {
-                format!("StartNode:{}:{}:{}", port, daemon, config_path)
+                format!(
+                    "StartNode::port={}&daemon={}&config_path={}",
+                    port, daemon, config_path
+                )
             }
 
             // Threshold
@@ -726,7 +907,10 @@ impl Intent {
                 threshold,
                 mode,
             } => {
-                format!("RunThreshold:{}:{}:{}", configs, threshold, mode)
+                format!(
+                    "RunThreshold::configs={}&threshold={}&mode={}",
+                    configs, threshold, mode
+                )
             }
 
             // Init
@@ -735,11 +919,16 @@ impl Intent {
                 threshold,
                 output,
             } => {
-                format!("InitAccount:{}:{}:{}", num_devices, threshold, output)
+                format!(
+                    "InitAccount::num_devices={}&threshold={}&output={}",
+                    num_devices, threshold, output
+                )
             }
 
             // System queries
-            Self::GetStatus { config_path } => format!("GetStatus:{}", config_path),
+            Self::GetStatus { config_path } => {
+                format!("GetStatus::config_path={}", config_path)
+            }
             Self::GetVersion => "GetVersion".to_string(),
         }
     }
