@@ -2,16 +2,19 @@
 //!
 //! Handlers for invitation-related operations including creating, accepting,
 //! and declining invitations for channels, guardians, and contacts.
+//!
+//! This module now uses `aura_invitation::InvitationService` internally for
+//! guard chain integration while maintaining the same public API.
 
+use super::invitation_bridge::execute_guard_outcome;
 use super::shared::{HandlerContext, HandlerUtilities};
-use crate::core::{AgentError, AgentResult, AuthorityContext};
+use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomEffects;
 use aura_core::identifiers::AuthorityId;
-use aura_invitation::facts::InvitationFact;
-use aura_journal::DomainFact;
+use aura_invitation::guards::GuardSnapshot;
+use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_protocol::effects::EffectApiEffects;
-use aura_protocol::guards::send_guard::create_send_guard;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,12 +32,20 @@ pub enum InvitationType {
 }
 
 impl InvitationType {
-    /// Convert to string type for InvitationFact
-    fn as_type_string(&self) -> String {
+    /// Convert to aura_invitation::InvitationType
+    fn to_core_type(&self) -> aura_invitation::InvitationType {
         match self {
-            InvitationType::Channel { .. } => "channel".to_string(),
-            InvitationType::Guardian { .. } => "guardian".to_string(),
-            InvitationType::Contact { .. } => "contact".to_string(),
+            InvitationType::Channel { block_id } => aura_invitation::InvitationType::Channel {
+                block_id: block_id.clone(),
+            },
+            InvitationType::Guardian { subject_authority } => {
+                aura_invitation::InvitationType::Guardian {
+                    subject_authority: *subject_authority,
+                }
+            }
+            InvitationType::Contact { petname } => aura_invitation::InvitationType::Contact {
+                petname: petname.clone(),
+            },
         }
     }
 }
@@ -52,6 +63,18 @@ pub enum InvitationStatus {
     Cancelled,
     /// Invitation has expired
     Expired,
+}
+
+impl From<aura_invitation::InvitationStatus> for InvitationStatus {
+    fn from(status: aura_invitation::InvitationStatus) -> Self {
+        match status {
+            aura_invitation::InvitationStatus::Pending => InvitationStatus::Pending,
+            aura_invitation::InvitationStatus::Accepted => InvitationStatus::Accepted,
+            aura_invitation::InvitationStatus::Declined => InvitationStatus::Declined,
+            aura_invitation::InvitationStatus::Cancelled => InvitationStatus::Cancelled,
+            aura_invitation::InvitationStatus::Expired => InvitationStatus::Expired,
+        }
+    }
 }
 
 /// Created invitation details
@@ -89,8 +112,12 @@ pub struct InvitationResult {
 }
 
 /// Invitation handler
+///
+/// Uses `aura_invitation::InvitationService` for guard chain integration.
 pub struct InvitationHandler {
     context: HandlerContext,
+    /// Core invitation service from aura_invitation
+    service: CoreInvitationService,
     /// Cache of pending invitations (for quick lookup)
     pending_invitations: Arc<RwLock<HashMap<String, Invitation>>>,
 }
@@ -100,8 +127,11 @@ impl InvitationHandler {
     pub fn new(authority: AuthorityContext) -> AgentResult<Self> {
         HandlerUtilities::validate_authority_context(&authority)?;
 
+        let service = CoreInvitationService::new(authority.authority_id, InvitationConfig::default());
+
         Ok(Self {
             context: HandlerContext::new(authority),
+            service,
             pending_invitations: Arc::new(RwLock::new(HashMap::new())),
         })
     }
@@ -109,6 +139,40 @@ impl InvitationHandler {
     /// Get the authority context
     pub fn authority_context(&self) -> &AuthorityContext {
         &self.context.authority
+    }
+
+    /// Build a guard snapshot from the current context and effects
+    async fn build_snapshot(&self, effects: &AuraEffectSystem) -> GuardSnapshot {
+        let now_ms = effects.current_timestamp().await.unwrap_or(0);
+
+        // Build capabilities list - in testing mode, grant all capabilities
+        let capabilities = if effects.is_testing() {
+            vec![
+                "invitation:send".to_string(),
+                "invitation:accept".to_string(),
+                "invitation:decline".to_string(),
+                "invitation:cancel".to_string(),
+                "invitation:guardian".to_string(),
+                "invitation:channel".to_string(),
+            ]
+        } else {
+            // TODO: Get capabilities from Biscuit token or capability store
+            vec![
+                "invitation:send".to_string(),
+                "invitation:accept".to_string(),
+                "invitation:decline".to_string(),
+                "invitation:cancel".to_string(),
+            ]
+        };
+
+        GuardSnapshot::new(
+            self.context.authority.authority_id,
+            self.context.effect_context.context_id(),
+            100, // Default flow budget
+            capabilities,
+            1, // Default epoch
+            now_ms,
+        )
     }
 
     /// Create an invitation
@@ -122,54 +186,26 @@ impl InvitationHandler {
     ) -> AgentResult<Invitation> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        // Enforce guard (unless testing)
-        if !effects.is_testing() {
-            let guard = create_send_guard(
-                "invitation:create".to_string(),
-                self.context.effect_context.context_id(),
-                self.context.authority.authority_id,
-                50,
-            );
-            let result = guard
-                .evaluate(effects)
-                .await
-                .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
-            if !result.authorized {
-                return Err(AgentError::effects(
-                    result
-                        .denial_reason
-                        .unwrap_or_else(|| "invitation create not authorized".to_string()),
-                ));
-            }
-        }
-
         // Generate unique invitation ID
         let invitation_id = format!("inv-{}", effects.random_uuid().await.simple());
-
         let current_time = effects.current_timestamp().await.unwrap_or(0);
         let expires_at = expires_in_ms.map(|ms| current_time + ms);
 
-        // Create the invitation fact
-        let fact = InvitationFact::Sent {
-            context_id: self.context.effect_context.context_id(),
-            invitation_id: invitation_id.clone(),
-            sender_id: self.context.authority.authority_id,
-            receiver_id,
-            invitation_type: invitation_type.as_type_string(),
-            sent_at_ms: current_time,
-            expires_at_ms: expires_at,
-            message: message.clone(),
-        };
+        // Build snapshot and prepare through service
+        let snapshot = self.build_snapshot(effects).await;
+        let core_type = invitation_type.to_core_type();
 
-        // Journal the invitation fact
-        HandlerUtilities::append_generic_fact(
-            &self.context.authority,
-            effects,
-            self.context.effect_context.context_id(),
-            "invitation",
-            &fact.to_bytes(),
-        )
-        .await?;
+        let outcome = self.service.prepare_send_invitation(
+            &snapshot,
+            receiver_id,
+            core_type,
+            message.clone(),
+            expires_in_ms,
+            invitation_id.clone(),
+        );
+
+        // Execute the outcome (handles denial and effects)
+        execute_guard_outcome(outcome, &self.context.authority, effects).await?;
 
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
@@ -199,45 +235,12 @@ impl InvitationHandler {
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        // Enforce guard (unless testing)
-        if !effects.is_testing() {
-            let guard = create_send_guard(
-                "invitation:accept".to_string(),
-                self.context.effect_context.context_id(),
-                self.context.authority.authority_id,
-                50,
-            );
-            let result = guard
-                .evaluate(effects)
-                .await
-                .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
-            if !result.authorized {
-                return Err(AgentError::effects(
-                    result
-                        .denial_reason
-                        .unwrap_or_else(|| "invitation accept not authorized".to_string()),
-                ));
-            }
-        }
+        // Build snapshot and prepare through service
+        let snapshot = self.build_snapshot(effects).await;
+        let outcome = self.service.prepare_accept_invitation(&snapshot, invitation_id);
 
-        let current_time = effects.current_timestamp().await.unwrap_or(0);
-
-        // Create acceptance fact
-        let fact = InvitationFact::Accepted {
-            invitation_id: invitation_id.to_string(),
-            acceptor_id: self.context.authority.authority_id,
-            accepted_at_ms: current_time,
-        };
-
-        // Journal the acceptance
-        HandlerUtilities::append_generic_fact(
-            &self.context.authority,
-            effects,
-            self.context.effect_context.context_id(),
-            "invitation",
-            &fact.to_bytes(),
-        )
-        .await?;
+        // Execute the outcome
+        execute_guard_outcome(outcome, &self.context.authority, effects).await?;
 
         // Update cache if we have this invitation
         {
@@ -263,43 +266,12 @@ impl InvitationHandler {
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        // Enforce guard (unless testing)
-        if !effects.is_testing() {
-            let guard = create_send_guard(
-                "invitation:decline".to_string(),
-                self.context.effect_context.context_id(),
-                self.context.authority.authority_id,
-                30,
-            );
-            let result = guard
-                .evaluate(effects)
-                .await
-                .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
-            if !result.authorized {
-                return Err(AgentError::effects(result.denial_reason.unwrap_or_else(
-                    || "invitation decline not authorized".to_string(),
-                )));
-            }
-        }
+        // Build snapshot and prepare through service
+        let snapshot = self.build_snapshot(effects).await;
+        let outcome = self.service.prepare_decline_invitation(&snapshot, invitation_id);
 
-        let current_time = effects.current_timestamp().await.unwrap_or(0);
-
-        // Create decline fact
-        let fact = InvitationFact::Declined {
-            invitation_id: invitation_id.to_string(),
-            decliner_id: self.context.authority.authority_id,
-            declined_at_ms: current_time,
-        };
-
-        // Journal the decline
-        HandlerUtilities::append_generic_fact(
-            &self.context.authority,
-            effects,
-            self.context.effect_context.context_id(),
-            "invitation",
-            &fact.to_bytes(),
-        )
-        .await?;
+        // Execute the outcome
+        execute_guard_outcome(outcome, &self.context.authority, effects).await?;
 
         // Update cache if we have this invitation
         {
@@ -325,45 +297,12 @@ impl InvitationHandler {
     ) -> AgentResult<InvitationResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
-        // Enforce guard (unless testing)
-        if !effects.is_testing() {
-            let guard = create_send_guard(
-                "invitation:cancel".to_string(),
-                self.context.effect_context.context_id(),
-                self.context.authority.authority_id,
-                30,
-            );
-            let result = guard
-                .evaluate(effects)
-                .await
-                .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
-            if !result.authorized {
-                return Err(AgentError::effects(
-                    result
-                        .denial_reason
-                        .unwrap_or_else(|| "invitation cancel not authorized".to_string()),
-                ));
-            }
-        }
+        // Build snapshot and prepare through service
+        let snapshot = self.build_snapshot(effects).await;
+        let outcome = self.service.prepare_cancel_invitation(&snapshot, invitation_id);
 
-        let current_time = effects.current_timestamp().await.unwrap_or(0);
-
-        // Create cancellation fact
-        let fact = InvitationFact::Cancelled {
-            invitation_id: invitation_id.to_string(),
-            canceller_id: self.context.authority.authority_id,
-            cancelled_at_ms: current_time,
-        };
-
-        // Journal the cancellation
-        HandlerUtilities::append_generic_fact(
-            &self.context.authority,
-            effects,
-            self.context.effect_context.context_id(),
-            "invitation",
-            &fact.to_bytes(),
-        )
-        .await?;
+        // Execute the outcome
+        execute_guard_outcome(outcome, &self.context.authority, effects).await?;
 
         // Remove from cache
         {

@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod auth_service;
 pub mod invitation;
+pub mod invitation_bridge;
 pub mod invitation_service;
 pub mod ota;
 pub mod recovery;
