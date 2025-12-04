@@ -3,8 +3,8 @@
 //! Handlers for invitation-related operations including creating, accepting,
 //! and declining invitations for channels, guardians, and contacts.
 //!
-//! This module now uses `aura_invitation::InvitationService` internally for
-//! guard chain integration while maintaining the same public API.
+//! This module uses `aura_invitation::InvitationService` internally for
+//! guard chain integration. Types are re-exported from `aura_invitation`.
 
 use super::invitation_bridge::execute_guard_outcome;
 use super::shared::{HandlerContext, HandlerUtilities};
@@ -15,91 +15,18 @@ use aura_core::identifiers::AuthorityId;
 use aura_invitation::guards::GuardSnapshot;
 use aura_invitation::{InvitationConfig, InvitationService as CoreInvitationService};
 use aura_protocol::effects::EffectApiEffects;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// Invitation type
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum InvitationType {
-    /// Invitation to join a block/channel
-    Channel { block_id: String },
-    /// Invitation to become a guardian
-    Guardian { subject_authority: AuthorityId },
-    /// Invitation to become a contact
-    Contact { petname: Option<String> },
-}
-
-impl InvitationType {
-    /// Convert to aura_invitation::InvitationType
-    fn to_core_type(&self) -> aura_invitation::InvitationType {
-        match self {
-            InvitationType::Channel { block_id } => aura_invitation::InvitationType::Channel {
-                block_id: block_id.clone(),
-            },
-            InvitationType::Guardian { subject_authority } => {
-                aura_invitation::InvitationType::Guardian {
-                    subject_authority: *subject_authority,
-                }
-            }
-            InvitationType::Contact { petname } => aura_invitation::InvitationType::Contact {
-                petname: petname.clone(),
-            },
-        }
-    }
-}
-
-/// Invitation status
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum InvitationStatus {
-    /// Invitation is pending response
-    Pending,
-    /// Invitation was accepted
-    Accepted,
-    /// Invitation was declined
-    Declined,
-    /// Invitation was cancelled by sender
-    Cancelled,
-    /// Invitation has expired
-    Expired,
-}
-
-impl From<aura_invitation::InvitationStatus> for InvitationStatus {
-    fn from(status: aura_invitation::InvitationStatus) -> Self {
-        match status {
-            aura_invitation::InvitationStatus::Pending => InvitationStatus::Pending,
-            aura_invitation::InvitationStatus::Accepted => InvitationStatus::Accepted,
-            aura_invitation::InvitationStatus::Declined => InvitationStatus::Declined,
-            aura_invitation::InvitationStatus::Cancelled => InvitationStatus::Cancelled,
-            aura_invitation::InvitationStatus::Expired => InvitationStatus::Expired,
-        }
-    }
-}
-
-/// Created invitation details
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Invitation {
-    /// Unique invitation identifier
-    pub invitation_id: String,
-    /// Sender authority
-    pub sender_id: AuthorityId,
-    /// Receiver authority
-    pub receiver_id: AuthorityId,
-    /// Type of invitation
-    pub invitation_type: InvitationType,
-    /// Current status
-    pub status: InvitationStatus,
-    /// Creation timestamp (ms)
-    pub created_at: u64,
-    /// Expiration timestamp (ms), if any
-    pub expires_at: Option<u64>,
-    /// Optional message
-    pub message: Option<String>,
-}
+// Re-export types from aura_invitation for public API
+pub use aura_invitation::{Invitation, InvitationStatus, InvitationType};
 
 /// Result of an invitation action
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// This type is specific to the agent handler layer, providing a simplified
+/// result type for handler operations.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct InvitationResult {
     /// Whether the action succeeded
     pub success: bool,
@@ -127,7 +54,8 @@ impl InvitationHandler {
     pub fn new(authority: AuthorityContext) -> AgentResult<Self> {
         HandlerUtilities::validate_authority_context(&authority)?;
 
-        let service = CoreInvitationService::new(authority.authority_id, InvitationConfig::default());
+        let service =
+            CoreInvitationService::new(authority.authority_id, InvitationConfig::default());
 
         Ok(Self {
             context: HandlerContext::new(authority),
@@ -193,12 +121,11 @@ impl InvitationHandler {
 
         // Build snapshot and prepare through service
         let snapshot = self.build_snapshot(effects).await;
-        let core_type = invitation_type.to_core_type();
 
         let outcome = self.service.prepare_send_invitation(
             &snapshot,
             receiver_id,
-            core_type,
+            invitation_type.clone(),
             message.clone(),
             expires_in_ms,
             invitation_id.clone(),
@@ -209,6 +136,7 @@ impl InvitationHandler {
 
         let invitation = Invitation {
             invitation_id: invitation_id.clone(),
+            context_id: self.context.effect_context.context_id(),
             sender_id: self.context.authority.authority_id,
             receiver_id,
             invitation_type,
@@ -237,7 +165,9 @@ impl InvitationHandler {
 
         // Build snapshot and prepare through service
         let snapshot = self.build_snapshot(effects).await;
-        let outcome = self.service.prepare_accept_invitation(&snapshot, invitation_id);
+        let outcome = self
+            .service
+            .prepare_accept_invitation(&snapshot, invitation_id);
 
         // Execute the outcome
         execute_guard_outcome(outcome, &self.context.authority, effects).await?;
@@ -268,7 +198,9 @@ impl InvitationHandler {
 
         // Build snapshot and prepare through service
         let snapshot = self.build_snapshot(effects).await;
-        let outcome = self.service.prepare_decline_invitation(&snapshot, invitation_id);
+        let outcome = self
+            .service
+            .prepare_decline_invitation(&snapshot, invitation_id);
 
         // Execute the outcome
         execute_guard_outcome(outcome, &self.context.authority, effects).await?;
@@ -299,7 +231,9 @@ impl InvitationHandler {
 
         // Build snapshot and prepare through service
         let snapshot = self.build_snapshot(effects).await;
-        let outcome = self.service.prepare_cancel_invitation(&snapshot, invitation_id);
+        let outcome = self
+            .service
+            .prepare_cancel_invitation(&snapshot, invitation_id);
 
         // Execute the outcome
         execute_guard_outcome(outcome, &self.context.authority, effects).await?;
