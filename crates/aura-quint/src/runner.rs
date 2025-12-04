@@ -1573,8 +1573,29 @@ impl QuintRunner {
     fn determine_capability_property_type(&self, property_name: &str) -> CapabilityPropertyType {
         let name_lower = property_name.to_lowercase();
 
+        // Check specific patterns before broader matches
+        // Monotonicity properties
+        if name_lower.contains("monotonic") {
+            CapabilityPropertyType::Monotonicity
+        }
+        // Non-interference properties
+        else if name_lower.contains("interference") {
+            CapabilityPropertyType::NonInterference
+        }
+        // Temporal consistency properties
+        else if name_lower.contains("temporal") {
+            CapabilityPropertyType::TemporalConsistency
+        }
+        // Context isolation properties
+        else if name_lower.contains("isolation") {
+            CapabilityPropertyType::ContextIsolation
+        }
+        // Authorization soundness (check before broader "authorization" match)
+        else if name_lower.contains("soundness") {
+            CapabilityPropertyType::AuthorizationSoundness
+        }
         // Authorization properties: guard chain, capability grants, permissions
-        if name_lower.contains("grant")
+        else if name_lower.contains("grant")
             || name_lower.contains("permit")
             || name_lower.contains("restrict")
             || name_lower.contains("guard")
@@ -1603,18 +1624,6 @@ impl QuintRunner {
             || name_lower.contains("chain")
         {
             CapabilityPropertyType::Integrity
-        }
-        // Existing property types
-        else if name_lower.contains("monotonic") {
-            CapabilityPropertyType::Monotonicity
-        } else if name_lower.contains("interference") {
-            CapabilityPropertyType::NonInterference
-        } else if name_lower.contains("temporal") {
-            CapabilityPropertyType::TemporalConsistency
-        } else if name_lower.contains("isolation") {
-            CapabilityPropertyType::ContextIsolation
-        } else if name_lower.contains("auth") {
-            CapabilityPropertyType::AuthorizationSoundness
         } else {
             CapabilityPropertyType::General
         }
