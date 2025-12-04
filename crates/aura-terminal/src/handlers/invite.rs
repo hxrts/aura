@@ -11,10 +11,10 @@ use std::str::FromStr;
 /// Minimal invitation payload used by the CLI while the coordinator wiring is pending.
 #[derive(Debug)]
 struct PreparedInvitation {
-    inviter: DeviceId,
+    _inviter: DeviceId,
     invitee: DeviceId,
     account_id: AccountId,
-    granted_token: SerializableBiscuit,
+    _granted_token: SerializableBiscuit,
     device_role: String,
     ttl_secs: Option<u64>,
 }
@@ -74,10 +74,10 @@ async fn build_request(
     let granted_token = SerializableBiscuit::new(device_token, authority.root_public_key());
 
     Ok(PreparedInvitation {
-        inviter: ctx.device_id(),
+        _inviter: ctx.device_id(),
         invitee: invitee_id,
         account_id,
-        granted_token,
+        _granted_token: granted_token,
         device_role: role.to_string(),
         ttl_secs: ttl,
     })
