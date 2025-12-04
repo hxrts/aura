@@ -282,7 +282,8 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                             .map(|r| convert_resident(r, my_id))
                             .collect();
 
-                        let budget = convert_budget(&block_state.storage, block_state.resident_count);
+                        let budget =
+                            convert_budget(&block_state.storage, block_state.resident_count);
 
                         reactive_block_name.set(block_state.name.clone());
                         reactive_residents.set(residents);

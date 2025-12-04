@@ -68,7 +68,6 @@ iocraft = "0.7"
 futures-signals = "0.3"
 
 # CLI
-clap = { workspace = true }
 toml = { workspace = true }
 serde = { workspace = true }
 hex = { workspace = true }

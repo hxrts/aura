@@ -264,9 +264,7 @@ fn convert_guardian(g: &aura_app::views::Guardian) -> Guardian {
 }
 
 /// Convert aura-app recovery process status to TUI recovery state
-fn convert_recovery_state(
-    status: aura_app::views::RecoveryProcessStatus,
-) -> RecoveryState {
+fn convert_recovery_state(status: aura_app::views::RecoveryProcessStatus) -> RecoveryState {
     match status {
         aura_app::views::RecoveryProcessStatus::Idle => RecoveryState::None,
         aura_app::views::RecoveryProcessStatus::Initiated => RecoveryState::Initiated,
@@ -364,7 +362,8 @@ pub fn RecoveryScreen(
                             .collect();
 
                         // Convert recovery status
-                        let status = convert_recovery_status(&recovery_state, &recovery_state.guardians);
+                        let status =
+                            convert_recovery_status(&recovery_state, &recovery_state.guardians);
 
                         reactive_guardians.set(guardians);
                         reactive_threshold_required.set(recovery_state.threshold);

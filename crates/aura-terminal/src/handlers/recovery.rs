@@ -1,18 +1,19 @@
 //! Guardian Recovery CLI Commands
 //!
 //! Commands for managing guardian-based account recovery.
+//! Uses the authority model - guardians are identified by AuthorityId.
 
 use crate::handlers::HandlerContext;
 use anyhow::Result;
 use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::{JournalEffects, StorageEffects};
 use aura_core::hash;
-use aura_core::identifiers::{ContextId, GuardianId};
+use aura_core::identifiers::ContextId;
 use aura_core::time::TimeStamp;
-use aura_core::{AccountId, AuthorityId, DeviceId, FactValue, Hash32};
+use aura_core::{AuthorityId, FactValue, Hash32};
 use aura_journal::fact::{FactContent, RelationalFact};
 use aura_protocol::effects::EffectApiEffects;
-use aura_recovery::types::{GuardianProfile, GuardianSet};
+use aura_recovery::types::{GuardianProfile, GuardianSet, RecoveryDispute};
 use aura_recovery::{RecoveryRequest, RecoveryResponse};
 use std::path::Path;
 
@@ -104,41 +105,21 @@ async fn start_recovery(
         println!("Justification: {}", just);
     }
 
-    // Parse account ID
-    let account_id = account
-        .parse::<AccountId>()
-        .map_err(|e| anyhow::anyhow!("Invalid account ID '{}': {}", account, e))?;
+    // Parse account ID as authority
+    let account_authority = ids::authority_id(account);
 
-    // Parse guardians list (comma-separated guardian IDs)
-    let guardian_ids: Vec<&str> = guardians.split(',').map(|s| s.trim()).collect();
-    if guardian_ids.is_empty() {
+    // Parse guardians list (comma-separated authority identifiers)
+    let guardian_strs: Vec<&str> = guardians.split(',').map(|s| s.trim()).collect();
+    if guardian_strs.is_empty() {
         return Err(anyhow::anyhow!("No guardians specified"));
     }
 
-    // Convert to guardian profiles with Journal integration
+    // Convert to guardian profiles using authority model
     let mut guardian_profiles = Vec::new();
-    for (i, guardian_str) in guardian_ids.iter().enumerate() {
-        // Parse guardian ID
-        let guardian_id = guardian_str
-            .parse::<GuardianId>()
-            .map_err(|e| anyhow::anyhow!("Invalid guardian ID '{}': {}", guardian_str, e))?;
-
-        // Query actual device IDs from Journal/Web-of-Trust
-        let device_id = match query_guardian_device_id(ctx, &guardian_id).await {
-            Ok(id) => id,
-            Err(_) => {
-                // Derive a deterministic device ID when not yet recorded in the journal
-                tracing::warn!(
-                    guardian_id = ?guardian_id,
-                    "Guardian device ID not found in Journal, deriving deterministic fallback"
-                );
-                DeviceId::from(format!("guardian-device-{}", i).as_str())
-            }
-        };
-
-        guardian_profiles.push(GuardianProfile::new(
-            guardian_id,
-            device_id,
+    for (i, guardian_str) in guardian_strs.iter().enumerate() {
+        let guardian_authority = ids::authority_id(guardian_str);
+        guardian_profiles.push(GuardianProfile::with_label(
+            guardian_authority,
             format!("Guardian {}", i + 1),
         ));
     }
@@ -162,30 +143,30 @@ async fn start_recovery(
         timestamp: ctx.effects().current_timestamp().await.unwrap_or(0),
     };
 
-    // Derive requesting device from authority context
-    let requesting_device = DeviceId::from_uuid(ctx.effect_context().authority_id().uuid());
+    // Get initiator authority from context
+    let initiator_id = ctx.effect_context().authority_id();
 
-    // Create recovery request
+    // Create recovery request using authority model
     let recovery_request = RecoveryRequest {
-        requesting_device,
-        account_id,
+        initiator_id,
+        account_id: account_authority,
         context,
         threshold: threshold as usize,
-        guardians: guardian_set,
-        auth_token: None,
+        guardians: guardian_set.clone(),
     };
 
     println!("Executing recovery protocol via proper coordinator...");
 
     // Convert to the new recovery protocol format
     let commitment = Hash32::new(hash::hash(
-        format!("recovery-commitment:{}", account_id).as_bytes(),
+        format!("recovery-commitment:{}", account_authority).as_bytes(),
     ));
-    let new_public_key = hash::hash(format!("recovery-new-key:{}", account_id).as_bytes()).to_vec();
+    let new_public_key =
+        hash::hash(format!("recovery-new-key:{}", account_authority).as_bytes()).to_vec();
 
     let recovery_request_new = aura_recovery::recovery_protocol::RecoveryRequest {
-        recovery_id: account_id.to_string(),
-        account_authority: AuthorityId::from_uuid(account_id.0),
+        recovery_id: account_authority.to_string(),
+        account_authority,
         new_tree_commitment: commitment,
         operation: aura_recovery::recovery_protocol::RecoveryOperation::ReplaceTree {
             new_public_key,
@@ -200,17 +181,15 @@ async fn start_recovery(
     use aura_relational::RelationalContext;
     use std::sync::Arc;
 
-    let guardian_authorities: Vec<AuthorityId> = recovery_request
-        .guardians
-        .iter()
-        .map(|g| ids::authority_id(&format!("guardian-authority:{}", g.guardian_id)))
-        .collect();
+    let guardian_authorities: Vec<AuthorityId> =
+        guardian_set.iter().map(|g| g.authority_id).collect();
+
     // Create a mock relational context for demo
     let recovery_context = Arc::new(RelationalContext::new(guardian_authorities.clone()));
 
     let recovery_protocol = RecoveryProtocol::new(
         recovery_context,
-        AuthorityId::from_uuid(account_id.0),
+        account_authority,
         guardian_authorities,
         threshold as usize,
     );
@@ -229,7 +208,7 @@ async fn start_recovery(
         .map_err(|e| anyhow::anyhow!("Failed to initiate recovery protocol: {}", e))?;
 
     // Store request payload deterministically via StorageEffects
-    let request_path = format!("recovery_request_{}.json", account_id);
+    let request_path = format!("recovery_request_{}.json", account_authority);
     let request_json = serde_json::to_vec_pretty(&recovery_request)
         .map_err(|e| anyhow::anyhow!("Failed to serialize recovery request: {}", e))?;
 
@@ -251,7 +230,7 @@ async fn start_recovery(
     println!("Share the stored request key with guardians and ask them to run `aura recovery approve --request-file {}`", request_path);
 
     // Update journal with recovery initiation using proper effects
-    let recovery_fact_key = format!("recovery_initiated.{}", account_id);
+    let recovery_fact_key = format!("recovery_initiated.{}", account_authority);
     let recovery_fact_value =
         encode_recovery_fact(ctx.context_id(), "recovery_initiated", &recovery_request)?;
 
@@ -314,7 +293,7 @@ async fn approve_recovery(ctx: &HandlerContext<'_>, request_file: &Path) -> Resu
         "Loaded recovery request for account: {}",
         recovery_request.account_id
     );
-    println!("Requesting device: {}", recovery_request.requesting_device);
+    println!("Initiator: {}", recovery_request.initiator_id);
     println!("Required threshold: {}", recovery_request.threshold);
 
     // Check if justification exists
@@ -323,34 +302,24 @@ async fn approve_recovery(ctx: &HandlerContext<'_>, request_file: &Path) -> Resu
         println!("Justification: {}", justification_text);
     }
 
-    // Get current device ID from agent configuration
-    let guardian_device = match get_current_device_id(ctx).await {
-        Ok(device_id) => device_id,
-        Err(_) => {
-            // Fallback to a device ID derived from the first guardian ID in the request
-            let first_guardian = recovery_request
-                .guardians
-                .iter()
-                .next()
-                .ok_or_else(|| anyhow::anyhow!("No guardians in recovery request"))?;
-            first_guardian.device_id
-        }
-    };
+    // Get current authority from context
+    let guardian_authority = ctx.effect_context().authority_id();
 
-    // Find this device in the guardian set
+    // Find this authority in the guardian set
     let guardian_profile = recovery_request
         .guardians
-        .by_device(&guardian_device)
+        .by_authority(&guardian_authority)
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "Current device {} is not a guardian for this recovery",
-                guardian_device
+                "Current authority {} is not a guardian for this recovery",
+                guardian_authority
             )
         })?;
 
+    let label = guardian_profile.label.as_deref().unwrap_or("Guardian");
     println!(
         "Approving as guardian: {} ({})",
-        guardian_profile.label, guardian_profile.guardian_id
+        label, guardian_profile.authority_id
     );
 
     // Execute guardian approval through choreographic system
@@ -369,20 +338,19 @@ async fn approve_recovery(ctx: &HandlerContext<'_>, request_file: &Path) -> Resu
 
     // Build recovery share and evidence for downstream aggregation
     let share = aura_recovery::types::RecoveryShare {
-        guardian: guardian_profile.clone(),
+        guardian_id: guardian_profile.authority_id,
+        guardian_label: guardian_profile.label.clone(),
         share: approval_result.key_share.clone(),
         partial_signature: approval_result.partial_signature.clone(),
-        issued_at: timestamp_ms(&approval_result.timestamp),
+        issued_at_ms: timestamp_ms(&approval_result.timestamp),
     };
 
     let evidence = aura_recovery::types::RecoveryEvidence {
+        context_id: ctx.context_id(),
         account_id: recovery_request.account_id,
-        recovering_device: recovery_request.requesting_device,
-        guardians: vec![guardian_profile.guardian_id],
-        issued_at: timestamp_ms(&approval_result.timestamp) / 1000,
-        cooldown_expires_at: timestamp_ms(&approval_result.timestamp) / 1000 + 24 * 3600,
-        dispute_window_ends_at: timestamp_ms(&approval_result.timestamp) / 1000 + 48 * 3600,
-        guardian_profiles: vec![guardian_profile.clone()],
+        approving_guardians: vec![guardian_profile.authority_id],
+        completed_at_ms: timestamp_ms(&approval_result.timestamp),
+        dispute_window_ends_at_ms: timestamp_ms(&approval_result.timestamp) + 48 * 3600 * 1000,
         disputes: Vec::new(),
         threshold_signature: None,
     };
@@ -402,7 +370,7 @@ async fn approve_recovery(ctx: &HandlerContext<'_>, request_file: &Path) -> Resu
 
     let response_key = format!(
         "recovery_response:{}:{}",
-        recovery_request.account_id, guardian_profile.guardian_id
+        recovery_request.account_id, guardian_profile.authority_id
     );
     ctx.effects()
         .store(&response_key, response_json.clone())
@@ -416,7 +384,7 @@ async fn approve_recovery(ctx: &HandlerContext<'_>, request_file: &Path) -> Resu
 
     let response_path = format!(
         "recovery_response_{}_{}.json",
-        recovery_request.account_id, guardian_profile.guardian_id
+        recovery_request.account_id, guardian_profile.authority_id
     );
 
     ctx.effects()
@@ -491,46 +459,10 @@ async fn dispute_recovery(ctx: &HandlerContext<'_>, evidence: &str, reason: &str
         return Err(anyhow::anyhow!("Dispute reason cannot be empty"));
     }
 
-    // Use caller authority as disputing device (deterministic mapping)
-    let disputing_device = DeviceId::from_uuid(ctx.effect_context().authority_id().uuid());
+    // Use caller authority as disputing guardian
+    let guardian_authority = ctx.effect_context().authority_id();
 
-    // Look up guardian ID from device ID via Journal/Web-of-Trust using proper JournalEffects
-    let current_journal = ctx
-        .effects()
-        .get_journal()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to get journal via effects: {}", e))?;
-
-    // Find guardian ID associated with this device
-    let guardian_id = current_journal
-        .facts
-        .keys()
-        .filter(|key| key.starts_with("guardian_device:"))
-        .find_map(|key| {
-            if let Some(value) = current_journal.facts.get(&key) {
-                if format!("{:?}", value).contains(&disputing_device.to_string()) {
-                    // Parse guardian ID from key
-                    if let Some(guardian_part) = key.split(':').nth(1) {
-                        guardian_part.parse::<GuardianId>().ok()
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-        .unwrap_or_else(|| {
-            // Fallback: create guardian ID from device
-            ids::guardian_id(&format!("guardian-from-device:{}", disputing_device))
-        });
-
-    println!(
-        "Filing dispute as guardian {} from device {}",
-        guardian_id, disputing_device
-    );
+    println!("Filing dispute as guardian {}", guardian_authority);
 
     // Validate that dispute window is still open
     println!("Validating dispute window and guardian eligibility...");
@@ -553,7 +485,7 @@ async fn dispute_recovery(ctx: &HandlerContext<'_>, evidence: &str, reason: &str
         .map_err(|e| anyhow::anyhow!("Failed to parse evidence JSON: {}", e))?;
 
         if let Some(dispute_window_ends) = evidence_json
-            .get("dispute_window_ends_at")
+            .get("dispute_window_ends_at_ms")
             .and_then(|v| v.as_u64())
         {
             let current_time = ctx.effects().current_timestamp().await.unwrap_or(0);
@@ -567,29 +499,27 @@ async fn dispute_recovery(ctx: &HandlerContext<'_>, evidence: &str, reason: &str
     }
 
     // Check if this guardian has already filed a dispute
-    let existing_dispute_key = format!("recovery_dispute.{}.{}", evidence, guardian_id);
+    let existing_dispute_key = format!("recovery_dispute.{}.{}", evidence, guardian_authority);
     if dispute_journal.facts.contains_key(&existing_dispute_key) {
         return Err(anyhow::anyhow!(
             "Guardian {} has already filed a dispute for evidence {}",
-            guardian_id,
+            guardian_authority,
             evidence
         ));
     }
 
     // Create dispute record
-    use aura_recovery::types::RecoveryDispute;
-
     let current_timestamp = ctx.effects().current_timestamp().await.unwrap_or(0);
 
     let dispute = RecoveryDispute {
-        guardian_id,
+        guardian_id: guardian_authority,
         reason: reason.to_string(),
-        filed_at: current_timestamp,
+        filed_at_ms: current_timestamp,
     };
 
     println!(
         "Created dispute record with timestamp: {}",
-        dispute.filed_at
+        dispute.filed_at_ms
     );
 
     // Store dispute in Journal using proper JournalEffects API
@@ -624,68 +554,13 @@ async fn dispute_recovery(ctx: &HandlerContext<'_>, evidence: &str, reason: &str
     println!("Dispute recorded in Journal with key: {}", dispute_key);
 
     println!("  Evidence ID: {}", evidence);
-    println!("  Guardian ID: {}", guardian_id);
+    println!("  Guardian ID: {}", guardian_authority);
     println!("  Reason: {}", reason);
-    println!("  Filed at: {}", dispute.filed_at);
+    println!("  Filed at: {}", dispute.filed_at_ms);
 
     println!("Dispute filed successfully!");
 
     Ok(())
-}
-
-/// Query guardian device ID from Journal/Web-of-Trust
-async fn query_guardian_device_id(
-    ctx: &HandlerContext<'_>,
-    guardian_id: &GuardianId,
-) -> Result<DeviceId, anyhow::Error> {
-    // Query Journal for guardian metadata using proper JournalEffects
-    let journal = ctx
-        .effects()
-        .get_journal()
-        .await
-        .map_err(anyhow::Error::new)?;
-
-    // Look for guardian device mapping in journal facts
-    let guardian_key = format!("guardian.{}.device_id", guardian_id);
-    if let Some(fact) = journal.facts.get(&guardian_key) {
-        let device_str = match fact {
-            aura_core::FactValue::String(device_str) => Some(device_str.clone()),
-            aura_core::FactValue::Bytes(bytes) => String::from_utf8(bytes.clone()).ok(),
-            _ => None,
-        };
-        if let Some(device_str) = device_str {
-            return Ok(DeviceId::from(device_str.as_str()));
-        }
-    }
-
-    // If not found in journal, try guardian ID as device ID
-    Ok(DeviceId::from(guardian_id.to_string().as_str()))
-}
-
-/// Get current device ID from agent configuration
-async fn get_current_device_id(ctx: &HandlerContext<'_>) -> Result<DeviceId, anyhow::Error> {
-    // Try to get device ID from journal facts using proper JournalEffects
-    let journal = ctx
-        .effects()
-        .get_journal()
-        .await
-        .map_err(anyhow::Error::new)?;
-
-    // Look for device ID in journal facts
-    if let Some(fact) = journal.facts.get("agent.device_id") {
-        let device_str = match fact {
-            aura_core::FactValue::String(device_str) => Some(device_str.clone()),
-            aura_core::FactValue::Bytes(bytes) => String::from_utf8(bytes.clone()).ok(),
-            _ => None,
-        };
-        if let Some(device_str) = device_str {
-            return Ok(DeviceId::from(device_str.as_str()));
-        }
-    }
-
-    Err(anyhow::anyhow!(
-        "Device ID not found in agent configuration"
-    ))
 }
 
 /// Generate real guardian approval for recovery request using FROST threshold signing
@@ -705,7 +580,7 @@ async fn generate_guardian_approval(
 
     println!(
         "Generating guardian approval for guardian {} and recovery {}",
-        guardian.guardian_id, request.account_id
+        guardian.authority_id, request.account_id
     );
 
     // Deterministic partial signature derived from the recovery message hash.
@@ -714,13 +589,13 @@ async fn generate_guardian_approval(
     let key_share_bytes = hash::hash(
         format!(
             "guardian-key-share:{}:{}",
-            guardian.guardian_id, request.account_id
+            guardian.authority_id, request.account_id
         )
         .as_bytes(),
     );
 
     Ok(GuardianKeyApproval {
-        guardian_id: guardian.guardian_id,
+        guardian_id: guardian.authority_id,
         key_share: key_share_bytes.to_vec(),
         partial_signature: partial_sig_bytes.to_vec(),
         timestamp: aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {

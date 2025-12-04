@@ -8,18 +8,19 @@ pub struct NodeArgs {
 }
 
 pub fn node_parser() -> impl Parser<NodeArgs> {
+    let port = long("port")
+        .help("Port to listen on")
+        .argument::<u16>("PORT")
+        .optional();
+    let daemon = long("daemon").help("Run as daemon").switch();
+    let config = long("config")
+        .short('c')
+        .help("Config file path")
+        .argument::<std::path::PathBuf>("CONFIG")
+        .optional();
     construct!(NodeArgs {
-        port: long("port")
-            .help("Port to listen on")
-            .argument::<u16>("PORT")
-            .optional(),
-        daemon: long("daemon")
-            .help("Run as daemon")
-            .switch(),
-        config: long("config")
-            .short('c')
-            .help("Config file path")
-            .argument::<std::path::PathBuf>("CONFIG")
-            .optional(),
+        port,
+        daemon,
+        config
     })
 }

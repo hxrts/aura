@@ -4,10 +4,20 @@ use crate::handlers::HandlerContext;
 use crate::InvitationAction;
 use anyhow::{anyhow, Result};
 use aura_core::{effects::StorageEffects, AccountId, DeviceId};
-use aura_invitation::device_invitation::DeviceInvitationRequest;
 use aura_wot::{AccountAuthority, SerializableBiscuit};
 use biscuit_auth::{KeyPair, PrivateKey};
 use std::str::FromStr;
+
+/// Minimal invitation payload used by the CLI while the coordinator wiring is pending.
+#[derive(Debug)]
+struct PreparedInvitation {
+    inviter: DeviceId,
+    invitee: DeviceId,
+    account_id: AccountId,
+    granted_token: SerializableBiscuit,
+    device_role: String,
+    ttl_secs: Option<u64>,
+}
 
 /// Handle invitation-related CLI commands
 ///
@@ -26,9 +36,8 @@ pub async fn handle_invitation(ctx: &HandlerContext<'_>, action: &InvitationActi
         } => {
             let request = build_request(ctx, account, invitee, role, *ttl).await?;
 
-            // TODO: Re-enable coordinator when effect system RwLock integration is complete
-            // The coordinators expect Arc<E: AuraEffects> but agent.runtime().effects()
-            // now returns Arc<RwLock<AuraEffectSystem>>
+            // Coordinator integration pending effect system RwLock update.
+            // Coordinators expect Arc<E: AuraEffects> but agent uses Arc<RwLock<AuraEffectSystem>>.
             println!(
                 "Invitation request prepared for {} to account {} with role '{}' (ttl: {:?}).",
                 request.invitee, request.account_id, request.device_role, request.ttl_secs
@@ -37,7 +46,7 @@ pub async fn handle_invitation(ctx: &HandlerContext<'_>, action: &InvitationActi
             Ok(())
         }
         InvitationAction::Accept { envelope } => {
-            // TODO: Re-enable coordinator when effect system RwLock integration is complete
+            // Coordinator integration pending effect system RwLock update.
             println!("Accept invitation from envelope {:?}.", envelope);
             println!("Note: Full coordinator integration pending effect system update.");
             Ok(())
@@ -51,7 +60,7 @@ async fn build_request(
     invitee: &str,
     role: &str,
     ttl: Option<u64>,
-) -> Result<DeviceInvitationRequest> {
+) -> Result<PreparedInvitation> {
     let account_id = AccountId::from_str(account)
         .map_err(|err| anyhow!("invalid account id '{}': {}", account, err))?;
     let invitee_id = DeviceId::from_str(invitee)
@@ -64,7 +73,7 @@ async fn build_request(
         .map_err(|e| anyhow!("failed to create device token: {}", e))?;
     let granted_token = SerializableBiscuit::new(device_token, authority.root_public_key());
 
-    Ok(DeviceInvitationRequest {
+    Ok(PreparedInvitation {
         inviter: ctx.device_id(),
         invitee: invitee_id,
         account_id,

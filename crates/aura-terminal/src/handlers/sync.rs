@@ -175,7 +175,10 @@ async fn handle_once_mode(ctx: &HandlerContext<'_>, peers_str: &str) -> Result<(
         manager.add_peer(*peer).await;
     }
 
-    println!("  Registered {} peers for sync", manager.peers().await.len());
+    println!(
+        "  Registered {} peers for sync",
+        manager.peers().await.len()
+    );
 
     // In a real implementation, this would call:
     // manager.sync_with_peers(effects, peers).await?;
@@ -203,8 +206,8 @@ async fn handle_status(ctx: &HandlerContext<'_>) -> Result<()> {
     println!("Sync Service Status");
     println!("===================\n");
 
-    // In production, this would query a running sync daemon
-    // For now, show placeholder status
+    // Status query requires a running sync daemon (started via `aura sync daemon`).
+    // Without a daemon, show usage instructions.
     println!("Note: Full status requires a running sync daemon.");
     println!();
     println!("To start the sync daemon:");

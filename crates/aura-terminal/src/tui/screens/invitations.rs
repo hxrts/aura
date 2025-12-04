@@ -282,9 +282,7 @@ pub struct InvitationsScreenProps {
 }
 
 /// Convert aura-app invitation type to TUI invitation type
-fn convert_invitation_type(
-    inv_type: aura_app::views::InvitationType,
-) -> InvitationType {
+fn convert_invitation_type(inv_type: aura_app::views::InvitationType) -> InvitationType {
     match inv_type {
         aura_app::views::InvitationType::Block => InvitationType::Guardian,
         aura_app::views::InvitationType::Guardian => InvitationType::Guardian,
@@ -293,9 +291,7 @@ fn convert_invitation_type(
 }
 
 /// Convert aura-app invitation status to TUI invitation status
-fn convert_invitation_status(
-    status: aura_app::views::InvitationStatus,
-) -> InvitationStatus {
+fn convert_invitation_status(status: aura_app::views::InvitationStatus) -> InvitationStatus {
     match status {
         aura_app::views::InvitationStatus::Pending => InvitationStatus::Pending,
         aura_app::views::InvitationStatus::Accepted => InvitationStatus::Accepted,
@@ -306,9 +302,7 @@ fn convert_invitation_status(
 }
 
 /// Convert aura-app invitation direction to TUI invitation direction
-fn convert_invitation_direction(
-    dir: aura_app::views::InvitationDirection,
-) -> InvitationDirection {
+fn convert_invitation_direction(dir: aura_app::views::InvitationDirection) -> InvitationDirection {
     match dir {
         aura_app::views::InvitationDirection::Received => InvitationDirection::Inbound,
         aura_app::views::InvitationDirection::Sent => InvitationDirection::Outbound,

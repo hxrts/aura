@@ -189,10 +189,7 @@ pub struct NeighborhoodScreenProps {
 }
 
 /// Convert aura-app neighbor block to TUI block summary
-fn convert_neighbor_block(
-    n: &aura_app::views::NeighborBlock,
-    home_block_id: &str,
-) -> BlockSummary {
+fn convert_neighbor_block(n: &aura_app::views::NeighborBlock, home_block_id: &str) -> BlockSummary {
     BlockSummary {
         id: n.id.clone(),
         name: Some(n.name.clone()),
@@ -206,9 +203,9 @@ fn convert_neighbor_block(
 /// Convert aura-app traversal depth to TUI traversal depth
 fn convert_traversal_depth(depth: u32) -> TraversalDepth {
     match depth {
-        0 => TraversalDepth::Interior,  // At home
-        1 => TraversalDepth::Frontage,  // One hop away
-        _ => TraversalDepth::Street,    // Two or more hops
+        0 => TraversalDepth::Interior, // At home
+        1 => TraversalDepth::Frontage, // One hop away
+        _ => TraversalDepth::Street,   // Two or more hops
     }
 }
 

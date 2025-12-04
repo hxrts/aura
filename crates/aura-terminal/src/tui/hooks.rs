@@ -109,7 +109,10 @@ pub struct AppCoreContext {
 impl AppCoreContext {
     /// Create a new AppCoreContext
     pub fn new(app_core: Arc<RwLock<AppCore>>, io_context: Arc<IoContext>) -> Self {
-        Self { app_core, io_context }
+        Self {
+            app_core,
+            io_context,
+        }
     }
 
     /// Get a snapshot of the current state

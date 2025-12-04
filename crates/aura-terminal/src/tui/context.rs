@@ -329,6 +329,27 @@ impl IoContext {
         NeighborhoodSnapshot::default()
     }
 
+    // Backwards-compatible view helpers for tests and harnesses.
+    pub fn chat_view(&self) -> ChatSnapshot {
+        self.snapshot_chat()
+    }
+
+    pub fn guardians_view(&self) -> GuardiansSnapshot {
+        self.snapshot_guardians()
+    }
+
+    pub fn recovery_view(&self) -> RecoverySnapshot {
+        self.snapshot_recovery()
+    }
+
+    pub fn invitations_view(&self) -> InvitationsSnapshot {
+        self.snapshot_invitations()
+    }
+
+    pub fn block_view(&self) -> BlockSnapshot {
+        self.snapshot_block()
+    }
+
     // ─── iocraft-Compatible Getters ────────────────────────────────────────
 
     /// Get channels as iocraft types for ChatScreen

@@ -1,22 +1,15 @@
 //! Aura Terminal Main Entry Point
-//!
-//! Command-line interface for the Aura threshold identity platform.
-//! Uses the unified effect system for all operations.
+//! Uses bpaf for CLI parsing and delegates execution to CLI handlers.
 
 use anyhow::Result;
 use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::effects::ExecutionMode;
-use cfg_if::cfg_if;
-use clap::{Parser, Subcommand};
-use std::path::PathBuf;
-
+use aura_terminal::cli::bpaf_commands::{cli_parser, Commands, GlobalArgs, ThresholdArgs};
 use aura_terminal::ids;
-#[cfg(feature = "terminal")]
-use aura_terminal::TuiArgs;
-use aura_terminal::{
-    AdminAction, AmpAction, AuthorityCommands, ChatCommands, CliHandler, ContextAction,
-    InvitationAction, RecoveryAction, SnapshotAction, SyncAction,
-};
+use aura_terminal::{CliHandler, SyncAction};
+use bpaf::Parser;
+use cfg_if::cfg_if;
+use std::path::PathBuf;
 
 cfg_if! {
     if #[cfg(feature = "development")] {
@@ -24,155 +17,10 @@ cfg_if! {
     }
 }
 
-#[derive(Parser)]
-#[command(name = "aura")]
-#[command(about = "Aura - Threshold Identity and Storage Platform", long_about = None)]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-
-    /// Enable verbose logging
-    #[arg(short, long, global = true)]
-    verbose: bool,
-
-    /// Config file path
-    #[arg(short, long, global = true)]
-    config: Option<PathBuf>,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    /// Initialize a new threshold account
-    Init {
-        /// Number of devices
-        #[arg(short = 'n', long)]
-        num_devices: u32,
-
-        /// Threshold (minimum devices needed)
-        #[arg(short = 't', long)]
-        threshold: u32,
-
-        /// Output directory
-        #[arg(short = 'o', long)]
-        output: PathBuf,
-    },
-
-    /// Show account status
-    Status {
-        /// Config file path
-        #[arg(short = 'c', long)]
-        config: Option<PathBuf>,
-    },
-
-    /// Run node/agent daemon
-    Node {
-        /// Port to listen on
-        #[arg(long)]
-        port: Option<u16>,
-
-        /// Run as daemon
-        #[arg(long)]
-        daemon: bool,
-
-        /// Config file path
-        #[arg(short = 'c', long)]
-        config: Option<PathBuf>,
-    },
-
-    /// Perform threshold operations
-    Threshold {
-        /// Comma-separated list of config files
-        #[arg(long)]
-        configs: String,
-
-        /// Threshold number
-        #[arg(long)]
-        threshold: u32,
-
-        /// Operation mode
-        #[arg(long)]
-        mode: String,
-    },
-
-    /// Scenario management (requires development feature)
-    #[cfg(feature = "development")]
-    Scenarios {
-        #[command(subcommand)]
-        action: ScenarioAction,
-    },
-
-    /// Interactive TUI demo with simulator (requires development feature)
-    #[cfg(feature = "development")]
-    Demo {
-        #[command(subcommand)]
-        command: DemoCommands,
-    },
-
-    /// Maintenance flows (snapshot, GC, OTA hooks)
-    Snapshot {
-        #[command(subcommand)]
-        action: SnapshotAction,
-    },
-
-    /// Admin maintenance (replace/fork)
-    Admin {
-        #[command(subcommand)]
-        action: AdminAction,
-    },
-
-    /// Guardian recovery flows
-    Recovery {
-        #[command(subcommand)]
-        action: RecoveryAction,
-    },
-
-    /// Device invitations
-    Invite {
-        #[command(subcommand)]
-        action: InvitationAction,
-    },
-
-    /// Authority management (experimental)
-    Authority {
-        #[command(subcommand)]
-        command: AuthorityCommands,
-    },
-
-    /// Show version information
-    Version,
-
-    /// Inspect relational contexts and rendezvous state
-    Context {
-        #[command(subcommand)]
-        action: ContextAction,
-    },
-
-    /// AMP channel inspection and bump flows (experimental)
-    Amp {
-        #[command(subcommand)]
-        action: AmpAction,
-    },
-
-    /// Secure chat messaging
-    Chat {
-        #[command(subcommand)]
-        command: ChatCommands,
-    },
-
-    /// Journal synchronization (daemon mode by default)
-    Sync {
-        #[command(subcommand)]
-        action: Option<SyncAction>,
-    },
-
-    /// Interactive terminal user interface
-    #[cfg(feature = "terminal")]
-    Tui(#[command(flatten)] TuiArgs),
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    let args: GlobalArgs = cli_parser().to_options().run();
+    let command = args.command;
 
     // Create CLI device ID
     let device_id = ids::device_id("cli:main-device");
@@ -188,61 +36,57 @@ async fn main() -> Result<()> {
     let effect_system = agent.runtime().effects().clone();
 
     // Initialize logging through effects
-    let log_level = if cli.verbose { "debug" } else { "info" };
+    let log_level = if args.verbose { "debug" } else { "info" };
     println!("Initializing Aura CLI with log level: {}", log_level);
 
     // Create CLI handler
     let cli_handler = CliHandler::new(effect_system, device_id, effect_context);
 
     // Execute command through effect system
-    match &cli.command {
-        Commands::Init {
-            num_devices,
-            threshold,
-            output,
-        } => {
+    match command {
+        Commands::Init(init) => {
             cli_handler
-                .handle_init(*num_devices, *threshold, output)
+                .handle_init(init.num_devices, init.threshold, &init.output)
                 .await
         }
-        Commands::Status { config } => {
-            let config_path = resolve_config_path(config, &cli.config, &cli_handler).await?;
+        Commands::Status(status) => {
+            let config_path =
+                resolve_config_path(status.config.as_ref(), args.config.as_ref(), &cli_handler)
+                    .await?;
             cli_handler.handle_status(&config_path).await
         }
-        Commands::Node {
-            port,
-            daemon,
-            config,
-        } => {
-            let config_path = resolve_config_path(config, &cli.config, &cli_handler).await?;
+        Commands::Node(node) => {
+            let config_path =
+                resolve_config_path(node.config.as_ref(), args.config.as_ref(), &cli_handler)
+                    .await?;
             cli_handler
-                .handle_node(port.unwrap_or(58835), *daemon, &config_path)
+                .handle_node(node.port.unwrap_or(58835), node.daemon, &config_path)
                 .await
         }
-        Commands::Threshold {
+        Commands::Threshold(ThresholdArgs {
             configs,
             threshold,
             mode,
-        } => {
+        }) => {
             cli_handler
-                .handle_threshold(configs, *threshold, mode)
+                .handle_threshold(&configs, threshold, &mode)
                 .await
         }
         #[cfg(feature = "development")]
-        Commands::Scenarios { action } => cli_handler.handle_scenarios(action).await,
+        Commands::Scenarios { action } => cli_handler.handle_scenarios(&action).await,
         #[cfg(feature = "development")]
-        Commands::Demo { command } => cli_handler.handle_demo(command).await,
-        Commands::Snapshot { action } => cli_handler.handle_snapshot(action).await,
-        Commands::Admin { action } => cli_handler.handle_admin(action).await,
-        Commands::Recovery { action } => cli_handler.handle_recovery(action).await,
-        Commands::Invite { action } => cli_handler.handle_invitation(action).await,
-        Commands::Authority { command } => cli_handler.handle_authority(command).await,
-        Commands::Context { action } => cli_handler.handle_context(action).await,
-        Commands::Amp { action } => cli_handler.handle_amp(action).await,
-        Commands::Chat { command } => cli_handler.handle_chat(command).await,
+        Commands::Demo { command } => cli_handler.handle_demo(&command).await,
+        Commands::Snapshot { action } => cli_handler.handle_snapshot(&action).await,
+        Commands::Admin { action } => cli_handler.handle_admin(&action).await,
+        Commands::Recovery { action } => cli_handler.handle_recovery(&action).await,
+        Commands::Invite { action } => cli_handler.handle_invitation(&action).await,
+        Commands::Authority { command } => cli_handler.handle_authority(&command).await,
+        Commands::Context { action } => cli_handler.handle_context(&action).await,
+        Commands::Amp { action } => cli_handler.handle_amp(&action).await,
+        Commands::Chat { command } => cli_handler.handle_chat(&command).await,
         Commands::Sync { action } => {
             // Default to daemon mode if no subcommand specified
-            let sync_action = action.clone().unwrap_or(SyncAction::Daemon {
+            let sync_action = action.unwrap_or(SyncAction::Daemon {
                 interval: 60,
                 max_concurrent: 5,
                 peers: None,
@@ -251,15 +95,15 @@ async fn main() -> Result<()> {
             cli_handler.handle_sync(&sync_action).await
         }
         #[cfg(feature = "terminal")]
-        Commands::Tui(args) => cli_handler.handle_tui(args).await,
+        Commands::Tui(args) => cli_handler.handle_tui(&args).await,
         Commands::Version => cli_handler.handle_version().await,
     }
 }
 
 /// Resolve the configuration file path from command line arguments
 async fn resolve_config_path(
-    cmd_config: &Option<PathBuf>,
-    global_config: &Option<PathBuf>,
+    cmd_config: Option<&PathBuf>,
+    global_config: Option<&PathBuf>,
     _cli_handler: &CliHandler,
 ) -> Result<PathBuf> {
     if let Some(config) = cmd_config {
@@ -276,27 +120,37 @@ async fn resolve_config_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bpaf::Args;
 
     #[test]
     fn test_cli_parsing() {
-        let cli = Cli::try_parse_from(["aura", "version"]).unwrap();
-        assert!(matches!(cli.command, Commands::Version));
-        assert!(!cli.verbose);
+        let args = cli_parser()
+            .to_options()
+            .run_inner(Args::from(&["--verbose", "version"]))
+            .unwrap();
+        assert!(matches!(args.command, Commands::Version));
+        assert!(args.verbose);
     }
 
     #[test]
     fn test_cli_init() {
-        let cli =
-            Cli::try_parse_from(["aura", "init", "-n", "3", "-t", "2", "-o", "/tmp/test"]).unwrap();
-        if let Commands::Init {
-            num_devices,
-            threshold,
-            output,
-        } = cli.command
-        {
-            assert_eq!(num_devices, 3);
-            assert_eq!(threshold, 2);
-            assert_eq!(output, PathBuf::from("/tmp/test"));
+        let args = cli_parser()
+            .to_options()
+            .run_inner(Args::from(&[
+                "init",
+                "--num-devices",
+                "3",
+                "--threshold",
+                "2",
+                "--output",
+                "/tmp/test",
+            ]))
+            .unwrap();
+
+        if let Commands::Init(init) = args.command {
+            assert_eq!(init.num_devices, 3);
+            assert_eq!(init.threshold, 2);
+            assert_eq!(init.output, PathBuf::from("/tmp/test"));
         } else {
             panic!("Expected Init command");
         }
@@ -305,9 +159,12 @@ mod tests {
     #[test]
     fn test_cli_sync_default() {
         // Test that `aura sync` parses with no subcommand (daemon mode default)
-        let cli = Cli::try_parse_from(["aura", "sync"]).unwrap();
-        if let Commands::Sync { action } = cli.command {
-            assert!(action.is_none()); // No subcommand = daemon mode by default
+        let args = cli_parser()
+            .to_options()
+            .run_inner(Args::from(&["sync"]))
+            .unwrap();
+        if let Commands::Sync { action } = args.command {
+            assert!(action.is_none());
         } else {
             panic!("Expected Sync command");
         }
@@ -316,11 +173,26 @@ mod tests {
     #[test]
     fn test_cli_sync_daemon() {
         // Test explicit daemon subcommand with options
-        let cli = Cli::try_parse_from([
-            "aura", "sync", "daemon", "--interval", "30", "--max-concurrent", "3",
-        ])
-        .unwrap();
-        if let Commands::Sync { action: Some(SyncAction::Daemon { interval, max_concurrent, .. }) } = cli.command {
+        let args = cli_parser()
+            .to_options()
+            .run_inner(Args::from(&[
+                "sync",
+                "daemon",
+                "--interval",
+                "30",
+                "--max-concurrent",
+                "3",
+            ]))
+            .unwrap();
+        if let Commands::Sync {
+            action:
+                Some(SyncAction::Daemon {
+                    interval,
+                    max_concurrent,
+                    ..
+                }),
+        } = args.command
+        {
             assert_eq!(interval, 30);
             assert_eq!(max_concurrent, 3);
         } else {
@@ -331,8 +203,14 @@ mod tests {
     #[test]
     fn test_cli_sync_once() {
         // Test one-shot sync mode
-        let cli = Cli::try_parse_from(["aura", "sync", "once", "--peers", "peer1,peer2"]).unwrap();
-        if let Commands::Sync { action: Some(SyncAction::Once { peers, .. }) } = cli.command {
+        let args = cli_parser()
+            .to_options()
+            .run_inner(Args::from(&["sync", "once", "--peers", "peer1,peer2"]))
+            .unwrap();
+        if let Commands::Sync {
+            action: Some(SyncAction::Once { peers, .. }),
+        } = args.command
+        {
             assert_eq!(peers, "peer1,peer2");
         } else {
             panic!("Expected Sync once command");
@@ -343,21 +221,18 @@ mod tests {
         if #[cfg(feature = "development")] {
             #[test]
             fn test_cli_scenarios() {
-                let cli = Cli::try_parse_from([
-                    "aura",
-                    "scenarios",
-                    "list",
-                    "--directory",
-                    "scenarios",
-                    "--detailed",
-                ])
-                .unwrap();
-                if let Commands::Scenarios { action } = cli.command {
-                    if let ScenarioAction::List {
-                        directory,
-                        detailed,
-                    } = action
-                    {
+                let args = cli_parser()
+                    .to_options()
+                    .run_inner(Args::from(&[
+                        "scenarios",
+                        "list",
+                        "--directory",
+                        "scenarios",
+                        "--detailed",
+                    ]))
+                    .unwrap();
+                if let Commands::Scenarios { action } = args.command {
+                    if let ScenarioAction::List { directory, detailed } = action {
                         assert_eq!(directory, PathBuf::from("scenarios"));
                         assert!(detailed);
                     } else {

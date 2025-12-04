@@ -3607,10 +3607,10 @@ pub(super) async fn execute_command(
                     if let Err(e) = core_guard.dispatch(intent) {
                         tracing::warn!("AppCore dispatch failed for InviteToBlock: {}", e);
                     }
-                // Commit pending facts and persist to storage
-                if let Err(e) = core_guard.commit_and_persist() {
-                    tracing::warn!("Failed to persist facts: {}", e);
-                }
+                    // Commit pending facts and persist to storage
+                    if let Err(e) = core_guard.commit_and_persist() {
+                        tracing::warn!("Failed to persist facts: {}", e);
+                    }
                 }
             }
 

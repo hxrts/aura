@@ -136,125 +136,99 @@ pub fn create_default_test_cli_handler() -> Result<CliHandler, AuraError> {
 }
 
 /// Scenario action types
-#[derive(Debug, Clone, clap::Subcommand)]
+#[derive(Debug, Clone)]
 pub enum ScenarioAction {
     /// Discover scenarios in a directory tree
     Discover {
         /// Root directory to search
-        #[arg(long)]
         root: std::path::PathBuf,
         /// Whether to validate discovered scenarios
-        #[arg(long)]
         validate: bool,
     },
     /// List available scenarios
     List {
         /// Directory containing scenarios
-        #[arg(long)]
         directory: std::path::PathBuf,
         /// Show detailed information
-        #[arg(long)]
         detailed: bool,
     },
     /// Validate scenario configurations
     Validate {
         /// Directory containing scenarios
-        #[arg(long)]
         directory: std::path::PathBuf,
         /// Validation strictness level
-        #[arg(long)]
         strictness: Option<String>,
     },
     /// Run scenarios
     Run {
         /// Directory containing scenarios
-        #[arg(long)]
         directory: Option<std::path::PathBuf>,
         /// Pattern to match scenario names
-        #[arg(long)]
         pattern: Option<String>,
         /// Run scenarios in parallel
-        #[arg(long)]
         parallel: bool,
         /// Maximum number of parallel scenarios
-        #[arg(long)]
         max_parallel: Option<usize>,
         /// Output file for results
-        #[arg(long)]
         output_file: Option<std::path::PathBuf>,
         /// Generate detailed report
-        #[arg(long)]
         detailed_report: bool,
     },
     /// Generate reports from scenario results
     Report {
         /// Input results file
-        #[arg(long)]
         input: std::path::PathBuf,
         /// Output report file
-        #[arg(long)]
         output: std::path::PathBuf,
         /// Report format (text, json, html)
-        #[arg(long)]
         format: Option<String>,
         /// Include detailed information
-        #[arg(long)]
         detailed: bool,
     },
 }
 
 /// Snapshot maintenance subcommands.
-#[derive(Debug, Clone, clap::Subcommand)]
+#[derive(Debug, Clone)]
 pub enum SnapshotAction {
     /// Run the full Snapshot_v1 ceremony locally (propose + commit + GC).
     Propose,
 }
 
 /// Admin maintenance subcommands.
-#[derive(Debug, Clone, clap::Subcommand)]
+#[derive(Debug, Clone)]
 pub enum AdminAction {
     /// Replace the administrator for an account (records journal fact).
     Replace {
         /// Account identifier (UUID string).
-        #[arg(long)]
         account: String,
         /// Device ID of the new admin (UUID string).
-        #[arg(long)]
         new_admin: String,
         /// Epoch when the new admin becomes authoritative.
-        #[arg(long)]
         activation_epoch: u64,
     },
 }
 
 /// Recovery subcommands exposed via CLI.
-#[derive(Debug, Clone, clap::Subcommand)]
+#[derive(Debug, Clone)]
 pub enum RecoveryAction {
     /// Initiate guardian recovery from the local device.
     Start {
         /// Account identifier to recover.
-        #[arg(long)]
         account: String,
         /// Comma separated guardian device IDs.
-        #[arg(long)]
         guardians: String,
         /// Required guardian threshold (defaults to 2).
-        #[arg(long, default_value = "2")]
         threshold: u32,
         /// Recovery priority (normal|urgent|emergency).
-        #[arg(long, default_value = "normal")]
         priority: String,
         /// Dispute window in hours (guardians can object before finalize).
-        #[arg(long, default_value = "48")]
         dispute_hours: u64,
         /// Optional human readable justification recorded in the request.
-        #[arg(long)]
         justification: Option<String>,
     },
     /// Approve a guardian recovery request from this device.
     Approve {
         /// Path to a serialized recovery request (JSON).
-        #[arg(long)]
         request_file: std::path::PathBuf,
     },
     /// Show local guardian recovery status and cooldown timers.
@@ -262,65 +236,52 @@ pub enum RecoveryAction {
     /// File a dispute against a recovery evidence record.
     Dispute {
         /// Evidence identifier returned by `aura recovery start`.
-        #[arg(long)]
         evidence: String,
         /// Human readable reason included in the dispute log.
-        #[arg(long)]
         reason: String,
     },
 }
 
 /// Invitation subcommands.
-#[derive(Debug, Clone, clap::Subcommand)]
+#[derive(Debug, Clone)]
 pub enum InvitationAction {
     /// Create a device invitation envelope and broadcast it.
     Create {
         /// Account identifier.
-        #[arg(long)]
         account: String,
         /// Device ID of the invitee.
-        #[arg(long)]
         invitee: String,
         /// Role granted to the invitee.
-        #[arg(long, default_value = "device")]
         role: String,
         /// Optional TTL in seconds.
-        #[arg(long)]
         ttl: Option<u64>,
     },
     /// Accept an invitation envelope serialized to disk.
     Accept {
         /// Path to the invitation envelope JSON file.
-        #[arg(long)]
         envelope: std::path::PathBuf,
     },
 }
 
 /// OTA upgrade subcommands
-#[derive(Debug, Clone, clap::Subcommand)]
+#[derive(Debug, Clone)]
 pub enum OtaAction {
     /// Submit a new upgrade proposal
     Propose {
         /// Source version (from)
-        #[arg(long)]
         from_version: String,
         /// Target version (to)
-        #[arg(long)]
         to_version: String,
         /// Upgrade type: soft, hard, or security
-        #[arg(long, default_value = "soft")]
         upgrade_type: String,
         /// Download URL for the upgrade package
-        #[arg(long)]
         download_url: String,
         /// Upgrade description
-        #[arg(long)]
         description: String,
     },
     /// Set user opt-in policy
     Policy {
         /// Policy type: auto, manual, security, soft-auto
-        #[arg(long)]
         policy: String,
     },
     /// Check upgrade status
@@ -328,7 +289,6 @@ pub enum OtaAction {
     /// Opt into a specific upgrade
     OptIn {
         /// Proposal ID to opt into
-        #[arg(long)]
         proposal_id: String,
     },
     /// List all upgrade proposals
