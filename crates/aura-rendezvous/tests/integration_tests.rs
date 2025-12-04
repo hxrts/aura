@@ -1,763 +1,646 @@
-//! End-to-End Integration Tests for SBB System
+//! Integration Tests for Rendezvous System
 //!
-//! This module provides comprehensive integration tests that demonstrate the complete
-//! Alice→Bob connection flow via the Social Bulletin Board (SBB) system, including:
-//! - Relationship establishment and trust management
-//! - Encrypted envelope flooding with capability enforcement
-//! - Transport offer discovery and connection establishment
-//! - Flow budget enforcement and trust-based forwarding
+//! End-to-end tests for the fact-based rendezvous architecture:
+//! - Descriptor publication and caching
+//! - Transport selection and probing
+//! - Handshake flow (initiator/responder)
+//! - Channel establishment with epoch rotation
+//! - Guard chain integration
 
-#![allow(clippy::disallowed_methods)]
-#![allow(clippy::unwrap_used)] // Tests are allowed to use unwrap for clarity
+#![allow(clippy::unwrap_used)] // Tests use unwrap for clarity
 
-use aura_core::effects::NetworkEffects;
-use aura_core::{AuraResult, DeviceId, RelationshipId, TrustLevel};
-use aura_rendezvous::messaging::{NetworkConfig, NetworkTransport};
-// Use testkit for proper test infrastructure
-use async_lock::RwLock;
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_rendezvous::{
-    crypto::encryption::PaddingStrategy,
-    integration::capability_aware::SbbForwardingPolicy,
-    integration::sbb_system::{
-        IntegratedSbbSystem, SbbConfig, SbbDiscoveryRequest, SbbSystemBuilder,
-    },
-    messaging::{TransportMethod, TransportOfferPayload},
+    facts::{RendezvousDescriptor, RendezvousFact, TransportHint},
+    new_channel::{ChannelManager, HandshakeConfig, Handshaker, SecureChannel},
+    protocol::guards,
+    service::{EffectCommand, GuardDecision, GuardSnapshot, RendezvousConfig, RendezvousService},
 };
-use aura_testkit::DeviceTestFixture;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::time::Duration;
 
-/// End-to-end test scenario configuration
-#[derive(Debug, Clone)]
-pub struct E2eTestConfig {
-    /// Number of devices in the test network
-    pub device_count: usize,
-    /// Whether to use encrypted envelopes
-    pub use_encryption: bool,
-    /// Trust level for relationships
-    pub trust_level: TrustLevel,
-    /// TTL for SBB flooding
-    pub ttl: u8,
-    /// Test timeout duration
-    pub timeout_duration: Duration,
+// =============================================================================
+// Test Helpers
+// =============================================================================
+
+fn test_authority(seed: u8) -> AuthorityId {
+    AuthorityId::new_from_entropy([seed; 32])
 }
 
-impl Default for E2eTestConfig {
-    fn default() -> Self {
-        Self {
-            device_count: 3, // Alice, Bob, Charlie
-            use_encryption: true,
-            trust_level: TrustLevel::Medium,
-            ttl: 4,
-            timeout_duration: Duration::from_secs(10),
-        }
+fn test_context(seed: u8) -> ContextId {
+    ContextId::new_from_entropy([seed; 32])
+}
+
+fn test_snapshot(authority: AuthorityId, context: ContextId) -> GuardSnapshot {
+    GuardSnapshot {
+        authority_id: authority,
+        context_id: context,
+        flow_budget_remaining: 1000,
+        capabilities: vec![
+            guards::CAP_RENDEZVOUS_PUBLISH.to_string(),
+            guards::CAP_RENDEZVOUS_CONNECT.to_string(),
+            guards::CAP_RENDEZVOUS_RELAY.to_string(),
+        ],
+        epoch: 1,
     }
 }
 
-/// Temporary device info for avoiding borrowing issues
-#[derive(Debug, Clone)]
-struct TempDeviceInfo {
-    device_id: DeviceId,
-    name: String,
-    #[allow(dead_code)]
-    transport_config: NetworkConfig,
-}
-
-/// Test device in the SBB network
-#[derive(Debug)]
-pub struct TestDevice {
-    /// Device identifier
-    pub device_id: DeviceId,
-    /// Device name for logging
-    pub name: String,
-    /// Integrated SBB system
-    pub sbb_system: IntegratedSbbSystem,
-    /// Network transport
-    pub transport: Arc<RwLock<NetworkTransport>>,
-}
-
-/// Complete SBB test network
-#[derive(Debug)]
-pub struct SbbTestNetwork {
-    /// All devices in the network
-    pub devices: HashMap<DeviceId, TestDevice>,
-    /// Test configuration
-    pub config: E2eTestConfig,
-}
-
-/// Test result for Alice→Bob connection
-#[derive(Debug)]
-pub struct ConnectionTestResult {
-    /// Whether the connection was successful
-    pub success: bool,
-    /// Number of devices the discovery request reached
-    pub devices_reached: usize,
-    /// Total flow budget consumed
-    pub flow_consumed: u64,
-    /// Whether encryption was used
-    pub encryption_used: bool,
-    /// Time taken for discovery
-    pub discovery_time: Duration,
-    /// Error message if failed
-    pub error: Option<String>,
-}
-
-impl TestDevice {
-    /// Create new test device
-    pub async fn new(
-        device_id: DeviceId,
-        name: String,
-        _config: &E2eTestConfig,
-    ) -> AuraResult<Self> {
-        // Create shared effect system using testkit
-        let fixture = aura_testkit::create_test_fixture_with_device_id(device_id).await?;
-        let effects = fixture.effect_system_wrapped();
-        let network_effects = Arc::clone(&effects) as Arc<dyn NetworkEffects>;
-
-        // Create network transport
-        let context_id = aura_core::ContextId::new_from_entropy([0u8; 32]);
-        let transport = NetworkTransport::new(device_id, network_effects, context_id);
-
-        // Create SBB system
-        let sbb_config = SbbConfig {
-            forwarding_policy: SbbForwardingPolicy {
-                min_trust_level: TrustLevel::Low,
-                max_flow_usage: 0.5, // Use up to 50% of flow budget
-                prefer_guardians: true,
-                max_streams_per_peer: 10,
-            },
-            padding_strategy: PaddingStrategy::PowerOfTwo,
-            app_context: "test-sbb-e2e".to_string(),
-        };
-
-        let aura_effects = Arc::clone(&effects) as Arc<dyn aura_protocol::effects::AuraEffects>;
-        let sbb_system = SbbSystemBuilder::new(device_id)
-            .with_config(sbb_config)
-            .with_transport(Arc::clone(&transport))
-            .build(aura_effects);
-
-        Ok(Self {
-            device_id,
-            name,
-            sbb_system,
-            transport,
-        })
-    }
-
-    /// Add relationship to another device
-    pub async fn add_relationship(
-        &mut self,
-        peer_device: &TestDevice,
-        trust_level: TrustLevel,
-        is_guardian: bool,
-    ) -> AuraResult<()> {
-        let relationship_id = RelationshipId::new([0u8; 32]);
-        let now = aura_rendezvous::sbb::current_timestamp();
-
-        if is_guardian {
-            self.sbb_system
-                .add_guardian(peer_device.device_id, relationship_id, trust_level, now)
-                .await;
-        } else {
-            self.sbb_system
-                .add_friend(peer_device.device_id, relationship_id, trust_level, now)
-                .await;
-        }
-
-        // Transport connectivity is handled by the shared NetworkEffects harness in tests.
-
-        tracing::info!(
-            "{} added {} as {} (trust: {:?})",
-            self.name,
-            peer_device.name,
-            if is_guardian { "guardian" } else { "friend" },
-            trust_level
-        );
-
-        Ok(())
-    }
-
-    /// Add relationship using temporary device info (avoids borrowing issues)
-    async fn add_relationship_from_info(
-        &mut self,
-        peer_info: &TempDeviceInfo,
-        trust_level: TrustLevel,
-        is_guardian: bool,
-    ) -> AuraResult<()> {
-        let relationship_id = RelationshipId::new([0u8; 32]);
-        let now = aura_rendezvous::sbb::current_timestamp();
-
-        if is_guardian {
-            self.sbb_system
-                .add_guardian(peer_info.device_id, relationship_id, trust_level, now)
-                .await;
-        } else {
-            self.sbb_system
-                .add_friend(peer_info.device_id, relationship_id, trust_level, now)
-                .await;
-        }
-
-        // Transport connectivity is handled by the shared NetworkEffects harness in tests.
-
-        tracing::info!(
-            "{} added {} as {} (trust: {:?})",
-            self.name,
-            peer_info.name,
-            if is_guardian { "guardian" } else { "friend" },
-            trust_level
-        );
-
-        Ok(())
-    }
-
-    /// Create and flood transport offer
-    pub async fn flood_transport_offer(
-        &mut self,
-        offer_methods: Vec<TransportMethod>,
-        use_encryption: bool,
-        ttl: Option<u8>,
-    ) -> AuraResult<aura_rendezvous::integration::sbb_system::SbbDiscoveryResult> {
-        let offer = TransportOfferPayload {
-            device_id: self.device_id,
-            transport_methods: offer_methods,
-            expires_at: 3600, // deterministic expiration for tests
-            nonce: [1u8; 16], // Fixed nonce for deterministic tests
-        };
-
-        let discovery_request = SbbDiscoveryRequest {
-            device_id: self.device_id,
-            transport_offer: offer,
-            use_encryption,
-            ttl,
-        };
-
-        tracing::info!(
-            "{} flooding transport offer (encrypted: {}, ttl: {:?})",
-            self.name,
-            use_encryption,
-            ttl
-        );
-
-        self.sbb_system
-            .flood_discovery_request(discovery_request)
-            .await
-    }
-
-    /// Get current SBB statistics
-    pub fn get_sbb_stats(&self) -> aura_rendezvous::integration::capability_aware::TrustStatistics {
-        self.sbb_system.get_statistics()
+fn test_descriptor(authority: AuthorityId, context: ContextId) -> RendezvousDescriptor {
+    RendezvousDescriptor {
+        authority_id: authority,
+        context_id: context,
+        transport_hints: vec![TransportHint::QuicDirect {
+            addr: "192.168.1.1:8443".to_string(),
+        }],
+        handshake_psk_commitment: [42u8; 32],
+        valid_from: 0,
+        valid_until: 10_000,
+        nonce: [0u8; 32],
     }
 }
 
-impl SbbTestNetwork {
-    /// Create new test network with specified configuration
-    pub async fn new(config: E2eTestConfig) -> AuraResult<Self> {
-        let mut devices = HashMap::new();
+// =============================================================================
+// Descriptor Publication Tests
+// =============================================================================
 
-        // Create devices
-        for i in 0..config.device_count {
-            let fixture = DeviceTestFixture::new(i);
-            let device_id = fixture.device_id();
-            let name = match i {
-                0 => "Alice".to_string(),
-                1 => "Bob".to_string(),
-                2 => "Charlie".to_string(),
-                n => format!("Device{}", n),
-            };
+#[test]
+fn test_descriptor_publication_flow() {
+    // Setup: Alice wants to publish her descriptor
+    let alice = test_authority(1);
+    let context = test_context(100);
 
-            let device = TestDevice::new(device_id, name, &config).await?;
-            devices.insert(device_id, device);
-        }
+    let config = RendezvousConfig::default();
+    let service = RendezvousService::new(alice, config);
 
-        Ok(Self { devices, config })
-    }
+    let snapshot = test_snapshot(alice, context);
+    let hints = vec![TransportHint::QuicDirect {
+        addr: "10.0.0.1:8443".to_string(),
+    }];
 
-    /// Set up linear topology: Alice ↔ Bob ↔ Charlie
-    pub async fn setup_linear_topology(&mut self) -> AuraResult<()> {
-        let device_ids: Vec<DeviceId> = self.devices.keys().copied().collect();
+    // Act: Prepare descriptor publication
+    let outcome = service.prepare_publish_descriptor(&snapshot, context, hints, 1000);
 
-        if device_ids.len() < 2 {
-            return Err(aura_core::AuraError::coordination_failed(
-                "Need at least 2 devices for topology".to_string(),
-            ));
-        }
+    // Assert: Should be allowed with correct effects
+    assert!(matches!(outcome.decision, GuardDecision::Allow));
+    assert!(!outcome.effects.is_empty());
 
-        // Alice ↔ Bob
-        let (alice_id, bob_id) = (device_ids[0], device_ids[1]);
+    // Verify flow budget charge is included
+    let has_charge = outcome
+        .effects
+        .iter()
+        .any(|e| matches!(e, EffectCommand::ChargeFlowBudget { .. }));
+    assert!(has_charge, "Should include flow budget charge");
 
-        // Alice adds Bob as friend
-        {
-            // Clone the necessary data from bob_device to avoid simultaneous borrows
-            let (bob_device_id, bob_name) = {
-                let bob_device = self.devices.get(&bob_id).unwrap();
-                // NetworkTransport no longer exposes config() - it uses network_effects directly
-                (bob_device.device_id, bob_device.name.clone())
-            };
+    // Verify journal append is included
+    let has_append = outcome
+        .effects
+        .iter()
+        .any(|e| matches!(e, EffectCommand::JournalAppend { .. }));
+    assert!(has_append, "Should include journal append");
+}
 
-            // Create a temporary device-like struct with just the needed data
-            let temp_bob = TempDeviceInfo {
-                device_id: bob_device_id,
-                name: bob_name,
-                transport_config: NetworkConfig::default(), // Placeholder - field is dead_code
-            };
+#[test]
+fn test_descriptor_caching_and_lookup() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context = test_context(100);
 
-            self.devices
-                .get_mut(&alice_id)
-                .unwrap()
-                .add_relationship_from_info(&temp_bob, self.config.trust_level, false)
-                .await?;
-        }
+    let config = RendezvousConfig::default();
+    let mut service = RendezvousService::new(alice, config);
 
-        // Bob adds Alice as friend
-        {
-            // Clone the necessary data from alice_device to avoid simultaneous borrows
-            let (alice_device_id, alice_name, alice_transport_config) = {
-                let alice_device = self.devices.get(&alice_id).unwrap();
-                // NetworkTransport no longer exposes config()
-                let transport_config = NetworkConfig::default();
-                (
-                    alice_device.device_id,
-                    alice_device.name.clone(),
-                    transport_config,
-                )
-            };
+    // Create Bob's descriptor
+    let bob_descriptor = test_descriptor(bob, context);
 
-            // Create a temporary device-like struct with just the needed data
-            let temp_alice = TempDeviceInfo {
-                device_id: alice_device_id,
-                name: alice_name,
-                transport_config: alice_transport_config,
-            };
+    // Cache it
+    service.cache_descriptor(bob_descriptor.clone());
 
-            self.devices
-                .get_mut(&bob_id)
-                .unwrap()
-                .add_relationship_from_info(&temp_alice, self.config.trust_level, false)
-                .await?;
-        }
+    // Lookup should succeed
+    let cached = service.get_cached_descriptor(context, bob);
+    assert!(cached.is_some());
+    assert_eq!(cached.unwrap().authority_id, bob);
 
-        // If we have Charlie, connect Bob ↔ Charlie
-        if device_ids.len() >= 3 {
-            let charlie_id = device_ids[2];
+    // Lookup for unknown peer should fail
+    let unknown = test_authority(99);
+    let not_cached = service.get_cached_descriptor(context, unknown);
+    assert!(not_cached.is_none());
+}
 
-            // Bob adds Charlie as friend
-            {
-                // Clone the necessary data from charlie_device to avoid simultaneous borrows
-                let (charlie_device_id, charlie_name, charlie_transport_config) = {
-                    let charlie_device = self.devices.get(&charlie_id).unwrap();
-                    // NetworkTransport no longer exposes config()
-                    let transport_config = NetworkConfig::default();
-                    (
-                        charlie_device.device_id,
-                        charlie_device.name.clone(),
-                        transport_config,
-                    )
-                };
+#[test]
+fn test_descriptor_expiry_and_pruning() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context = test_context(100);
 
-                let temp_charlie = TempDeviceInfo {
-                    device_id: charlie_device_id,
-                    name: charlie_name,
-                    transport_config: charlie_transport_config,
-                };
+    let config = RendezvousConfig::default();
+    let mut service = RendezvousService::new(alice, config);
 
-                self.devices
-                    .get_mut(&bob_id)
-                    .unwrap()
-                    .add_relationship_from_info(&temp_charlie, self.config.trust_level, false)
-                    .await?;
-            }
+    // Create descriptor valid until time 1000
+    let mut descriptor = test_descriptor(bob, context);
+    descriptor.valid_until = 1000;
 
-            // Charlie adds Bob as guardian (preferred for reliability)
-            {
-                // Clone the necessary data from bob_device to avoid simultaneous borrows
-                let (bob_device_id, bob_name, bob_transport_config) = {
-                    let bob_device = self.devices.get(&bob_id).unwrap();
-                    // NetworkTransport no longer exposes config()
-                    let transport_config = NetworkConfig::default();
-                    (
-                        bob_device.device_id,
-                        bob_device.name.clone(),
-                        transport_config,
-                    )
-                };
+    service.cache_descriptor(descriptor);
 
-                let temp_bob = TempDeviceInfo {
-                    device_id: bob_device_id,
-                    name: bob_name,
-                    transport_config: bob_transport_config,
-                };
+    // At time 500, should still be cached
+    service.prune_expired_descriptors(500);
+    assert!(service.get_cached_descriptor(context, bob).is_some());
 
-                self.devices
-                    .get_mut(&charlie_id)
-                    .unwrap()
-                    .add_relationship_from_info(&temp_bob, self.config.trust_level, true)
-                    .await?;
-            }
-        }
+    // At time 1500, should be pruned
+    service.prune_expired_descriptors(1500);
+    assert!(service.get_cached_descriptor(context, bob).is_none());
+}
 
-        tracing::info!("Set up linear topology: Alice ↔ Bob ↔ Charlie");
-        Ok(())
-    }
+#[test]
+fn test_descriptor_refresh_detection() {
+    let alice = test_authority(1);
+    let context = test_context(100);
 
-    /// Set up full mesh topology (everyone connected to everyone)
-    pub async fn setup_mesh_topology(&mut self) -> AuraResult<()> {
-        let device_ids: Vec<DeviceId> = self.devices.keys().copied().collect();
+    let config = RendezvousConfig::default();
+    let mut service = RendezvousService::new(alice, config);
 
-        for i in 0..device_ids.len() {
-            for j in 0..device_ids.len() {
-                if i != j {
-                    let device_a_id = device_ids[i];
-                    let device_b_id = device_ids[j];
+    // Create Alice's own descriptor valid until 10000
+    let mut descriptor = test_descriptor(alice, context);
+    descriptor.valid_until = 10_000;
 
-                    // Clone the necessary data from device_b to avoid simultaneous borrows
-                    let (device_b_device_id, device_b_name, device_b_transport_config) = {
-                        let device_b = self.devices.get(&device_b_id).unwrap();
-                        // NetworkTransport no longer exposes config()
-                        let transport_config = NetworkConfig::default();
-                        (device_b.device_id, device_b.name.clone(), transport_config)
-                    };
+    service.cache_descriptor(descriptor);
 
-                    let temp_device_b = TempDeviceInfo {
-                        device_id: device_b_device_id,
-                        name: device_b_name,
-                        transport_config: device_b_transport_config,
-                    };
+    // With 2000ms refresh window, should NOT need refresh at time 7000
+    // (10000 - 2000 = 8000 threshold)
+    assert!(!service.needs_refresh(context, 7000, 2000));
 
-                    let is_guardian = j == 0; // Make first device a guardian
+    // Should need refresh at time 8500 (past threshold)
+    assert!(service.needs_refresh(context, 8500, 2000));
+}
 
-                    self.devices
-                        .get_mut(&device_a_id)
-                        .unwrap()
-                        .add_relationship_from_info(
-                            &temp_device_b,
-                            self.config.trust_level,
-                            is_guardian,
-                        )
-                        .await?;
-                }
-            }
-        }
+// =============================================================================
+// Channel Establishment Tests
+// =============================================================================
 
-        tracing::info!("Set up full mesh topology");
-        Ok(())
-    }
+#[test]
+fn test_channel_establishment_flow() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context = test_context(100);
+    let psk = [42u8; 32];
 
-    /// Run Alice→Bob connection test
-    pub async fn test_alice_bob_connection(&mut self) -> AuraResult<ConnectionTestResult> {
-        let device_ids: Vec<DeviceId> = self.devices.keys().copied().collect();
-        if device_ids.len() < 2 {
-            return Err(aura_core::AuraError::coordination_failed(
-                "Need at least 2 devices for connection test".to_string(),
-            ));
-        }
+    let config = RendezvousConfig::default();
+    let mut service = RendezvousService::new(alice, config);
 
-        let (alice_id, _bob_id) = (device_ids[0], device_ids[1]);
+    // Cache Bob's descriptor first
+    let bob_descriptor = test_descriptor(bob, context);
+    service.cache_descriptor(bob_descriptor);
 
-        // Alice creates transport offer
-        let offer_methods = vec![
-            TransportMethod::WebSocket {
-                url: "ws://127.0.0.1:8080".to_string(),
-            },
-            TransportMethod::Quic {
-                addr: "127.0.0.1".to_string(),
-                port: 8443,
-            },
-        ];
+    let snapshot = test_snapshot(alice, context);
 
-        // Alice floods discovery request
-        let result = {
-            let alice = self.devices.get_mut(&alice_id).unwrap();
-            alice
-                .flood_transport_offer(
-                    offer_methods,
-                    self.config.use_encryption,
-                    Some(self.config.ttl),
-                )
-                .await
-        };
+    // Act: Prepare channel establishment
+    let outcome = service
+        .prepare_establish_channel(&snapshot, context, bob, &psk)
+        .unwrap();
 
-        // Use fixed duration for test (not measuring real time)
-        let discovery_time = std::time::Duration::from_millis(100);
+    // Assert: Should be allowed
+    assert!(matches!(outcome.decision, GuardDecision::Allow));
 
-        match result {
-            Ok(discovery_result) => {
-                // Check if the discovery reached expected devices
-                let _expected_devices = if device_ids.len() >= 3 { 2 } else { 1 }; // Bob + Charlie if present
+    // Should have handshake send effect
+    let has_handshake = outcome
+        .effects
+        .iter()
+        .any(|e| matches!(e, EffectCommand::SendHandshake { .. }));
+    assert!(has_handshake, "Should include handshake send");
+}
 
-                // Get flow statistics
-                let alice_stats = self.devices.get(&alice_id).unwrap().get_sbb_stats();
+#[test]
+fn test_channel_establishment_requires_descriptor() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context = test_context(100);
+    let psk = [42u8; 32];
 
-                Ok(ConnectionTestResult {
-                    success: discovery_result.peers_reached > 0,
-                    devices_reached: discovery_result.peers_reached,
-                    flow_consumed: alice_stats.total_flow_spent,
-                    encryption_used: discovery_result.encrypted,
-                    discovery_time,
-                    error: None,
-                })
-            }
-            Err(e) => Ok(ConnectionTestResult {
-                success: false,
-                devices_reached: 0,
-                flow_consumed: 0,
-                encryption_used: self.config.use_encryption,
-                discovery_time,
-                error: Some(e.to_string()),
-            }),
-        }
-    }
+    let config = RendezvousConfig::default();
+    let service = RendezvousService::new(alice, config);
 
-    /// Run comprehensive SBB system test
-    pub async fn run_comprehensive_test(&mut self) -> AuraResult<Vec<ConnectionTestResult>> {
-        let mut results = Vec::new();
+    let snapshot = test_snapshot(alice, context);
 
-        // Test 1: Basic Alice→Bob connection
-        tracing::info!("Running Test 1: Basic Alice→Bob connection");
-        let result1 = self.test_alice_bob_connection().await?;
-        results.push(result1);
+    // Try to establish channel without Bob's descriptor cached
+    let result = service.prepare_establish_channel(&snapshot, context, bob, &psk);
 
-        // Test 2: Update trust levels and retry
-        if self.devices.len() >= 2 {
-            tracing::info!("Running Test 2: High trust connection");
-            let device_ids: Vec<DeviceId> = self.devices.keys().copied().collect();
-            let (alice_id, bob_id) = (device_ids[0], device_ids[1]);
+    // Should fail - no descriptor
+    assert!(result.is_err());
+}
 
-            // Upgrade Alice's trust in Bob
-            let now = 0;
-            self.devices
-                .get_mut(&alice_id)
-                .unwrap()
-                .sbb_system
-                .update_trust_level(bob_id, TrustLevel::High, now)?;
+// =============================================================================
+// Handshake Flow Tests
+// =============================================================================
 
-            let result2 = self.test_alice_bob_connection().await?;
-            results.push(result2);
-        }
+#[test]
+fn test_handshake_initiator_responder_flow() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context = test_context(100);
+    let psk = [42u8; 32];
+    let epoch = 1u64;
 
-        // Test 3: Flow budget exhaustion (if implemented)
-        tracing::info!("Running Test 3: Multiple rapid discoveries");
-        for i in 0..3 {
-            tracing::info!("Discovery attempt {}", i + 1);
-            let result = self.test_alice_bob_connection().await?;
-            results.push(result);
+    // Alice initiates
+    let alice_config = HandshakeConfig {
+        local: alice,
+        remote: bob,
+        context_id: context,
+        psk,
+        timeout_ms: 5000,
+    };
+    let mut alice_handshaker = Handshaker::new(alice_config);
 
-            // Small delay between attempts
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+    // Bob responds
+    let bob_config = HandshakeConfig {
+        local: bob,
+        remote: alice,
+        context_id: context,
+        psk,
+        timeout_ms: 5000,
+    };
+    let mut bob_handshaker = Handshaker::new(bob_config);
 
-        Ok(results)
-    }
+    // Step 1: Alice creates init message
+    let init_msg = alice_handshaker.create_init_message(epoch).unwrap();
+    assert!(!init_msg.is_empty());
 
-    /// Get network statistics
-    pub fn get_network_stats(
-        &self,
-    ) -> HashMap<DeviceId, aura_rendezvous::integration::capability_aware::TrustStatistics> {
-        self.devices
-            .iter()
-            .map(|(id, device)| (*id, device.get_sbb_stats()))
-            .collect()
-    }
+    // Step 2: Bob processes init
+    bob_handshaker.process_init(&init_msg, epoch).unwrap();
 
-    /// Print network summary
-    pub fn print_network_summary(&self) {
-        tracing::info!("=== SBB Network Summary ===");
-        for (device_id, device) in &self.devices {
-            let stats = device.get_sbb_stats();
-            tracing::info!(
-                "{} ({}): {} relationships, trust: {:.2}, flow: {:.1}%",
-                device.name,
-                device_id.0,
-                stats.relationship_count,
-                stats.average_trust_level(),
-                stats.flow_utilization() * 100.0
-            );
-        }
+    // Step 3: Bob creates response
+    let response_msg = bob_handshaker.create_response(epoch).unwrap();
+    assert!(!response_msg.is_empty());
+
+    // Step 4: Alice processes response
+    alice_handshaker.process_response(&response_msg).unwrap();
+
+    // Step 5: Both complete
+    let alice_result = alice_handshaker.complete(epoch, true).unwrap();
+    let bob_result = bob_handshaker.complete(epoch, false).unwrap();
+
+    // Channel IDs should match
+    assert_eq!(alice_result.channel_id, bob_result.channel_id);
+    assert!(alice_result.is_initiator);
+    assert!(!bob_result.is_initiator);
+}
+
+#[test]
+fn test_handshake_psk_mismatch_detection() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context = test_context(100);
+
+    let config = RendezvousConfig::default();
+    let mut service = RendezvousService::new(bob, config);
+
+    // Bob's expected PSK
+    let expected_psk = [42u8; 32];
+
+    // Create Bob's descriptor and cache it
+    let bob_descriptor = test_descriptor(bob, context);
+    service.cache_descriptor(bob_descriptor);
+
+    let snapshot = test_snapshot(bob, context);
+
+    // Alice sends handshake with WRONG PSK
+    let wrong_psk = [99u8; 32];
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(&wrong_psk);
+    let wrong_commitment: [u8; 32] = hasher.finalize().into();
+
+    let handshake = aura_rendezvous::protocol::NoiseHandshake {
+        noise_message: vec![1, 2, 3],
+        psk_commitment: wrong_commitment,
+        epoch: 1,
+    };
+
+    // Bob should reject (PSK commitment doesn't match)
+    let outcome =
+        service.prepare_handle_handshake(&snapshot, context, alice, handshake, &expected_psk);
+
+    assert!(matches!(outcome.decision, GuardDecision::Deny { .. }));
+}
+
+// =============================================================================
+// Channel Manager Tests
+// =============================================================================
+
+#[test]
+fn test_channel_manager_lifecycle() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context = test_context(100);
+
+    let mut manager = ChannelManager::new();
+
+    // No channel initially
+    assert!(manager.find_by_context_peer(context, bob).is_none());
+
+    // Create and register channel
+    let channel_id = [77u8; 32];
+    let mut channel = SecureChannel::new(channel_id, context, alice, bob, 1);
+    channel.mark_active(); // Make it active
+
+    assert!(channel.is_active());
+    assert_eq!(channel.channel_id(), channel_id);
+    assert_eq!(channel.epoch(), 1);
+
+    manager.register(channel);
+
+    // Should now be retrievable
+    assert!(manager.find_by_context_peer(context, bob).is_some());
+
+    // Get mutable and mark for rotation
+    if let Some(ch) = manager.find_by_context_peer_mut(context, bob) {
+        ch.mark_needs_rotation();
+        assert!(ch.needs_rotation());
+        ch.rotate(2).unwrap();
+        assert!(!ch.needs_rotation());
+        assert_eq!(ch.epoch(), 2);
     }
 }
 
-/// Convenience function to run a complete Alice→Bob SBB test
-pub async fn run_alice_bob_sbb_test(config: E2eTestConfig) -> AuraResult<ConnectionTestResult> {
-    // Initialize tracing for test visibility
-    let _ = tracing_subscriber::fmt::try_init();
+#[test]
+fn test_channel_manager_epoch_advancement() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let charlie = test_authority(3);
+    let context = test_context(100);
 
-    let mut network = SbbTestNetwork::new(config).await?;
-    network.setup_linear_topology().await?;
-    network.print_network_summary();
+    let mut manager = ChannelManager::new();
 
-    let result = network.test_alice_bob_connection().await?;
+    // Create and register channels at epoch 1
+    let mut ch1 = SecureChannel::new([1u8; 32], context, alice, bob, 1);
+    ch1.mark_active();
+    manager.register(ch1);
 
-    tracing::info!("=== Test Results ===");
-    tracing::info!("Success: {}", result.success);
-    tracing::info!("Devices reached: {}", result.devices_reached);
-    tracing::info!("Flow consumed: {} bytes", result.flow_consumed);
-    tracing::info!("Encryption used: {}", result.encryption_used);
-    tracing::info!("Discovery time: {:?}", result.discovery_time);
-    if let Some(error) = &result.error {
-        tracing::error!("Error: {}", error);
-    }
+    let mut ch2 = SecureChannel::new([2u8; 32], context, alice, charlie, 1);
+    ch2.mark_active();
+    manager.register(ch2);
 
-    Ok(result)
+    // Advance to epoch 2 - should mark all for rotation
+    manager.advance_epoch(2);
+
+    // Both should need rotation
+    assert!(manager
+        .find_by_context_peer(context, bob)
+        .unwrap()
+        .needs_rotation());
+    assert!(manager
+        .find_by_context_peer(context, charlie)
+        .unwrap()
+        .needs_rotation());
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+// =============================================================================
+// Guard Chain Integration Tests
+// =============================================================================
 
-    #[tokio::test]
-    async fn test_basic_alice_bob_connection() {
-        let config = E2eTestConfig {
-            device_count: 2,
-            use_encryption: false,
-            trust_level: TrustLevel::Medium,
-            ttl: 3,
-            timeout_duration: Duration::from_secs(5),
-        };
+#[test]
+fn test_insufficient_flow_budget_blocks_publish() {
+    let alice = test_authority(1);
+    let context = test_context(100);
 
-        let result = run_alice_bob_sbb_test(config).await.unwrap();
-        assert!(result.success, "Alice→Bob connection should succeed");
-        assert!(
-            result.devices_reached > 0,
-            "Should reach at least one device"
-        );
+    let config = RendezvousConfig::default();
+    let service = RendezvousService::new(alice, config);
+
+    // Snapshot with insufficient budget
+    let mut snapshot = test_snapshot(alice, context);
+    snapshot.flow_budget_remaining = 0; // No budget
+
+    let hints = vec![TransportHint::QuicDirect {
+        addr: "10.0.0.1:8443".to_string(),
+    }];
+
+    let outcome = service.prepare_publish_descriptor(&snapshot, context, hints, 1000);
+
+    // Should be denied
+    assert!(matches!(outcome.decision, GuardDecision::Deny { .. }));
+    if let GuardDecision::Deny { reason } = outcome.decision {
+        assert!(reason.contains("flow budget"));
     }
+}
 
-    #[tokio::test]
-    async fn test_encrypted_alice_bob_connection() {
-        let config = E2eTestConfig {
-            device_count: 2,
-            use_encryption: true,
-            trust_level: TrustLevel::High,
-            ttl: 3,
-            timeout_duration: Duration::from_secs(5),
-        };
+#[test]
+fn test_missing_capability_blocks_connect() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context = test_context(100);
+    let psk = [42u8; 32];
 
-        let result = run_alice_bob_sbb_test(config).await.unwrap();
-        assert!(
-            result.success,
-            "Encrypted Alice→Bob connection should succeed"
-        );
-        // Note: encryption_used might be false due to simplified implementation
+    let config = RendezvousConfig::default();
+    let mut service = RendezvousService::new(alice, config);
+
+    // Cache Bob's descriptor
+    service.cache_descriptor(test_descriptor(bob, context));
+
+    // Snapshot WITHOUT connect capability
+    let mut snapshot = test_snapshot(alice, context);
+    snapshot.capabilities = vec![guards::CAP_RENDEZVOUS_PUBLISH.to_string()]; // Only publish
+
+    let result = service.prepare_establish_channel(&snapshot, context, bob, &psk);
+
+    // Should be denied
+    assert!(result.is_ok());
+    let outcome = result.unwrap();
+    assert!(matches!(outcome.decision, GuardDecision::Deny { .. }));
+    if let GuardDecision::Deny { reason } = outcome.decision {
+        assert!(reason.contains("capability"));
     }
+}
 
-    #[tokio::test]
-    async fn test_three_device_network() {
-        let config = E2eTestConfig {
-            device_count: 3,
-            use_encryption: false,
-            trust_level: TrustLevel::Medium,
-            ttl: 4,
-            timeout_duration: Duration::from_secs(10),
-        };
+// =============================================================================
+// End-to-End Flow Tests
+// =============================================================================
 
-        let mut network = SbbTestNetwork::new(config).await.unwrap();
-        network.setup_linear_topology().await.unwrap();
+#[test]
+fn test_complete_discovery_to_channel_flow() {
+    // Setup: Alice and Bob in same context
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context = test_context(100);
+    let psk = [42u8; 32];
+    let epoch = 1u64;
 
-        let result = network.test_alice_bob_connection().await.unwrap();
-        assert!(result.success, "Alice→Bob→Charlie network should work");
+    // Both create services
+    let config = RendezvousConfig::default();
+    let mut alice_service = RendezvousService::new(alice, config.clone());
+    let bob_service = RendezvousService::new(bob, config);
 
-        // In linear topology, Alice's message should reach Bob (and possibly Charlie via Bob)
-        assert!(
-            result.devices_reached > 0,
-            "Should reach devices through network"
-        );
-    }
+    // Step 1: Bob publishes his descriptor
+    let bob_snapshot = test_snapshot(bob, context);
+    let bob_hints = vec![TransportHint::QuicDirect {
+        addr: "10.0.0.2:8443".to_string(),
+    }];
+    let publish_outcome =
+        bob_service.prepare_publish_descriptor(&bob_snapshot, context, bob_hints, 1000);
+    assert!(matches!(publish_outcome.decision, GuardDecision::Allow));
 
-    #[tokio::test]
-    async fn test_mesh_network() {
-        let config = E2eTestConfig {
-            device_count: 3,
-            use_encryption: false,
-            trust_level: TrustLevel::High,
-            ttl: 2,
-            timeout_duration: Duration::from_secs(10),
-        };
+    // Step 2: Alice receives Bob's descriptor (simulated journal sync)
+    let bob_descriptor = test_descriptor(bob, context);
+    alice_service.cache_descriptor(bob_descriptor);
 
-        let mut network = SbbTestNetwork::new(config).await.unwrap();
-        network.setup_mesh_topology().await.unwrap();
+    // Step 3: Alice initiates channel establishment
+    let alice_snapshot = test_snapshot(alice, context);
+    let establish_outcome = alice_service
+        .prepare_establish_channel(&alice_snapshot, context, bob, &psk)
+        .unwrap();
+    assert!(matches!(establish_outcome.decision, GuardDecision::Allow));
 
-        let results = network.run_comprehensive_test().await.unwrap();
+    // Step 4: Complete handshake (simulated message exchange)
+    let alice_hs_config = HandshakeConfig {
+        local: alice,
+        remote: bob,
+        context_id: context,
+        psk,
+        timeout_ms: 5000,
+    };
+    let mut alice_handshaker = Handshaker::new(alice_hs_config);
 
-        // At least some tests should succeed in mesh network
-        let successful_tests = results.iter().filter(|r| r.success).count();
-        assert!(
-            successful_tests > 0,
-            "Some tests should succeed in mesh network"
-        );
-    }
+    let bob_hs_config = HandshakeConfig {
+        local: bob,
+        remote: alice,
+        context_id: context,
+        psk,
+        timeout_ms: 5000,
+    };
+    let mut bob_handshaker = Handshaker::new(bob_hs_config);
 
-    #[tokio::test]
-    async fn test_trust_level_impact() {
-        // Test with different trust levels
-        let high_trust_config = E2eTestConfig {
-            device_count: 2,
-            use_encryption: false,
-            trust_level: TrustLevel::High,
-            ttl: 3,
-            timeout_duration: Duration::from_secs(5),
-        };
+    let init = alice_handshaker.create_init_message(epoch).unwrap();
+    bob_handshaker.process_init(&init, epoch).unwrap();
+    let response = bob_handshaker.create_response(epoch).unwrap();
+    alice_handshaker.process_response(&response).unwrap();
+    let alice_result = alice_handshaker.complete(epoch, true).unwrap();
+    let bob_result = bob_handshaker.complete(epoch, false).unwrap();
 
-        let low_trust_config = E2eTestConfig {
-            trust_level: TrustLevel::Low,
-            ..high_trust_config
-        };
+    // Step 5: Both have matching channels
+    assert_eq!(alice_result.channel_id, bob_result.channel_id);
 
-        let high_result = run_alice_bob_sbb_test(high_trust_config).await.unwrap();
-        let low_result = run_alice_bob_sbb_test(low_trust_config).await.unwrap();
+    // Step 6: Create channel managers and register channels
+    let mut alice_channels = ChannelManager::new();
+    let mut bob_channels = ChannelManager::new();
 
-        // Both should succeed, but high trust might have different behavior
-        assert!(high_result.success, "High trust connection should succeed");
-        assert!(low_result.success, "Low trust connection should succeed");
-    }
+    let channel_id = alice_result.channel_id;
 
-    #[tokio::test]
-    async fn test_flow_budget_tracking() {
-        let config = E2eTestConfig {
-            device_count: 2,
-            use_encryption: false,
-            trust_level: TrustLevel::Medium,
-            ttl: 3,
-            timeout_duration: Duration::from_secs(5),
-        };
+    let mut alice_ch = SecureChannel::new(channel_id, context, alice, bob, epoch);
+    alice_ch.mark_active();
+    alice_channels.register(alice_ch);
 
-        let mut network = SbbTestNetwork::new(config).await.unwrap();
-        network.setup_linear_topology().await.unwrap();
+    let mut bob_ch = SecureChannel::new(channel_id, context, bob, alice, epoch);
+    bob_ch.mark_active();
+    bob_channels.register(bob_ch);
 
-        // Run multiple discoveries to test flow budget tracking
-        let mut total_flow = 0u64;
-        for _i in 0..3 {
-            let result = network.test_alice_bob_connection().await.unwrap();
-            total_flow += result.flow_consumed;
+    // Both can retrieve their channels
+    assert!(alice_channels.find_by_context_peer(context, bob).is_some());
+    assert!(bob_channels.find_by_context_peer(context, alice).is_some());
+}
 
-            // Small delay between tests
-            tokio::time::sleep(Duration::from_millis(50)).await;
+#[test]
+fn test_multi_context_isolation() {
+    let alice = test_authority(1);
+    let bob = test_authority(2);
+    let context1 = test_context(100);
+    let context2 = test_context(200);
+
+    let config = RendezvousConfig::default();
+    let mut service = RendezvousService::new(alice, config);
+
+    // Bob's descriptor for context1
+    let mut bob_desc1 = test_descriptor(bob, context1);
+    bob_desc1.transport_hints = vec![TransportHint::QuicDirect {
+        addr: "10.0.0.1:8443".to_string(),
+    }];
+
+    // Bob's descriptor for context2
+    let mut bob_desc2 = test_descriptor(bob, context2);
+    bob_desc2.transport_hints = vec![TransportHint::QuicDirect {
+        addr: "10.0.0.2:9443".to_string(),
+    }];
+
+    service.cache_descriptor(bob_desc1);
+    service.cache_descriptor(bob_desc2);
+
+    // Should find correct descriptor per context
+    let found1 = service.get_cached_descriptor(context1, bob).unwrap();
+    let found2 = service.get_cached_descriptor(context2, bob).unwrap();
+
+    assert_eq!(
+        found1.transport_hints[0],
+        TransportHint::QuicDirect {
+            addr: "10.0.0.1:8443".to_string()
         }
+    );
+    assert_eq!(
+        found2.transport_hints[0],
+        TransportHint::QuicDirect {
+            addr: "10.0.0.2:9443".to_string()
+        }
+    );
 
-        // Flow consumption should be tracked
-        // (Actual values depend on implementation details)
-        println!("Total flow consumed across tests: {} bytes", total_flow);
+    // Cross-context lookup should fail
+    let unknown_context = test_context(99);
+    assert!(service
+        .get_cached_descriptor(unknown_context, bob)
+        .is_none());
+}
+
+// =============================================================================
+// Transport Selection Tests
+// =============================================================================
+
+#[test]
+fn test_transport_hint_serialization() {
+    use aura_journal::DomainFact;
+
+    let hint = TransportHint::QuicDirect {
+        addr: "192.168.1.1:8443".to_string(),
+    };
+
+    let descriptor = RendezvousDescriptor {
+        authority_id: test_authority(1),
+        context_id: test_context(100),
+        transport_hints: vec![hint.clone()],
+        handshake_psk_commitment: [0u8; 32],
+        valid_from: 0,
+        valid_until: 10_000,
+        nonce: [0u8; 32],
+    };
+
+    let fact = RendezvousFact::Descriptor(descriptor.clone());
+
+    // Serialize and deserialize
+    let bytes = fact.to_bytes();
+    let recovered = RendezvousFact::from_bytes(&bytes).unwrap();
+
+    if let RendezvousFact::Descriptor(d) = recovered {
+        assert_eq!(d.transport_hints, descriptor.transport_hints);
+        assert_eq!(d.authority_id, descriptor.authority_id);
+    } else {
+        panic!("Expected Descriptor fact");
     }
+}
 
-    #[tokio::test]
-    async fn test_device_isolation() {
-        // Test that devices without relationships can't communicate via SBB
-        let config = E2eTestConfig {
-            device_count: 2,
-            use_encryption: false,
-            trust_level: TrustLevel::Medium,
-            ttl: 3,
-            timeout_duration: Duration::from_secs(5),
-        };
+#[test]
+fn test_relay_transport_hint() {
+    let relay = test_authority(99);
+    let hint = TransportHint::WebSocketRelay {
+        relay_authority: relay,
+    };
 
-        let mut network = SbbTestNetwork::new(config).await.unwrap();
-        // Don't set up topology - devices have no relationships
+    let descriptor = RendezvousDescriptor {
+        authority_id: test_authority(1),
+        context_id: test_context(100),
+        transport_hints: vec![hint],
+        handshake_psk_commitment: [0u8; 32],
+        valid_from: 0,
+        valid_until: 10_000,
+        nonce: [0u8; 32],
+    };
 
-        let result = network.test_alice_bob_connection().await.unwrap();
-
-        // Should fail because no relationships exist
-        assert!(
-            !result.success || result.devices_reached == 0,
-            "Isolated devices should not be able to communicate via SBB"
-        );
-    }
+    // Should have relay hint
+    assert!(descriptor.transport_hints.iter().any(|h| {
+        matches!(
+            h,
+            TransportHint::WebSocketRelay {
+                relay_authority,
+            } if *relay_authority == relay
+        )
+    }));
 }

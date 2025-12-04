@@ -559,7 +559,7 @@ impl RendezvousService {
             };
         }
 
-        // Placeholder - relay support to be implemented in Phase 2+
+        // Relay support will be added in Phase 2+
         GuardOutcome {
             decision: GuardDecision::Deny {
                 reason: "Relay support not yet implemented".to_string(),

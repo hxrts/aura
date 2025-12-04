@@ -161,7 +161,7 @@ impl SecureChannel {
 
     /// Rotate channel keys for new epoch
     ///
-    /// In production, this would re-key the underlying transport.
+    /// Full implementation will re-key the underlying Noise transport.
     pub fn rotate(&mut self, new_epoch: u64) -> AuraResult<()> {
         if new_epoch <= self.epoch {
             return Err(AuraError::invalid(
@@ -410,9 +410,8 @@ impl Handshaker {
             epoch,
         ));
 
-        // Placeholder: In production, this would create actual Noise IKpsk2 message
-        let message =
-            create_placeholder_handshake_message(&self.config.local, &self.config.psk, epoch, true);
+        // Create handshake message (Noise IKpsk2 integration pending)
+        let message = create_handshake_message(&self.config.local, &self.config.psk, epoch, true);
 
         self.state = HandshakeState::InitSent;
         Ok(message)
@@ -431,7 +430,7 @@ impl Handshaker {
             epoch,
         ));
 
-        // Placeholder: In production, this would process actual Noise message
+        // Process handshake message (Noise IKpsk2 integration pending)
         self.state = HandshakeState::InitReceived;
         Ok(())
     }
@@ -442,13 +441,8 @@ impl Handshaker {
             return Err(AuraError::invalid("Invalid state for create_response"));
         }
 
-        // Placeholder: In production, this would create actual Noise response
-        let message = create_placeholder_handshake_message(
-            &self.config.local,
-            &self.config.psk,
-            epoch,
-            false,
-        );
+        // Create response message (Noise IKpsk2 integration pending)
+        let message = create_handshake_message(&self.config.local, &self.config.psk, epoch, false);
 
         self.state = HandshakeState::ResponseSent;
         Ok(message)
@@ -460,7 +454,7 @@ impl Handshaker {
             return Err(AuraError::invalid("Invalid state for process_response"));
         }
 
-        // Placeholder: In production, this would process actual Noise response
+        // Process response message (Noise IKpsk2 integration pending)
         self.state = HandshakeState::ResponseReceived;
         Ok(())
     }
@@ -540,8 +534,8 @@ fn generate_channel_id(
     channel_id
 }
 
-/// Create a placeholder handshake message
-fn create_placeholder_handshake_message(
+/// Create a handshake message (Noise IKpsk2 integration pending)
+fn create_handshake_message(
     authority: &AuthorityId,
     psk: &[u8; 32],
     epoch: u64,
