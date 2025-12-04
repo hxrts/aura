@@ -54,11 +54,31 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
+// =============================================================================
+// Core Modules (New Architecture)
+// =============================================================================
+
+/// Guard types for invitation operations
+///
+/// Provides `GuardSnapshot`, `GuardOutcome`, `EffectCommand`, and related types
+/// for guard chain integration following the pattern from `aura-rendezvous`.
+pub mod guards;
+
+/// Invitation service coordinator
+///
+/// Main service for invitation operations with guard chain integration.
+/// All operations return `GuardOutcome` for the caller to execute.
+pub mod service;
+
 /// Domain fact types for invitation state changes
 pub mod facts;
 
 /// View delta and reducer for invitation facts
 pub mod view;
+
+// =============================================================================
+// Legacy Modules (To be refactored in later phases)
+// =============================================================================
 
 /// Main invitation and acceptance choreography (G_invitation)
 pub mod invitation_acceptance;
