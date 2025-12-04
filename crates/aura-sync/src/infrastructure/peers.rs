@@ -36,7 +36,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::core::{sync_config_error, sync_peer_error, SyncResult};
 
@@ -44,7 +43,7 @@ static NEXT_PEER_TS: AtomicU64 = AtomicU64::new(1);
 fn now_secs() -> u64 {
     NEXT_PEER_TS.fetch_add(1, Ordering::SeqCst)
 }
-use aura_core::{hash, DeviceId};
+use aura_core::DeviceId;
 use aura_protocol::guards::BiscuitGuardEvaluator;
 
 // =============================================================================
@@ -361,7 +360,9 @@ impl PeerManager {
     where
         E: aura_core::effects::NetworkEffects + aura_core::effects::StorageEffects + Send + Sync,
     {
-        tracing::info!("Starting peer discovery (using tracked peers - rendezvous integration pending)");
+        tracing::info!(
+            "Starting peer discovery (using tracked peers - rendezvous integration pending)"
+        );
 
         // Update last refresh time
         self.last_refresh = Some(now);
@@ -786,28 +787,6 @@ impl PeerManager {
     pub fn recalculate_peer_health(&mut self, _peer: &DeviceId) {
         // Health is calculated on-demand
         // In a real implementation, this would update cached health metrics
-    }
-}
-
-fn trust_level_threshold(min_score: u8) -> aura_core::relationships::TrustLevel {
-    use aura_core::relationships::TrustLevel;
-    match min_score {
-        0..=20 => TrustLevel::None,
-        21..=40 => TrustLevel::Low,
-        41..=60 => TrustLevel::Medium,
-        61..=85 => TrustLevel::High,
-        _ => TrustLevel::Full,
-    }
-}
-
-fn trust_level_score(level: aura_core::relationships::TrustLevel) -> u8 {
-    use aura_core::relationships::TrustLevel;
-    match level {
-        TrustLevel::None => 0,
-        TrustLevel::Low => 25,
-        TrustLevel::Medium => 50,
-        TrustLevel::High => 75,
-        TrustLevel::Full => 100,
     }
 }
 

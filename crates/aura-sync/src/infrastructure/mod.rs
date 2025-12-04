@@ -13,6 +13,7 @@ pub mod cache;
 pub mod connections;
 pub mod peers;
 pub mod rate_limit;
+pub mod rendezvous;
 pub mod retry;
 
 // Re-export key types for convenience
@@ -20,4 +21,5 @@ pub use cache::{CacheEpochTracker, CacheInvalidation, CacheManager};
 pub use connections::{ConnectionMetadata, ConnectionPool, PoolConfig};
 pub use peers::{PeerDiscoveryConfig, PeerInfo, PeerManager, PeerMetadata, PeerStatus};
 pub use rate_limit::{RateLimit, RateLimitConfig, RateLimitResult, RateLimiter};
+pub use rendezvous::{DiscoveredPeer, RendezvousAdapter, RendezvousEvent};
 pub use retry::{BackoffStrategy, RetryContext, RetryPolicy, RetryResult};
