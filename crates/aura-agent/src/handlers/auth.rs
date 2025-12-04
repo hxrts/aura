@@ -17,12 +17,11 @@ use tokio::sync::RwLock;
 
 /// Extract the group public key (32 bytes) from a serialized FROST PublicKeyPackage
 fn extract_group_public_key(public_key_package: &[u8]) -> AgentResult<Vec<u8>> {
-    // The public key package is bincode-serialized. We need to deserialize it
-    // to extract the group verifying key.
+    // The public key package is serialized using FROST's native serialization.
     use frost_ed25519 as frost;
 
-    let pubkey_package: frost::keys::PublicKeyPackage = bincode::deserialize(public_key_package)
-        .map_err(|e| {
+    let pubkey_package: frost::keys::PublicKeyPackage =
+        frost::keys::PublicKeyPackage::deserialize(public_key_package).map_err(|e| {
             AgentError::effects(format!("failed to deserialize public key package: {e}"))
         })?;
 
