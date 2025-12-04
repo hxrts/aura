@@ -84,7 +84,8 @@ impl InvitationHandler {
                 "invitation:channel".to_string(),
             ]
         } else {
-            // TODO: Get capabilities from Biscuit token or capability store
+            // Capabilities will be derived from Biscuit token when integrated.
+            // Currently uses default set for non-testing mode.
             vec![
                 "invitation:send".to_string(),
                 "invitation:accept".to_string(),

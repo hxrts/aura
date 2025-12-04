@@ -209,9 +209,7 @@ impl SyncServiceManager {
             + Sync,
     {
         let service = self.service.read().await;
-        let service = service
-            .as_ref()
-            .ok_or("Sync service not started")?;
+        let service = service.as_ref().ok_or("Sync service not started")?;
 
         let now_instant = Instant::now();
         service

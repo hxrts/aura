@@ -481,7 +481,8 @@ impl InvitationService {
 
     /// Remove expired invitations from cache
     pub fn prune_expired_invitations(&mut self, now_ms: u64) {
-        self.invitation_cache.retain(|_, inv| !inv.is_expired(now_ms));
+        self.invitation_cache
+            .retain(|_, inv| !inv.is_expired(now_ms));
     }
 
     /// List pending invitations from cache
@@ -551,7 +552,14 @@ mod tests {
     }
 
     fn test_snapshot() -> GuardSnapshot {
-        GuardSnapshot::new(test_authority(), test_context(), 100, full_capabilities(), 1, 1000)
+        GuardSnapshot::new(
+            test_authority(),
+            test_context(),
+            100,
+            full_capabilities(),
+            1,
+            1000,
+        )
     }
 
     #[test]

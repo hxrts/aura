@@ -8,9 +8,9 @@ use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::effects::RandomEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_journal::DomainFact;
 use aura_protocol::effects::EffectApiEffects;
 use aura_protocol::guards::send_guard::create_send_guard;
-use aura_journal::DomainFact;
 use aura_rendezvous::{
     EffectCommand, GuardSnapshot, RendezvousConfig, RendezvousDescriptor, RendezvousFact,
     RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
@@ -115,11 +115,9 @@ impl RendezvousHandler {
                 .await
                 .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
             if !result.authorized {
-                return Err(AgentError::effects(
-                    result
-                        .denial_reason
-                        .unwrap_or_else(|| "descriptor publish not authorized".to_string()),
-                ));
+                return Err(AgentError::effects(result.denial_reason.unwrap_or_else(
+                    || "descriptor publish not authorized".to_string(),
+                )));
             }
         }
 
@@ -225,11 +223,9 @@ impl RendezvousHandler {
                 .await
                 .map_err(|e| AgentError::effects(format!("guard evaluation failed: {e}")))?;
             if !result.authorized {
-                return Err(AgentError::effects(
-                    result
-                        .denial_reason
-                        .unwrap_or_else(|| "channel initiation not authorized".to_string()),
-                ));
+                return Err(AgentError::effects(result.denial_reason.unwrap_or_else(
+                    || "channel initiation not authorized".to_string(),
+                )));
             }
         }
 

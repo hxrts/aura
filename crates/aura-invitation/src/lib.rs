@@ -96,7 +96,7 @@ pub mod view;
 // - `invitation_acceptance` -> Use `InvitationService::prepare_accept_invitation()`
 // - `relationship_formation` -> Use relational contexts from `aura-relational`
 //
-// TODO: Complete migration and remove these modules
+// These modules will be removed once all consumers migrate to InvitationService.
 
 /// Main invitation and acceptance choreography (G_invitation)
 #[deprecated(note = "Use InvitationService from service.rs instead")]

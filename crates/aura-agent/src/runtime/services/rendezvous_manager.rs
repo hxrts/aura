@@ -37,7 +37,7 @@ impl Default for RendezvousManagerConfig {
     fn default() -> Self {
         Self {
             auto_refresh_enabled: true,
-            refresh_window: Duration::from_secs(300),      // 5 minutes
+            refresh_window: Duration::from_secs(300), // 5 minutes
             descriptor_validity: Duration::from_secs(3600), // 1 hour
             auto_cleanup_enabled: true,
             cleanup_interval: Duration::from_secs(60),
@@ -113,10 +113,7 @@ pub struct RendezvousManager {
 
 impl RendezvousManager {
     /// Create a new rendezvous manager
-    pub fn new(
-        authority_id: AuthorityId,
-        config: RendezvousManagerConfig,
-    ) -> Self {
+    pub fn new(authority_id: AuthorityId, config: RendezvousManagerConfig) -> Self {
         Self {
             service: Arc::new(RwLock::new(None)),
             config,
@@ -169,7 +166,10 @@ impl RendezvousManager {
             self.start_cleanup_task().await;
         }
 
-        tracing::info!("Rendezvous manager started for authority {}", self.authority_id);
+        tracing::info!(
+            "Rendezvous manager started for authority {}",
+            self.authority_id
+        );
         Ok(())
     }
 
@@ -290,7 +290,13 @@ impl RendezvousManager {
         let service = self.service.read().await;
         service
             .as_ref()
-            .map(|s| s.needs_refresh(context_id, now_ms, self.config.refresh_window.as_millis() as u64))
+            .map(|s| {
+                s.needs_refresh(
+                    context_id,
+                    now_ms,
+                    self.config.refresh_window.as_millis() as u64,
+                )
+            })
             .unwrap_or(true)
     }
 
@@ -299,7 +305,9 @@ impl RendezvousManager {
         let service = self.service.read().await;
         service
             .as_ref()
-            .map(|s| s.contexts_needing_refresh(now_ms, self.config.refresh_window.as_millis() as u64))
+            .map(|s| {
+                s.contexts_needing_refresh(now_ms, self.config.refresh_window.as_millis() as u64)
+            })
             .unwrap_or_default()
     }
 
@@ -318,7 +326,8 @@ impl RendezvousManager {
         let service = self.service.read().await;
         let service = service.as_ref().ok_or("Rendezvous manager not started")?;
 
-        service.prepare_establish_channel(snapshot, context_id, peer, psk)
+        service
+            .prepare_establish_channel(snapshot, context_id, peer, psk)
             .map_err(|e| format!("Failed to prepare channel: {e}"))
     }
 

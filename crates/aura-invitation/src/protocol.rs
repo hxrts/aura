@@ -378,7 +378,10 @@ mod tests {
         state = GuardianInvitationState::Accepted {
             recovery_public_key: vec![1, 2, 3],
         };
-        if let GuardianInvitationState::Accepted { recovery_public_key } = &state {
+        if let GuardianInvitationState::Accepted {
+            recovery_public_key,
+        } = &state
+        {
             assert_eq!(recovery_public_key, &vec![1, 2, 3]);
         }
 

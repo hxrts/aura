@@ -1284,7 +1284,10 @@ mod tests {
             &deltas[0],
             RecoveryDelta::GuardianSetupStarted { .. }
         ));
-        assert!(matches!(&deltas[1], RecoveryDelta::GuardianResponded { .. }));
+        assert!(matches!(
+            &deltas[1],
+            RecoveryDelta::GuardianResponded { .. }
+        ));
         assert!(matches!(
             &deltas[2],
             RecoveryDelta::GuardianSetupCompleted { .. }
