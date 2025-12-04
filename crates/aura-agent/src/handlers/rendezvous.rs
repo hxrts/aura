@@ -3,6 +3,7 @@
 //! Handlers for rendezvous operations including descriptor publication,
 //! channel establishment, and relay coordination.
 
+use super::rendezvous_bridge::execute_guard_outcome;
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
@@ -61,6 +62,7 @@ pub struct RendezvousHandler {
 
 /// Pending channel state
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Used for pending handshake cache; retained for future reconciliation logic
 struct PendingChannel {
     context_id: ContextId,
     peer: AuthorityId,
@@ -97,8 +99,8 @@ impl RendezvousHandler {
         effects: &AuraEffectSystem,
         context_id: ContextId,
         transport_hints: Vec<TransportHint>,
-        psk_commitment: [u8; 32],
-        validity_duration_ms: u64,
+        _psk_commitment: [u8; 32],
+        _validity_duration_ms: u64,
     ) -> AgentResult<RendezvousResult> {
         HandlerUtilities::validate_authority_context(&self.context.authority)?;
 
@@ -132,7 +134,7 @@ impl RendezvousHandler {
             service.prepare_publish_descriptor(&snapshot, context_id, transport_hints, current_time)
         };
 
-        // Check guard outcome
+        // Check guard outcome and execute effects via the bridge
         if !outcome.decision.is_allowed() {
             return Ok(RendezvousResult {
                 success: false,
@@ -142,25 +144,19 @@ impl RendezvousHandler {
             });
         }
 
-        // Extract the descriptor fact from effects and journal it
+        // Cache descriptor before executing effects (for local access)
         for effect in &outcome.effects {
-            if let EffectCommand::JournalAppend { fact } = effect {
-                HandlerUtilities::append_generic_fact(
-                    &self.context.authority,
-                    effects,
-                    context_id,
-                    RENDEZVOUS_FACT_TYPE_ID,
-                    &fact.to_bytes(),
-                )
-                .await?;
-
-                // Cache our own descriptor
-                if let RendezvousFact::Descriptor(desc) = fact {
-                    let mut service = self.service.write().await;
-                    service.cache_descriptor(desc.clone());
-                }
+            if let EffectCommand::JournalAppend {
+                fact: RendezvousFact::Descriptor(desc),
+            } = effect
+            {
+                let mut service = self.service.write().await;
+                service.cache_descriptor(desc.clone());
             }
         }
+
+        // Execute all effect commands via the bridge
+        execute_guard_outcome(outcome, &self.context.authority, context_id, effects).await?;
 
         Ok(RendezvousResult {
             success: true,
@@ -271,6 +267,9 @@ impl RendezvousHandler {
                 },
             );
         }
+
+        // Execute all effect commands via the bridge (includes SendHandshake)
+        execute_guard_outcome(outcome, &self.context.authority, context_id, effects).await?;
 
         Ok(ChannelResult {
             success: true,

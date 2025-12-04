@@ -3784,6 +3784,29 @@ pub(super) async fn execute_command(
                 tracing::info!("ForceSync completed: {} total changes", total_changes);
             }
 
+            // Phase 5.1: After sync completes with changes, reload journal to update ViewState
+            // This enables the AuraEvent → ViewDelta flow: sync'd facts get applied to AppCore
+            if total_changes > 0 {
+                if let Some(ref core) = app_core {
+                    let mut app = core.write().await;
+                    if let Some(path) = app.journal_path() {
+                        let path = std::path::PathBuf::from(path);
+                        match app.load_from_storage(&path) {
+                            Ok(count) => {
+                                tracing::info!(
+                                    "Reloaded {} facts from journal after sync ({} changes)",
+                                    count,
+                                    total_changes
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to reload journal after sync: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+
             Ok(())
         }
 
@@ -3804,16 +3827,19 @@ pub(super) async fn execute_command(
                 format!("Invalid peer UUID: {:?}", e)
             })?;
 
+            let mut changes_applied = 0u32;
+
             if let Some(effect_system) = effect_system {
                 match effect_system.sync_with_peer(peer_uuid).await {
                     Ok(metrics) => {
+                        changes_applied = metrics.applied as u32;
                         tracing::info!(
                             "State sync completed with peer {}: {} applied, {} duplicates, {} rounds",
                             peer_id_owned, metrics.applied, metrics.duplicates, metrics.rounds
                         );
                         let _ = event_tx.send(AuraEvent::SyncCompleted {
                             peer_id: peer_id_owned,
-                            changes: metrics.applied as u32,
+                            changes: changes_applied,
                         });
                     }
                     Err(e) => {
@@ -3834,6 +3860,28 @@ pub(super) async fn execute_command(
                     peer_id: peer_id_owned,
                     changes: 0,
                 });
+            }
+
+            // Phase 5.1: After sync completes with changes, reload journal to update ViewState
+            if changes_applied > 0 {
+                if let Some(ref core) = app_core {
+                    let mut app = core.write().await;
+                    if let Some(path) = app.journal_path() {
+                        let path = std::path::PathBuf::from(path);
+                        match app.load_from_storage(&path) {
+                            Ok(count) => {
+                                tracing::info!(
+                                    "Reloaded {} facts from journal after RequestState ({} changes)",
+                                    count,
+                                    changes_applied
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to reload journal after RequestState: {}", e);
+                            }
+                        }
+                    }
+                }
             }
 
             Ok(())
@@ -3907,6 +3955,74 @@ pub(super) async fn execute_command(
 
             // Emit event
             let _ = event_tx.send(AuraEvent::PeersListed { peers });
+
+            Ok(())
+        }
+
+        EffectCommand::DiscoverPeers => {
+            // Discover peers from the sync effect system and add them to known_peers
+            //
+            // This command queries the effect system for connected/discovered peers
+            // and adds any new ones to the known_peers list. The actual discovery
+            // source depends on the effect system configuration:
+            // - In production: queries rendezvous service for cached peer descriptors
+            // - In testing/demo: may return empty or mock peers
+            //
+            // After discovery, ForceSync will use these peers instead of the demo peer.
+
+            tracing::info!("DiscoverPeers command - querying effect system for peers");
+
+            let mut discovered_count = 0u32;
+            let mut new_peers_added = 0u32;
+
+            if let Some(ref effects) = effect_system {
+                // Query the sync effect system for connected peers
+                match effects.get_connected_peers().await {
+                    Ok(peers) => {
+                        discovered_count = peers.len() as u32;
+                        tracing::info!("Discovered {} peers from effect system", discovered_count);
+
+                        // Add new peers to known_peers list
+                        let mut bridge_state = state.write().await;
+                        for peer_uuid in peers {
+                            if !bridge_state.known_peers.contains(&peer_uuid) {
+                                bridge_state.known_peers.push(peer_uuid);
+                                new_peers_added += 1;
+                                tracing::debug!("Added discovered peer: {}", peer_uuid);
+                            }
+                        }
+                        drop(bridge_state);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to discover peers: {:?}", e);
+                    }
+                }
+            } else {
+                tracing::debug!("Effect system not available for peer discovery");
+            }
+
+            // Get the final list of known peers
+            let bridge_state = state.read().await;
+            let all_peers: Vec<String> = bridge_state
+                .known_peers
+                .iter()
+                .map(|p| p.to_string())
+                .collect();
+            drop(bridge_state);
+
+            tracing::info!(
+                "Peer discovery complete: {} discovered, {} new, {} total known",
+                discovered_count,
+                new_peers_added,
+                all_peers.len()
+            );
+
+            // Emit discovery completed event
+            let _ = event_tx.send(AuraEvent::PeersDiscovered {
+                discovered: discovered_count,
+                new_peers: new_peers_added,
+                total: all_peers.len() as u32,
+            });
 
             Ok(())
         }

@@ -54,6 +54,7 @@ pub struct RuntimeSystem {
 impl RuntimeSystem {
     /// Create a new runtime system
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)] // Factory retained for future runtime wiring
     pub(crate) fn new(
         effect_executor: EffectExecutor,
         effect_system: Arc<RwLock<AuraEffectSystem>>,
@@ -82,6 +83,7 @@ impl RuntimeSystem {
 
     /// Create a new runtime system with sync service
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)] // Factory retained for future sync-enabled runtime
     pub(crate) fn new_with_sync(
         effect_executor: EffectExecutor,
         effect_system: Arc<RwLock<AuraEffectSystem>>,
@@ -111,6 +113,7 @@ impl RuntimeSystem {
 
     /// Create a new runtime system with rendezvous service
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)] // Factory retained for future rendezvous-enabled runtime
     pub(crate) fn new_with_rendezvous(
         effect_executor: EffectExecutor,
         effect_system: Arc<RwLock<AuraEffectSystem>>,

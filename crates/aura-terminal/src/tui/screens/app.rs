@@ -5,7 +5,7 @@
 use iocraft::prelude::*;
 use std::sync::Arc;
 
-use crate::tui::components::KeyHintsBar;
+use crate::tui::components::{AccountSetupModal, AccountSetupState, KeyHintsBar};
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
 use crate::tui::hooks::AppCoreContext;
@@ -109,7 +109,15 @@ pub struct IoAppProps {
     pub on_block_send: Option<BlockSendCallback>,
     pub on_block_invite: Option<BlockInviteCallback>,
     pub on_block_navigate_neighborhood: Option<BlockNavCallback>,
+    // Account setup
+    /// Whether to show account setup modal on start
+    pub show_account_setup: bool,
+    /// Callback for account creation
+    pub on_create_account: Option<CreateAccountCallback>,
 }
+
+/// Callback for creating an account
+pub type CreateAccountCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Main application with screen navigation
 #[component]
@@ -117,6 +125,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let screen = hooks.use_state(|| Screen::Block);
     let should_exit = hooks.use_state(|| false);
     let mut system = hooks.use_context_mut::<SystemContext>();
+
+    // Account setup modal state
+    let account_setup = hooks.use_state(|| {
+        let mut state = AccountSetupState::new();
+        if props.show_account_setup {
+            state.show();
+        }
+        state
+    });
+    let on_create_account = props.on_create_account.clone();
 
     // Handle exit request
     if should_exit.get() {
@@ -174,28 +192,71 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     hooks.use_terminal_events({
         let mut screen = screen.clone();
         let mut should_exit = should_exit.clone();
+        let mut account_setup = account_setup.clone();
+        let on_create_account = on_create_account.clone();
         move |event| match event {
             TerminalEvent::Key(KeyEvent {
                 code, modifiers, ..
-            }) => match code {
-                KeyCode::Char('1') => screen.set(Screen::Block),
-                KeyCode::Char('2') => screen.set(Screen::Chat),
-                KeyCode::Char('3') => screen.set(Screen::Contacts),
-                KeyCode::Char('4') => screen.set(Screen::Neighborhood),
-                KeyCode::Char('5') => screen.set(Screen::Invitations),
-                KeyCode::Char('6') => screen.set(Screen::Settings),
-                KeyCode::Char('7') => screen.set(Screen::Recovery),
-                KeyCode::Char('8') => screen.set(Screen::Help),
-                KeyCode::Tab => {
-                    if modifiers.contains(KeyModifiers::SHIFT) {
-                        screen.set(screen.get().prev());
-                    } else {
-                        screen.set(screen.get().next());
+            }) => {
+                // Handle account setup modal input first (captures all input when visible)
+                if account_setup.get().visible {
+                    match code {
+                        KeyCode::Char(c) => {
+                            let mut state = account_setup.get();
+                            state.push_char(c);
+                            account_setup.set(state);
+                        }
+                        KeyCode::Backspace => {
+                            let mut state = account_setup.get();
+                            state.backspace();
+                            account_setup.set(state);
+                        }
+                        KeyCode::Enter => {
+                            let state = account_setup.get();
+                            if state.can_submit() {
+                                // Trigger account creation
+                                if let Some(ref callback) = on_create_account {
+                                    let name = state.display_name.clone();
+                                    callback(name);
+                                }
+                                // Mark as creating
+                                let mut state = account_setup.get();
+                                state.start_creating();
+                                account_setup.set(state);
+                            }
+                        }
+                        KeyCode::Esc => {
+                            // Allow canceling the modal (optional - could be removed to force account creation)
+                            let mut state = account_setup.get();
+                            state.hide();
+                            account_setup.set(state);
+                        }
+                        _ => {}
                     }
+                    return; // Don't process other keys when modal is visible
                 }
-                KeyCode::Char('q') => should_exit.set(true),
-                _ => {}
-            },
+
+                // Normal screen navigation
+                match code {
+                    KeyCode::Char('1') => screen.set(Screen::Block),
+                    KeyCode::Char('2') => screen.set(Screen::Chat),
+                    KeyCode::Char('3') => screen.set(Screen::Contacts),
+                    KeyCode::Char('4') => screen.set(Screen::Neighborhood),
+                    KeyCode::Char('5') => screen.set(Screen::Invitations),
+                    KeyCode::Char('6') => screen.set(Screen::Settings),
+                    KeyCode::Char('7') => screen.set(Screen::Recovery),
+                    KeyCode::Char('8') => screen.set(Screen::Help),
+                    KeyCode::Tab => {
+                        if modifiers.contains(KeyModifiers::SHIFT) {
+                            screen.set(screen.get().prev());
+                        } else {
+                            screen.set(screen.get().next());
+                        }
+                    }
+                    KeyCode::Char('q') => should_exit.set(true),
+                    _ => {}
+                }
+            }
             _ => {}
         }
     });

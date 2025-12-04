@@ -200,27 +200,7 @@ Web of trust systems model relationships between devices for authorization decis
 
 ### Relationship Formation
 
-Establish trust relationships through invitation protocols:
-
-```rust
-use aura_invitation::relationship_formation::{RelationshipFormationConfig, execute_relationship_formation};
-
-pub async fn form_trust_relationship<E: RelationshipFormationEffects>(
-    effects: &E,
-    config: RelationshipFormationConfig,
-) -> Result<TrustRelationship, RelationshipError> {
-    let relationship = execute_relationship_formation(
-        config.initiator_id,
-        config.responder_id,
-        config,
-        effects,
-    ).await?;
-
-    Ok(relationship)
-}
-```
-
-Relationship formation requires mutual consent from both devices. The protocol establishes shared cryptographic material and initial trust levels. Successful formation creates bidirectional trust records.
+Use relational contexts plus `InvitationService` to model trust formation. Create a shared context for the participants, exchange capabilities via invitations (e.g., `InvitationType::Contact`), and record trust facts in the relational journal. The legacy `relationship_formation` module has been removed.
 
 ### Trust Computation
 

@@ -228,12 +228,12 @@ impl RecoveryService {
     /// # Returns
     /// True if the recovery is in Initiated or CollectingShares state
     pub async fn is_pending(&self, recovery_id: &str) -> bool {
-        match self.handler.get_state(recovery_id).await {
-            Some(RecoveryState::Initiated { .. }) => true,
-            Some(RecoveryState::CollectingShares { .. }) => true,
-            Some(RecoveryState::Reconstructing { .. }) => true,
-            _ => false,
-        }
+        matches!(
+            self.handler.get_state(recovery_id).await,
+            Some(RecoveryState::Initiated { .. })
+                | Some(RecoveryState::CollectingShares { .. })
+                | Some(RecoveryState::Reconstructing { .. })
+        )
     }
 }
 

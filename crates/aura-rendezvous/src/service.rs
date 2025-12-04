@@ -520,6 +520,29 @@ impl RendezvousService {
             .collect()
     }
 
+    /// List all cached peer authorities (excluding self)
+    ///
+    /// Returns unique AuthorityIds for all peers with cached descriptors.
+    /// Useful for peer discovery integration with sync.
+    pub fn list_cached_peers(&self) -> Vec<AuthorityId> {
+        self.descriptor_cache
+            .keys()
+            .filter(|(_, auth)| *auth != self.authority_id)
+            .map(|(_, auth)| *auth)
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    /// List all cached peers for a specific context (excluding self)
+    pub fn list_cached_peers_for_context(&self, context_id: ContextId) -> Vec<AuthorityId> {
+        self.descriptor_cache
+            .keys()
+            .filter(|(ctx, auth)| *ctx == context_id && *auth != self.authority_id)
+            .map(|(_, auth)| *auth)
+            .collect()
+    }
+
     /// Create a channel established fact
     pub fn create_channel_established_fact(
         &self,

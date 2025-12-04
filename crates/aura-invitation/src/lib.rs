@@ -86,35 +86,9 @@ pub mod view;
 // Legacy Modules
 // =============================================================================
 //
-// These modules predate the service/guard-chain architecture and are deprecated.
-// New code should use `InvitationService` from `service.rs` with choreography
-// definitions from `protocol.rs`.
-//
-// Migration path:
-// - `device_invitation` -> Use `InvitationService::prepare_send_invitation()`
-// - `guardian_invitation` -> Use `InvitationType::Guardian` with `InvitationService`
-// - `invitation_acceptance` -> Use `InvitationService::prepare_accept_invitation()`
-// - `relationship_formation` -> Use relational contexts from `aura-relational`
-//
-// These modules will be removed once all consumers migrate to InvitationService.
-
-/// Main invitation and acceptance choreography (G_invitation)
-#[deprecated(note = "Use InvitationService from service.rs instead")]
-pub mod invitation_acceptance;
-
-/// Guardian relationship invitation protocols
-#[deprecated(note = "Use InvitationService with InvitationType::Guardian instead")]
-pub mod guardian_invitation;
-
-/// Device onboarding invitation protocols
-#[deprecated(note = "Use InvitationService from service.rs instead")]
-pub mod device_invitation;
-
-/// Trust relationship formation
-#[deprecated(note = "Use relational contexts from aura-relational instead")]
-pub mod relationship_formation;
-
-mod transport;
+// Historical invitation/relationship choreographies have been removed.
+// Use `InvitationService` (service.rs) with `InvitationType` variants and
+// relational contexts (aura-relational) for all invitation flows.
 
 /// Error type for invitation operations
 ///

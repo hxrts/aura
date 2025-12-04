@@ -160,21 +160,6 @@ fn convert_to_journal_operation(fact: &JsonValue) -> AuraResult<JournalOperation
                 result: parse_result_from_fact(fact)?,
             })
         }
-        // New fact types for enhanced journal support
-        "relationship_formation" => {
-            // Parse relationship formation fact (invitation acceptance)
-            let device_a = parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
-            let device_b = parse_target_device_from_fact(fact).unwrap_or_else(|_| "peer".to_string());
-            let trust_level = parse_trust_level_from_fact(fact).unwrap_or_else(|_| "trusted".to_string());
-            let relationship_id = format!("{}:{}", device_a, device_b);
-
-            Ok(JournalOperation::FormRelationship {
-                relationship_id,
-                device_a,
-                device_b,
-                trust_level,
-            })
-        }
         "guardian_enrollment" => {
             // Parse guardian enrollment fact
             let device_id = parse_device_id_from_fact(fact).unwrap_or_else(|_| "unknown".to_string());
@@ -331,7 +316,6 @@ fn preserves_monotonicity(fact: &JsonValue) -> bool {
             | "capability_grant"
             | "session_attestation"
             | "intent_finalization"
-            | "relationship_formation"
             | "guardian_enrollment"
             | "key_derivation"
             | "flow_budget_update"

@@ -316,6 +316,8 @@ pub enum EffectCommand {
     },
     /// List known peers
     ListPeers,
+    /// Discover peers from rendezvous service and add to known peers
+    DiscoverPeers,
 
     // === Neighborhood Traversal Commands ===
     /// Move to adjacent position in neighborhood
@@ -352,6 +354,7 @@ impl EffectCommand {
             | Self::AddPeer { .. }
             | Self::RemovePeer { .. }
             | Self::ListPeers
+            | Self::DiscoverPeers
             | Self::Ping
             | Self::ListParticipants { .. }
             | Self::GetUserInfo { .. } => CommandAuthorizationLevel::Public,
@@ -559,6 +562,15 @@ pub enum AuraEvent {
     PeersListed {
         /// Known peer IDs
         peers: Vec<String>,
+    },
+    /// Peers discovered from rendezvous/sync service
+    PeersDiscovered {
+        /// Number of peers discovered from effect system
+        discovered: u32,
+        /// Number of new peers added to known_peers
+        new_peers: u32,
+        /// Total known peers after discovery
+        total: u32,
     },
 
     // === Block Events ===
@@ -910,7 +922,8 @@ impl EventFilter {
             | AuraEvent::SyncFailed { .. }
             | AuraEvent::PeerAdded { .. }
             | AuraEvent::PeerRemoved { .. }
-            | AuraEvent::PeersListed { .. } => self.sync,
+            | AuraEvent::PeersListed { .. }
+            | AuraEvent::PeersDiscovered { .. } => self.sync,
             AuraEvent::BlockCreated { .. } | AuraEvent::BlockJoined { .. } => self.block,
             AuraEvent::InvitationAccepted { .. }
             | AuraEvent::InvitationDeclined { .. }

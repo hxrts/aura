@@ -4,6 +4,7 @@
 //! Provides lifecycle management, descriptor caching, and channel establishment.
 
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_effects::time::PhysicalTimeHandler;
 use aura_rendezvous::{
     RendezvousConfig, RendezvousDescriptor, RendezvousFact, RendezvousService, TransportHint,
 };
@@ -199,9 +200,11 @@ impl RendezvousManager {
         let service = self.service.clone();
         let interval = self.config.cleanup_interval;
         let state = self.state.clone();
+        let clock = PhysicalTimeHandler::new();
 
         let handle = tokio::spawn(async move {
             let mut ticker = tokio::time::interval(interval);
+            let clock = clock;
             loop {
                 ticker.tick().await;
 
@@ -212,11 +215,7 @@ impl RendezvousManager {
 
                 // Perform cleanup
                 if let Some(ref mut svc) = *service.write().await {
-                    // Get current time in ms (simplified - production would use TimeEffects)
-                    let now_ms = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
+                    let now_ms = clock.physical_time_now_ms();
                     svc.prune_expired_descriptors(now_ms);
                 }
             }
@@ -361,6 +360,31 @@ impl RendezvousManager {
         let service = service.as_ref().ok_or("Rendezvous manager not started")?;
 
         Ok(service.prepare_relay_request(context_id, relay, target, snapshot))
+    }
+
+    // ========================================================================
+    // Peer Discovery
+    // ========================================================================
+
+    /// List all cached peer authorities (excluding self)
+    ///
+    /// Returns unique AuthorityIds for all peers with cached descriptors.
+    /// Useful for peer discovery integration with sync.
+    pub async fn list_cached_peers(&self) -> Vec<AuthorityId> {
+        let service = self.service.read().await;
+        service
+            .as_ref()
+            .map(|s| s.list_cached_peers())
+            .unwrap_or_default()
+    }
+
+    /// List all cached peers for a specific context (excluding self)
+    pub async fn list_cached_peers_for_context(&self, context_id: ContextId) -> Vec<AuthorityId> {
+        let service = self.service.read().await;
+        service
+            .as_ref()
+            .map(|s| s.list_cached_peers_for_context(context_id))
+            .unwrap_or_default()
     }
 
     // ========================================================================

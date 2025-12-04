@@ -12,6 +12,7 @@ pub mod ota;
 pub mod recovery;
 pub mod recovery_service;
 pub mod rendezvous;
+pub mod rendezvous_bridge;
 pub mod rendezvous_service;
 pub mod sessions;
 pub mod shared;

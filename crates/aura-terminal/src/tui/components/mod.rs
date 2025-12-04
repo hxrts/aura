@@ -2,6 +2,7 @@
 //!
 //! Declarative UI components for building screens.
 
+mod account_setup;
 mod card;
 mod command_palette;
 mod empty_state;
@@ -19,6 +20,7 @@ mod text_styled;
 mod textarea;
 mod toast;
 
+pub use account_setup::{AccountSetupModal, AccountSetupState};
 pub use card::{CardFooter, CardHeader, CardStyle, SimpleCard};
 pub use command_palette::{CommandItem, CommandPalette, PaletteCommand};
 pub use empty_state::{EmptyState, LoadingState, NoResults};
