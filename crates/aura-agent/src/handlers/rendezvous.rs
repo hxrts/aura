@@ -6,15 +6,14 @@
 use super::shared::{HandlerContext, HandlerUtilities};
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
-use aura_core::effects::{GuardSnapshot, RandomEffects};
+use aura_core::effects::RandomEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_journal::DomainFact;
 use aura_protocol::effects::EffectApiEffects;
-use aura_protocol::guards::pure::GuardChain;
 use aura_protocol::guards::send_guard::create_send_guard;
+use aura_journal::DomainFact;
 use aura_rendezvous::{
-    RendezvousDescriptor, RendezvousFact, RendezvousService, SelectedTransport, TransportHint,
-    RENDEZVOUS_FACT_TYPE_ID,
+    EffectCommand, GuardSnapshot, RendezvousConfig, RendezvousDescriptor, RendezvousFact,
+    RendezvousService, TransportHint, RENDEZVOUS_FACT_TYPE_ID,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -66,15 +65,15 @@ struct PendingChannel {
     context_id: ContextId,
     peer: AuthorityId,
     initiated_at: u64,
-    transport: SelectedTransport,
 }
 
 impl RendezvousHandler {
     /// Create a new rendezvous handler
-    pub fn new(authority: AuthorityContext, guard_chain: Arc<GuardChain>) -> AgentResult<Self> {
+    pub fn new(authority: AuthorityContext) -> AgentResult<Self> {
         HandlerUtilities::validate_authority_context(&authority)?;
 
-        let service = RendezvousService::new(authority.authority_id, guard_chain);
+        let config = RendezvousConfig::default();
+        let service = RendezvousService::new(authority.authority_id, config);
 
         Ok(Self {
             context: HandlerContext::new(authority),
@@ -126,32 +125,17 @@ impl RendezvousHandler {
 
         let current_time = effects.current_timestamp().await.unwrap_or(0);
 
-        // Generate nonce
-        let nonce_uuid = effects.random_uuid().await;
-        let mut nonce = [0u8; 32];
-        nonce[..16].copy_from_slice(nonce_uuid.as_bytes());
-
         // Create snapshot for guard evaluation
         let snapshot = self.create_snapshot(effects, context_id).await?;
 
         // Prepare the descriptor through the service
-        let (fact, outcome) = {
+        let outcome = {
             let service = self.service.read().await;
-            service
-                .prepare_publish_descriptor(
-                    context_id,
-                    transport_hints,
-                    psk_commitment,
-                    current_time,
-                    current_time.saturating_add(validity_duration_ms),
-                    nonce,
-                    &snapshot,
-                )
-                .map_err(|e| AgentError::effects(format!("prepare descriptor failed: {e}")))?
+            service.prepare_publish_descriptor(&snapshot, context_id, transport_hints, current_time)
         };
 
         // Check guard outcome
-        if !outcome.decision.is_authorized() {
+        if !outcome.decision.is_allowed() {
             return Ok(RendezvousResult {
                 success: false,
                 context_id,
@@ -160,20 +144,24 @@ impl RendezvousHandler {
             });
         }
 
-        // Journal the descriptor fact
-        HandlerUtilities::append_generic_fact(
-            &self.context.authority,
-            effects,
-            context_id,
-            RENDEZVOUS_FACT_TYPE_ID,
-            &fact.to_bytes(),
-        )
-        .await?;
+        // Extract the descriptor fact from effects and journal it
+        for effect in &outcome.effects {
+            if let EffectCommand::JournalAppend { fact } = effect {
+                HandlerUtilities::append_generic_fact(
+                    &self.context.authority,
+                    effects,
+                    context_id,
+                    RENDEZVOUS_FACT_TYPE_ID,
+                    &fact.to_bytes(),
+                )
+                .await?;
 
-        // Cache our own descriptor
-        if let RendezvousFact::Descriptor(desc) = &fact {
-            let mut service = self.service.write().await;
-            service.cache_descriptor(desc.clone());
+                // Cache our own descriptor
+                if let RendezvousFact::Descriptor(desc) = fact {
+                    let mut service = self.service.write().await;
+                    service.cache_descriptor(desc.clone());
+                }
+            }
         }
 
         Ok(RendezvousResult {
@@ -250,16 +238,21 @@ impl RendezvousHandler {
         // Create snapshot for guard evaluation
         let snapshot = self.create_snapshot(effects, context_id).await?;
 
+        // Generate PSK for the channel
+        let psk_uuid = effects.random_uuid().await;
+        let mut psk = [0u8; 32];
+        psk[..16].copy_from_slice(psk_uuid.as_bytes());
+
         // Prepare channel establishment
-        let (transport, outcome) = {
+        let outcome = {
             let service = self.service.read().await;
             service
-                .prepare_establish_channel(context_id, peer, &snapshot)
+                .prepare_establish_channel(&snapshot, context_id, peer, &psk)
                 .map_err(|e| AgentError::effects(format!("prepare channel failed: {e}")))?
         };
 
         // Check guard outcome
-        if !outcome.decision.is_authorized() {
+        if !outcome.decision.is_allowed() {
             return Ok(ChannelResult {
                 success: false,
                 context_id,
@@ -279,23 +272,16 @@ impl RendezvousHandler {
                     context_id,
                     peer,
                     initiated_at: current_time,
-                    transport: transport.clone(),
                 },
             );
         }
-
-        let transport_str = match &transport {
-            SelectedTransport::Direct { addr } => format!("direct:{}", addr),
-            SelectedTransport::Relayed { relay } => format!("relay:{}", relay),
-            SelectedTransport::Tor { onion_addr } => format!("tor:{}", onion_addr),
-        };
 
         Ok(ChannelResult {
             success: true,
             context_id,
             peer,
             channel_id: None, // Will be set after handshake completion
-            transport: Some(transport_str),
+            transport: Some("pending".to_string()), // Transport determined by effects
             error: None,
         })
     }
@@ -384,12 +370,10 @@ impl RendezvousHandler {
         // Prepare relay request
         let outcome = {
             let service = self.service.read().await;
-            service
-                .prepare_relay_request(context_id, relay, target, &snapshot)
-                .map_err(|e| AgentError::effects(format!("prepare relay failed: {e}")))?
+            service.prepare_relay_request(context_id, relay, target, &snapshot)
         };
 
-        if !outcome.decision.is_authorized() {
+        if !outcome.decision.is_allowed() {
             return Ok(RendezvousResult {
                 success: false,
                 context_id,
@@ -416,37 +400,23 @@ impl RendezvousHandler {
         effects: &AuraEffectSystem,
         context_id: ContextId,
     ) -> AgentResult<GuardSnapshot> {
-        use aura_core::effects::{FlowBudgetView, MetadataView};
-        use aura_core::time::{PhysicalTime, TimeStamp};
-        use aura_core::Cap;
-
-        let current_time = effects.current_timestamp().await.unwrap_or(0);
-
-        // Build budgets from effects
-        let mut budgets = HashMap::new();
-        budgets.insert((context_id, self.context.authority.authority_id), 1000u32);
-
-        // Generate random seed
-        let seed_uuid = effects.random_uuid().await;
-        let mut rng_seed = [0u8; 32];
-        rng_seed[..16].copy_from_slice(seed_uuid.as_bytes());
-
         Ok(GuardSnapshot {
-            now: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: current_time,
-                uncertainty: None,
-            }),
-            caps: Cap::default(),
-            budgets: FlowBudgetView::new(budgets),
-            metadata: MetadataView::default(),
-            rng_seed,
+            authority_id: self.context.authority.authority_id,
+            context_id,
+            flow_budget_remaining: 1000, // Default budget
+            capabilities: vec![
+                "rendezvous:publish".to_string(),
+                "rendezvous:connect".to_string(),
+                "rendezvous:relay".to_string(),
+            ],
+            epoch: effects.current_timestamp().await.unwrap_or(0) / 1000, // Epoch in seconds
         })
     }
 
     /// Cleanup expired descriptors
     pub async fn cleanup_expired(&self, now_ms: u64) {
         let mut service = self.service.write().await;
-        service.cleanup_expired_descriptors(now_ms);
+        service.prune_expired_descriptors(now_ms);
     }
 }
 
@@ -456,7 +426,6 @@ mod tests {
     use crate::core::context::RelationalContext;
     use crate::core::AgentConfig;
     use crate::runtime::effects::AuraEffectSystem;
-    use aura_protocol::guards::pure::GuardChain;
     use std::sync::Arc;
     use tokio::sync::RwLock;
 
@@ -474,8 +443,7 @@ mod tests {
     #[tokio::test]
     async fn test_handler_creation() {
         let authority_context = create_test_authority(50);
-        let guard_chain = Arc::new(GuardChain::standard());
-        let handler = RendezvousHandler::new(authority_context.clone(), guard_chain);
+        let handler = RendezvousHandler::new(authority_context.clone());
 
         assert!(handler.is_ok());
     }
@@ -483,8 +451,7 @@ mod tests {
     #[tokio::test]
     async fn test_publish_descriptor() {
         let authority_context = create_test_authority(51);
-        let guard_chain = Arc::new(GuardChain::standard());
-        let handler = RendezvousHandler::new(authority_context.clone(), guard_chain).unwrap();
+        let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
@@ -511,8 +478,7 @@ mod tests {
     #[tokio::test]
     async fn test_cache_peer_descriptor() {
         let authority_context = create_test_authority(52);
-        let guard_chain = Arc::new(GuardChain::standard());
-        let handler = RendezvousHandler::new(authority_context, guard_chain).unwrap();
+        let handler = RendezvousHandler::new(authority_context).unwrap();
 
         let context_id = ContextId::new_from_entropy([152u8; 32]);
         let peer = AuthorityId::new_from_entropy([53u8; 32]);
@@ -539,8 +505,7 @@ mod tests {
     #[tokio::test]
     async fn test_initiate_channel() {
         let authority_context = create_test_authority(54);
-        let guard_chain = Arc::new(GuardChain::standard());
-        let handler = RendezvousHandler::new(authority_context.clone(), guard_chain).unwrap();
+        let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
@@ -577,8 +542,7 @@ mod tests {
     #[tokio::test]
     async fn test_complete_channel() {
         let authority_context = create_test_authority(56);
-        let guard_chain = Arc::new(GuardChain::standard());
-        let handler = RendezvousHandler::new(authority_context.clone(), guard_chain).unwrap();
+        let handler = RendezvousHandler::new(authority_context.clone()).unwrap();
 
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));

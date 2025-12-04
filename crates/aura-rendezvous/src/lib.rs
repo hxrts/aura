@@ -60,6 +60,29 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
+// =============================================================================
+// NEW MODULES (Refactored Architecture)
+// =============================================================================
+
+/// Domain fact types for rendezvous (stored in journal, propagated via sync)
+pub mod facts;
+
+/// MPST choreography definitions for rendezvous protocols
+pub mod protocol;
+
+/// RendezvousService - main coordinator for peer discovery and channel establishment
+pub mod service;
+
+/// Transport descriptor types and selection logic
+pub mod descriptor;
+
+/// SecureChannel wrapper with epoch-based key rotation (named to avoid conflict during transition)
+pub mod new_channel;
+
+// =============================================================================
+// LEGACY MODULES (To be removed in Phase 5)
+// =============================================================================
+
 /// Secret-Branded Broadcasting protocols
 pub mod sbb;
 
@@ -163,3 +186,37 @@ pub use integration::{
 
 // Re-export discovery types
 pub use discovery::{DiscoveryQuery, DiscoveryService, RendezvousPoint};
+
+// =============================================================================
+// NEW RE-EXPORTS (Refactored Architecture)
+// =============================================================================
+
+// Re-export fact types (for journal integration)
+pub use facts::{
+    RendezvousDescriptor, RendezvousFact, RendezvousFactReducer, TransportHint,
+    RENDEZVOUS_FACT_TYPE_ID,
+};
+
+// Re-export protocol types
+pub use protocol::{
+    DescriptorAnswer, DescriptorOffer, HandshakeComplete as NewHandshakeComplete,
+    HandshakeInit as NewHandshakeInit, NoiseHandshake, RelayComplete, RelayEnvelope,
+    RelayForward, RelayRequest, RelayResponse,
+};
+
+// Re-export service types
+pub use service::{
+    EffectCommand, GuardDecision, GuardOutcome, GuardRequest, GuardSnapshot, RendezvousConfig,
+    RendezvousService,
+};
+
+// Re-export descriptor types
+pub use descriptor::{
+    DescriptorBuilder, SelectedTransport, StunConfig, TransportProber, TransportSelector,
+};
+
+// Re-export channel types (new implementation)
+pub use new_channel::{
+    ChannelManager, ChannelState as NewChannelState, HandshakeConfig, HandshakeResult as NewHandshakeResult,
+    HandshakeState, Handshaker, SecureChannel as NewSecureChannel,
+};

@@ -56,6 +56,9 @@
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
+/// Recovery domain facts for journal integration
+pub mod facts;
+
 /// Common utilities for recovery operations (DRY infrastructure)
 pub mod utils;
 
@@ -109,3 +112,6 @@ pub use aura_wot::BiscuitTokenManager;
 
 // Re-export membership change types
 pub use guardian_membership::{MembershipChange, MembershipChangeRequest};
+
+// Re-export facts for registry integration
+pub use facts::{MembershipChangeType, RecoveryFact, RecoveryFactReducer, RECOVERY_FACT_TYPE_ID};

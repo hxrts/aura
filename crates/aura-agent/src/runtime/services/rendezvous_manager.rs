@@ -3,11 +3,9 @@
 //! Wraps `aura_rendezvous::RendezvousService` for integration with the agent runtime.
 //! Provides lifecycle management, descriptor caching, and channel establishment.
 
-use aura_core::effects::GuardSnapshot;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_protocol::guards::pure::GuardChain;
 use aura_rendezvous::{
-    RendezvousDescriptor, RendezvousFact, RendezvousService, TransportHint,
+    RendezvousConfig, RendezvousDescriptor, RendezvousFact, RendezvousService, TransportHint,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -106,9 +104,6 @@ pub struct RendezvousManager {
     /// Current state
     state: Arc<RwLock<RendezvousManagerState>>,
 
-    /// Guard chain for authorization
-    guard_chain: Arc<GuardChain>,
-
     /// Authority ID
     authority_id: AuthorityId,
 
@@ -120,22 +115,20 @@ impl RendezvousManager {
     /// Create a new rendezvous manager
     pub fn new(
         authority_id: AuthorityId,
-        guard_chain: Arc<GuardChain>,
         config: RendezvousManagerConfig,
     ) -> Self {
         Self {
             service: Arc::new(RwLock::new(None)),
             config,
             state: Arc::new(RwLock::new(RendezvousManagerState::Stopped)),
-            guard_chain,
             authority_id,
             cleanup_task: Arc::new(RwLock::new(None)),
         }
     }
 
     /// Create with default configuration
-    pub fn with_defaults(authority_id: AuthorityId, guard_chain: Arc<GuardChain>) -> Self {
-        Self::new(authority_id, guard_chain, RendezvousManagerConfig::default())
+    pub fn with_defaults(authority_id: AuthorityId) -> Self {
+        Self::new(authority_id, RendezvousManagerConfig::default())
     }
 
     /// Get the current state
@@ -157,15 +150,16 @@ impl RendezvousManager {
 
         *self.state.write().await = RendezvousManagerState::Starting;
 
-        // Create the underlying rendezvous service
-        let mut service = RendezvousService::new(self.authority_id, self.guard_chain.clone());
+        // Create rendezvous config from manager config
+        let rendezvous_config = RendezvousConfig {
+            descriptor_validity_ms: self.config.descriptor_validity.as_millis() as u64,
+            probe_timeout_ms: 5000,
+            stun_server: None,
+            max_relay_hops: 3,
+        };
 
-        // Configure transport selector if we have default hints
-        if !self.config.default_transport_hints.is_empty() {
-            service = service.with_transport_selector(
-                aura_rendezvous::TransportSelector::default(),
-            );
-        }
+        // Create the underlying rendezvous service
+        let service = RendezvousService::new(self.authority_id, rendezvous_config);
 
         *self.service.write().await = Some(service);
         *self.state.write().await = RendezvousManagerState::Running;
@@ -223,7 +217,7 @@ impl RendezvousManager {
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_millis() as u64)
                         .unwrap_or(0);
-                    svc.cleanup_expired_descriptors(now_ms);
+                    svc.prune_expired_descriptors(now_ms);
                 }
             }
         });
@@ -237,71 +231,38 @@ impl RendezvousManager {
 
     /// Publish a transport descriptor for a context
     ///
-    /// Returns the fact to be committed to the journal and the guard outcome.
+    /// Returns the guard outcome with the descriptor fact.
     pub async fn publish_descriptor(
         &self,
         context_id: ContextId,
         transport_hints: Option<Vec<TransportHint>>,
-        psk_commitment: [u8; 32],
         now_ms: u64,
-        nonce: [u8; 32],
-        snapshot: &GuardSnapshot,
-    ) -> Result<(RendezvousFact, aura_core::effects::GuardOutcome), String> {
+        snapshot: &aura_rendezvous::GuardSnapshot,
+    ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self.service.read().await;
         let service = service.as_ref().ok_or("Rendezvous manager not started")?;
 
         let hints = transport_hints.unwrap_or_else(|| self.config.default_transport_hints.clone());
-        let validity_ms = self.config.descriptor_validity.as_millis() as u64;
 
-        service
-            .prepare_publish_descriptor(
-                context_id,
-                hints,
-                psk_commitment,
-                now_ms,
-                now_ms.saturating_add(validity_ms),
-                nonce,
-                snapshot,
-            )
-            .map_err(|e| format!("Failed to prepare descriptor: {}", e))
+        Ok(service.prepare_publish_descriptor(snapshot, context_id, hints, now_ms))
     }
 
     /// Refresh a descriptor for a context
     ///
-    /// Returns the new descriptor fact, optional revocation fact, and guard outcome.
+    /// Returns the guard outcome with the new descriptor fact.
     pub async fn refresh_descriptor(
         &self,
         context_id: ContextId,
         transport_hints: Option<Vec<TransportHint>>,
-        psk_commitment: [u8; 32],
         now_ms: u64,
-        new_nonce: [u8; 32],
-        snapshot: &GuardSnapshot,
-    ) -> Result<
-        (
-            RendezvousFact,
-            Option<RendezvousFact>,
-            aura_core::effects::GuardOutcome,
-        ),
-        String,
-    > {
+        snapshot: &aura_rendezvous::GuardSnapshot,
+    ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self.service.read().await;
         let service = service.as_ref().ok_or("Rendezvous manager not started")?;
 
         let hints = transport_hints.unwrap_or_else(|| self.config.default_transport_hints.clone());
-        let validity_ms = self.config.descriptor_validity.as_millis() as u64;
 
-        service
-            .prepare_refresh_descriptor(
-                context_id,
-                hints,
-                psk_commitment,
-                now_ms,
-                validity_ms,
-                new_nonce,
-                snapshot,
-            )
-            .map_err(|e| format!("Failed to prepare refresh: {}", e))
+        Ok(service.prepare_refresh_descriptor(snapshot, context_id, hints, now_ms))
     }
 
     /// Cache a peer's descriptor
@@ -351,20 +312,14 @@ impl RendezvousManager {
         &self,
         context_id: ContextId,
         peer: AuthorityId,
-        snapshot: &GuardSnapshot,
-    ) -> Result<
-        (
-            aura_rendezvous::SelectedTransport,
-            aura_core::effects::GuardOutcome,
-        ),
-        String,
-    > {
+        psk: &[u8; 32],
+        snapshot: &aura_rendezvous::GuardSnapshot,
+    ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self.service.read().await;
         let service = service.as_ref().ok_or("Rendezvous manager not started")?;
 
-        service
-            .prepare_establish_channel(context_id, peer, snapshot)
-            .map_err(|e| format!("Failed to prepare channel: {}", e))
+        service.prepare_establish_channel(snapshot, context_id, peer, psk)
+            .map_err(|e| format!("Failed to prepare channel: {e}"))
     }
 
     /// Create a channel established fact
@@ -391,29 +346,12 @@ impl RendezvousManager {
         context_id: ContextId,
         relay: AuthorityId,
         target: AuthorityId,
-        snapshot: &GuardSnapshot,
-    ) -> Result<aura_core::effects::GuardOutcome, String> {
+        snapshot: &aura_rendezvous::GuardSnapshot,
+    ) -> Result<aura_rendezvous::GuardOutcome, String> {
         let service = self.service.read().await;
         let service = service.as_ref().ok_or("Rendezvous manager not started")?;
 
-        service
-            .prepare_relay_request(context_id, relay, target, snapshot)
-            .map_err(|e| format!("Failed to prepare relay request: {}", e))
-    }
-
-    /// Prepare to forward a relay message
-    pub async fn prepare_relay_forward(
-        &self,
-        context_id: ContextId,
-        target: AuthorityId,
-        snapshot: &GuardSnapshot,
-    ) -> Result<aura_core::effects::GuardOutcome, String> {
-        let service = self.service.read().await;
-        let service = service.as_ref().ok_or("Rendezvous manager not started")?;
-
-        service
-            .prepare_relay_forward(context_id, target, snapshot)
-            .map_err(|e| format!("Failed to prepare relay forward: {}", e))
+        Ok(service.prepare_relay_request(context_id, relay, target, snapshot))
     }
 
     // ========================================================================
@@ -434,10 +372,7 @@ impl RendezvousManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::effects::{FlowBudgetView, MetadataView};
-    use aura_core::time::{PhysicalTime, TimeStamp};
-    use aura_core::Cap;
-    use std::collections::HashMap;
+    use aura_rendezvous::GuardSnapshot;
 
     fn test_authority() -> AuthorityId {
         AuthorityId::new_from_entropy([1u8; 32])
@@ -452,29 +387,22 @@ mod tests {
     }
 
     fn test_snapshot(authority: AuthorityId, context: ContextId) -> GuardSnapshot {
-        let mut budgets = HashMap::new();
-        budgets.insert((context, authority), 1000);
-
         GuardSnapshot {
-            now: TimeStamp::PhysicalClock(PhysicalTime {
-                ts_ms: 1000,
-                uncertainty: None,
-            }),
-            caps: Cap::default(),
-            budgets: FlowBudgetView::new(budgets),
-            metadata: MetadataView::default(),
-            rng_seed: [0u8; 32],
+            authority_id: authority,
+            context_id: context,
+            flow_budget_remaining: 1000,
+            capabilities: vec![
+                "rendezvous:publish".to_string(),
+                "rendezvous:connect".to_string(),
+            ],
+            epoch: 1,
         }
     }
 
     #[tokio::test]
     async fn test_manager_creation() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(
-            test_authority(),
-            Arc::new(GuardChain::standard()),
-            config,
-        );
+        let manager = RendezvousManager::new(test_authority(), config);
 
         assert_eq!(manager.state().await, RendezvousManagerState::Stopped);
         assert!(!manager.is_running().await);
@@ -483,11 +411,7 @@ mod tests {
     #[tokio::test]
     async fn test_manager_lifecycle() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(
-            test_authority(),
-            Arc::new(GuardChain::standard()),
-            config,
-        );
+        let manager = RendezvousManager::new(test_authority(), config);
 
         // Start
         manager.start().await.unwrap();
@@ -501,11 +425,7 @@ mod tests {
     #[tokio::test]
     async fn test_descriptor_caching() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(
-            test_authority(),
-            Arc::new(GuardChain::standard()),
-            config,
-        );
+        let manager = RendezvousManager::new(test_authority(), config);
         manager.start().await.unwrap();
 
         let descriptor = RendezvousDescriptor {
@@ -534,30 +454,23 @@ mod tests {
     #[tokio::test]
     async fn test_publish_descriptor() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(
-            test_authority(),
-            Arc::new(GuardChain::standard()),
-            config,
-        );
+        let manager = RendezvousManager::new(test_authority(), config);
         manager.start().await.unwrap();
 
         let snapshot = test_snapshot(test_authority(), test_context());
-        let (fact, outcome) = manager
+        let outcome = manager
             .publish_descriptor(
                 test_context(),
                 Some(vec![TransportHint::QuicDirect {
                     addr: "127.0.0.1:8443".to_string(),
                 }]),
-                [0u8; 32],
                 1000,
-                [42u8; 32],
                 &snapshot,
             )
             .await
             .unwrap();
 
-        assert!(matches!(fact, RendezvousFact::Descriptor(_)));
-        assert!(outcome.decision.is_authorized());
+        assert!(outcome.decision.is_allowed());
 
         manager.stop().await.unwrap();
     }
@@ -565,11 +478,7 @@ mod tests {
     #[tokio::test]
     async fn test_needs_refresh() {
         let config = RendezvousManagerConfig::for_testing();
-        let manager = RendezvousManager::new(
-            test_authority(),
-            Arc::new(GuardChain::standard()),
-            config,
-        );
+        let manager = RendezvousManager::new(test_authority(), config);
         manager.start().await.unwrap();
 
         // No descriptor cached - should need refresh

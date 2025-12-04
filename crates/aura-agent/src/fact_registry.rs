@@ -24,6 +24,7 @@
 //! | `aura-chat` | `ChatFact` | Channels, messages |
 //! | `aura-invitation` | `InvitationFact` | Invitation lifecycle |
 //! | `aura-relational` | `ContactFact` | Contact management |
+//! | `aura-recovery` | `RecoveryFact` | Guardian setup, membership, key recovery |
 //! | `aura-protocol/moderation` | `Block*Fact` | Block, mute, ban, kick |
 //!
 //! Domain crates implement the `DomainFact` trait and provide a `FactReducer`.
@@ -32,6 +33,7 @@ use aura_chat::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
 use aura_invitation::{InvitationFact, InvitationFactReducer, INVITATION_FACT_TYPE_ID};
 use aura_journal::FactRegistry;
 use aura_protocol::moderation::register_moderation_facts;
+use aura_recovery::{RecoveryFact, RecoveryFactReducer, RECOVERY_FACT_TYPE_ID};
 use aura_relational::{ContactFact, ContactFactReducer, CONTACT_FACT_TYPE_ID};
 use aura_rendezvous::{RendezvousFact, RendezvousFactReducer, RENDEZVOUS_FACT_TYPE_ID};
 
@@ -48,6 +50,7 @@ pub fn build_fact_registry() -> FactRegistry {
     registry.register::<InvitationFact>(INVITATION_FACT_TYPE_ID, Box::new(InvitationFactReducer));
     registry.register::<ContactFact>(CONTACT_FACT_TYPE_ID, Box::new(ContactFactReducer));
     registry.register::<RendezvousFact>(RENDEZVOUS_FACT_TYPE_ID, Box::new(RendezvousFactReducer));
+    registry.register::<RecoveryFact>(RECOVERY_FACT_TYPE_ID, Box::new(RecoveryFactReducer));
     register_moderation_facts(&mut registry);
 
     registry
@@ -64,6 +67,7 @@ mod tests {
         assert!(registry.is_registered(INVITATION_FACT_TYPE_ID));
         assert!(registry.is_registered(CONTACT_FACT_TYPE_ID));
         assert!(registry.is_registered(RENDEZVOUS_FACT_TYPE_ID));
+        assert!(registry.is_registered(RECOVERY_FACT_TYPE_ID));
         assert!(registry.is_registered("moderation:block-mute"));
         assert!(registry.is_registered("moderation:block-unmute"));
     }

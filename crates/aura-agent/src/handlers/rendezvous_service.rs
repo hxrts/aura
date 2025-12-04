@@ -7,7 +7,6 @@ use super::rendezvous::{ChannelResult, RendezvousHandler, RendezvousResult};
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::identifiers::{AuthorityId, ContextId};
-use aura_protocol::guards::pure::GuardChain;
 use aura_rendezvous::{RendezvousDescriptor, TransportHint};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -25,9 +24,8 @@ impl RendezvousServiceApi {
     pub fn new(
         effects: Arc<RwLock<AuraEffectSystem>>,
         authority_context: AuthorityContext,
-        guard_chain: Arc<GuardChain>,
     ) -> AgentResult<Self> {
-        let handler = RendezvousHandler::new(authority_context, guard_chain)?;
+        let handler = RendezvousHandler::new(authority_context)?;
         Ok(Self { handler, effects })
     }
 
@@ -229,7 +227,6 @@ mod tests {
     use super::*;
     use crate::core::context::RelationalContext;
     use crate::core::AgentConfig;
-    use aura_protocol::guards::pure::GuardChain;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -247,9 +244,8 @@ mod tests {
         let authority_context = create_test_authority(60);
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let guard_chain = Arc::new(GuardChain::standard());
 
-        let service = RendezvousServiceApi::new(effects, authority_context, guard_chain);
+        let service = RendezvousServiceApi::new(effects, authority_context);
         assert!(service.is_ok());
     }
 
@@ -258,9 +254,8 @@ mod tests {
         let authority_context = create_test_authority(61);
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let guard_chain = Arc::new(GuardChain::standard());
 
-        let service = RendezvousServiceApi::new(effects, authority_context, guard_chain).unwrap();
+        let service = RendezvousServiceApi::new(effects, authority_context).unwrap();
 
         let context_id = ContextId::new_from_entropy([161u8; 32]);
         let result = service
@@ -276,9 +271,8 @@ mod tests {
         let authority_context = create_test_authority(62);
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let guard_chain = Arc::new(GuardChain::standard());
 
-        let service = RendezvousServiceApi::new(effects, authority_context, guard_chain).unwrap();
+        let service = RendezvousServiceApi::new(effects, authority_context).unwrap();
 
         let context_id = ContextId::new_from_entropy([162u8; 32]);
         let peer = AuthorityId::new_from_entropy([63u8; 32]);
@@ -307,9 +301,8 @@ mod tests {
         let authority_context = create_test_authority(64);
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let guard_chain = Arc::new(GuardChain::standard());
 
-        let service = RendezvousServiceApi::new(effects, authority_context, guard_chain).unwrap();
+        let service = RendezvousServiceApi::new(effects, authority_context).unwrap();
 
         let context_id = ContextId::new_from_entropy([164u8; 32]);
         let peer = AuthorityId::new_from_entropy([65u8; 32]);
@@ -347,9 +340,8 @@ mod tests {
         let authority_context = create_test_authority(66);
         let config = AgentConfig::default();
         let effects = Arc::new(RwLock::new(AuraEffectSystem::testing(&config).unwrap()));
-        let guard_chain = Arc::new(GuardChain::standard());
 
-        let service = RendezvousServiceApi::new(effects, authority_context, guard_chain).unwrap();
+        let service = RendezvousServiceApi::new(effects, authority_context).unwrap();
 
         let context_id = ContextId::new_from_entropy([166u8; 32]);
         let relay = AuthorityId::new_from_entropy([67u8; 32]);
@@ -359,6 +351,9 @@ mod tests {
             .request_relay(context_id, relay, target)
             .await
             .unwrap();
-        assert!(result.success);
+        // Note: Relay support is not yet implemented in Phase 1,
+        // so this returns success=false with an error message
+        assert!(!result.success);
+        assert!(result.error.is_some());
     }
 }

@@ -215,8 +215,6 @@ impl EffectSystemBuilder {
 
     /// Build the runtime system (async)
     pub async fn build(self, _ctx: &EffectContext) -> Result<RuntimeSystem, String> {
-        use aura_protocol::guards::pure::GuardChain;
-
         let config = self.config.unwrap_or_default();
         let authority_id = self.authority_id.ok_or("Authority ID required")?;
 
@@ -263,8 +261,7 @@ impl EffectSystemBuilder {
 
         // Create optional rendezvous manager
         let rendezvous_manager = self.rendezvous_config.map(|rendezvous_config| {
-            let guard_chain = Arc::new(GuardChain::standard());
-            super::services::RendezvousManager::new(authority_id, guard_chain, rendezvous_config)
+            super::services::RendezvousManager::new(authority_id, rendezvous_config)
         });
 
         // Build runtime system with configured services

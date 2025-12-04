@@ -3739,7 +3739,7 @@ pub(super) async fn execute_command(
                 });
 
                 // Call sync_with_peer if effect_system is available
-                if let Some(effect_system) = effect_system {
+                if let Some(ref effect_system) = effect_system {
                     match effect_system.sync_with_peer(peer_uuid).await {
                         Ok(metrics) => {
                             tracing::info!(

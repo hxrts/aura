@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 aura-core = { path = "../aura-core" }
+aura-journal = { path = "../aura-journal" }
 aura-verify = { path = "../aura-verify" }
 aura-authenticate = { path = "../aura-authenticate" }
 aura-wot = { path = "../aura-wot" }

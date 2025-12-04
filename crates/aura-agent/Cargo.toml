@@ -22,6 +22,7 @@ aura-chat = { path = "../aura-chat" }
 aura-invitation = { path = "../aura-invitation" }
 aura-rendezvous = { path = "../aura-rendezvous" }
 aura-sync = { path = "../aura-sync" }
+aura-recovery = { path = "../aura-recovery" }
 aura-wot = { path = "../aura-wot" }
 aura-macros = { path = "../aura-macros" }
 aura-mpst = { path = "../aura-mpst" }
