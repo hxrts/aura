@@ -170,8 +170,13 @@ pub use aura_core::{
 };
 
 // Re-export WoT types (using Biscuit tokens instead of legacy capabilities)
-pub use aura_wot::{AccountAuthority, BiscuitError, BiscuitTokenManager};
+pub use aura_wot::{BiscuitError, BiscuitTokenManager, TokenAuthority};
 pub use biscuit_auth::Biscuit as BiscuitToken;
+
+// Deprecated alias for backward compatibility
+#[deprecated(since = "0.2.0", note = "Use TokenAuthority instead")]
+#[allow(deprecated)]
+pub use aura_wot::AccountAuthority;
 
 // Re-export auth types
 pub use aura_authenticate::{

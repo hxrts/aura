@@ -129,6 +129,9 @@ pub use runtime::services::{SyncManagerConfig, SyncManagerState, SyncServiceMana
 // Rendezvous service types
 pub use runtime::services::{RendezvousManager, RendezvousManagerConfig};
 
+// Social service types
+pub use runtime::services::{SocialManager, SocialManagerConfig, SocialManagerState};
+
 // Re-export core types for convenience
 pub use aura_core::effects::ExecutionMode;
 

@@ -1,29 +1,40 @@
-use aura_core::identifiers::DeviceId;
-use aura_core::AccountId;
+use aura_core::identifiers::AuthorityId;
 use biscuit_auth::{macros::*, Biscuit, KeyPair, PublicKey};
 use serde::{Deserialize, Serialize};
 
-pub struct AccountAuthority {
-    account_id: AccountId,
+/// Token authority for issuing Biscuit tokens.
+///
+/// **Authority Model**: Uses `AuthorityId` as the primary identifier, aligning
+/// with the authority-centric identity model where authorities are the
+/// cryptographic actors that issue and manage tokens.
+///
+/// This replaces the legacy `AccountAuthority` pattern that used `AccountId`.
+pub struct TokenAuthority {
+    authority_id: AuthorityId,
     root_keypair: KeyPair,
 }
 
-impl AccountAuthority {
-    pub fn new(account_id: AccountId) -> Self {
+impl TokenAuthority {
+    /// Create a new token authority for the given authority ID.
+    pub fn new(authority_id: AuthorityId) -> Self {
         Self {
-            account_id,
+            authority_id,
             root_keypair: KeyPair::new(),
         }
     }
 
-    pub fn create_device_token(&self, device_id: DeviceId) -> Result<Biscuit, BiscuitError> {
-        let account = self.account_id.to_string();
-        let device = device_id.to_string();
+    /// Create a token for a subordinate authority or derived identity.
+    ///
+    /// The token includes the issuing authority and recipient authority facts,
+    /// along with default owner capabilities.
+    pub fn create_token(&self, recipient: AuthorityId) -> Result<Biscuit, BiscuitError> {
+        let issuer = self.authority_id.to_string();
+        let recipient_str = recipient.to_string();
 
         let token = biscuit!(
             r#"
-            account({account});
-            device({device});
+            issuer({issuer});
+            authority({recipient_str});
             role("owner");
             capability("read");
             capability("write");
@@ -37,52 +48,69 @@ impl AccountAuthority {
         Ok(token)
     }
 
+    /// Get the public key for token verification.
     pub fn root_public_key(&self) -> PublicKey {
         self.root_keypair.public()
     }
 
+    /// Get the root keypair (for advanced use cases).
     pub fn root_keypair(&self) -> &KeyPair {
         &self.root_keypair
     }
 
-    /// Get the account ID associated with this authority
-    pub fn account_id(&self) -> AccountId {
-        self.account_id
+    /// Get the authority ID associated with this token authority.
+    pub fn authority_id(&self) -> AuthorityId {
+        self.authority_id
     }
 
-    /// Create a new AccountAuthority from existing keypair (for loading from storage)
-    pub fn from_keypair(account_id: AccountId, keypair: KeyPair) -> Self {
+    /// Create a TokenAuthority from an existing keypair (for loading from storage).
+    pub fn from_keypair(authority_id: AuthorityId, keypair: KeyPair) -> Self {
         Self {
-            account_id,
+            authority_id,
             root_keypair: keypair,
         }
     }
 
-    /// Export the keypair for secure storage
+    /// Export the keypair for secure storage.
     pub fn export_keypair(&self) -> &KeyPair {
         &self.root_keypair
     }
 
-    /// Check if this authority can verify tokens for the given account
-    pub fn can_verify_for_account(&self, account_id: &AccountId) -> bool {
-        &self.account_id == account_id
+    /// Check if this authority can verify tokens for the given authority.
+    pub fn can_verify_for(&self, authority_id: &AuthorityId) -> bool {
+        &self.authority_id == authority_id
     }
 }
 
+// Legacy type alias for backward compatibility during migration
+#[deprecated(
+    since = "0.2.0",
+    note = "Use TokenAuthority instead. AccountAuthority has been renamed to align with authority-centric model."
+)]
+pub type AccountAuthority = TokenAuthority;
+
+/// Biscuit token manager for an authority.
+///
+/// **Authority Model**: Tokens are managed per-authority, not per-device.
+/// This aligns with the authority-centric identity model where authorities
+/// are the cryptographic actors that hold and manage tokens.
 #[derive(Clone)]
 pub struct BiscuitTokenManager {
-    device_id: DeviceId,
+    authority_id: AuthorityId,
     current_token: Biscuit,
 }
 
 impl BiscuitTokenManager {
-    pub fn new(device_id: DeviceId, initial_token: Biscuit) -> Self {
+    /// Create a new token manager for the given authority.
+    pub fn new(authority_id: AuthorityId, initial_token: Biscuit) -> Self {
         Self {
-            device_id,
+            authority_id,
             current_token: initial_token,
         }
     }
 
+    /// Attenuate the token to only allow read operations on resources
+    /// matching the given prefix.
     pub fn attenuate_read(&self, resource_prefix: &str) -> Result<Biscuit, BiscuitError> {
         let prefix = resource_prefix.to_string();
         let attenuated = self.current_token.append(block!(
@@ -94,6 +122,8 @@ impl BiscuitTokenManager {
         Ok(attenuated)
     }
 
+    /// Attenuate the token to only allow write operations on resources
+    /// matching the given prefix.
     pub fn attenuate_write(&self, resource_prefix: &str) -> Result<Biscuit, BiscuitError> {
         let prefix = resource_prefix.to_string();
         let attenuated = self.current_token.append(block!(
@@ -105,26 +135,29 @@ impl BiscuitTokenManager {
         Ok(attenuated)
     }
 
+    /// Get the current token.
     pub fn current_token(&self) -> &Biscuit {
         &self.current_token
     }
 
-    /// Get the device ID associated with this token manager
-    pub fn device_id(&self) -> DeviceId {
-        self.device_id
+    /// Get the authority ID associated with this token manager.
+    pub fn authority_id(&self) -> AuthorityId {
+        self.authority_id
     }
 
-    /// Update the current token (for token refresh scenarios)
+    /// Update the current token (for token refresh scenarios).
     pub fn update_token(&mut self, new_token: Biscuit) {
         self.current_token = new_token;
     }
 
+    /// Serialize the current token to bytes.
     pub fn serialize_token(&self) -> Result<Vec<u8>, BiscuitError> {
         self.current_token
             .to_vec()
             .map_err(BiscuitError::BiscuitLib)
     }
 
+    /// Deserialize a token from bytes.
     pub fn deserialize_token(bytes: &[u8], root_key: &PublicKey) -> Result<Biscuit, BiscuitError> {
         Biscuit::from(bytes, *root_key).map_err(BiscuitError::BiscuitLib)
     }

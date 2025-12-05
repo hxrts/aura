@@ -1,0 +1,41 @@
+# Aura Social - Social Topology Layer
+[package]
+name = "aura-social"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Social topology (blocks and neighborhoods) for the Aura threshold identity platform"
+keywords = ["social", "topology", "blocks", "neighborhoods", "relay"]
+categories = ["cryptography"]
+
+[lints]
+workspace = true
+
+[dependencies]
+# Layer 1 - Foundation
+aura-core = { path = "../aura-core" }
+
+# Layer 2 - Domain crates (aura-social builds ON these)
+aura-journal = { path = "../aura-journal" }
+aura-wot = { path = "../aura-wot" }
+aura-transport = { path = "../aura-transport" }
+
+# Layer 3 - Handler composition utilities
+aura-composition = { path = "../aura-composition" }
+
+# External
+async-trait = { workspace = true }
+bincode = { workspace = true }
+serde = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+[features]
+default = []

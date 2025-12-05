@@ -6,7 +6,7 @@
 //! # Runtime Agnostic Design
 //!
 //! This module uses only std primitives (RwLock, AtomicU64) to remain runtime-agnostic.
-//! Higher layers (aura-cli, aura-effects) can wrap subscriptions in async adapters if needed.
+//! Higher layers (aura-terminal, aura-effects) can wrap subscriptions in async adapters if needed.
 
 // Allow expect on RwLock::read/write - lock poisoning from panics
 // is unrecoverable, so expect() is the appropriate handling pattern.

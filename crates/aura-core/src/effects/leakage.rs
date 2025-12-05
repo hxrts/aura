@@ -12,6 +12,7 @@
 //! This is an application effect implemented in orchestration layer by composing
 //! infrastructure effects with privacy-specific business logic.
 
+use crate::time::PhysicalTime;
 use crate::types::identifiers::ContextId;
 use crate::{AuthorityId, Result};
 use async_trait::async_trait;
@@ -43,8 +44,39 @@ pub struct LeakageEvent {
     pub observer_class: ObserverClass,
     /// Operation that caused leakage
     pub operation: String,
-    /// Timestamp
-    pub timestamp_ms: u64,
+    /// Timestamp (uses unified time system)
+    pub timestamp: PhysicalTime,
+}
+
+impl LeakageEvent {
+    /// Get timestamp in milliseconds for backward compatibility
+    pub fn timestamp_ms(&self) -> u64 {
+        self.timestamp.ts_ms
+    }
+
+    /// Create event from milliseconds timestamp (for backward compatibility)
+    pub fn with_timestamp_ms(
+        source: AuthorityId,
+        destination: AuthorityId,
+        context_id: ContextId,
+        leakage_amount: u64,
+        observer_class: ObserverClass,
+        operation: String,
+        timestamp_ms: u64,
+    ) -> Self {
+        Self {
+            source,
+            destination,
+            context_id,
+            leakage_amount,
+            observer_class,
+            operation,
+            timestamp: PhysicalTime {
+                ts_ms: timestamp_ms,
+                uncertainty: None,
+            },
+        }
+    }
 }
 
 /// Leakage budget state
@@ -115,10 +147,14 @@ pub trait LeakageEffects: Send + Sync {
     ) -> Result<bool>;
 
     /// Get leakage history for analysis
+    ///
+    /// # Arguments
+    /// * `since_timestamp` - Optional filter to get events since this time.
+    ///   Pass `None` to get all history.
     async fn get_leakage_history(
         &self,
         context_id: ContextId,
-        since_timestamp: Option<u64>,
+        since_timestamp: Option<&PhysicalTime>,
     ) -> Result<Vec<LeakageEvent>>;
 }
 
@@ -128,8 +164,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
     /// Record leakage for a send operation
     ///
     /// # Arguments
-    /// * `timestamp_ms` - Current timestamp in milliseconds since UNIX epoch.
-    ///   Should be obtained from `PhysicalTimeEffects` to maintain effect system boundaries.
+    /// * `timestamp` - Current timestamp from `PhysicalTimeEffects` to maintain effect system boundaries.
     async fn record_send_leakage(
         &self,
         source: AuthorityId,
@@ -137,7 +172,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
         context_id: ContextId,
         flow_cost: u64,
         observer_classes: &[ObserverClass],
-        timestamp_ms: u64,
+        timestamp: &PhysicalTime,
     ) -> Result<()> {
         for observer in observer_classes {
             let event = LeakageEvent {
@@ -147,7 +182,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
                 leakage_amount: flow_cost,
                 observer_class: *observer,
                 operation: "send".to_string(),
-                timestamp_ms,
+                timestamp: timestamp.clone(),
             };
             self.record_leakage(event).await?;
         }
@@ -157,8 +192,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
     /// Record leakage for a receive operation
     ///
     /// # Arguments
-    /// * `timestamp_ms` - Current timestamp in milliseconds since UNIX epoch.
-    ///   Should be obtained from `PhysicalTimeEffects` to maintain effect system boundaries.
+    /// * `timestamp` - Current timestamp from `PhysicalTimeEffects` to maintain effect system boundaries.
     async fn record_recv_leakage(
         &self,
         source: AuthorityId,
@@ -166,7 +200,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
         context_id: ContextId,
         flow_cost: u64,
         observer_classes: &[ObserverClass],
-        timestamp_ms: u64,
+        timestamp: &PhysicalTime,
     ) -> Result<()> {
         for observer in observer_classes {
             let event = LeakageEvent {
@@ -176,7 +210,7 @@ pub trait LeakageChoreographyExt: LeakageEffects {
                 leakage_amount: flow_cost,
                 observer_class: *observer,
                 operation: "recv".to_string(),
-                timestamp_ms,
+                timestamp: timestamp.clone(),
             };
             self.record_leakage(event).await?;
         }
@@ -212,7 +246,7 @@ impl<T: LeakageEffects + ?Sized> LeakageEffects for std::sync::Arc<T> {
     async fn get_leakage_history(
         &self,
         context_id: ContextId,
-        since_timestamp: Option<u64>,
+        since_timestamp: Option<&PhysicalTime>,
     ) -> Result<Vec<LeakageEvent>> {
         (**self)
             .get_leakage_history(context_id, since_timestamp)

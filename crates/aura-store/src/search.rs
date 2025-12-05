@@ -2,8 +2,11 @@
 //!
 //! This module defines pure types and functions for storage search operations,
 //! capability-based result filtering, and privacy-preserving search.
+//!
+//! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 
 use crate::StorageCapability;
+use aura_core::time::PhysicalTime;
 use aura_core::AuraError;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -191,6 +194,8 @@ impl SearchResults {
 // Authorization checks now handled at effect system layer
 
 /// Search index entry for CRDT-based search
+///
+/// **Time System**: Uses `PhysicalTime` for entry timestamps.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SearchIndexEntry {
     /// Content identifier
@@ -199,17 +204,19 @@ pub struct SearchIndexEntry {
     pub terms: BTreeSet<String>,
     /// Required capabilities
     pub required_capabilities: Vec<StorageCapability>,
-    /// Entry timestamp
-    pub timestamp: u64,
+    /// Entry timestamp (unified time system)
+    pub timestamp: PhysicalTime,
 }
 
 impl SearchIndexEntry {
     /// Create new search index entry
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
     pub fn new(
         content_id: String,
         terms: BTreeSet<String>,
         required_capabilities: Vec<StorageCapability>,
-        timestamp: u64,
+        timestamp: PhysicalTime,
     ) -> Self {
         Self {
             content_id,
@@ -217,6 +224,31 @@ impl SearchIndexEntry {
             required_capabilities,
             timestamp,
         }
+    }
+
+    /// Create new search index entry from milliseconds timestamp
+    ///
+    /// Convenience constructor for backward compatibility.
+    pub fn new_from_ms(
+        content_id: String,
+        terms: BTreeSet<String>,
+        required_capabilities: Vec<StorageCapability>,
+        timestamp_ms: u64,
+    ) -> Self {
+        Self::new(
+            content_id,
+            terms,
+            required_capabilities,
+            PhysicalTime {
+                ts_ms: timestamp_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
+    /// Get timestamp in milliseconds for backward compatibility
+    pub fn timestamp_ms(&self) -> u64 {
+        self.timestamp.ts_ms
     }
 
     /// Check if this entry matches query terms
@@ -253,8 +285,10 @@ impl SearchIndexEntry {
 // Removed filter_search_results function - capability-based filtering superseded by Biscuit tokens
 
 /// Pure function to build search index from content
+///
+/// **Time System**: Uses `PhysicalTime` for entry timestamps.
 pub fn build_search_index(
-    content_entries: &[(String, String, Vec<StorageCapability>, u64)],
+    content_entries: &[(String, String, Vec<StorageCapability>, PhysicalTime)],
 ) -> Result<Vec<SearchIndexEntry>, AuraError> {
     let mut index_entries = Vec::new();
 
@@ -267,13 +301,40 @@ pub fn build_search_index(
             .map(|s| s.to_string())
             .collect();
 
-        let entry =
-            SearchIndexEntry::new(content_id.clone(), terms, capabilities.clone(), *timestamp);
+        let entry = SearchIndexEntry::new(
+            content_id.clone(),
+            terms,
+            capabilities.clone(),
+            timestamp.clone(),
+        );
 
         index_entries.push(entry);
     }
 
     Ok(index_entries)
+}
+
+/// Pure function to build search index from content (with milliseconds timestamps)
+///
+/// Convenience function for backward compatibility.
+pub fn build_search_index_from_ms(
+    content_entries: &[(String, String, Vec<StorageCapability>, u64)],
+) -> Result<Vec<SearchIndexEntry>, AuraError> {
+    let entries_with_time: Vec<_> = content_entries
+        .iter()
+        .map(|(id, content, caps, ts_ms)| {
+            (
+                id.clone(),
+                content.clone(),
+                caps.clone(),
+                PhysicalTime {
+                    ts_ms: *ts_ms,
+                    uncertainty: None,
+                },
+            )
+        })
+        .collect();
+    build_search_index(&entries_with_time)
 }
 
 // Removed search_index function - capability-based access checks superseded by Biscuit tokens
@@ -283,6 +344,13 @@ pub fn build_search_index(
 mod tests {
     use super::*;
     use crate::StorageResource;
+
+    fn test_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
 
     #[test]
     fn test_search_scope() {
@@ -299,7 +367,7 @@ mod tests {
             .collect();
         let caps = vec![StorageCapability::read(StorageResource::Global)];
 
-        let entry = SearchIndexEntry::new("test_content".to_string(), terms, caps, 42);
+        let entry = SearchIndexEntry::new("test_content".to_string(), terms, caps, test_time(42));
 
         assert!(entry.matches_terms("hello world"));
         assert!(entry.matches_terms("test"));
@@ -313,7 +381,7 @@ mod tests {
             .map(|&s| s.to_string())
             .collect();
         let caps = vec![];
-        let entry = SearchIndexEntry::new("test".to_string(), terms, caps, 100);
+        let entry = SearchIndexEntry::new("test".to_string(), terms, caps, test_time(100));
 
         let score1 = entry.calculate_score("hello world");
         let score2 = entry.calculate_score("hello");
@@ -333,13 +401,13 @@ mod tests {
                 "doc1".to_string(),
                 "Hello world! This is a test document.".to_string(),
                 vec![StorageCapability::read(StorageResource::Global)],
-                1,
+                test_time(1),
             ),
             (
                 "doc2".to_string(),
                 "Another document with different content.".to_string(),
                 vec![],
-                2,
+                test_time(2),
             ),
         ];
 

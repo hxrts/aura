@@ -6,9 +6,9 @@
 //! Key principles:
 //! - Privacy mechanisms are built into core types
 //! - Default behavior preserves privacy
-//! - Relationship scoping is fundamental to all operations
+//! - Context scoping is fundamental to all operations
 
-use aura_core::{identifiers::DeviceId, RelationshipId};
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_transport::{
     ConnectionId, Envelope, HolePunchMessage, PeerInfo, PrivacyAwareSelectionCriteria,
     PrivacyLevel, StunMessage, TransportConfig,
@@ -27,8 +27,8 @@ fn main() {
     // Example 3: Privacy-preserving peer selection
     peer_selection_example();
 
-    // Example 4: Relationship-scoped connections
-    relationship_scoped_connections_example();
+    // Example 4: Context-scoped connections
+    context_scoped_connections_example();
 
     // Example 5: Protocol messages with built-in privacy
     protocol_privacy_example();
@@ -39,7 +39,7 @@ fn main() {
 fn privacy_aware_envelope_example() {
     println!("📧 Example 1: Privacy-Aware Envelope Creation\n");
 
-    let relationship_context = RelationshipId::new([1u8; 32]);
+    let context_id = ContextId::new_from_entropy([1u8; 32]);
     let message = b"Hello, private world!".to_vec();
 
     // Create basic envelope - privacy level determined by configuration
@@ -49,18 +49,18 @@ fn privacy_aware_envelope_example() {
     println!("Message size: {} bytes", basic_envelope.payload.len());
     println!("Privacy level: {:?}", basic_envelope.privacy_level());
 
-    // Create relationship-scoped envelope - privacy built-in
+    // Create context-scoped envelope - privacy built-in
     let scoped_envelope = Envelope::new_scoped(
         message.clone(),
-        relationship_context,
+        context_id,
         Some("secure_messaging".to_string()),
     );
 
-    println!("\nScoped envelope created with relationship privacy");
+    println!("\nScoped envelope created with context privacy");
     println!("Privacy level: {:?}", scoped_envelope.privacy_level());
     println!(
-        "Requires relationship scope: {}",
-        scoped_envelope.requires_relationship_scope()
+        "Requires context scope: {}",
+        scoped_envelope.requires_context_scope()
     );
 
     // Create blinded envelope - maximum privacy
@@ -76,9 +76,9 @@ fn privacy_aware_envelope_example() {
 fn transport_configuration_example() {
     println!("⚙️  Example 2: Transport Configuration with Privacy Levels\n");
 
-    // Maximum privacy configuration - relationship scoped
+    // Maximum privacy configuration - context scoped
     let max_privacy_config = TransportConfig {
-        privacy_level: PrivacyLevel::RelationshipScoped,
+        privacy_level: PrivacyLevel::ContextScoped,
         max_connections: 50,
         connection_timeout: Duration::from_secs(30),
         enable_capability_filtering: true,
@@ -136,12 +136,12 @@ fn peer_selection_example() {
     let mut peers = Vec::new();
 
     for i in 0..5 {
-        let peer_id = DeviceId::new();
-        let mut peer_info = PeerInfo::new(peer_id);
+        let authority_id = AuthorityId::new_from_entropy([i as u8; 32]);
+        let mut peer_info = PeerInfo::new(authority_id);
 
-        // Add relationship context for the peer
-        let relationship_id = RelationshipId::new([i as u8; 32]);
-        peer_info.add_relationship(relationship_id);
+        // Add context for the peer
+        let context_id = ContextId::new_from_entropy([i as u8; 32]);
+        peer_info.add_context(context_id);
 
         peers.push(peer_info);
     }
@@ -174,26 +174,25 @@ fn peer_selection_example() {
     println!("Peer selection preserves capability privacy\n");
 }
 
-/// Example 4: Relationship-scoped connections
-/// Shows how connections are scoped to specific relationships
-fn relationship_scoped_connections_example() {
-    println!("🔗 Example 4: Relationship-Scoped Connections\n");
+/// Example 4: Context-scoped connections
+/// Shows how connections are scoped to specific contexts
+fn context_scoped_connections_example() {
+    println!("🔗 Example 4: Context-Scoped Connections\n");
 
-    let _device_id = DeviceId::new();
-    let peer_id = DeviceId::new();
-    let family_context = RelationshipId::new([1u8; 32]);
-    let work_context = RelationshipId::new([2u8; 32]);
+    let _authority_id = AuthorityId::new_from_entropy([0u8; 32]);
+    let peer_authority = AuthorityId::new_from_entropy([1u8; 32]);
+    let family_context = ContextId::new_from_entropy([1u8; 32]);
+    let work_context = ContextId::new_from_entropy([2u8; 32]);
 
     // Create basic connection IDs
     let basic_connection = ConnectionId::new();
 
-    // Create relationship-scoped connection IDs
+    // Create context-scoped connection IDs
     let family_connection =
-        aura_transport::ScopedConnectionId::new(basic_connection, family_context.clone());
-    let work_connection =
-        aura_transport::ScopedConnectionId::new(basic_connection, work_context.clone());
+        aura_transport::ScopedConnectionId::new(basic_connection, family_context);
+    let work_connection = aura_transport::ScopedConnectionId::new(basic_connection, work_context);
 
-    println!("Created relationship-scoped connections:");
+    println!("Created context-scoped connections:");
     println!(
         "  Family connection ID: {:?}",
         family_connection.connection_id()
@@ -203,19 +202,16 @@ fn relationship_scoped_connections_example() {
         work_connection.connection_id()
     );
 
-    // Connections are isolated by relationship
-    assert_ne!(
-        family_connection.relationship_id(),
-        work_connection.relationship_id()
-    );
-    println!("\nSame peer, different relationships = different connection scopes");
-    println!("Relationship scoping prevents cross-context leakage");
+    // Connections are isolated by context
+    assert_ne!(family_connection.context_id(), work_connection.context_id());
+    println!("\nSame peer, different contexts = different connection scopes");
+    println!("Context scoping prevents cross-context leakage");
 
     // Create connection info with privacy
     let connection_info = aura_transport::ConnectionInfo::new_scoped(
-        peer_id,
+        peer_authority,
         family_context,
-        PrivacyLevel::RelationshipScoped,
+        PrivacyLevel::ContextScoped,
     );
 
     println!("\nConnection metadata:");
@@ -242,8 +238,8 @@ fn protocol_privacy_example() {
     // Hole punch message with basic construction
     let target_addr = aura_transport::types::endpoint::EndpointAddress::new("192.168.1.100:12345");
     let _hole_punch_msg = HolePunchMessage::coordination_request(
-        aura_core::identifiers::DeviceId::new(),
-        aura_core::identifiers::DeviceId::new(),
+        AuthorityId::new_from_entropy([1u8; 32]),
+        AuthorityId::new_from_entropy([2u8; 32]),
         target_addr,
     );
 

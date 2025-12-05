@@ -4,7 +4,7 @@
 //! Implements Dynamic<T> with compositional combinators.
 //!
 //! This module provides UI-agnostic reactive programming infrastructure
-//! that can be used by CLI, webapp, or any other UI layer.
+//! that can be used by CLI, webapp, or other UI layers.
 
 use std::sync::Arc;
 use tokio::sync::broadcast::error::RecvError;

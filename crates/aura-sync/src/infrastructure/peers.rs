@@ -32,18 +32,30 @@
 //! ```
 
 use std::collections::{HashMap, HashSet};
+#[cfg(test)]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::core::{sync_config_error, sync_peer_error, SyncResult};
-
-static NEXT_PEER_TS: AtomicU64 = AtomicU64::new(1);
-fn now_secs() -> u64 {
-    NEXT_PEER_TS.fetch_add(1, Ordering::SeqCst)
-}
+use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
+
+/// Deterministic monotonic counter for test/dev purposes
+/// In production, callers should provide PhysicalTime from their time provider
+#[cfg(test)]
+static NEXT_PEER_TS: AtomicU64 = AtomicU64::new(1);
+
+/// Internal helper to create a test time from the monotonic counter
+/// **Note**: Production code should use `PhysicalTime` from their time provider
+#[cfg(test)]
+fn test_time_now() -> PhysicalTime {
+    PhysicalTime {
+        ts_ms: NEXT_PEER_TS.fetch_add(1, Ordering::SeqCst) * 1000,
+        uncertainty: None,
+    }
+}
 use aura_protocol::guards::BiscuitGuardEvaluator;
 
 // =============================================================================
@@ -162,6 +174,8 @@ pub enum PeerStatus {
 }
 
 /// Metadata about a discovered peer
+///
+/// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerMetadata {
     /// Device identifier
@@ -170,11 +184,11 @@ pub struct PeerMetadata {
     /// Current connection status
     pub status: PeerStatus,
 
-    /// When peer was first discovered (Unix timestamp in seconds)
-    pub discovered_at: u64,
+    /// When peer was first discovered (unified time system)
+    pub discovered_at: PhysicalTime,
 
-    /// When peer status last changed (Unix timestamp in seconds)
-    pub last_status_change: u64,
+    /// When peer status last changed (unified time system)
+    pub last_status_change: PhysicalTime,
 
     /// Number of successful sync sessions with this peer
     pub successful_syncs: u64,
@@ -185,11 +199,11 @@ pub struct PeerMetadata {
     /// Approximate average latency in milliseconds
     pub average_latency_ms: u64,
 
-    /// Last time the peer was seen (Unix timestamp in seconds)
-    pub last_seen: u64,
+    /// Last time the peer was seen (unified time system)
+    pub last_seen: PhysicalTime,
 
-    /// Last successful sync time (Unix timestamp in seconds)
-    pub last_successful_sync: u64,
+    /// Last successful sync time (unified time system)
+    pub last_successful_sync: PhysicalTime,
 
     /// Trust level from aura-wot (0-100)
     pub trust_level: u8,
@@ -204,32 +218,60 @@ pub struct PeerMetadata {
 impl PeerMetadata {
     /// Create new peer metadata for a discovered peer
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
-    pub fn new(device_id: DeviceId, now: u64) -> Self {
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    /// Note: Callers should obtain `now` via their time provider and pass it to this method
+    pub fn new(device_id: DeviceId, now: &PhysicalTime) -> Self {
         Self {
             device_id,
             status: PeerStatus::Discovered,
-            discovered_at: now,
-            last_status_change: now,
+            discovered_at: now.clone(),
+            last_status_change: now.clone(),
             successful_syncs: 0,
             failed_syncs: 0,
             average_latency_ms: 1000,
-            last_seen: now,
-            last_successful_sync: now,
+            last_seen: now.clone(),
+            last_successful_sync: now.clone(),
             trust_level: 0,
             has_sync_capability: false,
             active_sessions: 0,
         }
     }
 
+    /// Create new peer metadata (from milliseconds)
+    ///
+    /// Convenience constructor for backward compatibility.
+    pub fn new_from_ms(device_id: DeviceId, now_ms: u64) -> Self {
+        Self::new(
+            device_id,
+            &PhysicalTime {
+                ts_ms: now_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
     /// Update peer status
     ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
     /// Note: Callers should obtain `now` via their time provider and pass it to this method
-    pub fn set_status(&mut self, status: PeerStatus, now: u64) {
+    pub fn set_status(&mut self, status: PeerStatus, now: &PhysicalTime) {
         if self.status != status {
             self.status = status;
-            self.last_status_change = now;
+            self.last_status_change = now.clone();
         }
+    }
+
+    /// Update peer status (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn set_status_ms(&mut self, status: PeerStatus, now_ms: u64) {
+        self.set_status(
+            status,
+            &PhysicalTime {
+                ts_ms: now_ms,
+                uncertainty: None,
+            },
+        );
     }
 
     /// Check if peer is available for new sync sessions
@@ -268,10 +310,12 @@ pub struct PeerInfo {
 }
 
 /// Connection details for an active peer
+///
+/// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionDetails {
-    /// When connection was established (Unix timestamp in seconds)
-    pub connected_at: u64,
+    /// When connection was established (unified time system)
+    pub connected_at: PhysicalTime,
 
     /// Connection identifier from aura-transport
     pub connection_id: String,
@@ -304,6 +348,8 @@ pub enum RelationshipType {
 /// - Uses aura-wot for Biscuit token-based authorization and trust ranking
 /// - Uses aura-transport for connection management
 /// - Uses aura-verify for identity verification
+///
+/// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 pub struct PeerManager {
     /// Configuration
     config: PeerDiscoveryConfig,
@@ -311,8 +357,8 @@ pub struct PeerManager {
     /// Tracked peers by device ID
     peers: HashMap<DeviceId, PeerInfo>,
 
-    /// Last discovery refresh time (Unix timestamp in seconds)
-    last_refresh: Option<u64>,
+    /// Last discovery refresh time (unified time system)
+    last_refresh: Option<PhysicalTime>,
 
     /// Biscuit guard evaluator for authorization checks
     guard_evaluator: Option<BiscuitGuardEvaluator>,
@@ -356,7 +402,13 @@ impl PeerManager {
     /// Full rendezvous-based peer discovery is Week 2 work. Currently returns
     /// only manually-added/tracked peers. When rendezvous integration is complete,
     /// this will query `aura_rendezvous::discovery::DiscoveryService` for peers.
-    pub async fn discover_peers<E>(&mut self, _effects: &E, now: u64) -> SyncResult<Vec<DeviceId>>
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub async fn discover_peers<E>(
+        &mut self,
+        _effects: &E,
+        now: &PhysicalTime,
+    ) -> SyncResult<Vec<DeviceId>>
     where
         E: aura_core::effects::NetworkEffects + aura_core::effects::StorageEffects + Send + Sync,
     {
@@ -365,7 +417,7 @@ impl PeerManager {
         );
 
         // Update last refresh time
-        self.last_refresh = Some(now);
+        self.last_refresh = Some(now.clone());
 
         // Return currently tracked peers (full rendezvous discovery is Week 2 work)
         let all_peers: Vec<DeviceId> = self.peers.keys().copied().collect();
@@ -395,20 +447,33 @@ impl PeerManager {
     // =============================================================================
 
     /// Add a discovered peer to tracking
-    pub fn add_peer(&mut self, device_id: DeviceId, now: u64) -> SyncResult<()> {
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub fn add_peer(&mut self, device_id: DeviceId, now: &PhysicalTime) -> SyncResult<()> {
         if self.peers.len() >= self.config.max_tracked_peers {
             return Err(sync_config_error("sync", "Maximum tracked peers exceeded"));
         }
 
-        self.peers.entry(device_id).or_insert_with(|| {
-            PeerInfo {
-                metadata: PeerMetadata::new(device_id, now),
-                token: None, // Will be set when peer provides token
-                connection_details: None,
-            }
+        self.peers.entry(device_id).or_insert_with(|| PeerInfo {
+            metadata: PeerMetadata::new(device_id, now),
+            token: None, // Will be set when peer provides token
+            connection_details: None,
         });
 
         Ok(())
+    }
+
+    /// Add a discovered peer to tracking (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn add_peer_ms(&mut self, device_id: DeviceId, now_ms: u64) -> SyncResult<()> {
+        self.add_peer(
+            device_id,
+            &PhysicalTime {
+                ts_ms: now_ms,
+                uncertainty: None,
+            },
+        )
     }
 
     /// Update peer metadata
@@ -666,15 +731,26 @@ impl PeerManager {
 
     /// Check if discovery refresh is needed
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via their time provider
-    pub fn needs_refresh(&self, now: u64) -> bool {
-        match self.last_refresh {
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    /// Note: Callers should obtain `now` via their time provider
+    pub fn needs_refresh(&self, now: &PhysicalTime) -> bool {
+        match &self.last_refresh {
             None => true,
             Some(last) => {
-                let elapsed_secs = now.saturating_sub(last);
-                elapsed_secs >= self.config.refresh_interval.as_secs()
+                let elapsed_ms = now.ts_ms.saturating_sub(last.ts_ms);
+                elapsed_ms >= self.config.refresh_interval.as_millis() as u64
             }
         }
+    }
+
+    /// Check if discovery refresh is needed (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn needs_refresh_ms(&self, now_ms: u64) -> bool {
+        self.needs_refresh(&PhysicalTime {
+            ts_ms: now_ms,
+            uncertainty: None,
+        })
     }
 
     /// List all tracked peers
@@ -715,10 +791,20 @@ impl PeerManager {
     }
 
     /// Update last contact timestamp for a peer
-    pub fn update_last_contact(&mut self, peer: DeviceId) {
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub fn update_last_contact(&mut self, peer: DeviceId, now: &PhysicalTime) {
         if let Some(peer_info) = self.peers.get_mut(&peer) {
-            peer_info.metadata.last_seen = now_secs();
+            peer_info.metadata.last_seen = now.clone();
         }
+    }
+
+    /// Update last contact timestamp for a peer (using test time)
+    ///
+    /// **Note**: Production code should use `update_last_contact` with explicit time.
+    #[cfg(test)]
+    pub fn update_last_contact_test(&mut self, peer: DeviceId) {
+        self.update_last_contact(peer, &test_time_now());
     }
 
     /// Get recent sync success rate for a peer
@@ -729,28 +815,32 @@ impl PeerManager {
     }
 
     /// Mark peer as degraded
-    pub fn mark_peer_degraded(&mut self, peer: &DeviceId) {
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub fn mark_peer_degraded(&mut self, peer: &DeviceId, now: &PhysicalTime) {
         if let Some(peer_info) = self.peers.get_mut(peer) {
-            peer_info
-                .metadata
-                .set_status(PeerStatus::Degraded, now_secs());
+            peer_info.metadata.set_status(PeerStatus::Degraded, now);
         }
     }
 
     /// Mark peer as healthy
-    pub fn mark_peer_healthy(&mut self, peer: &DeviceId) {
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub fn mark_peer_healthy(&mut self, peer: &DeviceId, now: &PhysicalTime) {
         if let Some(peer_info) = self.peers.get_mut(peer) {
-            peer_info
-                .metadata
-                .set_status(PeerStatus::Connected, now_secs());
+            peer_info.metadata.set_status(PeerStatus::Connected, now);
         }
     }
 
     /// Get time since last sync with a peer
-    pub fn get_time_since_last_sync(&self, peer: &DeviceId) -> Duration {
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub fn get_time_since_last_sync(&self, peer: &DeviceId, now: &PhysicalTime) -> Duration {
         if let Some(peer_info) = self.peers.get(peer) {
-            let now = now_secs();
-            Duration::from_secs(now.saturating_sub(peer_info.metadata.last_successful_sync))
+            let elapsed_ms = now
+                .ts_ms
+                .saturating_sub(peer_info.metadata.last_successful_sync.ts_ms);
+            Duration::from_millis(elapsed_ms)
         } else {
             Duration::from_secs(u64::MAX) // Very long time for unknown peers
         }
@@ -762,17 +852,21 @@ impl PeerManager {
     }
 
     /// Increment sync success counter for a peer
-    pub fn increment_sync_success(&mut self, peer: &DeviceId) {
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub fn increment_sync_success(&mut self, peer: &DeviceId, now: &PhysicalTime) {
         if let Some(peer_info) = self.peers.get_mut(peer) {
             peer_info.metadata.successful_syncs += 1;
-            peer_info.metadata.last_successful_sync = now_secs();
+            peer_info.metadata.last_successful_sync = now.clone();
         }
     }
 
     /// Update last successful sync timestamp
-    pub fn update_last_successful_sync(&mut self, peer: &DeviceId) {
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub fn update_last_successful_sync(&mut self, peer: &DeviceId, now: &PhysicalTime) {
         if let Some(peer_info) = self.peers.get_mut(peer) {
-            peer_info.metadata.last_successful_sync = now_secs();
+            peer_info.metadata.last_successful_sync = now.clone();
         }
     }
 
@@ -817,10 +911,18 @@ pub struct PeerManagerStatistics {
 mod tests {
     use super::*;
 
+    /// Helper function to create PhysicalTime for tests
+    fn test_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
     #[test]
     fn test_peer_metadata_scoring() {
-        let now = 1234567890u64; // Use Unix timestamp instead
-        let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]), now);
+        let now = test_time(1234567890_000); // Use milliseconds timestamp
+        let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]), &now);
         meta.trust_level = 80;
         meta.successful_syncs = 8;
         meta.failed_syncs = 2;
@@ -839,8 +941,8 @@ mod tests {
 
     #[test]
     fn test_peer_availability() {
-        let now = 1234567890u64; // Use Unix timestamp
-        let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]), now);
+        let now = test_time(1234567890_000); // Use milliseconds timestamp
+        let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]), &now);
         meta.status = PeerStatus::Connected;
         meta.active_sessions = 5;
 
@@ -858,11 +960,11 @@ mod tests {
         let peer2 = DeviceId::from_bytes([2; 32]);
         let peer3 = DeviceId::from_bytes([3; 32]);
 
-        let now = 1234567890u64; // Use Unix timestamp
+        let now = test_time(1234567890_000); // Use milliseconds timestamp
 
-        manager.add_peer(peer1, now).unwrap();
-        manager.add_peer(peer2, now).unwrap();
-        manager.add_peer(peer3, now).unwrap();
+        manager.add_peer(peer1, &now).unwrap();
+        manager.add_peer(peer2, &now).unwrap();
+        manager.add_peer(peer3, &now).unwrap();
 
         // Set up peer1 as high trust, connected
         manager

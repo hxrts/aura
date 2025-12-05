@@ -30,7 +30,10 @@ fn prepare_send_invitation_allows_with_capabilities() {
         "inv-1".to_string(),
     );
 
-    assert!(outcome.is_allowed(), "send should be allowed when capability present");
+    assert!(
+        outcome.is_allowed(),
+        "send should be allowed when capability present"
+    );
 }
 
 #[test]
@@ -42,9 +45,15 @@ fn prepare_accept_invitation_requires_capability() {
 
     let snap = snapshot_with_caps(&[]); // no caps
     let outcome = svc.prepare_accept_invitation(&snap, "inv-absent");
-    assert!(outcome.is_denied(), "accept should be denied without capability");
+    assert!(
+        outcome.is_denied(),
+        "accept should be denied without capability"
+    );
 
     let snap_ok = snapshot_with_caps(&["invitation:accept"]);
     let outcome_ok = svc.prepare_accept_invitation(&snap_ok, "inv-absent");
-    assert!(outcome_ok.is_allowed(), "accept should be allowed with capability");
+    assert!(
+        outcome_ok.is_allowed(),
+        "accept should be allowed with capability"
+    );
 }

@@ -24,8 +24,8 @@ pub struct TransportConfig {
     /// Maximum message size in bytes
     pub max_message_size: usize,
 
-    /// Enable relationship-scoped routing
-    pub enable_relationship_scoping: bool,
+    /// Enable context-scoped routing
+    pub enable_context_scoping: bool,
 
     /// Enable capability-based access control
     pub enable_capability_filtering: bool,
@@ -42,7 +42,7 @@ impl Default for TransportConfig {
     fn default() -> Self {
         Self {
             // Privacy-by-design: default to relationship scoped
-            privacy_level: PrivacyLevel::RelationshipScoped,
+            privacy_level: PrivacyLevel::ContextScoped,
 
             // Conservative timeouts
             connection_timeout: Duration::from_secs(30),
@@ -51,7 +51,7 @@ impl Default for TransportConfig {
             max_message_size: 1024 * 1024, // 1MB
 
             // Privacy features enabled by default
-            enable_relationship_scoping: true,
+            enable_context_scoping: true,
             enable_capability_filtering: true,
             default_blinding: true,
 
@@ -66,7 +66,7 @@ impl TransportConfig {
     pub fn clear() -> Self {
         Self {
             privacy_level: PrivacyLevel::Clear,
-            enable_relationship_scoping: false,
+            enable_context_scoping: false,
             enable_capability_filtering: false,
             default_blinding: false,
             ..Default::default()
@@ -77,7 +77,7 @@ impl TransportConfig {
     pub fn maximum_privacy() -> Self {
         Self {
             privacy_level: PrivacyLevel::Blinded,
-            enable_relationship_scoping: true,
+            enable_context_scoping: true,
             enable_capability_filtering: true,
             default_blinding: true,
             max_message_size: 64 * 1024, // Smaller messages for privacy
@@ -91,7 +91,7 @@ impl TransportConfig {
         Self {
             privacy_level: PrivacyLevel::Clear,
             connection_timeout: Duration::from_secs(5),
-            enable_relationship_scoping: false,
+            enable_context_scoping: false,
             enable_capability_filtering: false,
             default_blinding: false,
             max_connections: 10,
@@ -114,12 +114,10 @@ impl TransportConfig {
         }
 
         // Privacy consistency checks
-        if matches!(self.privacy_level, PrivacyLevel::RelationshipScoped)
-            && !self.enable_relationship_scoping
+        if matches!(self.privacy_level, PrivacyLevel::ContextScoped) && !self.enable_context_scoping
         {
             return Err(
-                "relationship_scoping must be enabled for RelationshipScoped privacy level"
-                    .to_string(),
+                "context_scoping must be enabled for ContextScoped privacy level".to_string(),
             );
         }
 
@@ -129,7 +127,7 @@ impl TransportConfig {
     /// Check if configuration supports privacy features
     pub fn supports_privacy(&self) -> bool {
         !matches!(self.privacy_level, PrivacyLevel::Clear)
-            || self.enable_relationship_scoping
+            || self.enable_context_scoping
             || self.enable_capability_filtering
             || self.default_blinding
     }
@@ -144,11 +142,8 @@ mod tests {
         let config = TransportConfig::default();
 
         // Should default to privacy-preserving settings
-        assert!(matches!(
-            config.privacy_level,
-            PrivacyLevel::RelationshipScoped
-        ));
-        assert!(config.enable_relationship_scoping);
+        assert!(matches!(config.privacy_level, PrivacyLevel::ContextScoped));
+        assert!(config.enable_context_scoping);
         assert!(config.enable_capability_filtering);
         assert!(config.default_blinding);
         assert!(config.supports_privacy());
@@ -162,14 +157,14 @@ mod tests {
         // Clear configuration
         let clear = TransportConfig::clear();
         assert!(matches!(clear.privacy_level, PrivacyLevel::Clear));
-        assert!(!clear.enable_relationship_scoping);
+        assert!(!clear.enable_context_scoping);
         assert!(!clear.default_blinding);
         assert!(!clear.supports_privacy());
 
         // Maximum privacy configuration
         let max_privacy = TransportConfig::maximum_privacy();
         assert!(matches!(max_privacy.privacy_level, PrivacyLevel::Blinded));
-        assert!(max_privacy.enable_relationship_scoping);
+        assert!(max_privacy.enable_context_scoping);
         assert!(max_privacy.default_blinding);
         assert!(max_privacy.supports_privacy());
         assert!(max_privacy.max_message_size < TransportConfig::default().max_message_size);
@@ -193,8 +188,8 @@ mod tests {
 
         // Privacy inconsistency
         config.max_connections = 10;
-        config.privacy_level = PrivacyLevel::RelationshipScoped;
-        config.enable_relationship_scoping = false;
+        config.privacy_level = PrivacyLevel::ContextScoped;
+        config.enable_context_scoping = false;
         assert!(config.validate().is_err());
     }
 }

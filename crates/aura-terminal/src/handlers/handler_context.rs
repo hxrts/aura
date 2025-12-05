@@ -7,9 +7,13 @@
 //! Handlers use `HandlerContext` for consistent signatures and return
 //! `Result<HandlerResult, CliError>` to drive view deltas.
 
-use aura_agent::{AuraEffectSystem, EffectContext};
+// Import types from aura-app which re-exports them from aura-agent
 use aura_app::core::ViewDelta;
 use aura_core::identifiers::{ContextId, DeviceId};
+
+// Re-export agent types through aura-app
+// This avoids direct aura-agent dependency for consumers
+pub use aura_app::{AuraAgent, AuraEffectSystem, EffectContext};
 
 /// Unified context for CLI handler functions
 ///
@@ -30,6 +34,7 @@ pub struct HandlerContext<'a> {
     effect_ctx: &'a EffectContext,
     effect_system: &'a AuraEffectSystem,
     device_id: DeviceId,
+    agent: Option<&'a AuraAgent>,
 }
 
 impl<'a> HandlerContext<'a> {
@@ -38,11 +43,13 @@ impl<'a> HandlerContext<'a> {
         effect_ctx: &'a EffectContext,
         effect_system: &'a AuraEffectSystem,
         device_id: DeviceId,
+        agent: Option<&'a AuraAgent>,
     ) -> Self {
         Self {
             effect_ctx,
             effect_system,
             device_id,
+            agent,
         }
     }
 
@@ -64,6 +71,11 @@ impl<'a> HandlerContext<'a> {
     /// Get the context ID from the effect context
     pub fn context_id(&self) -> ContextId {
         self.effect_ctx.context_id()
+    }
+
+    /// Access the agent if available (for higher-level services)
+    pub fn agent(&self) -> Option<&'a AuraAgent> {
+        self.agent
     }
 }
 

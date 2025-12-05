@@ -75,11 +75,11 @@ The codebase follows a strict 8-layer architecture with zero circular dependenci
 
 4. **Orchestration** (`aura-protocol`): Multi-party coordination and guard infrastructure: handler adapters, CrdtCoordinator, GuardChain (CapGuard → FlowGuard → JournalCoupler), Capability evaluator, Aura Consensus runtime, anti-entropy/snapshot helpers.
 
-5. **Feature/Protocol** (`aura-authenticate`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-sync`): End-to-end protocol crates (auth, secure messaging, guardian recovery, rendezvous, storage, etc.) built atop the orchestration layer. `aura-frost` is deprecated; FROST primitives live in `aura-core::crypto::tree_signing`.
+5. **Feature/Protocol** (`aura-authenticate`, `aura-chat`, `aura-invitation`, `aura-recovery`, `aura-relational`, `aura-rendezvous`, `aura-social`, `aura-sync`): End-to-end protocol crates (auth, secure messaging, guardian recovery, rendezvous, social topology, storage, etc.) built atop the orchestration layer. `aura-frost` is deprecated; FROST primitives live in `aura-core::crypto::tree_signing`.
 
 6. **Runtime Composition** (`aura-agent`, `aura-simulator`, `aura-app`): Runtime assembly of effect systems (agent), deterministic simulation (simulator), and portable application core (app). `aura-agent` now owns the effect registry/builder infrastructure; `aura-protocol` no longer exports the legacy registry. `aura-app` provides the platform-agnostic business logic consumed by all frontends.
 
-7. **User Interface** (`aura-terminal`): Terminal-based CLI and TUI entry points driving the agent runtime. Exposes scenario/admin/recovery/invitation flows plus authority/context inspection commands.
+7. **User Interface** (`aura-terminal`): Terminal-based CLI and TUI entry points. Imports only from `aura-app` (never `aura-agent` directly). Uses `AppCore` as the unified backend interface for all operations. Exposes scenario/admin/recovery/invitation flows plus authority/context inspection commands.
 
 8. **Testing & Tools** (`aura-testkit`, `aura-quint`): Shared fixtures, simulation harnesses, property tests, Quint interop.
 
@@ -199,6 +199,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **Test scenario** → `aura-testkit`
 - **Choreography protocol** → Feature crate + `aura-mpst`
 - **Authorization logic** → `aura-wot`
+- **Social topology/relay selection** → `aura-social`
 
 #### "I need to understand..."
 - **How authorities work** → `docs/100_authority_and_identity.md`
@@ -216,6 +217,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **How relational contexts work** → `docs/103_relational_contexts.md`
 - **How transport and receipts work** → `docs/108_transport_and_information_flow.md`
 - **How rendezvous and peer discovery work** → `docs/110_rendezvous.md`
+- **How social topology and blocks work** → `docs/114_social_architecture.md`
 - **How state reduction works** → `docs/110_state_reduction.md`
 - **How the mathematical model works** → `docs/002_theoretical_model.md`
 - **How identifiers and boundaries work** → `docs/105_identifiers_and_boundaries.md`

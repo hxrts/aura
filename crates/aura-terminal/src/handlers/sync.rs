@@ -7,7 +7,8 @@ use crate::cli::sync::SyncAction;
 use crate::handlers::HandlerContext;
 use crate::ids;
 use anyhow::Result;
-use aura_agent::{SyncManagerConfig, SyncServiceManager};
+// Import sync types through aura-app
+use aura_app::{SyncManagerConfig, SyncServiceManager};
 use aura_core::identifiers::DeviceId;
 use aura_effects::time::PhysicalTimeHandler;
 use aura_sync::services::HealthStatus;

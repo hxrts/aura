@@ -34,6 +34,7 @@
 //! ```
 
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::time::PhysicalTime;
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
@@ -59,8 +60,8 @@ pub enum ContactFact {
         contact_id: AuthorityId,
         /// User-assigned petname for the contact
         petname: String,
-        /// Timestamp when contact was added (ms since epoch)
-        added_at_ms: u64,
+        /// Timestamp when contact was added (uses unified time system)
+        added_at: PhysicalTime,
     },
     /// Contact removed from authority's contact list
     Removed {
@@ -70,8 +71,8 @@ pub enum ContactFact {
         owner_id: AuthorityId,
         /// Authority being removed as a contact
         contact_id: AuthorityId,
-        /// Timestamp when contact was removed (ms since epoch)
-        removed_at_ms: u64,
+        /// Timestamp when contact was removed (uses unified time system)
+        removed_at: PhysicalTime,
     },
     /// Contact petname updated
     Renamed {
@@ -83,8 +84,8 @@ pub enum ContactFact {
         contact_id: AuthorityId,
         /// New petname for the contact
         new_petname: String,
-        /// Timestamp when contact was renamed (ms since epoch)
-        renamed_at_ms: u64,
+        /// Timestamp when contact was renamed (uses unified time system)
+        renamed_at: PhysicalTime,
     },
 }
 
@@ -104,6 +105,73 @@ impl ContactFact {
             ContactFact::Added { owner_id, .. } => *owner_id,
             ContactFact::Removed { owner_id, .. } => *owner_id,
             ContactFact::Renamed { owner_id, .. } => *owner_id,
+        }
+    }
+
+    /// Get the timestamp in milliseconds (backward compatibility)
+    pub fn timestamp_ms(&self) -> u64 {
+        match self {
+            ContactFact::Added { added_at, .. } => added_at.ts_ms,
+            ContactFact::Removed { removed_at, .. } => removed_at.ts_ms,
+            ContactFact::Renamed { renamed_at, .. } => renamed_at.ts_ms,
+        }
+    }
+
+    /// Create an Added fact with millisecond timestamp (backward compatibility)
+    pub fn added_with_timestamp_ms(
+        context_id: ContextId,
+        owner_id: AuthorityId,
+        contact_id: AuthorityId,
+        petname: String,
+        added_at_ms: u64,
+    ) -> Self {
+        Self::Added {
+            context_id,
+            owner_id,
+            contact_id,
+            petname,
+            added_at: PhysicalTime {
+                ts_ms: added_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a Removed fact with millisecond timestamp (backward compatibility)
+    pub fn removed_with_timestamp_ms(
+        context_id: ContextId,
+        owner_id: AuthorityId,
+        contact_id: AuthorityId,
+        removed_at_ms: u64,
+    ) -> Self {
+        Self::Removed {
+            context_id,
+            owner_id,
+            contact_id,
+            removed_at: PhysicalTime {
+                ts_ms: removed_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a Renamed fact with millisecond timestamp (backward compatibility)
+    pub fn renamed_with_timestamp_ms(
+        context_id: ContextId,
+        owner_id: AuthorityId,
+        contact_id: AuthorityId,
+        new_petname: String,
+        renamed_at_ms: u64,
+    ) -> Self {
+        Self::Renamed {
+            context_id,
+            owner_id,
+            contact_id,
+            new_petname,
+            renamed_at: PhysicalTime {
+                ts_ms: renamed_at_ms,
+                uncertainty: None,
+            },
         }
     }
 }
@@ -191,13 +259,13 @@ mod tests {
 
     #[test]
     fn test_contact_fact_serialization() {
-        let fact = ContactFact::Added {
-            context_id: test_context_id(),
-            owner_id: test_authority_id(1),
-            contact_id: test_authority_id(2),
-            petname: "Alice".to_string(),
-            added_at_ms: 1234567890,
-        };
+        let fact = ContactFact::added_with_timestamp_ms(
+            test_context_id(),
+            test_authority_id(1),
+            test_authority_id(2),
+            "Alice".to_string(),
+            1234567890,
+        );
 
         let bytes = fact.to_bytes();
         let restored = ContactFact::from_bytes(&bytes);
@@ -207,13 +275,13 @@ mod tests {
 
     #[test]
     fn test_contact_fact_to_generic() {
-        let fact = ContactFact::Renamed {
-            context_id: test_context_id(),
-            owner_id: test_authority_id(1),
-            contact_id: test_authority_id(2),
-            new_petname: "Bob".to_string(),
-            renamed_at_ms: 1234567899,
-        };
+        let fact = ContactFact::renamed_with_timestamp_ms(
+            test_context_id(),
+            test_authority_id(1),
+            test_authority_id(2),
+            "Bob".to_string(),
+            1234567899,
+        );
 
         let generic = fact.to_generic();
 
@@ -236,13 +304,13 @@ mod tests {
         let reducer = ContactFactReducer;
         assert_eq!(reducer.handles_type(), CONTACT_FACT_TYPE_ID);
 
-        let fact = ContactFact::Added {
-            context_id: test_context_id(),
-            owner_id: test_authority_id(1),
-            contact_id: test_authority_id(2),
-            petname: "Test".to_string(),
-            added_at_ms: 0,
-        };
+        let fact = ContactFact::added_with_timestamp_ms(
+            test_context_id(),
+            test_authority_id(1),
+            test_authority_id(2),
+            "Test".to_string(),
+            0,
+        );
 
         let bytes = fact.to_bytes();
         let binding = reducer.reduce(test_context_id(), CONTACT_FACT_TYPE_ID, &bytes);
@@ -260,26 +328,26 @@ mod tests {
         let contact = test_authority_id(99);
 
         let facts = vec![
-            ContactFact::Added {
-                context_id: test_context_id(),
-                owner_id: test_authority_id(1),
-                contact_id: contact,
-                petname: "Alice".to_string(),
-                added_at_ms: 0,
-            },
-            ContactFact::Removed {
-                context_id: test_context_id(),
-                owner_id: test_authority_id(1),
-                contact_id: contact,
-                removed_at_ms: 0,
-            },
-            ContactFact::Renamed {
-                context_id: test_context_id(),
-                owner_id: test_authority_id(1),
-                contact_id: contact,
-                new_petname: "Bob".to_string(),
-                renamed_at_ms: 0,
-            },
+            ContactFact::added_with_timestamp_ms(
+                test_context_id(),
+                test_authority_id(1),
+                contact,
+                "Alice".to_string(),
+                0,
+            ),
+            ContactFact::removed_with_timestamp_ms(
+                test_context_id(),
+                test_authority_id(1),
+                contact,
+                0,
+            ),
+            ContactFact::renamed_with_timestamp_ms(
+                test_context_id(),
+                test_authority_id(1),
+                contact,
+                "Bob".to_string(),
+                0,
+            ),
         ];
 
         for fact in facts {
@@ -290,26 +358,26 @@ mod tests {
     #[test]
     fn test_type_id_consistency() {
         let facts: Vec<ContactFact> = vec![
-            ContactFact::Added {
-                context_id: test_context_id(),
-                owner_id: test_authority_id(1),
-                contact_id: test_authority_id(2),
-                petname: "x".to_string(),
-                added_at_ms: 0,
-            },
-            ContactFact::Removed {
-                context_id: test_context_id(),
-                owner_id: test_authority_id(1),
-                contact_id: test_authority_id(2),
-                removed_at_ms: 0,
-            },
-            ContactFact::Renamed {
-                context_id: test_context_id(),
-                owner_id: test_authority_id(1),
-                contact_id: test_authority_id(2),
-                new_petname: "y".to_string(),
-                renamed_at_ms: 0,
-            },
+            ContactFact::added_with_timestamp_ms(
+                test_context_id(),
+                test_authority_id(1),
+                test_authority_id(2),
+                "x".to_string(),
+                0,
+            ),
+            ContactFact::removed_with_timestamp_ms(
+                test_context_id(),
+                test_authority_id(1),
+                test_authority_id(2),
+                0,
+            ),
+            ContactFact::renamed_with_timestamp_ms(
+                test_context_id(),
+                test_authority_id(1),
+                test_authority_id(2),
+                "y".to_string(),
+                0,
+            ),
         ];
 
         for fact in facts {

@@ -4,11 +4,11 @@ use std::path::PathBuf;
 use crate::cli::{
     amp::amp_parser,
     authority::authority_parser,
-    bpaf_init::{init_parser, InitArgs},
-    bpaf_node::{node_parser, NodeArgs},
-    bpaf_status::{status_parser, StatusArgs},
     chat::chat_parser,
     context::context_parser,
+    init::{init_parser, InitArgs},
+    node::{node_parser, NodeArgs},
+    status::{status_parser, StatusArgs},
     sync::sync_action_parser,
     tui::tui_parser,
 };
@@ -18,11 +18,11 @@ use crate::{
 };
 
 #[cfg(feature = "development")]
-use crate::ScenarioAction;
-#[cfg(feature = "development")]
 use crate::cli::demo::demo_parser;
 #[cfg(feature = "development")]
 use crate::DemoCommands;
+#[cfg(feature = "development")]
+use crate::ScenarioAction;
 #[cfg(feature = "terminal")]
 use crate::TuiArgs;
 
@@ -321,17 +321,43 @@ fn invite_command() -> impl Parser<Commands> {
     };
 
     let accept = {
-        let envelope = long("envelope")
-            .help("Path to the invitation envelope JSON file")
-            .argument::<PathBuf>("FILE");
-        construct!(InvitationAction::Accept { envelope })
+        let invitation_id = long("invitation-id")
+            .help("Invitation identifier to accept")
+            .argument::<String>("INVITATION_ID");
+        construct!(InvitationAction::Accept { invitation_id })
             .to_options()
             .command("accept")
     };
 
-    command("invite", construct!([create, accept]).to_options())
-        .help("Device invitations")
-        .map(|action| Commands::Invite { action })
+    let decline = {
+        let invitation_id = long("invitation-id")
+            .help("Invitation identifier to decline")
+            .argument::<String>("INVITATION_ID");
+        construct!(InvitationAction::Decline { invitation_id })
+            .to_options()
+            .command("decline")
+    };
+
+    let cancel = {
+        let invitation_id = long("invitation-id")
+            .help("Invitation identifier to cancel (must be sender)")
+            .argument::<String>("INVITATION_ID");
+        construct!(InvitationAction::Cancel { invitation_id })
+            .to_options()
+            .command("cancel")
+    };
+
+    let list = pure(InvitationAction::List)
+        .to_options()
+        .command("list")
+        .help("List pending invitations");
+
+    command(
+        "invite",
+        construct!([create, accept, decline, cancel, list]).to_options(),
+    )
+    .help("Device invitations")
+    .map(|action| Commands::Invite { action })
 }
 
 fn authority_command() -> impl Parser<Commands> {

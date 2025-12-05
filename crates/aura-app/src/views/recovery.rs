@@ -52,12 +52,24 @@ pub enum RecoveryProcessStatus {
     Failed,
 }
 
+/// Guardian approval for recovery (with detailed info)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct RecoveryApproval {
+    /// Guardian ID who approved
+    pub guardian_id: String,
+    /// Timestamp when approved (ms since epoch)
+    pub approved_at: u64,
+}
+
 /// Active recovery process (if any)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct RecoveryProcess {
     /// Recovery context ID
     pub id: String,
+    /// Account being recovered (authority ID as string)
+    pub account_id: String,
     /// Current status
     pub status: RecoveryProcessStatus,
     /// Number of approvals received
@@ -66,10 +78,14 @@ pub struct RecoveryProcess {
     pub approvals_required: u32,
     /// Guardian IDs that have approved
     pub approved_by: Vec<String>,
+    /// Detailed approval records
+    pub approvals: Vec<RecoveryApproval>,
     /// When recovery was initiated (ms since epoch)
     pub initiated_at: u64,
     /// When recovery expires (ms since epoch)
     pub expires_at: Option<u64>,
+    /// Progress percentage (0-100)
+    pub progress: u32,
 }
 
 /// Recovery state
@@ -105,33 +121,72 @@ impl RecoveryState {
     }
 
     /// Initiate a recovery process
-    pub fn initiate_recovery(&mut self, session_id: String, initiated_at: u64) {
+    pub fn initiate_recovery(&mut self, session_id: String, account_id: String, initiated_at: u64) {
         self.active_recovery = Some(RecoveryProcess {
             id: session_id,
+            account_id,
             status: RecoveryProcessStatus::Initiated,
             approvals_received: 0,
             approvals_required: self.threshold,
             approved_by: Vec::new(),
+            approvals: Vec::new(),
             initiated_at,
             expires_at: None,
+            progress: 0,
         });
     }
 
     /// Add a guardian approval to the active recovery
     pub fn add_guardian_approval(&mut self, guardian_id: String) {
+        self.add_guardian_approval_with_timestamp(guardian_id, 0);
+    }
+
+    /// Add a guardian approval with timestamp to the active recovery
+    pub fn add_guardian_approval_with_timestamp(&mut self, guardian_id: String, timestamp: u64) {
         if let Some(ref mut recovery) = self.active_recovery {
             if !recovery.approved_by.contains(&guardian_id) {
-                recovery.approved_by.push(guardian_id);
+                recovery.approved_by.push(guardian_id.clone());
+                recovery.approvals.push(RecoveryApproval {
+                    guardian_id,
+                    approved_at: timestamp,
+                });
                 recovery.approvals_received += 1;
+
+                // Update progress
+                if recovery.approvals_required > 0 {
+                    recovery.progress =
+                        (recovery.approvals_received * 100) / recovery.approvals_required;
+                }
 
                 // Update status based on approvals
                 if recovery.approvals_received >= recovery.approvals_required {
                     recovery.status = RecoveryProcessStatus::Approved;
+                    recovery.progress = 100;
                 } else {
                     recovery.status = RecoveryProcessStatus::WaitingForApprovals;
                 }
             }
         }
+    }
+
+    /// Complete the active recovery process
+    pub fn complete_recovery(&mut self) {
+        if let Some(ref mut recovery) = self.active_recovery {
+            recovery.status = RecoveryProcessStatus::Completed;
+            recovery.progress = 100;
+        }
+    }
+
+    /// Fail/cancel the active recovery process
+    pub fn fail_recovery(&mut self) {
+        if let Some(ref mut recovery) = self.active_recovery {
+            recovery.status = RecoveryProcessStatus::Failed;
+        }
+    }
+
+    /// Clear the active recovery
+    pub fn clear_recovery(&mut self) {
+        self.active_recovery = None;
     }
 
     /// Toggle guardian status for a contact

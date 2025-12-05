@@ -3,14 +3,14 @@
 //! Main application with screen navigation
 
 use iocraft::prelude::*;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
-use crate::tui::components::{AccountSetupModal, AccountSetupState, KeyHintsBar};
+use crate::tui::components::{AccountSetupModal, KeyHintsBar};
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::screens::block::{BlockInviteCallback, BlockNavCallback, BlockSendCallback};
-use crate::tui::screens::chat::SendCallback;
+use crate::tui::screens::chat::{ChannelSelectCallback, SendCallback};
 use crate::tui::screens::contacts::{EditPetnameCallback, ToggleGuardianCallback};
 use crate::tui::screens::invitations::InvitationCallback;
 use crate::tui::screens::neighborhood::{GoHomeCallback, NavigationCallback};
@@ -62,6 +62,81 @@ pub fn ScreenTabBar(props: &ScreenTabBarProps) -> impl Into<AnyElement<'static>>
     }
 }
 
+/// Props for StatusBar
+#[derive(Default, Props)]
+pub struct StatusBarProps {
+    /// Whether sync is in progress
+    pub syncing: bool,
+    /// Last sync time (ms since epoch), None if never synced
+    pub last_sync_time: Option<u64>,
+    /// Number of known peers
+    pub peer_count: usize,
+}
+
+/// Format a timestamp as relative time (e.g., "2m ago", "1h ago")
+fn format_relative_time(ts_ms: u64) -> String {
+    // Simple implementation - just show minutes/hours ago
+    // In production, use actual current time comparison
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    if now_ms < ts_ms {
+        return "just now".to_string();
+    }
+
+    let elapsed_ms = now_ms - ts_ms;
+    let elapsed_secs = elapsed_ms / 1000;
+
+    if elapsed_secs < 60 {
+        "just now".to_string()
+    } else if elapsed_secs < 3600 {
+        format!("{}m ago", elapsed_secs / 60)
+    } else if elapsed_secs < 86400 {
+        format!("{}h ago", elapsed_secs / 3600)
+    } else {
+        format!("{}d ago", elapsed_secs / 86400)
+    }
+}
+
+/// Status bar showing sync status and peer count
+#[component]
+pub fn StatusBar(props: &StatusBarProps) -> impl Into<AnyElement<'static>> {
+    let sync_status = if props.syncing {
+        "Syncing...".to_string()
+    } else if let Some(ts) = props.last_sync_time {
+        format!("Synced {}", format_relative_time(ts))
+    } else {
+        "Not synced".to_string()
+    };
+
+    let sync_color = if props.syncing {
+        Theme::WARNING
+    } else if props.last_sync_time.is_some() {
+        Theme::SUCCESS
+    } else {
+        Theme::TEXT_MUTED
+    };
+
+    let peer_status = format!("{} peers", props.peer_count);
+
+    element! {
+        View(
+            flex_direction: FlexDirection::Row,
+            justify_content: JustifyContent::End,
+            gap: Spacing::MD,
+            padding_left: Spacing::SM,
+            padding_right: Spacing::SM,
+            background_color: Theme::BG_DARK,
+        ) {
+            Text(content: sync_status, color: sync_color)
+            Text(content: " | ", color: Theme::BORDER)
+            Text(content: peer_status, color: Theme::TEXT_MUTED)
+        }
+    }
+}
+
 /// Props for IoApp
 #[derive(Default, Props)]
 pub struct IoAppProps {
@@ -90,6 +165,8 @@ pub struct IoAppProps {
     pub traversal_depth: TraversalDepth,
     // Effect dispatch callback for sending messages
     pub on_send: Option<SendCallback>,
+    // Effect dispatch callback for channel selection
+    pub on_channel_select: Option<ChannelSelectCallback>,
     // Effect dispatch callbacks for invitation actions
     pub on_accept_invitation: Option<InvitationCallback>,
     pub on_decline_invitation: Option<InvitationCallback>,
@@ -114,6 +191,13 @@ pub struct IoAppProps {
     pub show_account_setup: bool,
     /// Callback for account creation
     pub on_create_account: Option<CreateAccountCallback>,
+    // Sync status
+    /// Whether sync is in progress
+    pub sync_in_progress: bool,
+    /// Last sync time (ms since epoch)
+    pub last_sync_time: Option<u64>,
+    /// Number of known peers
+    pub peer_count: usize,
 }
 
 /// Callback for creating an account
@@ -126,14 +210,16 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let should_exit = hooks.use_state(|| false);
     let mut system = hooks.use_context_mut::<SystemContext>();
 
-    // Account setup modal state
-    let account_setup = hooks.use_state(|| {
-        let mut state = AccountSetupState::new();
-        if props.show_account_setup {
-            state.show();
-        }
-        state
-    });
+    // Account setup modal state (using pattern from chat.rs for non-Copy types)
+    // - Bool flags use use_state (Copy)
+    // - String uses Arc<RwLock<String>> (thread-safe shared state)
+    // - Version counter triggers re-renders
+    let account_visible = hooks.use_state(|| props.show_account_setup);
+    let account_creating = hooks.use_state(|| false);
+    let account_error: Option<String> = None; // Errors are transient
+    let account_display_name: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
+    let account_display_name_for_handler = account_display_name.clone();
+    let account_version = hooks.use_state(|| 0usize);
     let on_create_account = props.on_create_account.clone();
 
     // Handle exit request
@@ -166,6 +252,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let traversal_depth = props.traversal_depth;
     // Effect dispatch callbacks
     let on_send = props.on_send.clone();
+    let on_channel_select = props.on_channel_select.clone();
     let on_accept_invitation = props.on_accept_invitation.clone();
     let on_decline_invitation = props.on_decline_invitation.clone();
     let on_enter_block = props.on_enter_block.clone();
@@ -192,44 +279,56 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     hooks.use_terminal_events({
         let mut screen = screen.clone();
         let mut should_exit = should_exit.clone();
-        let mut account_setup = account_setup.clone();
+        let mut account_visible = account_visible.clone();
+        let mut account_creating = account_creating.clone();
+        let mut account_version = account_version.clone();
+        let account_display_name = account_display_name_for_handler.clone();
         let on_create_account = on_create_account.clone();
         move |event| match event {
             TerminalEvent::Key(KeyEvent {
                 code, modifiers, ..
             }) => {
                 // Handle account setup modal input first (captures all input when visible)
-                if account_setup.get().visible {
+                if account_visible.get() {
                     match code {
                         KeyCode::Char(c) => {
-                            let mut state = account_setup.get();
-                            state.push_char(c);
-                            account_setup.set(state);
+                            if let Ok(mut guard) = account_display_name.write() {
+                                guard.push(c);
+                            }
+                            account_version.set(account_version.get().wrapping_add(1));
                         }
                         KeyCode::Backspace => {
-                            let mut state = account_setup.get();
-                            state.backspace();
-                            account_setup.set(state);
+                            if let Ok(mut guard) = account_display_name.write() {
+                                guard.pop();
+                            }
+                            account_version.set(account_version.get().wrapping_add(1));
                         }
                         KeyCode::Enter => {
-                            let state = account_setup.get();
-                            if state.can_submit() {
-                                // Trigger account creation
+                            // Check if we can submit (name not empty and not creating)
+                            let can_submit = account_display_name
+                                .read()
+                                .map(|n| !n.is_empty())
+                                .unwrap_or(false)
+                                && !account_creating.get();
+
+                            if can_submit {
+                                // Trigger account creation callback
                                 if let Some(ref callback) = on_create_account {
-                                    let name = state.display_name.clone();
+                                    let name = account_display_name
+                                        .read()
+                                        .map(|n| n.clone())
+                                        .unwrap_or_default();
                                     callback(name);
                                 }
                                 // Mark as creating
-                                let mut state = account_setup.get();
-                                state.start_creating();
-                                account_setup.set(state);
+                                account_creating.set(true);
+                                account_version.set(account_version.get().wrapping_add(1));
                             }
                         }
                         KeyCode::Esc => {
-                            // Allow canceling the modal (optional - could be removed to force account creation)
-                            let mut state = account_setup.get();
-                            state.hide();
-                            account_setup.set(state);
+                            // Allow canceling the modal
+                            account_visible.set(false);
+                            account_version.set(account_version.get().wrapping_add(1));
                         }
                         _ => {}
                     }
@@ -268,6 +367,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         KeyHint::new("Tab", "Switch panel"),
     ];
 
+    // Extract account setup state for rendering
+    let modal_visible = account_visible.get();
+    let modal_creating = account_creating.get();
+    let modal_display_name = account_display_name
+        .read()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    let modal_error = account_error.unwrap_or_default();
+    // account_version is used for triggering re-renders (not directly in UI)
+    let _ = account_version.get();
+
+    // Extract sync status from props
+    let syncing = props.sync_in_progress;
+    let last_sync = props.last_sync_time;
+    let peers = props.peer_count;
+
     element! {
         View(
             flex_direction: FlexDirection::Column,
@@ -276,6 +391,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         ) {
             // Screen tab bar
             ScreenTabBar(active: current_screen)
+
+            // Status bar showing sync status
+            StatusBar(syncing: syncing, last_sync_time: last_sync, peer_count: peers)
 
             // Screen content
             View(flex_grow: 1.0) {
@@ -304,6 +422,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                                     hints: chat_hints.clone(),
                                     initial_channel_index: idx,
                                     on_send: on_send.clone(),
+                                    on_channel_select: on_channel_select.clone(),
                                 )
                             }
                         }]
@@ -375,6 +494,15 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
 
             // Global hints
             KeyHintsBar(hints: hints)
+
+            // Account setup modal overlay
+            AccountSetupModal(
+                visible: modal_visible,
+                display_name: modal_display_name,
+                focused: true,
+                creating: modal_creating,
+                error: modal_error,
+            )
         }
     }
 }
@@ -560,6 +688,16 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         });
     });
 
+    // ChannelSelectCallback for selecting a channel (triggers real-time message updates)
+    let app_core_for_select = ctx_arc.app_core().clone();
+    let on_channel_select: ChannelSelectCallback = Arc::new(move |channel_id: String| {
+        // Use try_read since we're in a sync callback
+        // This is safe because select_channel uses lock_mut() internally
+        if let Ok(core) = app_core_for_select.try_read() {
+            core.views().select_channel(Some(channel_id));
+        }
+    });
+
     // InvitationCallback for accepting invitations
     let ctx_for_accept = ctx_arc.clone();
     let on_accept_invitation: InvitationCallback = Arc::new(move |invitation_id: String| {
@@ -736,6 +874,21 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         });
     });
 
+    // CreateAccountCallback for account creation from setup modal
+    let ctx_for_create = ctx_arc.clone();
+    let on_create_account: CreateAccountCallback = Arc::new(move |display_name: String| {
+        let ctx = ctx_for_create.clone();
+        let cmd = EffectCommand::CreateAccount { display_name };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to create account: {}", e);
+            }
+        });
+    });
+
+    // Check if account already exists to determine if we show setup modal
+    let show_account_setup = !ctx_arc.has_account();
+
     // Get data from IoContext
     let channels = ctx_arc.get_channels();
     let messages = ctx_arc.get_messages();
@@ -812,16 +965,20 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let threshold_k = recovery_status.threshold as u8;
     let threshold_n = guardians.len().max(recovery_status.threshold as usize) as u8;
 
-    // Create AppCoreContext for components to access AppCore and signals
-    let app_core_context = ctx_arc
-        .app_core()
-        .cloned()
-        .map(|app_core| AppCoreContext::new(app_core, ctx_arc.clone()));
+    // Get sync status for status bar display
+    let sync_in_progress = ctx_arc.is_syncing().await;
+    let last_sync_time = ctx_arc.last_sync_time().await;
+    let peer_count = ctx_arc.known_peers_count().await;
 
-    // Wrap the app in ContextProvider when AppCore is available
+    // Create AppCoreContext for components to access AppCore and signals
+    // AppCore is always available (demo mode uses agent-less AppCore)
+    let app_core_context = AppCoreContext::new(ctx_arc.app_core().clone(), ctx_arc.clone());
+
+    // Wrap the app in ContextProvider
     // This enables components to use `hooks.use_context::<AppCoreContext>()` for
     // reactive signal subscription via `use_future`
-    if let Some(context) = app_core_context {
+    {
+        let context = app_core_context;
         element! {
             ContextProvider(value: Context::owned(context)) {
                 IoApp(
@@ -849,6 +1006,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     traversal_depth: TraversalDepth::Street,
                     // Effect dispatch callbacks
                     on_send: Some(on_send),
+                    on_channel_select: Some(on_channel_select.clone()),
                     on_accept_invitation: Some(on_accept_invitation),
                     on_decline_invitation: Some(on_decline_invitation),
                     on_enter_block: Some(on_enter_block),
@@ -866,57 +1024,15 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     on_block_send: Some(on_block_send),
                     on_block_invite: Some(on_block_invite),
                     on_block_navigate_neighborhood: Some(on_block_navigate_neighborhood),
+                    // Account setup
+                    show_account_setup: show_account_setup,
+                    on_create_account: Some(on_create_account.clone()),
+                    // Sync status
+                    sync_in_progress: sync_in_progress,
+                    last_sync_time: last_sync_time,
+                    peer_count: peer_count,
                 )
             }
-        }
-        .fullscreen()
-        .await
-    } else {
-        // Fallback without context (demo mode or no AppCore)
-        element! {
-            IoApp(
-                channels: channels,
-                messages: messages,
-                help_commands: help_commands,
-                invitations: invitations,
-                guardians: guardians,
-                devices: devices,
-                display_name: "You".to_string(),
-                threshold_k: threshold_k,
-                threshold_n: threshold_n,
-                mfa_policy: MfaPolicy::SensitiveOnly,
-                recovery_status: recovery_status,
-                // Block screen data
-                block_name: block_name,
-                residents: residents,
-                block_budget: block_budget,
-                channel_name: channel_name,
-                // Contacts screen data
-                contacts: contacts,
-                // Neighborhood screen data
-                neighborhood_name: neighborhood_name,
-                blocks: blocks,
-                traversal_depth: TraversalDepth::Street,
-                // Effect dispatch callbacks
-                on_send: Some(on_send),
-                on_accept_invitation: Some(on_accept_invitation),
-                on_decline_invitation: Some(on_decline_invitation),
-                on_enter_block: Some(on_enter_block),
-                on_go_home: Some(on_go_home),
-                on_back_to_street: Some(on_back_to_street),
-                // Recovery callbacks
-                on_start_recovery: Some(on_start_recovery),
-                on_add_guardian: Some(on_add_guardian),
-                // Settings callbacks
-                on_update_mfa: Some(on_update_mfa),
-                // Contacts callbacks
-                on_edit_petname: Some(on_edit_petname),
-                on_toggle_guardian: Some(on_toggle_guardian),
-                // Block callbacks
-                on_block_send: Some(on_block_send),
-                on_block_invite: Some(on_block_invite),
-                on_block_navigate_neighborhood: Some(on_block_navigate_neighborhood),
-            )
         }
         .fullscreen()
         .await

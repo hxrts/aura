@@ -23,7 +23,7 @@
 //! - Layer 4: aura-protocol (orchestration)
 //! - Layer 5: aura-frost, aura-invitation, aura-recovery, aura-sync, etc. (protocols)
 //! - Layer 6: aura-agent, aura-simulator (runtime)
-//! - Layer 7: aura-cli (UI)
+//! - Layer 7: aura-terminal (UI)
 //!
 //! Foundation layers should create their own internal test utilities (e.g., `aura-core/src/test_utils.rs`)
 //! to avoid circular dependencies. These tests should use stateless effect patterns where possible.
@@ -44,7 +44,7 @@
 //! - Production effect implementations (belong in aura-effects)
 //! - Protocol logic (belong in Layer 5 feature crates)
 //! - Runtime composition logic (belong in aura-agent)
-//! - UI implementations (belong in aura-cli)
+//! - UI implementations (belong in aura-terminal)
 //! - Test cases for specific crates (belong in those crates' test modules)
 //! - Formal verification logic (Quint belongs in aura-quint-api)
 //!
@@ -97,6 +97,17 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! ## Architecture Layers
+//!
+//! - **Layers 1-3**: Foundation, specification, and implementation
+//!   - Should create internal test utilities (`src/test_utils.rs`)
+//!   - Do NOT depend on aura-testkit (would create circular dependency)
+//! - **Layers 4-7**: Protocol, features, runtime, UI
+//!   - Can depend on aura-testkit via `[dev-dependencies]`
+//! - **Layer 8**: Testing and tools
+//!   - aura-testkit itself (this crate)
+//!   - aura-quint (formal verification)
 
 // Existing modular structure
 pub mod builders;

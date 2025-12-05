@@ -54,6 +54,20 @@ pub enum IntentError {
         /// Reason for storage error
         reason: String,
     },
+
+    /// No agent configured for operation requiring agent
+    #[error("No agent configured: {reason}")]
+    NoAgent {
+        /// Reason explaining what operation requires an agent
+        reason: String,
+    },
+
+    /// Service operation failed
+    #[error("Service error: {reason}")]
+    ServiceError {
+        /// Reason for service error
+        reason: String,
+    },
 }
 
 impl IntentError {
@@ -88,6 +102,20 @@ impl IntentError {
     /// Create a storage error
     pub fn storage_error(reason: impl Into<String>) -> Self {
         Self::StorageError {
+            reason: reason.into(),
+        }
+    }
+
+    /// Create a no-agent error
+    pub fn no_agent(reason: impl Into<String>) -> Self {
+        Self::NoAgent {
+            reason: reason.into(),
+        }
+    }
+
+    /// Create a service error
+    pub fn service_error(reason: impl Into<String>) -> Self {
+        Self::ServiceError {
             reason: reason.into(),
         }
     }

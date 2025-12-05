@@ -101,11 +101,8 @@ pub type RecoveryResult<T> = AuraResult<T>;
 // Re-export essential types
 pub use types::{GuardianProfile, GuardianSet, RecoveryRequest, RecoveryResponse};
 
-// Re-export auth types
-pub use aura_authenticate::guardian_auth::{
-    GuardianAuthCoordinator, GuardianAuthRequest, GuardianAuthResponse, RecoveryContext,
-    RecoveryOperationType,
-};
+// Re-export auth types (from new guard-based architecture)
+pub use aura_authenticate::{RecoveryContext, RecoveryOperationType};
 
 // Re-export choreography coordinators
 pub use guardian_membership::GuardianMembershipCoordinator;

@@ -208,6 +208,41 @@ if let Some(peer_info) = adapter.get_peer_info(context_id, peer, now_ms) {
 let stale_peers = adapter.peers_needing_refresh(context_id, now_ms);
 ```
 
+### 6.2 Four-Layer Discovery Model
+
+Aura uses a progressive disclosure model for peer discovery. The `aura-social` crate provides `SocialTopology` which determines the appropriate discovery layer based on the caller's social relationships. The four layers in priority order:
+
+1. **Direct** (priority 0): Target is a known peer with existing relationship. Directly accessible with minimal cost.
+2. **Block** (priority 1): Target is unknown but reachable through block peers. Block peers can relay messages.
+3. **Neighborhood** (priority 2): Target is unknown but reachable through neighborhood traversal. Multiple hops across adjacent blocks.
+4. **Rendezvous** (priority 3): No social presence - requires global flooding through rendezvous infrastructure.
+
+```rust
+use aura_social::{DiscoveryLayer, SocialTopology};
+
+let topology = SocialTopology::new(local_authority, block, neighborhoods);
+
+// Determine discovery strategy for target
+match topology.discovery_layer(&target) {
+    DiscoveryLayer::Direct => {
+        // Direct connection, minimal cost
+    }
+    DiscoveryLayer::Block => {
+        // Relay through block peers
+        let relays = topology.block_peers();
+    }
+    DiscoveryLayer::Neighborhood => {
+        // Multi-hop through neighborhood
+        let (layer, peers) = topology.discovery_context(&target);
+    }
+    DiscoveryLayer::Rendezvous => {
+        // Global rendezvous flooding required
+    }
+}
+```
+
+The discovery layer determines flow budget costs. Direct has minimal cost. Rendezvous has highest cost due to global propagation. This creates economic incentives to establish social relationships before communication.
+
 ## 7. Protocol Flow
 
 The rendezvous sequence uses the context between two authorities.

@@ -4,7 +4,7 @@
 //! Target: <200 lines (focused implementation).
 
 use super::info::{PeerInfo, ReliabilityLevel};
-use aura_core::{identifiers::DeviceId, RelationshipId};
+use aura_core::identifiers::{AuthorityId, ContextId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -13,8 +13,8 @@ use crate::PrivacyLevel;
 /// Simple peer selection with manifest privacy
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PrivacyAwareSelectionCriteria {
-    /// Required relationship context
-    pub relationship_context: Option<RelationshipId>,
+    /// Required context scope
+    pub context_id: Option<ContextId>,
 
     /// Required capabilities (will be blinded for privacy)
     pub required_capabilities: HashSet<String>,
@@ -29,7 +29,7 @@ pub struct PrivacyAwareSelectionCriteria {
     pub prefer_privacy_features: bool,
 
     /// Exclude specific peers
-    pub excluded_peers: HashSet<DeviceId>,
+    pub excluded_peers: HashSet<AuthorityId>,
 }
 
 /// Privacy-preserving peer selection result
@@ -62,7 +62,7 @@ impl PrivacyAwareSelectionCriteria {
     /// Create new selection criteria
     pub fn new() -> Self {
         Self {
-            relationship_context: None,
+            context_id: None,
             required_capabilities: HashSet::new(),
             min_reliability: ReliabilityLevel::Medium,
             max_peers: 5,
@@ -71,10 +71,10 @@ impl PrivacyAwareSelectionCriteria {
         }
     }
 
-    /// Create criteria for specific relationship
-    pub fn for_relationship(relationship_id: RelationshipId) -> Self {
+    /// Create criteria for specific context
+    pub fn for_context(context_id: ContextId) -> Self {
         Self {
-            relationship_context: Some(relationship_id),
+            context_id: Some(context_id),
             ..Self::new()
         }
     }
@@ -92,8 +92,8 @@ impl PrivacyAwareSelectionCriteria {
     }
 
     /// Exclude specific peer
-    pub fn exclude_peer(&mut self, device_id: DeviceId) -> &mut Self {
-        self.excluded_peers.insert(device_id);
+    pub fn exclude_peer(&mut self, authority_id: AuthorityId) -> &mut Self {
+        self.excluded_peers.insert(authority_id);
         self
     }
 
@@ -139,13 +139,13 @@ impl PrivacyAwareSelectionCriteria {
     /// Check if peer passes basic filters
     fn passes_basic_filters(&self, peer: &PeerInfo) -> bool {
         // Exclude excluded peers
-        if self.excluded_peers.contains(&peer.device_id) {
+        if self.excluded_peers.contains(&peer.authority_id) {
             return false;
         }
 
-        // Check relationship context
-        if let Some(relationship_id) = &self.relationship_context {
-            if !peer.is_available_in_relationship(relationship_id) {
+        // Check context scope
+        if let Some(context_id) = &self.context_id {
+            if !peer.is_available_in_context(context_id) {
                 return false;
             }
         }
@@ -178,9 +178,9 @@ impl PrivacyAwareSelectionCriteria {
             score += (capability_count as f64 * 0.05).min(0.2);
         }
 
-        // Relationship context bonus
-        if let Some(relationship_id) = &self.relationship_context {
-            if peer.relationship_contexts.contains(relationship_id) {
+        // Context scope bonus
+        if let Some(context_id) = &self.context_id {
+            if peer.context_ids.contains(context_id) {
                 score += 0.2;
             }
         }
@@ -203,9 +203,9 @@ impl PrivacyAwareSelectionCriteria {
         // Blinded reasons for privacy
         reasons.push("capability_match".to_string());
 
-        if let Some(_relationship_id) = &self.relationship_context {
-            if !peer.relationship_contexts.is_empty() {
-                reasons.push("relationship_available".to_string());
+        if let Some(_context_id) = &self.context_id {
+            if !peer.context_ids.is_empty() {
+                reasons.push("context_available".to_string());
             }
         }
 
@@ -255,11 +255,11 @@ impl PrivacyAwareSelectionCriteria {
 }
 
 impl SelectionResult {
-    /// Get selected device IDs
-    pub fn device_ids(&self) -> Vec<DeviceId> {
+    /// Get selected authority IDs
+    pub fn authority_ids(&self) -> Vec<AuthorityId> {
         self.selected_peers
             .iter()
-            .map(|sp| sp.peer_info.device_id)
+            .map(|sp| sp.peer_info.authority_id)
             .collect()
     }
 

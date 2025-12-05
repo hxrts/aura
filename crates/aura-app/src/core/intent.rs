@@ -268,6 +268,79 @@ pub enum Intent {
         storage_budget: u64,
     },
 
+    /// Set block topic
+    SetBlockTopic {
+        /// Block ID
+        block_id: ContextId,
+        /// Topic text
+        topic: String,
+    },
+
+    // =========================================================================
+    // Block Moderation Intents
+    // =========================================================================
+    /// Ban a user from a block
+    BanUser {
+        /// Block ID
+        block_id: ContextId,
+        /// Authority ID to ban
+        target_id: String,
+        /// Reason for ban
+        reason: String,
+    },
+
+    /// Unban a user from a block
+    UnbanUser {
+        /// Block ID
+        block_id: ContextId,
+        /// Authority ID to unban
+        target_id: String,
+    },
+
+    /// Mute a user in a block
+    MuteUser {
+        /// Block ID
+        block_id: ContextId,
+        /// Authority ID to mute
+        target_id: String,
+        /// Duration in seconds (None = permanent)
+        duration_secs: Option<u64>,
+    },
+
+    /// Unmute a user in a block
+    UnmuteUser {
+        /// Block ID
+        block_id: ContextId,
+        /// Authority ID to unmute
+        target_id: String,
+    },
+
+    /// Kick a user from a block
+    KickUser {
+        /// Block ID
+        block_id: ContextId,
+        /// Authority ID to kick
+        target_id: String,
+        /// Reason for kick
+        reason: String,
+    },
+
+    /// Pin a message in a block
+    PinMessage {
+        /// Block ID
+        block_id: ContextId,
+        /// Message ID to pin
+        message_id: String,
+    },
+
+    /// Unpin a message in a block
+    UnpinMessage {
+        /// Block ID
+        block_id: ContextId,
+        /// Message ID to unpin
+        message_id: String,
+    },
+
     // =========================================================================
     // Navigation Intents
     // =========================================================================
@@ -507,6 +580,14 @@ impl Intent {
             Self::SetBlockName { block_id, .. } => Some(*block_id),
             Self::UpdateBlockStorage { block_id, .. } => Some(*block_id),
             Self::InviteToBlock { block_id, .. } => Some(*block_id),
+            Self::SetBlockTopic { block_id, .. } => Some(*block_id),
+            Self::BanUser { block_id, .. } => Some(*block_id),
+            Self::UnbanUser { block_id, .. } => Some(*block_id),
+            Self::MuteUser { block_id, .. } => Some(*block_id),
+            Self::UnmuteUser { block_id, .. } => Some(*block_id),
+            Self::KickUser { block_id, .. } => Some(*block_id),
+            Self::PinMessage { block_id, .. } => Some(*block_id),
+            Self::UnpinMessage { block_id, .. } => Some(*block_id),
             _ => None,
         }
     }
@@ -540,6 +621,14 @@ impl Intent {
             Self::InviteToBlock { .. } => "invite to block",
             Self::SetBlockName { .. } => "set block name",
             Self::UpdateBlockStorage { .. } => "update block storage",
+            Self::SetBlockTopic { .. } => "set block topic",
+            Self::BanUser { .. } => "ban user",
+            Self::UnbanUser { .. } => "unban user",
+            Self::MuteUser { .. } => "mute user",
+            Self::UnmuteUser { .. } => "unmute user",
+            Self::KickUser { .. } => "kick user",
+            Self::PinMessage { .. } => "pin message",
+            Self::UnpinMessage { .. } => "unpin message",
             Self::NavigateTo { .. } => "navigate",
             Self::GoBack => "go back",
             // Admin/Maintenance
@@ -780,6 +869,74 @@ impl Intent {
                 format!(
                     "UpdateBlockStorage::block_id={}&storage_budget={}",
                     block_id, storage_budget
+                )
+            }
+            Self::SetBlockTopic { block_id, topic } => {
+                format!("SetBlockTopic::block_id={}&topic={}", block_id, topic)
+            }
+
+            // Block moderation intents
+            Self::BanUser {
+                block_id,
+                target_id,
+                reason,
+            } => {
+                format!(
+                    "BanUser::block_id={}&target_id={}&reason={}",
+                    block_id, target_id, reason
+                )
+            }
+            Self::UnbanUser {
+                block_id,
+                target_id,
+            } => {
+                format!("UnbanUser::block_id={}&target_id={}", block_id, target_id)
+            }
+            Self::MuteUser {
+                block_id,
+                target_id,
+                duration_secs,
+            } => {
+                let duration = duration_secs
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "permanent".to_string());
+                format!(
+                    "MuteUser::block_id={}&target_id={}&duration={}",
+                    block_id, target_id, duration
+                )
+            }
+            Self::UnmuteUser {
+                block_id,
+                target_id,
+            } => {
+                format!("UnmuteUser::block_id={}&target_id={}", block_id, target_id)
+            }
+            Self::KickUser {
+                block_id,
+                target_id,
+                reason,
+            } => {
+                format!(
+                    "KickUser::block_id={}&target_id={}&reason={}",
+                    block_id, target_id, reason
+                )
+            }
+            Self::PinMessage {
+                block_id,
+                message_id,
+            } => {
+                format!(
+                    "PinMessage::block_id={}&message_id={}",
+                    block_id, message_id
+                )
+            }
+            Self::UnpinMessage {
+                block_id,
+                message_id,
+            } => {
+                format!(
+                    "UnpinMessage::block_id={}&message_id={}",
+                    block_id, message_id
                 )
             }
 

@@ -161,6 +161,7 @@ The testing metric `metadata_leakage` measures information leakage in bits. For 
 
 ```rust
 use aura_core::effects::LeakageEffects;
+use aura_core::time::PhysicalTime;
 use aura_core::{AuthorityId, ContextId, ObserverClass, LeakageEvent};
 
 async fn record_message_send(
@@ -177,7 +178,10 @@ async fn record_message_send(
         leakage_amount: 1, // 1 message observed
         observer_class: ObserverClass::Neighbor,
         operation: "send_message".to_string(),
-        timestamp_ms: current_timestamp_ms(),
+        timestamp: PhysicalTime {
+            ts_ms: current_timestamp_ms(),
+            uncertainty: None,
+        },
     };
 
     leakage.record_leakage(event).await?;

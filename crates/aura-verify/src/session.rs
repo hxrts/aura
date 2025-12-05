@@ -2,8 +2,13 @@
 //!
 //! This module verifies session tickets that authorize scoped operations
 //! within a protocol session.
+//!
+//! **Authority Model**: Session tickets are issued by authorities (not devices).
+//! This aligns with the authority-centric identity model where authorities
+//! represent cryptographic actors that hide their internal device structure.
 
 use crate::{AuthenticationError, Result};
+use aura_core::identifiers::AuthorityId;
 use aura_core::{Ed25519Signature, Ed25519VerifyingKey};
 use uuid::Uuid;
 
@@ -11,7 +16,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SessionTicket {
     pub session_id: Uuid,
-    pub issuer_device_id: aura_core::identifiers::DeviceId,
+    /// Authority that issued this session ticket
+    pub issuer_authority: AuthorityId,
     pub issued_at: u64,  // Epoch timestamp
     pub expires_at: u64, // Epoch timestamp
     pub scope: SessionScope,
@@ -33,14 +39,14 @@ pub enum SessionScope {
 
 /// Verify that a session ticket is authentic and valid
 ///
-/// This function proves that a session ticket was issued by a trusted device
+/// This function proves that a session ticket was issued by a trusted authority
 /// and is still valid (not expired).
 ///
 /// # Arguments
 ///
 /// * `ticket` - The session ticket to verify
 /// * `ticket_signature` - Signature over the ticket
-/// * `issuer_public_key` - Public key of the device that issued the ticket
+/// * `issuer_public_key` - Public key of the authority that issued the ticket
 /// * `current_time` - Current timestamp for expiry checking
 ///
 /// # Returns
@@ -89,7 +95,7 @@ pub fn verify_session_ticket(
 
     tracing::debug!(
         session_id = %ticket.session_id,
-        issuer = %ticket.issuer_device_id,
+        issuer = %ticket.issuer_authority,
         "Session ticket verified successfully"
     );
 
@@ -179,7 +185,7 @@ mod tests {
     fn create_test_ticket() -> SessionTicket {
         SessionTicket {
             session_id: Uuid::from_bytes([1u8; 16]),
-            issuer_device_id: aura_core::identifiers::DeviceId::from_bytes([2u8; 32]),
+            issuer_authority: AuthorityId::new_from_entropy([2u8; 32]),
             issued_at: 1000,
             expires_at: 2000,
             scope: SessionScope::Dkd {

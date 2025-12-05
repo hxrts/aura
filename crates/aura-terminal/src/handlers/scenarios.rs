@@ -9,10 +9,10 @@ use std::time::Instant;
 use crate::handlers::HandlerContext;
 use crate::ScenarioAction;
 use anyhow::Result;
-use aura_agent::AgentConfig;
-use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
+// Import from aura-app which re-exports agent types
+use aura_app::AgentConfig;
+use aura_authenticate::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::{ConsoleEffects, StorageEffects};
-use aura_core::AccountId;
 use aura_recovery::guardian_setup::GuardianSetupCoordinator;
 use aura_recovery::types::{GuardianProfile, GuardianSet, RecoveryRequest};
 use aura_simulator::handlers::scenario::SimulationScenarioHandler;
@@ -972,23 +972,14 @@ async fn run_guardian_setup_choreography(
     _ctx: &HandlerContext<'_>,
     steps: &mut Vec<SimStep>,
 ) -> Result<(), anyhow::Error> {
-    let device_id = crate::ids::device_id("scenario:guardian-setup:device");
     let effect_system = Arc::new(aura_agent::AuraEffectSystem::testing(
         &AgentConfig::default(),
     )?);
     let coordinator = GuardianSetupCoordinator::new(effect_system);
 
     let guardians = GuardianSet::new(vec![
-        GuardianProfile::new(
-            crate::ids::guardian_id("guardian:alice"),
-            crate::ids::device_id("guardian:alice:device"),
-            "alice",
-        ),
-        GuardianProfile::new(
-            crate::ids::guardian_id("guardian:charlie"),
-            crate::ids::device_id("guardian:charlie:device"),
-            "charlie",
-        ),
+        GuardianProfile::with_label(crate::ids::authority_id("guardian:alice"), "alice"),
+        GuardianProfile::with_label(crate::ids::authority_id("guardian:charlie"), "charlie"),
     ]);
 
     let timestamp = 0;
@@ -1001,12 +992,11 @@ async fn run_guardian_setup_choreography(
     };
 
     let request = RecoveryRequest {
-        requesting_device: device_id,
-        account_id: AccountId::new_from_entropy(aura_core::hash::hash(b"scenario:guardian-setup")),
+        initiator_id: crate::ids::authority_id("scenario:guardian-setup:initiator"),
+        account_id: crate::ids::authority_id("scenario:guardian-setup:account"),
         context: recovery_context,
         threshold: 2,
         guardians,
-        auth_token: None,
     };
 
     let response = coordinator

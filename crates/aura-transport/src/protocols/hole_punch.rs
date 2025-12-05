@@ -5,7 +5,7 @@
 
 use crate::types::endpoint::EndpointAddress;
 use aura_core::hash::{hash as core_hash, hasher};
-use aura_core::identifiers::DeviceId;
+use aura_core::identifiers::AuthorityId;
 use aura_core::time::{OrderTime, TimeStamp};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -20,10 +20,10 @@ pub enum HolePunchMessage {
     CoordinationRequest {
         /// Session ID for this hole punch attempt
         session_id: Uuid,
-        /// Device initiating the hole punch
-        initiator: DeviceId,
-        /// Target device for hole punching
-        target: DeviceId,
+        /// Authority initiating the hole punch
+        initiator: AuthorityId,
+        /// Target authority for hole punching
+        target: AuthorityId,
         /// Relay server coordinates the process
         relay_server: EndpointAddress,
     },
@@ -32,10 +32,10 @@ pub enum HolePunchMessage {
     PunchPacket {
         /// Session ID matching coordination request
         session_id: Uuid,
-        /// Source device
-        source: DeviceId,
-        /// Target device
-        target: DeviceId,
+        /// Source authority
+        source: AuthorityId,
+        /// Target authority
+        target: AuthorityId,
         /// Sequence number for this punch attempt
         sequence: u32,
         /// Timestamp when packet was sent
@@ -46,10 +46,10 @@ pub enum HolePunchMessage {
     PunchAcknowledgment {
         /// Session ID being acknowledged
         session_id: Uuid,
-        /// Device sending acknowledgment
-        acknoweffect_api: DeviceId,
+        /// Authority sending acknowledgment
+        acknowledger: AuthorityId,
         /// Successfully reached peer
-        reached_peer: DeviceId,
+        reached_peer: AuthorityId,
         /// Local endpoint that succeeded
         local_endpoint: EndpointAddress,
         /// Remote endpoint that was reached
@@ -118,8 +118,8 @@ pub enum HolePunchInstruction {
 impl HolePunchMessage {
     /// Create new coordination request
     pub fn coordination_request(
-        initiator: DeviceId,
-        target: DeviceId,
+        initiator: AuthorityId,
+        target: AuthorityId,
         relay_server: EndpointAddress,
     ) -> Self {
         Self::coordination_request_with_id(
@@ -133,8 +133,8 @@ impl HolePunchMessage {
     /// Create coordination request with specific session ID
     pub fn coordination_request_with_id(
         session_id: Uuid,
-        initiator: DeviceId,
-        target: DeviceId,
+        initiator: AuthorityId,
+        target: AuthorityId,
         relay_server: EndpointAddress,
     ) -> Self {
         Self::CoordinationRequest {
@@ -146,7 +146,7 @@ impl HolePunchMessage {
     }
 
     /// Generate deterministic session ID
-    fn generate_session_id(initiator: DeviceId, target: DeviceId) -> Uuid {
+    fn generate_session_id(initiator: AuthorityId, target: AuthorityId) -> Uuid {
         let counter = HOLE_PUNCH_SESSION_COUNTER.fetch_add(1, Ordering::SeqCst);
         let mut h = hasher();
         h.update(initiator.0.as_bytes());
@@ -161,8 +161,8 @@ impl HolePunchMessage {
     /// Create punch packet
     pub fn punch_packet(
         session_id: Uuid,
-        source: DeviceId,
-        target: DeviceId,
+        source: AuthorityId,
+        target: AuthorityId,
         sequence: u32,
     ) -> Self {
         Self::punch_packet_at_time(session_id, source, target, sequence, {
@@ -177,8 +177,8 @@ impl HolePunchMessage {
     /// Create punch packet with specific timestamp
     pub fn punch_packet_at_time(
         session_id: Uuid,
-        source: DeviceId,
-        target: DeviceId,
+        source: AuthorityId,
+        target: AuthorityId,
         sequence: u32,
         timestamp: TimeStamp,
     ) -> Self {
@@ -194,14 +194,14 @@ impl HolePunchMessage {
     /// Create acknowledgment
     pub fn acknowledgment(
         session_id: Uuid,
-        acknoweffect_api: DeviceId,
-        reached_peer: DeviceId,
+        acknowledger: AuthorityId,
+        reached_peer: AuthorityId,
         local_endpoint: EndpointAddress,
         remote_endpoint: EndpointAddress,
     ) -> Self {
         Self::PunchAcknowledgment {
             session_id,
-            acknoweffect_api,
+            acknowledger,
             reached_peer,
             local_endpoint,
             remote_endpoint,

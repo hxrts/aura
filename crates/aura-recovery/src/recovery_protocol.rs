@@ -11,7 +11,7 @@ use aura_core::hash;
 use aura_core::identifiers::ContextId;
 use aura_core::relational::fact::RelationalFact;
 use aura_core::relational::{ConsensusProof, RecoveryGrant, RecoveryOp};
-use aura_core::time::TimeStamp;
+use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_core::Prestate;
 use aura_core::{AuraError, AuthorityId, Hash32, Result};
 use aura_journal::DomainFact;
@@ -332,7 +332,10 @@ impl RecoveryProtocolHandler {
             context_id,
             account_id: request.account_authority,
             request_hash,
-            initiated_at_ms: timestamp,
+            initiated_at: PhysicalTime {
+                ts_ms: timestamp,
+                uncertainty: None,
+            },
         };
         self.emit_fact(initiated_fact, time_effects, journal)
             .await?;
@@ -362,7 +365,10 @@ impl RecoveryProtocolHandler {
             context_id,
             guardian_id: approval.guardian_id,
             share_hash,
-            submitted_at_ms: timestamp,
+            submitted_at: PhysicalTime {
+                ts_ms: timestamp,
+                uncertainty: None,
+            },
         };
         self.emit_fact(share_fact, time_effects, journal).await?;
 
@@ -444,7 +450,10 @@ impl RecoveryProtocolHandler {
             context_id,
             account_id: self.protocol.account_authority,
             evidence_hash,
-            completed_at_ms: timestamp,
+            completed_at: PhysicalTime {
+                ts_ms: timestamp,
+                uncertainty: None,
+            },
         };
         self.emit_fact(completed_fact, time_effects, journal)
             .await?;

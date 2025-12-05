@@ -4,6 +4,7 @@
 //! snapshots, OTA, receipts, and epochs) function correctly when integrated with
 //! the aura-testkit testing framework and with each other.
 
+use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
 use aura_sync::protocols::{
     AntiEntropyConfig, AntiEntropyProtocol, EpochConfig, EpochRotationCoordinator,
@@ -17,6 +18,13 @@ fn device(seed: u8) -> DeviceId {
 
 // Test fixture: deterministic timestamp for reproducible tests
 const TEST_TIMESTAMP_MS: u64 = 1700000000000; // 2023-11-15 in milliseconds
+
+fn test_time(ts_ms: u64) -> PhysicalTime {
+    PhysicalTime {
+        ts_ms,
+        uncertainty: None,
+    }
+}
 
 // =============================================================================
 // Anti-Entropy Protocol Tests
@@ -301,7 +309,11 @@ fn test_epoch_rotation_initiation() {
     let participant2 = device(19);
     let context_id = aura_core::ContextId::new_from_entropy([0u8; 32]);
 
-    let result = coordinator.initiate_rotation(vec![participant1, participant2], context_id);
+    let result = coordinator.initiate_rotation(
+        vec![participant1, participant2],
+        context_id,
+        &test_time(TEST_TIMESTAMP_MS),
+    );
 
     assert!(result.is_ok());
     let rotation_id = result.unwrap();
@@ -322,7 +334,8 @@ fn test_epoch_rotation_with_insufficient_participants() {
     let participant = device(21);
     let context_id = aura_core::ContextId::new_from_entropy([1u8; 32]);
 
-    let result = coordinator.initiate_rotation(vec![participant], context_id);
+    let result =
+        coordinator.initiate_rotation(vec![participant], context_id, &test_time(TEST_TIMESTAMP_MS));
 
     assert!(result.is_err());
     assert!(result
@@ -343,7 +356,11 @@ fn test_epoch_confirmation_processing() {
     let context_id = aura_core::ContextId::new_from_entropy([2u8; 32]);
 
     let rotation_id = coordinator
-        .initiate_rotation(vec![participant1, participant2], context_id)
+        .initiate_rotation(
+            vec![participant1, participant2],
+            context_id,
+            &test_time(TEST_TIMESTAMP_MS),
+        )
         .unwrap();
 
     // Process confirmations
@@ -352,7 +369,7 @@ fn test_epoch_confirmation_processing() {
         participant_id: participant1,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
+        confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
     };
 
     let result = coordinator.process_confirmation(confirmation1);
@@ -364,7 +381,7 @@ fn test_epoch_confirmation_processing() {
         participant_id: participant2,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
+        confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
     };
 
     let result = coordinator.process_confirmation(confirmation2);
@@ -383,7 +400,11 @@ fn test_epoch_commit() {
     let context_id = aura_core::ContextId::new_from_entropy([3u8; 32]);
 
     let rotation_id = coordinator
-        .initiate_rotation(participants.clone(), context_id)
+        .initiate_rotation(
+            participants.clone(),
+            context_id,
+            &test_time(TEST_TIMESTAMP_MS),
+        )
         .unwrap();
 
     // Process both confirmations
@@ -393,7 +414,7 @@ fn test_epoch_commit() {
             participant_id: participant,
             current_epoch: 0,
             ready_for_epoch: 1,
-            confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
+            confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
         };
         let _ = coordinator.process_confirmation(confirmation);
     }
@@ -418,7 +439,11 @@ fn test_epoch_rotation_cleanup() {
         let context_id = aura_core::ContextId::new_from_entropy([4u8; 32]);
 
         let rotation_id = coordinator
-            .initiate_rotation(participants.clone(), context_id)
+            .initiate_rotation(
+                participants.clone(),
+                context_id,
+                &test_time(TEST_TIMESTAMP_MS),
+            )
             .unwrap();
 
         // Process confirmations
@@ -428,7 +453,7 @@ fn test_epoch_rotation_cleanup() {
                 participant_id: participant,
                 current_epoch: i,
                 ready_for_epoch: i + 1,
-                confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
+                confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
             };
             let _ = coordinator.process_confirmation(confirmation);
         }
@@ -499,7 +524,11 @@ fn test_multi_device_protocol_scenarios() {
     // Device 1 initiates rotation
     let context = aura_core::ContextId::new_from_entropy([5u8; 32]);
     let rotation_id = coord1
-        .initiate_rotation(vec![device2, device3], context)
+        .initiate_rotation(
+            vec![device2, device3],
+            context,
+            &test_time(TEST_TIMESTAMP_MS),
+        )
         .unwrap();
 
     // Devices 2 and 3 confirm
@@ -508,7 +537,7 @@ fn test_multi_device_protocol_scenarios() {
         participant_id: device2,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
+        confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
     };
 
     let conf3 = aura_sync::protocols::EpochConfirmation {
@@ -516,7 +545,7 @@ fn test_multi_device_protocol_scenarios() {
         participant_id: device3,
         current_epoch: 0,
         ready_for_epoch: 1,
-        confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
+        confirmation_timestamp: test_time(TEST_TIMESTAMP_MS),
     };
 
     // Coordinator processes confirmations

@@ -161,11 +161,11 @@ impl<S: StorageEffects> LeakageEffects for ProductionLeakageHandler<S> {
     async fn get_leakage_history(
         &self,
         context_id: ContextId,
-        since_timestamp: Option<u64>,
+        since_timestamp: Option<&aura_core::time::PhysicalTime>,
     ) -> Result<Vec<LeakageEvent>> {
         let mut events = self.load_events(context_id).await?;
         if let Some(since) = since_timestamp {
-            events.retain(|e| e.timestamp_ms >= since);
+            events.retain(|e| e.timestamp.ts_ms >= since.ts_ms);
         }
         Ok(events)
     }
@@ -294,15 +294,15 @@ mod tests {
         let context = ContextId::new_from_entropy([1u8; 32]);
 
         // Record a leakage event
-        let event = LeakageEvent {
-            source: AuthorityId::new_from_entropy([2u8; 32]),
-            destination: AuthorityId::new_from_entropy([3u8; 32]),
-            context_id: context,
-            leakage_amount: 100,
-            observer_class: ObserverClass::External,
-            operation: "test".to_string(),
-            timestamp_ms: 1000,
-        };
+        let event = LeakageEvent::with_timestamp_ms(
+            AuthorityId::new_from_entropy([2u8; 32]),
+            AuthorityId::new_from_entropy([3u8; 32]),
+            context,
+            100,
+            ObserverClass::External,
+            "test".to_string(),
+            1000,
+        );
 
         handler.record_leakage(event.clone()).await.unwrap();
 
@@ -321,15 +321,15 @@ mod tests {
 
         // Record multiple events
         for i in 0..5 {
-            let event = LeakageEvent {
-                source: AuthorityId::new_from_entropy([2u8; 32]),
-                destination: AuthorityId::new_from_entropy([3u8; 32]),
-                context_id: context,
-                leakage_amount: 100,
-                observer_class: ObserverClass::External,
-                operation: format!("test_{}", i),
-                timestamp_ms: i as u64 * 1000,
-            };
+            let event = LeakageEvent::with_timestamp_ms(
+                AuthorityId::new_from_entropy([2u8; 32]),
+                AuthorityId::new_from_entropy([3u8; 32]),
+                context,
+                100,
+                ObserverClass::External,
+                format!("test_{}", i),
+                i as u64 * 1000,
+            );
             handler.record_leakage(event).await.unwrap();
         }
 
@@ -345,15 +345,15 @@ mod tests {
         let context = ContextId::new_from_entropy([1u8; 32]);
 
         // Record initial leakage
-        let event = LeakageEvent {
-            source: AuthorityId::new_from_entropy([2u8; 32]),
-            destination: AuthorityId::new_from_entropy([3u8; 32]),
-            context_id: context,
-            leakage_amount: 100,
-            observer_class: ObserverClass::External,
-            operation: "test".to_string(),
-            timestamp_ms: 0,
-        };
+        let event = LeakageEvent::with_timestamp_ms(
+            AuthorityId::new_from_entropy([2u8; 32]),
+            AuthorityId::new_from_entropy([3u8; 32]),
+            context,
+            100,
+            ObserverClass::External,
+            "test".to_string(),
+            0,
+        );
         handler.record_leakage(event).await.unwrap();
 
         // Check budget - should allow 5000 more (limit is 10000, consumed is 100)
@@ -373,21 +373,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_leakage_history_filtering() {
+        use aura_core::time::PhysicalTime;
+
         let storage = Arc::new(TestStorage::new());
         let handler = ProductionLeakageHandler::with_storage(storage);
         let context = ContextId::new_from_entropy([1u8; 32]);
 
         // Record events at different timestamps
         for ts in [1000u64, 2000, 3000, 4000, 5000] {
-            let event = LeakageEvent {
-                source: AuthorityId::new_from_entropy([2u8; 32]),
-                destination: AuthorityId::new_from_entropy([3u8; 32]),
-                context_id: context,
-                leakage_amount: 100,
-                observer_class: ObserverClass::External,
-                operation: format!("test_{}", ts),
-                timestamp_ms: ts,
-            };
+            let event = LeakageEvent::with_timestamp_ms(
+                AuthorityId::new_from_entropy([2u8; 32]),
+                AuthorityId::new_from_entropy([3u8; 32]),
+                context,
+                100,
+                ObserverClass::External,
+                format!("test_{}", ts),
+                ts,
+            );
             handler.record_leakage(event).await.unwrap();
         }
 
@@ -396,8 +398,12 @@ mod tests {
         assert_eq!(all_history.len(), 5);
 
         // Get history since timestamp 3000
+        let since = PhysicalTime {
+            ts_ms: 3000,
+            uncertainty: None,
+        };
         let filtered = handler
-            .get_leakage_history(context, Some(3000))
+            .get_leakage_history(context, Some(&since))
             .await
             .unwrap();
         assert_eq!(filtered.len(), 3); // 3000, 4000, 5000

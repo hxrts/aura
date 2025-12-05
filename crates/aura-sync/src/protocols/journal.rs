@@ -42,6 +42,7 @@ use crate::core::{sync_session_error, SyncResult};
 use crate::infrastructure::RetryPolicy;
 use crate::protocols::anti_entropy::{AntiEntropyConfig, AntiEntropyProtocol, JournalDigest};
 use aura_core::effects::{JournalEffects, NetworkEffects, PhysicalTimeEffects};
+use aura_core::time::PhysicalTime;
 use aura_core::{AccountId, AttestedOp, DeviceId};
 use aura_protocol::guards::BiscuitGuardEvaluator;
 use aura_wot::BiscuitTokenManager;
@@ -52,6 +53,8 @@ use futures;
 // =============================================================================
 
 /// Synchronization state for a peer
+///
+/// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SyncState {
     /// Never synchronized with this peer
@@ -62,8 +65,8 @@ pub enum SyncState {
 
     /// Successfully synchronized
     Synced {
-        /// Last sync timestamp
-        last_sync: u64,
+        /// Last sync timestamp (unified time system)
+        last_sync: PhysicalTime,
 
         /// Operations synced in last round
         operations: usize,
@@ -74,9 +77,49 @@ pub enum SyncState {
         /// Error message
         error: String,
 
-        /// Failed timestamp
-        failed_at: u64,
+        /// Failed timestamp (unified time system)
+        failed_at: PhysicalTime,
     },
+}
+
+impl SyncState {
+    /// Get the last sync timestamp in milliseconds, if synced
+    pub fn last_sync_ms(&self) -> Option<u64> {
+        match self {
+            SyncState::Synced { last_sync, .. } => Some(last_sync.ts_ms),
+            _ => None,
+        }
+    }
+
+    /// Get the failed timestamp in milliseconds, if failed
+    pub fn failed_at_ms(&self) -> Option<u64> {
+        match self {
+            SyncState::Failed { failed_at, .. } => Some(failed_at.ts_ms),
+            _ => None,
+        }
+    }
+
+    /// Create a Synced state from milliseconds timestamp
+    pub fn synced_from_ms(timestamp_ms: u64, operations: usize) -> Self {
+        SyncState::Synced {
+            last_sync: PhysicalTime {
+                ts_ms: timestamp_ms,
+                uncertainty: None,
+            },
+            operations,
+        }
+    }
+
+    /// Create a Failed state from milliseconds timestamp
+    pub fn failed_from_ms(error: String, timestamp_ms: u64) -> Self {
+        SyncState::Failed {
+            error,
+            failed_at: PhysicalTime {
+                ts_ms: timestamp_ms,
+                uncertainty: None,
+            },
+        }
+    }
 }
 
 /// Journal synchronization message
@@ -265,8 +308,15 @@ impl JournalSyncProtocol {
                         operations_synced += ops_count;
                         peers_synced.push(peer);
 
-                        // Update peer state to synced
-                        let sync_time = start.elapsed().as_secs();
+                        // Update peer state to synced with current wall-clock time
+                        let sync_time =
+                            effects
+                                .physical_time()
+                                .await
+                                .unwrap_or_else(|_| PhysicalTime {
+                                    ts_ms: 0,
+                                    uncertainty: None,
+                                });
                         self.peer_states.insert(
                             peer,
                             SyncState::Synced {
@@ -284,8 +334,15 @@ impl JournalSyncProtocol {
                     Err(e) => {
                         peers_failed.push(peer);
 
-                        // Update peer state to failed
-                        let failed_time = start.elapsed().as_secs();
+                        // Update peer state to failed with current wall-clock time
+                        let failed_time =
+                            effects
+                                .physical_time()
+                                .await
+                                .unwrap_or_else(|_| PhysicalTime {
+                                    ts_ms: 0,
+                                    uncertainty: None,
+                                });
                         self.peer_states.insert(
                             peer,
                             SyncState::Failed {
@@ -446,6 +503,13 @@ pub struct JournalSyncStatistics {
 mod tests {
     use super::*;
 
+    fn test_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
     #[test]
     fn test_journal_sync_protocol_creation() {
         let config = JournalSyncConfig::default();
@@ -471,7 +535,7 @@ mod tests {
         protocol.update_peer_state(
             peer,
             SyncState::Synced {
-                last_sync: 100,
+                last_sync: test_time(100),
                 operations: 42,
             },
         );
@@ -493,7 +557,7 @@ mod tests {
         protocol.update_peer_state(
             peer2,
             SyncState::Synced {
-                last_sync: 100,
+                last_sync: test_time(100),
                 operations: 10,
             },
         );
@@ -501,7 +565,7 @@ mod tests {
             peer3,
             SyncState::Failed {
                 error: "timeout".to_string(),
-                failed_at: 200,
+                failed_at: test_time(200),
             },
         );
 

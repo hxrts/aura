@@ -1,12 +1,11 @@
 //! Privacy-Aware Peer Information Types
 //!
-//! Essential peer management with built-in capability blinding and relationship scoping.
+//! Essential peer management with built-in capability blinding and context scoping.
 //! Target: <180 lines (concise implementation).
 
 use aura_core::{
-    identifiers::DeviceId,
+    identifiers::{AuthorityId, ContextId},
     time::{PhysicalTime, TimeStamp},
-    RelationshipId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -16,20 +15,20 @@ use crate::PrivacyLevel;
 /// Essential peer information with built-in capability blinding
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PeerInfo {
-    /// Peer device identifier
-    pub device_id: DeviceId,
+    /// Peer authority identifier (cross-authority communication)
+    pub authority_id: AuthorityId,
 
     /// Blinded capability advertisement
     pub capabilities: BlindedPeerCapabilities,
 
-    /// Relationship-scoped metrics
+    /// Context-scoped metrics
     pub metrics: ScopedPeerMetrics,
 
     /// Last seen time (using Aura unified time system)
     pub last_seen: TimeStamp,
 
-    /// Available relationship contexts
-    pub relationship_contexts: HashSet<RelationshipId>,
+    /// Available context scopes
+    pub context_ids: HashSet<ContextId>,
 
     /// Privacy-preserving status information
     pub status: PeerStatus,
@@ -51,17 +50,17 @@ pub struct BlindedPeerCapabilities {
     last_updated: TimeStamp,
 }
 
-/// Core metrics with relationship scoping
+/// Core metrics with context scoping
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScopedPeerMetrics {
-    /// Per-relationship connection counts
-    connection_counts: HashMap<RelationshipId, u32>,
+    /// Per-context connection counts
+    connection_counts: HashMap<ContextId, u32>,
 
-    /// Per-relationship message counts
-    message_counts: HashMap<RelationshipId, u64>,
+    /// Per-context message counts
+    message_counts: HashMap<ContextId, u64>,
 
-    /// Per-relationship latency measurements (blinded)
-    latency_data: HashMap<RelationshipId, LatencyData>,
+    /// Per-context latency measurements (blinded)
+    latency_data: HashMap<ContextId, LatencyData>,
 
     /// Overall reliability score (privacy-preserving)
     pub reliability_score: f64,
@@ -109,9 +108,9 @@ pub enum ReliabilityLevel {
 
 impl PeerInfo {
     /// Create new peer info with minimal capabilities
-    pub fn new(device_id: DeviceId) -> Self {
+    pub fn new(authority_id: AuthorityId) -> Self {
         Self::new_with_timestamp(
-            device_id,
+            authority_id,
             TimeStamp::PhysicalClock(PhysicalTime {
                 ts_ms: 0,
                 uncertainty: None,
@@ -120,35 +119,34 @@ impl PeerInfo {
     }
 
     /// Create new peer info with specific timestamp
-    pub fn new_with_timestamp(device_id: DeviceId, current_time: TimeStamp) -> Self {
+    pub fn new_with_timestamp(authority_id: AuthorityId, current_time: TimeStamp) -> Self {
         Self {
-            device_id,
+            authority_id,
             capabilities: BlindedPeerCapabilities::new_with_timestamp(current_time.clone()),
             metrics: ScopedPeerMetrics::new(),
             last_seen: current_time,
-            relationship_contexts: HashSet::new(),
+            context_ids: HashSet::new(),
             status: PeerStatus::Unknown,
         }
     }
 
-    /// Add relationship context
-    pub fn add_relationship(&mut self, relationship_id: RelationshipId) {
-        self.relationship_contexts.insert(relationship_id.clone());
-        self.metrics.add_relationship_context(relationship_id);
+    /// Add context scope
+    pub fn add_context(&mut self, context_id: ContextId) {
+        self.context_ids.insert(context_id);
+        self.metrics.add_context(context_id);
     }
 
-    /// Check if peer is available in relationship context
-    pub fn is_available_in_relationship(&self, relationship_id: &RelationshipId) -> bool {
-        self.relationship_contexts.contains(relationship_id)
-            && matches!(self.status, PeerStatus::Online { .. })
+    /// Check if peer is available in context
+    pub fn is_available_in_context(&self, context_id: &ContextId) -> bool {
+        self.context_ids.contains(context_id) && matches!(self.status, PeerStatus::Online { .. })
     }
 
-    /// Get capabilities for relationship (privacy-preserving)
-    pub fn capabilities_for_relationship(
+    /// Get capabilities for context (privacy-preserving)
+    pub fn capabilities_for_context(
         &self,
-        relationship_id: &RelationshipId,
+        context_id: &ContextId,
     ) -> Option<&BlindedPeerCapabilities> {
-        if self.relationship_contexts.contains(relationship_id) {
+        if self.context_ids.contains(context_id) {
             Some(&self.capabilities)
         } else {
             None
@@ -249,12 +247,12 @@ impl ScopedPeerMetrics {
         }
     }
 
-    /// Add relationship context
-    pub fn add_relationship_context(&mut self, relationship_id: RelationshipId) {
-        self.connection_counts.insert(relationship_id.clone(), 0);
-        self.message_counts.insert(relationship_id.clone(), 0);
+    /// Add context
+    pub fn add_context(&mut self, context_id: ContextId) {
+        self.connection_counts.insert(context_id, 0);
+        self.message_counts.insert(context_id, 0);
         self.latency_data.insert(
-            relationship_id,
+            context_id,
             LatencyData {
                 avg_latency_ms: 0,
                 reliability: ReliabilityLevel::Unknown,
@@ -262,19 +260,16 @@ impl ScopedPeerMetrics {
         );
     }
 
-    /// Record connection for relationship
-    pub fn record_connection(&mut self, relationship_id: &RelationshipId) {
-        if let Some(count) = self.connection_counts.get_mut(relationship_id) {
+    /// Record connection for context
+    pub fn record_connection(&mut self, context_id: &ContextId) {
+        if let Some(count) = self.connection_counts.get_mut(context_id) {
             *count += 1;
         }
     }
 
-    /// Get connection count for relationship
-    pub fn connection_count(&self, relationship_id: &RelationshipId) -> u32 {
-        self.connection_counts
-            .get(relationship_id)
-            .copied()
-            .unwrap_or(0)
+    /// Get connection count for context
+    pub fn connection_count(&self, context_id: &ContextId) -> u32 {
+        self.connection_counts.get(context_id).copied().unwrap_or(0)
     }
 
     /// Update reliability score

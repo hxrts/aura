@@ -31,6 +31,7 @@
 //! ```
 
 use aura_core::identifiers::DeviceId;
+use aura_core::time::PhysicalTime;
 use aura_core::{AccountId, SessionId};
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -53,8 +54,8 @@ pub struct ExecutionContext {
     /// Operation type being performed
     pub operation_type: String,
 
-    /// Operation timestamp
-    pub timestamp: u64,
+    /// Operation timestamp (uses unified time system)
+    pub timestamp: PhysicalTime,
 
     /// Additional metadata
     pub metadata: HashMap<String, String>,
@@ -63,11 +64,30 @@ pub struct ExecutionContext {
 impl ExecutionContext {
     /// Create a new execution context
     pub fn new(device_id: DeviceId, operation_type: String) -> Self {
-        let timestamp = SystemTime::now()
+        let ts_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
+            .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
 
+        Self {
+            device_id,
+            account_id: None,
+            session_id: None,
+            operation_type,
+            timestamp: PhysicalTime {
+                ts_ms,
+                uncertainty: None,
+            },
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Create context with explicit timestamp (for deterministic testing)
+    pub fn with_timestamp(
+        device_id: DeviceId,
+        operation_type: String,
+        timestamp: PhysicalTime,
+    ) -> Self {
         Self {
             device_id,
             account_id: None,
@@ -78,16 +98,25 @@ impl ExecutionContext {
         }
     }
 
-    /// Create context with explicit timestamp (for deterministic testing)
-    pub fn with_timestamp(device_id: DeviceId, operation_type: String, timestamp: u64) -> Self {
-        Self {
+    /// Create context with explicit timestamp in milliseconds (backward compatibility)
+    pub fn with_timestamp_ms(
+        device_id: DeviceId,
+        operation_type: String,
+        timestamp_ms: u64,
+    ) -> Self {
+        Self::with_timestamp(
             device_id,
-            account_id: None,
-            session_id: None,
             operation_type,
-            timestamp,
-            metadata: HashMap::new(),
-        }
+            PhysicalTime {
+                ts_ms: timestamp_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
+    /// Get timestamp in milliseconds (backward compatibility)
+    pub fn timestamp_ms(&self) -> u64 {
+        self.timestamp.ts_ms
     }
 
     /// Set the account ID
@@ -126,7 +155,7 @@ impl ExecutionContext {
             account_id: self.account_id,
             session_id: self.session_id,
             operation_type,
-            timestamp: self.timestamp,
+            timestamp: self.timestamp.clone(),
             metadata: self.metadata.clone(),
         }
     }
@@ -159,9 +188,19 @@ impl StandardContextHandler {
         &self,
         device_id: DeviceId,
         operation_type: String,
-        timestamp: u64,
+        timestamp: PhysicalTime,
     ) -> ExecutionContext {
         ExecutionContext::with_timestamp(device_id, operation_type, timestamp)
+    }
+
+    /// Create context with explicit timestamp in milliseconds (backward compatibility)
+    pub fn create_execution_context_with_timestamp_ms(
+        &self,
+        device_id: DeviceId,
+        operation_type: String,
+        timestamp_ms: u64,
+    ) -> ExecutionContext {
+        ExecutionContext::with_timestamp_ms(device_id, operation_type, timestamp_ms)
     }
 
     /// Validate context for operation
@@ -225,7 +264,7 @@ mod tests {
         assert_eq!(context.operation_type, operation_type);
         assert!(context.account_id.is_none());
         assert!(context.session_id.is_none());
-        assert!(context.timestamp > 0);
+        assert!(context.timestamp_ms() > 0);
     }
 
     #[test]

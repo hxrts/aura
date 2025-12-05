@@ -5,6 +5,7 @@
 //! scattered patterns they replace. Tests validate API compatibility, performance,
 //! and behavioral equivalence during the refactoring process.
 
+use aura_core::time::PhysicalTime;
 use aura_core::{AuraError, DeviceId, SessionId};
 use aura_sync::core::{
     config::{RetryConfig, SyncConfig},
@@ -47,6 +48,14 @@ fn generate_test_uuid() -> Uuid {
         bytes[0..8].copy_from_slice(&val.to_le_bytes());
         Uuid::from_bytes(bytes)
     })
+}
+
+/// Create a test PhysicalTime from milliseconds
+fn test_time(ts_ms: u64) -> PhysicalTime {
+    PhysicalTime {
+        ts_ms,
+        uncertainty: None,
+    }
 }
 
 /// Test protocol state for session management tests
@@ -428,12 +437,12 @@ fn test_unified_session_management() {
     // Test session manager handles all sync session patterns
 
     let config = SessionConfig::default();
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, test_time(1000000));
 
     // Test session creation and activation
     let participants = vec![device(6), device(7)];
     let session_id = manager
-        .create_session(participants.clone(), 1000001)
+        .create_session(participants.clone(), &test_time(1000001))
         .unwrap();
 
     let initial_state = TestSyncProtocolState {
@@ -443,7 +452,7 @@ fn test_unified_session_management() {
     };
 
     manager
-        .activate_session(session_id, initial_state.clone(), 1000001)
+        .activate_session(session_id, initial_state.clone(), &test_time(1000001))
         .unwrap();
     assert_eq!(manager.count_active_sessions(), 1);
 
@@ -454,7 +463,7 @@ fn test_unified_session_management() {
     updated_state.bytes_transferred = 1024;
 
     manager
-        .update_session(session_id, updated_state, 1000002)
+        .update_session(session_id, updated_state, &test_time(1000002))
         .unwrap();
 
     // Test successful completion
@@ -462,7 +471,7 @@ fn test_unified_session_management() {
     metadata.insert(String::from("sync_type"), String::from("journal"));
 
     manager
-        .complete_session(session_id, 100, 2048, metadata, 1000003)
+        .complete_session(session_id, 100, 2048, metadata, &test_time(1000003))
         .unwrap();
 
     // Verify final state
@@ -485,16 +494,18 @@ fn test_session_failure_handling() {
     // Test session failure scenarios
 
     let config = SessionConfig::default();
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, test_time(1000000));
 
-    let session_id = manager.create_session(vec![device(8)], 1000001).unwrap();
+    let session_id = manager
+        .create_session(vec![device(8)], &test_time(1000001))
+        .unwrap();
     let state = TestSyncProtocolState {
         phase: String::from("test"),
         operations_pending: 50,
         bytes_transferred: 0,
     };
     manager
-        .activate_session(session_id, state, 1000001)
+        .activate_session(session_id, state, &test_time(1000001))
         .unwrap();
 
     // Test failure with partial results
@@ -510,7 +521,12 @@ fn test_session_failure_handling() {
     };
 
     manager
-        .fail_session(session_id, error, Some(partial_results), 1000002)
+        .fail_session(
+            session_id,
+            error,
+            Some(partial_results),
+            &test_time(1000002),
+        )
         .unwrap();
 
     // Verify failure handling
@@ -536,11 +552,11 @@ fn test_session_resource_limits() {
         max_participants: 3,
         ..SessionConfig::default()
     };
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, test_time(1000000));
 
     // Test participant limit
     let too_many_participants = vec![device(10); 5];
-    let result = manager.create_session(too_many_participants, 1000001);
+    let result = manager.create_session(too_many_participants, &test_time(1000001));
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), AuraError::Invalid { .. }));
 
@@ -551,15 +567,21 @@ fn test_session_resource_limits() {
         bytes_transferred: 0,
     };
 
-    let session1 = manager.create_session(vec![device(11)], 1000001).unwrap();
-    let session2 = manager.create_session(vec![device(12)], 1000002).unwrap();
-    manager
-        .activate_session(session1, state.clone(), 1000001)
+    let session1 = manager
+        .create_session(vec![device(11)], &test_time(1000001))
         .unwrap();
-    manager.activate_session(session2, state, 1000002).unwrap();
+    let session2 = manager
+        .create_session(vec![device(12)], &test_time(1000002))
+        .unwrap();
+    manager
+        .activate_session(session1, state.clone(), &test_time(1000001))
+        .unwrap();
+    manager
+        .activate_session(session2, state, &test_time(1000002))
+        .unwrap();
 
     // Third session should exceed limit
-    let result = manager.create_session(vec![device(13)], 1000003);
+    let result = manager.create_session(vec![device(13)], &test_time(1000003));
     assert!(result.is_err());
     assert!(matches!(result.unwrap_err(), AuraError::Internal { .. }));
 }
@@ -569,7 +591,7 @@ fn test_session_statistics() {
     // Test session statistics collection
 
     let config = SessionConfig::default();
-    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, 1000000);
+    let mut manager = SessionManager::<TestSyncProtocolState>::new(config, test_time(1000000));
 
     // Create various session outcomes
     let state = TestSyncProtocolState {
@@ -579,22 +601,26 @@ fn test_session_statistics() {
     };
 
     // Successful session
-    let session1 = manager.create_session(vec![device(14)], 1000001).unwrap();
-    manager
-        .activate_session(session1, state.clone(), 1000001)
+    let session1 = manager
+        .create_session(vec![device(14)], &test_time(1000001))
         .unwrap();
     manager
-        .complete_session(session1, 50, 1000, HashMap::new(), 1000002)
+        .activate_session(session1, state.clone(), &test_time(1000001))
+        .unwrap();
+    manager
+        .complete_session(session1, 50, 1000, HashMap::new(), &test_time(1000002))
         .unwrap();
 
     // Failed session
-    let session2 = manager.create_session(vec![device(15)], 1000002).unwrap();
+    let session2 = manager
+        .create_session(vec![device(15)], &test_time(1000002))
+        .unwrap();
     manager
-        .activate_session(session2, state.clone(), 1000002)
+        .activate_session(session2, state.clone(), &test_time(1000002))
         .unwrap();
     let error = SessionError::Timeout { duration_ms: 5000 };
     manager
-        .fail_session(session2, error, None, 1000003)
+        .fail_session(session2, error, None, &test_time(1000003))
         .unwrap();
 
     let stats = manager.get_statistics();
@@ -620,12 +646,12 @@ fn test_cross_module_integration() {
     let mut session_manager = SessionManager::<TestSyncProtocolState>::with_metrics(
         session_config,
         metrics.clone(),
-        1000000,
+        test_time(1000000),
     );
 
     // Perform a complete sync session workflow
     let session_id = session_manager
-        .create_session(vec![device(16)], 1000001)
+        .create_session(vec![device(16)], &test_time(1000001))
         .unwrap();
 
     let state = TestSyncProtocolState {
@@ -635,7 +661,7 @@ fn test_cross_module_integration() {
     };
 
     session_manager
-        .activate_session(session_id, state, 1000001)
+        .activate_session(session_id, state, &test_time(1000001))
         .unwrap();
 
     // Simulate session progress
@@ -646,12 +672,12 @@ fn test_cross_module_integration() {
     };
 
     session_manager
-        .update_session(session_id, updated_state, 1000002)
+        .update_session(session_id, updated_state, &test_time(1000002))
         .unwrap();
 
     // Complete session
     session_manager
-        .complete_session(session_id, 100, 2048, HashMap::new(), 1000003)
+        .complete_session(session_id, 100, 2048, HashMap::new(), &test_time(1000003))
         .unwrap();
 
     // Verify metrics integration
@@ -700,7 +726,7 @@ fn test_backwards_compatibility_surface() {
     // Basic session management
 
     let _session_manager =
-        SessionManager::<TestSyncProtocolState>::new(SessionConfig::default(), 1000000);
+        SessionManager::<TestSyncProtocolState>::new(SessionConfig::default(), test_time(1000000));
 
     // Basic message patterns
     let _session_msg = SessionMessage::new(SessionId::new(), "test");

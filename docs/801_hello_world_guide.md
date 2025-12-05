@@ -29,6 +29,7 @@ Create a simple ping-pong choreography. This protocol demonstrates basic message
 ```rust
 use aura_macros::choreography;
 use aura_core::effects::{ConsoleEffects, NetworkEffects, TimeEffects};
+use aura_core::time::PhysicalTime;
 use serde::{Serialize, Deserialize};
 
 /// Sealed supertrait for ping-pong effects
@@ -38,13 +39,13 @@ impl<T> PingPongEffects for T where T: ConsoleEffects + NetworkEffects + TimeEff
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Ping {
     pub message: String,
-    pub timestamp: u64,
+    pub timestamp: PhysicalTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Pong {
     pub response: String,
-    pub timestamp: u64,
+    pub timestamp: PhysicalTime,
 }
 
 choreography! {

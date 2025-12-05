@@ -235,6 +235,7 @@ where
                 // Use a deterministic, non-nil surrogate ContextId derived from the interpreter
                 // authority to keep accounting reproducible. When the interpreter is wired into
                 // the transport pipeline, callers provide the real relational ContextId here.
+                let timestamp = self.time.physical_time().await?;
                 let event = LeakageEvent {
                     source: self.authority_id,
                     destination: self.authority_id, // Self-leakage for deterministic accounting
@@ -247,7 +248,7 @@ where
                     leakage_amount: bits as u64,
                     observer_class: ObserverClass::External, // Conservative default
                     operation: "guard_evaluation".to_string(),
-                    timestamp_ms: self.time.physical_time().await?.ts_ms,
+                    timestamp,
                 };
 
                 self.leakage.record_leakage(event).await.map_err(|e| {
@@ -469,7 +470,7 @@ mod tests {
         async fn get_leakage_history(
             &self,
             _context_id: aura_core::identifiers::ContextId,
-            _since_timestamp: Option<u64>,
+            _since_timestamp: Option<&aura_core::time::PhysicalTime>,
         ) -> Result<Vec<LeakageEvent>> {
             Ok(vec![])
         }

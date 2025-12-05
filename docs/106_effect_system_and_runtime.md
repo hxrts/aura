@@ -390,6 +390,112 @@ The registry is integrated at the effect system level, not the trait level. This
 
 Protocol-level facts (Guardian, Recovery, Consensus, AMP) use the built-in reduction pipeline in `aura-journal/src/reduction.rs`. They do not require registry registration.
 
-## 12. Summary
+## 12. AppCore: Unified Frontend Interface
 
-The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems as services accessible through `AuraAgent`. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior.
+The `AppCore` in `aura-app` provides a unified interface for all frontend platforms. It wraps the `AuraAgent` and provides a clean API that hides the complexity of the effect system from UI code.
+
+### 12.1 Architecture
+
+AppCore sits between frontends (TUI, CLI, iOS, Android, Web) and the agent runtime:
+
+```
+┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
+│     TUI     │  │     CLI     │  │     iOS     │  │     Web     │
+└──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘
+       │                │                │                │
+       └────────────────┴────────────────┴────────────────┘
+                               │
+                               ↓
+                   ┌───────────────────────┐
+                   │       AppCore         │  ← aura-app (ONLY frontend interface)
+                   │                       │
+                   │  • ViewState signals  │
+                   │  • Intent dispatch    │
+                   │  • Service operations │
+                   └───────────┬───────────┘
+                               │
+                               ↓ (internal, hidden from frontends)
+                   ┌───────────────────────┐
+                   │      AuraAgent        │  ← aura-agent (runtime)
+                   │                       │
+                   │  • Effect system      │
+                   │  • Service handlers   │
+                   └───────────────────────┘
+```
+
+Frontends import only from `aura-app`, never from `aura-agent` directly. This maintains proper layer boundaries.
+
+### 12.2 Construction Modes
+
+AppCore supports two construction modes for different use cases:
+
+```rust
+// Demo/Offline mode - local state only, no network
+let app = AppCore::new(config)?;
+
+// Production mode - with agent for full functionality
+let agent = AgentBuilder::new()
+    .with_config(agent_config)
+    .with_authority(authority_id)
+    .build_production()
+    .await?;
+let app = AppCore::with_agent(config, agent)?;
+```
+
+Demo mode enables offline development and testing. Production mode provides full effect system capabilities.
+
+### 12.3 Push-Based Reactive Flow
+
+All state changes flow through the reactive pipeline:
+
+```
+Local Intent ───┐
+                │
+Service Result ─┼──► Fact ──► Journal ──► Reduce ──► ViewState
+                │                                      │
+Remote Sync ────┘                                      ↓
+                                               Signal<T> ──► UI
+                                               (push, no poll)
+```
+
+Services emit facts, they never directly mutate ViewState. UI subscribes to signals using `signal.for_each()`. This preserves push semantics and avoids polling.
+
+### 12.4 Accessing the Agent
+
+When AppCore has an agent, it provides access to the full effect system:
+
+```rust
+// Check if agent is available
+if app.has_agent() {
+    // Get agent reference
+    let agent = app.agent().unwrap();
+
+    // Access effect system (requires async lock)
+    let effects_arc = agent.runtime().effects();
+    let effects = effects_arc.read().await;
+
+    // Use effects
+    let time = effects.physical_time().await?;
+}
+```
+
+The effect system uses `Arc<RwLock<AuraEffectSystem>>` to safely share state across async tasks.
+
+### 12.5 Re-exports
+
+`aura-app` re-exports types from `aura-agent` so frontends don't need direct dependencies:
+
+```rust
+// Agent types
+pub use aura_agent::{AgentBuilder, AgentConfig, AuraAgent, AuraEffectSystem, EffectContext};
+
+// Service types
+pub use aura_agent::{SyncManagerConfig, SyncServiceManager, ...};
+
+// Reactive types
+pub use aura_agent::reactive::{Dynamic, FactSource, ReactiveScheduler, ...};
+```
+
+## 13. Summary
+
+The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems as services accessible through `AuraAgent`. `AppCore` wraps the agent to provide a unified, platform-agnostic interface for all frontends. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior.

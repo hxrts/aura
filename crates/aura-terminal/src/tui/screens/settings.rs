@@ -4,6 +4,7 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::tui::components::KeyHintsBar;
 use crate::tui::theme::{Spacing, Theme};
@@ -45,8 +46,9 @@ pub fn SectionList(props: &SectionListProps) -> impl Into<AnyElement<'static>> {
                     let bg = if is_selected { Theme::BG_SELECTED } else { Theme::BG_DARK };
                     let color = if is_selected { Theme::PRIMARY } else { Theme::TEXT };
                     let title = section.title().to_string();
+                    let key = title.clone();
                     element! {
-                        View(background_color: bg, padding_left: Spacing::XS) {
+                        View(key: key, background_color: bg, padding_left: Spacing::XS) {
                             Text(content: title, color: color)
                         }
                     }
@@ -216,7 +218,12 @@ pub fn DetailPanel(props: &DetailPanelProps) -> impl Into<AnyElement<'static>> {
             View(padding_left: Spacing::PANEL_PADDING) {
                 Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
             }
-            View(flex_direction: FlexDirection::Column, padding: Spacing::PANEL_PADDING) {
+            View(
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                padding: Spacing::PANEL_PADDING,
+                overflow: Overflow::Scroll,
+            ) {
                 #(lines.iter().map(|(text, color)| {
                     let t = text.clone();
                     let c = *color;
@@ -275,6 +282,10 @@ pub fn SettingsScreen(
     // Clone callback for event handler
     let on_update_mfa = props.on_update_mfa.clone();
 
+    // Throttle for navigation keys - persists across renders using use_ref
+    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
+    let throttle_duration = Duration::from_millis(150);
+
     hooks.use_terminal_events({
         let mut section = section.clone();
         let mut detail_focused = detail_focused.clone();
@@ -284,23 +295,31 @@ pub fn SettingsScreen(
         move |event| match event {
             TerminalEvent::Key(KeyEvent { code, .. }) => match code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    if !detail_focused.get() {
-                        section.set(section.get().prev());
-                    } else if section.get() == SettingsSection::Devices && device_count > 0 {
-                        let idx = device_index.get();
-                        if idx > 0 {
-                            device_index.set(idx - 1);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        if !detail_focused.get() {
+                            section.set(section.get().prev());
+                        } else if section.get() == SettingsSection::Devices && device_count > 0 {
+                            let idx = device_index.get();
+                            if idx > 0 {
+                                device_index.set(idx - 1);
+                            }
                         }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    if !detail_focused.get() {
-                        section.set(section.get().next());
-                    } else if section.get() == SettingsSection::Devices && device_count > 0 {
-                        let idx = device_index.get();
-                        if idx + 1 < device_count {
-                            device_index.set(idx + 1);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        if !detail_focused.get() {
+                            section.set(section.get().next());
+                        } else if section.get() == SettingsSection::Devices && device_count > 0 {
+                            let idx = device_index.get();
+                            if idx + 1 < device_count {
+                                device_index.set(idx + 1);
+                            }
                         }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 KeyCode::Tab => {
@@ -328,6 +347,16 @@ pub fn SettingsScreen(
             width: 100pct,
             height: 100pct,
         ) {
+            // Header
+            View(
+                padding: 1,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
+            ) {
+                Text(content: "Settings", weight: Weight::Bold, color: Theme::PRIMARY)
+            }
+
             // Main content: sidebar + detail
             View(
                 flex_direction: FlexDirection::Row,

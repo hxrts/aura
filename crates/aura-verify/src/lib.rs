@@ -12,29 +12,39 @@
 //! - YES Device lifecycle management (active, suspended, revoked)
 //! - YES Session management and validation
 //! - YES Pure domain logic for authentication checks
+//! - YES Fact-based device lifecycle state changes
 //! - NO cryptographic signing/verification operations (use CryptoEffects from aura-effects)
 //! - NO handler composition (that's aura-composition)
 //! - NO multi-party protocol logic (that's aura-protocol)
+//!
+//! # Authority Model
+//!
+//! Protocol participants and session issuers are identified by `AuthorityId` rather than
+//! device-level identifiers. This aligns with the authority-centric identity model where
+//! authorities hide their internal device structure from external parties.
 //!
 //! # Core Modules
 //!
 //! - **Cryptographic Verification**: Signature verification (device, guardian, threshold)
 //! - **Device Registry**: Device lifecycle management (active, suspended, revoked)
 //! - **Session Management**: Session ticket validation
+//! - **Facts**: Pure fact types for device lifecycle state changes
 //!
 //! # Core Types
 //!
-//! - **IdentityProof**: WHO signed something (Device, Guardian, or Threshold)
+//! - **IdentityProof**: WHO signed something (Device, Guardian, Authority, or Threshold)
 //! - **KeyMaterial**: Public keys for verification (device, guardian, group)
 //! - **VerifiedIdentity**: Successful verification result with proof and message hash
 //! - **IdentityVerifier**: Device registry and lifecycle management
 //! - **DeviceInfo**: Device registration with status tracking
+//! - **VerifyFact**: Fact types for device lifecycle events
 //! - **AuthenticationError**: Signature validation failures
 
 #![allow(missing_docs)]
 
 pub mod device;
 pub mod event_validation;
+pub mod facts;
 pub mod guardian;
 pub mod messages;
 pub mod registry;
@@ -67,6 +77,11 @@ pub use aura_core::relationships::*;
 
 // Re-export registry types (from merged aura-identity)
 pub use registry::{DeviceInfo, DeviceStatus, IdentityVerifier, VerificationResult};
+
+// Re-export fact types
+pub use facts::{
+    VerificationType, VerifyFact, VerifyFactDelta, VerifyFactReducer, VERIFY_FACT_TYPE_ID,
+};
 
 // Re-export crypto message types (now consolidated in messages.rs)
 pub use messages::{
@@ -108,6 +123,10 @@ pub type Result<T> = std::result::Result<T, AuthenticationError>;
 ///
 /// This provides access to public keys needed for signature verification.
 /// No policies or authorization data - pure cryptographic material only.
+///
+/// **Authority Model Note**: Device keys are indexed by `DeviceId` for internal
+/// verification purposes, but cross-authority protocol messages should use
+/// `AuthorityId` as the participant identifier.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct KeyMaterial {
     /// Device public keys indexed by DeviceId
@@ -202,9 +221,16 @@ impl Default for KeyMaterial {
 }
 
 /// Pure identity proof that proves WHO signed something
+///
+/// **Migration Note**: The `Device` variant is maintained for backward compatibility
+/// with existing device-level verification. For cross-authority protocol messages,
+/// prefer using `Authority` which aligns with the authority-centric identity model.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum IdentityProof {
     /// Single device identity proof
+    ///
+    /// **Note**: This variant is primarily for internal device verification.
+    /// For cross-authority protocol messages, consider using `Authority` instead.
     Device {
         device_id: aura_core::identifiers::DeviceId,
         signature: Ed25519Signature,
@@ -215,6 +241,9 @@ pub enum IdentityProof {
         signature: Ed25519Signature,
     },
     /// Authority identity proof (for authority-level authentication)
+    ///
+    /// **Preferred**: Use this variant for cross-authority communication
+    /// where the internal device structure should be hidden.
     Authority {
         authority_id: aura_core::AuthorityId,
         signature: Ed25519Signature,

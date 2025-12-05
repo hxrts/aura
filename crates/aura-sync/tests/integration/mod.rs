@@ -22,12 +22,21 @@ pub mod ota_coordination;
 // Test utilities and helpers shared across integration tests
 pub mod test_utils;
 
+use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
 use aura_sync::core::{SessionManager, SyncConfig};
 use aura_testkit::simulation::{
     choreography::{test_device_trio, ChoreographyTestHarness},
     network::NetworkSimulator,
 };
+
+/// Create a test PhysicalTime from milliseconds
+pub fn test_time(ts_ms: u64) -> PhysicalTime {
+    PhysicalTime {
+        ts_ms,
+        uncertainty: None,
+    }
+}
 
 /// Common configuration for integration tests
 pub fn test_sync_config() -> SyncConfig {
@@ -45,7 +54,7 @@ pub async fn setup_test_trio() -> (ChoreographyTestHarness, NetworkSimulator) {
 pub fn test_session_manager() -> SessionManager<()> {
     let config = aura_sync::core::session::SessionConfig::default();
     // Use deterministic timestamp for reproducible tests
-    let now = 1700000000u64; // 2023-11-15 in seconds
+    let now = test_time(1700000000000); // 2023-11-15 in milliseconds
     SessionManager::new(config, now)
 }
 

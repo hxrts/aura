@@ -3,6 +3,7 @@
 //! Tests for journal sync protocol with divergent states, conflict resolution,
 //! and CRDT-based reconciliation scenarios.
 
+use super::test_time;
 use super::test_utils::*;
 use aura_core::{AuraError, AuraResult, RetryPolicy};
 use aura_sync::protocols::{JournalSyncConfig, JournalSyncProtocol, SyncState};
@@ -265,7 +266,7 @@ async fn test_sync_state_transitions() -> AuraResult<()> {
             SyncState::Idle,
             SyncState::Syncing,
             SyncState::Synced {
-                last_sync: 100,
+                last_sync: test_time(100),
                 operations: 5,
             },
         ];

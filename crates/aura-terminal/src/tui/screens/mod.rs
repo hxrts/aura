@@ -17,7 +17,7 @@ pub use app::{run_app, run_app_with_context, IoApp};
 pub use block::{
     run_block_screen, BlockInviteCallback, BlockNavCallback, BlockScreen, BlockSendCallback,
 };
-pub use chat::{run_chat_screen, ChatFocus, ChatScreen, SendCallback};
+pub use chat::{run_chat_screen, ChannelSelectCallback, ChatFocus, ChatScreen, SendCallback};
 pub use contacts::{
     run_contacts_screen, ContactsScreen, EditPetnameCallback, ToggleGuardianCallback,
 };

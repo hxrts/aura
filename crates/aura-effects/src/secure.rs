@@ -160,13 +160,13 @@ impl SecureStorageEffects for RealSecureStorageHandler {
         &self,
         location: &SecureStorageLocation,
         caps: &[aura_core::effects::SecureStorageCapability],
-        expires_at_ms: u64,
+        expires_at: &aura_core::time::PhysicalTime,
     ) -> Result<Vec<u8>, SecureStorageError> {
         self.require_capability(caps, SecureStorageCapability::Read)?;
         let token = format!(
             "{}:{}:{}",
             location.full_path(),
-            expires_at_ms,
+            expires_at.ts_ms,
             self.platform_config
         );
         Ok(token.into_bytes())

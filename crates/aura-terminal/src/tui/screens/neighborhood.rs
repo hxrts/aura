@@ -10,6 +10,7 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::tui::components::KeyHintsBar;
 use crate::tui::hooks::AppCoreContext;
@@ -89,11 +90,15 @@ pub struct BlockGridProps {
     pub selected_index: usize,
 }
 
-/// Grid of blocks in the neighborhood
+/// Grid of blocks in the neighborhood (2x2 layout)
 #[component]
 pub fn BlockGrid(props: &BlockGridProps) -> impl Into<AnyElement<'static>> {
     let blocks = props.blocks.clone();
     let selected = props.selected_index;
+
+    // Split blocks into rows of 2 for 2x2 grid
+    let row1: Vec<_> = blocks.iter().take(2).cloned().collect();
+    let row2: Vec<_> = blocks.iter().skip(2).take(2).cloned().collect();
 
     element! {
         View(
@@ -106,10 +111,11 @@ pub fn BlockGrid(props: &BlockGridProps) -> impl Into<AnyElement<'static>> {
                 Text(content: "Blocks", weight: Weight::Bold, color: Theme::PRIMARY)
             }
             View(
-                flex_direction: FlexDirection::Row,
-                flex_wrap: FlexWrap::Wrap,
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
                 gap: 1,
                 padding: 1,
+                overflow: Overflow::Scroll,
             ) {
                 #(if blocks.is_empty() {
                     vec![element! {
@@ -118,14 +124,38 @@ pub fn BlockGrid(props: &BlockGridProps) -> impl Into<AnyElement<'static>> {
                         }
                     }]
                 } else {
-                    blocks.iter().enumerate().map(|(idx, block)| {
-                        let is_selected = idx == selected;
-                        element! {
-                            View {
-                                BlockCard(block: block.clone(), is_selected: is_selected)
-                            }
+                    let mut rows = Vec::new();
+                    // Row 1
+                    rows.push(element! {
+                        View(flex_direction: FlexDirection::Row, gap: 1, key: "row1") {
+                            #(row1.iter().enumerate().map(|(idx, block)| {
+                                let is_selected = idx == selected;
+                                let id = block.id.clone();
+                                element! {
+                                    View(key: id, width: 50pct) {
+                                        BlockCard(block: block.clone(), is_selected: is_selected)
+                                    }
+                                }
+                            }))
                         }
-                    }).collect()
+                    });
+                    // Row 2
+                    if !row2.is_empty() {
+                        rows.push(element! {
+                            View(flex_direction: FlexDirection::Row, gap: 1, key: "row2") {
+                                #(row2.iter().enumerate().map(|(idx, block)| {
+                                    let is_selected = (idx + 2) == selected;
+                                    let id = block.id.clone();
+                                    element! {
+                                        View(key: id, width: 50pct) {
+                                            BlockCard(block: block.clone(), is_selected: is_selected)
+                                        }
+                                    }
+                                }))
+                            }
+                        });
+                    }
+                    rows
                 })
             }
         }
@@ -300,6 +330,10 @@ pub fn NeighborhoodScreen(
     let on_go_home = props.on_go_home.clone();
     let on_back_to_street = props.on_back_to_street.clone();
 
+    // Throttle for navigation keys - persists across renders using use_ref
+    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
+    let throttle_duration = Duration::from_millis(150);
+
     hooks.use_terminal_events({
         let mut selected = selected.clone();
         let blocks_for_handler = blocks.clone();
@@ -308,29 +342,45 @@ pub fn NeighborhoodScreen(
             TerminalEvent::Key(KeyEvent { code, .. }) => match code {
                 // Navigation - arrow keys and vim j/k/l (not h, as h is used for "go home")
                 KeyCode::Left => {
-                    let current = selected.get();
-                    if current > 0 {
-                        selected.set(current - 1);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        let current = selected.get();
+                        if current > 0 {
+                            selected.set(current - 1);
+                        }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 KeyCode::Right | KeyCode::Char('l') => {
-                    let current = selected.get();
-                    if current + 1 < count {
-                        selected.set(current + 1);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        let current = selected.get();
+                        if current + 1 < count {
+                            selected.set(current + 1);
+                        }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    let current = selected.get();
-                    // Move up a "row" (assume 3 per row)
-                    if current >= 3 {
-                        selected.set(current - 3);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        let current = selected.get();
+                        // Move up a row (2 blocks per row in 2x2 grid)
+                        if current >= 2 {
+                            selected.set(current - 2);
+                        }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    let current = selected.get();
-                    // Move down a "row"
-                    if current + 3 < count {
-                        selected.set(current + 3);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        let current = selected.get();
+                        // Move down a row (2 blocks per row in 2x2 grid)
+                        if current + 2 < count {
+                            selected.set(current + 2);
+                        }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 // Enter block - navigate into the selected block

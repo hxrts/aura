@@ -10,6 +10,7 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::tui::components::{EmptyState, KeyHintsBar};
 use crate::tui::hooks::AppCoreContext;
@@ -149,8 +150,9 @@ pub fn InvitationList(props: &InvitationListProps) -> impl Into<AnyElement<'stat
                 } else {
                     invitations.iter().enumerate().map(|(idx, inv)| {
                         let is_selected = idx == selected;
+                        let id = inv.id.clone();
                         element! {
-                            View { InvitationItem(invitation: inv.clone(), is_selected: is_selected) }
+                            View(key: id) { InvitationItem(invitation: inv.clone(), is_selected: is_selected) }
                         }
                     }).collect::<Vec<_>>()
                 })
@@ -164,16 +166,20 @@ pub fn InvitationList(props: &InvitationListProps) -> impl Into<AnyElement<'stat
 pub struct InvitationDetailProps {
     pub invitation: Option<Invitation>,
     pub focused: bool,
+    pub on_accept: Option<InvitationCallback>,
+    pub on_decline: Option<InvitationCallback>,
 }
 
 /// Detail panel for selected invitation
 #[component]
-pub fn InvitationDetail(props: &InvitationDetailProps) -> impl Into<AnyElement<'static>> {
+pub fn InvitationDetail(props: &InvitationDetailProps) -> impl Into<AnyElement<'static>> + '_ {
     let border_color = if props.focused {
         Theme::BORDER_FOCUS
     } else {
         Theme::BORDER
     };
+    let on_accept = props.on_accept.clone();
+    let on_decline = props.on_decline.clone();
 
     element! {
         View(
@@ -191,78 +197,42 @@ pub fn InvitationDetail(props: &InvitationDetailProps) -> impl Into<AnyElement<'
                 padding: Spacing::PANEL_PADDING,
             ) {
                 #(if let Some(inv) = &props.invitation {
-                    let type_label = inv.invitation_type.label().to_string();
-                    let direction_label = format!("{}: {}", inv.direction.label(), inv.other_party_name);
-                    let status_label = format!("Status: {}", inv.status.label());
-                    let created = format!("Created: {}", format_timestamp(inv.created_at));
-                    let message_text = inv.message.clone().unwrap_or_default();
-                    let has_message = inv.message.is_some();
-                    let expires_text = inv.expires_at
-                        .map(|exp| format!("Expires: {}", format_timestamp(exp)))
-                        .unwrap_or_default();
-                    let has_expires = inv.expires_at.is_some();
+                    let mut nodes: Vec<AnyElement<'static>> = vec![
+                        element! { Text(content: format!("Type: {}", inv.invitation_type.label()), color: Theme::TEXT) }.into_any(),
+                        element! { Text(content: format!("Direction: {}", inv.direction.label()), color: Theme::TEXT) }.into_any(),
+                        element! { Text(content: format!("Status: {}", inv.status.label()), color: Theme::TEXT) }.into_any(),
+                        element! { Text(content: format!("Other Party: {}", inv.other_party_name), color: Theme::TEXT) }.into_any(),
+                        element! { Text(content: format!("Created: {}", format_timestamp(inv.created_at)), color: Theme::TEXT_MUTED) }.into_any(),
+                    ];
 
-                    let status_color = match inv.status {
-                        InvitationStatus::Pending => Theme::WARNING,
-                        InvitationStatus::Accepted => Theme::SUCCESS,
-                        InvitationStatus::Declined => Theme::ERROR,
-                        InvitationStatus::Expired => Theme::TEXT_MUTED,
-                        InvitationStatus::Cancelled => Theme::TEXT_MUTED,
-                    };
-
-                    vec![
-                        element! {
-                            View(flex_direction: FlexDirection::Row) {
-                                Text(content: "Type: ", color: Theme::TEXT_MUTED)
-                                Text(content: type_label, color: Theme::TEXT)
-                            }
-                        },
-                        element! {
-                            View(flex_direction: FlexDirection::Row) {
-                                Text(content: direction_label, color: Theme::TEXT)
-                            }
-                        },
-                        element! {
-                            View(flex_direction: FlexDirection::Row) {
-                                Text(content: status_label, color: status_color)
-                            }
-                        },
-                        element! {
-                            View {}
-                        },
-                        element! {
-                            View(flex_direction: FlexDirection::Column) {
-                                #(if has_message {
-                                    vec![
-                                        element! { Text(content: "Message:", color: Theme::TEXT_MUTED) },
-                                        element! { Text(content: message_text.clone(), color: Theme::TEXT) },
-                                    ]
-                                } else {
-                                    vec![]
-                                })
-                            }
-                        },
-                        element! {
-                            View {
-                                Text(content: created, color: Theme::TEXT_MUTED)
-                            }
-                        },
-                        element! {
-                            View {
-                                #(if has_expires {
-                                    vec![element! { Text(content: expires_text.clone(), color: Theme::TEXT_MUTED) }]
-                                } else {
-                                    vec![]
-                                })
-                            }
-                        },
-                    ]
-                } else {
-                    vec![element! {
-                        View {
-                            Text(content: "Select an invitation to view details", color: Theme::TEXT_MUTED)
+                    if inv.status == InvitationStatus::Pending {
+                        let mut actions: Vec<AnyElement<'static>> = Vec::new();
+                        if let Some(cb) = on_accept {
+                            let id = inv.id.clone();
+                            actions.push(element! {
+                                Button(has_focus: true, handler: move |_| cb(id.clone())) {
+                                    Text(content: "Accept", color: Theme::PRIMARY)
+                                }
+                            }.into_any());
                         }
-                    }]
+                        if let Some(cb) = on_decline {
+                            let id = inv.id.clone();
+                            actions.push(element! {
+                                Button(has_focus: true, handler: move |_| cb(id.clone())) {
+                                    Text(content: "Decline", color: Theme::ERROR)
+                                }
+                            }.into_any());
+                        }
+                        if !actions.is_empty() {
+                            nodes.push(element! {
+                                View(flex_direction: FlexDirection::Row, gap: Spacing::SM) { #(actions) }
+                            }.into_any());
+                        }
+                    }
+
+                    nodes
+                } else {
+                    vec![element! { Text(content: "Select an invitation to view details", color: Theme::TEXT_MUTED) }.into_any()]
                 })
             }
         }
@@ -429,6 +399,10 @@ pub fn InvitationsScreen(
     let on_accept = props.on_accept.clone();
     let on_decline = props.on_decline.clone();
 
+    // Throttle for navigation keys - persists across renders using use_ref
+    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
+    let throttle_duration = Duration::from_millis(150);
+
     hooks.use_terminal_events({
         let mut selected = selected.clone();
         let mut filter = filter.clone();
@@ -438,15 +412,23 @@ pub fn InvitationsScreen(
         move |event| match event {
             TerminalEvent::Key(KeyEvent { code, .. }) => match code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    let current = selected.get();
-                    if current > 0 {
-                        selected.set(current - 1);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        let current = selected.get();
+                        if current > 0 {
+                            selected.set(current - 1);
+                        }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    let current = selected.get();
-                    if current + 1 < count {
-                        selected.set(current + 1);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        let current = selected.get();
+                        if current + 1 < count {
+                            selected.set(current + 1);
+                        }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 KeyCode::Tab => {
@@ -510,6 +492,16 @@ pub fn InvitationsScreen(
             width: 100pct,
             height: 100pct,
         ) {
+            // Header
+            View(
+                padding: 1,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
+            ) {
+                Text(content: "Invitations", weight: Weight::Bold, color: Theme::PRIMARY)
+            }
+
             // Filter tabs
             FilterTabs(filter: current_filter)
 
@@ -519,21 +511,19 @@ pub fn InvitationsScreen(
                 flex_grow: 1.0,
                 gap: 1,
             ) {
-                // List (35%)
-                View(width: 35pct) {
+                // List (25%)
+                View(width: 25pct) {
                     InvitationList(
                         invitations: filtered.clone(),
                         selected_index: current_selected,
                         focused: !is_detail_focused,
                     )
                 }
-                // Detail (65%)
-                View(width: 65pct) {
-                    InvitationDetail(
-                        invitation: selected_invitation,
-                        focused: is_detail_focused,
-                    )
-                }
+                // Detail (75%)
+                InvitationDetail(
+                    invitation: selected_invitation,
+                    focused: is_detail_focused,
+                )
             }
 
             // Key hints

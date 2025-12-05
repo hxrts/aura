@@ -273,10 +273,12 @@ Only facts fundamental to journal operation remain as direct enum variants:
 | Crate | Protocol | Purpose |
 |-------|----------|---------|
 | `aura-authenticate` | Authentication | Device, threshold, and guardian auth flows |
-| `aura-chat` | Secure messaging | Group chat with AMP transport integration || `aura-invitation` | Invitations | Peer onboarding and relational facts |
+| `aura-chat` | Secure messaging | Group chat with AMP transport integration |
+| `aura-invitation` | Invitations | Peer onboarding and relational facts |
 | `aura-recovery` | Guardian recovery | Recovery grants and dispute escalation |
 | `aura-relational` | Cross-authority relationships | RelationalContext protocols (domain types in aura-core) |
 | `aura-rendezvous` | Peer discovery | Context-scoped rendezvous and routing |
+| `aura-social` | Social topology | Block/neighborhood materialized views, relay selection, progressive discovery layers |
 | `aura-sync` | Synchronization | Journal sync and anti-entropy protocols |
 
 **Key characteristics**: Reusable building blocks with no UI or binary entry points.
@@ -357,6 +359,7 @@ crates/
 ├── aura-relational      Cross-authority relationships
 ├── aura-rendezvous      Peer discovery and routing
 ├── aura-simulator       Deterministic simulation engine
+├── aura-social          Social topology and progressive disclosure
 ├── aura-store           Storage domain types
 ├── aura-sync            Synchronization protocols
 ├── aura-terminal        Terminal UI (CLI + TUI)

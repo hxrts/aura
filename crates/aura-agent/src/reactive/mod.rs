@@ -1,13 +1,13 @@
 //! # Reactive Programming Infrastructure
 //!
-//! Shared reactive programming primitives for Aura UI layers (CLI, webapp, etc.).
+//! Shared reactive programming primitives for Aura UI layers (TUI, web, etc.).
 //! Provides FRP (Functional Reactive Programming) infrastructure independent of
 //! specific UI frameworks.
 //!
 //! ## Purpose
 //!
 //! This module provides the reactive foundation that can be used by:
-//! - TUI/CLI reactive views (`aura-cli`)
+//! - TUI/Terminal reactive views (`aura-terminal`)
 //! - Future web application UI
 //! - Any other UI layer that needs reactive data flow
 //!

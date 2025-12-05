@@ -1,11 +1,11 @@
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]
 //! # Aura Authenticate - Layer 5: Feature/Protocol Implementation
 //!
-//! **Purpose**: Device, threshold, and guardian authentication protocols.
+//! **Purpose**: Authority, threshold, and guardian authentication protocols.
 //!
-//! Complete end-to-end authentication protocols using stateless effect composition.
-//! Provides authentication coordinators for device authentication, session establishment,
-//! and guardian authentication for recovery operations.
+//! Complete end-to-end authentication protocols using the guard chain pattern.
+//! Provides `AuthService` for authentication operations with pure guard evaluation
+//! and explicit effect execution.
 //!
 //! # Architecture Constraints
 //!
@@ -19,34 +19,61 @@
 //!
 //! # Core Protocols
 //!
-//! - Device Authentication: Challenge-response with capability verification
-//! - Session Establishment: Session ticket creation with time-limited capabilities
-//! - Guardian Authentication: M-of-N guardian approval for recovery
+//! - Challenge-Response Authentication: Request → Challenge → Proof → Session
+//! - Session Management: Time-limited capabilities with scope restrictions
+//! - Guardian Authentication: M-of-N guardian approval for recovery operations
+//! - Distributed Key Derivation: Multi-party key generation without revealing shares
 //!
 //! # Design Principles
 //!
-//! - Effect Composition: Stateless effect handlers for predictable execution
-//! - Capability Verification: Effect-based capability checking and enforcement
-//! - Journal Integration: CRDT state management through effect system
-//! - Privacy Enforcement: Effect-level privacy controls and audit trails
-//! - Composable: Reusable authentication building blocks
+//! - **Guard Chain Pattern**: Pure evaluation over `GuardSnapshot` → `GuardOutcome` → `EffectCommand` execution
+//! - **Fact-Based State**: All state changes recorded as immutable `AuthFact` records
+//! - **View Derivation**: State derived from facts via `AuthViewReducer`
+//! - **Capability Verification**: Guard-based capability checking before operations
+//! - **Authority-Centric**: Uses `AuthorityId` as the primary identity type
+//!
+//! # Module Organization
+//!
+//! - [`guards`]: Pure guard types (`GuardSnapshot`, `GuardOutcome`, `EffectCommand`, `RecoveryContext`)
+//! - [`facts`]: Domain fact types (`AuthFact`, `AuthFactReducer`, `AuthFactDelta`)
+//! - [`service`]: Main `AuthService` with guard chain integration
+//! - [`view`]: View types (`AuthView`, `AuthViewReducer`) for deriving state from facts
+//! - [`guardian_auth_relational`]: Relational context-based guardian authentication
+//! - [`dkd`]: Distributed Key Derivation protocol
+//!
+//! See `docs/100_authority_and_identity.md` for the authority model documentation.
 
 #![allow(missing_docs)]
 #![forbid(unsafe_code)]
 
-/// Device authentication coordinator
-pub mod device_auth;
+// =============================================================================
+// Core Modules (New Architecture)
+// =============================================================================
 
-/// Authority authentication coordinator
-pub mod authority_auth;
+/// Guard types for authentication operations
+///
+/// Provides `GuardSnapshot`, `GuardOutcome`, `EffectCommand`, and related types
+/// for guard chain integration following the pattern from `aura-invitation`.
+pub mod guards;
 
-/// Session establishment coordinator
-pub mod session_creation;
+/// Domain fact types for authentication state changes
+pub mod facts;
 
-/// Guardian authentication coordinator for recovery operations
-pub mod guardian_auth;
+/// Authentication service coordinator
+///
+/// Main service for authentication operations with guard chain integration.
+/// All operations return `GuardOutcome` for the caller to execute.
+pub mod service;
 
-/// Guardian authentication via relational contexts (new model)
+/// View delta and reducer for authentication facts
+///
+/// Provides `AuthView`, `AuthViewReducer`, and related view types
+/// for deriving authentication state from the fact log.
+pub mod view;
+
+/// Guardian authentication via relational contexts
+///
+/// Authority-centric guardian authentication using `RelationalContext`.
 pub mod guardian_auth_relational;
 
 /// Distributed Key Derivation (DKD) protocol implementation
@@ -64,10 +91,34 @@ pub use aura_verify::{
 
 // Re-export Biscuit authorization types
 pub use aura_protocol::guards::{BiscuitGuardEvaluator, GuardError, GuardResult};
-pub use aura_wot::{AccountAuthority, BiscuitTokenManager, ResourceScope};
+pub use aura_wot::{BiscuitTokenManager, ResourceScope, TokenAuthority};
+
+// Deprecated alias for backward compatibility
+#[deprecated(since = "0.2.0", note = "Use TokenAuthority instead")]
+#[allow(deprecated)]
+pub use aura_wot::AccountAuthority;
 
 // Re-export DKD types
 pub use dkd::{
     create_test_config, execute_simple_dkd, DkdConfig, DkdError, DkdProtocol, DkdResult,
     DkdSessionId, KeyDerivationContext, ParticipantContribution,
+};
+
+// Re-export guard types
+pub use guards::{
+    check_capability, check_flow_budget, costs, evaluate_request, EffectCommand, GuardDecision,
+    GuardOutcome, GuardRequest, GuardSnapshot, RecoveryContext, RecoveryOperationType,
+};
+
+// Re-export fact types
+pub use facts::{AuthFact, AuthFactDelta, AuthFactReducer, AUTH_FACT_TYPE_ID};
+
+// Re-export service types
+pub use service::{
+    AuthService, AuthServiceConfig, ChallengeResult, GuardianApprovalResult, SessionResult,
+};
+
+// Re-export view types
+pub use view::{
+    AuthView, AuthViewReducer, ChallengeInfo, FailureRecord, RecoveryInfo, SessionInfo,
 };

@@ -14,9 +14,9 @@ use std::time::Duration;
 use aura_core::effects::time::PhysicalTimeEffects;
 use tokio::sync::RwLock;
 
-// Import TUI types from aura-cli's public API
-use aura_cli::demo::simulator_integration::SimulatedBridge;
-use aura_cli::tui::{AuraEvent, DemoScenario, EffectCommand, EventFilter, RecoveryState};
+// Import TUI types from aura-terminal's public API
+use aura_terminal::demo::simulator_integration::SimulatedBridge;
+use aura_terminal::tui::{AuraEvent, DemoScenario, EffectCommand, EventFilter, RecoveryState};
 
 /// Mock time effects for deterministic testing
 #[derive(Debug, Clone)]
@@ -238,8 +238,8 @@ impl Default for TuiTestHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_cli::tui::effects::{AuraEvent, EffectCommand};
-    use aura_cli::tui::reactive::RecoveryState;
+    use aura_terminal::tui::effects::{AuraEvent, EffectCommand};
+    use aura_terminal::tui::reactive::RecoveryState;
 
     /// Test basic harness initialization
     #[tokio::test]
@@ -306,7 +306,7 @@ mod tests {
     #[tokio::test]
     async fn test_recovery_initiation() {
         let mut harness =
-            TuiTestHarness::with_scenario(aura_cli::tui::demo::DemoScenario::Interactive);
+            TuiTestHarness::with_scenario(aura_terminal::tui::demo::DemoScenario::Interactive);
         harness.initialize().await;
 
         // Start recovery
@@ -331,7 +331,7 @@ mod tests {
     #[tokio::test]
     async fn test_recovery_cancellation() {
         let mut harness =
-            TuiTestHarness::with_scenario(aura_cli::tui::demo::DemoScenario::Interactive);
+            TuiTestHarness::with_scenario(aura_terminal::tui::demo::DemoScenario::Interactive);
         harness.initialize().await;
 
         // Start then cancel recovery
@@ -356,7 +356,7 @@ mod tests {
     #[tokio::test]
     async fn test_guardian_approval_flow() {
         let mut harness =
-            TuiTestHarness::with_scenario(aura_cli::tui::demo::DemoScenario::Interactive);
+            TuiTestHarness::with_scenario(aura_terminal::tui::demo::DemoScenario::Interactive);
         harness.initialize().await;
 
         // Start recovery
@@ -447,13 +447,13 @@ mod tests {
     #[tokio::test]
     async fn test_slow_guardian_scenario() {
         let harness =
-            TuiTestHarness::with_scenario(aura_cli::tui::demo::DemoScenario::SlowGuardian);
+            TuiTestHarness::with_scenario(aura_terminal::tui::demo::DemoScenario::SlowGuardian);
         harness.initialize().await;
 
         // Verify scenario is correct
         assert_eq!(
             harness.bridge().scenario(),
-            aura_cli::tui::demo::DemoScenario::SlowGuardian
+            aura_terminal::tui::demo::DemoScenario::SlowGuardian
         );
 
         // Start recovery
@@ -471,7 +471,7 @@ mod tests {
     #[tokio::test]
     async fn test_interactive_scenario() {
         let mut harness =
-            TuiTestHarness::with_scenario(aura_cli::tui::demo::DemoScenario::Interactive);
+            TuiTestHarness::with_scenario(aura_terminal::tui::demo::DemoScenario::Interactive);
         harness.initialize().await;
 
         // Verify scenario doesn't auto-advance
@@ -567,7 +567,7 @@ mod tests {
     #[tokio::test]
     async fn test_data_consistency() {
         let mut harness =
-            TuiTestHarness::with_scenario(aura_cli::tui::demo::DemoScenario::Interactive);
+            TuiTestHarness::with_scenario(aura_terminal::tui::demo::DemoScenario::Interactive);
         harness.initialize().await;
 
         // Record initial state

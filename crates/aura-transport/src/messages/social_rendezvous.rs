@@ -396,10 +396,10 @@ impl HandshakeTranscript {
 pub struct PskHandshakeConfig {
     /// Pre-shared key for PSK-based handshake
     pub k_psk: [u8; 32],
-    /// Expected peer device identifier
-    pub expected_peer_device_id: aura_core::identifiers::DeviceId,
-    /// Local device certificate for identity proof
-    pub local_device_cert: Vec<u8>,
+    /// Expected peer authority identifier
+    pub expected_peer_authority: aura_core::identifiers::AuthorityId,
+    /// Local authority certificate for identity proof
+    pub local_authority_cert: Vec<u8>,
     /// Selected transport for the handshake
     pub transport_descriptor: TransportDescriptor,
 }

@@ -219,12 +219,12 @@ impl ViewDeltaReducer for RecoveryViewReducer {
             RecoveryFact::GuardianSetupInitiated {
                 guardian_ids,
                 threshold,
-                initiated_at_ms,
+                initiated_at,
                 ..
             } => Some(RecoveryDelta::GuardianSetupStarted {
                 guardian_count: guardian_ids.len(),
                 threshold,
-                started_at: initiated_at_ms,
+                started_at: initiated_at.ts_ms,
             }),
 
             RecoveryFact::GuardianInvitationSent { .. } => {
@@ -234,49 +234,47 @@ impl ViewDeltaReducer for RecoveryViewReducer {
 
             RecoveryFact::GuardianAccepted {
                 guardian_id,
-                accepted_at_ms,
+                accepted_at,
                 ..
             } => Some(RecoveryDelta::GuardianResponded {
                 guardian_id: format_authority_id(&guardian_id),
                 accepted: true,
-                responded_at: accepted_at_ms,
+                responded_at: accepted_at.ts_ms,
             }),
 
             RecoveryFact::GuardianDeclined {
                 guardian_id,
-                declined_at_ms,
+                declined_at,
                 ..
             } => Some(RecoveryDelta::GuardianResponded {
                 guardian_id: format_authority_id(&guardian_id),
                 accepted: false,
-                responded_at: declined_at_ms,
+                responded_at: declined_at.ts_ms,
             }),
 
             RecoveryFact::GuardianSetupCompleted {
                 guardian_ids,
                 threshold,
-                completed_at_ms,
+                completed_at,
                 ..
             } => Some(RecoveryDelta::GuardianSetupCompleted {
                 guardian_ids: guardian_ids.iter().map(format_authority_id).collect(),
                 threshold,
-                completed_at: completed_at_ms,
+                completed_at: completed_at.ts_ms,
             }),
 
             RecoveryFact::GuardianSetupFailed {
-                reason,
-                failed_at_ms,
-                ..
+                reason, failed_at, ..
             } => Some(RecoveryDelta::GuardianSetupFailed {
                 reason,
-                failed_at: failed_at_ms,
+                failed_at: failed_at.ts_ms,
             }),
 
             // Membership Changes
             RecoveryFact::MembershipChangeProposed {
                 change_type,
                 proposal_hash,
-                proposed_at_ms,
+                proposed_at,
                 ..
             } => {
                 let change_description = match change_type {
@@ -293,7 +291,7 @@ impl ViewDeltaReducer for RecoveryViewReducer {
                 Some(RecoveryDelta::MembershipProposalCreated {
                     proposal_hash: hex::encode(proposal_hash.0),
                     change_description,
-                    proposed_at: proposed_at_ms,
+                    proposed_at: proposed_at.ts_ms,
                 })
             }
 
@@ -315,35 +313,35 @@ impl ViewDeltaReducer for RecoveryViewReducer {
                 proposal_hash,
                 new_guardian_ids,
                 new_threshold,
-                completed_at_ms,
+                completed_at,
                 ..
             } => Some(RecoveryDelta::MembershipChangeApplied {
                 proposal_hash: hex::encode(proposal_hash.0),
                 new_guardian_count: new_guardian_ids.len(),
                 new_threshold,
-                applied_at: completed_at_ms,
+                applied_at: completed_at.ts_ms,
             }),
 
             RecoveryFact::MembershipChangeRejected {
                 proposal_hash,
                 reason,
-                rejected_at_ms,
+                rejected_at,
                 ..
             } => Some(RecoveryDelta::MembershipChangeRejected {
                 proposal_hash: hex::encode(proposal_hash.0),
                 reason,
-                rejected_at: rejected_at_ms,
+                rejected_at: rejected_at.ts_ms,
             }),
 
             // Key Recovery
             RecoveryFact::RecoveryInitiated {
                 account_id,
-                initiated_at_ms,
+                initiated_at,
                 ..
             } => Some(RecoveryDelta::RecoveryStarted {
                 account_id: format_authority_id(&account_id),
                 shares_needed: 0, // Would need context to know threshold
-                started_at: initiated_at_ms,
+                started_at: initiated_at.ts_ms,
             }),
 
             RecoveryFact::RecoveryShareSubmitted { guardian_id, .. } => {
@@ -354,32 +352,32 @@ impl ViewDeltaReducer for RecoveryViewReducer {
                 })
             }
 
-            RecoveryFact::RecoveryDisputeFiled { filed_at_ms, .. } => {
+            RecoveryFact::RecoveryDisputeFiled { filed_at, .. } => {
                 // Assume 1 hour dispute window
                 Some(RecoveryDelta::RecoveryDisputeWindow {
-                    dispute_end_ms: filed_at_ms + 3_600_000,
+                    dispute_end_ms: filed_at.ts_ms + 3_600_000,
                     disputes_filed: 1, // Would need accumulated state
                 })
             }
 
             RecoveryFact::RecoveryCompleted {
                 account_id,
-                completed_at_ms,
+                completed_at,
                 ..
             } => Some(RecoveryDelta::RecoverySucceeded {
                 account_id: format_authority_id(&account_id),
-                completed_at: completed_at_ms,
+                completed_at: completed_at.ts_ms,
             }),
 
             RecoveryFact::RecoveryFailed {
                 account_id,
                 reason,
-                failed_at_ms,
+                failed_at,
                 ..
             } => Some(RecoveryDelta::RecoveryFailed {
                 account_id: format_authority_id(&account_id),
                 reason,
-                failed_at: failed_at_ms,
+                failed_at: failed_at.ts_ms,
             }),
         };
 
@@ -391,7 +389,7 @@ impl ViewDeltaReducer for RecoveryViewReducer {
 mod tests {
     use super::*;
     use aura_composition::downcast_delta;
-    use aura_core::{identifiers::ContextId, Hash32};
+    use aura_core::{identifiers::ContextId, time::PhysicalTime, Hash32};
 
     fn test_context_id() -> ContextId {
         ContextId::new_from_entropy([42u8; 32])
@@ -403,6 +401,13 @@ mod tests {
 
     fn test_hash(seed: u8) -> Hash32 {
         Hash32([seed; 32])
+    }
+
+    fn pt(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
     }
 
     #[test]
@@ -418,7 +423,7 @@ mod tests {
                 test_authority_id(4),
             ],
             threshold: 2,
-            initiated_at_ms: 1234567890,
+            initiated_at: pt(1234567890),
         };
 
         let bytes = fact.to_bytes();
@@ -447,7 +452,7 @@ mod tests {
         let fact = RecoveryFact::GuardianAccepted {
             context_id: test_context_id(),
             guardian_id: test_authority_id(5),
-            accepted_at_ms: 1234567899,
+            accepted_at: pt(1234567899),
         };
 
         let bytes = fact.to_bytes();
@@ -470,7 +475,7 @@ mod tests {
         let fact = RecoveryFact::GuardianDeclined {
             context_id: test_context_id(),
             guardian_id: test_authority_id(6),
-            declined_at_ms: 1234567900,
+            declined_at: pt(1234567900),
         };
 
         let bytes = fact.to_bytes();
@@ -494,7 +499,7 @@ mod tests {
             context_id: test_context_id(),
             account_id: test_authority_id(1),
             evidence_hash: test_hash(99),
-            completed_at_ms: 1234567999,
+            completed_at: pt(1234567999),
         };
 
         let bytes = fact.to_bytes();
@@ -519,7 +524,7 @@ mod tests {
             proposer_id: test_authority_id(1),
             change_type: crate::facts::MembershipChangeType::UpdateThreshold { new_threshold: 3 },
             proposal_hash: test_hash(42),
-            proposed_at_ms: 1234567890,
+            proposed_at: pt(1234567890),
         };
 
         let bytes = fact.to_bytes();
@@ -560,7 +565,7 @@ mod tests {
             context_id: test_context_id(),
             guardian_id: test_authority_id(2),
             invitation_hash: test_hash(10),
-            sent_at_ms: 1234567890,
+            sent_at: pt(1234567890),
         };
 
         let bytes = fact.to_bytes();

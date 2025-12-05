@@ -7,12 +7,16 @@
 //! - Cryptographic protocol messages (resharing, FROST, future DKD)
 //!
 //! All messages use aura-core message envelope (Layer 1) for versioning and serialization safety.
+//!
+//! **Authority Model**: Protocol participants are identified by `AuthorityId` rather than
+//! device-level identifiers. This aligns with the authority-centric identity model where
+//! authorities hide their internal device structure from external parties.
 
 // ============================================================================
 // Cryptographic Protocol Messages
 // ============================================================================
 
-use aura_core::identifiers::{DeviceId, SessionId};
+use aura_core::identifiers::{AuthorityId, SessionId};
 use serde::{Deserialize, Serialize};
 
 /// Unified cryptographic protocol message envelope
@@ -20,8 +24,8 @@ use serde::{Deserialize, Serialize};
 pub struct CryptoMessage {
     /// Session this message belongs to
     pub session_id: SessionId,
-    /// Device that sent this message
-    pub sender_id: DeviceId,
+    /// Authority that sent this message
+    pub sender: AuthorityId,
     /// Message sequence number within session
     pub sequence: u64,
     /// Timestamp when message was created
@@ -43,14 +47,14 @@ impl CryptoMessage {
     /// Create a new crypto message
     pub fn new(
         session_id: SessionId,
-        sender_id: DeviceId,
+        sender: AuthorityId,
         sequence: u64,
         timestamp: u64,
         payload: CryptoPayload,
     ) -> Self {
         Self {
             session_id,
-            sender_id,
+            sender,
             sequence,
             timestamp,
             payload,
@@ -93,8 +97,10 @@ pub struct InitiateResharingMessage {
     pub session_id: SessionId,
     pub old_threshold: u16,
     pub new_threshold: u16,
-    pub old_participants: Vec<DeviceId>,
-    pub new_participants: Vec<DeviceId>,
+    /// Authorities participating in the old threshold scheme
+    pub old_participants: Vec<AuthorityId>,
+    /// Authorities participating in the new threshold scheme
+    pub new_participants: Vec<AuthorityId>,
     pub start_epoch: u64,
     pub ttl_in_epochs: u64,
     pub resharing_context: Vec<u8>,
@@ -104,8 +110,10 @@ pub struct InitiateResharingMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DistributeSubShareMessage {
     pub session_id: SessionId,
-    pub from_device_id: DeviceId,
-    pub to_device_id: DeviceId,
+    /// Sending authority
+    pub from_authority: AuthorityId,
+    /// Receiving authority
+    pub to_authority: AuthorityId,
     pub encrypted_sub_share: Vec<u8>, // HPKE ciphertext
     pub share_index: u16,
     pub commitment_proof: Vec<u8>,
@@ -115,8 +123,10 @@ pub struct DistributeSubShareMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcknowledgeSubShareMessage {
     pub session_id: SessionId,
-    pub from_device_id: DeviceId,
-    pub to_device_id: DeviceId,
+    /// Sending authority (acknowledger)
+    pub from_authority: AuthorityId,
+    /// Authority that sent the sub-share being acknowledged
+    pub to_authority: AuthorityId,
     pub ack_signature: Vec<u8>,
     pub share_verification: bool,
     pub error_message: Option<String>,
@@ -129,7 +139,8 @@ pub struct FinalizeResharingMessage {
     pub new_group_public_key: Vec<u8>,
     pub new_threshold: u16,
     pub test_signature: Vec<u8>, // Proof that new shares work
-    pub participant_commitments: Vec<(DeviceId, Vec<u8>)>,
+    /// Commitments from each participating authority
+    pub participant_commitments: Vec<(AuthorityId, Vec<u8>)>,
     pub verification_data: ResharingVerification,
 }
 
@@ -145,7 +156,8 @@ pub struct ResharingVerification {
 /// Per-participant resharing verification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParticipantResharingVerification {
-    pub device_id: DeviceId,
+    /// Authority that participated in resharing
+    pub authority_id: AuthorityId,
     pub shares_sent: u16,
     pub shares_received: u16,
     pub verification_successful: bool,
@@ -157,7 +169,8 @@ pub struct ParticipantResharingVerification {
 pub struct AbortResharingMessage {
     pub session_id: SessionId,
     pub reason: ResharingAbortReason,
-    pub failed_participants: Vec<DeviceId>,
+    /// Authorities that failed during the resharing protocol
+    pub failed_participants: Vec<AuthorityId>,
     pub error_details: Option<String>,
 }
 
@@ -166,7 +179,8 @@ pub struct AbortResharingMessage {
 pub enum ResharingAbortReason {
     Timeout,
     DeliveryFailure {
-        missing_acks: Vec<(DeviceId, DeviceId)>,
+        /// (sender, recipient) pairs that failed acknowledgment
+        missing_acks: Vec<(AuthorityId, AuthorityId)>,
     },
     TestSignatureFailed,
     InsufficientParticipants,
@@ -181,7 +195,8 @@ pub struct RollbackResharingMessage {
     pub session_id: SessionId,
     pub rollback_to_epoch: u64,
     pub reason: String,
-    pub affected_participants: Vec<DeviceId>,
+    /// Authorities affected by the rollback
+    pub affected_participants: Vec<AuthorityId>,
 }
 
 /// Resharing protocol result
@@ -191,14 +206,16 @@ pub struct ResharingProtocolResult {
     pub success: bool,
     pub new_group_public_key: Option<Vec<u8>>,
     pub new_threshold: Option<u16>,
-    pub new_participants: Vec<DeviceId>,
+    /// Authorities that successfully completed resharing
+    pub new_participants: Vec<AuthorityId>,
     pub verification: Option<ResharingVerification>,
 }
 
 /// Encrypted share data for resharing
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedShare {
-    pub recipient_device_id: DeviceId,
+    /// Recipient authority for this share
+    pub recipient_authority: AuthorityId,
     pub encrypted_data: Vec<u8>, // HPKE encrypted share
     pub sender_proof: Vec<u8>,
     pub share_commitment: Vec<u8>,

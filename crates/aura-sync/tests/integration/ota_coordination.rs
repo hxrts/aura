@@ -3,6 +3,7 @@
 //! Tests for OTA protocol with threshold approval, epoch fencing,
 //! upgrade coordination, and rollback scenarios.
 
+use super::test_time;
 use super::test_utils::*;
 use aura_core::{AuraError, AuraResult, Hash32};
 use aura_sync::protocols::{EpochConfirmation, OTAConfig, UpgradeKind, UpgradeProposal};
@@ -13,6 +14,10 @@ use uuid::Uuid;
 
 // Test fixture: deterministic timestamp for reproducible tests
 const TEST_TIMESTAMP_MS: u64 = 1700000000000; // 2023-11-15 in milliseconds
+
+fn test_confirmation_time() -> aura_core::time::PhysicalTime {
+    test_time(TEST_TIMESTAMP_MS)
+}
 
 /// Test basic OTA upgrade coordination with threshold approval
 #[tokio::test]
@@ -209,7 +214,11 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
 
             // Step 3: Sync epochs before allowing OTA
             let context = aura_core::ContextId::new_from_entropy([6u8; 32]);
-            let rotation_id = coord1.initiate_rotation(vec![device2, device3], context)?;
+            let rotation_id = coord1.initiate_rotation(
+                vec![device2, device3],
+                context,
+                &test_confirmation_time(),
+            )?;
 
             // Process epoch confirmations
             let conf2 = EpochConfirmation {
@@ -217,7 +226,7 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
                 participant_id: device2,
                 current_epoch: 5,
                 ready_for_epoch: 6,
-                confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
+                confirmation_timestamp: test_confirmation_time(),
             };
 
             let conf3 = EpochConfirmation {
@@ -225,7 +234,7 @@ async fn test_ota_epoch_fencing() -> AuraResult<()> {
                 participant_id: device3,
                 current_epoch: 4,
                 ready_for_epoch: 6, // Jumping to match others
-                confirmation_timestamp_ms: TEST_TIMESTAMP_MS,
+                confirmation_timestamp: test_confirmation_time(),
             };
 
             coord1.process_confirmation(conf2)?;

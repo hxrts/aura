@@ -2,37 +2,47 @@
 //!
 //! This module provides a centralized session management system for
 //! all session lifecycle, state tracking, and coordination patterns.
+//!
+//! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 
 use crate::core::metrics::ErrorCategory;
 use crate::core::{
     sync_resource_with_limit, sync_session_error, sync_timeout_error, sync_validation_error,
     MetricsCollector, SyncConfig, SyncResult,
 };
+use aura_core::time::PhysicalTime;
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
 /// Unified session state machine following choreographic patterns
+///
+/// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SessionState<T> {
     /// Session initialization phase
     Initializing {
         participants: Vec<DeviceId>,
-        timeout_at: u64, // Unix timestamp
-        created_at: u64,
+        /// Timeout timestamp (unified time system)
+        timeout_at: PhysicalTime,
+        /// Creation timestamp (unified time system)
+        created_at: PhysicalTime,
     },
     /// Active session with protocol-specific state
     Active {
         protocol_state: T,
-        started_at: u64, // Unix timestamp
+        /// Start timestamp (unified time system)
+        started_at: PhysicalTime,
         participants: Vec<DeviceId>,
-        timeout_at: u64,
+        /// Timeout timestamp (unified time system)
+        timeout_at: PhysicalTime,
     },
     /// Session termination phase with results
     Terminating {
         result: SessionResult,
-        cleanup_deadline: u64, // Unix timestamp
+        /// Cleanup deadline timestamp (unified time system)
+        cleanup_deadline: PhysicalTime,
     },
     /// Session completed and cleaned up
     Completed(SessionResult),
@@ -40,15 +50,27 @@ pub enum SessionState<T> {
 
 impl<T> SessionState<T> {
     /// Check if session has timed out
-    pub fn is_timed_out(&self, now: u64) -> bool {
+    ///
+    /// **Time System**: Accepts `PhysicalTime` for comparison.
+    pub fn is_timed_out(&self, now: &PhysicalTime) -> bool {
         match self {
-            SessionState::Initializing { timeout_at, .. } => now >= *timeout_at,
-            SessionState::Active { timeout_at, .. } => now >= *timeout_at,
+            SessionState::Initializing { timeout_at, .. } => now.ts_ms >= timeout_at.ts_ms,
+            SessionState::Active { timeout_at, .. } => now.ts_ms >= timeout_at.ts_ms,
             SessionState::Terminating {
                 cleanup_deadline, ..
-            } => now >= *cleanup_deadline,
+            } => now.ts_ms >= cleanup_deadline.ts_ms,
             SessionState::Completed(_) => false,
         }
+    }
+
+    /// Check if session has timed out (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn is_timed_out_ms(&self, now_ms: u64) -> bool {
+        self.is_timed_out(&PhysicalTime {
+            ts_ms: now_ms,
+            uncertainty: None,
+        })
     }
 
     /// Get session participants
@@ -62,11 +84,13 @@ impl<T> SessionState<T> {
     }
 
     /// Get session duration in milliseconds (if active or completed)
-    pub fn duration_ms(&self, current_timestamp_secs: u64) -> Option<u64> {
-        let now = current_timestamp_secs;
-
+    ///
+    /// **Time System**: Accepts `PhysicalTime` for comparison.
+    pub fn duration_ms(&self, current_time: &PhysicalTime) -> Option<u64> {
         match self {
-            SessionState::Active { started_at, .. } => Some(now.saturating_sub(*started_at) * 1000),
+            SessionState::Active { started_at, .. } => {
+                Some(current_time.ts_ms.saturating_sub(started_at.ts_ms))
+            }
             SessionState::Terminating { result, .. } | SessionState::Completed(result) => {
                 match result {
                     SessionResult::Success { duration_ms, .. } => Some(*duration_ms),
@@ -75,7 +99,7 @@ impl<T> SessionState<T> {
                 }
             }
             SessionState::Initializing { created_at, .. } => {
-                Some(now.saturating_sub(*created_at) * 1000)
+                Some(current_time.ts_ms.saturating_sub(created_at.ts_ms))
             }
         }
     }
@@ -244,6 +268,8 @@ impl From<&crate::core::PerformanceConfig> for SessionResourceLimits {
 }
 
 /// Generic session manager for protocol-agnostic session coordination
+///
+/// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 pub struct SessionManager<T> {
     /// Active sessions indexed by session ID
     sessions: HashMap<SessionId, SessionState<T>>,
@@ -251,8 +277,8 @@ pub struct SessionManager<T> {
     config: SessionConfig,
     /// Metrics collector for session telemetry
     metrics: Option<MetricsCollector>,
-    /// Last cleanup timestamp (Unix timestamp in seconds)
-    last_cleanup: u64,
+    /// Last cleanup timestamp (unified time system)
+    last_cleanup: PhysicalTime,
     /// Monotonic counter used to derive deterministic-but-unique session IDs
     session_counter: u64,
 }
@@ -263,8 +289,8 @@ where
 {
     /// Create a new session manager
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
-    pub fn new(config: SessionConfig, now: u64) -> Self {
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub fn new(config: SessionConfig, now: PhysicalTime) -> Self {
         Self {
             sessions: HashMap::new(),
             config,
@@ -274,10 +300,27 @@ where
         }
     }
 
+    /// Create a new session manager from milliseconds timestamp
+    ///
+    /// Convenience constructor for backward compatibility.
+    pub fn new_from_ms(config: SessionConfig, now_ms: u64) -> Self {
+        Self::new(
+            config,
+            PhysicalTime {
+                ts_ms: now_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
     /// Create session manager with metrics collection
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
-    pub fn with_metrics(config: SessionConfig, metrics: MetricsCollector, now: u64) -> Self {
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub fn with_metrics(
+        config: SessionConfig,
+        metrics: MetricsCollector,
+        now: PhysicalTime,
+    ) -> Self {
         Self {
             sessions: HashMap::new(),
             config,
@@ -289,10 +332,10 @@ where
 
     /// Deterministically derive a unique session ID using the caller-supplied timestamp
     /// and a local monotonic counter (no ambient randomness).
-    fn generate_session_id(&mut self, now: u64) -> SessionId {
+    fn generate_session_id(&mut self, now: &PhysicalTime) -> SessionId {
         let mut input = Vec::new();
         input.extend_from_slice(b"aura.sync.session.id");
-        input.extend_from_slice(&now.to_le_bytes());
+        input.extend_from_slice(&now.ts_ms.to_le_bytes());
         input.extend_from_slice(&self.session_counter.to_le_bytes());
         self.session_counter = self.session_counter.wrapping_add(1);
 
@@ -304,11 +347,12 @@ where
 
     /// Create a new session with participants
     ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
     /// Note: Callers should obtain `now` via their time provider and pass it to this method
     pub fn create_session(
         &mut self,
         participants: Vec<DeviceId>,
-        now: u64,
+        now: &PhysicalTime,
     ) -> SyncResult<SessionId> {
         // Validate participant count
         if participants.len() > self.config.max_participants {
@@ -330,41 +374,60 @@ where
         }
 
         let session_id = self.generate_session_id(now);
-        // Use the provided now parameter instead of an implicit clock
-        let now_secs = now;
+        let timeout_ms = now.ts_ms + self.config.timeout.as_millis() as u64;
 
         let session_state = SessionState::Initializing {
             participants,
-            timeout_at: now_secs + self.config.timeout.as_secs(),
-            created_at: now_secs,
+            timeout_at: PhysicalTime {
+                ts_ms: timeout_ms,
+                uncertainty: now.uncertainty,
+            },
+            created_at: now.clone(),
         };
 
         self.sessions.insert(session_id, session_state);
 
         // Record metrics with the provided now parameter
         if let Some(ref metrics) = self.metrics {
-            metrics.record_sync_start(&session_id.to_string(), now);
+            metrics.record_sync_start(&session_id.to_string(), now.ts_ms);
         }
 
         Ok(session_id)
     }
 
+    /// Create a new session with participants (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn create_session_ms(
+        &mut self,
+        participants: Vec<DeviceId>,
+        now_ms: u64,
+    ) -> SyncResult<SessionId> {
+        self.create_session(
+            participants,
+            &PhysicalTime {
+                ts_ms: now_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
     /// Activate a session with initial protocol state
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
     pub fn activate_session(
         &mut self,
         session_id: SessionId,
         protocol_state: T,
-        current_timestamp_secs: u64,
+        current_time: &PhysicalTime,
     ) -> SyncResult<()> {
         let session = self
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
-        let now = current_timestamp_secs;
-
         // Check timeout before pattern matching to avoid borrow conflicts
-        if session.is_timed_out(now) {
+        if session.is_timed_out(current_time) {
             return Err(sync_timeout_error(
                 "session_activation",
                 self.config.timeout,
@@ -374,11 +437,16 @@ where
         match session {
             SessionState::Initializing { participants, .. } => {
                 let participants = participants.clone();
+                let timeout_ms = current_time.ts_ms
+                    + self.config.resource_limits.max_session_duration.as_millis() as u64;
                 *session = SessionState::Active {
                     protocol_state,
-                    started_at: now,
+                    started_at: current_time.clone(),
                     participants,
-                    timeout_at: now + self.config.resource_limits.max_session_duration.as_secs(),
+                    timeout_at: PhysicalTime {
+                        ts_ms: timeout_ms,
+                        uncertainty: current_time.uncertainty,
+                    },
                 };
 
                 Ok(())
@@ -390,12 +458,33 @@ where
         }
     }
 
+    /// Activate a session with initial protocol state (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn activate_session_ms(
+        &mut self,
+        session_id: SessionId,
+        protocol_state: T,
+        current_timestamp_ms: u64,
+    ) -> SyncResult<()> {
+        self.activate_session(
+            session_id,
+            protocol_state,
+            &PhysicalTime {
+                ts_ms: current_timestamp_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
     /// Update session protocol state
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
     pub fn update_session(
         &mut self,
         session_id: SessionId,
         new_state: T,
-        current_timestamp_secs: u64,
+        current_time: &PhysicalTime,
     ) -> SyncResult<()>
     where
         T: std::fmt::Debug,
@@ -406,8 +495,8 @@ where
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
         // Check timeout before pattern matching to avoid borrow conflicts
-        if session.is_timed_out(current_timestamp_secs) {
-            self.timeout_session(session_id, current_timestamp_secs)?;
+        if session.is_timed_out(current_time) {
+            self.timeout_session(session_id, current_time)?;
             return Err(sync_timeout_error("session_update", self.config.timeout));
         }
 
@@ -423,22 +512,45 @@ where
         }
     }
 
+    /// Update session protocol state (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn update_session_ms(
+        &mut self,
+        session_id: SessionId,
+        new_state: T,
+        current_timestamp_ms: u64,
+    ) -> SyncResult<()>
+    where
+        T: std::fmt::Debug,
+    {
+        self.update_session(
+            session_id,
+            new_state,
+            &PhysicalTime {
+                ts_ms: current_timestamp_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
     /// Complete a session successfully
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
     pub fn complete_session(
         &mut self,
         session_id: SessionId,
         operations_count: usize,
         bytes_transferred: usize,
         metadata: HashMap<String, String>,
-        current_timestamp_secs: u64,
+        current_time: &PhysicalTime,
     ) -> SyncResult<()> {
         let session = self
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
-        let current_ts = current_timestamp_secs;
-        let duration_ms = session.duration_ms(current_ts).unwrap_or(0);
+        let duration_ms = session.duration_ms(current_time).unwrap_or(0);
         let participants = session.participants().to_vec();
 
         let result = SessionResult::Success {
@@ -457,28 +569,52 @@ where
                 &session_id.to_string(),
                 operations_count,
                 bytes_transferred,
-                current_ts,
+                current_time.ts_ms,
             );
         }
 
         Ok(())
     }
 
+    /// Complete a session successfully (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn complete_session_ms(
+        &mut self,
+        session_id: SessionId,
+        operations_count: usize,
+        bytes_transferred: usize,
+        metadata: HashMap<String, String>,
+        current_timestamp_ms: u64,
+    ) -> SyncResult<()> {
+        self.complete_session(
+            session_id,
+            operations_count,
+            bytes_transferred,
+            metadata,
+            &PhysicalTime {
+                ts_ms: current_timestamp_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
     /// Fail a session with error context
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
     pub fn fail_session(
         &mut self,
         session_id: SessionId,
         error: SessionError,
         partial_results: Option<PartialResults>,
-        current_timestamp_secs: u64,
+        current_time: &PhysicalTime,
     ) -> SyncResult<()> {
         let session = self
             .sessions
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
-        let current_ts = current_timestamp_secs;
-        let duration_ms = session.duration_ms(current_ts).unwrap_or(0);
+        let duration_ms = session.duration_ms(current_time).unwrap_or(0);
 
         let result = SessionResult::Failure {
             error: error.clone(),
@@ -504,11 +640,34 @@ where
         Ok(())
     }
 
+    /// Fail a session with error context (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn fail_session_ms(
+        &mut self,
+        session_id: SessionId,
+        error: SessionError,
+        partial_results: Option<PartialResults>,
+        current_timestamp_ms: u64,
+    ) -> SyncResult<()> {
+        self.fail_session(
+            session_id,
+            error,
+            partial_results,
+            &PhysicalTime {
+                ts_ms: current_timestamp_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
     /// Timeout a session
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
     pub fn timeout_session(
         &mut self,
         session_id: SessionId,
-        current_timestamp_secs: u64,
+        current_time: &PhysicalTime,
     ) -> SyncResult<()>
     where
         T: std::fmt::Debug,
@@ -518,8 +677,7 @@ where
             .get_mut(&session_id)
             .ok_or_else(|| sync_session_error(format!("Session {} not found", session_id)))?;
 
-        let current_ts = current_timestamp_secs;
-        let duration_ms = session.duration_ms(current_ts).unwrap_or(0);
+        let duration_ms = session.duration_ms(current_time).unwrap_or(0);
         let last_known_state = format!("{:?}", session);
 
         let result = SessionResult::Timeout {
@@ -539,6 +697,26 @@ where
         }
 
         Ok(())
+    }
+
+    /// Timeout a session (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn timeout_session_ms(
+        &mut self,
+        session_id: SessionId,
+        current_timestamp_ms: u64,
+    ) -> SyncResult<()>
+    where
+        T: std::fmt::Debug,
+    {
+        self.timeout_session(
+            session_id,
+            &PhysicalTime {
+                ts_ms: current_timestamp_ms,
+                uncertainty: None,
+            },
+        )
     }
 
     /// Get session state
@@ -581,13 +759,14 @@ where
 
     /// Cleanup stale and completed sessions
     ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
     /// Note: Callers should obtain `now` via their time provider and pass it to this method
-    pub fn cleanup_stale_sessions(&mut self, now: u64) -> SyncResult<usize>
+    pub fn cleanup_stale_sessions(&mut self, now: &PhysicalTime) -> SyncResult<usize>
     where
         T: std::fmt::Debug,
     {
-        let elapsed_secs = now.saturating_sub(self.last_cleanup);
-        if Duration::from_secs(elapsed_secs) < self.config.cleanup_interval {
+        let elapsed_ms = now.ts_ms.saturating_sub(self.last_cleanup.ts_ms);
+        if elapsed_ms < self.config.cleanup_interval.as_millis() as u64 {
             return Ok(0);
         }
 
@@ -621,8 +800,21 @@ where
             removed += 1;
         }
 
-        self.last_cleanup = now;
+        self.last_cleanup = now.clone();
         Ok(removed)
+    }
+
+    /// Cleanup stale and completed sessions (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn cleanup_stale_sessions_ms(&mut self, now_ms: u64) -> SyncResult<usize>
+    where
+        T: std::fmt::Debug,
+    {
+        self.cleanup_stale_sessions(&PhysicalTime {
+            ts_ms: now_ms,
+            uncertainty: None,
+        })
     }
 
     /// Get session statistics
@@ -780,13 +972,24 @@ where
 
     /// Build the session manager
     ///
-    /// Note: Callers should obtain `now` as Unix timestamp via their time provider and pass it to this method
-    pub fn build(self, now: u64) -> SessionManager<T> {
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    /// Note: Callers should obtain `now` via their time provider and pass it to this method
+    pub fn build(self, now: PhysicalTime) -> SessionManager<T> {
         if let Some(metrics) = self.metrics {
             SessionManager::with_metrics(self.config, metrics, now)
         } else {
             SessionManager::new(self.config, now)
         }
+    }
+
+    /// Build the session manager (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn build_ms(self, now_ms: u64) -> SessionManager<T> {
+        self.build(PhysicalTime {
+            ts_ms: now_ms,
+            uncertainty: None,
+        })
     }
 }
 
@@ -807,6 +1010,14 @@ mod tests {
     use std::thread;
     use std::time::Duration as StdDuration;
 
+    /// Helper function to create PhysicalTime for tests
+    fn test_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
     struct TestProtocolState {
         phase: String,
@@ -815,12 +1026,13 @@ mod tests {
 
     #[test]
     fn test_session_creation_and_activation() {
-        let now = 1000000u64; // Unix timestamp
-        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
+        let now = test_time(1000000); // Unix timestamp in ms
+        let mut manager =
+            SessionManager::<TestProtocolState>::new(SessionConfig::default(), now.clone());
         let participants = vec![test_device_id(1), test_device_id(2)];
 
         // Create session
-        let session_id = manager.create_session(participants.clone(), now).unwrap();
+        let session_id = manager.create_session(participants.clone(), &now).unwrap();
         assert_eq!(manager.count_active_sessions(), 0); // Not active yet
 
         // Activate session
@@ -829,7 +1041,7 @@ mod tests {
             data: vec![1, 2, 3],
         };
         manager
-            .activate_session(session_id, initial_state.clone(), now)
+            .activate_session(session_id, initial_state.clone(), &now)
             .unwrap();
         assert_eq!(manager.count_active_sessions(), 1);
 
@@ -850,10 +1062,11 @@ mod tests {
 
     #[test]
     fn test_session_completion() {
-        let now = 1000000u64; // Unix timestamp
-        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
+        let now = test_time(1000000); // Unix timestamp in ms
+        let mut manager =
+            SessionManager::<TestProtocolState>::new(SessionConfig::default(), now.clone());
         let session_id = manager
-            .create_session(vec![test_device_id(1)], now)
+            .create_session(vec![test_device_id(1)], &now)
             .unwrap();
 
         let initial_state = TestProtocolState {
@@ -861,7 +1074,7 @@ mod tests {
             data: vec![],
         };
         manager
-            .activate_session(session_id, initial_state, now)
+            .activate_session(session_id, initial_state, &now)
             .unwrap();
 
         // Complete session
@@ -869,7 +1082,7 @@ mod tests {
         metadata.insert("test_key".to_string(), "test_value".to_string());
 
         manager
-            .complete_session(session_id, 100, 1024, metadata, now + 100)
+            .complete_session(session_id, 100, 1024, metadata, &test_time(1000100))
             .unwrap();
         assert_eq!(manager.count_active_sessions(), 0);
         assert_eq!(manager.count_completed_sessions(), 1);
@@ -891,10 +1104,11 @@ mod tests {
 
     #[test]
     fn test_session_failure() {
-        let now = 1000000u64; // Unix timestamp
-        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
+        let now = test_time(1000000); // Unix timestamp in ms
+        let mut manager =
+            SessionManager::<TestProtocolState>::new(SessionConfig::default(), now.clone());
         let session_id = manager
-            .create_session(vec![test_device_id(1)], now)
+            .create_session(vec![test_device_id(1)], &now)
             .unwrap();
 
         let initial_state = TestProtocolState {
@@ -902,7 +1116,7 @@ mod tests {
             data: vec![],
         };
         manager
-            .activate_session(session_id, initial_state, now)
+            .activate_session(session_id, initial_state, &now)
             .unwrap();
 
         // Fail session
@@ -910,7 +1124,7 @@ mod tests {
             constraint: "test constraint".to_string(),
         };
         manager
-            .fail_session(session_id, error.clone(), None, now + 10)
+            .fail_session(session_id, error.clone(), None, &test_time(1000010))
             .unwrap();
 
         // Verify failure
@@ -935,15 +1149,15 @@ mod tests {
             max_concurrent_sessions: 2,
             ..SessionConfig::default()
         };
-        let now = 1000000u64; // Unix timestamp
-        let mut manager = SessionManager::<TestProtocolState>::new(config, now);
+        let now = test_time(1000000); // Unix timestamp in ms
+        let mut manager = SessionManager::<TestProtocolState>::new(config, now.clone());
 
         // Create and activate maximum sessions
         let session1 = manager
-            .create_session(vec![test_device_id(1)], now)
+            .create_session(vec![test_device_id(1)], &now)
             .unwrap();
         let session2 = manager
-            .create_session(vec![test_device_id(1)], now)
+            .create_session(vec![test_device_id(1)], &now)
             .unwrap();
 
         let state = TestProtocolState {
@@ -951,12 +1165,12 @@ mod tests {
             data: vec![],
         };
         manager
-            .activate_session(session1, state.clone(), now)
+            .activate_session(session1, state.clone(), &now)
             .unwrap();
-        manager.activate_session(session2, state, now).unwrap();
+        manager.activate_session(session2, state, &now).unwrap();
 
         // Try to exceed limit
-        let result = manager.create_session(vec![test_device_id(1)], now);
+        let result = manager.create_session(vec![test_device_id(1)], &now);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), SyncError::Internal { .. }));
     }
@@ -968,11 +1182,11 @@ mod tests {
             timeout: Duration::from_millis(100),
             ..SessionConfig::default()
         };
-        let now = 1000000u64; // Unix timestamp
-        let mut manager = SessionManager::<TestProtocolState>::new(config, now);
+        let now = test_time(1000000); // Unix timestamp in ms
+        let mut manager = SessionManager::<TestProtocolState>::new(config, now.clone());
 
         let session_id = manager
-            .create_session(vec![test_device_id(1)], now)
+            .create_session(vec![test_device_id(1)], &now)
             .unwrap();
 
         // Wait for timeout
@@ -983,7 +1197,7 @@ mod tests {
             phase: "test".to_string(),
             data: vec![],
         };
-        let result = manager.activate_session(session_id, state, now + 200);
+        let result = manager.activate_session(session_id, state, &test_time(1000200));
         assert!(result.is_err());
         // Timeout errors now map to Internal
         assert!(matches!(result.unwrap_err(), SyncError::Internal { .. }));
@@ -996,20 +1210,20 @@ mod tests {
             cleanup_interval: Duration::from_millis(50),
             ..SessionConfig::default()
         };
-        let now = 1000000u64; // Unix timestamp
-        let mut manager = SessionManager::<TestProtocolState>::new(config, now);
+        let now = test_time(1000000); // Unix timestamp in ms
+        let mut manager = SessionManager::<TestProtocolState>::new(config, now.clone());
 
         // Create and complete a session
         let session_id = manager
-            .create_session(vec![test_device_id(1)], now)
+            .create_session(vec![test_device_id(1)], &now)
             .unwrap();
         let state = TestProtocolState {
             phase: "test".to_string(),
             data: vec![],
         };
-        manager.activate_session(session_id, state, now).unwrap();
+        manager.activate_session(session_id, state, &now).unwrap();
         manager
-            .complete_session(session_id, 0, 0, HashMap::new(), now + 50)
+            .complete_session(session_id, 0, 0, HashMap::new(), &test_time(1000050))
             .unwrap();
 
         assert_eq!(manager.sessions.len(), 1);
@@ -1018,26 +1232,27 @@ mod tests {
         thread::sleep(StdDuration::from_millis(100));
 
         // Cleanup should remove completed sessions
-        let now_cleanup = now + 200; // Future timestamp after cleanup interval
-        let removed = manager.cleanup_stale_sessions(now_cleanup).unwrap();
+        let now_cleanup = test_time(1000200); // Future timestamp after cleanup interval
+        let removed = manager.cleanup_stale_sessions(&now_cleanup).unwrap();
         assert!(removed > 0);
     }
 
     #[test]
     fn test_session_statistics() {
-        let now = 1000000u64; // Unix timestamp
-        let mut manager = SessionManager::<TestProtocolState>::new(SessionConfig::default(), now);
+        let now = test_time(1000000); // Unix timestamp in ms
+        let mut manager =
+            SessionManager::<TestProtocolState>::new(SessionConfig::default(), now.clone());
 
         // Create and complete some sessions
         for i in 0..3 {
             let session_id = manager
-                .create_session(vec![test_device_id(1)], now)
+                .create_session(vec![test_device_id(1)], &now)
                 .unwrap();
             let state = TestProtocolState {
                 phase: "test".to_string(),
                 data: vec![],
             };
-            manager.activate_session(session_id, state, now).unwrap();
+            manager.activate_session(session_id, state, &now).unwrap();
 
             if i < 2 {
                 manager
@@ -1046,7 +1261,7 @@ mod tests {
                         10 * (i + 1),
                         100 * (i + 1),
                         HashMap::new(),
-                        now + 100 * (i as u64 + 1),
+                        &test_time(1000000 + 100 * (i as u64 + 1)),
                     )
                     .unwrap();
             } else {
@@ -1054,7 +1269,7 @@ mod tests {
                     constraint: "test".to_string(),
                 };
                 manager
-                    .fail_session(session_id, error, None, now + 50)
+                    .fail_session(session_id, error, None, &test_time(1000050))
                     .unwrap();
             }
         }

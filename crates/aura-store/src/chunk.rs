@@ -2,7 +2,10 @@
 //!
 //! This module defines pure types and functions for content addressing,
 //! chunking, and manifest creation in Aura's storage system.
+//!
+//! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 
+use aura_core::time::PhysicalTime;
 use aura_core::{ChunkId, ContentId, ContentSize};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -108,6 +111,8 @@ impl ChunkLayout {
 }
 
 /// Manifest for a single chunk with metadata
+///
+/// **Time System**: Uses `PhysicalTime` for creation timestamps.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ChunkManifest {
     /// Chunk identifier
@@ -116,19 +121,21 @@ pub struct ChunkManifest {
     pub size: u32,
     /// Required capabilities for access
     pub required_capabilities: Vec<StorageCapability>,
-    /// Chunk creation timestamp (Unix timestamp)
-    pub created_at: u64,
+    /// Chunk creation timestamp (unified time system)
+    pub created_at: PhysicalTime,
     /// Optional metadata
     pub metadata: BTreeMap<String, String>,
 }
 
 impl ChunkManifest {
     /// Create a new chunk manifest
+    ///
+    /// **Time System**: Uses `PhysicalTime` for creation timestamps.
     pub fn new(
         chunk_id: ChunkId,
         size: u32,
         required_capabilities: Vec<StorageCapability>,
-        created_at: u64,
+        created_at: PhysicalTime,
     ) -> Self {
         Self {
             chunk_id,
@@ -137,6 +144,31 @@ impl ChunkManifest {
             created_at,
             metadata: BTreeMap::new(),
         }
+    }
+
+    /// Create a new chunk manifest from milliseconds timestamp
+    ///
+    /// Convenience constructor for backward compatibility.
+    pub fn new_from_ms(
+        chunk_id: ChunkId,
+        size: u32,
+        required_capabilities: Vec<StorageCapability>,
+        created_at_ms: u64,
+    ) -> Self {
+        Self::new(
+            chunk_id,
+            size,
+            required_capabilities,
+            PhysicalTime {
+                ts_ms: created_at_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
+    /// Get creation timestamp in milliseconds for backward compatibility
+    pub fn created_at_ms(&self) -> u64 {
+        self.created_at.ts_ms
     }
 
     /// Add metadata to the manifest
@@ -154,6 +186,8 @@ impl ChunkManifest {
 }
 
 /// Manifest for content composed of multiple chunks
+///
+/// **Time System**: Uses `PhysicalTime` for creation timestamps.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContentManifest {
     /// Content identifier
@@ -164,17 +198,19 @@ pub struct ContentManifest {
     pub chunk_manifests: Vec<ChunkManifest>,
     /// Content-level metadata
     pub metadata: BTreeMap<String, String>,
-    /// Content creation timestamp
-    pub created_at: u64,
+    /// Content creation timestamp (unified time system)
+    pub created_at: PhysicalTime,
 }
 
 impl ContentManifest {
     /// Create a new content manifest
+    ///
+    /// **Time System**: Uses `PhysicalTime` for creation timestamps.
     pub fn new(
         content_id: ContentId,
         layout: ChunkLayout,
         chunk_manifests: Vec<ChunkManifest>,
-        created_at: u64,
+        created_at: PhysicalTime,
     ) -> Result<Self, AuraError> {
         // Verify chunk manifests match layout
         if layout.chunk_count() != chunk_manifests.len() {
@@ -199,6 +235,31 @@ impl ContentManifest {
             metadata: BTreeMap::new(),
             created_at,
         })
+    }
+
+    /// Create a new content manifest from milliseconds timestamp
+    ///
+    /// Convenience constructor for backward compatibility.
+    pub fn new_from_ms(
+        content_id: ContentId,
+        layout: ChunkLayout,
+        chunk_manifests: Vec<ChunkManifest>,
+        created_at_ms: u64,
+    ) -> Result<Self, AuraError> {
+        Self::new(
+            content_id,
+            layout,
+            chunk_manifests,
+            PhysicalTime {
+                ts_ms: created_at_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
+    /// Get creation timestamp in milliseconds for backward compatibility
+    pub fn created_at_ms(&self) -> u64 {
+        self.created_at.ts_ms
     }
 
     /// Add metadata to the content manifest
@@ -341,6 +402,13 @@ pub fn compute_chunk_layout(
 mod tests {
     use super::*;
 
+    fn test_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
     #[test]
     fn test_erasure_config() {
         let config = ErasureConfig::new(3, 2, 1024);
@@ -379,8 +447,8 @@ mod tests {
     #[test]
     fn test_manifests_require_created_at() {
         let chunk_id = ChunkId::from_bytes(b"chunk1");
-        let manifest = ChunkManifest::new(chunk_id, 10, vec![], 123);
-        assert_eq!(manifest.created_at, 123);
+        let manifest = ChunkManifest::new(chunk_id, 10, vec![], test_time(123));
+        assert_eq!(manifest.created_at, test_time(123));
 
         let layout = ChunkLayout::new(
             vec![manifest.chunk_id.clone()],
@@ -393,9 +461,9 @@ mod tests {
             ContentId::from_bytes(b"content1"),
             layout,
             vec![manifest],
-            456,
+            test_time(456),
         )
         .unwrap();
-        assert_eq!(content_manifest.created_at, 456);
+        assert_eq!(content_manifest.created_at, test_time(456));
     }
 }

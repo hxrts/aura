@@ -30,6 +30,7 @@
 //! - Device attestation certificates
 //! - Critical configuration data
 
+use crate::time::PhysicalTime;
 use crate::AuraError;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -94,8 +95,28 @@ pub enum SecureStorageCapability {
     List,
     /// Access to device attestation for key binding
     DeviceAttestation,
-    /// Time-bound access control
-    TimeBound { expires_at: u64 },
+    /// Time-bound access control (uses unified time system)
+    TimeBound { expires_at: PhysicalTime },
+}
+
+impl SecureStorageCapability {
+    /// Create a time-bound capability with millisecond expiration (backward compatibility)
+    pub fn time_bound_ms(expires_at_ms: u64) -> Self {
+        Self::TimeBound {
+            expires_at: PhysicalTime {
+                ts_ms: expires_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Get expiration in milliseconds if this is a TimeBound capability
+    pub fn expires_at_ms(&self) -> Option<u64> {
+        match self {
+            Self::TimeBound { expires_at } => Some(expires_at.ts_ms),
+            _ => None,
+        }
+    }
 }
 
 /// Secure storage effects interface
@@ -219,7 +240,7 @@ pub trait SecureStorageEffects: Send + Sync {
     /// # Parameters
     /// - `location`: Location the token grants access to
     /// - `capabilities`: Capabilities granted by this token
-    /// - `expires_at`: Timestamp when the token expires
+    /// - `expires_at`: Timestamp when the token expires (uses unified time system)
     ///
     /// # Returns
     /// An opaque token that can be used for time-bound access
@@ -227,7 +248,7 @@ pub trait SecureStorageEffects: Send + Sync {
         &self,
         location: &SecureStorageLocation,
         capabilities: &[SecureStorageCapability],
-        expires_at: u64,
+        expires_at: &PhysicalTime,
     ) -> Result<Vec<u8>, SecureStorageError>;
 
     /// Use a time-bound token to access data

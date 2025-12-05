@@ -9,7 +9,7 @@
 //! - Mock handlers for isolated testing
 //! - Integration testing for choreographic protocols
 
-use aura_core::{identifiers::DeviceId, RelationshipId};
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_transport::{
     ConnectionId, Envelope, HolePunchMessage, PeerInfo, PrivacyAwareSelectionCriteria,
     PrivacyLevel, StunMessage, TransportConfig,
@@ -41,7 +41,7 @@ fn envelope_testing_patterns() {
     println!("🧪 Example 1: Envelope Testing Patterns\n");
 
     let test_message = b"Test message for privacy verification".to_vec();
-    let relationship_id = RelationshipId::new([1u8; 32]);
+    let context_id = ContextId::new_from_entropy([1u8; 32]);
 
     // Test basic envelope creation
     let basic_envelope = Envelope::new(test_message.clone());
@@ -55,15 +55,15 @@ fn envelope_testing_patterns() {
     // Test scoped envelope creation
     let scoped_envelope = Envelope::new_scoped(
         test_message.clone(),
-        relationship_id,
+        context_id,
         Some("test_capability".to_string()),
     );
     assert_eq!(scoped_envelope.payload, test_message);
     assert!(matches!(
         scoped_envelope.privacy_level(),
-        PrivacyLevel::RelationshipScoped
+        PrivacyLevel::ContextScoped
     ));
-    assert!(scoped_envelope.requires_relationship_scope());
+    assert!(scoped_envelope.requires_context_scope());
     println!("Scoped envelope creation test passed");
 
     // Test blinded envelope creation
@@ -78,7 +78,7 @@ fn envelope_testing_patterns() {
     // Privacy level consistency test
     let envelopes = [
         (basic_envelope, PrivacyLevel::Clear),
-        (scoped_envelope, PrivacyLevel::RelationshipScoped),
+        (scoped_envelope, PrivacyLevel::ContextScoped),
         (blinded_envelope, PrivacyLevel::Blinded),
     ];
 
@@ -106,10 +106,10 @@ fn configuration_validation_testing() {
 
     // Test custom configuration
     let custom_config = TransportConfig {
-        privacy_level: PrivacyLevel::RelationshipScoped,
+        privacy_level: PrivacyLevel::ContextScoped,
         max_connections: 42,
         connection_timeout: Duration::from_secs(60),
-        enable_relationship_scoping: true,
+        enable_context_scoping: true,
         enable_capability_filtering: true,
         default_blinding: true,
         ..Default::default()
@@ -117,11 +117,11 @@ fn configuration_validation_testing() {
 
     assert!(matches!(
         custom_config.privacy_level,
-        PrivacyLevel::RelationshipScoped
+        PrivacyLevel::ContextScoped
     ));
     assert_eq!(custom_config.max_connections, 42);
     assert_eq!(custom_config.connection_timeout, Duration::from_secs(60));
-    assert!(custom_config.enable_relationship_scoping);
+    assert!(custom_config.enable_context_scoping);
     assert!(custom_config.enable_capability_filtering);
     assert!(custom_config.default_blinding);
     println!("Custom configuration validation passed");
@@ -130,7 +130,7 @@ fn configuration_validation_testing() {
     let privacy_levels = [
         PrivacyLevel::Clear,
         PrivacyLevel::Blinded,
-        PrivacyLevel::RelationshipScoped,
+        PrivacyLevel::ContextScoped,
     ];
 
     for privacy_level in privacy_levels {
@@ -152,12 +152,12 @@ fn peer_selection_testing() {
     // Create test peers
     let mut peers = Vec::new();
     for i in 0..3 {
-        let peer_id = DeviceId::new();
-        let mut peer_info = PeerInfo::new(peer_id);
+        let authority_id = AuthorityId::new_from_entropy([i as u8; 32]);
+        let mut peer_info = PeerInfo::new(authority_id);
 
-        // Add relationship context
-        let relationship_id = RelationshipId::new([i as u8; 32]);
-        peer_info.add_relationship(relationship_id);
+        // Add context
+        let context_id = ContextId::new_from_entropy([i as u8; 32]);
+        peer_info.add_context(context_id);
 
         // Add some capabilities for testing
         peer_info
@@ -218,8 +218,8 @@ fn protocol_message_testing() {
     // Test hole punch message creation
     let target_addr = aura_transport::types::endpoint::EndpointAddress::new("127.0.0.1:8080");
     let _hole_punch_message = HolePunchMessage::coordination_request(
-        aura_core::identifiers::DeviceId::new(),
-        aura_core::identifiers::DeviceId::new(),
+        AuthorityId::new_from_entropy([1u8; 32]),
+        AuthorityId::new_from_entropy([2u8; 32]),
         target_addr,
     );
 
@@ -228,7 +228,7 @@ fn protocol_message_testing() {
 
     // Test WebSocket message creation
     let _websocket_message = aura_transport::WebSocketMessage::handshake_request(
-        aura_core::identifiers::DeviceId::new(),
+        AuthorityId::new_from_entropy([1u8; 32]),
         vec!["test_capability".to_string()],
     );
 
@@ -248,18 +248,17 @@ fn integration_testing_patterns() {
 
     // Test scoped connection creation
     let base_connection = ConnectionId::new();
-    let relationship_id = RelationshipId::new([42u8; 32]);
-    let scoped_connection =
-        aura_transport::ScopedConnectionId::new(base_connection, relationship_id.clone());
+    let context_id = ContextId::new_from_entropy([42u8; 32]);
+    let scoped_connection = aura_transport::ScopedConnectionId::new(base_connection, context_id);
 
     assert_eq!(scoped_connection.connection_id(), base_connection);
-    assert_eq!(scoped_connection.relationship_id(), relationship_id);
+    assert_eq!(scoped_connection.context_id(), context_id);
     println!("Scoped connection creation test passed");
 
     // Test connection info creation
-    let peer_id = DeviceId::new();
+    let peer_authority = AuthorityId::new_from_entropy([1u8; 32]);
     let connection_info =
-        aura_transport::ConnectionInfo::new(peer_id, PrivacyLevel::RelationshipScoped);
+        aura_transport::ConnectionInfo::new(peer_authority, PrivacyLevel::ContextScoped);
 
     assert!(!connection_info.is_established());
     assert!(connection_info.age() >= Duration::from_secs(0));
@@ -269,14 +268,14 @@ fn integration_testing_patterns() {
     let message = b"Integration test message".to_vec();
     let envelope = Envelope::new_scoped(
         message.clone(),
-        relationship_id,
+        context_id,
         Some("integration_test".to_string()),
     );
 
     assert_eq!(envelope.payload, message);
     assert!(matches!(
         envelope.privacy_level(),
-        PrivacyLevel::RelationshipScoped
+        PrivacyLevel::ContextScoped
     ));
     println!("End-to-end envelope integration test passed");
 

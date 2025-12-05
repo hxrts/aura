@@ -45,6 +45,7 @@ pub mod agent;
 pub mod amp;
 pub mod authority;
 pub mod authorization;
+pub mod availability; // Data availability within replication units
 pub mod biometric;
 pub mod bloom;
 pub mod capability;
@@ -52,6 +53,7 @@ pub mod chaos;
 pub mod choreographic; // Multi-party protocol coordination
 pub mod console;
 pub mod crypto;
+pub mod flood; // Rendezvous flooding for discovery
 pub mod flow; // Flow budget management
 pub mod guard; // Pure guard evaluation with effect commands
 pub mod guardian; // Guardian relational coordination
@@ -62,6 +64,7 @@ pub mod ledger; // Event sourcing and audit trails
 pub mod network;
 pub mod quint;
 pub mod random;
+pub mod relay; // Relay selection for message forwarding
 pub mod reliability;
 pub mod secure;
 pub mod simulation;
@@ -89,6 +92,7 @@ pub use authority::{AuthorityEffects, AuthorityRelationalEffects, RelationalEffe
 pub use authorization::{
     AuthorizationDecision, AuthorizationEffects, AuthorizationError, BiscuitAuthorizationEffects,
 };
+pub use availability::{AvailabilityError, DataAvailability};
 pub use biometric::{
     BiometricCapability, BiometricConfig, BiometricEffects, BiometricEnrollmentResult,
     BiometricError, BiometricSecurityLevel, BiometricStatistics, BiometricType,
@@ -103,6 +107,9 @@ pub use capability::{
 pub use chaos::{ByzantineType, ChaosEffects, ChaosError, CorruptionType, ResourceType};
 pub use console::ConsoleEffects;
 pub use crypto::{CryptoEffects, CryptoError};
+pub use flood::{
+    FloodAction, FloodBudget, FloodError, LayeredBudget, RendezvousFlooder, RendezvousPacket,
+};
 pub use flow::{FlowBudgetEffects, FlowHint};
 pub use guardian::{GuardianAcceptInput, GuardianEffects, GuardianRequestInput};
 pub use indexed::{FactId, IndexStats, IndexedFact, IndexedJournalEffects};
@@ -119,6 +126,7 @@ pub use quint::{
     VerificationId, VerificationResult,
 };
 pub use random::RandomEffects;
+pub use relay::{RelayCandidate, RelayContext, RelayError, RelayRelationship, RelaySelector};
 pub use reliability::{
     // Unified retry types
     BackoffStrategy,

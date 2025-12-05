@@ -2,13 +2,13 @@
 //!
 //! This module provides unified message patterns and building blocks used across
 //! all sync protocols. It eliminates duplication and provides consistent interfaces.
+//!
+//! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 
+use aura_core::time::PhysicalTime;
 use aura_core::{DeviceId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
-fn current_timestamp_secs() -> u64 {
-    panic!("timestamp must be supplied via PhysicalTimeEffects; call new_with_timestamp with an explicit value")
-}
 use uuid::Uuid;
 
 /// Common trait for protocol message pairs
@@ -62,31 +62,35 @@ impl<T> SessionMessage<T> {
 }
 
 /// Timestamped message for ordering and replay
+///
+/// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimestampedMessage<T> {
-    /// Unix timestamp when message was created
-    pub timestamp: u64,
+    /// Timestamp when message was created (unified time system)
+    pub timestamp: PhysicalTime,
     /// The actual message payload
     pub payload: T,
 }
 
 impl<T> TimestampedMessage<T> {
-    /// Create a new timestamped message with current time
-    /// DEPRECATED: Use new_with_timestamp instead for proper time abstraction
-    #[deprecated(note = "Use new_with_timestamp instead for proper time abstraction")]
-    pub fn new(payload: T) -> Self {
-        Self::new_with_timestamp(None, payload)
-    }
-
     /// Create a new timestamped message with provided timestamp
-    pub fn new_with_timestamp(timestamp_secs: Option<u64>, payload: T) -> Self {
-        let timestamp = timestamp_secs.unwrap_or_else(current_timestamp_secs);
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub fn new(timestamp: PhysicalTime, payload: T) -> Self {
         Self { timestamp, payload }
     }
 
-    /// Create a timestamped message with specific time
-    pub fn with_timestamp(timestamp: u64, payload: T) -> Self {
-        Self { timestamp, payload }
+    /// Create a timestamped message from milliseconds timestamp
+    ///
+    /// Convenience constructor for backward compatibility.
+    pub fn new_from_ms(timestamp_ms: u64, payload: T) -> Self {
+        Self::new(
+            PhysicalTime {
+                ts_ms: timestamp_ms,
+                uncertainty: None,
+            },
+            payload,
+        )
     }
 
     /// Extract the payload
@@ -94,17 +98,20 @@ impl<T> TimestampedMessage<T> {
         self.payload
     }
 
-    /// Get age of this message in seconds
-    pub fn age_seconds(&self, current_timestamp_secs: u64) -> u64 {
-        current_timestamp_secs.saturating_sub(self.timestamp)
+    /// Get timestamp in milliseconds for backward compatibility
+    pub fn timestamp_ms(&self) -> u64 {
+        self.timestamp.ts_ms
     }
 
-    /// Get age of this message in seconds using current time
-    /// DEPRECATED: Use age_seconds with timestamp parameter for proper time abstraction
-    #[deprecated(note = "Use age_seconds with timestamp parameter for proper time abstraction")]
-    pub fn age_seconds_now(&self) -> u64 {
-        let now = current_timestamp_secs();
-        self.age_seconds(now)
+    /// Get age of this message in milliseconds
+    pub fn age_ms(&self, current_time: &PhysicalTime) -> u64 {
+        current_time.ts_ms.saturating_sub(self.timestamp.ts_ms)
+    }
+
+    /// Get age of this message in seconds
+    pub fn age_seconds(&self, current_timestamp_secs: u64) -> u64 {
+        let current_ms = current_timestamp_secs * 1000;
+        current_ms.saturating_sub(self.timestamp.ts_ms) / 1000
     }
 }
 
@@ -408,6 +415,13 @@ mod tests {
     use super::*;
     use aura_testkit::builders::test_device_id;
 
+    fn test_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
     #[test]
     fn test_session_message() {
         let session_id = SessionId::new();
@@ -422,13 +436,13 @@ mod tests {
 
     #[test]
     fn test_timestamped_message() {
-        let msg = TimestampedMessage::new_with_timestamp(Some(0), "test".to_string());
-        assert_eq!(msg.age_seconds(msg.timestamp + 1), 1); // Age should be exactly 1 second
+        let msg = TimestampedMessage::new(test_time(0), "test".to_string());
+        assert_eq!(msg.age_ms(&test_time(1000)), 1000); // Age should be 1000ms
 
-        let old_msg = TimestampedMessage::with_timestamp(0, "old".to_string());
-        // Use deterministic timestamp instead of SystemTime::now()
-        let current_time = 2000u64; // Fixed time in seconds
-        assert!(old_msg.age_seconds(current_time) > 1000); // Very old
+        let old_msg = TimestampedMessage::new_from_ms(0, "old".to_string());
+        // Use deterministic timestamp
+        let current_time = test_time(2_000_000); // 2000 seconds in ms
+        assert!(old_msg.age_ms(&current_time) > 1_000_000); // Very old
     }
 
     #[test]

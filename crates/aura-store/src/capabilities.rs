@@ -1,11 +1,41 @@
-//! Storage capability types and access control logic
+//! Storage capability types and access control metadata
 //!
-//! This module defines storage-specific capability types and pure functions
-//! for access control decisions using meet-semilattice operations.
+//! This module defines storage-specific capability types used as **metadata**
+//! for specifying what capabilities are required to access storage resources.
+//!
+//! **Important**: These types describe capability *requirements*, not authorization
+//! logic. Actual authorization is handled by Biscuit tokens via the effect system.
+//! See `aura-wot` for the authorization implementation.
+//!
+//! ## Usage Pattern
+//!
+//! ```ignore
+//! // Specify required capabilities as metadata on content
+//! let manifest = ChunkManifest::new(
+//!     chunk_id,
+//!     size,
+//!     vec![StorageCapability::read(StorageResource::namespace("user/alice"))],
+//!     timestamp,
+//! );
+//!
+//! // Actual authorization check uses Biscuit tokens
+//! // via aura-wot::check_biscuit_access()
+//! ```
+//!
+//! ## Future Direction
+//!
+//! These types may be migrated to use `aura_core::ResourceScope` in a future
+//! version for consistency with the broader authorization system.
 
 use serde::{Deserialize, Serialize};
 
-/// Storage-specific capability for resource access
+/// Storage capability metadata specifying required access level
+///
+/// **Note**: This type describes capability *requirements* as metadata.
+/// Actual authorization is performed via Biscuit tokens. Use this to
+/// annotate content with its access requirements.
+///
+/// See `aura_wot::check_biscuit_access()` for authorization checks.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct StorageCapability {
     /// Storage resource identifier
@@ -44,14 +74,20 @@ impl StorageCapability {
     }
 }
 
-/// Storage resource identifier
+/// Storage resource identifier for capability metadata
+///
+/// Identifies storage resources at various granularities. Used to specify
+/// which resources a capability requirement applies to.
+///
+/// **Note**: This is metadata describing resource scopes, not authorization.
+/// For cross-authority authorization, see `aura_core::ResourceScope`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum StorageResource {
     /// Specific content by content ID
     Content(String),
-    /// All content in a namespace
+    /// All content in a namespace (path-based scoping)
     Namespace(String),
-    /// Global storage access
+    /// Global storage access (admin operations)
     Global,
     /// Search index access
     SearchIndex,

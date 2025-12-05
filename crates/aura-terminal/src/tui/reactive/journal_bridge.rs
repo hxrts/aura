@@ -57,7 +57,8 @@
 //! - `crate::tui::context::TuiContext::build()` - Wiring logic
 
 // Re-export types that may be used by other modules for backwards compatibility
-pub use aura_agent::reactive::{
+// All types now come from aura-app (which re-exports from aura-agent internally)
+pub use aura_app::{
     BlockDelta, BlockReduction, ChatReduction, FactSource, FactStreamAdapter, GuardianDelta,
     GuardianReduction, InvitationReduction, ReactiveScheduler, RecoveryDelta, RecoveryReduction,
     SchedulerConfig, ViewAdapter,

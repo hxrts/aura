@@ -93,14 +93,14 @@ impl RecoveryState {
                 initiator_id,
                 guardian_ids,
                 threshold,
-                initiated_at_ms,
+                initiated_at,
             } => {
                 self.setups.insert(
                     *context_id,
                     SetupState {
                         context_id: *context_id,
                         initiator_id: *initiator_id,
-                        initiated_at: *initiated_at_ms,
+                        initiated_at: initiated_at.ts_ms,
                         target_guardians: guardian_ids.clone(),
                         accepted: Vec::new(),
                         declined: Vec::new(),
@@ -161,7 +161,7 @@ impl RecoveryState {
                 proposer_id,
                 change_type,
                 proposal_hash,
-                proposed_at_ms,
+                proposed_at,
             } => {
                 self.proposals.insert(
                     *context_id,
@@ -170,7 +170,7 @@ impl RecoveryState {
                         proposer_id: *proposer_id,
                         proposal_hash: *proposal_hash,
                         change_type: change_type.clone(),
-                        proposed_at: *proposed_at_ms,
+                        proposed_at: proposed_at.ts_ms,
                         votes_for: Vec::new(),
                         votes_against: Vec::new(),
                         status: ProposalStatus::Pending,
@@ -212,7 +212,7 @@ impl RecoveryState {
                 context_id,
                 account_id,
                 request_hash,
-                initiated_at_ms,
+                initiated_at,
             } => {
                 self.recoveries.insert(
                     *context_id,
@@ -220,7 +220,7 @@ impl RecoveryState {
                         context_id: *context_id,
                         account_id: *account_id,
                         request_hash: *request_hash,
-                        initiated_at: *initiated_at_ms,
+                        initiated_at: initiated_at.ts_ms,
                         shares_submitted: Vec::new(),
                         disputes: Vec::new(),
                         status: RecoveryStatus::AwaitingShares,
@@ -460,6 +460,7 @@ pub enum RecoveryStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use aura_core::time::PhysicalTime;
 
     fn test_context_id() -> ContextId {
         ContextId::new_from_entropy([42u8; 32])
@@ -471,6 +472,13 @@ mod tests {
 
     fn test_hash(seed: u8) -> Hash32 {
         Hash32([seed; 32])
+    }
+
+    fn pt(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
     }
 
     #[test]
@@ -487,12 +495,12 @@ mod tests {
                 initiator_id: initiator.clone(),
                 guardian_ids: vec![guardian1.clone(), guardian2.clone(), guardian3.clone()],
                 threshold: 2,
-                initiated_at_ms: 1000,
+                initiated_at: pt(1000),
             },
             RecoveryFact::GuardianAccepted {
                 context_id: ctx.clone(),
                 guardian_id: guardian1.clone(),
-                accepted_at_ms: 2000,
+                accepted_at: pt(2000),
             },
         ];
 
@@ -517,17 +525,17 @@ mod tests {
                 initiator_id: initiator,
                 guardian_ids: vec![guardian1.clone(), guardian2.clone()],
                 threshold: 2,
-                initiated_at_ms: 1000,
+                initiated_at: pt(1000),
             },
             RecoveryFact::GuardianAccepted {
                 context_id: ctx.clone(),
                 guardian_id: guardian1,
-                accepted_at_ms: 2000,
+                accepted_at: pt(2000),
             },
             RecoveryFact::GuardianAccepted {
                 context_id: ctx.clone(),
                 guardian_id: guardian2,
-                accepted_at_ms: 3000,
+                accepted_at: pt(3000),
             },
         ];
 
@@ -551,12 +559,12 @@ mod tests {
                 initiator_id: initiator,
                 guardian_ids: vec![guardian1.clone(), guardian2.clone()],
                 threshold: 2,
-                initiated_at_ms: 1000,
+                initiated_at: pt(1000),
             },
             RecoveryFact::GuardianDeclined {
                 context_id: ctx.clone(),
                 guardian_id: guardian1,
-                declined_at_ms: 2000,
+                declined_at: pt(2000),
             },
         ];
 
@@ -580,21 +588,21 @@ mod tests {
                 proposer_id: proposer,
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
                 proposal_hash: test_hash(1),
-                proposed_at_ms: 1000,
+                proposed_at: pt(1000),
             },
             RecoveryFact::MembershipVoteCast {
                 context_id: ctx.clone(),
                 voter_id: voter1.clone(),
                 proposal_hash: test_hash(1),
                 approved: true,
-                voted_at_ms: 2000,
+                voted_at: pt(2000),
             },
             RecoveryFact::MembershipVoteCast {
                 context_id: ctx.clone(),
                 voter_id: voter2.clone(),
                 proposal_hash: test_hash(1),
                 approved: false,
-                voted_at_ms: 3000,
+                voted_at: pt(3000),
             },
         ];
 
@@ -617,13 +625,13 @@ mod tests {
                 context_id: ctx.clone(),
                 account_id: account.clone(),
                 request_hash: test_hash(1),
-                initiated_at_ms: 1000,
+                initiated_at: pt(1000),
             },
             RecoveryFact::RecoveryShareSubmitted {
                 context_id: ctx.clone(),
                 guardian_id: guardian1.clone(),
                 share_hash: test_hash(2),
-                submitted_at_ms: 2000,
+                submitted_at: pt(2000),
             },
         ];
 
@@ -646,13 +654,13 @@ mod tests {
                 context_id: ctx.clone(),
                 account_id: account,
                 request_hash: test_hash(1),
-                initiated_at_ms: 1000,
+                initiated_at: pt(1000),
             },
             RecoveryFact::RecoveryDisputeFiled {
                 context_id: ctx.clone(),
                 disputer_id: disputer.clone(),
                 reason: "Unauthorized recovery attempt".to_string(),
-                filed_at_ms: 2000,
+                filed_at: pt(2000),
             },
         ];
 
@@ -677,7 +685,7 @@ mod tests {
                 initiator_id: initiator.clone(),
                 guardian_ids: vec![guardian.clone()],
                 threshold: 1,
-                initiated_at_ms: 1000,
+                initiated_at: pt(1000),
             },
             // Completed setup
             RecoveryFact::GuardianSetupInitiated {
@@ -685,18 +693,18 @@ mod tests {
                 initiator_id: initiator,
                 guardian_ids: vec![guardian.clone()],
                 threshold: 1,
-                initiated_at_ms: 2000,
+                initiated_at: pt(2000),
             },
             RecoveryFact::GuardianAccepted {
                 context_id: ctx2.clone(),
                 guardian_id: guardian,
-                accepted_at_ms: 3000,
+                accepted_at: pt(3000),
             },
             RecoveryFact::GuardianSetupCompleted {
                 context_id: ctx2.clone(),
                 guardian_ids: vec![],
                 threshold: 1,
-                completed_at_ms: 4000,
+                completed_at: pt(4000),
             },
         ];
 

@@ -1,13 +1,12 @@
-//! Relationship-Scoped Connection Abstractions
+//! Context-Scoped Connection Abstractions
 //!
-//! Provides essential connection types with built-in relationship scoping and privacy context.
+//! Provides essential connection types with built-in context scoping and privacy context.
 //! Target: <120 lines (minimal scoping implementation).
 
 use aura_core::{
     hash::{hash as core_hash, hasher},
-    identifiers::DeviceId,
+    identifiers::{AuthorityId, ContextId},
     time::{OrderTime, PhysicalTime, TimeStamp},
-    RelationshipId,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -27,14 +26,14 @@ fn order_from_bytes(seed: &[u8]) -> OrderTime {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ConnectionId(Uuid);
 
-/// Privacy-preserving connection identification within relationship context
+/// Privacy-preserving connection identification within context
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ScopedConnectionId {
     /// Base connection identifier
     pub connection_id: ConnectionId,
-    /// Relationship context for this connection
-    pub relationship_id: RelationshipId,
-    /// Scoped identifier within relationship
+    /// Context for this connection
+    pub context_id: ContextId,
+    /// Scoped identifier within context
     pub scoped_id: Uuid,
 }
 
@@ -71,17 +70,17 @@ pub enum ConnectionState {
     },
 }
 
-/// Essential connection metadata with relationship scoping
+/// Essential connection metadata with context scoping
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConnectionInfo {
     /// Connection identifier
     pub connection_id: ConnectionId,
     /// Current connection state
     pub state: ConnectionState,
-    /// Peer device identifier
-    pub peer_id: DeviceId,
-    /// Relationship context (if scoped)
-    pub relationship_context: Option<RelationshipId>,
+    /// Peer authority identifier (cross-authority communication)
+    pub peer_authority: AuthorityId,
+    /// Context scope (if scoped)
+    pub context_id: Option<ContextId>,
     /// Connection capabilities
     pub capabilities: HashMap<String, String>,
     /// Connection metrics
@@ -93,8 +92,8 @@ pub struct ConnectionInfo {
 pub struct PrivacyContext {
     /// Current privacy level
     pub privacy_level: PrivacyLevel,
-    /// Relationship scope (if any)
-    pub relationship_scope: Option<RelationshipId>,
+    /// Context scope (if any)
+    pub context_id: Option<ContextId>,
     /// Capability filtering enabled
     pub capability_filtering: bool,
     /// Message blinding enabled
@@ -148,23 +147,23 @@ impl ConnectionId {
 
 impl ScopedConnectionId {
     /// Create scoped connection identifier
-    pub fn new(connection_id: ConnectionId, relationship_id: RelationshipId) -> Self {
-        // Create a deterministic UUID from relationship and connection IDs
+    pub fn new(connection_id: ConnectionId, context_id: ContextId) -> Self {
+        // Create a deterministic UUID from context and connection IDs
         let mut bytes = [0u8; 16];
-        let rel_bytes = relationship_id.as_bytes();
+        let ctx_bytes = context_id.to_bytes();
         let conn_uuid = connection_id.as_uuid();
         let conn_bytes = conn_uuid.as_bytes();
 
         // Mix the bytes for deterministic generation
         for i in 0..16 {
-            bytes[i] = rel_bytes[i] ^ conn_bytes[i];
+            bytes[i] = ctx_bytes[i] ^ conn_bytes[i];
         }
 
         let scoped_id = Uuid::from_bytes(bytes);
 
         Self {
             connection_id,
-            relationship_id,
+            context_id,
             scoped_id,
         }
     }
@@ -174,25 +173,25 @@ impl ScopedConnectionId {
         self.connection_id
     }
 
-    /// Get relationship context
-    pub fn relationship_id(&self) -> RelationshipId {
-        self.relationship_id.clone()
+    /// Get context
+    pub fn context_id(&self) -> ContextId {
+        self.context_id
     }
 }
 
 impl ConnectionInfo {
-    /// Create new connection info for peer
-    pub fn new(peer_id: DeviceId, privacy_level: PrivacyLevel) -> Self {
+    /// Create new connection info for peer authority
+    pub fn new(peer_authority: AuthorityId, privacy_level: PrivacyLevel) -> Self {
         Self::new_with_timestamp(
-            peer_id,
+            peer_authority,
             privacy_level,
-            TimeStamp::OrderClock(OrderTime(core_hash(peer_id.0.as_bytes()))),
+            TimeStamp::OrderClock(OrderTime(core_hash(peer_authority.0.as_bytes()))),
         )
     }
 
-    /// Create new connection info for peer with specific timestamp
+    /// Create new connection info for peer authority with specific timestamp
     pub fn new_with_timestamp(
-        peer_id: DeviceId,
+        peer_authority: AuthorityId,
         privacy_level: PrivacyLevel,
         started_at: TimeStamp,
     ) -> Self {
@@ -205,32 +204,32 @@ impl ConnectionInfo {
         Self {
             connection_id,
             state,
-            peer_id,
-            relationship_context: None,
+            peer_authority,
+            context_id: None,
             capabilities: HashMap::new(),
             metrics: ConnectionMetrics::new_with_timestamp(started_at),
         }
     }
 
-    /// Create relationship-scoped connection
+    /// Create context-scoped connection
     pub fn new_scoped(
-        peer_id: DeviceId,
-        relationship_id: RelationshipId,
+        peer_authority: AuthorityId,
+        context_id: ContextId,
         privacy_level: PrivacyLevel,
     ) -> Self {
-        let timestamp = TimeStamp::OrderClock(order_from_bytes(relationship_id.as_bytes()));
-        Self::new_scoped_with_timestamp(peer_id, relationship_id, privacy_level, timestamp)
+        let timestamp = TimeStamp::OrderClock(order_from_bytes(context_id.as_bytes()));
+        Self::new_scoped_with_timestamp(peer_authority, context_id, privacy_level, timestamp)
     }
 
-    /// Create relationship-scoped connection with specific timestamp
+    /// Create context-scoped connection with specific timestamp
     pub fn new_scoped_with_timestamp(
-        peer_id: DeviceId,
-        relationship_id: RelationshipId,
+        peer_authority: AuthorityId,
+        context_id: ContextId,
         privacy_level: PrivacyLevel,
         started_at: TimeStamp,
     ) -> Self {
-        let mut info = Self::new_with_timestamp(peer_id, privacy_level, started_at);
-        info.relationship_context = Some(relationship_id);
+        let mut info = Self::new_with_timestamp(peer_authority, privacy_level, started_at);
+        info.context_id = Some(context_id);
         info
     }
 

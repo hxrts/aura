@@ -17,17 +17,17 @@
 //! use aura_invitation::facts::{InvitationFact, InvitationFactReducer};
 //! use aura_journal::{FactRegistry, DomainFact};
 //!
-//! // Create an invitation fact
-//! let fact = InvitationFact::Sent {
+//! // Create an invitation fact using backward-compatible constructor
+//! let fact = InvitationFact::sent_ms(
 //!     context_id,
-//!     invitation_id: "inv-123".to_string(),
+//!     "inv-123".to_string(),
 //!     sender_id,
 //!     receiver_id,
-//!     invitation_type: "guardian".to_string(),
-//!     sent_at_ms: 1234567890,
-//!     expires_at_ms: Some(1234567890 + 86400000),
-//!     message: Some("Please be my guardian".to_string()),
-//! };
+//!     "guardian".to_string(),
+//!     1234567890,
+//!     Some(1234567890 + 86400000),
+//!     Some("Please be my guardian".to_string()),
+//! );
 //!
 //! // Convert to generic for storage
 //! let generic = fact.to_generic();
@@ -37,6 +37,7 @@
 //! ```
 
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::time::PhysicalTime;
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
@@ -64,10 +65,10 @@ pub enum InvitationFact {
         receiver_id: AuthorityId,
         /// Type of invitation: "guardian", "channel", "contact"
         invitation_type: String,
-        /// Timestamp when invitation was sent (ms since epoch)
-        sent_at_ms: u64,
-        /// Optional expiration timestamp (ms since epoch)
-        expires_at_ms: Option<u64>,
+        /// Timestamp when invitation was sent (uses unified time system)
+        sent_at: PhysicalTime,
+        /// Optional expiration timestamp (uses unified time system)
+        expires_at: Option<PhysicalTime>,
         /// Optional message with the invitation
         message: Option<String>,
     },
@@ -77,8 +78,8 @@ pub enum InvitationFact {
         invitation_id: String,
         /// Authority accepting the invitation
         acceptor_id: AuthorityId,
-        /// Timestamp when invitation was accepted (ms since epoch)
-        accepted_at_ms: u64,
+        /// Timestamp when invitation was accepted (uses unified time system)
+        accepted_at: PhysicalTime,
     },
     /// Invitation declined
     Declined {
@@ -86,8 +87,8 @@ pub enum InvitationFact {
         invitation_id: String,
         /// Authority declining the invitation
         decliner_id: AuthorityId,
-        /// Timestamp when invitation was declined (ms since epoch)
-        declined_at_ms: u64,
+        /// Timestamp when invitation was declined (uses unified time system)
+        declined_at: PhysicalTime,
     },
     /// Invitation cancelled by sender
     Cancelled {
@@ -95,8 +96,8 @@ pub enum InvitationFact {
         invitation_id: String,
         /// Authority cancelling the invitation (must be sender)
         canceller_id: AuthorityId,
-        /// Timestamp when invitation was cancelled (ms since epoch)
-        cancelled_at_ms: u64,
+        /// Timestamp when invitation was cancelled (uses unified time system)
+        cancelled_at: PhysicalTime,
     },
 }
 
@@ -108,6 +109,94 @@ impl InvitationFact {
             InvitationFact::Accepted { invitation_id, .. } => invitation_id,
             InvitationFact::Declined { invitation_id, .. } => invitation_id,
             InvitationFact::Cancelled { invitation_id, .. } => invitation_id,
+        }
+    }
+
+    /// Get the timestamp in milliseconds (backward compatibility)
+    pub fn timestamp_ms(&self) -> u64 {
+        match self {
+            InvitationFact::Sent { sent_at, .. } => sent_at.ts_ms,
+            InvitationFact::Accepted { accepted_at, .. } => accepted_at.ts_ms,
+            InvitationFact::Declined { declined_at, .. } => declined_at.ts_ms,
+            InvitationFact::Cancelled { cancelled_at, .. } => cancelled_at.ts_ms,
+        }
+    }
+
+    /// Create a Sent fact with millisecond timestamps (backward compatibility)
+    #[allow(clippy::too_many_arguments)]
+    pub fn sent_ms(
+        context_id: ContextId,
+        invitation_id: String,
+        sender_id: AuthorityId,
+        receiver_id: AuthorityId,
+        invitation_type: String,
+        sent_at_ms: u64,
+        expires_at_ms: Option<u64>,
+        message: Option<String>,
+    ) -> Self {
+        Self::Sent {
+            context_id,
+            invitation_id,
+            sender_id,
+            receiver_id,
+            invitation_type,
+            sent_at: PhysicalTime {
+                ts_ms: sent_at_ms,
+                uncertainty: None,
+            },
+            expires_at: expires_at_ms.map(|ts_ms| PhysicalTime {
+                ts_ms,
+                uncertainty: None,
+            }),
+            message,
+        }
+    }
+
+    /// Create an Accepted fact with millisecond timestamp (backward compatibility)
+    pub fn accepted_ms(
+        invitation_id: String,
+        acceptor_id: AuthorityId,
+        accepted_at_ms: u64,
+    ) -> Self {
+        Self::Accepted {
+            invitation_id,
+            acceptor_id,
+            accepted_at: PhysicalTime {
+                ts_ms: accepted_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a Declined fact with millisecond timestamp (backward compatibility)
+    pub fn declined_ms(
+        invitation_id: String,
+        decliner_id: AuthorityId,
+        declined_at_ms: u64,
+    ) -> Self {
+        Self::Declined {
+            invitation_id,
+            decliner_id,
+            declined_at: PhysicalTime {
+                ts_ms: declined_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a Cancelled fact with millisecond timestamp (backward compatibility)
+    pub fn cancelled_ms(
+        invitation_id: String,
+        canceller_id: AuthorityId,
+        cancelled_at_ms: u64,
+    ) -> Self {
+        Self::Cancelled {
+            invitation_id,
+            canceller_id,
+            cancelled_at: PhysicalTime {
+                ts_ms: cancelled_at_ms,
+                uncertainty: None,
+            },
         }
     }
 }
@@ -206,16 +295,16 @@ mod tests {
 
     #[test]
     fn test_invitation_fact_serialization() {
-        let fact = InvitationFact::Sent {
-            context_id: test_context_id(),
-            invitation_id: "inv-123".to_string(),
-            sender_id: test_authority_id(1),
-            receiver_id: test_authority_id(2),
-            invitation_type: "guardian".to_string(),
-            sent_at_ms: 1234567890,
-            expires_at_ms: Some(1234567890 + 86400000),
-            message: Some("Please be my guardian".to_string()),
-        };
+        let fact = InvitationFact::sent_ms(
+            test_context_id(),
+            "inv-123".to_string(),
+            test_authority_id(1),
+            test_authority_id(2),
+            "guardian".to_string(),
+            1234567890,
+            Some(1234567890 + 86400000),
+            Some("Please be my guardian".to_string()),
+        );
 
         let bytes = fact.to_bytes();
         let restored = InvitationFact::from_bytes(&bytes);
@@ -225,11 +314,8 @@ mod tests {
 
     #[test]
     fn test_invitation_fact_to_generic() {
-        let fact = InvitationFact::Accepted {
-            invitation_id: "inv-456".to_string(),
-            acceptor_id: test_authority_id(3),
-            accepted_at_ms: 1234567899,
-        };
+        let fact =
+            InvitationFact::accepted_ms("inv-456".to_string(), test_authority_id(3), 1234567899);
 
         let generic = fact.to_generic();
 
@@ -252,16 +338,16 @@ mod tests {
         let reducer = InvitationFactReducer;
         assert_eq!(reducer.handles_type(), INVITATION_FACT_TYPE_ID);
 
-        let fact = InvitationFact::Sent {
-            context_id: test_context_id(),
-            invitation_id: "inv-789".to_string(),
-            sender_id: test_authority_id(4),
-            receiver_id: test_authority_id(5),
-            invitation_type: "contact".to_string(),
-            sent_at_ms: 0,
-            expires_at_ms: None,
-            message: None,
-        };
+        let fact = InvitationFact::sent_ms(
+            test_context_id(),
+            "inv-789".to_string(),
+            test_authority_id(4),
+            test_authority_id(5),
+            "contact".to_string(),
+            0,
+            None,
+            None,
+        );
 
         let bytes = fact.to_bytes();
         let binding = reducer.reduce(test_context_id(), INVITATION_FACT_TYPE_ID, &bytes);
@@ -277,31 +363,19 @@ mod tests {
     #[test]
     fn test_invitation_id_extraction() {
         let facts = vec![
-            InvitationFact::Sent {
-                context_id: test_context_id(),
-                invitation_id: "inv-1".to_string(),
-                sender_id: test_authority_id(1),
-                receiver_id: test_authority_id(2),
-                invitation_type: "guardian".to_string(),
-                sent_at_ms: 0,
-                expires_at_ms: None,
-                message: None,
-            },
-            InvitationFact::Accepted {
-                invitation_id: "inv-2".to_string(),
-                acceptor_id: test_authority_id(3),
-                accepted_at_ms: 0,
-            },
-            InvitationFact::Declined {
-                invitation_id: "inv-3".to_string(),
-                decliner_id: test_authority_id(4),
-                declined_at_ms: 0,
-            },
-            InvitationFact::Cancelled {
-                invitation_id: "inv-4".to_string(),
-                canceller_id: test_authority_id(5),
-                cancelled_at_ms: 0,
-            },
+            InvitationFact::sent_ms(
+                test_context_id(),
+                "inv-1".to_string(),
+                test_authority_id(1),
+                test_authority_id(2),
+                "guardian".to_string(),
+                0,
+                None,
+                None,
+            ),
+            InvitationFact::accepted_ms("inv-2".to_string(), test_authority_id(3), 0),
+            InvitationFact::declined_ms("inv-3".to_string(), test_authority_id(4), 0),
+            InvitationFact::cancelled_ms("inv-4".to_string(), test_authority_id(5), 0),
         ];
 
         assert_eq!(facts[0].invitation_id(), "inv-1");
@@ -313,35 +387,50 @@ mod tests {
     #[test]
     fn test_type_id_consistency() {
         let facts: Vec<InvitationFact> = vec![
-            InvitationFact::Sent {
-                context_id: test_context_id(),
-                invitation_id: "x".to_string(),
-                sender_id: test_authority_id(1),
-                receiver_id: test_authority_id(2),
-                invitation_type: "t".to_string(),
-                sent_at_ms: 0,
-                expires_at_ms: None,
-                message: None,
-            },
-            InvitationFact::Accepted {
-                invitation_id: "x".to_string(),
-                acceptor_id: test_authority_id(3),
-                accepted_at_ms: 0,
-            },
-            InvitationFact::Declined {
-                invitation_id: "x".to_string(),
-                decliner_id: test_authority_id(4),
-                declined_at_ms: 0,
-            },
-            InvitationFact::Cancelled {
-                invitation_id: "x".to_string(),
-                canceller_id: test_authority_id(5),
-                cancelled_at_ms: 0,
-            },
+            InvitationFact::sent_ms(
+                test_context_id(),
+                "x".to_string(),
+                test_authority_id(1),
+                test_authority_id(2),
+                "t".to_string(),
+                0,
+                None,
+                None,
+            ),
+            InvitationFact::accepted_ms("x".to_string(), test_authority_id(3), 0),
+            InvitationFact::declined_ms("x".to_string(), test_authority_id(4), 0),
+            InvitationFact::cancelled_ms("x".to_string(), test_authority_id(5), 0),
         ];
 
         for fact in facts {
             assert_eq!(fact.type_id(), INVITATION_FACT_TYPE_ID);
         }
+    }
+
+    #[test]
+    fn test_timestamp_ms_backward_compat() {
+        let sent = InvitationFact::sent_ms(
+            test_context_id(),
+            "inv".to_string(),
+            test_authority_id(1),
+            test_authority_id(2),
+            "guardian".to_string(),
+            1234567890,
+            None,
+            None,
+        );
+        assert_eq!(sent.timestamp_ms(), 1234567890);
+
+        let accepted =
+            InvitationFact::accepted_ms("inv".to_string(), test_authority_id(1), 1111111111);
+        assert_eq!(accepted.timestamp_ms(), 1111111111);
+
+        let declined =
+            InvitationFact::declined_ms("inv".to_string(), test_authority_id(1), 2222222222);
+        assert_eq!(declined.timestamp_ms(), 2222222222);
+
+        let cancelled =
+            InvitationFact::cancelled_ms("inv".to_string(), test_authority_id(1), 3333333333);
+        assert_eq!(cancelled.timestamp_ms(), 3333333333);
     }
 }

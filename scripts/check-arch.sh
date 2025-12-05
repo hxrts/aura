@@ -180,7 +180,7 @@ RUNTIME_ALLOWLIST="crates/aura-agent/src/runtime/"
 APP_NATIVE_STORAGE_ALLOWLIST="crates/aura-app/src/core/app.rs"
 
 # CLI entry points (Layer 7) - main.rs where production starts
-CLI_ENTRY_ALLOWLIST="crates/aura-cli/src/main.rs"
+CLI_ENTRY_ALLOWLIST="crates/aura-terminal/src/main.rs"
 
 # Common filter for effect/impure checks
 # Usage: filter_common_allowlist "$input" ["extra_pattern"]
@@ -224,7 +224,7 @@ layer_of() {
     aura-protocol) echo 4 ;;
     aura-authenticate|aura-chat|aura-invitation|aura-recovery|aura-relational|aura-rendezvous|aura-sync|aura-app) echo 5 ;;
     aura-agent|aura-simulator) echo 6 ;;
-    aura-cli|aura-terminal) echo 7 ;;
+    aura-terminal) echo 7 ;;
     aura-testkit|aura-quint) echo 8 ;;
     *) echo 0 ;;
   esac
@@ -242,9 +242,9 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_LAYERS" = true ]; then
   fi
 
   # Domain crates should not depend on runtime/UI layers
-  for crate in aura-authenticate aura-chat aura-invitation aura-recovery aura-relational aura-rendezvous aura-sync; do
+  for crate in aura-authenticate aura-app aura-chat aura-invitation aura-recovery aura-relational aura-rendezvous aura-sync; do
     if [ -d "crates/$crate" ]; then
-      if grep -A20 "^\[dependencies\]" crates/$crate/Cargo.toml | grep -E "aura-agent|aura-simulator|aura-cli" >/dev/null; then
+      if grep -A20 "^\[dependencies\]" crates/$crate/Cargo.toml | grep -E "aura-agent|aura-simulator|aura-terminal" >/dev/null; then
         violation "$crate depends on runtime/UI layers"
       else
         info "$crate: no runtime/UI deps"
@@ -278,7 +278,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   infra_traits="CryptoEffects|NetworkEffects|StorageEffects|PhysicalTimeEffects|LogicalClockEffects|OrderClockEffects|TimeAttestationEffects|RandomEffects|ConsoleEffects|ConfigurationEffects|LeakageEffects"
   infra_defs=$(find crates/ -name "*.rs" -not -path "*/aura-core/*" -exec grep -El "pub trait ($infra_traits)" {} + 2>/dev/null || true)
   if [ -n "$infra_defs" ]; then
-    violation "Infrastructure effect traits defined outside aura-core:" 
+    violation "Infrastructure effect traits defined outside aura-core:"
     echo "$infra_defs"
   else
     info "Infra effect traits defined only in aura-core"

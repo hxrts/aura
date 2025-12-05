@@ -164,7 +164,6 @@ impl SyncService {
         let now = time_effects
             .physical_time()
             .await
-            .map(|t| t.ts_ms)
             .map_err(time_error_to_aura)?;
         let session_manager = SessionManager::new(Default::default(), now);
         let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
@@ -199,7 +198,6 @@ impl SyncService {
         let now = time_effects
             .physical_time()
             .await
-            .map(|t| t.ts_ms)
             .map_err(time_error_to_aura)?;
         let session_manager = SessionManager::new(Default::default(), now);
         let journal_sync = JournalSyncProtocol::new(config.journal_sync.clone());
@@ -270,7 +268,8 @@ impl SyncService {
             .iter()
             .map(|&(peer, ops)| (peer, ops > 0)) // ops > 0 = success
             .collect();
-        Self::update_peer_scores_from_sync(&self.peer_manager, &score_results).await?;
+        let now = effects.physical_time().await.map_err(time_error_to_aura)?;
+        Self::update_peer_scores_from_sync(&self.peer_manager, &score_results, &now).await?;
 
         // 6. Log aggregate metrics
         Self::update_auto_sync_metrics(&score_results).await?;
@@ -468,8 +467,12 @@ impl SyncService {
         // 3. Execute anti-entropy and journal sync protocols
         let sync_results = Self::execute_auto_sync_protocols(journal_sync, &session_peers).await?;
 
-        // 4. Update peer scores based on sync results
-        Self::update_peer_scores_from_sync(peer_manager, &sync_results).await?;
+        // 4. Update peer scores based on sync results (get current time for timestamps)
+        let score_now = time_effects
+            .physical_time()
+            .await
+            .map_err(time_error_to_aura)?;
+        Self::update_peer_scores_from_sync(peer_manager, &sync_results, &score_now).await?;
 
         // 5. Track metrics and update session states
         Self::update_auto_sync_metrics(&sync_results).await?;
@@ -620,17 +623,22 @@ impl SyncService {
     /// Update peer states after sync operations
     async fn update_peer_states(&self, peers: &[DeviceId]) -> SyncResult<()> {
         let mut peer_manager = self.peer_manager.write();
+        let now = self
+            .time_effects
+            .physical_time()
+            .await
+            .map_err(time_error_to_aura)?;
 
         for &peer in peers {
             // Update last contact time
-            peer_manager.update_last_contact(peer);
+            peer_manager.update_last_contact(peer, &now);
 
             // Update peer availability based on recent sync attempts
             let recent_success_rate = peer_manager.get_recent_sync_success_rate(&peer);
             if recent_success_rate < 0.3 {
-                peer_manager.mark_peer_degraded(&peer);
+                peer_manager.mark_peer_degraded(&peer, &now);
             } else if recent_success_rate > 0.8 {
-                peer_manager.mark_peer_healthy(&peer);
+                peer_manager.mark_peer_healthy(&peer, &now);
             }
         }
 
@@ -739,14 +747,12 @@ impl SyncService {
         let now = time_effects
             .physical_time()
             .await
-            .map_err(time_error_to_aura)?
-            .ts_ms
-            / 1000;
+            .map_err(time_error_to_aura)?;
 
         // Now acquire lock and create sessions
         let mut manager = session_manager.write();
         for &peer in peers {
-            match manager.create_session(vec![peer], now) {
+            match manager.create_session(vec![peer], &now) {
                 Ok(_session_id) => {
                     session_peers.push(peer);
                     tracing::debug!("Created auto-sync session for peer {}", peer);
@@ -784,13 +790,14 @@ impl SyncService {
     async fn update_peer_scores_from_sync(
         peer_manager: &Arc<RwLock<PeerManager>>,
         results: &[(DeviceId, bool)],
+        now: &aura_core::time::PhysicalTime,
     ) -> SyncResult<()> {
         let mut manager = peer_manager.write();
 
         for &(peer, success) in results {
             if success {
-                manager.increment_sync_success(&peer);
-                manager.update_last_successful_sync(&peer);
+                manager.increment_sync_success(&peer, now);
+                manager.update_last_successful_sync(&peer, now);
                 manager.recalculate_peer_health(&peer);
             } else {
                 manager.increment_sync_failure(&peer);

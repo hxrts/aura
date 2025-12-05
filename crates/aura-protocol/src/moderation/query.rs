@@ -39,15 +39,17 @@ pub fn query_current_bans(
                 binding_data,
             }) if fact_context == context_id && binding_type == BLOCK_BAN_FACT_TYPE_ID => {
                 if let Some(block_ban) = BlockBanFact::from_bytes(binding_data) {
+                    let banned_at_ms = block_ban.banned_at_ms();
+                    let expires_at_ms = block_ban.expires_at_ms();
                     let ban = BanStatus {
                         banned_authority: block_ban.banned_authority,
                         actor_authority: block_ban.actor_authority,
                         reason: block_ban.reason,
-                        banned_at_ms: block_ban.banned_at_ms,
-                        expires_at_ms: block_ban.expires_at_ms,
+                        banned_at_ms,
+                        expires_at_ms,
                         channel_id: block_ban.channel_id,
                     };
-                    bans.insert(block_ban.banned_authority, ban);
+                    bans.insert(ban.banned_authority, ban);
                 }
             }
             FactContent::Relational(RelationalFact::Generic {
@@ -58,7 +60,7 @@ pub fn query_current_bans(
                 if let Some(block_unban) = BlockUnbanFact::from_bytes(binding_data) {
                     // Remove ban if unban happened after the ban
                     if let Some(ban) = bans.get(&block_unban.unbanned_authority) {
-                        if block_unban.unbanned_at_ms >= ban.banned_at_ms {
+                        if block_unban.unbanned_at_ms() >= ban.banned_at_ms {
                             bans.remove(&block_unban.unbanned_authority);
                         }
                     }
@@ -106,8 +108,8 @@ pub fn query_current_mutes(
                         muted_authority: block_mute.muted_authority,
                         actor_authority: block_mute.actor_authority,
                         duration_secs: block_mute.duration_secs,
-                        muted_at_ms: block_mute.muted_at_ms,
-                        expires_at_ms: block_mute.expires_at_ms,
+                        muted_at_ms: block_mute.muted_at_ms(),
+                        expires_at_ms: block_mute.expires_at_ms(),
                         channel_id: block_mute.channel_id,
                     };
                     mutes.insert(mute.muted_authority, mute);
@@ -120,7 +122,7 @@ pub fn query_current_mutes(
             }) if fact_context == context_id && binding_type == "moderation:block-unmute" => {
                 if let Some(block_unmute) = BlockUnmuteFact::from_bytes(binding_data) {
                     let unmuted_authority = block_unmute.unmuted_authority;
-                    let unmuted_at_ms = block_unmute.unmuted_at_ms;
+                    let unmuted_at_ms = block_unmute.unmuted_at_ms();
                     // Remove mute if unmute happened after the mute
                     if let Some(mute) = mutes.get(&unmuted_authority) {
                         if unmuted_at_ms >= mute.muted_at_ms {
@@ -162,12 +164,13 @@ pub fn query_kick_history(facts: &[Fact], context_id: &ContextId) -> Vec<KickRec
         {
             if fact_context == context_id && binding_type == BLOCK_KICK_FACT_TYPE_ID {
                 if let Some(block_kick) = BlockKickFact::from_bytes(binding_data) {
+                    let kicked_at_ms = block_kick.kicked_at_ms();
                     kicks.push(KickRecord {
                         kicked_authority: block_kick.kicked_authority,
                         actor_authority: block_kick.actor_authority,
                         channel_id: block_kick.channel_id,
                         reason: block_kick.reason,
-                        kicked_at_ms: block_kick.kicked_at_ms,
+                        kicked_at_ms,
                     });
                 }
             }
@@ -249,7 +252,7 @@ pub fn is_user_muted(
 mod tests {
     use super::*;
     use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
-    use aura_core::time::{OrderTime, TimeStamp};
+    use aura_core::time::{OrderTime, PhysicalTime, TimeStamp};
     use aura_journal::fact::{Fact, FactContent, RelationalFact};
 
     fn create_test_fact(content: RelationalFact, order_index: u64) -> Fact {
@@ -275,6 +278,13 @@ mod tests {
         ChannelId::from_bytes([id; 32])
     }
 
+    fn pt(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
     #[test]
     fn test_query_current_bans_basic() {
         let context = test_context();
@@ -287,8 +297,8 @@ mod tests {
             banned_authority: user1.clone(),
             actor_authority: steward.clone(),
             reason: "test ban".to_string(),
-            banned_at_ms: 1000,
-            expires_at_ms: None,
+            banned_at: pt(1000),
+            expires_at: None,
         };
 
         let facts = vec![create_test_fact(ban_fact.to_generic(), 0)];
@@ -311,15 +321,15 @@ mod tests {
             banned_authority: user1.clone(),
             actor_authority: steward.clone(),
             reason: "test ban".to_string(),
-            banned_at_ms: 1000,
-            expires_at_ms: None,
+            banned_at: pt(1000),
+            expires_at: None,
         };
         let unban_fact = BlockUnbanFact {
             context_id: context.clone(),
             channel_id: None,
             unbanned_authority: user1.clone(),
             actor_authority: steward.clone(),
-            unbanned_at_ms: 2000,
+            unbanned_at: pt(2000),
         };
 
         let facts = vec![
@@ -343,8 +353,8 @@ mod tests {
             banned_authority: user1.clone(),
             actor_authority: steward.clone(),
             reason: "test ban".to_string(),
-            banned_at_ms: 1000,
-            expires_at_ms: Some(2000), // Expires at 2000ms
+            banned_at: pt(1000),
+            expires_at: Some(pt(2000)), // Expires at 2000ms
         };
 
         let facts = vec![create_test_fact(ban_fact.to_generic(), 0)];
@@ -370,8 +380,8 @@ mod tests {
             muted_authority: user1.clone(),
             actor_authority: steward.clone(),
             duration_secs: Some(60),
-            muted_at_ms: 1000,
-            expires_at_ms: Some(61000), // 1000ms + 60s = 61000ms
+            muted_at: pt(1000),
+            expires_at: Some(pt(61000)), // 1000ms + 60s = 61000ms
         };
 
         let facts = vec![create_test_fact(mute_fact.to_generic(), 0)];
@@ -397,15 +407,15 @@ mod tests {
             muted_authority: user1.clone(),
             actor_authority: steward.clone(),
             duration_secs: None,
-            muted_at_ms: 1000,
-            expires_at_ms: None,
+            muted_at: pt(1000),
+            expires_at: None,
         };
         let unmute_fact = BlockUnmuteFact {
             context_id: context.clone(),
             channel_id: None,
             unmuted_authority: user1.clone(),
             actor_authority: steward.clone(),
-            unmuted_at_ms: 2000,
+            unmuted_at: pt(2000),
         };
 
         let facts = vec![
@@ -431,7 +441,7 @@ mod tests {
             kicked_authority: user1.clone(),
             actor_authority: steward.clone(),
             reason: "first kick".to_string(),
-            kicked_at_ms: 1000,
+            kicked_at: pt(1000),
         };
         let kick_fact2 = BlockKickFact {
             context_id: context.clone(),
@@ -439,7 +449,7 @@ mod tests {
             kicked_authority: user2.clone(),
             actor_authority: steward.clone(),
             reason: "second kick".to_string(),
-            kicked_at_ms: 2000,
+            kicked_at: pt(2000),
         };
 
         let facts = vec![
@@ -467,8 +477,8 @@ mod tests {
             banned_authority: user1.clone(),
             actor_authority: steward.clone(),
             reason: "test ban".to_string(),
-            banned_at_ms: 1000,
-            expires_at_ms: None,
+            banned_at: pt(1000),
+            expires_at: None,
         };
 
         let facts = vec![create_test_fact(ban_fact.to_generic(), 0)];
@@ -491,8 +501,8 @@ mod tests {
             muted_authority: user1.clone(),
             actor_authority: steward.clone(),
             duration_secs: None,
-            muted_at_ms: 1000,
-            expires_at_ms: None,
+            muted_at: pt(1000),
+            expires_at: None,
         };
 
         let facts = vec![create_test_fact(mute_fact.to_generic(), 0)];
@@ -517,8 +527,8 @@ mod tests {
             banned_authority: user1.clone(),
             actor_authority: steward.clone(),
             reason: "channel-specific ban".to_string(),
-            banned_at_ms: 1000,
-            expires_at_ms: None,
+            banned_at: pt(1000),
+            expires_at: None,
         };
 
         let facts = vec![create_test_fact(ban_fact.to_generic(), 0)];

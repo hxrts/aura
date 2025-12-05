@@ -1,4 +1,5 @@
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::time::PhysicalTime;
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer, FactRegistry,
@@ -19,8 +20,47 @@ pub struct BlockMuteFact {
     pub muted_authority: AuthorityId,
     pub actor_authority: AuthorityId,
     pub duration_secs: Option<u64>,
-    pub muted_at_ms: u64,
-    pub expires_at_ms: Option<u64>,
+    pub muted_at: PhysicalTime,
+    pub expires_at: Option<PhysicalTime>,
+}
+
+impl BlockMuteFact {
+    /// Backward-compat accessor for muted_at timestamp in milliseconds.
+    pub fn muted_at_ms(&self) -> u64 {
+        self.muted_at.ts_ms
+    }
+
+    /// Backward-compat accessor for expires_at timestamp in milliseconds.
+    pub fn expires_at_ms(&self) -> Option<u64> {
+        self.expires_at.as_ref().map(|t| t.ts_ms)
+    }
+
+    /// Backward-compat constructor using raw millisecond timestamps.
+    pub fn new_ms(
+        context_id: ContextId,
+        channel_id: Option<ChannelId>,
+        muted_authority: AuthorityId,
+        actor_authority: AuthorityId,
+        duration_secs: Option<u64>,
+        muted_at_ms: u64,
+        expires_at_ms: Option<u64>,
+    ) -> Self {
+        Self {
+            context_id,
+            channel_id,
+            muted_authority,
+            actor_authority,
+            duration_secs,
+            muted_at: PhysicalTime {
+                ts_ms: muted_at_ms,
+                uncertainty: None,
+            },
+            expires_at: expires_at_ms.map(|ts_ms| PhysicalTime {
+                ts_ms,
+                uncertainty: None,
+            }),
+        }
+    }
 }
 
 impl DomainFact for BlockMuteFact {
@@ -48,7 +88,34 @@ pub struct BlockUnmuteFact {
     pub channel_id: Option<ChannelId>,
     pub unmuted_authority: AuthorityId,
     pub actor_authority: AuthorityId,
-    pub unmuted_at_ms: u64,
+    pub unmuted_at: PhysicalTime,
+}
+
+impl BlockUnmuteFact {
+    /// Backward-compat accessor for unmuted_at timestamp in milliseconds.
+    pub fn unmuted_at_ms(&self) -> u64 {
+        self.unmuted_at.ts_ms
+    }
+
+    /// Backward-compat constructor using raw millisecond timestamps.
+    pub fn new_ms(
+        context_id: ContextId,
+        channel_id: Option<ChannelId>,
+        unmuted_authority: AuthorityId,
+        actor_authority: AuthorityId,
+        unmuted_at_ms: u64,
+    ) -> Self {
+        Self {
+            context_id,
+            channel_id,
+            unmuted_authority,
+            actor_authority,
+            unmuted_at: PhysicalTime {
+                ts_ms: unmuted_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
 }
 
 impl DomainFact for BlockUnmuteFact {
@@ -77,8 +144,47 @@ pub struct BlockBanFact {
     pub banned_authority: AuthorityId,
     pub actor_authority: AuthorityId,
     pub reason: String,
-    pub banned_at_ms: u64,
-    pub expires_at_ms: Option<u64>,
+    pub banned_at: PhysicalTime,
+    pub expires_at: Option<PhysicalTime>,
+}
+
+impl BlockBanFact {
+    /// Backward-compat accessor for banned_at timestamp in milliseconds.
+    pub fn banned_at_ms(&self) -> u64 {
+        self.banned_at.ts_ms
+    }
+
+    /// Backward-compat accessor for expires_at timestamp in milliseconds.
+    pub fn expires_at_ms(&self) -> Option<u64> {
+        self.expires_at.as_ref().map(|t| t.ts_ms)
+    }
+
+    /// Backward-compat constructor using raw millisecond timestamps.
+    pub fn new_ms(
+        context_id: ContextId,
+        channel_id: Option<ChannelId>,
+        banned_authority: AuthorityId,
+        actor_authority: AuthorityId,
+        reason: String,
+        banned_at_ms: u64,
+        expires_at_ms: Option<u64>,
+    ) -> Self {
+        Self {
+            context_id,
+            channel_id,
+            banned_authority,
+            actor_authority,
+            reason,
+            banned_at: PhysicalTime {
+                ts_ms: banned_at_ms,
+                uncertainty: None,
+            },
+            expires_at: expires_at_ms.map(|ts_ms| PhysicalTime {
+                ts_ms,
+                uncertainty: None,
+            }),
+        }
+    }
 }
 
 impl DomainFact for BlockBanFact {
@@ -106,7 +212,34 @@ pub struct BlockUnbanFact {
     pub channel_id: Option<ChannelId>,
     pub unbanned_authority: AuthorityId,
     pub actor_authority: AuthorityId,
-    pub unbanned_at_ms: u64,
+    pub unbanned_at: PhysicalTime,
+}
+
+impl BlockUnbanFact {
+    /// Backward-compat accessor for unbanned_at timestamp in milliseconds.
+    pub fn unbanned_at_ms(&self) -> u64 {
+        self.unbanned_at.ts_ms
+    }
+
+    /// Backward-compat constructor using raw millisecond timestamps.
+    pub fn new_ms(
+        context_id: ContextId,
+        channel_id: Option<ChannelId>,
+        unbanned_authority: AuthorityId,
+        actor_authority: AuthorityId,
+        unbanned_at_ms: u64,
+    ) -> Self {
+        Self {
+            context_id,
+            channel_id,
+            unbanned_authority,
+            actor_authority,
+            unbanned_at: PhysicalTime {
+                ts_ms: unbanned_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
 }
 
 impl DomainFact for BlockUnbanFact {
@@ -135,7 +268,36 @@ pub struct BlockKickFact {
     pub kicked_authority: AuthorityId,
     pub actor_authority: AuthorityId,
     pub reason: String,
-    pub kicked_at_ms: u64,
+    pub kicked_at: PhysicalTime,
+}
+
+impl BlockKickFact {
+    /// Backward-compat accessor for kicked_at timestamp in milliseconds.
+    pub fn kicked_at_ms(&self) -> u64 {
+        self.kicked_at.ts_ms
+    }
+
+    /// Backward-compat constructor using raw millisecond timestamps.
+    pub fn new_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        kicked_authority: AuthorityId,
+        actor_authority: AuthorityId,
+        reason: String,
+        kicked_at_ms: u64,
+    ) -> Self {
+        Self {
+            context_id,
+            channel_id,
+            kicked_authority,
+            actor_authority,
+            reason,
+            kicked_at: PhysicalTime {
+                ts_ms: kicked_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
 }
 
 impl DomainFact for BlockKickFact {
@@ -311,6 +473,13 @@ mod tests {
         AuthorityId::new_from_entropy([seed; 32])
     }
 
+    fn pt(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
     #[test]
     fn moderation_facts_register_with_registry() {
         let mut registry = FactRegistry::new();
@@ -326,8 +495,8 @@ mod tests {
             muted_authority: test_authority_id(1),
             actor_authority: test_authority_id(2),
             duration_secs: Some(30),
-            muted_at_ms: 1000,
-            expires_at_ms: Some(31000),
+            muted_at: pt(1000),
+            expires_at: Some(pt(31000)),
         };
 
         let binding = registry.reduce_generic(
@@ -347,7 +516,7 @@ mod tests {
             channel_id: None,
             unmuted_authority: block_mute.muted_authority,
             actor_authority: block_mute.actor_authority,
-            unmuted_at_ms: 2000,
+            unmuted_at: pt(2000),
         };
 
         let binding = registry.reduce_generic(

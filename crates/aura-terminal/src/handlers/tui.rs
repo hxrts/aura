@@ -7,17 +7,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use aura_agent::core::config::StorageConfig;
-use aura_agent::{AgentConfig, AuraEffectSystem};
-use aura_app::{AppConfig, AppCore};
+// Import from aura-app which re-exports agent types
+use aura_app::{AgentBuilder, AgentConfig, AppConfig, AppCore, EffectContext, StorageConfig};
+use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::AuraError;
-use aura_effects::time::PhysicalTimeHandler;
 use tokio::sync::RwLock;
 
 use crate::cli::tui::TuiArgs;
 use crate::tui::{
     context::IoContext,
-    effects::{BridgeConfig, EffectBridge},
+    effects::EffectBridge,
     screens::{run_app, run_app_with_context},
 };
 
@@ -66,20 +65,32 @@ async fn handle_tui_launch(data_dir: Option<&str>, device_id_str: Option<&str>) 
         ..AgentConfig::default()
     };
 
-    // Build production effect system
-    let effect_system = AuraEffectSystem::production(agent_config)
-        .map_err(|e| AuraError::internal(format!("Failed to create effect system: {}", e)))?;
-    let effect_system = Arc::new(effect_system);
+    // Create effect context for agent initialization
+    let effect_ctx = EffectContext::new(
+        AuthorityId::new_from_entropy([0u8; 32]), // Temporary authority, agent will update
+        ContextId::new_from_entropy([0u8; 32]),   // Temporary context
+        aura_core::effects::ExecutionMode::Production,
+    );
 
-    // Create AppCore - the portable application core from aura-app
+    // Build production agent using AgentBuilder
+    // This creates the AuraAgent with full effect system and services
+    let agent = AgentBuilder::new()
+        .with_config(agent_config)
+        .with_authority(AuthorityId::new_from_entropy([0u8; 32])) // Will be replaced by loaded account
+        .build_production(&effect_ctx)
+        .await
+        .map_err(|e| AuraError::internal(format!("Failed to create agent: {}", e)))?;
+
+    // Create AppCore with agent - the portable application core from aura-app
     // This provides intent-based state management with reactive ViewState
+    // The agent is now wrapped inside AppCore, providing a unified interface
     let journal_path = base_path.join("journal.json");
     let app_config = AppConfig {
         data_dir: base_path.to_string_lossy().to_string(),
         debug: false,
         journal_path: Some(journal_path.to_string_lossy().to_string()),
     };
-    let mut app_core = AppCore::new(app_config)
+    let mut app_core = AppCore::with_agent(app_config, agent)
         .map_err(|e| AuraError::internal(format!("Failed to create AppCore: {}", e)))?;
 
     // Load existing journal facts from storage to rebuild ViewState
@@ -97,20 +108,11 @@ async fn handle_tui_launch(data_dir: Option<&str>, device_id_str: Option<&str>) 
 
     let app_core = Arc::new(RwLock::new(app_core));
 
-    println!("AppCore initialized");
-
-    // Cast to trait objects for bridge
-    let amp_trait: Option<Arc<dyn aura_core::effects::amp::AmpChannelEffects + Send + Sync>> =
-        Some(effect_system.clone() as Arc<_>);
+    println!("AppCore initialized (with agent)");
 
     // Create effect bridge for TUI with AppCore integration
-    let bridge = EffectBridge::with_full_config(
-        BridgeConfig::default(),
-        Arc::new(PhysicalTimeHandler),
-        amp_trait.clone(),
-        Some(effect_system.clone()),
-        Some(app_core.clone()),
-    );
+    // Effect system is accessed via app_core.agent().runtime().effects()
+    let bridge = EffectBridge::with_app_core(app_core.clone());
 
     // Create IoContext with AppCore integration
     let ctx = IoContext::with_app_core(bridge, app_core);

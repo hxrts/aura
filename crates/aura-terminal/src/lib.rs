@@ -12,16 +12,37 @@
 //! Layer 7 user interface crate providing:
 //! - CLI command implementations for scenario management, authority operations, and recovery
 //! - Interactive TUI for real-time interaction with Aura
-//! - Integration with the agent runtime for command execution
+//! - Integration with `AppCore` for all runtime operations
 //! - User-facing commands for account management, authentication, and recovery
 //! - Visualization and reporting tools for status and diagnostics
 //!
-//! ## Architecture Constraints
+//! ## Architecture
 //!
-//! This crate depends on:
-//! - **aura-app**: Portable headless application core (intents, views, queries)
-//! - **Layer 1-6**: All lower layers (core, domain crates, effects, protocols, features, runtime)
-//! - **Layer 8** (optional): Test fixtures from aura-testkit for testing
+//! All operations go through `AppCore` from `aura-app`:
+//!
+//! ```text
+//! ┌─────────────────────────┐
+//! │     aura-terminal       │  ← THIS CRATE
+//! │                         │
+//! │  CLI handlers           │
+//! │  TUI screens/components │
+//! └───────────┬─────────────┘
+//!             │
+//!             ↓ imports from
+//! ┌───────────────────────────┐
+//! │        aura-app           │  ← AppCore + re-exports
+//! │                           │
+//! │  AppCore (with AuraAgent) │
+//! │  Intent dispatch          │
+//! │  ViewState signals        │
+//! └───────────────────────────┘
+//! ```
+//!
+//! ## Constraints
+//!
+//! This crate:
+//! - **IMPORTS FROM**: `aura-app` (primary), `aura-core` (types only)
+//! - **NEVER IMPORTS**: `aura-agent` directly (use aura-app re-exports)
 //! - **MUST NOT**: Create effect implementations or handlers (use aura-effects)
 //! - **MUST NOT**: Be imported by Layer 1-6 crates (no circular dependencies)
 //!
@@ -78,39 +99,54 @@ pub use handlers::CliHandler;
 // Action types defined in this module (no re-export needed)
 
 // Action types are defined in this module and automatically available
-use aura_agent::{AgentBuilder, EffectContext};
+// Import from aura_app which re-exports agent types
+use aura_app::{AgentBuilder, AppConfig, AppCore, EffectContext};
 use aura_core::{effects::ExecutionMode, identifiers::DeviceId, AuraError};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 /// Create a CLI handler for the given device ID
+///
+/// Uses AppCore as the unified backend for all operations.
 pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
     let authority_id = ids::authority_id(&format!("cli:authority:{}", device_id));
     let context_id = ids::context_id(&format!("cli:context:{}", device_id));
+
+    // Build agent
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing()
         .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
+
+    // Create AppCore with the agent
+    let config = AppConfig::default();
+    let app_core = AppCore::with_agent(config, agent)
+        .map_err(|e| AuraError::agent(format!("AppCore creation failed: {}", e)))?;
+    let app_core = Arc::new(RwLock::new(app_core));
+
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
-    Ok(CliHandler::new(
-        agent.runtime().effects(),
-        device_id,
-        effect_context,
-    ))
+    Ok(CliHandler::new(app_core, device_id, effect_context))
 }
 
 /// Create a test CLI handler for the given device ID
 pub fn create_test_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> {
     let authority_id = ids::authority_id(&format!("cli:test-authority:{}", device_id));
     let context_id = ids::context_id(&format!("cli:test-context:{}", device_id));
+
+    // Build agent
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing()
         .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
+
+    // Create AppCore with the agent
+    let config = AppConfig::default();
+    let app_core = AppCore::with_agent(config, agent)
+        .map_err(|e| AuraError::agent(format!("AppCore creation failed: {}", e)))?;
+    let app_core = Arc::new(RwLock::new(app_core));
+
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
-    Ok(CliHandler::new(
-        agent.runtime().effects(),
-        device_id,
-        effect_context,
-    ))
+    Ok(CliHandler::new(app_core, device_id, effect_context))
 }
 
 /// Create a CLI handler with a generated device ID
@@ -256,11 +292,23 @@ pub enum InvitationAction {
         /// Optional TTL in seconds.
         ttl: Option<u64>,
     },
-    /// Accept an invitation envelope serialized to disk.
+    /// Accept an invitation by ID.
     Accept {
-        /// Path to the invitation envelope JSON file.
-        envelope: std::path::PathBuf,
+        /// Invitation identifier string.
+        invitation_id: String,
     },
+    /// Decline an invitation by ID.
+    Decline {
+        /// Invitation identifier string.
+        invitation_id: String,
+    },
+    /// Cancel an invitation you previously sent.
+    Cancel {
+        /// Invitation identifier string.
+        invitation_id: String,
+    },
+    /// List pending invitations.
+    List,
 }
 
 /// OTA upgrade subcommands

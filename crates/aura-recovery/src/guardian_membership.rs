@@ -262,7 +262,10 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
             proposer_id: request.base.initiator_id,
             change_type: Self::to_fact_change_type(&request.change),
             proposal_hash,
-            proposed_at_ms: now_ms,
+            proposed_at: PhysicalTime {
+                ts_ms: now_ms,
+                uncertainty: None,
+            },
         };
         self.emit_fact(proposed_fact).await?;
 
@@ -289,21 +292,22 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
 
         // Check if we have enough approvals
         if approvals.len() < request.base.threshold {
-            let rejected_fact = RecoveryFact::MembershipChangeRejected {
-                context_id,
-                proposal_hash,
-                reason: format!(
-                    "Insufficient guardian approvals: got {}, need {}",
-                    approvals.len(),
-                    request.base.threshold
-                ),
-                rejected_at_ms: self
-                    .effect_system()
-                    .physical_time()
-                    .await
-                    .map(|t| t.ts_ms)
-                    .unwrap_or(0),
-            };
+            let rejected_fact =
+                RecoveryFact::MembershipChangeRejected {
+                    context_id,
+                    proposal_hash,
+                    reason: format!(
+                        "Insufficient guardian approvals: got {}, need {}",
+                        approvals.len(),
+                        request.base.threshold
+                    ),
+                    rejected_at: self.effect_system().physical_time().await.unwrap_or(
+                        PhysicalTime {
+                            ts_ms: 0,
+                            uncertainty: None,
+                        },
+                    ),
+                };
             let _ = self.emit_fact(rejected_fact).await;
 
             return Ok(RecoveryResponse::error(format!(
@@ -320,21 +324,22 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
 
         // Validate the new configuration
         if new_guardian_set.len() < final_threshold {
-            let rejected_fact = RecoveryFact::MembershipChangeRejected {
-                context_id,
-                proposal_hash,
-                reason: format!(
-                    "Invalid configuration: {} guardians cannot satisfy threshold of {}",
-                    new_guardian_set.len(),
-                    final_threshold
-                ),
-                rejected_at_ms: self
-                    .effect_system()
-                    .physical_time()
-                    .await
-                    .map(|t| t.ts_ms)
-                    .unwrap_or(0),
-            };
+            let rejected_fact =
+                RecoveryFact::MembershipChangeRejected {
+                    context_id,
+                    proposal_hash,
+                    reason: format!(
+                        "Invalid configuration: {} guardians cannot satisfy threshold of {}",
+                        new_guardian_set.len(),
+                        final_threshold
+                    ),
+                    rejected_at: self.effect_system().physical_time().await.unwrap_or(
+                        PhysicalTime {
+                            ts_ms: 0,
+                            uncertainty: None,
+                        },
+                    ),
+                };
             let _ = self.emit_fact(rejected_fact).await;
 
             return Ok(RecoveryResponse::error(format!(
@@ -362,12 +367,14 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
             proposal_hash,
             new_guardian_ids: new_guardian_set.iter().map(|g| g.authority_id).collect(),
             new_threshold: final_threshold as u16,
-            completed_at_ms: self
+            completed_at: self
                 .effect_system()
                 .physical_time()
                 .await
-                .map(|t| t.ts_ms)
-                .unwrap_or(0),
+                .unwrap_or(PhysicalTime {
+                    ts_ms: 0,
+                    uncertainty: None,
+                }),
         };
         self.emit_fact(completed_fact).await?;
 
@@ -429,7 +436,7 @@ impl<E: RecoveryEffects + 'static> GuardianMembershipCoordinator<E> {
             voter_id: guardian_id,
             proposal_hash,
             approved,
-            voted_at_ms: physical_time.ts_ms,
+            voted_at: physical_time.clone(),
         };
         self.emit_fact(vote_fact).await?;
 
@@ -551,9 +558,9 @@ mod tests {
             base: crate::types::RecoveryRequest {
                 initiator_id: test_authority_id(0),
                 account_id: test_authority_id(10),
-                context: aura_authenticate::guardian_auth::RecoveryContext {
+                context: aura_authenticate::RecoveryContext {
                     operation_type:
-                        aura_authenticate::guardian_auth::RecoveryOperationType::GuardianSetModification,
+                        aura_authenticate::RecoveryOperationType::GuardianSetModification,
                     justification: "Test membership change".to_string(),
                     is_emergency: false,
                     timestamp: 0,

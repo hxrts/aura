@@ -47,6 +47,7 @@
 use aura_core::{
     hash,
     identifiers::{AuthorityId, ContextId},
+    time::PhysicalTime,
     Hash32,
 };
 use aura_journal::{
@@ -80,8 +81,8 @@ pub enum RecoveryFact {
         guardian_ids: Vec<AuthorityId>,
         /// Required threshold for recovery
         threshold: u16,
-        /// Timestamp when setup was initiated (ms since epoch)
-        initiated_at_ms: u64,
+        /// Timestamp when setup was initiated (uses unified time system)
+        initiated_at: PhysicalTime,
     },
 
     /// Invitation sent to a guardian
@@ -92,8 +93,8 @@ pub enum RecoveryFact {
         guardian_id: AuthorityId,
         /// Hash of the invitation details
         invitation_hash: Hash32,
-        /// Timestamp when invitation was sent (ms since epoch)
-        sent_at_ms: u64,
+        /// Timestamp when invitation was sent (uses unified time system)
+        sent_at: PhysicalTime,
     },
 
     /// Guardian accepted the invitation
@@ -102,8 +103,8 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Guardian that accepted
         guardian_id: AuthorityId,
-        /// Timestamp when accepted (ms since epoch)
-        accepted_at_ms: u64,
+        /// Timestamp when accepted (uses unified time system)
+        accepted_at: PhysicalTime,
     },
 
     /// Guardian declined the invitation
@@ -112,8 +113,8 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Guardian that declined
         guardian_id: AuthorityId,
-        /// Timestamp when declined (ms since epoch)
-        declined_at_ms: u64,
+        /// Timestamp when declined (uses unified time system)
+        declined_at: PhysicalTime,
     },
 
     /// Guardian setup completed successfully
@@ -124,8 +125,8 @@ pub enum RecoveryFact {
         guardian_ids: Vec<AuthorityId>,
         /// Final threshold for recovery
         threshold: u16,
-        /// Timestamp when setup completed (ms since epoch)
-        completed_at_ms: u64,
+        /// Timestamp when setup completed (uses unified time system)
+        completed_at: PhysicalTime,
     },
 
     /// Guardian setup failed
@@ -134,8 +135,8 @@ pub enum RecoveryFact {
         context_id: ContextId,
         /// Reason for failure
         reason: String,
-        /// Timestamp when setup failed (ms since epoch)
-        failed_at_ms: u64,
+        /// Timestamp when setup failed (uses unified time system)
+        failed_at: PhysicalTime,
     },
 
     // ========================================================================
@@ -151,8 +152,8 @@ pub enum RecoveryFact {
         change_type: MembershipChangeType,
         /// Hash of the proposal details
         proposal_hash: Hash32,
-        /// Timestamp when proposed (ms since epoch)
-        proposed_at_ms: u64,
+        /// Timestamp when proposed (uses unified time system)
+        proposed_at: PhysicalTime,
     },
 
     /// Vote cast on membership change
@@ -165,8 +166,8 @@ pub enum RecoveryFact {
         proposal_hash: Hash32,
         /// Whether the vote is in favor
         approved: bool,
-        /// Timestamp when vote was cast (ms since epoch)
-        voted_at_ms: u64,
+        /// Timestamp when vote was cast (uses unified time system)
+        voted_at: PhysicalTime,
     },
 
     /// Membership change completed
@@ -179,8 +180,8 @@ pub enum RecoveryFact {
         new_guardian_ids: Vec<AuthorityId>,
         /// New threshold after the change
         new_threshold: u16,
-        /// Timestamp when change completed (ms since epoch)
-        completed_at_ms: u64,
+        /// Timestamp when change completed (uses unified time system)
+        completed_at: PhysicalTime,
     },
 
     /// Membership change rejected
@@ -191,8 +192,8 @@ pub enum RecoveryFact {
         proposal_hash: Hash32,
         /// Reason for rejection
         reason: String,
-        /// Timestamp when rejected (ms since epoch)
-        rejected_at_ms: u64,
+        /// Timestamp when rejected (uses unified time system)
+        rejected_at: PhysicalTime,
     },
 
     // ========================================================================
@@ -206,8 +207,8 @@ pub enum RecoveryFact {
         account_id: AuthorityId,
         /// Hash of the recovery request
         request_hash: Hash32,
-        /// Timestamp when recovery was initiated (ms since epoch)
-        initiated_at_ms: u64,
+        /// Timestamp when recovery was initiated (uses unified time system)
+        initiated_at: PhysicalTime,
     },
 
     /// Recovery share submitted by a guardian
@@ -218,8 +219,8 @@ pub enum RecoveryFact {
         guardian_id: AuthorityId,
         /// Hash of the share (not the share itself)
         share_hash: Hash32,
-        /// Timestamp when share was submitted (ms since epoch)
-        submitted_at_ms: u64,
+        /// Timestamp when share was submitted (uses unified time system)
+        submitted_at: PhysicalTime,
     },
 
     /// Dispute filed during recovery dispute window
@@ -230,8 +231,8 @@ pub enum RecoveryFact {
         disputer_id: AuthorityId,
         /// Reason for the dispute
         reason: String,
-        /// Timestamp when dispute was filed (ms since epoch)
-        filed_at_ms: u64,
+        /// Timestamp when dispute was filed (uses unified time system)
+        filed_at: PhysicalTime,
     },
 
     /// Recovery completed successfully
@@ -242,8 +243,8 @@ pub enum RecoveryFact {
         account_id: AuthorityId,
         /// Hash of the recovery evidence
         evidence_hash: Hash32,
-        /// Timestamp when recovery completed (ms since epoch)
-        completed_at_ms: u64,
+        /// Timestamp when recovery completed (uses unified time system)
+        completed_at: PhysicalTime,
     },
 
     /// Recovery failed
@@ -254,8 +255,8 @@ pub enum RecoveryFact {
         account_id: AuthorityId,
         /// Reason for failure
         reason: String,
-        /// Timestamp when recovery failed (ms since epoch)
-        failed_at_ms: u64,
+        /// Timestamp when recovery failed (uses unified time system)
+        failed_at: PhysicalTime,
     },
 }
 
@@ -322,6 +323,306 @@ impl RecoveryFact {
             RecoveryFact::RecoveryDisputeFiled { .. } => "recovery-dispute-filed",
             RecoveryFact::RecoveryCompleted { .. } => "recovery-completed",
             RecoveryFact::RecoveryFailed { .. } => "recovery-failed",
+        }
+    }
+
+    /// Get the timestamp for this fact in milliseconds (backward compatibility)
+    pub fn timestamp_ms(&self) -> u64 {
+        match self {
+            // Guardian setup
+            RecoveryFact::GuardianSetupInitiated { initiated_at, .. } => initiated_at.ts_ms,
+            RecoveryFact::GuardianInvitationSent { sent_at, .. } => sent_at.ts_ms,
+            RecoveryFact::GuardianAccepted { accepted_at, .. } => accepted_at.ts_ms,
+            RecoveryFact::GuardianDeclined { declined_at, .. } => declined_at.ts_ms,
+            RecoveryFact::GuardianSetupCompleted { completed_at, .. } => completed_at.ts_ms,
+            RecoveryFact::GuardianSetupFailed { failed_at, .. } => failed_at.ts_ms,
+            // Membership change
+            RecoveryFact::MembershipChangeProposed { proposed_at, .. } => proposed_at.ts_ms,
+            RecoveryFact::MembershipVoteCast { voted_at, .. } => voted_at.ts_ms,
+            RecoveryFact::MembershipChangeCompleted { completed_at, .. } => completed_at.ts_ms,
+            RecoveryFact::MembershipChangeRejected { rejected_at, .. } => rejected_at.ts_ms,
+            // Key recovery
+            RecoveryFact::RecoveryInitiated { initiated_at, .. } => initiated_at.ts_ms,
+            RecoveryFact::RecoveryShareSubmitted { submitted_at, .. } => submitted_at.ts_ms,
+            RecoveryFact::RecoveryDisputeFiled { filed_at, .. } => filed_at.ts_ms,
+            RecoveryFact::RecoveryCompleted { completed_at, .. } => completed_at.ts_ms,
+            RecoveryFact::RecoveryFailed { failed_at, .. } => failed_at.ts_ms,
+        }
+    }
+
+    // ========================================================================
+    // Backward Compatibility Constructors
+    // ========================================================================
+
+    /// Create a GuardianSetupInitiated fact with millisecond timestamp (backward compatibility)
+    pub fn guardian_setup_initiated_ms(
+        context_id: ContextId,
+        initiator_id: AuthorityId,
+        guardian_ids: Vec<AuthorityId>,
+        threshold: u16,
+        initiated_at_ms: u64,
+    ) -> Self {
+        Self::GuardianSetupInitiated {
+            context_id,
+            initiator_id,
+            guardian_ids,
+            threshold,
+            initiated_at: PhysicalTime {
+                ts_ms: initiated_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a GuardianInvitationSent fact with millisecond timestamp (backward compatibility)
+    pub fn guardian_invitation_sent_ms(
+        context_id: ContextId,
+        guardian_id: AuthorityId,
+        invitation_hash: Hash32,
+        sent_at_ms: u64,
+    ) -> Self {
+        Self::GuardianInvitationSent {
+            context_id,
+            guardian_id,
+            invitation_hash,
+            sent_at: PhysicalTime {
+                ts_ms: sent_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a GuardianAccepted fact with millisecond timestamp (backward compatibility)
+    pub fn guardian_accepted_ms(
+        context_id: ContextId,
+        guardian_id: AuthorityId,
+        accepted_at_ms: u64,
+    ) -> Self {
+        Self::GuardianAccepted {
+            context_id,
+            guardian_id,
+            accepted_at: PhysicalTime {
+                ts_ms: accepted_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a GuardianDeclined fact with millisecond timestamp (backward compatibility)
+    pub fn guardian_declined_ms(
+        context_id: ContextId,
+        guardian_id: AuthorityId,
+        declined_at_ms: u64,
+    ) -> Self {
+        Self::GuardianDeclined {
+            context_id,
+            guardian_id,
+            declined_at: PhysicalTime {
+                ts_ms: declined_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a GuardianSetupCompleted fact with millisecond timestamp (backward compatibility)
+    pub fn guardian_setup_completed_ms(
+        context_id: ContextId,
+        guardian_ids: Vec<AuthorityId>,
+        threshold: u16,
+        completed_at_ms: u64,
+    ) -> Self {
+        Self::GuardianSetupCompleted {
+            context_id,
+            guardian_ids,
+            threshold,
+            completed_at: PhysicalTime {
+                ts_ms: completed_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a GuardianSetupFailed fact with millisecond timestamp (backward compatibility)
+    pub fn guardian_setup_failed_ms(
+        context_id: ContextId,
+        reason: String,
+        failed_at_ms: u64,
+    ) -> Self {
+        Self::GuardianSetupFailed {
+            context_id,
+            reason,
+            failed_at: PhysicalTime {
+                ts_ms: failed_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a MembershipChangeProposed fact with millisecond timestamp (backward compatibility)
+    pub fn membership_change_proposed_ms(
+        context_id: ContextId,
+        proposer_id: AuthorityId,
+        change_type: MembershipChangeType,
+        proposal_hash: Hash32,
+        proposed_at_ms: u64,
+    ) -> Self {
+        Self::MembershipChangeProposed {
+            context_id,
+            proposer_id,
+            change_type,
+            proposal_hash,
+            proposed_at: PhysicalTime {
+                ts_ms: proposed_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a MembershipVoteCast fact with millisecond timestamp (backward compatibility)
+    pub fn membership_vote_cast_ms(
+        context_id: ContextId,
+        voter_id: AuthorityId,
+        proposal_hash: Hash32,
+        approved: bool,
+        voted_at_ms: u64,
+    ) -> Self {
+        Self::MembershipVoteCast {
+            context_id,
+            voter_id,
+            proposal_hash,
+            approved,
+            voted_at: PhysicalTime {
+                ts_ms: voted_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a MembershipChangeCompleted fact with millisecond timestamp (backward compatibility)
+    pub fn membership_change_completed_ms(
+        context_id: ContextId,
+        proposal_hash: Hash32,
+        new_guardian_ids: Vec<AuthorityId>,
+        new_threshold: u16,
+        completed_at_ms: u64,
+    ) -> Self {
+        Self::MembershipChangeCompleted {
+            context_id,
+            proposal_hash,
+            new_guardian_ids,
+            new_threshold,
+            completed_at: PhysicalTime {
+                ts_ms: completed_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a MembershipChangeRejected fact with millisecond timestamp (backward compatibility)
+    pub fn membership_change_rejected_ms(
+        context_id: ContextId,
+        proposal_hash: Hash32,
+        reason: String,
+        rejected_at_ms: u64,
+    ) -> Self {
+        Self::MembershipChangeRejected {
+            context_id,
+            proposal_hash,
+            reason,
+            rejected_at: PhysicalTime {
+                ts_ms: rejected_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a RecoveryInitiated fact with millisecond timestamp (backward compatibility)
+    pub fn recovery_initiated_ms(
+        context_id: ContextId,
+        account_id: AuthorityId,
+        request_hash: Hash32,
+        initiated_at_ms: u64,
+    ) -> Self {
+        Self::RecoveryInitiated {
+            context_id,
+            account_id,
+            request_hash,
+            initiated_at: PhysicalTime {
+                ts_ms: initiated_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a RecoveryShareSubmitted fact with millisecond timestamp (backward compatibility)
+    pub fn recovery_share_submitted_ms(
+        context_id: ContextId,
+        guardian_id: AuthorityId,
+        share_hash: Hash32,
+        submitted_at_ms: u64,
+    ) -> Self {
+        Self::RecoveryShareSubmitted {
+            context_id,
+            guardian_id,
+            share_hash,
+            submitted_at: PhysicalTime {
+                ts_ms: submitted_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a RecoveryDisputeFiled fact with millisecond timestamp (backward compatibility)
+    pub fn recovery_dispute_filed_ms(
+        context_id: ContextId,
+        disputer_id: AuthorityId,
+        reason: String,
+        filed_at_ms: u64,
+    ) -> Self {
+        Self::RecoveryDisputeFiled {
+            context_id,
+            disputer_id,
+            reason,
+            filed_at: PhysicalTime {
+                ts_ms: filed_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a RecoveryCompleted fact with millisecond timestamp (backward compatibility)
+    pub fn recovery_completed_ms(
+        context_id: ContextId,
+        account_id: AuthorityId,
+        evidence_hash: Hash32,
+        completed_at_ms: u64,
+    ) -> Self {
+        Self::RecoveryCompleted {
+            context_id,
+            account_id,
+            evidence_hash,
+            completed_at: PhysicalTime {
+                ts_ms: completed_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
+
+    /// Create a RecoveryFailed fact with millisecond timestamp (backward compatibility)
+    pub fn recovery_failed_ms(
+        context_id: ContextId,
+        account_id: AuthorityId,
+        reason: String,
+        failed_at_ms: u64,
+    ) -> Self {
+        Self::RecoveryFailed {
+            context_id,
+            account_id,
+            reason,
+            failed_at: PhysicalTime {
+                ts_ms: failed_at_ms,
+                uncertainty: None,
+            },
         }
     }
 }
@@ -530,6 +831,13 @@ mod tests {
         Hash32([seed; 32])
     }
 
+    fn pt(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
     #[test]
     fn test_recovery_fact_serialization() {
         let fact = RecoveryFact::GuardianSetupInitiated {
@@ -541,7 +849,7 @@ mod tests {
                 test_authority_id(4),
             ],
             threshold: 2,
-            initiated_at_ms: 1234567890,
+            initiated_at: pt(1234567890),
         };
 
         let bytes = fact.to_bytes();
@@ -556,7 +864,7 @@ mod tests {
             context_id: test_context_id(),
             account_id: test_authority_id(1),
             evidence_hash: test_hash(99),
-            completed_at_ms: 1234567899,
+            completed_at: pt(1234567899),
         };
 
         let generic = fact.to_generic();
@@ -583,7 +891,7 @@ mod tests {
         let fact = RecoveryFact::GuardianAccepted {
             context_id: test_context_id(),
             guardian_id: test_authority_id(5),
-            accepted_at_ms: 1234567890,
+            accepted_at: pt(1234567890),
         };
 
         let bytes = fact.to_bytes();
@@ -606,20 +914,20 @@ mod tests {
                 initiator_id: test_authority_id(1),
                 guardian_ids: vec![],
                 threshold: 2,
-                initiated_at_ms: 0,
+                initiated_at: pt(0),
             },
             RecoveryFact::RecoveryInitiated {
                 context_id: ctx,
                 account_id: test_authority_id(2),
                 request_hash: test_hash(1),
-                initiated_at_ms: 0,
+                initiated_at: pt(0),
             },
             RecoveryFact::MembershipChangeProposed {
                 context_id: ctx,
                 proposer_id: test_authority_id(3),
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
                 proposal_hash: test_hash(2),
-                proposed_at_ms: 0,
+                proposed_at: pt(0),
             },
         ];
 
@@ -638,18 +946,18 @@ mod tests {
                 initiator_id: test_authority_id(1),
                 guardian_ids: vec![],
                 threshold: 2,
-                initiated_at_ms: 0,
+                initiated_at: pt(0),
             },
             RecoveryFact::GuardianAccepted {
                 context_id: ctx,
                 guardian_id: test_authority_id(2),
-                accepted_at_ms: 0,
+                accepted_at: pt(0),
             },
             RecoveryFact::RecoveryCompleted {
                 context_id: ctx,
                 account_id: test_authority_id(3),
                 evidence_hash: test_hash(1),
-                completed_at_ms: 0,
+                completed_at: pt(0),
             },
         ];
 
@@ -667,39 +975,39 @@ mod tests {
                 initiator_id: test_authority_id(1),
                 guardian_ids: vec![],
                 threshold: 2,
-                initiated_at_ms: 0,
+                initiated_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::GuardianInvitationSent {
                 context_id: ctx,
                 guardian_id: test_authority_id(1),
                 invitation_hash: test_hash(1),
-                sent_at_ms: 0,
+                sent_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::GuardianAccepted {
                 context_id: ctx,
                 guardian_id: test_authority_id(1),
-                accepted_at_ms: 0,
+                accepted_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::GuardianDeclined {
                 context_id: ctx,
                 guardian_id: test_authority_id(1),
-                declined_at_ms: 0,
+                declined_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::GuardianSetupCompleted {
                 context_id: ctx,
                 guardian_ids: vec![],
                 threshold: 2,
-                completed_at_ms: 0,
+                completed_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::GuardianSetupFailed {
                 context_id: ctx,
                 reason: "test".to_string(),
-                failed_at_ms: 0,
+                failed_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::MembershipChangeProposed {
@@ -707,7 +1015,7 @@ mod tests {
                 proposer_id: test_authority_id(1),
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
                 proposal_hash: test_hash(1),
-                proposed_at_ms: 0,
+                proposed_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::MembershipVoteCast {
@@ -715,7 +1023,7 @@ mod tests {
                 voter_id: test_authority_id(1),
                 proposal_hash: test_hash(1),
                 approved: true,
-                voted_at_ms: 0,
+                voted_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::MembershipChangeCompleted {
@@ -723,49 +1031,49 @@ mod tests {
                 proposal_hash: test_hash(1),
                 new_guardian_ids: vec![],
                 new_threshold: 2,
-                completed_at_ms: 0,
+                completed_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::MembershipChangeRejected {
                 context_id: ctx,
                 proposal_hash: test_hash(1),
                 reason: "test".to_string(),
-                rejected_at_ms: 0,
+                rejected_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::RecoveryInitiated {
                 context_id: ctx,
                 account_id: test_authority_id(1),
                 request_hash: test_hash(1),
-                initiated_at_ms: 0,
+                initiated_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::RecoveryShareSubmitted {
                 context_id: ctx,
                 guardian_id: test_authority_id(1),
                 share_hash: test_hash(1),
-                submitted_at_ms: 0,
+                submitted_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::RecoveryDisputeFiled {
                 context_id: ctx,
                 disputer_id: test_authority_id(1),
                 reason: "test".to_string(),
-                filed_at_ms: 0,
+                filed_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::RecoveryCompleted {
                 context_id: ctx,
                 account_id: test_authority_id(1),
                 evidence_hash: test_hash(1),
-                completed_at_ms: 0,
+                completed_at: pt(0),
             }
             .sub_type(),
             RecoveryFact::RecoveryFailed {
                 context_id: ctx,
                 account_id: test_authority_id(1),
                 reason: "test".to_string(),
-                failed_at_ms: 0,
+                failed_at: pt(0),
             }
             .sub_type(),
         ];
@@ -799,5 +1107,25 @@ mod tests {
             let restored: MembershipChangeType = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(restored, change);
         }
+    }
+
+    #[test]
+    fn test_timestamp_ms_backward_compat() {
+        let fact = RecoveryFact::guardian_setup_initiated_ms(
+            test_context_id(),
+            test_authority_id(1),
+            vec![test_authority_id(2), test_authority_id(3)],
+            2,
+            1234567890,
+        );
+        assert_eq!(fact.timestamp_ms(), 1234567890);
+
+        let fact2 = RecoveryFact::recovery_completed_ms(
+            test_context_id(),
+            test_authority_id(1),
+            test_hash(1),
+            9876543210,
+        );
+        assert_eq!(fact2.timestamp_ms(), 9876543210);
     }
 }

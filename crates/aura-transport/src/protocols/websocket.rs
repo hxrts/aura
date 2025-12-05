@@ -4,7 +4,7 @@
 //! Target: <100 lines (simple implementation).
 
 use aura_core::hash::{hash as core_hash, hasher};
-use aura_core::identifiers::DeviceId;
+use aura_core::identifiers::AuthorityId;
 use aura_core::time::{OrderTime, TimeStamp};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -19,8 +19,8 @@ pub enum WebSocketMessage {
     HandshakeRequest {
         /// Session ID for this handshake
         session_id: Uuid,
-        /// Device initiating handshake
-        initiator: DeviceId,
+        /// Authority initiating handshake
+        initiator: AuthorityId,
         /// Protocol version
         protocol_version: String,
         /// Supported capabilities
@@ -51,8 +51,8 @@ pub enum WebSocketMessage {
     TeardownRequest {
         /// Session ID to teardown
         session_id: Uuid,
-        /// Device requesting teardown
-        requester: DeviceId,
+        /// Authority requesting teardown
+        requester: AuthorityId,
         /// Reason for teardown
         reason: String,
     },
@@ -102,7 +102,7 @@ pub enum FrameType {
 
 impl WebSocketMessage {
     /// Create handshake request
-    pub fn handshake_request(initiator: DeviceId, capabilities: Vec<String>) -> Self {
+    pub fn handshake_request(initiator: AuthorityId, capabilities: Vec<String>) -> Self {
         Self::handshake_request_with_id(
             Self::generate_session_id(initiator),
             initiator,
@@ -113,7 +113,7 @@ impl WebSocketMessage {
     /// Create handshake request with specific session ID
     pub fn handshake_request_with_id(
         session_id: Uuid,
-        initiator: DeviceId,
+        initiator: AuthorityId,
         capabilities: Vec<String>,
     ) -> Self {
         Self::HandshakeRequest {
@@ -125,7 +125,7 @@ impl WebSocketMessage {
     }
 
     /// Generate deterministic session ID using initiator + monotonic counter
-    fn generate_session_id(initiator: DeviceId) -> Uuid {
+    fn generate_session_id(initiator: AuthorityId) -> Uuid {
         let counter = SESSION_COUNTER.fetch_add(1, Ordering::SeqCst);
         let mut h = hasher();
         h.update(initiator.0.as_bytes());
@@ -188,7 +188,7 @@ impl WebSocketMessage {
     }
 
     /// Create teardown request
-    pub fn teardown_request(session_id: Uuid, requester: DeviceId, reason: String) -> Self {
+    pub fn teardown_request(session_id: Uuid, requester: AuthorityId, reason: String) -> Self {
         Self::TeardownRequest {
             session_id,
             requester,

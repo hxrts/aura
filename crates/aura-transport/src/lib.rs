@@ -3,7 +3,7 @@
 //! **Purpose**: Define P2P communication abstractions and transport semantics.
 //!
 //! This crate provides privacy-aware transport data types, protocol message definitions,
-//! and relationship-scoped connection abstractions.
+//! and context-scoped connection abstractions.
 //!
 //! # Architecture Constraints
 //!
@@ -19,6 +19,8 @@
 //! ## Key Design Principles
 //!
 //! **Privacy-by-Design**: Privacy mechanisms integrated into core types, not bolted on
+//! **Authority-Centric**: Uses `AuthorityId` for cross-authority communication
+//! **Context-Scoped**: Uses `ContextId` for relational context scoping
 //! **Conciseness**: Every file <300 lines, focused implementations, no over-engineering
 //! **Library Integration**: Designed for compatibility with rumpsteak-aura and mature networking libraries
 //! **Clean Architecture**: Pure specification layer with curated API surface
@@ -30,16 +32,16 @@
 //!     Envelope, TransportConfig, PrivacyLevel, ConnectionId,
 //!     PeerInfo, PrivacyAwareSelectionCriteria,
 //! };
-//! use aura_core::RelationshipId;
+//! use aura_core::identifiers::ContextId;
 //!
-//! // Privacy-aware envelope with relationship scoping
+//! // Privacy-aware envelope with context scoping
 //! let message = b"Hello, world!".to_vec();
-//! let relationship_context = RelationshipId::new([1u8; 32]);
-//! let envelope = Envelope::new_scoped(message, relationship_context, None);
+//! let context_id = ContextId::new_from_entropy([1u8; 32]);
+//! let envelope = Envelope::new_scoped(message, context_id, None);
 //!
 //! // Transport configuration with built-in privacy levels
 //! let config = TransportConfig {
-//!     privacy_level: PrivacyLevel::RelationshipScoped,
+//!     privacy_level: PrivacyLevel::ContextScoped,
 //!     ..Default::default()
 //! };
 //! ```
@@ -67,10 +69,13 @@ pub mod types {
 /// AMP types (clean - no domain dependencies)
 pub mod amp;
 
+/// Transport domain facts for state changes
+pub mod facts;
+
 /// Privacy-aware peer management
 ///
 /// This module provides peer discovery, information management, and privacy-preserving
-/// selection algorithms that protect capability information and relationship contexts.
+/// selection algorithms that protect capability information and context scopes.
 pub mod peers {
     pub mod info;
     pub mod selection;
@@ -88,6 +93,12 @@ pub mod protocols {
 
 /// Context-aware transport for authority-centric model
 pub mod context_transport;
+
+/// Relay selection strategies for message forwarding
+///
+/// This module provides deterministic relay selection algorithms that
+/// use social topology to choose relay nodes for message forwarding.
+pub mod relay;
 
 /// Transport layer message types and protocol definitions
 ///
@@ -127,3 +138,12 @@ pub use messages::{
 
 // Re-export AMP types
 pub use amp::{AmpError, AmpHeader, AmpRatchetState, RatchetDerivation};
+
+// Re-export fact types
+pub use facts::{TransportFact, TransportFactDelta, TransportFactReducer, TRANSPORT_FACT_TYPE_ID};
+
+// Re-export relay types
+pub use relay::{
+    hash_relay_seed, partition_by_relationship, select_by_tiers, select_one_from_tier,
+    DeterministicRandomSelector,
+};

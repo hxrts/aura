@@ -22,6 +22,7 @@ use crate::guards::{
     check_capability, check_flow_budget, costs, EffectCommand, GuardOutcome, GuardSnapshot,
 };
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::time::PhysicalTime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -259,8 +260,14 @@ impl InvitationService {
             sender_id: snapshot.authority_id,
             receiver_id,
             invitation_type: invitation_type.as_type_string(),
-            sent_at_ms: snapshot.now_ms,
-            expires_at_ms,
+            sent_at: PhysicalTime {
+                ts_ms: snapshot.now_ms,
+                uncertainty: None,
+            },
+            expires_at: expires_at_ms.map(|ts_ms| PhysicalTime {
+                ts_ms,
+                uncertainty: None,
+            }),
             message,
         };
 
@@ -324,7 +331,10 @@ impl InvitationService {
         let fact = InvitationFact::Accepted {
             invitation_id: invitation_id.to_string(),
             acceptor_id: snapshot.authority_id,
-            accepted_at_ms: snapshot.now_ms,
+            accepted_at: PhysicalTime {
+                ts_ms: snapshot.now_ms,
+                uncertainty: None,
+            },
         };
 
         // Construct effect commands
@@ -378,7 +388,10 @@ impl InvitationService {
         let fact = InvitationFact::Declined {
             invitation_id: invitation_id.to_string(),
             decliner_id: snapshot.authority_id,
-            declined_at_ms: snapshot.now_ms,
+            declined_at: PhysicalTime {
+                ts_ms: snapshot.now_ms,
+                uncertainty: None,
+            },
         };
 
         // Construct effect commands
@@ -439,7 +452,10 @@ impl InvitationService {
         let fact = InvitationFact::Cancelled {
             invitation_id: invitation_id.to_string(),
             canceller_id: snapshot.authority_id,
-            cancelled_at_ms: snapshot.now_ms,
+            cancelled_at: PhysicalTime {
+                ts_ms: snapshot.now_ms,
+                uncertainty: None,
+            },
         };
 
         // Construct effect commands

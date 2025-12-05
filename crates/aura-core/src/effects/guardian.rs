@@ -7,6 +7,7 @@
 use crate::epochs::Epoch;
 use crate::frost::{PublicKeyPackage, Share};
 use crate::relational::{GuardianBinding, GuardianParameters};
+use crate::time::PhysicalTime;
 use crate::{AuthorityId, ContextId, Hash32, Result};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -26,10 +27,22 @@ pub struct GuardianRequestInput {
     pub guardian_commitment: Hash32,
     /// Parameters proposed for this guardian binding
     pub parameters: GuardianParameters,
-    /// Timestamp (ms since epoch) when the request is made
-    pub requested_at_ms: u64,
-    /// Optional expiration (ms since epoch) for the request
-    pub expires_at_ms: Option<u64>,
+    /// Timestamp when the request is made (uses unified time system)
+    pub requested_at: PhysicalTime,
+    /// Optional expiration for the request (uses unified time system)
+    pub expires_at: Option<PhysicalTime>,
+}
+
+impl GuardianRequestInput {
+    /// Get timestamp in milliseconds (backward compatibility)
+    pub fn requested_at_ms(&self) -> u64 {
+        self.requested_at.ts_ms
+    }
+
+    /// Get expiration in milliseconds (backward compatibility)
+    pub fn expires_at_ms(&self) -> Option<u64> {
+        self.expires_at.as_ref().map(|t| t.ts_ms)
+    }
 }
 
 /// Consensus inputs required to finalize a guardian binding

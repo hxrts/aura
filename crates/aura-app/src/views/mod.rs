@@ -19,7 +19,10 @@ pub mod recovery;
 pub use state::ViewState;
 
 // Re-export state types for convenience
-pub use block::{BlockState, Resident, ResidentRole, StorageBudget};
+pub use block::{
+    BanRecord, BlockState, BlocksState, KickRecord, MuteRecord, Resident, ResidentRole,
+    StorageBudget,
+};
 pub use chat::{Channel, ChannelType, ChatState, Message};
 pub use contacts::{Contact, ContactsState};
 pub use invitations::{
@@ -27,5 +30,6 @@ pub use invitations::{
 };
 pub use neighborhood::{AdjacencyType, NeighborBlock, NeighborhoodState, TraversalPosition};
 pub use recovery::{
-    Guardian, GuardianStatus, RecoveryProcess, RecoveryProcessStatus, RecoveryState,
+    Guardian, GuardianStatus, RecoveryApproval, RecoveryProcess, RecoveryProcessStatus,
+    RecoveryState,
 };

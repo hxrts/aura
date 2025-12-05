@@ -1,9 +1,13 @@
 //! Privacy-Aware Message Envelope Types
 //!
-//! Provides essential message wrappers with built-in privacy preservation, relationship scoping,
+//! Provides essential message wrappers with built-in privacy preservation, context scoping,
 //! and minimal framing metadata. Target: <150 lines (concise implementation).
 
-use aura_core::{hash::hasher, identifiers::DeviceId, AuraResult, RelationshipId};
+use aura_core::{
+    hash::hasher,
+    identifiers::{AuthorityId, ContextId},
+    AuraResult,
+};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU64, Ordering};
 use uuid::Uuid;
@@ -11,7 +15,7 @@ use uuid::Uuid;
 /// Universal message wrapper with essential blinding capabilities
 ///
 /// Integrates privacy preservation directly into the core envelope type.
-/// Supports both clear and blinded modes with relationship scoping.
+/// Supports both clear and blinded modes with context scoping.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Envelope {
     /// Unique message identifier
@@ -20,23 +24,24 @@ pub struct Envelope {
     pub header: FrameHeader,
     /// Message payload (may be blinded)
     pub payload: Vec<u8>,
-    /// Relationship context for scoped routing
-    pub relationship_scope: Option<RelationshipId>,
+    /// Context for scoped routing (relational context)
+    pub context_id: Option<ContextId>,
 }
 
-/// Relationship-scoped message envelope for privacy-preserving routing
+/// Context-scoped message envelope for privacy-preserving routing
 ///
-/// Ensures messages are only routed within appropriate relationship contexts.
+/// Ensures messages are only routed within appropriate relational contexts.
+/// Uses AuthorityId for cross-authority communication.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScopedEnvelope {
     /// Base envelope
     pub envelope: Envelope,
-    /// Required relationship context
-    pub relationship_id: RelationshipId,
-    /// Sender within relationship context
-    pub scoped_sender: DeviceId,
-    /// Recipient within relationship context
-    pub scoped_recipient: DeviceId,
+    /// Required relational context
+    pub context_id: ContextId,
+    /// Sender authority within context
+    pub sender: AuthorityId,
+    /// Recipient authority within context
+    pub recipient: AuthorityId,
 }
 
 /// Essential frame metadata with minimal capability hints
@@ -61,8 +66,8 @@ pub enum FrameType {
     Clear,
     /// Capability-scoped message frame
     CapabilityScoped,
-    /// Relationship-scoped message frame
-    RelationshipScoped,
+    /// Context-scoped message frame
+    ContextScoped,
     /// Fully blinded message frame
     Blinded,
 }
@@ -74,8 +79,8 @@ pub enum PrivacyLevel {
     Clear,
     /// Basic blinding - hide message metadata
     Blinded,
-    /// Relationship-scoped - restrict to relationship context
-    RelationshipScoped,
+    /// Context-scoped - restrict to relational context
+    ContextScoped,
 }
 
 impl Envelope {
@@ -101,7 +106,7 @@ impl Envelope {
                 frame_size: payload.len() as u32,
             },
             payload,
-            relationship_scope: None,
+            context_id: None,
         }
     }
 
@@ -118,37 +123,37 @@ impl Envelope {
         Uuid::from_bytes(uuid_bytes)
     }
 
-    /// Create relationship-scoped envelope with privacy preservation
+    /// Create context-scoped envelope with privacy preservation
     pub fn new_scoped(
         payload: Vec<u8>,
-        relationship_id: RelationshipId,
+        context_id: ContextId,
         capability_hint: Option<String>,
     ) -> Self {
         Self::new_scoped_with_id(
             Self::generate_message_id(),
             payload,
-            relationship_id,
+            context_id,
             capability_hint,
         )
     }
 
-    /// Create relationship-scoped envelope with specified message ID
+    /// Create context-scoped envelope with specified message ID
     pub fn new_scoped_with_id(
         message_id: Uuid,
         payload: Vec<u8>,
-        relationship_id: RelationshipId,
+        context_id: ContextId,
         capability_hint: Option<String>,
     ) -> Self {
         Self {
             message_id,
             header: FrameHeader {
-                frame_type: FrameType::RelationshipScoped,
-                privacy_level: PrivacyLevel::RelationshipScoped,
+                frame_type: FrameType::ContextScoped,
+                privacy_level: PrivacyLevel::ContextScoped,
                 capability_hint,
                 frame_size: payload.len() as u32,
             },
             payload,
-            relationship_scope: Some(relationship_id),
+            context_id: Some(context_id),
         }
     }
 
@@ -168,14 +173,13 @@ impl Envelope {
                 frame_size: 0, // Hide actual size
             },
             payload,
-            relationship_scope: None,
+            context_id: None,
         }
     }
 
-    /// Check if envelope requires relationship context
-    pub fn requires_relationship_scope(&self) -> bool {
-        matches!(self.header.frame_type, FrameType::RelationshipScoped)
-            || self.relationship_scope.is_some()
+    /// Check if envelope requires context scope
+    pub fn requires_context_scope(&self) -> bool {
+        matches!(self.header.frame_type, FrameType::ContextScoped) || self.context_id.is_some()
     }
 
     /// Get privacy level for this envelope
@@ -188,22 +192,22 @@ impl ScopedEnvelope {
     /// Create scoped envelope from base envelope
     pub fn new(
         envelope: Envelope,
-        relationship_id: RelationshipId,
-        sender: DeviceId,
-        recipient: DeviceId,
+        context_id: ContextId,
+        sender: AuthorityId,
+        recipient: AuthorityId,
     ) -> AuraResult<Self> {
         // Verify envelope supports scoping
-        if !envelope.requires_relationship_scope() {
+        if !envelope.requires_context_scope() {
             return Err(aura_core::AuraError::invalid(
-                "Envelope does not support relationship scoping",
+                "Envelope does not support context scoping",
             ));
         }
 
         Ok(Self {
             envelope,
-            relationship_id,
-            scoped_sender: sender,
-            scoped_recipient: recipient,
+            context_id,
+            sender,
+            recipient,
         })
     }
 
@@ -212,9 +216,9 @@ impl ScopedEnvelope {
         self.envelope
     }
 
-    /// Verify sender within relationship context
-    pub fn verify_sender(&self, expected_sender: DeviceId) -> bool {
-        self.scoped_sender == expected_sender
+    /// Verify sender within context
+    pub fn verify_sender(&self, expected_sender: AuthorityId) -> bool {
+        self.sender == expected_sender
     }
 }
 
@@ -236,16 +240,16 @@ mod tests {
         // Clear envelope
         let clear = Envelope::new(payload.clone());
         assert!(matches!(clear.privacy_level(), PrivacyLevel::Clear));
-        assert!(!clear.requires_relationship_scope());
+        assert!(!clear.requires_context_scope());
 
         // Scoped envelope
-        let relationship_id = RelationshipId::new([1u8; 32]);
-        let scoped = Envelope::new_scoped(payload.clone(), relationship_id, None);
+        let context_id = ContextId::new_from_entropy([1u8; 32]);
+        let scoped = Envelope::new_scoped(payload.clone(), context_id, None);
         assert!(matches!(
             scoped.privacy_level(),
-            PrivacyLevel::RelationshipScoped
+            PrivacyLevel::ContextScoped
         ));
-        assert!(scoped.requires_relationship_scope());
+        assert!(scoped.requires_context_scope());
 
         // Blinded envelope
         let blinded = Envelope::new_blinded(payload);
@@ -256,18 +260,18 @@ mod tests {
     #[test]
     fn test_scoped_envelope_validation() {
         let payload = b"test message".to_vec();
-        let relationship_id = RelationshipId::new([2u8; 32]);
-        let sender = DeviceId::new_from_entropy([1u8; 32]);
-        let recipient = DeviceId::new_from_entropy([2u8; 32]);
+        let context_id = ContextId::new_from_entropy([2u8; 32]);
+        let sender = AuthorityId::new_from_entropy([1u8; 32]);
+        let recipient = AuthorityId::new_from_entropy([2u8; 32]);
 
         // Valid scoped envelope
-        let scoped_env = Envelope::new_scoped(payload.clone(), relationship_id.clone(), None);
-        let scoped = ScopedEnvelope::new(scoped_env, relationship_id.clone(), sender, recipient);
+        let scoped_env = Envelope::new_scoped(payload.clone(), context_id, None);
+        let scoped = ScopedEnvelope::new(scoped_env, context_id, sender, recipient);
         assert!(scoped.is_ok());
 
         // Invalid - envelope doesn't support scoping
         let clear_env = Envelope::new(payload);
-        let result = ScopedEnvelope::new(clear_env, relationship_id, sender, recipient);
+        let result = ScopedEnvelope::new(clear_env, context_id, sender, recipient);
         assert!(result.is_err());
     }
 }

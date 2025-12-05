@@ -10,6 +10,7 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::tui::components::{EmptyState, KeyHintsBar};
 use crate::tui::hooks::AppCoreContext;
@@ -98,7 +99,12 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
                 View(padding_left: Spacing::PANEL_PADDING) {
                     Text(content: "Guardians", weight: Weight::Bold, color: Theme::PRIMARY)
                 }
-                View(flex_direction: FlexDirection::Column, padding: Spacing::PANEL_PADDING) {
+                View(
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    padding: Spacing::PANEL_PADDING,
+                    overflow: Overflow::Scroll,
+                ) {
                     #(if guardians.is_empty() {
                         vec![element! { View { EmptyState(title: "No guardians configured".to_string()) } }]
                     } else {
@@ -112,10 +118,11 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
                                 GuardianStatus::Declined | GuardianStatus::Removed => Theme::ERROR,
                             };
                             let icon = g.status.icon().to_string();
+                            let id = g.id.clone();
                             let name = g.name.clone();
                             let share_text = if g.has_share { " [share]" } else { "" }.to_string();
                             element! {
-                                View(flex_direction: FlexDirection::Row, background_color: bg, padding_left: Spacing::XS, gap: Spacing::XS) {
+                                View(key: id, flex_direction: FlexDirection::Row, background_color: bg, padding_left: Spacing::XS, gap: Spacing::XS) {
                                     Text(content: icon, color: status_color)
                                     Text(content: name, color: Theme::TEXT)
                                     Text(content: share_text, color: Theme::SECONDARY)
@@ -208,7 +215,12 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
                 View(padding_left: Spacing::PANEL_PADDING) {
                     Text(content: "Guardian Approvals", weight: Weight::Bold, color: Theme::PRIMARY)
                 }
-                View(flex_direction: FlexDirection::Column, padding: Spacing::PANEL_PADDING) {
+                View(
+                    flex_direction: FlexDirection::Column,
+                    flex_grow: 1.0,
+                    padding: Spacing::PANEL_PADDING,
+                    overflow: Overflow::Scroll,
+                ) {
                     #(if approvals.is_empty() {
                         vec![element! { View { EmptyState(title: "No recovery in progress".to_string()) } }]
                     } else {
@@ -216,8 +228,9 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
                             let icon = if a.approved { Icons::CHECK } else { Icons::PENDING };
                             let icon_color = if a.approved { Theme::SUCCESS } else { Theme::TEXT_MUTED };
                             let name = a.guardian_name.clone();
+                            let key = name.clone();
                             element! {
-                                View(flex_direction: FlexDirection::Row, padding_left: Spacing::XS, gap: Spacing::XS) {
+                                View(key: key, flex_direction: FlexDirection::Row, padding_left: Spacing::XS, gap: Spacing::XS) {
                                     Text(content: icon.to_string(), color: icon_color)
                                     Text(content: name, color: Theme::TEXT)
                                 }
@@ -400,6 +413,10 @@ pub fn RecoveryScreen(
     let on_start_recovery = props.on_start_recovery.clone();
     let on_add_guardian = props.on_add_guardian.clone();
 
+    // Throttle for navigation keys - persists across renders using use_ref
+    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
+    let throttle_duration = Duration::from_millis(150);
+
     hooks.use_terminal_events({
         let mut active_tab = active_tab.clone();
         let mut guardian_index = guardian_index.clone();
@@ -416,19 +433,29 @@ pub fn RecoveryScreen(
                     active_tab.set(active_tab.get().next());
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
-                    if active_tab.get() == RecoveryTab::Guardians && guardian_count > 0 {
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move
+                        && active_tab.get() == RecoveryTab::Guardians
+                        && guardian_count > 0
+                    {
                         let idx = guardian_index.get();
                         if idx > 0 {
                             guardian_index.set(idx - 1);
                         }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    if active_tab.get() == RecoveryTab::Guardians && guardian_count > 0 {
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move
+                        && active_tab.get() == RecoveryTab::Guardians
+                        && guardian_count > 0
+                    {
                         let idx = guardian_index.get();
                         if idx + 1 < guardian_count {
                             guardian_index.set(idx + 1);
                         }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 // Add guardian - triggers callback
@@ -455,6 +482,16 @@ pub fn RecoveryScreen(
             width: 100pct,
             height: 100pct,
         ) {
+            // Header
+            View(
+                padding: 1,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
+                border_color: Theme::BORDER,
+            ) {
+                Text(content: "Recovery", weight: Weight::Bold, color: Theme::PRIMARY)
+            }
+
             // Tab bar
             TabBar(active_tab: current_tab)
 

@@ -53,8 +53,7 @@ use aura_core::effects::{
 };
 use aura_core::hash::{self, hash};
 use aura_core::identifiers::{ChannelId, ContextId};
-use aura_core::time::{PhysicalTime, TimeStamp};
-use aura_journal::semilattice::{InvitationRecordRegistry, InvitationStatus};
+use aura_core::time::PhysicalTime;
 use aura_journal::DomainFact;
 use aura_protocol::amp::AmpJournalEffects;
 use aura_protocol::effects::SyncEffects;
@@ -67,214 +66,8 @@ use tokio::sync::{broadcast, RwLock};
 // ============================================================================
 // Internal State Types (Shared with bridge.rs)
 // ============================================================================
-// These types support the current demo implementation.
-// They will be refactored when integrating with the real journal system.
-
-/// Block invitation envelope for tracking block membership invitations
-#[derive(Debug, Clone)]
-pub(super) struct BlockInvitationEnvelope {
-    /// Unique invitation identifier
-    pub invitation_id: String,
-    /// Block being invited to
-    pub block_id: String,
-    /// Block name (for display)
-    pub block_name: Option<String>,
-    /// Authority of the inviter (steward)
-    pub inviter_authority: aura_core::AuthorityId,
-    /// Authority of the invitee
-    pub invitee_authority: aura_core::AuthorityId,
-    /// When the invitation was created (ms since epoch)
-    pub created_at: u64,
-    /// When the invitation expires (ms since epoch)
-    pub expires_at: u64,
-}
-
-/// Ban record for persistent moderation
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub(super) struct BanRecord {
-    /// Banned user authority ID
-    pub authority_id: String,
-    /// Reason for ban
-    pub reason: String,
-    /// Actor who issued the ban
-    pub actor: String,
-    /// Timestamp when ban was issued (ms since epoch)
-    pub banned_at: u64,
-}
-
-/// Mute record for persistent moderation with expiration
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub(super) struct MuteRecord {
-    /// Muted user authority ID
-    pub authority_id: String,
-    /// Mute duration in seconds (None = permanent)
-    pub duration_secs: Option<u64>,
-    /// Timestamp when mute was issued (ms since epoch)
-    pub muted_at: u64,
-    /// Timestamp when mute expires (ms since epoch, None = permanent)
-    pub expires_at: Option<u64>,
-    /// Actor who issued the mute
-    pub actor: String,
-}
-
-impl MuteRecord {
-    /// Check if this mute has expired
-    #[allow(dead_code)]
-    pub fn is_expired(&self, current_time_ms: u64) -> bool {
-        match self.expires_at {
-            Some(expiry) => current_time_ms >= expiry,
-            None => false, // Permanent mute never expires
-        }
-    }
-}
-
-/// Kick log entry for audit trail
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub(super) struct KickRecord {
-    /// Kicked user authority ID
-    pub authority_id: String,
-    /// Channel from which user was kicked
-    pub channel: String,
-    /// Reason for kick
-    pub reason: String,
-    /// Actor who issued the kick
-    pub actor: String,
-    /// Timestamp when kick occurred (ms since epoch)
-    pub kicked_at: u64,
-}
-
-/// Block resident state for tracking members
-#[derive(Debug, Clone)]
-pub(super) struct ResidentState {
-    /// Authority ID of the resident
-    pub authority_id: aura_core::AuthorityId,
-    /// Display name (petname)
-    #[allow(dead_code)]
-    pub name: String,
-    /// Whether this resident is a steward
-    pub is_steward: bool,
-    /// When the resident joined (ms since epoch)
-    #[allow(dead_code)]
-    pub joined_at: u64,
-    /// Storage allocated by this resident
-    #[allow(dead_code)]
-    pub storage_allocated: u64,
-}
-
-/// Block state for internal tracking
-#[derive(Debug, Clone)]
-pub(super) struct BlockState {
-    /// Block identifier
-    #[allow(dead_code)]
-    pub id: String,
-    /// Block name
-    pub name: Option<String>,
-    /// When the block was created (ms since epoch)
-    #[allow(dead_code)]
-    pub created_at: u64,
-    /// Residents of the block
-    pub residents: Vec<ResidentState>,
-    /// Total storage budget in bytes (default 10MB)
-    pub storage_budget: u64,
-    /// Storage used in bytes
-    pub storage_used: u64,
-    /// Whether this is the user's primary block
-    pub is_primary: bool,
-    /// Channel topic (optional)
-    pub topic: Option<String>,
-    /// Pinned messages (message IDs)
-    pub pinned_messages: Vec<String>,
-    /// Channel mode flags (e.g., "moderated", "invite-only")
-    pub mode_flags: Option<String>,
-    /// Persistent ban list (keyed by authority ID)
-    pub ban_list: HashMap<String, BanRecord>,
-    /// Persistent mute list with expiration (keyed by authority ID)
-    pub mute_list: HashMap<String, MuteRecord>,
-    /// Kick log for audit trail
-    pub kick_log: Vec<KickRecord>,
-    /// Relational context identifier for journal integration
-    #[allow(dead_code)]
-    pub context_id: aura_core::ContextId,
-}
-
-impl BlockState {
-    /// Default storage limit: 10 MB
-    pub const DEFAULT_STORAGE_BUDGET: u64 = 10 * 1024 * 1024;
-    /// Default resident allocation: 200 KB
-    pub const RESIDENT_ALLOCATION: u64 = 200 * 1024;
-
-    /// Create a new block with the creator as steward
-    pub fn new(
-        id: String,
-        name: Option<String>,
-        creator_authority: aura_core::AuthorityId,
-        created_at: u64,
-    ) -> Self {
-        let steward = ResidentState {
-            authority_id: creator_authority,
-            name: "You".to_string(), // Default petname for self
-            is_steward: true,
-            joined_at: created_at,
-            storage_allocated: Self::RESIDENT_ALLOCATION,
-        };
-
-        let context_entropy = hash(id.as_bytes());
-
-        Self {
-            id,
-            name,
-            created_at,
-            residents: vec![steward],
-            storage_budget: Self::DEFAULT_STORAGE_BUDGET,
-            storage_used: Self::RESIDENT_ALLOCATION, // Steward's initial allocation
-            is_primary: true,                        // First block is primary by default
-            topic: None,
-            pinned_messages: Vec::new(),
-            mode_flags: None,
-            ban_list: HashMap::new(),
-            mute_list: HashMap::new(),
-            kick_log: Vec::new(),
-            context_id: aura_core::ContextId::new_from_entropy(context_entropy),
-        }
-    }
-
-    /// Add a new resident to the block
-    pub fn add_resident(
-        &mut self,
-        authority_id: aura_core::AuthorityId,
-        name: String,
-        joined_at: u64,
-    ) -> Result<(), String> {
-        // Check if resident already exists
-        if self
-            .residents
-            .iter()
-            .any(|r| r.authority_id == authority_id)
-        {
-            return Err("Resident already exists in block".to_string());
-        }
-
-        // Check storage capacity
-        let new_allocation = Self::RESIDENT_ALLOCATION;
-        if self.storage_used + new_allocation > self.storage_budget {
-            return Err("Insufficient storage budget for new resident".to_string());
-        }
-
-        self.residents.push(ResidentState {
-            authority_id,
-            name,
-            is_steward: false,
-            joined_at,
-            storage_allocated: new_allocation,
-        });
-        self.storage_used += new_allocation;
-
-        Ok(())
-    }
-}
+// Note: Block/invitation types have been migrated to AppCore's unified ViewState.
+// See aura_app::views for BlockState, InvitationsState, etc.
 
 /// FROST threshold signing state for the current device.
 ///
@@ -297,18 +90,6 @@ pub(super) struct FrostState {
     /// Used when coordinating multi-device signing ceremonies
     #[allow(dead_code)]
     pub max_signers: u16,
-}
-
-/// Traversal position in neighborhood
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub(super) struct TraversalPosition {
-    /// Neighborhood ID
-    pub neighborhood_id: String,
-    /// Block ID within neighborhood
-    pub block_id: String,
-    /// Traversal depth (Street, Frontage, Interior)
-    pub depth: String,
 }
 
 /// Stored capability token entry with metadata
@@ -474,6 +255,9 @@ pub struct GuardianInvitation {
 }
 
 /// Internal state for the effect bridge
+///
+/// Note: Block/invitation state has been migrated to AppCore's unified ViewState.
+/// Access via AppCore.views().get_blocks(), get_invitations(), etc.
 pub(super) struct BridgeState {
     /// Whether the bridge is connected
     pub connected: bool,
@@ -481,47 +265,15 @@ pub(super) struct BridgeState {
     pub pending_commands: u32,
     /// Last error message
     pub last_error: Option<String>,
-    /// Active recovery session (Phase 3 state management)
-    pub recovery_session: Option<crate::tui::recovery_session::RecoverySession>,
     /// Current account authority (after CreateAccount)
     pub account_authority: Option<aura_core::AuthorityId>,
-    /// Whether MFA (m > 1) is required for sensitive ops (UI mirror of threshold policy)
-    #[allow(dead_code)]
-    pub require_mfa: bool,
     /// Current user's maximum authorized level
     /// Updated when user authenticates or gains capabilities
     pub user_auth_level: CommandAuthorizationLevel,
-    /// User's Biscuit token for cryptographic authorization (Phase 4)
-    ///
-    /// - None: Demo mode using simplified auth levels (CommandAuthorizationLevel)
-    /// - Some(token): Production mode with real Biscuit token verification
-    ///
-    /// Used with ProtocolGuard for guard chain authorization:
-    /// - Demo: Use ProtocolGuard::new_for_testing() to bypass token verification
-    /// - Prod: Use ProtocolGuard::new() with real token for Biscuit policy enforcement
-    #[allow(dead_code)]
-    pub user_token: Option<biscuit_auth::Biscuit>,
     /// FROST threshold signing state
     pub frost_state: FrostState,
-    /// Invitation record registry for tracking invitation status
-    /// NOTE: This duplicates AppCore.view_state.invitations but is kept for demo implementations
-    pub invitation_registry: InvitationRecordRegistry,
-    /// Blocks created or joined by the user (keyed by block_id)
-    /// NOTE: This duplicates AppCore.view_state.block but is kept for demo implementations
-    pub blocks: HashMap<String, BlockState>,
-    /// Currently active block (if any)
-    /// NOTE: This duplicates AppCore selection state but is kept for demo implementations
-    pub current_block: Option<String>,
-    /// Pending block invitations received (keyed by invitation_id)
-    /// NOTE: This should be migrated to AppCore.view_state.invitations
-    pub pending_block_invitations: HashMap<String, BlockInvitationEnvelope>,
-    /// Sent block invitations (keyed by invitation_id)
-    /// NOTE: This should be migrated to AppCore.view_state.invitations
-    pub sent_block_invitations: HashMap<String, BlockInvitationEnvelope>,
     /// User's current nickname/display name (local preference)
     pub user_nickname: Option<String>,
-    /// Current traversal position in neighborhood (Section 9)
-    pub traversal_position: Option<TraversalPosition>,
     /// Current context ID for AMP channel operations
     /// Set when user selects a channel or context
     pub current_context: Option<aura_core::ContextId>,
@@ -533,7 +285,10 @@ pub(super) struct BridgeState {
     /// Known peers for sync operations
     /// Populated via AddPeer command or peer discovery
     pub known_peers: Vec<uuid::Uuid>,
-    // NOTE: contacts and guardian_invitations removed - use AppCore.view_state instead
+    /// Last sync timestamp (ms since epoch)
+    pub last_sync_time: Option<u64>,
+    /// Whether sync is currently in progress
+    pub sync_in_progress: bool,
 }
 
 impl Default for BridgeState {
@@ -542,23 +297,12 @@ impl Default for BridgeState {
             connected: false,
             pending_commands: 0,
             last_error: None,
-            recovery_session: None,
             account_authority: None,
-            require_mfa: false,
             // Start with Basic level - user is authenticated but not elevated
             // Non-demo mode starts at Public and upgrades after auth
             user_auth_level: CommandAuthorizationLevel::Basic,
-            // Start with no Biscuit token (demo mode)
-            // Production: Set via authentication flow with real token from auth ceremony
-            user_token: None,
             frost_state: FrostState::default(),
-            invitation_registry: InvitationRecordRegistry::new(),
-            blocks: HashMap::new(),
-            current_block: None,
-            pending_block_invitations: HashMap::new(),
-            sent_block_invitations: HashMap::new(),
             user_nickname: None,
-            traversal_position: None,
             // Start with default context; set when user selects a channel
             current_context: Some(aura_core::ContextId::from_uuid(crate::ids::uuid(
                 "tui:default-context",
@@ -568,6 +312,9 @@ impl Default for BridgeState {
             tokens_loaded: false,
             // Start with no known peers; add via AddPeer command or discovery
             known_peers: Vec::new(),
+            // Sync status - updated by ForceSync/RequestState commands
+            last_sync_time: None,
+            sync_in_progress: false,
         }
     }
 }
@@ -660,18 +407,21 @@ pub fn check_authorization(
 /// * `state` - Shared bridge state
 /// * `time_effects` - Time effect handler for timestamps
 /// * `amp_effects` - Optional AMP channel effect handler
-/// * `effect_system` - Optional full effect system for complex operations
+/// * `app_core` - AppCore containing the agent with effect system
 ///
 /// # Returns
 /// * `Ok(())` on success
 /// * `Err(String)` on failure (used for retry logic)
+///
+/// NOTE: This function uses deprecated BridgeState fields. These should be
+/// migrated to use AppCore ViewState instead.
+#[allow(deprecated)]
 pub(super) async fn execute_command(
     command: &EffectCommand,
     event_tx: &broadcast::Sender<AuraEvent>,
     state: &Arc<RwLock<BridgeState>>,
     time_effects: &Arc<dyn PhysicalTimeEffects>,
     amp_effects: Option<&(dyn AmpChannelEffects + Send + Sync)>,
-    effect_system: Option<&Arc<aura_agent::AuraEffectSystem>>,
     app_core: Option<&Arc<tokio::sync::RwLock<aura_app::AppCore>>>,
 ) -> Result<(), String> {
     tracing::debug!("Executing command: {:?}", command);
@@ -684,15 +434,28 @@ pub(super) async fn execute_command(
         (bridge_state.user_auth_level, bridge_state.current_context)
     };
 
-    let effect_system = effect_system.cloned();
-    if let Some(effect_system) = &effect_system {
+    // Get effect system from AppCore's agent (unified architecture)
+    // This replaces the old direct effect_system parameter
+    let effect_system: Option<std::sync::Arc<tokio::sync::RwLock<aura_agent::AuraEffectSystem>>> =
+        if let Some(core) = app_core {
+            let guard = core.read().await;
+            guard.agent().map(|a| a.runtime().effects())
+        } else {
+            None
+        };
+
+    if effect_system.is_some() {
+        tracing::debug!("Effect system available via AppCore agent");
+    } else {
+        tracing::debug!("No effect system available (demo mode)");
+    }
+
+    // Load capability tokens if effect system available
+    if let Some(ref effect_system) = effect_system {
         let mut bridge_state = state.write().await;
         if !bridge_state.tokens_loaded {
-            if let Err(e) = bridge_state
-                .capability_token_store
-                .load(effect_system.as_ref())
-                .await
-            {
+            let es_guard = effect_system.read().await;
+            if let Err(e) = bridge_state.capability_token_store.load(&*es_guard).await {
                 tracing::warn!("Failed to load capability tokens: {}", e);
             }
             bridge_state.tokens_loaded = true;
@@ -780,7 +543,7 @@ pub(super) async fn execute_command(
             };
 
             // Create recovery context (relational context is derived from participants)
-            let recovery_context = Arc::new(RelationalContext::new(guardians.clone()));
+            let _recovery_context = Arc::new(RelationalContext::new(guardians.clone()));
 
             // Get current timestamp
             let started_at = time_effects
@@ -789,24 +552,28 @@ pub(super) async fn execute_command(
                 .map_err(|e| format!("Failed to get timestamp: {}", e))?
                 .ts_ms;
 
-            // Create recovery session
-            let session = crate::tui::recovery_session::RecoverySession::new(
-                session_id.clone(),
-                account_authority,
-                guardians,
-                threshold,
-                recovery_context,
-                started_at,
-            );
+            // Update AppCore's RecoveryState with the new session
+            if let Some(core) = app_core.as_ref() {
+                let core_read = core.read().await;
+                let mut recovery = core_read.views().get_recovery();
 
-            // Store in state
-            {
-                let mut bridge_state = state.write().await;
-                bridge_state.recovery_session = Some(session);
+                // Initialize the recovery process
+                recovery.initiate_recovery(
+                    session_id.clone(),
+                    account_authority.to_string(),
+                    started_at,
+                );
+
+                // Set the threshold if we have an active recovery
+                if let Some(ref mut process) = recovery.active_recovery {
+                    process.approvals_required = threshold as u32;
+                }
+
+                core_read.views().set_recovery(recovery);
             }
 
             tracing::info!(
-                "Recovery session created and stored: session_id={}",
+                "Recovery session created and stored in AppCore: session_id={}",
                 session_id
             );
 
@@ -824,31 +591,6 @@ pub(super) async fn execute_command(
                 guardian_id
             );
 
-            // Dispatch intent to AppCore for state management
-            if let Some(core) = app_core {
-                // Use a deterministic recovery context ID for now
-                let recovery_context = ContextId::default();
-                let intent = Intent::ApproveRecovery { recovery_context };
-                let mut core_guard = core.write().await;
-                if let Err(e) = core_guard.dispatch(intent) {
-                    tracing::warn!("AppCore dispatch failed for ApproveRecovery: {}", e);
-                }
-                // Commit pending facts and persist to storage
-                if let Err(e) = core_guard.commit_and_persist() {
-                    tracing::warn!("Failed to persist facts: {}", e);
-                }
-            }
-
-            // Get current recovery session from state
-            let mut bridge_state = state.write().await;
-            let session = bridge_state
-                .recovery_session
-                .as_mut()
-                .ok_or("No active recovery session")?;
-
-            // Parse guardian ID
-            let guardian_authority = ids::authority_id(&guardian_id);
-
             // Get current timestamp
             let timestamp = time_effects
                 .physical_time()
@@ -856,23 +598,55 @@ pub(super) async fn execute_command(
                 .map_err(|e| format!("Failed to get timestamp: {}", e))?
                 .ts_ms;
 
-            // Create guardian approval
-            let approval = crate::tui::recovery_session::GuardianApproval {
-                guardian_id: guardian_authority,
-                recovery_id: session.session_id.clone(),
-                signature: vec![0xDE, 0xAD, 0xBE, 0xEF], // Demo signature
-                timestamp,
+            // Get current/threshold from AppCore RecoveryState and add approval
+            let (current, threshold, session_id) = if let Some(core) = app_core {
+                // Dispatch intent to AppCore for state management
+                let recovery_context = ContextId::default();
+                let intent = Intent::ApproveRecovery { recovery_context };
+                {
+                    let mut core_guard = core.write().await;
+                    if let Err(e) = core_guard.dispatch(intent) {
+                        tracing::warn!("AppCore dispatch failed for ApproveRecovery: {}", e);
+                    }
+                    // Commit pending facts and persist to storage
+                    if let Err(e) = core_guard.commit_and_persist() {
+                        tracing::warn!("Failed to persist facts: {}", e);
+                    }
+                }
+
+                // Read and update recovery state
+                let core_read = core.read().await;
+                let mut recovery = core_read.views().get_recovery();
+
+                // Verify there's an active recovery
+                let process = recovery
+                    .active_recovery
+                    .as_ref()
+                    .ok_or("No active recovery session")?;
+
+                let session_id = process.id.clone();
+
+                // Add the guardian approval with timestamp
+                recovery.add_guardian_approval_with_timestamp(guardian_id.clone(), timestamp);
+
+                // Get updated counts
+                let current = recovery
+                    .active_recovery
+                    .as_ref()
+                    .map(|p| p.approvals_received)
+                    .unwrap_or(0);
+                let threshold = recovery
+                    .active_recovery
+                    .as_ref()
+                    .map(|p| p.approvals_required)
+                    .unwrap_or(0);
+
+                core_read.views().set_recovery(recovery);
+
+                (current, threshold, session_id)
+            } else {
+                return Err("No AppCore available for recovery".to_string());
             };
-
-            // Add approval to session
-            session.add_approval(approval).map_err(|e| {
-                tracing::error!("Failed to add guardian approval: {}", e);
-                e
-            })?;
-
-            let current = session.approval_count();
-            let threshold = session.threshold;
-            let session_id = session.session_id.clone();
 
             tracing::info!(
                 "Guardian approval added: guardian={}, current={}/{}, session={}",
@@ -881,9 +655,6 @@ pub(super) async fn execute_command(
                 threshold,
                 session_id
             );
-
-            // Drop the write lock before sending event
-            drop(bridge_state);
 
             // Emit event
             let _ = event_tx.send(AuraEvent::GuardianApproved {
@@ -898,45 +669,52 @@ pub(super) async fn execute_command(
         EffectCommand::CompleteRecovery => {
             tracing::info!("CompleteRecovery command executing");
 
-            // Dispatch intent to AppCore for state management
-            if let Some(core) = app_core {
+            // Get session_id and check threshold from AppCore
+            let session_id = if let Some(core) = app_core {
+                // Dispatch intent to AppCore for state management
                 let recovery_context = ContextId::default();
                 let intent = Intent::CompleteRecovery { recovery_context };
-                let mut core_guard = core.write().await;
-                if let Err(e) = core_guard.dispatch(intent) {
-                    tracing::warn!("AppCore dispatch failed for CompleteRecovery: {}", e);
+                {
+                    let mut core_guard = core.write().await;
+                    if let Err(e) = core_guard.dispatch(intent) {
+                        tracing::warn!("AppCore dispatch failed for CompleteRecovery: {}", e);
+                    }
+                    // Commit pending facts and persist to storage
+                    if let Err(e) = core_guard.commit_and_persist() {
+                        tracing::warn!("Failed to persist facts: {}", e);
+                    }
                 }
-                // Commit pending facts and persist to storage
-                if let Err(e) = core_guard.commit_and_persist() {
-                    tracing::warn!("Failed to persist facts: {}", e);
+
+                // Read and update recovery state
+                let core_read = core.read().await;
+                let mut recovery = core_read.views().get_recovery();
+
+                // Verify there's an active recovery
+                let process = recovery
+                    .active_recovery
+                    .as_ref()
+                    .ok_or("No active recovery session")?;
+
+                // Check if threshold is met
+                if process.approvals_received < process.approvals_required {
+                    return Err(format!(
+                        "Recovery threshold not met: {}/{} approvals",
+                        process.approvals_received, process.approvals_required
+                    ));
                 }
-            }
 
-            // Get recovery session from state
-            let mut bridge_state = state.write().await;
-            let session = bridge_state
-                .recovery_session
-                .as_mut()
-                .ok_or("No active recovery session")?;
+                let session_id = process.id.clone();
 
-            // Check if threshold is met
-            if !session.is_threshold_met() {
-                let current = session.approval_count();
-                let threshold = session.threshold;
-                return Err(format!(
-                    "Recovery threshold not met: {}/{} approvals",
-                    current, threshold
-                ));
-            }
+                // Mark as completed
+                recovery.complete_recovery();
+                core_read.views().set_recovery(recovery);
 
-            // Mark session as completed
-            session.mark_completed();
-            let session_id = session.session_id.clone();
+                session_id
+            } else {
+                return Err("No AppCore available for recovery".to_string());
+            };
 
             tracing::info!("Recovery completed: session={}", session_id);
-
-            // Drop lock before emitting event
-            drop(bridge_state);
 
             // Emit completion event
             let _ = event_tx.send(AuraEvent::RecoveryCompleted {
@@ -949,19 +727,30 @@ pub(super) async fn execute_command(
         EffectCommand::CancelRecovery => {
             tracing::info!("CancelRecovery command executing");
 
-            // Remove recovery session from state
-            let mut bridge_state = state.write().await;
-            let session = bridge_state
-                .recovery_session
-                .take()
-                .ok_or("No active recovery session")?;
+            // Get session_id and clear recovery from AppCore
+            let session_id = if let Some(core) = app_core {
+                let core_read = core.read().await;
+                let mut recovery = core_read.views().get_recovery();
 
-            let session_id = session.session_id.clone();
+                // Verify there's an active recovery
+                let process = recovery
+                    .active_recovery
+                    .as_ref()
+                    .ok_or("No active recovery session")?;
+
+                let session_id = process.id.clone();
+
+                // Fail/clear the recovery
+                recovery.fail_recovery();
+                recovery.clear_recovery();
+                core_read.views().set_recovery(recovery);
+
+                session_id
+            } else {
+                return Err("No AppCore available for recovery".to_string());
+            };
 
             tracing::info!("Recovery cancelled: session={}", session_id);
-
-            // Drop lock before emitting event
-            drop(bridge_state);
 
             // Emit cancellation event
             let _ = event_tx.send(AuraEvent::RecoveryCancelled {
@@ -1316,10 +1105,14 @@ pub(super) async fn execute_command(
             drop(bridge_state);
 
             // Persist nickname to storage via effect system
-            if let Some(effects) = &effect_system {
+            if let Some(ref effects) = effect_system {
                 use aura_core::effects::StorageEffects;
+                let effects_guard = effects.read().await;
                 let nickname_key = "tui/settings/user_nickname";
-                if let Err(e) = effects.store(nickname_key, name.as_bytes().to_vec()).await {
+                if let Err(e) = effects_guard
+                    .store(nickname_key, name.as_bytes().to_vec())
+                    .await
+                {
                     tracing::warn!("Failed to persist nickname to storage: {:?}", e);
                 }
             }
@@ -1359,10 +1152,11 @@ pub(super) async fn execute_command(
             }
 
             // Persist petname to storage (backup to journal)
-            if let Some(effects) = &effect_system {
+            if let Some(ref effects) = effect_system {
                 use aura_core::effects::StorageEffects;
+                let effects_guard = effects.read().await;
                 let petname_key = format!("tui/contacts/{}/petname", contact_id);
-                if let Err(e) = effects
+                if let Err(e) = effects_guard
                     .store(&petname_key, petname.as_bytes().to_vec())
                     .await
                 {
@@ -1417,15 +1211,16 @@ pub(super) async fn execute_command(
             }
 
             // Persist guardian status to storage (backup to journal)
-            if let Some(effects) = &effect_system {
+            if let Some(ref effects) = effect_system {
                 use aura_core::effects::StorageEffects;
+                let effects_guard = effects.read().await;
                 let guardian_key = format!("tui/contacts/{}/is_guardian", contact_id);
                 let value = if new_is_guardian {
                     b"true".to_vec()
                 } else {
                     b"false".to_vec()
                 };
-                if let Err(e) = effects.store(&guardian_key, value).await {
+                if let Err(e) = effects_guard.store(&guardian_key, value).await {
                     tracing::warn!(
                         "Failed to persist contact guardian status to storage: {:?}",
                         e
@@ -1464,8 +1259,9 @@ pub(super) async fn execute_command(
             // We only persist to storage and emit event here
 
             // Persist to storage
-            if let Some(effects) = &effect_system {
+            if let Some(ref effects) = effect_system {
                 use aura_core::effects::StorageEffects;
+                let effects_guard = effects.read().await;
                 let inv_key = format!("tui/guardian_invitations/{}", invitation_id);
                 #[derive(serde::Serialize)]
                 struct StoredGuardianInvitation {
@@ -1479,7 +1275,7 @@ pub(super) async fn execute_command(
                     expires_at: now_ts + (7 * 24 * 60 * 60 * 1000),
                 };
                 let inv_data = serde_json::to_vec(&stored).unwrap_or_default();
-                if let Err(e) = effects.store(&inv_key, inv_data).await {
+                if let Err(e) = effects_guard.store(&inv_key, inv_data).await {
                     tracing::warn!("Failed to persist guardian invitation to storage: {:?}", e);
                 }
             }
@@ -1495,13 +1291,43 @@ pub(super) async fn execute_command(
         }
 
         // Invitation commands - wired to aura-invitation protocol
-        // Uses BridgeState.invitation_registry for status tracking
-        // NOTE: Invitation state is now primarily managed via AppCore.view_state.invitations
+        // Invitation state is managed via AppCore.views().get_invitations()
         EffectCommand::AcceptInvitation { invitation_id } => {
             tracing::info!("Accepting invitation: {}", invitation_id);
 
-            // Dispatch intent to AppCore for state management
+            // Validate invitation status via AppCore ViewState
             if let Some(core) = app_core {
+                let core_read = core.read().await;
+                let invitations = core_read.views().get_invitations();
+                if let Some(invitation) = invitations.invitation(&invitation_id) {
+                    use aura_app::views::InvitationStatus as AppInvStatus;
+                    match invitation.status {
+                        AppInvStatus::Accepted => {
+                            return Err(format!(
+                                "Invitation {} has already been accepted",
+                                invitation_id
+                            ));
+                        }
+                        AppInvStatus::Rejected => {
+                            return Err(format!(
+                                "Invitation {} has been declined and cannot be accepted",
+                                invitation_id
+                            ));
+                        }
+                        AppInvStatus::Expired => {
+                            return Err(format!("Invitation {} has expired", invitation_id));
+                        }
+                        AppInvStatus::Revoked => {
+                            return Err(format!("Invitation {} has been revoked", invitation_id));
+                        }
+                        AppInvStatus::Pending => {
+                            // OK to accept
+                        }
+                    }
+                }
+                drop(core_read);
+
+                // Dispatch intent to AppCore for state management
                 let intent = Intent::AcceptInvitation {
                     invitation_fact: invitation_id.clone(),
                 };
@@ -1515,50 +1341,7 @@ pub(super) async fn execute_command(
                 }
             }
 
-            // Get current timestamp for registry update
-            let now = time_effects.physical_time().await.unwrap_or(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            });
-            let timestamp = TimeStamp::PhysicalClock(now);
-
-            // Update invitation registry
-            let mut bridge_state = state.write().await;
-
-            // Check registry status to validate invitation
-            let registry_record = bridge_state.invitation_registry.get(&invitation_id);
-            let current_status = registry_record.map(|r| r.status);
-
-            // Validate: can only accept pending invitations
-            match current_status {
-                Some(InvitationStatus::Accepted) => {
-                    return Err(format!(
-                        "Invitation {} has already been accepted",
-                        invitation_id
-                    ));
-                }
-                Some(InvitationStatus::Declined) => {
-                    return Err(format!(
-                        "Invitation {} has been declined and cannot be accepted",
-                        invitation_id
-                    ));
-                }
-                Some(InvitationStatus::Expired) => {
-                    return Err(format!("Invitation {} has expired", invitation_id));
-                }
-                Some(InvitationStatus::Pending) | None => {
-                    // OK to accept - pending or not yet tracked
-                }
-            }
-
-            // Mark as accepted in registry
-            bridge_state
-                .invitation_registry
-                .mark_accepted(&invitation_id, timestamp);
-
-            tracing::info!("Accepted invitation {} and updated registry", invitation_id);
-
-            drop(bridge_state);
+            tracing::info!("Accepted invitation {}", invitation_id);
 
             // Emit event for reactive view updates
             let _ = event_tx.send(AuraEvent::InvitationAccepted {
@@ -1571,8 +1354,42 @@ pub(super) async fn execute_command(
         EffectCommand::DeclineInvitation { invitation_id } => {
             tracing::info!("Declining invitation: {}", invitation_id);
 
-            // Dispatch intent to AppCore for state management
+            // Validate invitation status via AppCore ViewState
             if let Some(core) = app_core {
+                let core_read = core.read().await;
+                let invitations = core_read.views().get_invitations();
+                if let Some(invitation) = invitations.invitation(&invitation_id) {
+                    use aura_app::views::InvitationStatus as AppInvStatus;
+                    match invitation.status {
+                        AppInvStatus::Accepted => {
+                            return Err(format!(
+                                "Invitation {} has already been accepted and cannot be declined",
+                                invitation_id
+                            ));
+                        }
+                        AppInvStatus::Rejected => {
+                            return Err(format!(
+                                "Invitation {} has already been declined",
+                                invitation_id
+                            ));
+                        }
+                        AppInvStatus::Expired => {
+                            return Err(format!(
+                                "Invitation {} has expired and cannot be declined",
+                                invitation_id
+                            ));
+                        }
+                        AppInvStatus::Revoked => {
+                            return Err(format!("Invitation {} has been revoked", invitation_id));
+                        }
+                        AppInvStatus::Pending => {
+                            // OK to decline
+                        }
+                    }
+                }
+                drop(core_read);
+
+                // Dispatch intent to AppCore for state management
                 let intent = Intent::RejectInvitation {
                     invitation_fact: invitation_id.clone(),
                 };
@@ -1586,53 +1403,7 @@ pub(super) async fn execute_command(
                 }
             }
 
-            // Get current timestamp for registry update
-            let now = time_effects.physical_time().await.unwrap_or(PhysicalTime {
-                ts_ms: 0,
-                uncertainty: None,
-            });
-            let timestamp = TimeStamp::PhysicalClock(now);
-
-            // Update state
-            let mut bridge_state = state.write().await;
-
-            // Check registry status to validate invitation
-            let registry_record = bridge_state.invitation_registry.get(&invitation_id);
-            let current_status = registry_record.map(|r| r.status);
-
-            // Validate: can only decline pending invitations
-            match current_status {
-                Some(InvitationStatus::Accepted) => {
-                    return Err(format!(
-                        "Invitation {} has already been accepted and cannot be declined",
-                        invitation_id
-                    ));
-                }
-                Some(InvitationStatus::Declined) => {
-                    return Err(format!(
-                        "Invitation {} has already been declined",
-                        invitation_id
-                    ));
-                }
-                Some(InvitationStatus::Expired) => {
-                    return Err(format!(
-                        "Invitation {} has expired and cannot be declined",
-                        invitation_id
-                    ));
-                }
-                Some(InvitationStatus::Pending) | None => {
-                    // OK to decline
-                }
-            }
-
-            // Mark as declined in registry
-            bridge_state
-                .invitation_registry
-                .mark_declined(&invitation_id, timestamp);
-
-            tracing::info!("Declined invitation {} and updated registry", invitation_id);
-
-            drop(bridge_state);
+            tracing::info!("Declined invitation {}", invitation_id);
 
             // Emit event for reactive view updates
             let _ = event_tx.send(AuraEvent::InvitationDeclined {
@@ -1647,19 +1418,17 @@ pub(super) async fn execute_command(
             tracing::info!("ListParticipants for channel: {}", channel);
 
             // Find the block by channel ID (channel == block_id for now)
-            let participants: Vec<String> = {
-                let bridge_state = state.read().await;
-                bridge_state
+            // Use AppCore's BlocksState for participant lookup
+            let participants: Vec<String> = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                blocks
                     .blocks
                     .get(channel)
-                    .map(|block| {
-                        block
-                            .residents
-                            .iter()
-                            .map(|r| r.authority_id.to_string())
-                            .collect()
-                    })
+                    .map(|block| block.residents.iter().map(|r| r.id.clone()).collect())
                     .unwrap_or_default()
+            } else {
+                Vec::new()
             };
 
             let count = participants.len();
@@ -1678,32 +1447,31 @@ pub(super) async fn execute_command(
         EffectCommand::GetUserInfo { target } => {
             tracing::info!("GetUserInfo for target: {}", target);
 
-            // Search for the user across all blocks
-            let bridge_state = state.read().await;
-            for (_block_id, block) in &bridge_state.blocks {
-                if let Some(resident) = block
-                    .residents
-                    .iter()
-                    .find(|r| r.authority_id.to_string() == *target)
-                {
-                    tracing::info!(
-                        "Found user info for {}: steward={}, joined={}, storage={}",
-                        target,
-                        resident.is_steward,
-                        resident.joined_at,
-                        resident.storage_allocated
-                    );
+            // Search for the user across all blocks using AppCore ViewState
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                for block in blocks.blocks.values() {
+                    if let Some(resident) = block.residents.iter().find(|r| r.id == *target) {
+                        tracing::info!(
+                            "Found user info for {}: steward={}, joined={}, storage={}",
+                            target,
+                            resident.is_steward(),
+                            resident.joined_at,
+                            resident.storage_allocated
+                        );
 
-                    // Emit event with user information
-                    let _ = event_tx.send(AuraEvent::UserInfo {
-                        user_id: target.clone(),
-                        name: resident.name.clone(),
-                        is_steward: resident.is_steward,
-                        joined_at: resident.joined_at,
-                        storage_allocated: resident.storage_allocated,
-                    });
+                        // Emit event with user information
+                        let _ = event_tx.send(AuraEvent::UserInfo {
+                            user_id: target.clone(),
+                            name: resident.name.clone(),
+                            is_steward: resident.is_steward(),
+                            joined_at: resident.joined_at,
+                            storage_allocated: resident.storage_allocated,
+                        });
 
-                    return Ok(());
+                        return Ok(());
+                    }
                 }
             }
 
@@ -1741,15 +1509,21 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
-            let is_steward = {
-                let bridge_state = state.read().await;
-                bridge_state
+            let actor_id_str = actor_id.to_string();
+
+            // Check steward status via AppCore ViewState
+            let is_steward = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                blocks
                     .blocks
                     .values()
                     .flat_map(|block| &block.residents)
-                    .find(|r| r.authority_id == actor_id)
-                    .map(|r| r.is_steward)
+                    .find(|r| r.id == actor_id_str)
+                    .map(|r| r.is_steward())
                     .unwrap_or(false)
+            } else {
+                false
             };
 
             if !is_steward {
@@ -1771,28 +1545,32 @@ pub(super) async fn execute_command(
                 uncertainty: None,
             });
 
-            // Log kick to persistent audit trail
-            let mut bridge_state = state.write().await;
-            for block in bridge_state.blocks.values_mut() {
-                // Only update blocks where the actor is a steward
-                if block
-                    .residents
-                    .iter()
-                    .any(|r| r.authority_id == actor_id && r.is_steward)
-                {
-                    block.kick_log.push(KickRecord {
-                        authority_id: target.clone(),
-                        channel: channel.clone(),
-                        reason: reason.clone().unwrap_or_default(),
-                        actor: actor_id.to_string(),
-                        kicked_at: now.ts_ms,
-                    });
+            // Log kick to persistent audit trail via AppCore ViewState
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut blocks = core.views().get_blocks();
+                for block in blocks.blocks.values_mut() {
+                    // Only update blocks where the actor is a steward
+                    if block
+                        .residents
+                        .iter()
+                        .any(|r| r.id == actor_id_str && r.is_steward())
+                    {
+                        block.kick_log.push(aura_app::views::KickRecord {
+                            authority_id: target.clone(),
+                            channel: channel.clone(),
+                            reason: reason.clone().unwrap_or_default(),
+                            actor: actor_id.to_string(),
+                            kicked_at: now.ts_ms,
+                        });
+                    }
                 }
+                core.views().set_blocks(blocks);
             }
-            drop(bridge_state);
 
             // Journal integration: Write kick facts for distributed persistence
-            if let Some(effect_system) = effect_system {
+            if let Some(ref effect_system) = effect_system {
+                let es_guard = effect_system.read().await;
                 // Parse target string to AuthorityId
                 let kicked_authority = match target.parse::<aura_core::AuthorityId>() {
                     Ok(auth_id) => auth_id,
@@ -1820,54 +1598,69 @@ pub(super) async fn execute_command(
                 };
 
                 // Write a kick fact for each block where actor is steward
-                let bridge_state = state.read().await;
-                for block in bridge_state.blocks.values() {
-                    if block
-                        .residents
-                        .iter()
-                        .any(|r| r.authority_id == actor_id && r.is_steward)
-                    {
-                        let kick_fact = BlockKickFact {
-                            context_id: block.context_id.clone(),
-                            channel_id: channel_id.clone(),
-                            kicked_authority: kicked_authority.clone(),
-                            actor_authority: actor_id.clone(),
-                            reason: reason.clone().unwrap_or_default(),
-                            kicked_at_ms: now.ts_ms,
-                        }
-                        .to_generic();
-
-                        // Write fact to journal for distributed sync
-                        if let Err(e) = effect_system.insert_relational_fact(kick_fact).await {
-                            tracing::error!("Failed to persist kick fact to journal: {:?}", e);
-                            // Continue anyway - local state is already updated
-                        } else {
-                            tracing::info!(
-                                "KickUser fact persisted to journal for block {}: {} from {}",
-                                block.id,
-                                target,
-                                channel
-                            );
-                        }
-
-                        // Wire to AmpChannelEffects to record channel leave
-                        if let Some(amp) = amp_effects {
-                            let leave_params = ChannelLeaveParams {
-                                context: block.context_id.clone(),
-                                channel: channel_id.clone(),
-                                participant: kicked_authority.clone(),
+                if let Some(app_core) = app_core {
+                    let core = app_core.read().await;
+                    let blocks = core.views().get_blocks();
+                    for block in blocks.blocks.values() {
+                        if block
+                            .residents
+                            .iter()
+                            .any(|r| r.id == actor_id_str && r.is_steward())
+                        {
+                            // Parse context_id from String to ContextId
+                            let context_id = match block.context_id.parse::<aura_core::ContextId>()
+                            {
+                                Ok(ctx) => ctx,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        "Failed to parse context_id for block {}",
+                                        block.id
+                                    );
+                                    continue;
+                                }
                             };
-                            if let Err(e) = amp.leave_channel(leave_params).await {
-                                tracing::warn!(
-                                    "Failed to record leave_channel for kicked user: {:?}",
-                                    e
+
+                            let kick_fact = BlockKickFact {
+                                context_id: context_id.clone(),
+                                channel_id: channel_id.clone(),
+                                kicked_authority: kicked_authority.clone(),
+                                actor_authority: actor_id.clone(),
+                                reason: reason.clone().unwrap_or_default(),
+                                kicked_at: now.clone(),
+                            }
+                            .to_generic();
+
+                            // Write fact to journal for distributed sync
+                            if let Err(e) = es_guard.insert_relational_fact(kick_fact).await {
+                                tracing::error!("Failed to persist kick fact to journal: {:?}", e);
+                                // Continue anyway - local state is already updated
+                            } else {
+                                tracing::info!(
+                                    "KickUser fact persisted to journal for block {}: {} from {}",
+                                    block.id,
+                                    target,
+                                    channel
                                 );
-                                // Continue - kick fact is already recorded
+                            }
+
+                            // Wire to AmpChannelEffects to record channel leave
+                            if let Some(amp) = amp_effects {
+                                let leave_params = ChannelLeaveParams {
+                                    context: context_id,
+                                    channel: channel_id.clone(),
+                                    participant: kicked_authority.clone(),
+                                };
+                                if let Err(e) = amp.leave_channel(leave_params).await {
+                                    tracing::warn!(
+                                        "Failed to record leave_channel for kicked user: {:?}",
+                                        e
+                                    );
+                                    // Continue - kick fact is already recorded
+                                }
                             }
                         }
                     }
                 }
-                drop(bridge_state);
             }
 
             tracing::info!(
@@ -1902,15 +1695,21 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
-            let is_steward = {
-                let bridge_state = state.read().await;
-                bridge_state
+            let actor_id_str = actor_id.to_string();
+
+            // Check steward status via AppCore ViewState
+            let is_steward = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                blocks
                     .blocks
                     .values()
                     .flat_map(|block| &block.residents)
-                    .find(|r| r.authority_id == actor_id)
-                    .map(|r| r.is_steward)
+                    .find(|r| r.id == actor_id_str)
+                    .map(|r| r.is_steward())
                     .unwrap_or(false)
+            } else {
+                false
             };
 
             if !is_steward {
@@ -1932,28 +1731,34 @@ pub(super) async fn execute_command(
                 uncertainty: None,
             });
 
-            // Store ban in all blocks where actor is steward
-            let mut bridge_state = state.write().await;
-            for block in bridge_state.blocks.values_mut() {
-                // Only update blocks where the actor is a steward
-                if block
-                    .residents
-                    .iter()
-                    .any(|r| r.authority_id == actor_id && r.is_steward)
-                {
-                    block.ban_list.insert(
-                        target.clone(),
-                        BanRecord {
-                            authority_id: target.clone(),
-                            reason: reason.clone().unwrap_or_default(),
-                            actor: actor_id.to_string(),
-                            banned_at: now.ts_ms,
-                        },
-                    );
+            // Store ban in all blocks where actor is steward via AppCore ViewState
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut blocks = core.views().get_blocks();
+                for block in blocks.blocks.values_mut() {
+                    // Only update blocks where the actor is a steward
+                    if block
+                        .residents
+                        .iter()
+                        .any(|r| r.id == actor_id_str && r.is_steward())
+                    {
+                        block.ban_list.insert(
+                            target.clone(),
+                            aura_app::views::BanRecord {
+                                authority_id: target.clone(),
+                                reason: reason.clone().unwrap_or_default(),
+                                actor: actor_id.to_string(),
+                                banned_at: now.ts_ms,
+                            },
+                        );
+                    }
                 }
+                core.views().set_blocks(blocks);
             }
+
             // Journal integration: Write ban facts for distributed persistence
-            if let Some(effect_system) = effect_system {
+            if let Some(ref effect_system) = effect_system {
+                let es_guard = effect_system.read().await;
                 // Parse target string to AuthorityId
                 let banned_authority = match target.parse::<aura_core::AuthorityId>() {
                     Ok(auth_id) => auth_id,
@@ -1968,38 +1773,53 @@ pub(super) async fn execute_command(
                 };
 
                 // Write a ban fact for each block where actor is steward
-                let bridge_state = state.read().await;
-                for block in bridge_state.blocks.values() {
-                    if block
-                        .residents
-                        .iter()
-                        .any(|r| r.authority_id == actor_id && r.is_steward)
-                    {
-                        let ban_fact = BlockBanFact {
-                            context_id: block.context_id.clone(),
-                            channel_id: None, // Block-wide ban
-                            banned_authority: banned_authority.clone(),
-                            actor_authority: actor_id.clone(),
-                            reason: reason.clone().unwrap_or_default(),
-                            banned_at_ms: now.ts_ms,
-                            expires_at_ms: None, // Permanent ban
-                        }
-                        .to_generic();
+                if let Some(app_core) = app_core {
+                    let core = app_core.read().await;
+                    let blocks = core.views().get_blocks();
+                    for block in blocks.blocks.values() {
+                        if block
+                            .residents
+                            .iter()
+                            .any(|r| r.id == actor_id_str && r.is_steward())
+                        {
+                            // Parse context_id from String to ContextId
+                            let context_id = match block.context_id.parse::<aura_core::ContextId>()
+                            {
+                                Ok(ctx) => ctx,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        "Failed to parse context_id for block {}",
+                                        block.id
+                                    );
+                                    continue;
+                                }
+                            };
 
-                        // Write fact to journal for distributed sync
-                        if let Err(e) = effect_system.insert_relational_fact(ban_fact).await {
-                            tracing::error!("Failed to persist ban fact to journal: {:?}", e);
-                            // Continue anyway - local state is already updated
-                        } else {
-                            tracing::info!(
-                                "BanUser fact persisted to journal for block {}: {}",
-                                block.id,
-                                target
-                            );
+                            let ban_fact = BlockBanFact {
+                                context_id,
+                                channel_id: None, // Block-wide ban
+                                banned_authority: banned_authority.clone(),
+                                actor_authority: actor_id.clone(),
+                                reason: reason.clone().unwrap_or_default(),
+                                banned_at: now.clone(),
+                                expires_at: None, // Permanent ban
+                            }
+                            .to_generic();
+
+                            // Write fact to journal for distributed sync
+                            if let Err(e) = es_guard.insert_relational_fact(ban_fact).await {
+                                tracing::error!("Failed to persist ban fact to journal: {:?}", e);
+                                // Continue anyway - local state is already updated
+                            } else {
+                                tracing::info!(
+                                    "BanUser fact persisted to journal for block {}: {}",
+                                    block.id,
+                                    target
+                                );
+                            }
                         }
                     }
                 }
-                drop(bridge_state);
             }
 
             tracing::info!("BanUser successful: {} banned persistently", target);
@@ -2029,15 +1849,21 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
-            let is_steward = {
-                let bridge_state = state.read().await;
-                bridge_state
+            let actor_id_str = actor_id.to_string();
+
+            // Check steward status via AppCore ViewState
+            let is_steward = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                blocks
                     .blocks
                     .values()
                     .flat_map(|block| &block.residents)
-                    .find(|r| r.authority_id == actor_id)
-                    .map(|r| r.is_steward)
+                    .find(|r| r.id == actor_id_str)
+                    .map(|r| r.is_steward())
                     .unwrap_or(false)
+            } else {
+                false
             };
 
             if !is_steward {
@@ -2059,22 +1885,25 @@ pub(super) async fn execute_command(
                 uncertainty: None,
             });
 
-            // Remove ban from all blocks where actor is steward
-            let mut bridge_state = state.write().await;
-            for block in bridge_state.blocks.values_mut() {
-                // Only update blocks where the actor is a steward
-                if block
-                    .residents
-                    .iter()
-                    .any(|r| r.authority_id == actor_id && r.is_steward)
-                {
-                    block.ban_list.remove(target.as_str());
+            // Remove ban from all blocks where actor is steward via AppCore ViewState
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut blocks = core.views().get_blocks();
+                for block in blocks.blocks.values_mut() {
+                    // Only update blocks where the actor is a steward
+                    if block
+                        .residents
+                        .iter()
+                        .any(|r| r.id == actor_id_str && r.is_steward())
+                    {
+                        block.ban_list.remove(target.as_str());
+                    }
                 }
+                core.views().set_blocks(blocks);
             }
-            drop(bridge_state);
 
             // Journal integration: Write unban facts for distributed persistence
-            if let Some(effect_system) = effect_system {
+            if let Some(ref effect_system) = effect_system {
                 // Parse target string to AuthorityId
                 let unbanned_authority = match target.parse::<aura_core::AuthorityId>() {
                     Ok(auth_id) => auth_id,
@@ -2088,37 +1917,53 @@ pub(super) async fn execute_command(
                     }
                 };
 
+                let es_guard = effect_system.read().await;
                 // Write an unban fact for each block where actor is steward
-                let bridge_state = state.read().await;
-                for block in bridge_state.blocks.values() {
-                    if block
-                        .residents
-                        .iter()
-                        .any(|r| r.authority_id == actor_id && r.is_steward)
-                    {
-                        let unban_fact = BlockUnbanFact {
-                            context_id: block.context_id.clone(),
-                            channel_id: None, // Block-wide unban
-                            unbanned_authority: unbanned_authority.clone(),
-                            actor_authority: actor_id.clone(),
-                            unbanned_at_ms: now.ts_ms,
-                        }
-                        .to_generic();
+                if let Some(app_core) = app_core {
+                    let core = app_core.read().await;
+                    let blocks = core.views().get_blocks();
+                    for block in blocks.blocks.values() {
+                        if block
+                            .residents
+                            .iter()
+                            .any(|r| r.id == actor_id_str && r.is_steward())
+                        {
+                            // Parse context_id from String to ContextId
+                            let context_id = match block.context_id.parse::<aura_core::ContextId>()
+                            {
+                                Ok(ctx) => ctx,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        "Failed to parse context_id for block {}",
+                                        block.id
+                                    );
+                                    continue;
+                                }
+                            };
 
-                        // Write fact to journal for distributed sync
-                        if let Err(e) = effect_system.insert_relational_fact(unban_fact).await {
-                            tracing::error!("Failed to persist unban fact to journal: {:?}", e);
-                            // Continue anyway - local state is already updated
-                        } else {
-                            tracing::info!(
-                                "UnbanUser fact persisted to journal for block {}: {}",
-                                block.id,
-                                target
-                            );
+                            let unban_fact = BlockUnbanFact {
+                                context_id,
+                                channel_id: None, // Block-wide unban
+                                unbanned_authority: unbanned_authority.clone(),
+                                actor_authority: actor_id.clone(),
+                                unbanned_at: now.clone(),
+                            }
+                            .to_generic();
+
+                            // Write fact to journal for distributed sync
+                            if let Err(e) = es_guard.insert_relational_fact(unban_fact).await {
+                                tracing::error!("Failed to persist unban fact to journal: {:?}", e);
+                                // Continue anyway - local state is already updated
+                            } else {
+                                tracing::info!(
+                                    "UnbanUser fact persisted to journal for block {}: {}",
+                                    block.id,
+                                    target
+                                );
+                            }
                         }
                     }
                 }
-                drop(bridge_state);
             }
 
             tracing::info!("UnbanUser successful: {} unbanned persistently", target);
@@ -2150,15 +1995,21 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
-            let is_steward = {
-                let bridge_state = state.read().await;
-                bridge_state
+            let actor_id_str = actor_id.to_string();
+
+            // Check steward status via AppCore ViewState
+            let is_steward = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                blocks
                     .blocks
                     .values()
                     .flat_map(|block| &block.residents)
-                    .find(|r| r.authority_id == actor_id)
-                    .map(|r| r.is_steward)
+                    .find(|r| r.id == actor_id_str)
+                    .map(|r| r.is_steward())
                     .unwrap_or(false)
+            } else {
+                false
             };
 
             if !is_steward {
@@ -2183,31 +2034,34 @@ pub(super) async fn execute_command(
             // Calculate expiration timestamp if duration is specified
             let expires_at = duration_secs.map(|secs| now.ts_ms + (secs * 1000));
 
-            // Store mute in all blocks where actor is steward
-            let mut bridge_state = state.write().await;
-            for block in bridge_state.blocks.values_mut() {
-                // Only update blocks where the actor is a steward
-                if block
-                    .residents
-                    .iter()
-                    .any(|r| r.authority_id == actor_id && r.is_steward)
-                {
-                    block.mute_list.insert(
-                        target.clone(),
-                        MuteRecord {
-                            authority_id: target.clone(),
-                            duration_secs: *duration_secs,
-                            muted_at: now.ts_ms,
-                            expires_at,
-                            actor: actor_id.to_string(),
-                        },
-                    );
+            // Store mute in all blocks where actor is steward via AppCore ViewState
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut blocks = core.views().get_blocks();
+                for block in blocks.blocks.values_mut() {
+                    // Only update blocks where the actor is a steward
+                    if block
+                        .residents
+                        .iter()
+                        .any(|r| r.id == actor_id_str && r.is_steward())
+                    {
+                        block.mute_list.insert(
+                            target.clone(),
+                            aura_app::views::MuteRecord {
+                                authority_id: target.clone(),
+                                duration_secs: *duration_secs,
+                                muted_at: now.ts_ms,
+                                expires_at,
+                                actor: actor_id.to_string(),
+                            },
+                        );
+                    }
                 }
+                core.views().set_blocks(blocks);
             }
-            drop(bridge_state);
 
             // Journal integration: Write mute facts for distributed persistence
-            if let Some(effect_system) = effect_system {
+            if let Some(ref effect_system) = effect_system {
                 // Parse target string to AuthorityId
                 let muted_authority = match target.parse::<aura_core::AuthorityId>() {
                     Ok(auth_id) => auth_id,
@@ -2221,38 +2075,57 @@ pub(super) async fn execute_command(
                     }
                 };
 
+                let es_guard = effect_system.read().await;
                 // Write a mute fact for each block where actor is steward
-                let bridge_state = state.read().await;
-                for block in bridge_state.blocks.values() {
-                    if block
-                        .residents
-                        .iter()
-                        .any(|r| r.authority_id == actor_id && r.is_steward)
-                    {
-                        let mute_fact = BlockMuteFact {
-                            context_id: block.context_id.clone(),
-                            channel_id: None,
-                            muted_authority: muted_authority.clone(),
-                            actor_authority: actor_id.clone(),
-                            duration_secs: *duration_secs,
-                            muted_at_ms: now.ts_ms,
-                            expires_at_ms: expires_at,
-                        };
-                        if let Err(e) = effect_system
-                            .insert_relational_fact(mute_fact.to_generic())
-                            .await
+                if let Some(app_core) = app_core {
+                    let core = app_core.read().await;
+                    let blocks = core.views().get_blocks();
+                    for block in blocks.blocks.values() {
+                        if block
+                            .residents
+                            .iter()
+                            .any(|r| r.id == actor_id_str && r.is_steward())
                         {
-                            tracing::error!("Failed to persist mute fact to journal: {:?}", e);
-                        } else {
-                            tracing::info!(
-                                "MuteUser fact persisted to journal for block {}: {}",
-                                block.id,
-                                target
-                            );
+                            // Parse context_id from String to ContextId
+                            let context_id = match block.context_id.parse::<aura_core::ContextId>()
+                            {
+                                Ok(ctx) => ctx,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        "Failed to parse context_id for block {}",
+                                        block.id
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            let mute_fact = BlockMuteFact {
+                                context_id,
+                                channel_id: None,
+                                muted_authority: muted_authority.clone(),
+                                actor_authority: actor_id.clone(),
+                                duration_secs: *duration_secs,
+                                muted_at: now.clone(),
+                                expires_at: expires_at.map(|ts_ms| PhysicalTime {
+                                    ts_ms,
+                                    uncertainty: None,
+                                }),
+                            };
+                            if let Err(e) = es_guard
+                                .insert_relational_fact(mute_fact.to_generic())
+                                .await
+                            {
+                                tracing::error!("Failed to persist mute fact to journal: {:?}", e);
+                            } else {
+                                tracing::info!(
+                                    "MuteUser fact persisted to journal for block {}: {}",
+                                    block.id,
+                                    target
+                                );
+                            }
                         }
                     }
                 }
-                drop(bridge_state);
             }
 
             tracing::info!(
@@ -2286,15 +2159,21 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
-            let is_steward = {
-                let bridge_state = state.read().await;
-                bridge_state
+            let actor_id_str = actor_id.to_string();
+
+            // Check steward status via AppCore ViewState
+            let is_steward = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                blocks
                     .blocks
                     .values()
                     .flat_map(|block| &block.residents)
-                    .find(|r| r.authority_id == actor_id)
-                    .map(|r| r.is_steward)
+                    .find(|r| r.id == actor_id_str)
+                    .map(|r| r.is_steward())
                     .unwrap_or(false)
+            } else {
+                false
             };
 
             if !is_steward {
@@ -2316,22 +2195,25 @@ pub(super) async fn execute_command(
                 uncertainty: None,
             });
 
-            // Remove mute from all blocks where actor is steward
-            let mut bridge_state = state.write().await;
-            for block in bridge_state.blocks.values_mut() {
-                // Only update blocks where the actor is a steward
-                if block
-                    .residents
-                    .iter()
-                    .any(|r| r.authority_id == actor_id && r.is_steward)
-                {
-                    block.mute_list.remove(target.as_str());
+            // Remove mute from all blocks where actor is steward via AppCore ViewState
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut blocks = core.views().get_blocks();
+                for block in blocks.blocks.values_mut() {
+                    // Only update blocks where the actor is a steward
+                    if block
+                        .residents
+                        .iter()
+                        .any(|r| r.id == actor_id_str && r.is_steward())
+                    {
+                        block.mute_list.remove(target.as_str());
+                    }
                 }
+                core.views().set_blocks(blocks);
             }
-            drop(bridge_state);
 
             // Journal integration: Write unmute facts for distributed persistence
-            if let Some(effect_system) = effect_system {
+            if let Some(ref effect_system) = effect_system {
                 // Parse target string to AuthorityId
                 let unmuted_authority = match target.parse::<aura_core::AuthorityId>() {
                     Ok(auth_id) => auth_id,
@@ -2345,39 +2227,58 @@ pub(super) async fn execute_command(
                     }
                 };
 
+                let es_guard = effect_system.read().await;
                 // Write an unmute fact for each block where actor is steward
-                let bridge_state = state.read().await;
-                for block in bridge_state.blocks.values() {
-                    if block
-                        .residents
-                        .iter()
-                        .any(|r| r.authority_id == actor_id && r.is_steward)
-                    {
-                        let unmute_fact = BlockUnmuteFact {
-                            context_id: block.context_id.clone(),
-                            channel_id: None, // Block-wide unmute
-                            unmuted_authority: unmuted_authority.clone(),
-                            actor_authority: actor_id.clone(),
-                            unmuted_at_ms: now.ts_ms,
-                        };
-
-                        // Write fact to journal for distributed sync
-                        if let Err(e) = effect_system
-                            .insert_relational_fact(unmute_fact.to_generic())
-                            .await
+                if let Some(app_core) = app_core {
+                    let core = app_core.read().await;
+                    let blocks = core.views().get_blocks();
+                    for block in blocks.blocks.values() {
+                        if block
+                            .residents
+                            .iter()
+                            .any(|r| r.id == actor_id_str && r.is_steward())
                         {
-                            tracing::error!("Failed to persist unmute fact to journal: {:?}", e);
-                            // Continue anyway - local state is already updated
-                        } else {
-                            tracing::info!(
-                                "UnmuteUser fact persisted to journal for block {}: {}",
-                                block.id,
-                                target
-                            );
+                            // Parse context_id from String to ContextId
+                            let context_id = match block.context_id.parse::<aura_core::ContextId>()
+                            {
+                                Ok(ctx) => ctx,
+                                Err(_) => {
+                                    tracing::warn!(
+                                        "Failed to parse context_id for block {}",
+                                        block.id
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            let unmute_fact = BlockUnmuteFact {
+                                context_id,
+                                channel_id: None, // Block-wide unmute
+                                unmuted_authority: unmuted_authority.clone(),
+                                actor_authority: actor_id.clone(),
+                                unmuted_at: now.clone(),
+                            };
+
+                            // Write fact to journal for distributed sync
+                            if let Err(e) = es_guard
+                                .insert_relational_fact(unmute_fact.to_generic())
+                                .await
+                            {
+                                tracing::error!(
+                                    "Failed to persist unmute fact to journal: {:?}",
+                                    e
+                                );
+                                // Continue anyway - local state is already updated
+                            } else {
+                                tracing::info!(
+                                    "UnmuteUser fact persisted to journal for block {}: {}",
+                                    block.id,
+                                    target
+                                );
+                            }
                         }
                     }
                 }
-                drop(bridge_state);
             }
 
             tracing::info!("UnmuteUser successful: {} unmuted persistently", target);
@@ -2406,15 +2307,21 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
-            let is_steward = {
-                let bridge_state = state.read().await;
-                bridge_state
+            let actor_id_str = actor_id.to_string();
+
+            // Check steward status via AppCore ViewState
+            let is_steward = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                blocks
                     .blocks
                     .values()
                     .flat_map(|block| &block.residents)
-                    .find(|r| r.authority_id == actor_id)
-                    .map(|r| r.is_steward)
+                    .find(|r| r.id == actor_id_str)
+                    .map(|r| r.is_steward())
                     .unwrap_or(false)
+            } else {
+                false
             };
 
             if !is_steward {
@@ -2439,46 +2346,54 @@ pub(super) async fn execute_command(
             let expires_at = now_ts + (7 * 24 * 60 * 60 * 1000); // 7 days
 
             let invitation_id = format!("inv-{}", now_ts);
-            let target_authority = ids::authority_id(&format!("tui:user:{}", target));
+            let _target_authority = ids::authority_id(&format!("tui:user:{}", target));
 
-            let mut bridge_state = state.write().await;
-            let current_block_id = bridge_state.current_block.clone();
-            let block_name = current_block_id
-                .as_ref()
-                .and_then(|id| bridge_state.blocks.get(id))
-                .and_then(|b| b.name.clone());
+            // Get current block info and store invitation in AppCore
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
 
-            if let Some(block_id) = current_block_id {
-                let envelope = BlockInvitationEnvelope {
-                    invitation_id: invitation_id.clone(),
-                    block_id: block_id.clone(),
-                    block_name,
-                    inviter_authority: actor_id.clone(),
-                    invitee_authority: target_authority,
-                    created_at: now_ts,
-                    expires_at,
-                };
-                bridge_state
-                    .sent_block_invitations
-                    .insert(invitation_id.clone(), envelope);
-                drop(bridge_state);
+                if let Some(block_id) = blocks.current_block_id.clone() {
+                    let block_name = blocks.blocks.get(&block_id).map(|b| b.name.clone());
 
-                tracing::info!(
-                    "InviteUser successful: {} invited to block {}",
-                    target,
-                    block_id
-                );
-                let _ = event_tx.send(AuraEvent::UserInvited {
-                    target: target.clone(),
-                    actor: actor_id.to_string(),
-                });
+                    // Store invitation in AppCore's InvitationsState
+                    let mut invitations = core.views().get_invitations();
+                    let invitation = aura_app::views::Invitation {
+                        id: invitation_id.clone(),
+                        invitation_type: aura_app::views::InvitationType::Block,
+                        status: aura_app::views::InvitationStatus::Pending,
+                        direction: aura_app::views::InvitationDirection::Sent,
+                        from_id: actor_id.to_string(),
+                        from_name: String::new(),
+                        to_id: Some(target.clone()),
+                        to_name: Some(target.clone()),
+                        created_at: now_ts,
+                        expires_at: Some(expires_at),
+                        message: None,
+                        block_id: Some(block_id.clone()),
+                        block_name,
+                    };
+                    invitations.add_invitation(invitation);
+                    core.views().set_invitations(invitations);
+
+                    tracing::info!(
+                        "InviteUser successful: {} invited to block {}",
+                        target,
+                        block_id
+                    );
+                    let _ = event_tx.send(AuraEvent::UserInvited {
+                        target: target.clone(),
+                        actor: actor_id.to_string(),
+                    });
+                } else {
+                    tracing::warn!("InviteUser failed: no current block set");
+                    let _ = event_tx.send(AuraEvent::Error {
+                        code: "NO_CURRENT_BLOCK".to_string(),
+                        message: "No current block to invite user to".to_string(),
+                    });
+                }
             } else {
-                drop(bridge_state);
-                tracing::warn!("InviteUser failed: no current block set");
-                let _ = event_tx.send(AuraEvent::Error {
-                    code: "NO_CURRENT_BLOCK".to_string(),
-                    message: "No current block to invite user to".to_string(),
-                });
+                return Err("No AppCore available".to_string());
             }
 
             Ok(())
@@ -2502,17 +2417,21 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
+            let actor_id_str = actor_id.to_string();
 
-            // Check if actor is a steward
-            let is_actor_steward = {
-                let bridge_state = state.read().await;
-                bridge_state
+            // Check if actor is a steward via AppCore ViewState
+            let is_actor_steward = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                blocks
                     .blocks
                     .values()
                     .flat_map(|block| &block.residents)
-                    .find(|r| r.authority_id == actor_id)
-                    .map(|r| r.is_steward)
+                    .find(|r| r.id == actor_id_str)
+                    .map(|r| r.is_steward())
                     .unwrap_or(false)
+            } else {
+                false
             };
 
             if !is_actor_steward {
@@ -2528,21 +2447,19 @@ pub(super) async fn execute_command(
                 return Ok(());
             }
 
-            // Find target and update steward flag
+            // Find target and update steward role via AppCore ViewState
             let mut block_id_found: Option<String> = None;
-            {
-                let mut bridge_state = state.write().await;
-                for (block_id, block) in &mut bridge_state.blocks {
-                    if let Some(resident) = block
-                        .residents
-                        .iter_mut()
-                        .find(|r| r.authority_id.to_string() == *target)
-                    {
-                        resident.is_steward = true;
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut blocks = core.views().get_blocks();
+                for (block_id, block) in blocks.blocks.iter_mut() {
+                    if let Some(resident) = block.residents.iter_mut().find(|r| r.id == *target) {
+                        resident.role = aura_app::views::ResidentRole::Admin;
                         block_id_found = Some(block_id.clone());
                         break;
                     }
                 }
+                core.views().set_blocks(blocks);
             }
 
             if let Some(block_id) = block_id_found {
@@ -2599,10 +2516,11 @@ pub(super) async fn execute_command(
                                     stored_at,
                                     None, // No expiration for steward tokens
                                 );
-                                if let Some(effect_system) = &effect_system {
+                                if let Some(ref effect_system) = effect_system {
+                                    let es_guard = effect_system.read().await;
                                     if let Err(e) = bridge_state
                                         .capability_token_store
-                                        .persist(effect_system.as_ref())
+                                        .persist(&*es_guard)
                                         .await
                                     {
                                         tracing::warn!(
@@ -2666,17 +2584,21 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
+            let actor_id_str = actor_id.to_string();
 
-            // Check if actor is a steward
-            let is_actor_steward = {
-                let bridge_state = state.read().await;
-                bridge_state
+            // Check if actor is a steward via AppCore ViewState
+            let is_actor_steward = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                blocks
                     .blocks
                     .values()
                     .flat_map(|block| &block.residents)
-                    .find(|r| r.authority_id == actor_id)
-                    .map(|r| r.is_steward)
+                    .find(|r| r.id == actor_id_str)
+                    .map(|r| r.is_steward())
                     .unwrap_or(false)
+            } else {
+                false
             };
 
             if !is_actor_steward {
@@ -2692,21 +2614,19 @@ pub(super) async fn execute_command(
                 return Ok(());
             }
 
-            // Find target and update steward flag
+            // Find target and update steward flag via AppCore ViewState
             let mut block_id_found: Option<String> = None;
-            {
-                let mut bridge_state = state.write().await;
-                for (block_id, block) in &mut bridge_state.blocks {
-                    if let Some(resident) = block
-                        .residents
-                        .iter_mut()
-                        .find(|r| r.authority_id.to_string() == *target)
-                    {
-                        resident.is_steward = false;
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut blocks = core.views().get_blocks();
+                for (block_id, block) in blocks.blocks.iter_mut() {
+                    if let Some(resident) = block.residents.iter_mut().find(|r| r.id == *target) {
+                        resident.role = aura_app::views::ResidentRole::Resident;
                         block_id_found = Some(block_id.clone());
                         break;
                     }
                 }
+                core.views().set_blocks(blocks);
             }
 
             if let Some(block_id) = block_id_found {
@@ -2761,10 +2681,11 @@ pub(super) async fn execute_command(
                                     stored_at,
                                     None,
                                 );
-                                if let Some(effect_system) = &effect_system {
+                                if let Some(ref effect_system) = effect_system {
+                                    let es_guard = effect_system.read().await;
                                     if let Err(e) = bridge_state
                                         .capability_token_store
-                                        .persist(effect_system.as_ref())
+                                        .persist(&*es_guard)
                                         .await
                                     {
                                         tracing::warn!(
@@ -2837,21 +2758,25 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
+            let actor_id_str = actor_id.to_string();
 
-            // Check if actor is a steward in the channel/block
-            let is_actor_steward = {
-                let bridge_state = state.read().await;
-                bridge_state
+            // Check if actor is a steward in the channel/block via AppCore ViewState
+            let is_actor_steward = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                blocks
                     .blocks
                     .get(channel.as_str())
                     .and_then(|block| {
                         block
                             .residents
                             .iter()
-                            .find(|r| r.authority_id == actor_id)
-                            .map(|r| r.is_steward)
+                            .find(|r| r.id == actor_id_str)
+                            .map(|r| r.is_steward())
                     })
                     .unwrap_or(false)
+            } else {
+                false
             };
 
             if !is_actor_steward {
@@ -2868,11 +2793,13 @@ pub(super) async fn execute_command(
                 return Ok(());
             }
 
-            // Update topic
-            {
-                let mut bridge_state = state.write().await;
-                if let Some(block) = bridge_state.blocks.get_mut(channel.as_str()) {
+            // Update topic via AppCore ViewState
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut blocks = core.views().get_blocks();
+                if let Some(block) = blocks.blocks.get_mut(channel.as_str()) {
                     block.topic = Some(text.clone());
+                    core.views().set_blocks(blocks);
                     tracing::info!(
                         "SetTopic successful: channel {} topic set to '{}'",
                         channel,
@@ -2893,10 +2820,14 @@ pub(super) async fn execute_command(
             }
 
             // Persist topic to storage via effect system
-            if let Some(effects) = &effect_system {
+            if let Some(ref effects) = effect_system {
                 use aura_core::effects::StorageEffects;
+                let effects_guard = effects.read().await;
                 let topic_key = format!("tui/blocks/{}/topic", channel);
-                if let Err(e) = effects.store(&topic_key, text.as_bytes().to_vec()).await {
+                if let Err(e) = effects_guard
+                    .store(&topic_key, text.as_bytes().to_vec())
+                    .await
+                {
                     tracing::warn!("Failed to persist topic to storage: {:?}", e);
                 }
             }
@@ -2921,17 +2852,17 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
+            let actor_id_str = actor_id.to_string();
 
-            // Find which channel contains this message and check steward permission
+            // Find which channel contains this message and check steward permission via AppCore
             let mut channel_found: Option<String> = None;
             let mut is_steward = false;
-            {
-                let bridge_state = state.read().await;
-                for (block_id, block) in &bridge_state.blocks {
-                    if let Some(resident) =
-                        block.residents.iter().find(|r| r.authority_id == actor_id)
-                    {
-                        is_steward = resident.is_steward;
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                for (block_id, block) in &blocks.blocks {
+                    if let Some(resident) = block.residents.iter().find(|r| r.id == actor_id_str) {
+                        is_steward = resident.is_steward();
                         channel_found = Some(block_id.clone());
                         break;
                     }
@@ -2952,12 +2883,14 @@ pub(super) async fn execute_command(
             }
 
             if let Some(channel) = channel_found {
-                // Add message to pinned list
-                {
-                    let mut bridge_state = state.write().await;
-                    if let Some(block) = bridge_state.blocks.get_mut(channel.as_str()) {
+                // Add message to pinned list via AppCore ViewState
+                if let Some(app_core) = app_core {
+                    let core = app_core.read().await;
+                    let mut blocks = core.views().get_blocks();
+                    if let Some(block) = blocks.blocks.get_mut(channel.as_str()) {
                         if !block.pinned_messages.contains(&message_id) {
                             block.pinned_messages.push(message_id.clone());
+                            core.views().set_blocks(blocks);
                             tracing::info!(
                                 "PinMessage successful: message {} pinned in channel {}",
                                 message_id,
@@ -2975,15 +2908,22 @@ pub(super) async fn execute_command(
                 }
 
                 // Persist pinned messages to storage via effect system
-                if let Some(effects) = &effect_system {
-                    use aura_core::effects::StorageEffects;
-                    let bridge_state = state.read().await;
-                    if let Some(block) = bridge_state.blocks.get(channel.as_str()) {
-                        let pins_key = format!("tui/blocks/{}/pinned", channel);
-                        let pins_data =
-                            serde_json::to_vec(&block.pinned_messages).unwrap_or_default();
-                        if let Err(e) = effects.store(&pins_key, pins_data).await {
-                            tracing::warn!("Failed to persist pinned messages to storage: {:?}", e);
+                if let Some(ref effects) = effect_system {
+                    if let Some(app_core) = app_core {
+                        use aura_core::effects::StorageEffects;
+                        let effects_guard = effects.read().await;
+                        let core = app_core.read().await;
+                        let blocks = core.views().get_blocks();
+                        if let Some(block) = blocks.blocks.get(channel.as_str()) {
+                            let pins_key = format!("tui/blocks/{}/pinned", channel);
+                            let pins_data =
+                                serde_json::to_vec(&block.pinned_messages).unwrap_or_default();
+                            if let Err(e) = effects_guard.store(&pins_key, pins_data).await {
+                                tracing::warn!(
+                                    "Failed to persist pinned messages to storage: {:?}",
+                                    e
+                                );
+                            }
                         }
                     }
                 }
@@ -3015,18 +2955,20 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
+            let actor_id_str = actor_id.to_string();
 
-            // Find which channel contains this message and check steward permission
+            // Find which channel contains this message and check steward permission via AppCore
             let mut channel_found: Option<String> = None;
             let mut is_steward = false;
-            {
-                let bridge_state = state.read().await;
-                for (block_id, block) in &bridge_state.blocks {
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                for (block_id, block) in &blocks.blocks {
                     if block.pinned_messages.contains(&message_id) {
                         if let Some(resident) =
-                            block.residents.iter().find(|r| r.authority_id == actor_id)
+                            block.residents.iter().find(|r| r.id == actor_id_str)
                         {
-                            is_steward = resident.is_steward;
+                            is_steward = resident.is_steward();
                             channel_found = Some(block_id.clone());
                             break;
                         }
@@ -3048,14 +2990,16 @@ pub(super) async fn execute_command(
             }
 
             if let Some(channel) = channel_found {
-                // Remove message from pinned list
-                {
-                    let mut bridge_state = state.write().await;
-                    if let Some(block) = bridge_state.blocks.get_mut(channel.as_str()) {
+                // Remove message from pinned list via AppCore ViewState
+                if let Some(app_core) = app_core {
+                    let core = app_core.read().await;
+                    let mut blocks = core.views().get_blocks();
+                    if let Some(block) = blocks.blocks.get_mut(channel.as_str()) {
                         if let Some(idx) =
                             block.pinned_messages.iter().position(|id| id == message_id)
                         {
                             block.pinned_messages.remove(idx);
+                            core.views().set_blocks(blocks);
                             tracing::info!(
                                 "UnpinMessage successful: message {} unpinned from channel {}",
                                 message_id,
@@ -3076,15 +3020,22 @@ pub(super) async fn execute_command(
                 }
 
                 // Persist pinned messages to storage via effect system
-                if let Some(effects) = &effect_system {
-                    use aura_core::effects::StorageEffects;
-                    let bridge_state = state.read().await;
-                    if let Some(block) = bridge_state.blocks.get(channel.as_str()) {
-                        let pins_key = format!("tui/blocks/{}/pinned", channel);
-                        let pins_data =
-                            serde_json::to_vec(&block.pinned_messages).unwrap_or_default();
-                        if let Err(e) = effects.store(&pins_key, pins_data).await {
-                            tracing::warn!("Failed to persist pinned messages to storage: {:?}", e);
+                if let Some(ref effects) = effect_system {
+                    if let Some(app_core) = app_core {
+                        use aura_core::effects::StorageEffects;
+                        let effects_guard = effects.read().await;
+                        let core = app_core.read().await;
+                        let blocks = core.views().get_blocks();
+                        if let Some(block) = blocks.blocks.get(channel.as_str()) {
+                            let pins_key = format!("tui/blocks/{}/pinned", channel);
+                            let pins_data =
+                                serde_json::to_vec(&block.pinned_messages).unwrap_or_default();
+                            if let Err(e) = effects_guard.store(&pins_key, pins_data).await {
+                                tracing::warn!(
+                                    "Failed to persist pinned messages to storage: {:?}",
+                                    e
+                                );
+                            }
                         }
                     }
                 }
@@ -3116,21 +3067,25 @@ pub(super) async fn execute_command(
             }
 
             let actor_id = actor.unwrap();
+            let actor_id_str = actor_id.to_string();
 
-            // Check if actor is a steward in the channel/block
-            let is_actor_steward = {
-                let bridge_state = state.read().await;
-                bridge_state
+            // Check if actor is a steward in the channel/block via AppCore ViewState
+            let is_actor_steward = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                blocks
                     .blocks
                     .get(channel.as_str())
                     .and_then(|block| {
                         block
                             .residents
                             .iter()
-                            .find(|r| r.authority_id == actor_id)
-                            .map(|r| r.is_steward)
+                            .find(|r| r.id == actor_id_str)
+                            .map(|r| r.is_steward())
                     })
                     .unwrap_or(false)
+            } else {
+                false
             };
 
             if !is_actor_steward {
@@ -3147,11 +3102,13 @@ pub(super) async fn execute_command(
                 return Ok(());
             }
 
-            // Update mode flags
-            {
-                let mut bridge_state = state.write().await;
-                if let Some(block) = bridge_state.blocks.get_mut(channel.as_str()) {
+            // Update mode flags via AppCore ViewState
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut blocks = core.views().get_blocks();
+                if let Some(block) = blocks.blocks.get_mut(channel.as_str()) {
                     block.mode_flags = Some(flags.clone());
+                    core.views().set_blocks(blocks);
                     tracing::info!(
                         "SetChannelMode successful: channel {} mode set to '{}'",
                         channel,
@@ -3172,10 +3129,14 @@ pub(super) async fn execute_command(
             }
 
             // Persist channel mode to storage via effect system
-            if let Some(effects) = &effect_system {
+            if let Some(ref effects) = effect_system {
                 use aura_core::effects::StorageEffects;
+                let effects_guard = effects.read().await;
                 let mode_key = format!("tui/blocks/{}/mode", channel);
-                if let Err(e) = effects.store(&mode_key, flags.as_bytes().to_vec()).await {
+                if let Err(e) = effects_guard
+                    .store(&mode_key, flags.as_bytes().to_vec())
+                    .await
+                {
                     tracing::warn!("Failed to persist channel mode to storage: {:?}", e);
                 }
             }
@@ -3248,7 +3209,8 @@ pub(super) async fn execute_command(
             // HYBRID IMPLEMENTATION: Real TreeEffects + FROST threshold signing
             // Uses real tree operations with real FROST 1-of-1 ceremony for bootstrap
 
-            let authority_id = if let Some(ref effect_sys) = effect_system {
+            let authority_id = if let Some(ref effect_system_arc) = effect_system {
+                let effect_sys = effect_system_arc.read().await;
                 tracing::info!("Using TreeEffects for account creation");
 
                 // 1. Generate FROST 1-of-1 keys for single-device bootstrap
@@ -3318,7 +3280,7 @@ pub(super) async fn execute_command(
                 // 7. Create REAL FROST signature using the stored keys
                 let agg_sig = frost_sign_tree_op_with_keys(
                     &tree_op,
-                    effect_sys.as_ref(),
+                    &*effect_sys,
                     &frost_keys.key_packages[0],
                     &frost_keys.public_key_package,
                 )
@@ -3424,12 +3386,14 @@ pub(super) async fn execute_command(
                 .map_err(|e| e.to_string())?;
             let created_at = now.ts_ms;
 
-            let mut bridge_state = state.write().await;
-
             // Require account authority - user must be authenticated
-            let creator_authority = bridge_state.account_authority.clone().ok_or_else(|| {
-                "Cannot create block: no account authority. Create an account first.".to_string()
-            })?;
+            let creator_authority = {
+                let bridge_state = state.read().await;
+                bridge_state.account_authority.clone().ok_or_else(|| {
+                    "Cannot create block: no account authority. Create an account first."
+                        .to_string()
+                })?
+            };
 
             // Generate unique block ID
             let block_id = ids::uuid(&format!(
@@ -3439,34 +3403,39 @@ pub(super) async fn execute_command(
             ))
             .to_string();
 
-            // Check if this is the first block (will be primary)
-            let is_first_block = bridge_state.blocks.is_empty();
+            // Generate context ID for the block
+            let context_id = ids::uuid(&format!("context:block:{}", block_id)).to_string();
 
-            // Create block state with creator as steward
-            let mut block_state = BlockState::new(
-                block_id.clone(),
-                name.clone(),
-                creator_authority,
-                created_at,
-            );
+            // Check if this is the first block and create via AppCore ViewState
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut blocks = core.views().get_blocks();
+                let is_first_block = blocks.is_empty();
 
-            // Only the first block is primary by default
-            block_state.is_primary = is_first_block;
+                // Create block state with creator as steward using AppCore types
+                let mut block_state = aura_app::views::BlockState::new(
+                    block_id.clone(),
+                    name.clone(),
+                    creator_authority.to_string(),
+                    created_at,
+                    context_id,
+                );
 
-            // Store in blocks map
-            bridge_state.blocks.insert(block_id.clone(), block_state);
+                // Only the first block is primary by default
+                block_state.is_primary = is_first_block;
 
-            // Set as current block
-            bridge_state.current_block = Some(block_id.clone());
+                // Store in blocks map and select as current
+                blocks.add_block(block_state);
+                blocks.select_block(Some(block_id.clone()));
+                core.views().set_blocks(blocks);
 
-            tracing::info!(
-                "Block created: id={}, name={:?}, is_primary={}, residents=1, storage_budget=10MB",
-                block_id,
-                name,
-                is_first_block
-            );
-
-            drop(bridge_state);
+                tracing::info!(
+                    "Block created: id={}, name={:?}, is_primary={}, residents=1, storage_budget=10MB",
+                    block_id,
+                    name,
+                    is_first_block
+                );
+            }
 
             // Emit event for reactive view updates
             let _ = event_tx.send(AuraEvent::BlockCreated {
@@ -3487,90 +3456,133 @@ pub(super) async fn execute_command(
                 .map_err(|e| e.to_string())?;
             let joined_at = now.ts_ms;
 
-            let mut bridge_state = state.write().await;
-
             // Require account authority
-            let user_authority = bridge_state.account_authority.clone().ok_or_else(|| {
-                "Cannot accept block invitation: no account authority".to_string()
-            })?;
+            let user_authority = {
+                let bridge_state = state.read().await;
+                bridge_state.account_authority.clone().ok_or_else(|| {
+                    "Cannot accept block invitation: no account authority".to_string()
+                })?
+            };
 
-            // Find the first pending block invitation for this user
-            let invitation = bridge_state
-                .pending_block_invitations
-                .values()
-                .find(|inv| inv.invitee_authority == user_authority && inv.expires_at > joined_at)
-                .cloned();
+            // Find and process pending block invitation from AppCore's InvitationsState
+            let block_id = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut invitations = core.views().get_invitations();
 
-            let envelope =
-                invitation.ok_or_else(|| "No pending block invitation found".to_string())?;
+                // Find the first pending block invitation for this user
+                let pending_invitation = invitations
+                    .pending
+                    .iter()
+                    .find(|inv| {
+                        inv.invitation_type == aura_app::views::InvitationType::Block
+                            && inv.status == aura_app::views::InvitationStatus::Pending
+                            && inv.direction == aura_app::views::InvitationDirection::Received
+                            && inv.expires_at.map_or(true, |exp| exp > joined_at)
+                    })
+                    .cloned();
 
-            // Remove from pending invitations
-            bridge_state
-                .pending_block_invitations
-                .remove(&envelope.invitation_id);
+                let invitation = pending_invitation
+                    .ok_or_else(|| "No pending block invitation found".to_string())?;
 
-            // Check if block already exists (we might already have it from being steward)
-            if !bridge_state.blocks.contains_key(&envelope.block_id) {
-                // Create a new block state for the joined block
-                // The user joins as a regular resident (not steward)
-                let block_state = BlockState {
-                    id: envelope.block_id.clone(),
-                    name: envelope.block_name.clone(),
-                    created_at: envelope.created_at,
-                    topic: None,
-                    mode_flags: None,
-                    pinned_messages: Vec::new(),
-                    ban_list: HashMap::new(),
-                    mute_list: HashMap::new(),
-                    kick_log: Vec::new(),
-                    context_id: aura_core::ContextId::new_from_entropy(hash(
-                        envelope.block_id.as_bytes(),
-                    )),
-                    residents: vec![
-                        ResidentState {
-                            authority_id: envelope.inviter_authority.clone(),
-                            name: "Steward".to_string(), // The inviter is the steward
-                            is_steward: true,
-                            joined_at: envelope.created_at,
-                            storage_allocated: BlockState::RESIDENT_ALLOCATION,
+                let block_id = invitation
+                    .block_id
+                    .clone()
+                    .ok_or_else(|| "Block invitation missing block_id".to_string())?;
+                let block_name = invitation.block_name.clone().unwrap_or_default();
+                let inviter_id = invitation.from_id.clone();
+                let invitation_id = invitation.id.clone();
+                let created_at = invitation.created_at;
+
+                // Mark invitation as accepted
+                invitations.accept_invitation(&invitation_id);
+                core.views().set_invitations(invitations);
+
+                // Update blocks state
+                let mut blocks = core.views().get_blocks();
+
+                // Check if block already exists
+                if !blocks.has_block(&block_id) {
+                    // Create context_id as string (uuid from block_id)
+                    let context_id = ids::uuid(&format!("context:block:{}", block_id)).to_string();
+
+                    // Create inviter resident (the steward/owner)
+                    let inviter_resident = aura_app::views::Resident {
+                        id: inviter_id,
+                        name: "Steward".to_string(),
+                        role: aura_app::views::ResidentRole::Owner,
+                        is_online: false,
+                        joined_at: created_at,
+                        last_seen: Some(created_at),
+                        storage_allocated: aura_app::views::BlockState::RESIDENT_ALLOCATION,
+                    };
+
+                    // Create user resident (joining as regular resident)
+                    let user_resident = aura_app::views::Resident {
+                        id: user_authority.to_string(),
+                        name: "You".to_string(),
+                        role: aura_app::views::ResidentRole::Resident,
+                        is_online: true,
+                        joined_at,
+                        last_seen: Some(joined_at),
+                        storage_allocated: aura_app::views::BlockState::RESIDENT_ALLOCATION,
+                    };
+
+                    // Create block state using AppCore's type
+                    let mut block_state = aura_app::views::BlockState {
+                        id: block_id.clone(),
+                        name: block_name,
+                        residents: vec![inviter_resident, user_resident],
+                        my_role: aura_app::views::ResidentRole::Resident,
+                        storage: aura_app::views::StorageBudget {
+                            total_bytes: aura_app::views::BlockState::DEFAULT_STORAGE_BUDGET,
+                            used_bytes: 0,
+                            reserved_bytes: aura_app::views::BlockState::RESIDENT_ALLOCATION * 2,
                         },
-                        ResidentState {
-                            authority_id: user_authority.clone(),
+                        online_count: 1,
+                        resident_count: 2,
+                        is_primary: false, // Joined blocks are not primary by default
+                        topic: None,
+                        pinned_messages: Vec::new(),
+                        mode_flags: None,
+                        ban_list: HashMap::new(),
+                        mute_list: HashMap::new(),
+                        kick_log: Vec::new(),
+                        created_at,
+                        context_id,
+                    };
+
+                    // Set as current if no block selected
+                    let should_select = blocks.current_block_id.is_none();
+                    block_state.is_primary = should_select;
+
+                    blocks.add_block(block_state);
+                    if should_select {
+                        blocks.select_block(Some(block_id.clone()));
+                    }
+                } else {
+                    // Block exists, add user as resident
+                    if let Some(block) = blocks.block_mut(&block_id) {
+                        let user_resident = aura_app::views::Resident {
+                            id: user_authority.to_string(),
                             name: "You".to_string(),
-                            is_steward: false, // Joining as resident, not steward
+                            role: aura_app::views::ResidentRole::Resident,
+                            is_online: true,
                             joined_at,
-                            storage_allocated: BlockState::RESIDENT_ALLOCATION,
-                        },
-                    ],
-                    storage_budget: BlockState::DEFAULT_STORAGE_BUDGET,
-                    storage_used: BlockState::RESIDENT_ALLOCATION * 2, // Two residents
-                    is_primary: false, // Joined blocks are not primary by default
-                };
-
-                bridge_state
-                    .blocks
-                    .insert(envelope.block_id.clone(), block_state);
-            } else {
-                // Block exists, add user as resident
-                if let Some(block) = bridge_state.blocks.get_mut(&envelope.block_id) {
-                    let _ =
-                        block.add_resident(user_authority.clone(), "You".to_string(), joined_at);
+                            last_seen: Some(joined_at),
+                            storage_allocated: aura_app::views::BlockState::RESIDENT_ALLOCATION,
+                        };
+                        block.add_resident(user_resident);
+                        block.my_role = aura_app::views::ResidentRole::Resident;
+                    }
                 }
-            }
 
-            // Set as current block if no current block
-            if bridge_state.current_block.is_none() {
-                bridge_state.current_block = Some(envelope.block_id.clone());
-            }
+                core.views().set_blocks(blocks);
+                block_id
+            } else {
+                return Err("No AppCore available".to_string());
+            };
 
-            tracing::info!(
-                "Block joined: id={}, name={:?}",
-                envelope.block_id,
-                envelope.block_name
-            );
-
-            let block_id = envelope.block_id.clone();
-            drop(bridge_state);
+            tracing::info!("Block joined: id={}", block_id);
 
             // Emit event for reactive view updates
             let _ = event_tx.send(AuraEvent::BlockJoined { block_id });
@@ -3586,10 +3598,10 @@ pub(super) async fn execute_command(
 
             // Dispatch intent to AppCore for state management
             if let Some(core) = app_core {
-                // Get current block ID from bridge state
+                // Get current block ID from AppCore ViewState
                 let block_id_str = {
-                    let bridge_state = state.read().await;
-                    bridge_state.current_block.clone()
+                    let core_read = core.read().await;
+                    core_read.views().get_blocks().current_block_id.clone()
                 };
                 if let Some(block_id_str) = block_id_str {
                     let block_context_id =
@@ -3622,7 +3634,7 @@ pub(super) async fn execute_command(
             let created_at = now.ts_ms;
             let expires_at = created_at + (7 * 24 * 60 * 60 * 1000); // 7 days
 
-            let mut bridge_state = state.write().await;
+            let bridge_state = state.read().await;
 
             // Require account authority
             let inviter_authority = bridge_state
@@ -3630,56 +3642,60 @@ pub(super) async fn execute_command(
                 .clone()
                 .ok_or_else(|| "Cannot send block invitation: no account authority".to_string())?;
 
-            // Require a current block
-            let block_id = bridge_state.current_block.clone().ok_or_else(|| {
-                "Cannot send block invitation: no current block. Create a block first.".to_string()
-            })?;
+            // Get current block ID and block info from AppCore ViewState
+            let (block_id, block_name, is_steward) = if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let blocks = core.views().get_blocks();
+                let block_id = blocks.current_block_id.clone().ok_or_else(|| {
+                    "Cannot send block invitation: no current block. Create a block first."
+                        .to_string()
+                })?;
+                let block = blocks
+                    .block(&block_id)
+                    .ok_or_else(|| "Block not found in state".to_string())?;
+                let block_name = block.name.clone();
+                let inviter_id_str = inviter_authority.to_string();
+                let is_steward = block
+                    .residents
+                    .iter()
+                    .any(|r| r.id == inviter_id_str && r.is_steward());
+                (block_id, block_name, is_steward)
+            } else {
+                return Err("Cannot send block invitation: no AppCore available".to_string());
+            };
 
-            // Get block info
-            let block = bridge_state
-                .blocks
-                .get(&block_id)
-                .ok_or_else(|| "Block not found in state".to_string())?;
-            let block_name = block.name.clone();
-
-            // Verify user is a steward of the block (can send invitations)
-            let is_steward = block
-                .residents
-                .iter()
-                .any(|r| r.authority_id == inviter_authority && r.is_steward);
             if !is_steward {
                 return Err(
                     "Cannot send block invitation: you are not a steward of this block".to_string(),
                 );
             }
 
-            // Parse invitee authority from contact_id
-            // For demo purposes, create a synthetic authority from the contact_id
-            let invitee_authority =
-                aura_core::AuthorityId::from_str(&contact_id).unwrap_or_else(|_| {
-                    // Create synthetic authority from contact_id
-                    aura_core::AuthorityId::from_uuid(ids::uuid(&format!("contact:{}", contact_id)))
-                });
-
             // Generate unique invitation ID
             let invitation_id =
                 ids::uuid(&format!("block-invitation:{}:{}", block_id, created_at)).to_string();
 
-            // Create block invitation envelope
-            let envelope = BlockInvitationEnvelope {
-                invitation_id: invitation_id.clone(),
-                block_id: block_id.clone(),
-                block_name: block_name.clone(),
-                inviter_authority,
-                invitee_authority,
-                created_at,
-                expires_at,
-            };
-
-            // Store in sent invitations
-            bridge_state
-                .sent_block_invitations
-                .insert(invitation_id.clone(), envelope);
+            // Store invitation in AppCore's InvitationsState
+            if let Some(app_core) = app_core {
+                let core = app_core.read().await;
+                let mut invitations = core.views().get_invitations();
+                let invitation = aura_app::views::Invitation {
+                    id: invitation_id.clone(),
+                    invitation_type: aura_app::views::InvitationType::Block,
+                    status: aura_app::views::InvitationStatus::Pending,
+                    direction: aura_app::views::InvitationDirection::Sent,
+                    from_id: inviter_authority.to_string(),
+                    from_name: String::new(),
+                    to_id: Some(contact_id.clone()),
+                    to_name: Some(contact_id.clone()),
+                    created_at,
+                    expires_at: Some(expires_at),
+                    message: None,
+                    block_id: Some(block_id.clone()),
+                    block_name: Some(block_name.clone()),
+                };
+                invitations.add_invitation(invitation);
+                core.views().set_invitations(invitations);
+            }
 
             tracing::info!(
                 "Block invitation sent: id={}, block={}, recipient={}",
@@ -3712,6 +3728,12 @@ pub(super) async fn execute_command(
             // Sync with all known peers. If no peers are registered, fall back to demo peer.
             // Use AddPeer command to register peers for sync.
 
+            // Mark sync as in progress
+            {
+                let mut bridge_state = state.write().await;
+                bridge_state.sync_in_progress = true;
+            }
+
             // Get known peers from state
             let bridge_state = state.read().await;
             let known_peers = bridge_state.known_peers.clone();
@@ -3740,7 +3762,8 @@ pub(super) async fn execute_command(
 
                 // Call sync_with_peer if effect_system is available
                 if let Some(ref effect_system) = effect_system {
-                    match effect_system.sync_with_peer(peer_uuid).await {
+                    let es_guard = effect_system.read().await;
+                    match es_guard.sync_with_peer(peer_uuid).await {
                         Ok(metrics) => {
                             tracing::info!(
                                 "Sync completed with peer {}: {} applied, {} duplicates, {} rounds",
@@ -3807,6 +3830,18 @@ pub(super) async fn execute_command(
                 }
             }
 
+            // Update sync status
+            {
+                let now = time_effects
+                    .physical_time()
+                    .await
+                    .map(|t| t.ts_ms)
+                    .unwrap_or(0);
+                let mut bridge_state = state.write().await;
+                bridge_state.sync_in_progress = false;
+                bridge_state.last_sync_time = Some(now);
+            }
+
             Ok(())
         }
 
@@ -3815,6 +3850,12 @@ pub(super) async fn execute_command(
             //
             // This command requests full state synchronization from a specific peer.
             // Uses sync_with_peer which handles anti-entropy protocol internally.
+
+            // Mark sync as in progress
+            {
+                let mut bridge_state = state.write().await;
+                bridge_state.sync_in_progress = true;
+            }
 
             let peer_id_owned = peer_id.clone();
             let _ = event_tx.send(AuraEvent::SyncStarted {
@@ -3829,8 +3870,9 @@ pub(super) async fn execute_command(
 
             let mut changes_applied = 0u32;
 
-            if let Some(effect_system) = effect_system {
-                match effect_system.sync_with_peer(peer_uuid).await {
+            if let Some(ref effect_system) = effect_system {
+                let es_guard = effect_system.read().await;
+                match es_guard.sync_with_peer(peer_uuid).await {
                     Ok(metrics) => {
                         changes_applied = metrics.applied as u32;
                         tracing::info!(
@@ -3877,11 +3919,26 @@ pub(super) async fn execute_command(
                                 );
                             }
                             Err(e) => {
-                                tracing::warn!("Failed to reload journal after RequestState: {}", e);
+                                tracing::warn!(
+                                    "Failed to reload journal after RequestState: {}",
+                                    e
+                                );
                             }
                         }
                     }
                 }
+            }
+
+            // Update sync status
+            {
+                let now = time_effects
+                    .physical_time()
+                    .await
+                    .map(|t| t.ts_ms)
+                    .unwrap_or(0);
+                let mut bridge_state = state.write().await;
+                bridge_state.sync_in_progress = false;
+                bridge_state.last_sync_time = Some(now);
             }
 
             Ok(())
@@ -3975,7 +4032,8 @@ pub(super) async fn execute_command(
             let mut discovered_count = 0u32;
             let mut new_peers_added = 0u32;
 
-            if let Some(ref effects) = effect_system {
+            if let Some(ref effects_arc) = effect_system {
+                let effects = effects_arc.read().await;
                 // Query the sync effect system for connected peers
                 match effects.get_connected_peers().await {
                     Ok(peers) => {
@@ -4045,16 +4103,7 @@ pub(super) async fn execute_command(
                 depth
             );
 
-            // Update in-memory state
-            let mut state = state.write().await;
-            state.traversal_position = Some(TraversalPosition {
-                neighborhood_id: neighborhood_id.clone(),
-                block_id: block_id.clone(),
-                depth: depth.clone(),
-            });
-            drop(state);
-
-            // Emit position updated event
+            // Emit position updated event (UI subscribes to this)
             let _ = event_tx.send(AuraEvent::PositionUpdated {
                 neighborhood_id: neighborhood_id.clone(),
                 block_id: block_id.clone(),
@@ -4062,8 +4111,9 @@ pub(super) async fn execute_command(
             });
 
             // Persist traversal position to storage via effect system
-            if let Some(effects) = &effect_system {
+            if let Some(ref effects) = effect_system {
                 use aura_core::effects::StorageEffects;
+                let effects_guard = effects.read().await;
                 let pos_key = format!("tui/traversal/{}", neighborhood_id);
                 #[derive(serde::Serialize)]
                 struct StoredPosition {
@@ -4077,7 +4127,7 @@ pub(super) async fn execute_command(
                     depth: depth.clone(),
                 };
                 let pos_data = serde_json::to_vec(&stored).unwrap_or_default();
-                if let Err(e) = effects.store(&pos_key, pos_data).await {
+                if let Err(e) = effects_guard.store(&pos_key, pos_data).await {
                     tracing::warn!("Failed to persist traversal position to storage: {:?}", e);
                 }
             }
@@ -4121,9 +4171,10 @@ pub(super) async fn execute_command(
                 }
             }
 
-            // Get effect system reference
-            let effect_sys =
+            // Get effect system reference and acquire read lock
+            let effect_sys_arc =
                 effect_system.ok_or("Effect system not available for UpdateThreshold")?;
+            let effect_sys = effect_sys_arc.read().await;
 
             // 1. Create new policy with updated threshold
             let new_policy = Policy::Threshold {
@@ -4167,7 +4218,7 @@ pub(super) async fn execute_command(
             // NOTE: Multi-device mode uses the OLD threshold to authorize the change
             // (i.e., if changing from 2-of-3 to 3-of-5, need 2 signers from old policy)
             // For single-device demo, we use 1-of-1 FROST signing
-            let agg_sig = frost_sign_tree_op(&tree_op, effect_sys.as_ref()).await?;
+            let agg_sig = frost_sign_tree_op(&tree_op, &*effect_sys).await?;
 
             let attested_op = AttestedOp {
                 op: tree_op,
@@ -4235,7 +4286,8 @@ pub(super) async fn execute_command(
             // HYBRID IMPLEMENTATION: Real TreeEffects + FROST threshold signing
             // Uses real tree operations with stored FROST keys for authorization
 
-            let device_id = if let Some(ref effect_sys) = effect_system {
+            let device_id = if let Some(ref effect_system_arc) = effect_system {
+                let effect_sys = effect_system_arc.read().await;
                 tracing::info!("Using TreeEffects for device addition");
 
                 // 1. Retrieve stored FROST keys for signing authorization
@@ -4310,7 +4362,7 @@ pub(super) async fn execute_command(
                 // FUTURE: For multi-device, coordinate signing ceremony with other devices
                 let agg_sig = frost_sign_tree_op_with_keys(
                     &tree_op,
-                    effect_sys.as_ref(),
+                    &*effect_sys,
                     &key_package,
                     &public_key_package,
                 )
@@ -4379,7 +4431,8 @@ pub(super) async fn execute_command(
             // HYBRID IMPLEMENTATION: Real TreeEffects + simplified attestation
             // Uses real tree operations but simplified signing for demo/testing
 
-            if let Some(ref effect_sys) = effect_system {
+            if let Some(ref effect_system_arc) = effect_system {
+                let effect_sys = effect_system_arc.read().await;
                 tracing::info!("Using TreeEffects for device removal");
 
                 // 1. Look up leaf ID from device ID in tree state
@@ -4425,7 +4478,7 @@ pub(super) async fn execute_command(
                 // Uses genuine FROST threshold cryptography
                 // FUTURE: Run real FROST threshold ceremony with remaining devices
                 // IMPORTANT: Device being removed CANNOT participate in signing
-                let agg_sig = frost_sign_tree_op(&tree_op, effect_sys.as_ref()).await?;
+                let agg_sig = frost_sign_tree_op(&tree_op, &*effect_sys).await?;
 
                 let attested_op = AttestedOp {
                     op: tree_op,

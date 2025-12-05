@@ -28,6 +28,7 @@ members = [
     "crates/aura-rendezvous",
     "crates/aura-relational",
     "crates/aura-chat",
+    "crates/aura-social",
     "examples/hello-crdt",
     "examples/hello-choreo",
 ]

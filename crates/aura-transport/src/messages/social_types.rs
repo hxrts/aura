@@ -3,7 +3,7 @@
 //! This module contains message types for social protocols:
 //! - Rendezvous and peer discovery
 
-use aura_core::identifiers::DeviceId;
+use aura_core::identifiers::AuthorityId;
 use serde::{Deserialize, Serialize};
 
 // Re-export social message types
@@ -12,8 +12,8 @@ pub use crate::messages::social_rendezvous::*;
 /// Social coordination message envelope
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SocialMessage {
-    /// Device that sent this message
-    pub sender_id: DeviceId,
+    /// Authority that sent this message
+    pub sender: AuthorityId,
     /// Message sequence number
     pub sequence: u64,
     /// Timestamp when message was created
@@ -31,9 +31,9 @@ pub enum SocialPayload {
 
 impl SocialMessage {
     /// Create a new social message
-    pub fn new(sender_id: DeviceId, sequence: u64, timestamp: u64, payload: SocialPayload) -> Self {
+    pub fn new(sender: AuthorityId, sequence: u64, timestamp: u64, payload: SocialPayload) -> Self {
         Self {
-            sender_id,
+            sender,
             sequence,
             timestamp,
             payload,

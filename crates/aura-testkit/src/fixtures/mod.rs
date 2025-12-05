@@ -12,8 +12,10 @@ pub mod biscuit;
 pub mod cleanup;
 pub mod common;
 pub mod protocol;
+pub mod social;
 
 pub use biscuit::*;
 pub use cleanup::*;
 pub use common::*;
 pub use protocol::*;
+pub use social::*;

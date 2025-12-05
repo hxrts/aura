@@ -4,12 +4,12 @@
 //! and the agent's effect system. Executes `EffectCommand` items after
 //! guard approval.
 
+use super::shared::HandlerUtilities;
 use crate::core::{AgentError, AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_journal::DomainFact;
 use aura_rendezvous::{EffectCommand, GuardOutcome, RendezvousFact, RENDEZVOUS_FACT_TYPE_ID};
-use super::shared::HandlerUtilities;
 
 /// Execute a guard outcome's effect commands
 ///

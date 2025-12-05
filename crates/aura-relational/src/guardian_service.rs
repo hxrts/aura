@@ -46,18 +46,10 @@ impl GuardianEffects for GuardianService {
             guardian_commitment: input.guardian_commitment,
             requester: input.account,
             parameters: input.parameters.clone(),
-            requested_at: aura_core::time::TimeStamp::PhysicalClock(
-                aura_core::time::PhysicalTime {
-                    ts_ms: input.requested_at_ms,
-                    uncertainty: None,
-                },
-            ),
-            expires_at: input.expires_at_ms.map(|ts| {
-                aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                    ts_ms: ts,
-                    uncertainty: None,
-                })
-            }),
+            requested_at: aura_core::time::TimeStamp::PhysicalClock(input.requested_at),
+            expires_at: input
+                .expires_at
+                .map(aura_core::time::TimeStamp::PhysicalClock),
         };
 
         let fact = make_guardian_request_fact(payload)
@@ -72,18 +64,10 @@ impl GuardianEffects for GuardianService {
             guardian_commitment: input.guardian_commitment,
             requester: input.account,
             parameters: input.parameters.clone(),
-            requested_at: aura_core::time::TimeStamp::PhysicalClock(
-                aura_core::time::PhysicalTime {
-                    ts_ms: input.requested_at_ms,
-                    uncertainty: None,
-                },
-            ),
-            expires_at: input.expires_at_ms.map(|ts| {
-                aura_core::time::TimeStamp::PhysicalClock(aura_core::time::PhysicalTime {
-                    ts_ms: ts,
-                    uncertainty: None,
-                })
-            }),
+            requested_at: aura_core::time::TimeStamp::PhysicalClock(input.requested_at),
+            expires_at: input
+                .expires_at
+                .map(aura_core::time::TimeStamp::PhysicalClock),
         };
 
         let fact = make_guardian_cancel_fact(payload)

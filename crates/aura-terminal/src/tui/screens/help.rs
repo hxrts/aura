@@ -3,6 +3,7 @@
 //! Displays help for IRC-style slash commands
 
 use iocraft::prelude::*;
+use std::time::{Duration, Instant};
 
 use crate::tui::components::KeyHintsBar;
 use crate::tui::theme::Theme;
@@ -118,6 +119,10 @@ pub fn HelpScreen(props: &HelpScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let commands = props.commands.clone();
     let current_selected = selected.get();
 
+    // Throttle for navigation keys - persists across renders using use_ref
+    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
+    let throttle_duration = Duration::from_millis(150);
+
     hooks.use_terminal_events({
         let mut selected = selected.clone();
         let command_count = commands.len();
@@ -125,15 +130,23 @@ pub fn HelpScreen(props: &HelpScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
             if let TerminalEvent::Key(KeyEvent { code, .. }) = event {
                 match code {
                     KeyCode::Up | KeyCode::Char('k') => {
-                        let current = selected.get();
-                        if current > 0 {
-                            selected.set(current - 1);
+                        let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                        if should_move {
+                            let current = selected.get();
+                            if current > 0 {
+                                selected.set(current - 1);
+                            }
+                            nav_throttle.set(Instant::now());
                         }
                     }
                     KeyCode::Down | KeyCode::Char('j') => {
-                        let current = selected.get();
-                        if current + 1 < command_count {
-                            selected.set(current + 1);
+                        let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                        if should_move {
+                            let current = selected.get();
+                            if current + 1 < command_count {
+                                selected.set(current + 1);
+                            }
+                            nav_throttle.set(Instant::now());
                         }
                     }
                     _ => {}
@@ -151,10 +164,11 @@ pub fn HelpScreen(props: &HelpScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
             // Header
             View(
                 padding: 1,
-                border_style: BorderStyle::Round,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
             ) {
-                Text(content: "Help - Slash Commands", weight: Weight::Bold, color: Theme::PRIMARY)
+                Text(content: "Help", weight: Weight::Bold, color: Theme::PRIMARY)
             }
 
             // Command list
@@ -166,13 +180,16 @@ pub fn HelpScreen(props: &HelpScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
             ) {
                 #(commands.iter().enumerate().map(|(idx, cmd)| {
                     let is_selected = idx == current_selected;
+                    let key = cmd.name.clone();
                     element! {
-                        CommandItem(
-                            name: cmd.name.clone(),
-                            syntax: cmd.syntax.clone(),
-                            description: cmd.description.clone(),
-                            is_selected: is_selected,
-                        )
+                        View(key: key) {
+                            CommandItem(
+                                name: cmd.name.clone(),
+                                syntax: cmd.syntax.clone(),
+                                description: cmd.description.clone(),
+                                is_selected: is_selected,
+                            )
+                        }
                     }
                 }))
             }

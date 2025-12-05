@@ -16,6 +16,7 @@ aura-protocol = { path = "../aura-protocol" }
 aura-macros = { path = "../aura-macros" }
 aura-journal = { path = "../aura-journal" }
 aura-relational = { path = "../aura-relational" }
+aura-social = { path = "../aura-social" }
 
 # Cryptographic dependencies (ChaCha20-Poly1305 via CryptoEffects)
 curve25519-dalek = { workspace = true }

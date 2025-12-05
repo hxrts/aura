@@ -116,7 +116,7 @@ impl ViewDeltaReducer for ChatViewReducer {
                 name,
                 topic,
                 is_dm,
-                created_at_ms,
+                created_at,
                 creator_id,
                 ..
             } => Some(ChatDelta::ChannelAdded {
@@ -125,7 +125,7 @@ impl ViewDeltaReducer for ChatViewReducer {
                 topic,
                 is_dm,
                 member_count: 0, // Would need additional fact tracking
-                created_at: created_at_ms,
+                created_at: created_at.ts_ms,
                 creator_id: format!("{:?}", creator_id),
             }),
             ChatFact::ChannelClosed { channel_id, .. } => Some(ChatDelta::ChannelRemoved {
@@ -137,7 +137,7 @@ impl ViewDeltaReducer for ChatViewReducer {
                 sender_id,
                 sender_name,
                 content,
-                sent_at_ms,
+                sent_at,
                 reply_to,
                 ..
             } => Some(ChatDelta::MessageAdded {
@@ -146,7 +146,7 @@ impl ViewDeltaReducer for ChatViewReducer {
                 sender_id: format!("{:?}", sender_id),
                 sender_name,
                 content,
-                timestamp: sent_at_ms,
+                timestamp: sent_at.ts_ms,
                 reply_to,
             }),
             ChatFact::MessageRead { .. } => None, // Handled separately if needed
@@ -170,15 +170,15 @@ mod tests {
     fn test_channel_created_reduction() {
         let reducer = ChatViewReducer;
 
-        let fact = ChatFact::ChannelCreated {
-            context_id: test_context_id(),
-            channel_id: ChannelId::default(),
-            name: "test-channel".to_string(),
-            topic: Some("A test topic".to_string()),
-            is_dm: false,
-            created_at_ms: 1234567890,
-            creator_id: AuthorityId::default(),
-        };
+        let fact = ChatFact::channel_created_ms(
+            test_context_id(),
+            ChannelId::default(),
+            "test-channel".to_string(),
+            Some("A test topic".to_string()),
+            false,
+            1234567890,
+            AuthorityId::default(),
+        );
 
         let bytes = fact.to_bytes();
         let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &bytes);
@@ -206,16 +206,16 @@ mod tests {
     fn test_message_sent_reduction() {
         let reducer = ChatViewReducer;
 
-        let fact = ChatFact::MessageSent {
-            context_id: test_context_id(),
-            channel_id: ChannelId::default(),
-            message_id: "msg-123".to_string(),
-            sender_id: AuthorityId::default(),
-            sender_name: "Alice".to_string(),
-            content: "Hello, world!".to_string(),
-            sent_at_ms: 1234567890,
-            reply_to: None,
-        };
+        let fact = ChatFact::message_sent_ms(
+            test_context_id(),
+            ChannelId::default(),
+            "msg-123".to_string(),
+            AuthorityId::default(),
+            "Alice".to_string(),
+            "Hello, world!".to_string(),
+            1234567890,
+            None,
+        );
 
         let bytes = fact.to_bytes();
         let deltas = reducer.reduce_fact(CHAT_FACT_TYPE_ID, &bytes);

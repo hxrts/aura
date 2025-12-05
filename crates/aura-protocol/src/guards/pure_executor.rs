@@ -1,7 +1,7 @@
 //! Guard chain executor bridging pure guards with effect systems
 //!
-//! This module provides a bridge between the new pure guard implementation
-//! (ADR-014) and existing effect-based guard infrastructure, enabling gradual
+//! This module provides a bridge between the pure guard implementation
+//! and effect-based guard infrastructure, enabling gradual
 //! migration while maintaining compatibility.
 
 use super::{
@@ -302,6 +302,7 @@ where
                 Ok(EffectResult::Success)
             }
             EffectCommand::RecordLeakage { bits } => {
+                let timestamp = self.effects.physical_time().await?;
                 let event = aura_core::effects::LeakageEvent {
                     source: AuthorityId::default(),
                     destination: AuthorityId::default(),
@@ -309,7 +310,7 @@ where
                     leakage_amount: bits as u64,
                     observer_class: aura_core::effects::ObserverClass::External,
                     operation: "guard_chain".to_string(),
-                    timestamp_ms: self.effects.physical_time().await?.ts_ms,
+                    timestamp,
                 };
                 self.effects
                     .record_leakage(event)
@@ -381,6 +382,7 @@ where
                 Ok(EffectResult::Success)
             }
             EffectCommand::RecordLeakage { bits } => {
+                let timestamp = self.effects.physical_time().await?;
                 let event = aura_core::effects::LeakageEvent {
                     source: AuthorityId::default(),
                     destination: AuthorityId::default(),
@@ -388,7 +390,7 @@ where
                     leakage_amount: bits as u64,
                     observer_class: aura_core::effects::ObserverClass::External,
                     operation: "guard_chain".to_string(),
-                    timestamp_ms: self.effects.physical_time().await?.ts_ms,
+                    timestamp,
                 };
                 self.effects
                     .record_leakage(event)

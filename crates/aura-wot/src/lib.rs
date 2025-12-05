@@ -51,8 +51,8 @@ pub mod flow_budget;
 // Biscuit-based authorization (new implementation)
 // biscuit module is now consolidated into biscuit_authorization.rs
 pub mod biscuit_authorization;
-pub mod biscuit_resources;
 pub mod biscuit_token;
+pub mod facts;
 pub mod resource_scope; // Authority-based resource scopes
 pub mod storage_authorization; // Storage authorization logic (moved from aura-store)
 
@@ -69,8 +69,13 @@ pub use aura_core::semilattice::{MeetSemiLattice, Top};
 
 // Re-export Biscuit types
 pub use biscuit_auth::{Biscuit, KeyPair, PublicKey};
-pub use biscuit_token::{AccountAuthority, BiscuitError, BiscuitTokenManager, SerializableBiscuit};
+#[allow(deprecated)]
+pub use biscuit_token::AccountAuthority; // Deprecated alias for TokenAuthority
+pub use biscuit_token::{BiscuitError, BiscuitTokenManager, SerializableBiscuit, TokenAuthority};
 pub use flow_budget::FlowBudgetHandler;
+
+// Re-export fact types for journal integration
+pub use facts::{WotFact, WotFactDelta, WotFactReducer, WOT_FACT_TYPE_ID};
 
 // Re-export authority-based resource scopes from core
 // These replace the previous Biscuit-specific resource scopes (AdminOperation, JournalOp, etc.)

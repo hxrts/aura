@@ -138,6 +138,7 @@ pub struct EffectSystemBuilder {
     execution_mode: ExecutionMode,
     sync_config: Option<super::services::SyncManagerConfig>,
     rendezvous_config: Option<super::services::RendezvousManagerConfig>,
+    social_config: Option<super::services::SocialManagerConfig>,
 }
 
 impl EffectSystemBuilder {
@@ -149,6 +150,7 @@ impl EffectSystemBuilder {
             execution_mode: ExecutionMode::Production,
             sync_config: None,
             rendezvous_config: None,
+            social_config: None,
         }
     }
 
@@ -160,6 +162,7 @@ impl EffectSystemBuilder {
             execution_mode: ExecutionMode::Testing,
             sync_config: None,
             rendezvous_config: None,
+            social_config: None,
         }
     }
 
@@ -171,6 +174,7 @@ impl EffectSystemBuilder {
             execution_mode: ExecutionMode::Simulation { seed },
             sync_config: None,
             rendezvous_config: None,
+            social_config: None,
         }
     }
 
@@ -210,6 +214,18 @@ impl EffectSystemBuilder {
         config: super::services::RendezvousManagerConfig,
     ) -> Self {
         self.rendezvous_config = Some(config);
+        self
+    }
+
+    /// Enable social topology service with default configuration
+    pub fn with_social(mut self) -> Self {
+        self.social_config = Some(super::services::SocialManagerConfig::default());
+        self
+    }
+
+    /// Enable social topology service with custom configuration
+    pub fn with_social_config(mut self, config: super::services::SocialManagerConfig) -> Self {
+        self.social_config = Some(config);
         self
     }
 
@@ -264,6 +280,11 @@ impl EffectSystemBuilder {
             super::services::RendezvousManager::new(authority_id, rendezvous_config)
         });
 
+        // Create optional social manager
+        let social_manager = self
+            .social_config
+            .map(|social_config| super::services::SocialManager::new(authority_id, social_config));
+
         // Build runtime system with configured services
         Ok(RuntimeSystem::new_with_services(
             effect_executor,
@@ -275,6 +296,7 @@ impl EffectSystemBuilder {
             lifecycle_manager,
             sync_manager,
             rendezvous_manager,
+            social_manager,
             config,
             authority_id,
         ))

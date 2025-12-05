@@ -10,7 +10,7 @@
 //!   - Layer 4, compose core effects for distributed coordination
 //! - **Domain effects** (aura-journal, aura-wot, etc.): Journal, Authorization, Capability
 //!   - Layer 2, domain-specific application effects
-//! - **UI effects** (aura-cli): CLI-specific effects for command-line interface
+//! - **UI effects** (aura-terminal): TUI-specific effects for terminal user interface
 //!   - Layer 7, user interface abstractions
 //!
 //! **Key Protocol Effect Traits**:

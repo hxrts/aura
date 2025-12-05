@@ -313,7 +313,7 @@ impl LeakageEffects for Box<dyn AuraEffects> {
     async fn get_leakage_history(
         &self,
         context_id: aura_core::identifiers::ContextId,
-        since_timestamp: Option<u64>,
+        since_timestamp: Option<&aura_core::time::PhysicalTime>,
     ) -> aura_core::Result<Vec<aura_core::effects::LeakageEvent>> {
         (**self)
             .get_leakage_history(context_id, since_timestamp)

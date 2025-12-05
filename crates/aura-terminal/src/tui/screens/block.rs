@@ -10,6 +10,7 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::tui::components::KeyHintsBar;
 use crate::tui::hooks::AppCoreContext;
@@ -61,10 +62,11 @@ pub fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>>
                         let is_selected = idx == selected;
                         let bg = if is_selected { Theme::BG_SELECTED } else { Theme::BG_DARK };
                         let name = r.name.clone();
-                        let steward_badge = if r.is_steward { " ★" } else { "" }.to_string();
+                        let id = r.id.clone();
+                        let steward_badge = if r.is_steward { " ⚖︎" } else { "" }.to_string();
                         let self_badge = if r.is_self { " (you)" } else { "" }.to_string();
                         element! {
-                            View(flex_direction: FlexDirection::Row, background_color: bg, padding_left: 1) {
+                            View(key: id, flex_direction: FlexDirection::Row, background_color: bg, padding_left: 1) {
                                 Text(content: name, color: Theme::TEXT)
                                 Text(content: steward_badge, color: Theme::WARNING)
                                 Text(content: self_badge, color: Theme::TEXT_MUTED)
@@ -321,38 +323,46 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     let on_invite = props.on_invite.clone();
     let on_go_neighborhood = props.on_go_neighborhood.clone();
 
+    let resident_count = residents.len();
+
+    // Throttle for navigation keys - persists across renders using use_ref
+    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
+    let throttle_duration = Duration::from_millis(150);
+
     hooks.use_terminal_events({
         let mut resident_index = resident_index.clone();
-        let resident_count = residents.len();
         move |event| match event {
             TerminalEvent::Key(KeyEvent { code, .. }) => match code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    let idx = resident_index.get();
-                    if idx > 0 {
-                        resident_index.set(idx - 1);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        let idx = resident_index.get();
+                        if idx > 0 {
+                            resident_index.set(idx - 1);
+                        }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    let idx = resident_index.get();
-                    if idx + 1 < resident_count {
-                        resident_index.set(idx + 1);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        let idx = resident_index.get();
+                        if idx + 1 < resident_count {
+                            resident_index.set(idx + 1);
+                        }
+                        nav_throttle.set(Instant::now());
                     }
                 }
-                // Send message (would open message input in full implementation)
                 KeyCode::Enter => {
                     if let Some(ref callback) = on_send {
-                        // In a full implementation, this would send the composed message
-                        // For now, this signals intent to send a message
                         callback(String::new());
                     }
                 }
-                // Invite to block
                 KeyCode::Char('i') => {
                     if let Some(ref callback) = on_invite {
                         callback();
                     }
                 }
-                // Go to neighborhood view
                 KeyCode::Char('n') => {
                     if let Some(ref callback) = on_go_neighborhood {
                         callback();

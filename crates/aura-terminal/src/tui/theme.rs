@@ -21,7 +21,7 @@ impl Theme {
     // === Background Colors ===
     pub const BG_DARK: Color = Color::DarkGrey;
     pub const BG_PRIMARY: Color = Color::DarkBlue;
-    pub const BG_SELECTED: Color = Color::DarkCyan;
+    pub const BG_SELECTED: Color = Color::Blue; // Bright blue for clear selection visibility
     pub const BG_HOVER: Color = Color::AnsiValue(238); // Slightly lighter than dark
     pub const OVERLAY: Color = Color::AnsiValue(0); // Black for overlay backdrop
 

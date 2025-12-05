@@ -2,14 +2,17 @@
 //! Uses bpaf for CLI parsing and delegates execution to CLI handlers.
 
 use anyhow::Result;
-use aura_agent::{AgentBuilder, EffectContext};
+// Import from aura_app which re-exports agent types
+use aura_app::{AgentBuilder, AppConfig, AppCore, EffectContext};
 use aura_core::effects::ExecutionMode;
-use aura_terminal::cli::bpaf_commands::{cli_parser, Commands, GlobalArgs, ThresholdArgs};
+use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ThresholdArgs};
 use aura_terminal::ids;
 use aura_terminal::{CliHandler, SyncAction};
 use bpaf::Parser;
 use cfg_if::cfg_if;
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 cfg_if! {
     if #[cfg(feature = "development")] {
@@ -22,25 +25,29 @@ async fn main() -> Result<()> {
     let args: GlobalArgs = cli_parser().to_options().run();
     let command = args.command;
 
-    // Create CLI device ID
+    // Create CLI device ID and identifiers
     let device_id = ids::device_id("cli:main-device");
     let authority_id = ids::authority_id("cli:main-authority");
     let context_id = ids::context_id("cli:main-context");
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
 
-    // Initialize agent based on environment
+    // Initialize agent and create AppCore (unified backend)
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&effect_context)
         .await?;
-    let effect_system = agent.runtime().effects().clone();
+
+    // Create AppCore with the agent for full runtime capabilities
+    let config = AppConfig::default();
+    let app_core = AppCore::with_agent(config, agent)?;
+    let app_core = Arc::new(RwLock::new(app_core));
 
     // Initialize logging through effects
     let log_level = if args.verbose { "debug" } else { "info" };
     println!("Initializing Aura CLI with log level: {}", log_level);
 
-    // Create CLI handler
-    let cli_handler = CliHandler::new(effect_system, device_id, effect_context);
+    // Create CLI handler with unified AppCore backend
+    let cli_handler = CliHandler::new(app_core, device_id, effect_context);
 
     // Execute command through effect system
     match command {

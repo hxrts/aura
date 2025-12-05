@@ -5,7 +5,7 @@
 
 use crate::handlers::HandlerContext;
 use anyhow::Result;
-use aura_authenticate::guardian_auth::{RecoveryContext, RecoveryOperationType};
+use aura_authenticate::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::{JournalEffects, StorageEffects};
 use aura_core::hash;
 use aura_core::identifiers::ContextId;

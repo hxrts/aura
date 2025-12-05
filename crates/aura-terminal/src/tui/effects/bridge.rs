@@ -41,9 +41,6 @@ pub struct EffectBridge {
     /// Time effects for async delays (injected for testability)
     #[allow(dead_code)]
     time_effects: Arc<dyn PhysicalTimeEffects>,
-    /// Optional full effect system (provides access to all effect handlers)
-    #[allow(dead_code)]
-    effect_system: Option<Arc<aura_agent::AuraEffectSystem>>,
     /// Optional AppCore for intent-based state management
     #[allow(dead_code)]
     app_core: Option<Arc<RwLock<AppCore>>>,
@@ -53,6 +50,19 @@ impl EffectBridge {
     /// Create a new effect bridge with default configuration
     pub fn new() -> Self {
         Self::with_config_time_amp(BridgeConfig::default(), Arc::new(PhysicalTimeHandler), None)
+    }
+
+    /// Create a new effect bridge with AppCore integration
+    ///
+    /// This is the recommended constructor for production use, enabling
+    /// the full signal-based reactive architecture via AppCore's ViewState.
+    pub fn with_app_core(app_core: Arc<RwLock<AppCore>>) -> Self {
+        Self::with_full_config(
+            BridgeConfig::default(),
+            Arc::new(PhysicalTimeHandler),
+            None,
+            Some(app_core),
+        )
     }
 
     /// Create a new effect bridge with custom configuration
@@ -77,25 +87,16 @@ impl EffectBridge {
         time_effects: Arc<dyn PhysicalTimeEffects>,
         amp_effects: Option<Arc<dyn AmpChannelEffects + Send + Sync>>,
     ) -> Self {
-        Self::with_config_time_amp_system(config, time_effects, amp_effects, None)
+        Self::with_full_config(config, time_effects, amp_effects, None)
     }
 
-    /// Create a new effect bridge with full configuration including effect system
-    pub fn with_config_time_amp_system(
-        config: BridgeConfig,
-        time_effects: Arc<dyn PhysicalTimeEffects>,
-        amp_effects: Option<Arc<dyn AmpChannelEffects + Send + Sync>>,
-        effect_system: Option<Arc<aura_agent::AuraEffectSystem>>,
-    ) -> Self {
-        Self::with_full_config(config, time_effects, amp_effects, effect_system, None)
-    }
-
-    /// Create a new effect bridge with full configuration including effect system and AppCore
+    /// Create a new effect bridge with full configuration including AppCore
+    ///
+    /// The effect system is obtained from `app_core.agent().runtime().effects()`.
     pub fn with_full_config(
         config: BridgeConfig,
         time_effects: Arc<dyn PhysicalTimeEffects>,
         amp_effects: Option<Arc<dyn AmpChannelEffects + Send + Sync>>,
-        effect_system: Option<Arc<aura_agent::AuraEffectSystem>>,
         app_core: Option<Arc<RwLock<AppCore>>>,
     ) -> Self {
         let (command_tx, command_rx) = mpsc::channel(config.command_buffer_size);
@@ -107,11 +108,11 @@ impl EffectBridge {
             event_tx: event_tx.clone(),
             state: Arc::new(RwLock::new(BridgeState::default())),
             time_effects: time_effects.clone(),
-            effect_system: effect_system.clone(),
             app_core: app_core.clone(),
         };
 
         // Start command consumer loop in background
+        // Effect system is obtained from app_core.agent() in execute_command
         tokio::spawn(Self::command_consumer_loop(
             command_rx,
             event_tx,
@@ -119,7 +120,6 @@ impl EffectBridge {
             config,
             time_effects,
             amp_effects,
-            effect_system,
             app_core,
         ));
 
@@ -220,6 +220,21 @@ impl EffectBridge {
         state.last_error = None;
     }
 
+    /// Check if a sync operation is in progress
+    pub async fn is_syncing(&self) -> bool {
+        self.state.read().await.sync_in_progress
+    }
+
+    /// Get the last sync timestamp (ms since epoch)
+    pub async fn last_sync_time(&self) -> Option<u64> {
+        self.state.read().await.last_sync_time
+    }
+
+    /// Get the number of known peers
+    pub async fn known_peers_count(&self) -> usize {
+        self.state.read().await.known_peers.len()
+    }
+
     /// Get the configuration
     pub fn config(&self) -> &BridgeConfig {
         &self.config
@@ -236,7 +251,6 @@ impl EffectBridge {
         config: BridgeConfig,
         time_effects: Arc<dyn PhysicalTimeEffects>,
         amp_effects: Option<Arc<dyn AmpChannelEffects + Send + Sync>>,
-        effect_system: Option<Arc<aura_agent::AuraEffectSystem>>,
         app_core: Option<Arc<RwLock<AppCore>>>,
     ) {
         tracing::info!("EffectBridge command consumer loop started");
@@ -250,7 +264,6 @@ impl EffectBridge {
                 &config,
                 &time_effects,
                 amp_effects.as_deref(),
-                effect_system.as_ref(),
                 app_core.as_ref(),
             )
             .await;
@@ -278,7 +291,6 @@ impl EffectBridge {
         config: &BridgeConfig,
         time_effects: &Arc<dyn PhysicalTimeEffects>,
         amp_effects: Option<&(dyn AmpChannelEffects + Send + Sync)>,
-        effect_system: Option<&Arc<aura_agent::AuraEffectSystem>>,
         app_core: Option<&Arc<RwLock<AppCore>>>,
     ) -> Result<(), String> {
         let mut attempts = 0;
@@ -291,7 +303,6 @@ impl EffectBridge {
                 state,
                 time_effects,
                 amp_effects,
-                effect_system,
                 app_core,
             )
             .await

@@ -3,21 +3,10 @@
 use crate::handlers::HandlerContext;
 use crate::InvitationAction;
 use anyhow::{anyhow, Result};
-use aura_core::{effects::StorageEffects, AccountId, DeviceId};
-use aura_wot::{AccountAuthority, SerializableBiscuit};
-use biscuit_auth::{KeyPair, PrivateKey};
+// Import from aura-app which re-exports agent types
+use aura_app::AuraAgent;
+use aura_core::identifiers::AuthorityId;
 use std::str::FromStr;
-
-/// Minimal invitation payload used by the CLI while the coordinator wiring is pending.
-#[derive(Debug)]
-struct PreparedInvitation {
-    _inviter: DeviceId,
-    invitee: DeviceId,
-    account_id: AccountId,
-    _granted_token: SerializableBiscuit,
-    device_role: String,
-    ttl_secs: Option<u64>,
-}
 
 /// Handle invitation-related CLI commands
 ///
@@ -25,7 +14,9 @@ struct PreparedInvitation {
 ///
 /// **Standardized Signature (Task 2.2)**: Uses `HandlerContext` for unified parameter passing.
 pub async fn handle_invitation(ctx: &HandlerContext<'_>, action: &InvitationAction) -> Result<()> {
-    let _device_id = ctx.device_id();
+    let agent = ctx
+        .agent()
+        .ok_or_else(|| anyhow!("agent not available in handler context"))?;
 
     match action {
         InvitationAction::Create {
@@ -34,79 +25,96 @@ pub async fn handle_invitation(ctx: &HandlerContext<'_>, action: &InvitationActi
             role,
             ttl,
         } => {
-            let request = build_request(ctx, account, invitee, role, *ttl).await?;
-
-            // Coordinator integration pending effect system RwLock update.
-            // Coordinators expect Arc<E: AuraEffects> but agent uses Arc<RwLock<AuraEffectSystem>>.
+            let invitation = create_invitation(agent, account, invitee, role, *ttl).await?;
             println!(
-                "Invitation request prepared for {} to account {} with role '{}' (ttl: {:?}).",
-                request.invitee, request.account_id, request.device_role, request.ttl_secs
+                "Invitation created: id={} to={} role={} ttl={:?}",
+                invitation.invitation_id, invitee, role, ttl
             );
-            println!("Note: Full coordinator integration pending effect system update.");
             Ok(())
         }
-        InvitationAction::Accept { envelope } => {
-            // Coordinator integration pending effect system RwLock update.
-            println!("Accept invitation from envelope {:?}.", envelope);
-            println!("Note: Full coordinator integration pending effect system update.");
+        InvitationAction::Accept { invitation_id } => {
+            let service = agent.invitations().await?;
+            let result = service.accept(invitation_id).await?;
+            if result.success {
+                println!("Invitation {} accepted", invitation_id);
+            } else if let Some(err) = result.error {
+                println!("Invitation {} failed: {}", invitation_id, err);
+            }
+            Ok(())
+        }
+        InvitationAction::Decline { invitation_id } => {
+            let service = agent.invitations().await?;
+            let result = service.decline(invitation_id).await?;
+            if result.success {
+                println!("Invitation {} declined", invitation_id);
+            } else if let Some(err) = result.error {
+                println!("Invitation {} decline failed: {}", invitation_id, err);
+            }
+            Ok(())
+        }
+        InvitationAction::Cancel { invitation_id } => {
+            let service = agent.invitations().await?;
+            let result = service.cancel(invitation_id).await?;
+            if result.success {
+                println!("Invitation {} canceled", invitation_id);
+            } else if let Some(err) = result.error {
+                println!("Invitation {} cancel failed: {}", invitation_id, err);
+            }
+            Ok(())
+        }
+        InvitationAction::List => {
+            let service = agent.invitations().await?;
+            let pending = service.list_pending().await;
+            if pending.is_empty() {
+                println!("No pending invitations.");
+            } else {
+                println!("Pending invitations:");
+                for inv in pending {
+                    println!(
+                        "- {} → {} ({}) status={:?} expires={:?}",
+                        inv.sender_id,
+                        inv.receiver_id,
+                        inv.invitation_type.as_type_string(),
+                        inv.status,
+                        inv.expires_at
+                    );
+                }
+            }
             Ok(())
         }
     }
 }
 
-async fn build_request(
-    ctx: &HandlerContext<'_>,
+async fn create_invitation(
+    agent: &AuraAgent,
     account: &str,
     invitee: &str,
     role: &str,
-    ttl: Option<u64>,
-) -> Result<PreparedInvitation> {
-    let account_id = AccountId::from_str(account)
-        .map_err(|err| anyhow!("invalid account id '{}': {}", account, err))?;
-    let invitee_id = DeviceId::from_str(invitee)
-        .map_err(|err| anyhow!("invalid invitee device id '{}': {}", invitee, err))?;
+    ttl_secs: Option<u64>,
+) -> Result<aura_agent::Invitation> {
+    let receiver_id = AuthorityId::from_uuid(
+        uuid::Uuid::from_str(invitee).map_err(|e| anyhow!("invalid invitee authority: {e}"))?,
+    );
+    let subject_authority = AuthorityId::from_uuid(
+        uuid::Uuid::from_str(account).map_err(|e| anyhow!("invalid account authority: {e}"))?,
+    );
+    let service = agent.invitations().await?;
+    let expires_ms = ttl_secs.map(|s| s * 1000);
 
-    // Load authority from storage if available; otherwise create and persist a new authority
-    let authority = load_account_authority(ctx, account_id).await?;
-    let device_token = authority
-        .create_device_token(invitee_id)
-        .map_err(|e| anyhow!("failed to create device token: {}", e))?;
-    let granted_token = SerializableBiscuit::new(device_token, authority.root_public_key());
-
-    Ok(PreparedInvitation {
-        _inviter: ctx.device_id(),
-        invitee: invitee_id,
-        account_id,
-        _granted_token: granted_token,
-        device_role: role.to_string(),
-        ttl_secs: ttl,
-    })
-}
-
-/// Load an account authority from storage, persisting a new one if not present.
-async fn load_account_authority(
-    ctx: &HandlerContext<'_>,
-    account_id: AccountId,
-) -> Result<AccountAuthority> {
-    let key = format!("account_authority:{}:root_key", account_id);
-
-    if let Ok(Some(raw)) = ctx.effects().retrieve(&key).await {
-        // Stored as raw private key bytes
-        if raw.len() == 32 {
-            if let Ok(private) = PrivateKey::from_bytes(&raw) {
-                let keypair = KeyPair::from(&private);
-                return Ok(AccountAuthority::from_keypair(account_id, keypair));
-            }
-        }
+    if role.eq_ignore_ascii_case("guardian") {
+        service
+            .invite_as_guardian(receiver_id, subject_authority, None, expires_ms)
+            .await
+            .map_err(|e| anyhow!(e))
+    } else if role.eq_ignore_ascii_case("channel") {
+        service
+            .invite_to_channel(receiver_id, "channel".to_string(), None, expires_ms)
+            .await
+            .map_err(|e| anyhow!(e))
+    } else {
+        service
+            .invite_as_contact(receiver_id, Some(role.to_string()), None, expires_ms)
+            .await
+            .map_err(|e| anyhow!(e))
     }
-
-    // Create and persist a new authority for future use
-    let authority = AccountAuthority::new(account_id);
-    let private_bytes = authority.root_keypair().private().to_bytes();
-    ctx.effects()
-        .store(&key, private_bytes.to_vec())
-        .await
-        .map_err(anyhow::Error::from)?;
-
-    Ok(authority)
 }

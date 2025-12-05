@@ -47,6 +47,37 @@
 //! - Session-based coordination allows stateless protocol implementation
 //! - Integration with guard chain ensures authorization before synchronization
 //! - Metrics collection enables observability and performance tuning
+//!
+//! ## Authority vs Device Model
+//!
+//! This crate uses Aura's authority-centric identity model:
+//!
+//! - **`AuthorityId`**: Represents the *owner* of state and operations. Authorities are
+//!   cryptographic identities that own journals, create attestations, and authorize actions.
+//!   State is synchronized *per authority*, not per device.
+//!
+//! - **`DeviceId`**: Represents a *connection endpoint* for network communication.
+//!   Devices connect to each other to exchange state, but state ownership is always
+//!   attributed to authorities, not devices.
+//!
+//! In sync protocols:
+//! - Peers are identified by `DeviceId` for network addressing
+//! - Journal operations and facts are attributed to `AuthorityId`
+//! - Authorization decisions use `AuthorityId` via Biscuit tokens
+//! - State merges resolve conflicts using authority-attributed timestamps
+//!
+//! See `docs/100_authority_and_identity.md` for the complete authority model.
+//!
+//! ## Time System
+//!
+//! This crate uses the unified time system from `aura-core`:
+//!
+//! - **`PhysicalTime`**: Wall-clock timestamps with optional uncertainty bounds.
+//!   Used for timestamps, timeouts, and coordination deadlines.
+//! - All time access goes through `PhysicalTimeEffects` trait, never `SystemTime::now()`
+//! - Time is passed explicitly to methods, enabling deterministic testing
+//!
+//! See `docs/106_effect_system_and_runtime.md` for the unified time architecture.
 
 // Allow disallowed methods/types in protocol implementations that coordinate effects
 #![allow(clippy::disallowed_methods, clippy::disallowed_types)]

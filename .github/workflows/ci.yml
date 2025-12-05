@@ -103,7 +103,7 @@ jobs:
               --glob '!**/tests/**' \
               --glob '!**/integration/**' \
               --glob '!**/demo/**' \
-              --glob '!**/aura-cli/src/handlers/scenarios.rs' 2>/dev/null || true)
+              --glob '!**/aura-terminal/src/handlers/scenarios.rs' 2>/dev/null || true)
 
           violations=""
           for file in $files_with_violations; do
@@ -155,7 +155,7 @@ jobs:
               --glob '!**/aura-simulator/**' \
               --glob '!**/aura-testkit/**' \
               --glob '!**/aura-quint/**' \
-              --glob '!**/aura-cli/**' \
+              --glob '!**/aura-terminal/**' \
               --glob '!**/tests/**' \
               --glob '!**/aura-core/src/types/identifiers.rs' \
               --glob '!**/aura-core/src/effects/quint.rs' \

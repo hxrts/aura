@@ -56,6 +56,9 @@ pub mod descriptor;
 /// SecureChannel wrapper with epoch-based key rotation
 pub mod new_channel;
 
+/// Flood propagation for rendezvous packet flooding through social topology
+pub mod flood;
+
 // =============================================================================
 // RE-EXPORTS
 // =============================================================================
@@ -94,3 +97,6 @@ pub use new_channel::{
     ChannelManager, ChannelState, HandshakeConfig, HandshakeResult, HandshakeState, Handshaker,
     SecureChannel,
 };
+
+// Re-export flood types
+pub use flood::{DecryptedPayload, FloodPropagation, PacketBuilder, PacketCrypto, SeenNonces};

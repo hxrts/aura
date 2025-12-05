@@ -17,16 +17,16 @@
 //! use aura_chat::facts::{ChatFact, ChatFactReducer};
 //! use aura_journal::{FactRegistry, DomainFact};
 //!
-//! // Create a chat fact
-//! let fact = ChatFact::ChannelCreated {
+//! // Create a chat fact using backward-compatible constructor
+//! let fact = ChatFact::channel_created_ms(
 //!     context_id,
 //!     channel_id,
-//!     name: "general".to_string(),
-//!     topic: None,
-//!     is_dm: false,
-//!     created_at_ms: 1234567890,
+//!     "general".to_string(),
+//!     None,
+//!     false,
+//!     1234567890,
 //!     creator_id,
-//! };
+//! );
 //!
 //! // Convert to generic for storage
 //! let generic = fact.to_generic();
@@ -36,6 +36,7 @@
 //! ```
 
 use aura_core::identifiers::{AuthorityId, ChannelId, ContextId};
+use aura_core::time::PhysicalTime;
 use aura_journal::{
     reduction::{RelationalBinding, RelationalBindingType},
     DomainFact, FactReducer,
@@ -63,8 +64,8 @@ pub enum ChatFact {
         topic: Option<String>,
         /// Whether this is a direct message (1:1) channel
         is_dm: bool,
-        /// Timestamp when channel was created (ms since epoch)
-        created_at_ms: u64,
+        /// Timestamp when channel was created (uses unified time system)
+        created_at: PhysicalTime,
         /// Authority that created the channel
         creator_id: AuthorityId,
     },
@@ -74,8 +75,8 @@ pub enum ChatFact {
         context_id: ContextId,
         /// Channel being closed
         channel_id: ChannelId,
-        /// Timestamp when channel was closed (ms since epoch)
-        closed_at_ms: u64,
+        /// Timestamp when channel was closed (uses unified time system)
+        closed_at: PhysicalTime,
         /// Authority that closed the channel
         actor_id: AuthorityId,
     },
@@ -93,8 +94,8 @@ pub enum ChatFact {
         sender_name: String,
         /// Message content (plaintext; encryption handled at transport layer)
         content: String,
-        /// Timestamp when message was sent (ms since epoch)
-        sent_at_ms: u64,
+        /// Timestamp when message was sent (uses unified time system)
+        sent_at: PhysicalTime,
         /// Optional message ID this is replying to
         reply_to: Option<String>,
     },
@@ -108,9 +109,110 @@ pub enum ChatFact {
         message_id: String,
         /// Authority that read the message
         reader_id: AuthorityId,
-        /// Timestamp when message was read (ms since epoch)
-        read_at_ms: u64,
+        /// Timestamp when message was read (uses unified time system)
+        read_at: PhysicalTime,
     },
+}
+
+impl ChatFact {
+    /// Get the timestamp in milliseconds (backward compatibility)
+    pub fn timestamp_ms(&self) -> u64 {
+        match self {
+            ChatFact::ChannelCreated { created_at, .. } => created_at.ts_ms,
+            ChatFact::ChannelClosed { closed_at, .. } => closed_at.ts_ms,
+            ChatFact::MessageSent { sent_at, .. } => sent_at.ts_ms,
+            ChatFact::MessageRead { read_at, .. } => read_at.ts_ms,
+        }
+    }
+
+    /// Create a ChannelCreated fact with millisecond timestamp (backward compatibility)
+    pub fn channel_created_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        name: String,
+        topic: Option<String>,
+        is_dm: bool,
+        created_at_ms: u64,
+        creator_id: AuthorityId,
+    ) -> Self {
+        Self::ChannelCreated {
+            context_id,
+            channel_id,
+            name,
+            topic,
+            is_dm,
+            created_at: PhysicalTime {
+                ts_ms: created_at_ms,
+                uncertainty: None,
+            },
+            creator_id,
+        }
+    }
+
+    /// Create a ChannelClosed fact with millisecond timestamp (backward compatibility)
+    pub fn channel_closed_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        closed_at_ms: u64,
+        actor_id: AuthorityId,
+    ) -> Self {
+        Self::ChannelClosed {
+            context_id,
+            channel_id,
+            closed_at: PhysicalTime {
+                ts_ms: closed_at_ms,
+                uncertainty: None,
+            },
+            actor_id,
+        }
+    }
+
+    /// Create a MessageSent fact with millisecond timestamp (backward compatibility)
+    #[allow(clippy::too_many_arguments)]
+    pub fn message_sent_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+        sender_id: AuthorityId,
+        sender_name: String,
+        content: String,
+        sent_at_ms: u64,
+        reply_to: Option<String>,
+    ) -> Self {
+        Self::MessageSent {
+            context_id,
+            channel_id,
+            message_id,
+            sender_id,
+            sender_name,
+            content,
+            sent_at: PhysicalTime {
+                ts_ms: sent_at_ms,
+                uncertainty: None,
+            },
+            reply_to,
+        }
+    }
+
+    /// Create a MessageRead fact with millisecond timestamp (backward compatibility)
+    pub fn message_read_ms(
+        context_id: ContextId,
+        channel_id: ChannelId,
+        message_id: String,
+        reader_id: AuthorityId,
+        read_at_ms: u64,
+    ) -> Self {
+        Self::MessageRead {
+            context_id,
+            channel_id,
+            message_id,
+            reader_id,
+            read_at: PhysicalTime {
+                ts_ms: read_at_ms,
+                uncertainty: None,
+            },
+        }
+    }
 }
 
 impl DomainFact for ChatFact {
@@ -204,15 +306,15 @@ mod tests {
 
     #[test]
     fn test_chat_fact_serialization() {
-        let fact = ChatFact::ChannelCreated {
-            context_id: test_context_id(),
-            channel_id: test_channel_id(),
-            name: "general".to_string(),
-            topic: Some("General discussion".to_string()),
-            is_dm: false,
-            created_at_ms: 1234567890,
-            creator_id: test_authority_id(),
-        };
+        let fact = ChatFact::channel_created_ms(
+            test_context_id(),
+            test_channel_id(),
+            "general".to_string(),
+            Some("General discussion".to_string()),
+            false,
+            1234567890,
+            test_authority_id(),
+        );
 
         let bytes = fact.to_bytes();
         let restored = ChatFact::from_bytes(&bytes);
@@ -222,16 +324,16 @@ mod tests {
 
     #[test]
     fn test_chat_fact_to_generic() {
-        let fact = ChatFact::MessageSent {
-            context_id: test_context_id(),
-            channel_id: test_channel_id(),
-            message_id: "msg-123".to_string(),
-            sender_id: test_authority_id(),
-            sender_name: "Alice".to_string(),
-            content: "Hello, world!".to_string(),
-            sent_at_ms: 1234567890,
-            reply_to: None,
-        };
+        let fact = ChatFact::message_sent_ms(
+            test_context_id(),
+            test_channel_id(),
+            "msg-123".to_string(),
+            test_authority_id(),
+            "Alice".to_string(),
+            "Hello, world!".to_string(),
+            1234567890,
+            None,
+        );
 
         let generic = fact.to_generic();
 
@@ -254,15 +356,15 @@ mod tests {
         let reducer = ChatFactReducer;
         assert_eq!(reducer.handles_type(), CHAT_FACT_TYPE_ID);
 
-        let fact = ChatFact::ChannelCreated {
-            context_id: test_context_id(),
-            channel_id: test_channel_id(),
-            name: "test".to_string(),
-            topic: None,
-            is_dm: false,
-            created_at_ms: 0,
-            creator_id: test_authority_id(),
-        };
+        let fact = ChatFact::channel_created_ms(
+            test_context_id(),
+            test_channel_id(),
+            "test".to_string(),
+            None,
+            false,
+            0,
+            test_authority_id(),
+        );
 
         let bytes = fact.to_bytes();
         let binding = reducer.reduce(test_context_id(), CHAT_FACT_TYPE_ID, &bytes);
@@ -278,38 +380,38 @@ mod tests {
     #[test]
     fn test_type_id_consistency() {
         let facts = vec![
-            ChatFact::ChannelCreated {
-                context_id: test_context_id(),
-                channel_id: test_channel_id(),
-                name: "test".to_string(),
-                topic: None,
-                is_dm: false,
-                created_at_ms: 0,
-                creator_id: test_authority_id(),
-            },
-            ChatFact::ChannelClosed {
-                context_id: test_context_id(),
-                channel_id: test_channel_id(),
-                closed_at_ms: 0,
-                actor_id: test_authority_id(),
-            },
-            ChatFact::MessageSent {
-                context_id: test_context_id(),
-                channel_id: test_channel_id(),
-                message_id: "msg".to_string(),
-                sender_id: test_authority_id(),
-                sender_name: "Test".to_string(),
-                content: "Hello".to_string(),
-                sent_at_ms: 0,
-                reply_to: None,
-            },
-            ChatFact::MessageRead {
-                context_id: test_context_id(),
-                channel_id: test_channel_id(),
-                message_id: "msg".to_string(),
-                reader_id: test_authority_id(),
-                read_at_ms: 0,
-            },
+            ChatFact::channel_created_ms(
+                test_context_id(),
+                test_channel_id(),
+                "test".to_string(),
+                None,
+                false,
+                0,
+                test_authority_id(),
+            ),
+            ChatFact::channel_closed_ms(
+                test_context_id(),
+                test_channel_id(),
+                0,
+                test_authority_id(),
+            ),
+            ChatFact::message_sent_ms(
+                test_context_id(),
+                test_channel_id(),
+                "msg".to_string(),
+                test_authority_id(),
+                "Test".to_string(),
+                "Hello".to_string(),
+                0,
+                None,
+            ),
+            ChatFact::message_read_ms(
+                test_context_id(),
+                test_channel_id(),
+                "msg".to_string(),
+                test_authority_id(),
+                0,
+            ),
         ];
 
         for fact in facts {

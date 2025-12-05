@@ -2,7 +2,7 @@
 //!
 //! CLI commands for running Aura capability demonstrations.
 
-use bpaf::{command, construct, long, Parser};
+use bpaf::{construct, long, Parser};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -72,49 +72,52 @@ impl FromStr for DemoScenarioArg {
 }
 
 fn recovery_workflow_command() -> impl Parser<DemoCommands> {
-    command(
-        "recovery-workflow",
-        construct!(DemoCommands::RecoveryWorkflow {
-            directory: long("directory")
-                .help("Scenario root directory (defaults to bundled scenarios/)")
-                .argument::<PathBuf>("DIR")
-                .optional(),
-            seed: long("seed")
-                .help("Deterministic seed for simulation")
-                .argument::<u64>("SEED")
-                .fallback(2024),
-            detailed_report: long("detailed-report")
-                .help("Emit detailed simulator report")
-                .switch(),
-        }),
-    )
+    let directory = long("directory")
+        .help("Scenario root directory (defaults to bundled scenarios/)")
+        .argument::<PathBuf>("DIR")
+        .optional();
+    let seed = long("seed")
+        .help("Deterministic seed for simulation")
+        .argument::<u64>("SEED")
+        .fallback(2024);
+    let detailed_report = long("detailed-report")
+        .help("Emit detailed simulator report")
+        .switch();
+
+    construct!(DemoCommands::RecoveryWorkflow {
+        directory,
+        seed,
+        detailed_report,
+    })
+    .to_options()
+    .command("recovery-workflow")
     .help("Run the CLI recovery demo workflow (Bob + guardians)")
 }
 
 fn tui_demo_command() -> impl Parser<DemoCommands> {
-    command(
-        "tui",
-        construct!(DemoCommands::Tui {
-            scenario: long("scenario")
-                .help("Demo scenario to run")
-                .argument::<DemoScenarioArg>("SCENARIO")
-                .fallback(DemoScenarioArg::HappyPath),
-        }),
-    )
-    .help("Run the TUI demo with simulated backend")
+    let scenario = long("scenario")
+        .help("Demo scenario to run (happy-path, slow-guardian, failed-recovery, interactive)")
+        .argument::<String>("SCENARIO")
+        .parse(|s| s.parse::<DemoScenarioArg>())
+        .fallback(DemoScenarioArg::HappyPath);
+
+    construct!(DemoCommands::Tui { scenario })
+        .to_options()
+        .command("tui")
+        .help("Run the TUI demo with simulated backend")
 }
 
 fn human_agent_command() -> impl Parser<DemoCommands> {
-    command(
-        "human-agent",
-        construct!(DemoCommands::HumanAgent {
-            scenario: long("scenario")
-                .help("Demo scenario to run")
-                .argument::<DemoScenarioArg>("SCENARIO")
-                .fallback(DemoScenarioArg::Interactive),
-        }),
-    )
-    .help("Run the interactive human-agent conversation demo")
+    let scenario = long("scenario")
+        .help("Demo scenario to run (happy-path, slow-guardian, failed-recovery, interactive)")
+        .argument::<String>("SCENARIO")
+        .parse(|s| s.parse::<DemoScenarioArg>())
+        .fallback(DemoScenarioArg::Interactive);
+
+    construct!(DemoCommands::HumanAgent { scenario })
+        .to_options()
+        .command("human-agent")
+        .help("Run the interactive human-agent conversation demo")
 }
 
 pub fn demo_parser() -> impl Parser<DemoCommands> {

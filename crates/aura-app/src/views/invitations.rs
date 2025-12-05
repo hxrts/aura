@@ -69,6 +69,10 @@ pub struct Invitation {
     pub expires_at: Option<u64>,
     /// Optional message from sender
     pub message: Option<String>,
+    /// Block ID (for block invitations)
+    pub block_id: Option<String>,
+    /// Block name (for block invitations)
+    pub block_name: Option<String>,
 }
 
 /// Invitations state
@@ -153,5 +157,40 @@ impl InvitationsState {
             inv.status = InvitationStatus::Rejected;
             self.history.push(inv);
         }
+    }
+
+    /// Revoke a sent invitation
+    pub fn revoke_invitation(&mut self, invitation_id: &str) {
+        if let Some(idx) = self.sent.iter().position(|inv| inv.id == invitation_id) {
+            let mut inv = self.sent.remove(idx);
+            inv.status = InvitationStatus::Revoked;
+            self.history.push(inv);
+        }
+    }
+
+    /// Mark an invitation as expired
+    pub fn expire_invitation(&mut self, invitation_id: &str) {
+        // Check in pending first
+        if let Some(idx) = self.pending.iter().position(|inv| inv.id == invitation_id) {
+            let mut inv = self.pending.remove(idx);
+            inv.status = InvitationStatus::Expired;
+            self.pending_count = self.pending_count.saturating_sub(1);
+            self.history.push(inv);
+            return;
+        }
+        // Check in sent
+        if let Some(idx) = self.sent.iter().position(|inv| inv.id == invitation_id) {
+            let mut inv = self.sent.remove(idx);
+            inv.status = InvitationStatus::Expired;
+            self.history.push(inv);
+        }
+    }
+
+    /// Get all pending invitations (both sent and received)
+    pub fn all_pending(&self) -> impl Iterator<Item = &Invitation> {
+        self.pending
+            .iter()
+            .chain(self.sent.iter())
+            .filter(|inv| inv.status == InvitationStatus::Pending)
     }
 }

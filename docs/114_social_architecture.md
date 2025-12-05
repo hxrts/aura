@@ -266,6 +266,57 @@ Each block has a maximum of 8 residents. This human-scale limit enables strong c
 
 Each block may join a maximum of 4 neighborhoods. This limits adjacency graph complexity and effect delegation routing overhead.
 
+## 12. Infrastructure Roles
+
+Blocks and neighborhoods provide infrastructure services beyond social organization. The `aura-social` crate implements these roles through materialized views and relay selection.
+
+### 12.1 Block Infrastructure
+
+Blocks provide data availability and relay services for residents:
+
+- **Data Replication**: Block residents replicate pinned data across available devices. The `BlockAvailability` type coordinates replication factor and failover.
+- **Message Relay**: Block peers serve as first-hop relays for unknown destinations. The `SocialTopology::block_peers()` method returns available relays.
+- **Storage Coordination**: The `StorageService` enforces storage budgets per resident and tracks usage facts.
+
+### 12.2 Neighborhood Infrastructure
+
+Neighborhoods enable multi-hop routing and cross-block coordination:
+
+- **Descriptor Propagation**: Neighborhood adjacency edges define descriptor propagation paths. Adjacent blocks exchange routing information.
+- **Traversal Capabilities**: `TraversalAllowedFact` grants movement between blocks. Traversal depth limits constrain routing overhead.
+- **Multi-Hop Relay**: When block-level relay fails, neighborhood traversal provides alternate paths.
+
+### 12.3 Progressive Discovery Layers
+
+The `aura-social` crate implements a four-layer discovery model:
+
+| Layer | Priority | Resources Required | Flow Cost |
+|-------|----------|-------------------|-----------|
+| Direct | 0 | Known peer relationship | Minimal |
+| Block | 1 | Block peers available | Low |
+| Neighborhood | 2 | Neighborhood traversal | Medium |
+| Rendezvous | 3 | Global flooding | High |
+
+Discovery layer selection uses `SocialTopology::discovery_layer()`:
+
+```rust
+let topology = SocialTopology::new(local_authority, block, neighborhoods);
+let layer = topology.discovery_layer(&target);
+```
+
+Lower priority layers are preferred when available. This creates economic incentives to establish social relationships before communication.
+
+### 12.4 Relay Selection
+
+The `RelayCandidateBuilder` generates relay candidates based on social topology:
+
+```rust
+let builder = RelayCandidateBuilder::from_topology(topology);
+let candidates = builder.build_candidates(&context, &reachability);
+```
+
+Candidates are returned in priority order: block peers first, then neighborhood peers, then guardians. Reachability checks filter unreachable peers.
+
 ## See Also
 
-[Database Architecture](113_database.md) describes fact storage and queries. [Transport and Information Flow](108_transport_and_information_flow.md) covers AMP messaging. [Authorization](109_authorization.md) describes capability evaluation.
+[Database Architecture](113_database.md) describes fact storage and queries. [Transport and Information Flow](108_transport_and_information_flow.md) covers AMP messaging. [Authorization](109_authorization.md) describes capability evaluation. [Rendezvous Architecture](110_rendezvous.md) details the four-layer discovery model integration.

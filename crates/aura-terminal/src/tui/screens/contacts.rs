@@ -10,6 +10,7 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::tui::components::{EmptyState, KeyHintsBar, StatusIndicator};
 use crate::tui::hooks::AppCoreContext;
@@ -116,8 +117,9 @@ pub fn ContactList(props: &ContactListProps) -> impl Into<AnyElement<'static>> {
                 } else {
                     contacts.iter().enumerate().map(|(idx, contact)| {
                         let is_selected = idx == selected;
+                        let id = contact.id.clone();
                         element! {
-                            View {
+                            View(key: id) {
                                 ContactItem(contact: contact.clone(), is_selected: is_selected)
                             }
                         }
@@ -294,6 +296,10 @@ pub fn ContactsScreen(
     let on_edit_petname = props.on_edit_petname.clone();
     let on_toggle_guardian = props.on_toggle_guardian.clone();
 
+    // Throttle for navigation keys - persists across renders using use_ref
+    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
+    let throttle_duration = Duration::from_millis(150);
+
     hooks.use_terminal_events({
         let mut selected = selected.clone();
         let mut detail_focused = detail_focused.clone();
@@ -302,15 +308,23 @@ pub fn ContactsScreen(
         move |event| match event {
             TerminalEvent::Key(KeyEvent { code, .. }) => match code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    let current = selected.get();
-                    if current > 0 {
-                        selected.set(current - 1);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        let current = selected.get();
+                        if current > 0 {
+                            selected.set(current - 1);
+                        }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    let current = selected.get();
-                    if current + 1 < count {
-                        selected.set(current + 1);
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        let current = selected.get();
+                        if current + 1 < count {
+                            selected.set(current + 1);
+                        }
+                        nav_throttle.set(Instant::now());
                     }
                 }
                 KeyCode::Tab => {
@@ -363,21 +377,19 @@ pub fn ContactsScreen(
                 flex_grow: 1.0,
                 gap: 1,
             ) {
-                // List (50%)
-                View(width: 50pct) {
+                // List (25%)
+                View(width: 25pct) {
                     ContactList(
                         contacts: contacts.clone(),
                         selected_index: current_selected,
                         focused: !is_detail_focused,
                     )
                 }
-                // Detail (50%)
-                View(flex_grow: 1.0) {
-                    ContactDetail(
-                        contact: selected_contact,
-                        focused: is_detail_focused,
-                    )
-                }
+                // Detail (75%)
+                ContactDetail(
+                    contact: selected_contact,
+                    focused: is_detail_focused,
+                )
             }
 
             // Key hints

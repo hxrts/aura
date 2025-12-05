@@ -679,17 +679,16 @@ impl<S: StorageEffects + Send + Sync> StorageEffects for AuthorizedStorageHandle
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AccountAuthority;
-    use aura_core::identifiers::DeviceId;
-    use aura_core::AccountId;
+    use crate::TokenAuthority;
 
-    fn setup_test_authority() -> AccountAuthority {
-        AccountAuthority::new(AccountId::new_from_entropy([9u8; 32]))
+    fn setup_test_authority() -> (TokenAuthority, AuthorityId) {
+        let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
+        let authority = TokenAuthority::new(authority_id);
+        (authority, authority_id)
     }
 
     fn setup_test_evaluator() -> BiscuitStorageEvaluator {
-        let authority = setup_test_authority();
-        let authority_id = AuthorityId::from_uuid(authority.account_id().0);
+        let (authority, authority_id) = setup_test_authority();
         BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id)
     }
 
@@ -782,9 +781,9 @@ mod tests {
 
     #[test]
     fn test_biscuit_access_request() {
-        let authority = setup_test_authority();
-        let device_id = DeviceId::new_from_entropy([1u8; 32]);
-        let token = authority.create_device_token(device_id).unwrap();
+        let (authority, _authority_id) = setup_test_authority();
+        let recipient = AuthorityId::new_from_entropy([1u8; 32]);
+        let token = authority.create_token(recipient).unwrap();
         let token_bytes = token.to_vec().unwrap();
 
         let request = BiscuitAccessRequest::new(
@@ -928,10 +927,9 @@ mod tests {
         use aura_core::types::epochs::Epoch;
 
         let mock_storage = MockStorage::new();
-        let authority = setup_test_authority();
-        let device_id = DeviceId::new_from_entropy([1u8; 32]);
-        let token = authority.create_device_token(device_id).unwrap();
-        let authority_id = AuthorityId::from_uuid(authority.account_id().0);
+        let (authority, authority_id) = setup_test_authority();
+        let recipient = AuthorityId::new_from_entropy([1u8; 32]);
+        let token = authority.create_token(recipient).unwrap();
         let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
         let budget = FlowBudget::new(10000, Epoch::initial());
 
@@ -978,10 +976,9 @@ mod tests {
         use aura_core::types::epochs::Epoch;
 
         let mock_storage = MockStorage::new();
-        let authority = setup_test_authority();
-        let device_id = DeviceId::new_from_entropy([2u8; 32]);
-        let token = authority.create_device_token(device_id).unwrap();
-        let authority_id = AuthorityId::from_uuid(authority.account_id().0);
+        let (authority, authority_id) = setup_test_authority();
+        let recipient = AuthorityId::new_from_entropy([2u8; 32]);
+        let token = authority.create_token(recipient).unwrap();
         let evaluator = BiscuitStorageEvaluator::new(authority.root_public_key(), authority_id);
         let budget = FlowBudget::new(1000, Epoch::initial());
 

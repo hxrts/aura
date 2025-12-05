@@ -1,18 +1,17 @@
 //! Epoch Management Pattern
 //!
 //! Generic epoch rotation coordination pattern.
+//!
+//! **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 
 use crate::core::{sync_protocol_error, SyncError};
+use aura_core::time::PhysicalTime;
 use aura_core::{ContextId, DeviceId};
 // Note: aura-sync intentionally avoids aura-macros for semantic independence
 // use aura_macros::choreography;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
-
-fn now_ms() -> u64 {
-    0 // deterministic default; callers should supply PhysicalTimeEffects
-}
+use std::time::Duration;
 
 /// Epoch rotation coordinator using choreographic protocols
 #[derive(Debug, Clone)]
@@ -33,13 +32,16 @@ pub struct EpochConfig {
 }
 
 /// Epoch rotation state
+///
+/// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 #[derive(Debug, Clone)]
 pub struct EpochRotation {
     pub rotation_id: String,
     pub target_epoch: u64,
     pub participants: Vec<DeviceId>,
     pub confirmations: HashMap<DeviceId, EpochConfirmation>,
-    pub initiated_at_ms: u64,
+    /// When rotation was initiated (unified time system)
+    pub initiated_at: PhysicalTime,
     pub status: RotationStatus,
 }
 
@@ -54,6 +56,8 @@ pub enum RotationStatus {
 }
 
 /// Epoch rotation proposal
+///
+/// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpochRotationProposal {
     pub rotation_id: String,
@@ -61,26 +65,54 @@ pub struct EpochRotationProposal {
     pub proposer_id: DeviceId,
     pub participants: Vec<DeviceId>,
     pub context_id: ContextId,
-    pub timestamp_ms: u64,
+    /// When proposal was created (unified time system)
+    pub timestamp: PhysicalTime,
+}
+
+impl EpochRotationProposal {
+    /// Get timestamp in milliseconds for backward compatibility
+    pub fn timestamp_ms(&self) -> u64 {
+        self.timestamp.ts_ms
+    }
 }
 
 /// Epoch confirmation from participant
+///
+/// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpochConfirmation {
     pub rotation_id: String,
     pub participant_id: DeviceId,
     pub current_epoch: u64,
     pub ready_for_epoch: u64,
-    pub confirmation_timestamp_ms: u64,
+    /// When confirmation was sent (unified time system)
+    pub confirmation_timestamp: PhysicalTime,
+}
+
+impl EpochConfirmation {
+    /// Get confirmation timestamp in milliseconds for backward compatibility
+    pub fn confirmation_timestamp_ms(&self) -> u64 {
+        self.confirmation_timestamp.ts_ms
+    }
 }
 
 /// Synchronized epoch commit
+///
+/// **Time System**: Uses `PhysicalTime` for timestamps per the unified time architecture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpochCommit {
     pub rotation_id: String,
     pub committed_epoch: u64,
-    pub commit_timestamp_ms: u64,
+    /// When commit was issued (unified time system)
+    pub commit_timestamp: PhysicalTime,
     pub participants: Vec<DeviceId>,
+}
+
+impl EpochCommit {
+    /// Get commit timestamp in milliseconds for backward compatibility
+    pub fn commit_timestamp_ms(&self) -> u64 {
+        self.commit_timestamp.ts_ms
+    }
 }
 
 impl Default for EpochConfig {
@@ -110,15 +142,26 @@ impl EpochRotationCoordinator {
     }
 
     /// Check if epoch rotation is needed
-    pub fn needs_rotation(&self, last_rotation: SystemTime) -> bool {
-        last_rotation.elapsed().unwrap_or_default() >= self.epoch_config.epoch_duration
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    /// Compares current time with last rotation time to determine if epoch duration has elapsed.
+    pub fn needs_rotation(
+        &self,
+        last_rotation: &PhysicalTime,
+        current_time: &PhysicalTime,
+    ) -> bool {
+        let elapsed_ms = current_time.ts_ms.saturating_sub(last_rotation.ts_ms);
+        elapsed_ms >= self.epoch_config.epoch_duration.as_millis() as u64
     }
 
     /// Initiate epoch rotation
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
     pub fn initiate_rotation(
         &mut self,
         participants: Vec<DeviceId>,
         _context_id: ContextId,
+        now: &PhysicalTime,
     ) -> Result<String, SyncError> {
         if participants.len() < self.epoch_config.rotation_threshold {
             return Err(sync_protocol_error(
@@ -131,14 +174,14 @@ impl EpochRotationCoordinator {
             ));
         }
 
-        let rotation_id = format!("epoch-rotation-{}-{}", self.current_epoch + 1, now_ms());
+        let rotation_id = format!("epoch-rotation-{}-{}", self.current_epoch + 1, now.ts_ms);
 
         let rotation = EpochRotation {
             rotation_id: rotation_id.clone(),
             target_epoch: self.current_epoch + 1,
             participants: participants.clone(),
             confirmations: HashMap::new(),
-            initiated_at_ms: now_ms(),
+            initiated_at: now.clone(),
             status: RotationStatus::Initiated,
         };
 

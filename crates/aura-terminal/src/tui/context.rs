@@ -67,53 +67,90 @@ pub struct IoContext {
 
     /// AppCore for intent-based state management
     /// This is the portable application core from aura-app
-    app_core: Option<Arc<RwLock<AppCore>>>,
+    /// Always available - demo mode uses AppCore without agent
+    app_core: Arc<RwLock<AppCore>>,
 }
 
 impl IoContext {
-    /// Create a new IoContext with an effect bridge (demo mode, no AppCore)
-    pub fn new(bridge: EffectBridge) -> Self {
+    /// Create a new IoContext with an effect bridge (demo mode with default AppCore)
+    ///
+    /// Creates an AppCore without an agent, which provides:
+    /// - Full ViewState signal infrastructure
+    /// - Local-only intent dispatch
+    /// - No network/sync capabilities
+    ///
+    /// Note: The provided bridge should be created with `EffectBridge::with_app_core()`
+    /// to ensure signal-based state updates work correctly.
+    pub fn new(bridge: EffectBridge, app_core: Arc<RwLock<AppCore>>) -> Self {
         Self {
             bridge: Arc::new(bridge),
-            app_core: None,
+            app_core,
         }
     }
 
     /// Create a new IoContext with AppCore integration
     ///
     /// This is the production constructor that enables the full intent-based
-    /// state management flow from aura-app.
+    /// state management flow from aura-app. The bridge should be created with
+    /// `EffectBridge::with_app_core()` to enable signal-based state updates.
     pub fn with_app_core(bridge: EffectBridge, app_core: Arc<RwLock<AppCore>>) -> Self {
         Self {
             bridge: Arc::new(bridge),
-            app_core: Some(app_core),
+            app_core,
         }
     }
 
-    /// Create with default bridge configuration (demo mode)
+    /// Create with default bridge configuration (demo mode with AppCore)
+    ///
+    /// Creates an AppCore without an agent, which provides:
+    /// - Full ViewState signal infrastructure
+    /// - Local-only intent dispatch
+    /// - No network/sync capabilities
+    ///
+    /// The bridge is automatically configured with the AppCore for signal-based updates.
     pub fn with_defaults() -> Self {
-        Self::new(EffectBridge::new())
+        let app_core =
+            AppCore::new(aura_app::AppConfig::default()).expect("Failed to create default AppCore");
+        let app_core = Arc::new(RwLock::new(app_core));
+        let bridge = EffectBridge::with_app_core(app_core.clone());
+        Self {
+            bridge: Arc::new(bridge),
+            app_core,
+        }
     }
 
     /// Check if this context has AppCore integration
+    ///
+    /// Always returns true - AppCore is always available (demo mode uses agent-less AppCore)
+    #[inline]
     pub fn has_app_core(&self) -> bool {
-        self.app_core.is_some()
+        true
     }
 
-    /// Get the AppCore (if available)
-    pub fn app_core(&self) -> Option<&Arc<RwLock<AppCore>>> {
-        self.app_core.as_ref()
+    /// Get the AppCore
+    pub fn app_core(&self) -> &Arc<RwLock<AppCore>> {
+        &self.app_core
+    }
+
+    /// Check if an account (authority) has been set up
+    ///
+    /// Returns true if AppCore has an authority set,
+    /// indicating the user has completed account creation.
+    pub fn has_account(&self) -> bool {
+        // Use try_read to avoid blocking indefinitely
+        if let Ok(core) = self.app_core.try_read() {
+            return core.authority().is_some();
+        }
+        false
     }
 
     /// Get a snapshot from AppCore (blocking read lock)
     ///
-    /// Returns None if no AppCore is configured or if the lock is busy.
+    /// Returns None if the lock is busy.
     fn app_core_snapshot(&self) -> Option<aura_app::StateSnapshot> {
-        if let Some(app_core) = &self.app_core {
-            // Use try_read to avoid blocking indefinitely
-            if let Ok(core) = app_core.try_read() {
-                return Some(core.snapshot());
-            }
+        // Use try_read to avoid blocking indefinitely
+        if let Ok(core) = self.app_core.try_read() {
+            return Some(core.snapshot());
         }
         None
     }
@@ -492,6 +529,23 @@ impl IoContext {
     /// Get last error if any
     pub async fn last_error(&self) -> Option<String> {
         self.bridge.last_error().await
+    }
+
+    // ─── Sync Status ───────────────────────────────────────────────────────
+
+    /// Check if a sync operation is currently in progress
+    pub async fn is_syncing(&self) -> bool {
+        self.bridge.is_syncing().await
+    }
+
+    /// Get the timestamp of the last successful sync (ms since epoch)
+    pub async fn last_sync_time(&self) -> Option<u64> {
+        self.bridge.last_sync_time().await
+    }
+
+    /// Get the number of known peers for sync operations
+    pub async fn known_peers_count(&self) -> usize {
+        self.bridge.known_peers_count().await
     }
 }
 

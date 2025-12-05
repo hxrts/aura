@@ -3,7 +3,8 @@
 //! This module contains the aggregate view state that holds all view states.
 
 use super::{
-    BlockState, ChatState, ContactsState, InvitationsState, NeighborhoodState, RecoveryState,
+    BlockState, BlocksState, ChatState, ContactsState, InvitationsState, NeighborhoodState,
+    RecoveryState,
 };
 use crate::core::{StateSnapshot, ViewDelta};
 use cfg_if::cfg_if;
@@ -28,8 +29,10 @@ cfg_if! {
             invitations: Mutable<InvitationsState>,
             /// Contacts state
             contacts: Mutable<ContactsState>,
-            /// Block state
+            /// Current block state (for backwards compatibility)
             block: Mutable<BlockState>,
+            /// Multi-block state (all blocks the user has created/joined)
+            blocks: Mutable<BlocksState>,
             /// Neighborhood state
             neighborhood: Mutable<NeighborhoodState>,
         }
@@ -46,8 +49,10 @@ cfg_if! {
             invitations: InvitationsState,
             /// Contacts state
             contacts: ContactsState,
-            /// Block state
+            /// Current block state (for backwards compatibility)
             block: BlockState,
+            /// Multi-block state (all blocks the user has created/joined)
+            blocks: BlocksState,
             /// Neighborhood state
             neighborhood: NeighborhoodState,
         }
@@ -64,6 +69,7 @@ cfg_if! {
                     invitations: Mutable::new(InvitationsState::default()),
                     contacts: Mutable::new(ContactsState::default()),
                     block: Mutable::new(BlockState::default()),
+                    blocks: Mutable::new(BlocksState::default()),
                     neighborhood: Mutable::new(NeighborhoodState::default()),
                 }
             }
@@ -77,6 +83,7 @@ cfg_if! {
                     invitations: InvitationsState::default(),
                     contacts: ContactsState::default(),
                     block: BlockState::default(),
+                    blocks: BlocksState::default(),
                     neighborhood: NeighborhoodState::default(),
                 }
             }
@@ -95,6 +102,7 @@ impl ViewState {
                     invitations: self.invitations.get_cloned(),
                     contacts: self.contacts.get_cloned(),
                     block: self.block.get_cloned(),
+                    blocks: self.blocks.get_cloned(),
                     neighborhood: self.neighborhood.get_cloned(),
                 }
             } else {
@@ -104,6 +112,7 @@ impl ViewState {
                     invitations: self.invitations.clone(),
                     contacts: self.contacts.clone(),
                     block: self.block.clone(),
+                    blocks: self.blocks.clone(),
                     neighborhood: self.neighborhood.clone(),
                 }
             }
@@ -148,9 +157,40 @@ cfg_if! {
                 self.neighborhood.signal_cloned()
             }
 
+            /// Get a signal for blocks state (multi-block management)
+            pub fn blocks_signal(&self) -> impl Signal<Item = BlocksState> {
+                self.blocks.signal_cloned()
+            }
+
+            /// Get a clone of the current blocks state
+            ///
+            /// This returns a snapshot of the blocks state for read-only access.
+            /// For reactive updates, use `blocks_signal()` instead.
+            pub fn get_blocks(&self) -> BlocksState {
+                self.blocks.get_cloned()
+            }
+
+            /// Get a clone of the current recovery state
+            pub fn get_recovery(&self) -> RecoveryState {
+                self.recovery.get_cloned()
+            }
+
+            /// Get a clone of the current invitations state
+            pub fn get_invitations(&self) -> InvitationsState {
+                self.invitations.get_cloned()
+            }
+
             /// Update chat state
             pub fn set_chat(&self, state: ChatState) {
                 self.chat.set(state);
+            }
+
+            /// Select a channel (UI-only, not journaled)
+            ///
+            /// This updates the selected channel in ChatState and triggers
+            /// the chat signal for UI updates.
+            pub fn select_channel(&self, channel_id: Option<String>) {
+                self.chat.lock_mut().select_channel(channel_id);
             }
 
             /// Update recovery state
@@ -176,6 +216,29 @@ cfg_if! {
             /// Update neighborhood state
             pub fn set_neighborhood(&self, state: NeighborhoodState) {
                 self.neighborhood.set(state);
+            }
+
+            /// Update blocks state
+            pub fn set_blocks(&self, state: BlocksState) {
+                self.blocks.set(state);
+            }
+
+            /// Select a block (UI-only, not journaled)
+            ///
+            /// This updates the selected block in BlocksState and triggers
+            /// the blocks signal for UI updates.
+            pub fn select_block(&self, block_id: Option<String>) {
+                self.blocks.lock_mut().select_block(block_id);
+            }
+
+            /// Add a block to the blocks state
+            pub fn add_block(&self, block: BlockState) {
+                self.blocks.lock_mut().add_block(block);
+            }
+
+            /// Remove a block from the blocks state
+            pub fn remove_block(&self, block_id: &str) -> Option<BlockState> {
+                self.blocks.lock_mut().remove_block(block_id)
             }
         }
     }
@@ -247,6 +310,21 @@ cfg_if! {
             pub fn set_neighborhood(&mut self, state: NeighborhoodState) {
                 self.neighborhood = state;
             }
+
+            /// Get current blocks state
+            pub fn blocks(&self) -> &BlocksState {
+                &self.blocks
+            }
+
+            /// Get mutable blocks state
+            pub fn blocks_mut(&mut self) -> &mut BlocksState {
+                &mut self.blocks
+            }
+
+            /// Update blocks state
+            pub fn set_blocks(&mut self, state: BlocksState) {
+                self.blocks = state;
+            }
         }
     }
 }
@@ -293,8 +371,8 @@ cfg_if! {
                         self.block.lock_mut().set_name(name);
                     }
                     ViewDelta::RecoveryRequested { session_id } => {
-                        // Use 0 as initiated_at since we don't have timestamp in delta
-                        self.recovery.lock_mut().initiate_recovery(session_id, 0);
+                        // Use empty account_id and 0 as initiated_at since we don't have them in delta
+                        self.recovery.lock_mut().initiate_recovery(session_id, String::new(), 0);
                     }
                     ViewDelta::GuardianApproved { guardian_id } => {
                         self.recovery.lock_mut().add_guardian_approval(guardian_id);
@@ -314,6 +392,8 @@ cfg_if! {
                             created_at: 0,
                             expires_at: None,
                             message: None,
+                            block_id: None,
+                            block_name: None,
                         };
                         self.invitations.lock_mut().add_invitation(invitation);
                     }
@@ -372,8 +452,8 @@ cfg_if! {
                         self.block.set_name(name);
                     }
                     ViewDelta::RecoveryRequested { session_id } => {
-                        // Use 0 as initiated_at since we don't have timestamp in delta
-                        self.recovery.initiate_recovery(session_id, 0);
+                        // Use empty account_id and 0 as initiated_at since we don't have them in delta
+                        self.recovery.initiate_recovery(session_id, String::new(), 0);
                     }
                     ViewDelta::GuardianApproved { guardian_id } => {
                         self.recovery.add_guardian_approval(guardian_id);
@@ -393,6 +473,8 @@ cfg_if! {
                             created_at: 0,
                             expires_at: None,
                             message: None,
+                            block_id: None,
+                            block_name: None,
                         };
                         self.invitations.add_invitation(invitation);
                     }

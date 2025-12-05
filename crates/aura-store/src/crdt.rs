@@ -4,7 +4,8 @@
 //! implementing join and meet semilattice operations for convergence.
 
 use crate::SearchIndexEntry;
-use aura_core::{ChunkId, ContentId, JoinSemilattice};
+use aura_core::time::PhysicalTime;
+use aura_core::{AuthorityId, ChunkId, ContentId, JoinSemilattice};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -170,27 +171,64 @@ impl JoinSemilattice for StorageOpLog {
 }
 
 /// Individual storage operation for operation-based CRDT
+///
+/// **Authority Model**: Operations are attributed to authorities, not devices.
+/// This aligns with Aura's authority-centric identity model.
+///
+/// **Time System**: Uses `PhysicalTime` for wall-clock timestamps per the
+/// unified time system architecture.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StorageOperation {
     /// Operation type
     pub op_type: StorageOpType,
     /// Operation counter for ordering
     pub counter: u64,
-    /// Timestamp when operation was created
-    pub timestamp: u64,
-    /// Actor who created the operation
-    pub actor: String,
+    /// Timestamp when operation was created (unified time system)
+    pub timestamp: PhysicalTime,
+    /// Authority who created the operation
+    pub authority: AuthorityId,
 }
 
 impl StorageOperation {
     /// Create a new storage operation
-    pub fn new(op_type: StorageOpType, counter: u64, actor: String, timestamp: u64) -> Self {
+    pub fn new(
+        op_type: StorageOpType,
+        counter: u64,
+        authority: AuthorityId,
+        timestamp: PhysicalTime,
+    ) -> Self {
         Self {
             op_type,
             counter,
             timestamp,
-            actor,
+            authority,
         }
+    }
+
+    /// Create a new storage operation from milliseconds timestamp
+    ///
+    /// Convenience constructor that wraps a raw milliseconds timestamp
+    /// in PhysicalTime with no uncertainty.
+    pub fn new_from_ms(
+        op_type: StorageOpType,
+        counter: u64,
+        authority: AuthorityId,
+        timestamp_ms: u64,
+    ) -> Self {
+        Self::new(
+            op_type,
+            counter,
+            authority,
+            PhysicalTime {
+                ts_ms: timestamp_ms,
+                uncertainty: None,
+            },
+        )
+    }
+
+    /// Get the timestamp in milliseconds for backward compatibility
+    pub fn timestamp_ms(&self) -> u64 {
+        self.timestamp.ts_ms
     }
 
     /// Apply this operation to a storage index
@@ -268,13 +306,18 @@ impl StorageState {
         }
     }
 
-    /// Add content with capabilities
+    /// Add content to the storage state
+    ///
+    /// **Authority Model**: Content additions are attributed to the authority
+    /// performing the operation, not individual devices.
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
     pub fn add_content(
         &mut self,
         content_id: ContentId,
         entry: SearchIndexEntry,
-        actor: String,
-        timestamp: u64,
+        authority: AuthorityId,
+        timestamp: PhysicalTime,
     ) {
         let op = StorageOperation::new(
             StorageOpType::AddContent {
@@ -282,7 +325,7 @@ impl StorageState {
                 entry: entry.clone(),
             },
             self.op_log.counter + 1,
-            actor,
+            authority,
             timestamp,
         );
 
@@ -290,14 +333,24 @@ impl StorageState {
         self.index.add_entry(content_id, entry);
     }
 
-    /// Remove content
-    pub fn remove_content(&mut self, content_id: ContentId, actor: String, timestamp: u64) {
+    /// Remove content from the storage state
+    ///
+    /// **Authority Model**: Content removals are attributed to the authority
+    /// performing the operation, not individual devices.
+    ///
+    /// **Time System**: Uses `PhysicalTime` for timestamps.
+    pub fn remove_content(
+        &mut self,
+        content_id: ContentId,
+        authority: AuthorityId,
+        timestamp: PhysicalTime,
+    ) {
         let op = StorageOperation::new(
             StorageOpType::RemoveContent {
                 content_id: content_id.clone(),
             },
             self.op_log.counter + 1,
-            actor,
+            authority,
             timestamp,
         );
 
@@ -325,12 +378,14 @@ impl JoinSemilattice for StorageState {
 }
 
 /// Chunk availability tracker CRDT
+///
+/// **Time System**: Uses `PhysicalTime` for node update timestamps.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChunkAvailability {
     /// Mapping from chunk ID to set of nodes that have it
     pub chunk_locations: BTreeMap<ChunkId, BTreeSet<String>>,
-    /// Last update timestamp per node
-    pub node_timestamps: BTreeMap<String, u64>,
+    /// Last update timestamp per node (unified time system)
+    pub node_timestamps: BTreeMap<String, PhysicalTime>,
 }
 
 impl ChunkAvailability {
@@ -343,13 +398,29 @@ impl ChunkAvailability {
     }
 
     /// Mark chunk as available on a node
-    pub fn add_chunk(&mut self, chunk_id: ChunkId, node_id: String, timestamp: u64) {
+    ///
+    /// **Time System**: Uses `PhysicalTime` for update timestamps.
+    pub fn add_chunk(&mut self, chunk_id: ChunkId, node_id: String, timestamp: PhysicalTime) {
         self.chunk_locations
             .entry(chunk_id)
             .or_default()
             .insert(node_id.clone());
 
         self.node_timestamps.insert(node_id, timestamp);
+    }
+
+    /// Mark chunk as available on a node (from milliseconds)
+    ///
+    /// Convenience method for backward compatibility.
+    pub fn add_chunk_ms(&mut self, chunk_id: ChunkId, node_id: String, timestamp_ms: u64) {
+        self.add_chunk(
+            chunk_id,
+            node_id,
+            PhysicalTime {
+                ts_ms: timestamp_ms,
+                uncertainty: None,
+            },
+        );
     }
 
     /// Remove chunk from a node
@@ -395,13 +466,17 @@ impl JoinSemilattice for ChunkAvailability {
                 .extend(other_nodes.iter().cloned());
         }
 
-        // Merge node timestamps (take latest)
+        // Merge node timestamps (take latest by ts_ms)
         let mut merged_timestamps = self.node_timestamps.clone();
         for (node_id, other_timestamp) in &other.node_timestamps {
             merged_timestamps
                 .entry(node_id.clone())
-                .and_modify(|timestamp| *timestamp = (*timestamp).max(*other_timestamp))
-                .or_insert(*other_timestamp);
+                .and_modify(|timestamp| {
+                    if other_timestamp.ts_ms > timestamp.ts_ms {
+                        *timestamp = other_timestamp.clone();
+                    }
+                })
+                .or_insert(other_timestamp.clone());
         }
 
         Self {
@@ -415,6 +490,17 @@ impl JoinSemilattice for ChunkAvailability {
 mod tests {
     use super::*;
 
+    fn test_authority(seed: u8) -> AuthorityId {
+        AuthorityId::new_from_entropy([seed; 32])
+    }
+
+    fn test_time(ts_ms: u64) -> PhysicalTime {
+        PhysicalTime {
+            ts_ms,
+            uncertainty: None,
+        }
+    }
+
     #[test]
     fn test_storage_index_join() {
         let mut index1 = StorageIndex::new();
@@ -427,14 +513,14 @@ mod tests {
             "content1".to_string(),
             ["term1"].iter().map(|&s| s.to_string()).collect(),
             vec![],
-            1000, // timestamp
+            test_time(1000),
         );
 
         let entry2 = SearchIndexEntry::new(
             "content2".to_string(),
             ["term2"].iter().map(|&s| s.to_string()).collect(),
             vec![],
-            2000, // timestamp
+            test_time(2000),
         );
 
         index1.add_entry(content_id1.clone(), entry1);
@@ -455,21 +541,31 @@ mod tests {
         let op1 = StorageOperation::new(
             StorageOpType::AddContent {
                 content_id: ContentId::from_bytes(b"content1"),
-                entry: SearchIndexEntry::new("content1".to_string(), BTreeSet::new(), vec![], 1000),
+                entry: SearchIndexEntry::new(
+                    "content1".to_string(),
+                    BTreeSet::new(),
+                    vec![],
+                    test_time(1000),
+                ),
             },
             1,
-            "node1".to_string(),
-            1000, // timestamp
+            test_authority(1),
+            test_time(1000),
         );
 
         let op2 = StorageOperation::new(
             StorageOpType::AddContent {
                 content_id: ContentId::from_bytes(b"content2"),
-                entry: SearchIndexEntry::new("content2".to_string(), BTreeSet::new(), vec![], 2000),
+                entry: SearchIndexEntry::new(
+                    "content2".to_string(),
+                    BTreeSet::new(),
+                    vec![],
+                    test_time(2000),
+                ),
             },
             2,
-            "node2".to_string(),
-            2000, // timestamp
+            test_authority(2),
+            test_time(2000),
         );
 
         log1.add_operation(op1);
@@ -488,8 +584,8 @@ mod tests {
 
         let chunk_id = ChunkId::from_bytes(b"chunk1");
 
-        avail1.add_chunk(chunk_id.clone(), "node1".to_string(), 10);
-        avail2.add_chunk(chunk_id.clone(), "node2".to_string(), 20);
+        avail1.add_chunk(chunk_id.clone(), "node1".to_string(), test_time(10));
+        avail2.add_chunk(chunk_id.clone(), "node2".to_string(), test_time(20));
 
         let merged = avail1.join(&avail2);
 

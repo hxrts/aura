@@ -207,7 +207,10 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             initiator_id: request.initiator_id,
             guardian_ids: guardian_ids.clone(),
             threshold: request.threshold as u16,
-            initiated_at_ms: now_ms,
+            initiated_at: PhysicalTime {
+                ts_ms: now_ms,
+                uncertainty: None,
+            },
         };
         self.emit_fact(initiated_fact).await?;
 
@@ -216,7 +219,10 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             let failed_fact = RecoveryFact::GuardianSetupFailed {
                 context_id,
                 reason: "No guardians specified".to_string(),
-                failed_at_ms: now_ms,
+                failed_at: PhysicalTime {
+                    ts_ms: now_ms,
+                    uncertainty: None,
+                },
             };
             let _ = self.emit_fact(failed_fact).await;
             return Ok(RecoveryResponse::error("No guardians specified"));
@@ -246,12 +252,14 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
                     acceptances.len(),
                     request.threshold
                 ),
-                failed_at_ms: self
+                failed_at: self
                     .effect_system()
                     .physical_time()
                     .await
-                    .map(|t| t.ts_ms)
-                    .unwrap_or(0),
+                    .unwrap_or(PhysicalTime {
+                        ts_ms: 0,
+                        uncertainty: None,
+                    }),
             };
             let _ = self.emit_fact(failed_fact).await;
 
@@ -279,12 +287,14 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
             context_id,
             guardian_ids: shares.iter().map(|s| s.guardian_id).collect(),
             threshold: request.threshold as u16,
-            completed_at_ms: self
+            completed_at: self
                 .effect_system()
                 .physical_time()
                 .await
-                .map(|t| t.ts_ms)
-                .unwrap_or(0),
+                .unwrap_or(PhysicalTime {
+                    ts_ms: 0,
+                    uncertainty: None,
+                }),
         };
         self.emit_fact(completed_fact).await?;
 
@@ -320,7 +330,7 @@ impl<E: RecoveryEffects + 'static> GuardianSetupCoordinator<E> {
         let accepted_fact = RecoveryFact::GuardianAccepted {
             context_id,
             guardian_id,
-            accepted_at_ms: physical_time.ts_ms,
+            accepted_at: physical_time.clone(),
         };
         self.emit_fact(accepted_fact).await?;
 
@@ -384,9 +394,8 @@ mod tests {
         crate::types::RecoveryRequest {
             initiator_id: test_authority_id(0),
             account_id: test_authority_id(10),
-            context: aura_authenticate::guardian_auth::RecoveryContext {
-                operation_type:
-                    aura_authenticate::guardian_auth::RecoveryOperationType::DeviceKeyRecovery,
+            context: aura_authenticate::RecoveryContext {
+                operation_type: aura_authenticate::RecoveryOperationType::DeviceKeyRecovery,
                 justification: "Test recovery".to_string(),
                 is_emergency: false,
                 timestamp: 0,

@@ -4,6 +4,7 @@
 //! all integration test scenarios.
 
 use super::test_device_id;
+use aura_core::time::PhysicalTime;
 use aura_core::{AuraError, AuraResult, DeviceId};
 use aura_sync::{
     core::{SessionManager, SyncConfig, SyncResult},
@@ -102,9 +103,12 @@ impl MultiDeviceTestFixture {
     }
 
     /// Get current time for session management
-    fn current_time() -> u64 {
+    fn current_time() -> PhysicalTime {
         // Use deterministic timestamp for reproducible tests
-        1700000000u64 // 2023-11-15 in seconds
+        PhysicalTime {
+            ts_ms: 1700000000000, // 2023-11-15 in milliseconds
+            uncertainty: None,
+        }
     }
 
     /// Create coordinated session across all devices

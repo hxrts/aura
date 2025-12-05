@@ -3,7 +3,8 @@
 //! Main runtime system that orchestrates all agent operations.
 
 use super::services::{
-    ContextManager, FlowBudgetManager, ReceiptManager, RendezvousManager, SyncServiceManager,
+    ContextManager, FlowBudgetManager, ReceiptManager, RendezvousManager, SocialManager,
+    SyncServiceManager,
 };
 use super::{
     AuraEffectSystem, ChoreographyAdapter, EffectContext, EffectExecutor, LifecycleManager,
@@ -43,6 +44,9 @@ pub struct RuntimeSystem {
     /// Rendezvous manager (optional, for peer discovery and channel establishment)
     rendezvous_manager: Option<RendezvousManager>,
 
+    /// Social manager (optional, for social topology and relay selection)
+    social_manager: Option<SocialManager>,
+
     /// Configuration
     #[allow(dead_code)] // Will be used for runtime configuration
     config: AgentConfig,
@@ -76,6 +80,7 @@ impl RuntimeSystem {
             lifecycle_manager,
             sync_manager: None,
             rendezvous_manager: None,
+            social_manager: None,
             config,
             authority_id,
         }
@@ -106,6 +111,7 @@ impl RuntimeSystem {
             lifecycle_manager,
             sync_manager: Some(sync_manager),
             rendezvous_manager: None,
+            social_manager: None,
             config,
             authority_id,
         }
@@ -136,12 +142,13 @@ impl RuntimeSystem {
             lifecycle_manager,
             sync_manager: None,
             rendezvous_manager: Some(rendezvous_manager),
+            social_manager: None,
             config,
             authority_id,
         }
     }
 
-    /// Create a new runtime system with both sync and rendezvous services
+    /// Create a new runtime system with all services
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_with_services(
         effect_executor: EffectExecutor,
@@ -153,6 +160,7 @@ impl RuntimeSystem {
         lifecycle_manager: LifecycleManager,
         sync_manager: Option<SyncServiceManager>,
         rendezvous_manager: Option<RendezvousManager>,
+        social_manager: Option<SocialManager>,
         config: AgentConfig,
         authority_id: AuthorityId,
     ) -> Self {
@@ -166,6 +174,7 @@ impl RuntimeSystem {
             lifecycle_manager,
             sync_manager,
             rendezvous_manager,
+            social_manager,
             config,
             authority_id,
         }
@@ -224,6 +233,16 @@ impl RuntimeSystem {
     /// Check if rendezvous service is enabled
     pub fn has_rendezvous(&self) -> bool {
         self.rendezvous_manager.is_some()
+    }
+
+    /// Get the social manager (if enabled)
+    pub fn social(&self) -> Option<&SocialManager> {
+        self.social_manager.as_ref()
+    }
+
+    /// Check if social service is enabled
+    pub fn has_social(&self) -> bool {
+        self.social_manager.is_some()
     }
 
     /// Shutdown the runtime system

@@ -11,6 +11,7 @@
 use iocraft::prelude::*;
 
 use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
 
 use crate::tui::components::{
     navigate_list, KeyHintsBar, ListNavigation, MessageBubble, MessageInput,
@@ -21,6 +22,9 @@ use crate::tui::types::{Channel, KeyHint, Message};
 
 /// Callback type for sending messages
 pub type SendCallback = Arc<dyn Fn(String, String) + Send + Sync>;
+
+/// Callback type for channel selection (channel_id)
+pub type ChannelSelectCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Format a timestamp (ms since epoch) as a human-readable time string
 fn format_timestamp(ts_ms: u64) -> String {
@@ -86,7 +90,12 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
             width: 25pct,
         ) {
             Text(content: "Channels", weight: Weight::Bold, color: Theme::PRIMARY)
-            View(height: Spacing::XS)
+            View(
+                flex_direction: FlexDirection::Column,
+                flex_grow: 1.0,
+                overflow: Overflow::Scroll,
+                margin_top: Spacing::XS,
+            ) {
             #(props.channels.iter().enumerate().map(|(idx, ch)| {
                 let is_selected = idx == selected_idx;
                 let (bg, fg) = if is_selected {
@@ -94,6 +103,7 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
                 } else {
                     (Theme::BG_DARK, Theme::TEXT_MUTED)
                 };
+                let id = ch.id.clone();
                 let name = ch.name.clone();
                 let badge = if ch.unread_count > 0 {
                     format!(" ({})", ch.unread_count)
@@ -102,11 +112,12 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
                 };
                 let indicator = if is_selected { "→ " } else { "  " };
                 element! {
-                    View(background_color: bg, padding_left: Spacing::XS, padding_right: Spacing::XS) {
+                    View(key: id, background_color: bg, padding_left: Spacing::XS, padding_right: Spacing::XS) {
                         Text(content: format!("{}# {}{}", indicator, name, badge), color: fg)
                     }
                 }
             }))
+            }
         }
     }
 }
@@ -130,11 +141,13 @@ pub fn MessageList(props: &MessageListProps) -> impl Into<AnyElement<'static>> {
             padding: Spacing::PANEL_PADDING,
         ) {
             #(props.messages.iter().map(|msg| {
+                let id = msg.id.clone();
                 let sender = msg.sender.clone();
                 let content = msg.content.clone();
                 let ts = msg.timestamp.clone();
                 element! {
                     MessageBubble(
+                        key: id,
                         sender: sender,
                         content: content,
                         timestamp: ts,
@@ -159,6 +172,8 @@ pub struct ChatScreenProps {
     pub initial_channel_index: usize,
     /// Callback when sending a message (channel_id, content)
     pub on_send: Option<SendCallback>,
+    /// Callback when selecting a channel (channel_id)
+    pub on_channel_select: Option<ChannelSelectCallback>,
 }
 
 /// The main chat screen component with keyboard navigation
@@ -248,6 +263,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let hints = props.hints.clone();
     let channel_count = channels.len();
     let on_send = props.on_send.clone();
+    let on_channel_select = props.on_channel_select.clone();
 
     // State for channel selection (usize is Copy, so use_state works)
     let mut channel_idx = hooks.use_state(|| props.initial_channel_index);
@@ -269,11 +285,20 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         .map(|c| c.id.clone())
         .unwrap_or_default();
 
+    // Clone channels for use in event handler
+    let channels_for_handler = channels.clone();
+
+    // Throttle for navigation keys - persists across renders
+    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
+    let throttle_duration = Duration::from_millis(150);
+
     // Handle keyboard events
     hooks.use_terminal_events({
         let input_text = input_text_for_handler;
         let current_channel_id = current_channel_id.clone();
         let on_send = on_send.clone();
+        let on_channel_select = on_channel_select.clone();
+        let channels = channels_for_handler;
         move |event| match event {
             TerminalEvent::Key(KeyEvent {
                 code, modifiers, ..
@@ -296,22 +321,38 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         };
                         focus.set(new_focus);
                     }
-                    // Arrow keys navigate within focused panel
+                    // Arrow keys navigate within focused panel (with throttle)
                     KeyCode::Up => {
-                        if focus.get() == ChatFocus::Channels && channel_count > 0 {
+                        let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                        if should_move && focus.get() == ChatFocus::Channels && channel_count > 0 {
                             let new_idx =
                                 navigate_list(channel_idx.get(), channel_count, ListNavigation::Up);
                             channel_idx.set(new_idx);
+                            nav_throttle.set(Instant::now());
+                            // Notify AppCore of channel selection for real-time message updates
+                            if let Some(ref callback) = on_channel_select {
+                                if let Some(ch) = channels.get(new_idx) {
+                                    callback(ch.id.clone());
+                                }
+                            }
                         }
                     }
                     KeyCode::Down => {
-                        if focus.get() == ChatFocus::Channels && channel_count > 0 {
+                        let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                        if should_move && focus.get() == ChatFocus::Channels && channel_count > 0 {
                             let new_idx = navigate_list(
                                 channel_idx.get(),
                                 channel_count,
                                 ListNavigation::Down,
                             );
                             channel_idx.set(new_idx);
+                            nav_throttle.set(Instant::now());
+                            // Notify AppCore of channel selection for real-time message updates
+                            if let Some(ref callback) = on_channel_select {
+                                if let Some(ch) = channels.get(new_idx) {
+                                    callback(ch.id.clone());
+                                }
+                            }
                         }
                     }
                     // Enter sends message when input is focused
@@ -391,11 +432,12 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         ) {
             // Header with current channel
             View(
-                padding: Spacing::PANEL_PADDING,
-                border_style: BorderStyle::Round,
+                padding: 1,
+                border_style: BorderStyle::Single,
+                border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
             ) {
-                Text(content: format!("Aura Chat - #{}", channel_name), weight: Weight::Bold, color: Theme::PRIMARY)
+                Text(content: format!("Chat - #{}", channel_name), weight: Weight::Bold, color: Theme::PRIMARY)
             }
 
             // Main content area
@@ -415,13 +457,16 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                     border_style: BorderStyle::Round,
                     border_color: msg_border,
                     padding: Spacing::PANEL_PADDING,
+                    overflow: Overflow::Scroll,
                 ) {
                     #(messages.iter().map(|msg| {
+                        let id = msg.id.clone();
                         let sender = msg.sender.clone();
                         let content = msg.content.clone();
                         let ts = msg.timestamp.clone();
                         element! {
                             MessageBubble(
+                                key: id,
                                 sender: sender,
                                 content: content,
                                 timestamp: ts,

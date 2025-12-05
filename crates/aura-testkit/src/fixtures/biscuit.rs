@@ -1,27 +1,31 @@
 //! Biscuit token fixtures for testing authorization scenarios
 //!
 //! This module provides comprehensive test fixtures for creating and managing
-//! Biscuit tokens of different types (device, guardian, delegated) with various
+//! Biscuit tokens of different types (authority, guardian, delegated) with various
 //! authorization scenarios and delegation chains.
+//!
+//! **Authority Model**: Uses authority-centric identity model where authorities
+//! (not devices) are the cryptographic actors that issue and manage tokens.
 
-use aura_core::{AccountId, DeviceId};
-use aura_wot::{
-    biscuit_resources::{ResourceScope, StorageCategory},
-    biscuit_token::{AccountAuthority, BiscuitError, BiscuitTokenManager},
-};
+use aura_core::identifiers::AuthorityId;
+use aura_core::scope::{AuthorityOp, ResourceScope};
+use aura_wot::biscuit_token::{BiscuitError, BiscuitTokenManager, TokenAuthority};
 use biscuit_auth::{macros::*, Biscuit, PublicKey};
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-fn device(seed: u8) -> DeviceId {
-    DeviceId::new_from_entropy([seed; 32])
+fn authority(seed: u8) -> AuthorityId {
+    AuthorityId::new_from_entropy([seed; 32])
 }
 
 /// Comprehensive fixture for Biscuit token testing scenarios
+///
+/// **Authority Model**: Tokens are issued by authorities to other authorities.
+/// This replaces the legacy device-centric model.
 pub struct BiscuitTestFixture {
-    pub account_authority: AccountAuthority,
-    pub device_tokens: HashMap<DeviceId, BiscuitTokenManager>,
-    pub guardian_tokens: HashMap<DeviceId, Biscuit>,
+    pub token_authority: TokenAuthority,
+    pub authority_tokens: HashMap<AuthorityId, BiscuitTokenManager>,
+    pub guardian_tokens: HashMap<AuthorityId, Biscuit>,
     pub delegated_tokens: Vec<DelegatedTokenChain>,
 }
 
@@ -35,48 +39,51 @@ pub struct DelegatedTokenChain {
 }
 
 impl BiscuitTestFixture {
-    /// Create a new test fixture with a random account
+    /// Create a new test fixture with a random authority
     pub fn new() -> Self {
-        let account_id = AccountId::new_from_entropy([0u8; 32]);
-        let account_authority = AccountAuthority::new(account_id);
+        let authority_id = AuthorityId::new_from_entropy([0u8; 32]);
+        let token_authority = TokenAuthority::new(authority_id);
 
         Self {
-            account_authority,
-            device_tokens: HashMap::new(),
+            token_authority,
+            authority_tokens: HashMap::new(),
             guardian_tokens: HashMap::new(),
             delegated_tokens: Vec::new(),
         }
     }
 
-    /// Create a new test fixture with a specific account ID
-    pub fn with_account(account_id: AccountId) -> Self {
-        let account_authority = AccountAuthority::new(account_id);
+    /// Create a new test fixture with a specific authority ID
+    pub fn with_authority(authority_id: AuthorityId) -> Self {
+        let token_authority = TokenAuthority::new(authority_id);
 
         Self {
-            account_authority,
-            device_tokens: HashMap::new(),
+            token_authority,
+            authority_tokens: HashMap::new(),
             guardian_tokens: HashMap::new(),
             delegated_tokens: Vec::new(),
         }
     }
 
-    /// Add a device token with full owner capabilities
-    pub fn add_device_token(&mut self, device_id: DeviceId) -> Result<(), BiscuitError> {
-        let token = self.account_authority.create_device_token(device_id)?;
-        let manager = BiscuitTokenManager::new(device_id, token);
-        self.device_tokens.insert(device_id, manager);
+    /// Add an authority token with full owner capabilities
+    pub fn add_authority_token(&mut self, recipient: AuthorityId) -> Result<(), BiscuitError> {
+        let token = self.token_authority.create_token(recipient)?;
+        let manager = BiscuitTokenManager::new(recipient, token);
+        self.authority_tokens.insert(recipient, manager);
         Ok(())
     }
 
     /// Add a guardian token with recovery-specific capabilities
-    pub fn add_guardian_token(&mut self, device_id: DeviceId) -> Result<(), BiscuitError> {
-        let account = self.account_authority.account_id().to_string();
-        let device = device_id.to_string();
+    pub fn add_guardian_token(
+        &mut self,
+        guardian_authority: AuthorityId,
+    ) -> Result<(), BiscuitError> {
+        let issuer = self.token_authority.authority_id().to_string();
+        let guardian = guardian_authority.to_string();
 
         let guardian_token = biscuit!(
             r#"
-            account({account});
-            device({device});
+            issuer({issuer});
+            authority({guardian});
             role("guardian");
             capability("read");
             capability("recovery_initiate");
@@ -88,9 +95,10 @@ impl BiscuitTestFixture {
             check if resource($res), $res.starts_with("/recovery/") || $res.starts_with("/journal/");
         "#
         )
-        .build(self.account_authority.root_keypair())?;
+        .build(self.token_authority.root_keypair())?;
 
-        self.guardian_tokens.insert(device_id, guardian_token);
+        self.guardian_tokens
+            .insert(guardian_authority, guardian_token);
         Ok(())
     }
 
@@ -98,12 +106,15 @@ impl BiscuitTestFixture {
     pub fn create_delegation_chain(
         &mut self,
         chain_id: &str,
-        source_device: DeviceId,
+        source_authority: AuthorityId,
         resource_scopes: Vec<ResourceScope>,
     ) -> Result<(), BiscuitError> {
-        let source_manager = self.device_tokens.get(&source_device).ok_or_else(|| {
-            BiscuitError::AuthorizationFailed("Source device not found".to_string())
-        })?;
+        let source_manager = self
+            .authority_tokens
+            .get(&source_authority)
+            .ok_or_else(|| {
+                BiscuitError::AuthorizationFailed("Source authority not found".to_string())
+            })?;
 
         let original_token = source_manager.current_token().clone();
         let mut delegated_tokens = Vec::new();
@@ -113,64 +124,44 @@ impl BiscuitTestFixture {
         for (index, scope) in resource_scopes.iter().enumerate() {
             let index_i64 = index as i64;
             let attenuated_token = match scope {
-                ResourceScope::Storage { category, path: _ } => {
-                    let resource_pattern = scope.resource_pattern();
-                    let category_str = category.as_str();
+                ResourceScope::Authority {
+                    authority_id,
+                    operation,
+                } => {
+                    let authority_str = authority_id.to_string();
+                    let op_str = format!("{:?}", operation);
                     current_token.append(block!(
                         r#"
-                        check if operation($op), ["read"].contains($op);
-                        check if resource($res), $res.starts_with({resource_pattern});
-                        check if storage_category({category_str});
+                        check if authority({authority_str});
+                        check if operation({op_str});
 
                         // Add delegation depth tracking
                         delegation_depth({index_i64});
                     "#
                     ))?
                 }
-                ResourceScope::Journal {
-                    account_id,
+                ResourceScope::Context {
+                    context_id,
                     operation,
                 } => {
-                    let account_id_str = account_id.clone();
-                    let op_str = operation.as_str();
+                    let context_str = context_id.to_string();
+                    let op_str = format!("{:?}", operation);
                     current_token.append(block!(
                         r#"
+                        check if context({context_str});
                         check if operation({op_str});
-                        check if account({account_id_str});
-                        check if resource($res), $res.starts_with("/journal/");
 
                         delegation_depth({index_i64});
                     "#
                     ))?
                 }
-                ResourceScope::Relay { channel_id } => {
-                    let channel = channel_id.clone();
+                ResourceScope::Storage { authority_id, path } => {
+                    let authority_str = authority_id.to_string();
+                    let path_str = path.clone();
                     current_token.append(block!(
                         r#"
-                        check if operation($op), ["relay_message"].contains($op);
-                        check if channel({channel});
-
-                        delegation_depth({index_i64});
-                    "#
-                    ))?
-                }
-                ResourceScope::Recovery { recovery_type } => {
-                    let recovery_type_str = recovery_type.as_str();
-                    current_token.append(block!(
-                        r#"
-                        check if operation($op), ["recovery_approve", "threshold_sign"].contains($op);
-                        check if recovery_type({recovery_type_str});
-
-                        delegation_depth({index_i64});
-                    "#
-                    ))?
-                }
-                ResourceScope::Admin { operation } => {
-                    let admin_op = operation.as_str();
-                    current_token.append(block!(
-                        r#"
-                        check if operation({admin_op});
-                        check if role($role), ["admin", "owner"].contains($role);
+                        check if authority({authority_str});
+                        check if resource($res), $res.starts_with({path_str});
 
                         delegation_depth({index_i64});
                     "#
@@ -196,11 +187,11 @@ impl BiscuitTestFixture {
     /// Create a token with time-based expiration
     pub fn create_expiring_token(
         &self,
-        device_id: DeviceId,
+        recipient: AuthorityId,
         expiration_seconds: u64,
     ) -> Result<Biscuit, BiscuitError> {
-        let account = self.account_authority.account_id().to_string();
-        let device = device_id.to_string();
+        let issuer = self.token_authority.authority_id().to_string();
+        let recipient_str = recipient.to_string();
         let expiry_time = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
@@ -209,8 +200,8 @@ impl BiscuitTestFixture {
 
         let expiring_token = biscuit!(
             r#"
-            account({account});
-            device({device});
+            issuer({issuer});
+            authority({recipient_str});
             role("temporary");
             capability("read");
 
@@ -218,7 +209,7 @@ impl BiscuitTestFixture {
             check if time($time), $time < {expiry_time};
         "#
         )
-        .build(self.account_authority.root_keypair())?;
+        .build(self.token_authority.root_keypair())?;
 
         Ok(expiring_token)
     }
@@ -226,17 +217,17 @@ impl BiscuitTestFixture {
     /// Create a token with delegation depth limit
     pub fn create_depth_limited_token(
         &self,
-        device_id: DeviceId,
+        recipient: AuthorityId,
         max_depth: u32,
     ) -> Result<Biscuit, BiscuitError> {
-        let account = self.account_authority.account_id().to_string();
-        let device = device_id.to_string();
+        let issuer = self.token_authority.authority_id().to_string();
+        let recipient_str = recipient.to_string();
         let max_depth_i64 = max_depth as i64;
 
         let depth_limited_token = biscuit!(
             r#"
-            account({account});
-            device({device});
+            issuer({issuer});
+            authority({recipient_str});
             role("delegator");
             capability("read");
             capability("delegate");
@@ -246,24 +237,24 @@ impl BiscuitTestFixture {
             check if delegation_depth($depth), $depth <= {max_depth_i64};
         "#
         )
-        .build(self.account_authority.root_keypair())?;
+        .build(self.token_authority.root_keypair())?;
 
         Ok(depth_limited_token)
     }
 
     /// Get the root public key for token verification
     pub fn root_public_key(&self) -> PublicKey {
-        self.account_authority.root_public_key()
+        self.token_authority.root_public_key()
     }
 
-    /// Get a device token manager
-    pub fn get_device_token(&self, device_id: &DeviceId) -> Option<&BiscuitTokenManager> {
-        self.device_tokens.get(device_id)
+    /// Get an authority token manager
+    pub fn get_authority_token(&self, authority_id: &AuthorityId) -> Option<&BiscuitTokenManager> {
+        self.authority_tokens.get(authority_id)
     }
 
     /// Get a guardian token
-    pub fn get_guardian_token(&self, device_id: &DeviceId) -> Option<&Biscuit> {
-        self.guardian_tokens.get(device_id)
+    pub fn get_guardian_token(&self, authority_id: &AuthorityId) -> Option<&Biscuit> {
+        self.guardian_tokens.get(authority_id)
     }
 
     /// Get a delegation chain by ID
@@ -274,14 +265,14 @@ impl BiscuitTestFixture {
     }
 
     /// Create a token with minimal privileges (for testing privilege escalation prevention)
-    pub fn create_minimal_token(&self, device_id: DeviceId) -> Result<Biscuit, BiscuitError> {
-        let account = self.account_authority.account_id().to_string();
-        let device = device_id.to_string();
+    pub fn create_minimal_token(&self, recipient: AuthorityId) -> Result<Biscuit, BiscuitError> {
+        let issuer = self.token_authority.authority_id().to_string();
+        let recipient_str = recipient.to_string();
 
         let minimal_token = biscuit!(
             r#"
-            account({account});
-            device({device});
+            issuer({issuer});
+            authority({recipient_str});
             role("read_only");
 
             // Very restricted capabilities
@@ -292,7 +283,7 @@ impl BiscuitTestFixture {
             check if resource($res), $res.starts_with("/storage/personal/read_only/");
         "#
         )
-        .build(self.account_authority.root_keypair())?;
+        .build(self.token_authority.root_keypair())?;
 
         Ok(minimal_token)
     }
@@ -300,16 +291,16 @@ impl BiscuitTestFixture {
     /// Create a compromised token scenario for security testing
     pub fn create_compromised_scenario(
         &self,
-        device_id: DeviceId,
+        recipient: AuthorityId,
     ) -> Result<Biscuit, BiscuitError> {
-        let account = self.account_authority.account_id().to_string();
-        let device = device_id.to_string();
+        let issuer = self.token_authority.authority_id().to_string();
+        let recipient_str = recipient.to_string();
 
         // Create a token that might be used in privilege escalation attempts
         let suspicious_token = biscuit!(
             r#"
-            account({account});
-            device({device});
+            issuer({issuer});
+            authority({recipient_str});
             role("suspicious");
             capability("read");
 
@@ -318,18 +309,18 @@ impl BiscuitTestFixture {
             check if resource($res), $res.starts_with("/storage/public/");
 
             // Add suspicious facts that shouldn't grant additional privileges
-            compromised_device(true);
+            compromised_authority(true);
             attempted_privilege_escalation(true);
         "#
         )
-        .build(self.account_authority.root_keypair())?;
+        .build(self.token_authority.root_keypair())?;
 
         Ok(suspicious_token)
     }
 
-    /// Get account ID for this fixture
-    pub fn account_id(&self) -> AccountId {
-        self.account_authority.account_id()
+    /// Get authority ID for this fixture
+    pub fn authority_id(&self) -> AuthorityId {
+        self.token_authority.authority_id()
     }
 }
 
@@ -340,17 +331,17 @@ impl Default for BiscuitTestFixture {
 }
 
 /// Convenience functions for creating common test scenarios
-/// Create a basic multi-device scenario with owner and guardian
-pub fn create_multi_device_scenario() -> Result<BiscuitTestFixture, BiscuitError> {
+/// Create a basic multi-authority scenario with owner and guardians
+pub fn create_multi_authority_scenario() -> Result<BiscuitTestFixture, BiscuitError> {
     let mut fixture = BiscuitTestFixture::new();
 
-    // Add owner device
-    let owner_device = device(1);
-    fixture.add_device_token(owner_device)?;
+    // Add owner authority
+    let owner_authority = authority(1);
+    fixture.add_authority_token(owner_authority)?;
 
     // Add two guardians
-    let guardian1 = device(2);
-    let guardian2 = device(3);
+    let guardian1 = authority(2);
+    let guardian2 = authority(3);
     fixture.add_guardian_token(guardian1)?;
     fixture.add_guardian_token(guardian2)?;
 
@@ -361,26 +352,22 @@ pub fn create_multi_device_scenario() -> Result<BiscuitTestFixture, BiscuitError
 pub fn create_delegation_scenario() -> Result<BiscuitTestFixture, BiscuitError> {
     let mut fixture = BiscuitTestFixture::new();
 
-    let owner_device = device(4);
-    fixture.add_device_token(owner_device)?;
+    let owner_authority = authority(4);
+    fixture.add_authority_token(owner_authority)?;
 
-    // Create a delegation chain with progressive restrictions
+    // Create a delegation chain with progressive restrictions using authority-based scopes
     let resource_scopes = vec![
-        ResourceScope::Storage {
-            category: StorageCategory::Personal,
-            path: "documents/".to_string(),
+        ResourceScope::Authority {
+            authority_id: owner_authority,
+            operation: AuthorityOp::UpdateTree,
         },
         ResourceScope::Storage {
-            category: StorageCategory::Personal,
-            path: "documents/public/".to_string(),
-        },
-        ResourceScope::Storage {
-            category: StorageCategory::Personal,
-            path: "documents/public/readonly/".to_string(),
+            authority_id: owner_authority,
+            path: "/documents/".to_string(), // Further restricted by attenuation blocks
         },
     ];
 
-    fixture.create_delegation_chain("progressive_restriction", owner_device, resource_scopes)?;
+    fixture.create_delegation_chain("progressive_restriction", owner_authority, resource_scopes)?;
 
     Ok(fixture)
 }
@@ -389,14 +376,14 @@ pub fn create_delegation_scenario() -> Result<BiscuitTestFixture, BiscuitError> 
 pub fn create_recovery_scenario() -> Result<BiscuitTestFixture, BiscuitError> {
     let mut fixture = BiscuitTestFixture::new();
 
-    // Add compromised device (to be recovered)
-    let compromised_device = device(5);
-    fixture.add_device_token(compromised_device)?;
+    // Add compromised authority (to be recovered)
+    let compromised_authority = authority(5);
+    fixture.add_authority_token(compromised_authority)?;
 
     // Add three guardians for 2-of-3 recovery
     for i in 0..3 {
-        let guardian_device = device(6 + i);
-        fixture.add_guardian_token(guardian_device)?;
+        let guardian_authority = authority(6 + i);
+        fixture.add_guardian_token(guardian_authority)?;
     }
 
     Ok(fixture)
@@ -406,24 +393,26 @@ pub fn create_recovery_scenario() -> Result<BiscuitTestFixture, BiscuitError> {
 pub fn create_security_test_scenario() -> Result<BiscuitTestFixture, BiscuitError> {
     let mut fixture = BiscuitTestFixture::new();
 
-    // Add devices with different privilege levels
-    let admin_device = device(20);
-    let regular_device = device(21);
-    let restricted_device = device(22);
+    // Add authorities with different privilege levels
+    let admin_authority = authority(20);
+    let regular_authority = authority(21);
+    let restricted_authority = authority(22);
 
-    fixture.add_device_token(admin_device)?;
-    fixture.add_device_token(regular_device)?;
+    fixture.add_authority_token(admin_authority)?;
+    fixture.add_authority_token(regular_authority)?;
 
     // Create restricted and compromised tokens for security testing
-    let _minimal_token = fixture.create_minimal_token(restricted_device)?;
-    let _compromised_token = fixture.create_compromised_scenario(device(23))?;
+    let _minimal_token = fixture.create_minimal_token(restricted_authority)?;
+    let _compromised_token = fixture.create_compromised_scenario(authority(23))?;
 
     Ok(fixture)
 }
 
-// AccountAuthorityExt is no longer needed since AccountAuthority.account_id() is now available
-
-// Extension traits are no longer needed since as_str methods are now public on the original types
+// Legacy compatibility aliases
+#[deprecated(since = "0.2.0", note = "Use create_multi_authority_scenario instead")]
+pub fn create_multi_device_scenario() -> Result<BiscuitTestFixture, BiscuitError> {
+    create_multi_authority_scenario()
+}
 
 #[cfg(test)]
 mod tests {
@@ -432,47 +421,47 @@ mod tests {
     #[test]
     fn test_basic_fixture_creation() {
         let fixture = BiscuitTestFixture::new();
-        assert!(fixture.device_tokens.is_empty());
+        assert!(fixture.authority_tokens.is_empty());
         assert!(fixture.guardian_tokens.is_empty());
         assert!(fixture.delegated_tokens.is_empty());
     }
 
     #[test]
-    fn test_device_token_creation() {
+    fn test_authority_token_creation() {
         let mut fixture = BiscuitTestFixture::new();
-        let device_id = device(30);
+        let authority_id = authority(30);
 
-        fixture.add_device_token(device_id).unwrap();
-        assert!(fixture.device_tokens.contains_key(&device_id));
+        fixture.add_authority_token(authority_id).unwrap();
+        assert!(fixture.authority_tokens.contains_key(&authority_id));
     }
 
     #[test]
     fn test_guardian_token_creation() {
         let mut fixture = BiscuitTestFixture::new();
-        let device_id = device(31);
+        let authority_id = authority(31);
 
-        fixture.add_guardian_token(device_id).unwrap();
-        assert!(fixture.guardian_tokens.contains_key(&device_id));
+        fixture.add_guardian_token(authority_id).unwrap();
+        assert!(fixture.guardian_tokens.contains_key(&authority_id));
     }
 
     #[test]
-    fn test_multi_device_scenario() {
-        let fixture = create_multi_device_scenario().unwrap();
-        assert!(!fixture.device_tokens.is_empty());
+    fn test_multi_authority_scenario() {
+        let fixture = create_multi_authority_scenario().unwrap();
+        assert!(!fixture.authority_tokens.is_empty());
         assert!(!fixture.guardian_tokens.is_empty());
     }
 
     #[test]
     fn test_delegation_scenario() {
         let fixture = create_delegation_scenario().unwrap();
-        assert!(!fixture.device_tokens.is_empty());
+        assert!(!fixture.authority_tokens.is_empty());
         assert!(!fixture.delegated_tokens.is_empty());
     }
 
     #[test]
     fn test_recovery_scenario() {
         let fixture = create_recovery_scenario().unwrap();
-        assert!(!fixture.device_tokens.is_empty());
+        assert!(!fixture.authority_tokens.is_empty());
         assert!(!fixture.guardian_tokens.is_empty());
         assert_eq!(fixture.guardian_tokens.len(), 3);
     }
@@ -480,24 +469,24 @@ mod tests {
     #[test]
     fn test_security_test_scenario() {
         let fixture = create_security_test_scenario().unwrap();
-        assert!(!fixture.device_tokens.is_empty());
+        assert!(!fixture.authority_tokens.is_empty());
     }
 
     #[test]
     fn test_expiring_token_creation() {
         let fixture = BiscuitTestFixture::new();
-        let device_id = device(32);
+        let authority_id = authority(32);
 
-        let token = fixture.create_expiring_token(device_id, 3600).unwrap();
+        let token = fixture.create_expiring_token(authority_id, 3600).unwrap();
         assert!(!token.to_vec().unwrap().is_empty());
     }
 
     #[test]
     fn test_depth_limited_token_creation() {
         let fixture = BiscuitTestFixture::new();
-        let device_id = device(33);
+        let authority_id = authority(33);
 
-        let token = fixture.create_depth_limited_token(device_id, 3).unwrap();
+        let token = fixture.create_depth_limited_token(authority_id, 3).unwrap();
         assert!(!token.to_vec().unwrap().is_empty());
     }
 }
