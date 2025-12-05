@@ -7,7 +7,11 @@
 //! - Channel establishment with epoch rotation
 //! - Guard chain integration
 
-#![allow(clippy::unwrap_used)] // Tests use unwrap for clarity
+#![allow(
+    clippy::unwrap_used,
+    clippy::disallowed_types,
+    clippy::disallowed_methods
+)] // Tests use unwrap for clarity; allow test-only hash utilities
 
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_rendezvous::{
@@ -300,10 +304,7 @@ fn test_handshake_psk_mismatch_detection() {
 
     // Alice sends handshake with WRONG PSK
     let wrong_psk = [99u8; 32];
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(&wrong_psk);
-    let wrong_commitment: [u8; 32] = hasher.finalize().into();
+    let wrong_commitment = aura_core::hash::hash(&wrong_psk);
 
     let handshake = aura_rendezvous::protocol::NoiseHandshake {
         noise_message: vec![1, 2, 3],

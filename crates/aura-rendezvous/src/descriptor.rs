@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn test_descriptor_builder() {
-        let builder = DescriptorBuilder::new(test_authority(), 3600_000, None);
+        let builder = DescriptorBuilder::new(test_authority(), 3_600_000, None);
 
         let hints = vec![TransportHint::TcpDirect {
             addr: "127.0.0.1:8080".to_string(),
@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(descriptor.authority_id, test_authority());
         assert_eq!(descriptor.context_id, test_context());
         assert_eq!(descriptor.valid_from, 1000);
-        assert_eq!(descriptor.valid_until, 1000 + 3600_000);
+        assert_eq!(descriptor.valid_until, 1000 + 3_600_000);
         assert_eq!(descriptor.transport_hints.len(), 1);
     }
 
@@ -471,7 +471,7 @@ mod tests {
     fn test_descriptor_builder_with_stun() {
         let builder = DescriptorBuilder::new(
             test_authority(),
-            3600_000,
+            3_600_000,
             Some("stun.example.com:3478".to_string()),
         );
 

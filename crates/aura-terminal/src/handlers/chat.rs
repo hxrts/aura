@@ -9,8 +9,8 @@
 use crate::cli::chat::ChatCommands;
 use crate::handlers::HandlerContext;
 use anyhow::Result;
-// Import from aura-app which re-exports agent types
-use aura_app::AuraEffectSystem;
+// Import agent types from aura-agent (runtime layer)
+use aura_agent::AuraEffectSystem;
 use aura_core::effects::ConsoleEffects;
 
 /// Execute chat management commands through the effect system

@@ -491,15 +491,15 @@ mod tests {
 
         let facts = vec![
             RecoveryFact::GuardianSetupInitiated {
-                context_id: ctx.clone(),
-                initiator_id: initiator.clone(),
-                guardian_ids: vec![guardian1.clone(), guardian2.clone(), guardian3.clone()],
+                context_id: ctx,
+                initiator_id: initiator,
+                guardian_ids: vec![guardian1, guardian2, guardian3],
                 threshold: 2,
                 initiated_at: pt(1000),
             },
             RecoveryFact::GuardianAccepted {
-                context_id: ctx.clone(),
-                guardian_id: guardian1.clone(),
+                context_id: ctx,
+                guardian_id: guardian1,
                 accepted_at: pt(2000),
             },
         ];
@@ -521,19 +521,19 @@ mod tests {
 
         let facts = vec![
             RecoveryFact::GuardianSetupInitiated {
-                context_id: ctx.clone(),
+                context_id: ctx,
                 initiator_id: initiator,
-                guardian_ids: vec![guardian1.clone(), guardian2.clone()],
+                guardian_ids: vec![guardian1, guardian2],
                 threshold: 2,
                 initiated_at: pt(1000),
             },
             RecoveryFact::GuardianAccepted {
-                context_id: ctx.clone(),
+                context_id: ctx,
                 guardian_id: guardian1,
                 accepted_at: pt(2000),
             },
             RecoveryFact::GuardianAccepted {
-                context_id: ctx.clone(),
+                context_id: ctx,
                 guardian_id: guardian2,
                 accepted_at: pt(3000),
             },
@@ -555,14 +555,14 @@ mod tests {
 
         let facts = vec![
             RecoveryFact::GuardianSetupInitiated {
-                context_id: ctx.clone(),
+                context_id: ctx,
                 initiator_id: initiator,
-                guardian_ids: vec![guardian1.clone(), guardian2.clone()],
+                guardian_ids: vec![guardian1, guardian2],
                 threshold: 2,
                 initiated_at: pt(1000),
             },
             RecoveryFact::GuardianDeclined {
-                context_id: ctx.clone(),
+                context_id: ctx,
                 guardian_id: guardian1,
                 declined_at: pt(2000),
             },
@@ -584,22 +584,22 @@ mod tests {
 
         let facts = vec![
             RecoveryFact::MembershipChangeProposed {
-                context_id: ctx.clone(),
+                context_id: ctx,
                 proposer_id: proposer,
                 change_type: MembershipChangeType::UpdateThreshold { new_threshold: 3 },
                 proposal_hash: test_hash(1),
                 proposed_at: pt(1000),
             },
             RecoveryFact::MembershipVoteCast {
-                context_id: ctx.clone(),
-                voter_id: voter1.clone(),
+                context_id: ctx,
+                voter_id: voter1,
                 proposal_hash: test_hash(1),
                 approved: true,
                 voted_at: pt(2000),
             },
             RecoveryFact::MembershipVoteCast {
-                context_id: ctx.clone(),
-                voter_id: voter2.clone(),
+                context_id: ctx,
+                voter_id: voter2,
                 proposal_hash: test_hash(1),
                 approved: false,
                 voted_at: pt(3000),
@@ -622,14 +622,14 @@ mod tests {
 
         let facts = vec![
             RecoveryFact::RecoveryInitiated {
-                context_id: ctx.clone(),
-                account_id: account.clone(),
+                context_id: ctx,
+                account_id: account,
                 request_hash: test_hash(1),
                 initiated_at: pt(1000),
             },
             RecoveryFact::RecoveryShareSubmitted {
-                context_id: ctx.clone(),
-                guardian_id: guardian1.clone(),
+                context_id: ctx,
+                guardian_id: guardian1,
                 share_hash: test_hash(2),
                 submitted_at: pt(2000),
             },
@@ -651,14 +651,14 @@ mod tests {
 
         let facts = vec![
             RecoveryFact::RecoveryInitiated {
-                context_id: ctx.clone(),
+                context_id: ctx,
                 account_id: account,
                 request_hash: test_hash(1),
                 initiated_at: pt(1000),
             },
             RecoveryFact::RecoveryDisputeFiled {
-                context_id: ctx.clone(),
-                disputer_id: disputer.clone(),
+                context_id: ctx,
+                disputer_id: disputer,
                 reason: "Unauthorized recovery attempt".to_string(),
                 filed_at: pt(2000),
             },
@@ -681,27 +681,27 @@ mod tests {
         let facts = vec![
             // Active setup
             RecoveryFact::GuardianSetupInitiated {
-                context_id: ctx1.clone(),
-                initiator_id: initiator.clone(),
-                guardian_ids: vec![guardian.clone()],
+                context_id: ctx1,
+                initiator_id: initiator,
+                guardian_ids: vec![guardian],
                 threshold: 1,
                 initiated_at: pt(1000),
             },
             // Completed setup
             RecoveryFact::GuardianSetupInitiated {
-                context_id: ctx2.clone(),
+                context_id: ctx2,
                 initiator_id: initiator,
-                guardian_ids: vec![guardian.clone()],
+                guardian_ids: vec![guardian],
                 threshold: 1,
                 initiated_at: pt(2000),
             },
             RecoveryFact::GuardianAccepted {
-                context_id: ctx2.clone(),
+                context_id: ctx2,
                 guardian_id: guardian,
                 accepted_at: pt(3000),
             },
             RecoveryFact::GuardianSetupCompleted {
-                context_id: ctx2.clone(),
+                context_id: ctx2,
                 guardian_ids: vec![],
                 threshold: 1,
                 completed_at: pt(4000),

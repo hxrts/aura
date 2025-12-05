@@ -9,6 +9,7 @@ pub mod receipt_manager;
 pub mod rendezvous_manager;
 pub mod social_manager;
 pub mod sync_manager;
+pub mod threshold_signing;
 
 pub use authority_manager::{
     AuthorityError, AuthorityManager, AuthorityState, AuthorityStatus, SharedAuthorityManager,
@@ -19,3 +20,4 @@ pub use receipt_manager::ReceiptManager;
 pub use rendezvous_manager::{RendezvousManager, RendezvousManagerConfig};
 pub use social_manager::{SocialManager, SocialManagerConfig, SocialManagerState};
 pub use sync_manager::{SyncManagerConfig, SyncManagerState, SyncServiceManager};
+pub use threshold_signing::ThresholdSigningService;

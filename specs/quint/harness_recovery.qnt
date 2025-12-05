@@ -1,44 +1,60 @@
 module harness_recovery {
-  import protocol_core as core from "protocol_core"
-  import protocol_recovery as recovery from "protocol_recovery"
-  import protocol_signals as signals from "protocol_signals"
+  // Local type definitions (imports don't work for types in Quint)
+  type ProtocolId = str
+  type AuthorityId = str
+
+  // Import modules for actions (not types)
+  import protocol_recovery from "./protocol_recovery"
+
+  // Constants for signals
+  pure val SIGNAL_COMPLETE = "complete"
+  pure val SIGNAL_ABORT = "abort"
+
+  // Harness state - tracks which protocols have been registered via harness
+  var harnessRegistered: Set[ProtocolId]
+
+  action init: bool = all {
+    harnessRegistered' = Set()
+  }
 
   /// Register a recovery lifecycle across core + spec.
   action register(
-    pid: core.ProtocolId,
-    descriptor: core.ProtocolDescriptor,
-    members: Set[core.DeviceId],
-    guardians: Set[core.DeviceId],
+    pid: ProtocolId,
+    guardians: Set[AuthorityId],
     threshold: int
-  ): bool =
-    all {
-      core.registerProtocol(pid, descriptor, members),
-      recovery.configureRecovery(pid, guardians, threshold)
-    }
+  ): bool = all {
+    not(pid.in(harnessRegistered)),
+    protocol_recovery::configureRecovery(pid, guardians, threshold),
+    harnessRegistered' = harnessRegistered.union(Set(pid))
+  }
 
-  /// Apply LocalSignal("complete") when recovery evidence is satisfied.
-  action complete(pid: core.ProtocolId): bool =
-    all {
-      core.recordInput(pid, core.ProtocolInput::LocalSignal({signal: signals.COMPLETE})),
-      recovery.signalComplete(pid),
-      core.processStep(
-        pid,
-        core.ProtocolState::Completed,
-        recovery.lifecycleEffects.get(pid),
-        None
-      )
-    }
+  /// Submit a guardian share.
+  action submitShare(
+    pid: ProtocolId,
+    guardian: AuthorityId,
+    share: int
+  ): bool = all {
+    pid.in(harnessRegistered),
+    protocol_recovery::submitShare(pid, guardian, share),
+    harnessRegistered' = harnessRegistered
+  }
 
-  /// Abort the recovery lifecycle via LocalSignal("abort").
-  action abort(pid: core.ProtocolId, reason: str): bool =
-    all {
-      core.recordInput(pid, core.ProtocolInput::LocalSignal({signal: signals.ABORT})),
-      recovery.signalAbort(pid),
-      core.processStep(
-        pid,
-        core.ProtocolState::Failed,
-        recovery.lifecycleEffects.get(pid),
-        Some(core.OutputState::Failure({reason: reason}))
-      )
-    }
+  /// Complete the recovery lifecycle.
+  action complete(pid: ProtocolId): bool = all {
+    pid.in(harnessRegistered),
+    protocol_recovery::signalComplete(pid),
+    harnessRegistered' = harnessRegistered
+  }
+
+  /// Abort the recovery lifecycle.
+  action abort(pid: ProtocolId): bool = all {
+    pid.in(harnessRegistered),
+    protocol_recovery::signalAbort(pid),
+    harnessRegistered' = harnessRegistered
+  }
+
+  // ============ INVARIANTS ============
+
+  val InvariantHarnessTracksRegistrations =
+    harnessRegistered.forall(pid => pid != "")
 }

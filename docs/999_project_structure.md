@@ -293,7 +293,7 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 **`aura-app`**: Portable headless application core providing the business logic and state management layer for all platforms. Exposes a platform-agnostic API consumed by terminal, iOS, Android, and web frontends. Contains intent processing, view derivation, and platform feature flags (`native`, `ios`, `android`, `web-js`, `web-dominator`).
 
-**`aura-simulator`**: Deterministic simulation runtime with virtual time, transport shims, and failure injection.
+**`aura-simulator`**: Deterministic simulation runtime with virtual time, transport shims, failure injection, and generative testing via Quint integration (see `aura-simulator/src/quint/` for generative simulation bridge).
 
 **Contains**:
 - Application lifecycle management (startup, shutdown, signals)
@@ -324,15 +324,19 @@ Only facts fundamental to journal operation remain as direct enum variants:
 
 ## Layer 8: Testing and Development Tools
 
-**Purpose**: Cross-cutting test utilities and formal verification bridges.
+**Purpose**: Cross-cutting test utilities, formal verification bridges, and generative testing infrastructure.
 
 **`aura-testkit`**: Comprehensive testing infrastructure including:
-- Shared test fixtures and scenario builders  
+- Shared test fixtures and scenario builders
 - Property test helpers and deterministic utilities
 - **Mock effect handlers**: `MockCryptoHandler`, `MockTimeHandler`, `InMemoryStorageHandler`, etc.
 - Stateful test handlers that maintain controllable state for deterministic testing
 
-**`aura-quint`**: Formal verification bridge to Quint model checker.
+**`aura-quint`**: Formal verification bridge to Quint model checker including:
+- Native Quint subprocess interface for parsing and type checking
+- Property specification management with classification (authorization, budget, integrity)
+- Verification runner with caching and counterexample generation
+- Effect trait implementations for property evaluation during simulation
 
 **Key characteristics**: Mock handlers in `aura-testkit` are allowed to be stateful (using `Arc<Mutex<>>`, etc.) since they need controllable, deterministic state for testing. This maintains the stateless principle for production handlers in `aura-effects` while enabling comprehensive testing.
 
@@ -1218,7 +1222,21 @@ Production runtime assembling handlers and protocols into executable systems. In
 Portable headless application core providing platform-agnostic business logic and state management. Exposes a unified API for all frontends (terminal, iOS, Android, web). Contains intent processing, view derivation, and platform feature flags (`native`, `ios`, `android`, `web-js`, `web-dominator`). Supports UniFFI bindings for Swift/Kotlin integration.
 
 ### aura-simulator
-Deterministic simulation with chaos injection and property verification.
+Deterministic simulation with chaos injection, generative testing, and property verification.
+
+**Key modules**:
+- `core/`: Simulation engine, virtual time, network partitions
+- `handlers/`: Effect handlers with deterministic behavior
+- `quint/`: Generative simulation bridge to Quint specifications
+
+**Generative simulation components** (`aura-simulator/src/quint/`):
+- `GenerativeSimulator`: Executes Quint-generated traces through real effect handlers
+- `ActionRegistry`: Maps Quint action names to effect system handlers
+- `StateMapper`: Bidirectional state mapping between Quint models and Aura runtime
+- `TraceConverter`: ITF trace import/export for model checking integration
+- `ChaosByzantineMapper`: Byzantine scenario generation from formal specifications
+
+**Usage**: See `docs/806_simulation_guide.md` for generative simulation patterns.
 
 ### aura-terminal
 Terminal-based user interface combining CLI commands and interactive TUI. Provides account and device management, recovery status visualization, chat interfaces, and scenario execution. Consumes `aura-app` for all business logic. Binary is named `aura`.
@@ -1227,7 +1245,20 @@ Terminal-based user interface combining CLI commands and interactive TUI. Provid
 Comprehensive testing infrastructure including test fixtures, scenario builders, property test helpers, and mock effect handlers with controllable stateful behavior for deterministic testing.
 
 ### aura-quint
-Formal verification integration for protocol specifications.
+Formal verification bridge to Quint model checker and property evaluator.
+
+**Key modules**:
+- `evaluator.rs`: Native Quint subprocess interface for parsing and type checking
+- `handler.rs`: Effect trait implementations (`QuintEvaluationEffects`, `QuintVerificationEffects`)
+- `runner.rs`: Verification runner with caching and parallel execution
+- `properties.rs`: Property specification management and classification
+
+**Quint specifications** (`specs/quint/`):
+- `protocol_*.qnt`: Core protocol state machines (DKG, recovery, resharing, sessions, etc.)
+- `harness_*.qnt`: Standard harness modules for simulator integration
+- `capability_properties.qnt`: Guard chain and authorization verification
+
+**Usage**: See `docs/807_verification_guide.md` for Quint specification patterns.
 
 ## Documents That Reference This Guide
 

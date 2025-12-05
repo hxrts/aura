@@ -3,8 +3,8 @@
 use crate::handlers::HandlerContext;
 use crate::InvitationAction;
 use anyhow::{anyhow, Result};
-// Import from aura-app which re-exports agent types
-use aura_app::AuraAgent;
+// Import agent types from aura-agent (runtime layer)
+use aura_agent::AuraAgent;
 use aura_core::identifiers::AuthorityId;
 use std::str::FromStr;
 

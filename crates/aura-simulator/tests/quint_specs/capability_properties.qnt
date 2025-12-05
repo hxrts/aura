@@ -63,6 +63,10 @@ module CapabilityProperties {
 
     // ========== Helper Functions ==========
 
+    // Helper: check if a list contains an element (foldl since contains is Set-only)
+    pure def listContains(lst: List[GuardStep], elem: GuardStep): bool =
+        lst.foldl(false, (acc, x) => acc or (x == elem))
+
     // Check guard chain order is correct
     pure def isValidGuardOrder(steps: List[GuardStep]): bool = {
         steps.length() == 4 and
@@ -144,20 +148,21 @@ module CapabilityProperties {
     // ========== Invariants ==========
 
     // AUTHORIZATION: Guard chain order is always correct
-    val guardChainOrder = completed_ops.forall(op => isValidGuardOrder(op.guard_steps_completed))
+    // Note: forall only works on Sets, use foldl for Lists
+    val guardChainOrder = completed_ops.foldl(true, (acc, op) => acc and isValidGuardOrder(op.guard_steps_completed))
 
     // BUDGET: Charge-before-send invariant
-    val chargeBeforeSend = completed_ops.forall(op =>
-        op.guard_steps_completed.contains(TransportSend) implies op.charged
+    val chargeBeforeSend = completed_ops.foldl(true, (acc, op) =>
+        acc and (listContains(op.guard_steps_completed, TransportSend) implies op.charged)
     )
 
     // BUDGET: Spent never exceeds limit
     val spentWithinLimit = budgets.keys().forall(ctx => budgets.get(ctx).spent <= budgets.get(ctx).limit)
 
     // BUDGET: No transport without FlowGuard
-    val noTransportWithoutFlowGuard = completed_ops.forall(op =>
-        op.guard_steps_completed.contains(TransportSend) implies
-        op.guard_steps_completed.contains(FlowGuard)
+    val noTransportWithoutFlowGuard = completed_ops.foldl(true, (acc, op) =>
+        acc and (listContains(op.guard_steps_completed, TransportSend) implies
+        listContains(op.guard_steps_completed, FlowGuard))
     )
 
     // INTEGRITY: Attenuation only narrows capabilities
@@ -172,8 +177,8 @@ module CapabilityProperties {
 
     // Authorization soundness: All completed operations went through full guard chain
     temporal authorizationSoundness = always(
-        completed_ops.forall(op =>
-            op.guard_steps_completed == [CapGuard, FlowGuard, JournalCoupler, TransportSend]
+        completed_ops.foldl(true, (acc, op) =>
+            acc and (op.guard_steps_completed == [CapGuard, FlowGuard, JournalCoupler, TransportSend])
         )
     )
 

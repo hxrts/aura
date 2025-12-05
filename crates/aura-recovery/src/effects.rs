@@ -46,6 +46,7 @@
 
 use aura_core::effects::{
     CryptoEffects, JournalEffects, NetworkEffects, PhysicalTimeEffects, RandomEffects,
+    SecureStorageEffects, StorageEffects, ThresholdSigningEffects,
 };
 
 /// Composed effects required for local recovery operations.
@@ -60,6 +61,9 @@ use aura_core::effects::{
 /// - **CryptoEffects**: For signature verification and key operations
 /// - **JournalEffects**: For fact emission and journal operations
 /// - **RandomEffects**: For nonce generation and ceremony IDs
+/// - **ThresholdSigningEffects**: For guardian approval signatures
+/// - **StorageEffects**: For storing guardian acceptance keys
+/// - **SecureStorageEffects**: For storing decrypted FROST shares
 ///
 /// # Example
 ///
@@ -71,13 +75,29 @@ use aura_core::effects::{
 /// }
 /// ```
 pub trait RecoveryEffects:
-    PhysicalTimeEffects + CryptoEffects + JournalEffects + RandomEffects + Send + Sync
+    PhysicalTimeEffects
+    + CryptoEffects
+    + JournalEffects
+    + RandomEffects
+    + ThresholdSigningEffects
+    + StorageEffects
+    + SecureStorageEffects
+    + Send
+    + Sync
 {
 }
 
 /// Blanket implementation for any type that implements all required traits.
 impl<T> RecoveryEffects for T where
-    T: PhysicalTimeEffects + CryptoEffects + JournalEffects + RandomEffects + Send + Sync
+    T: PhysicalTimeEffects
+        + CryptoEffects
+        + JournalEffects
+        + RandomEffects
+        + ThresholdSigningEffects
+        + StorageEffects
+        + SecureStorageEffects
+        + Send
+        + Sync
 {
 }
 

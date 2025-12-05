@@ -1,4 +1,3 @@
-#![allow(deprecated)]
 //! Scenario management effect handler for simulation
 //!
 //! This module provides simulation-specific scenario injection and management

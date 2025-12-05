@@ -40,7 +40,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::ids;
-use crate::tui::effects::bridge::{frost_sign_tree_op, frost_sign_tree_op_with_keys};
 use crate::tui::effects::command_parser::{AuraEvent, CommandAuthorizationLevel, EffectCommand};
 use aura_app::{Intent, IntentChannelType};
 use aura_core::effects::{
@@ -68,29 +67,8 @@ use tokio::sync::{broadcast, RwLock};
 // ============================================================================
 // Note: Block/invitation types have been migrated to AppCore's unified ViewState.
 // See aura_app::views for BlockState, InvitationsState, etc.
-
-/// FROST threshold signing state for the current device.
-///
-/// Stores the key packages needed for threshold signing operations.
-/// In a multi-device scenario, each device holds its own key package
-/// and the shared public key package for verification.
-#[derive(Debug, Clone, Default)]
-pub(super) struct FrostState {
-    /// This device's key package (index 0 in a 1-of-1 bootstrap, or device-specific share)
-    /// Serialized frost_ed25519 KeyPackage
-    pub device_key_package: Option<Vec<u8>>,
-    /// Group public key package for signature aggregation and verification
-    /// Shared across all devices in the threshold group
-    pub public_key_package: Option<Vec<u8>>,
-    /// Current threshold configuration (e.g., 1-of-1 for bootstrap, 2-of-3 for guardians)
-    /// Used when coordinating multi-device signing ceremonies
-    #[allow(dead_code)]
-    pub threshold: u16,
-    /// Total number of signers in the threshold group
-    /// Used when coordinating multi-device signing ceremonies
-    #[allow(dead_code)]
-    pub max_signers: u16,
-}
+// Note: FROST signing state has been migrated to ThresholdSigningService in aura-agent.
+// Signing operations now go through AppCore.sign_tree_op().
 
 /// Stored capability token entry with metadata
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -270,8 +248,6 @@ pub(super) struct BridgeState {
     /// Current user's maximum authorized level
     /// Updated when user authenticates or gains capabilities
     pub user_auth_level: CommandAuthorizationLevel,
-    /// FROST threshold signing state
-    pub frost_state: FrostState,
     /// User's current nickname/display name (local preference)
     pub user_nickname: Option<String>,
     /// Current context ID for AMP channel operations
@@ -301,7 +277,6 @@ impl Default for BridgeState {
             // Start with Basic level - user is authenticated but not elevated
             // Non-demo mode starts at Public and upgrades after auth
             user_auth_level: CommandAuthorizationLevel::Basic,
-            frost_state: FrostState::default(),
             user_nickname: None,
             // Start with default context; set when user selects a channel
             current_context: Some(aura_core::ContextId::from_uuid(crate::ids::uuid(
@@ -407,7 +382,8 @@ pub fn check_authorization(
 /// * `state` - Shared bridge state
 /// * `time_effects` - Time effect handler for timestamps
 /// * `amp_effects` - Optional AMP channel effect handler
-/// * `app_core` - AppCore containing the agent with effect system
+/// * `agent` - Optional AuraAgent for effect system access (dependency inversion pattern)
+/// * `app_core` - AppCore for intent-based state management
 ///
 /// # Returns
 /// * `Ok(())` on success
@@ -422,6 +398,7 @@ pub(super) async fn execute_command(
     state: &Arc<RwLock<BridgeState>>,
     time_effects: &Arc<dyn PhysicalTimeEffects>,
     amp_effects: Option<&(dyn AmpChannelEffects + Send + Sync)>,
+    agent: Option<&Arc<aura_agent::AuraAgent>>,
     app_core: Option<&Arc<tokio::sync::RwLock<aura_app::AppCore>>>,
 ) -> Result<(), String> {
     tracing::debug!("Executing command: {:?}", command);
@@ -434,15 +411,10 @@ pub(super) async fn execute_command(
         (bridge_state.user_auth_level, bridge_state.current_context)
     };
 
-    // Get effect system from AppCore's agent (unified architecture)
-    // This replaces the old direct effect_system parameter
+    // Get effect system from agent directly (dependency inversion pattern)
+    // The agent is passed separately from AppCore, since AppCore only has RuntimeBridge
     let effect_system: Option<std::sync::Arc<tokio::sync::RwLock<aura_agent::AuraEffectSystem>>> =
-        if let Some(core) = app_core {
-            let guard = core.read().await;
-            guard.agent().map(|a| a.runtime().effects())
-        } else {
-            None
-        };
+        agent.map(|a| a.runtime().effects());
 
     if effect_system.is_some() {
         tracing::debug!("Effect system available via AppCore agent");
@@ -659,8 +631,8 @@ pub(super) async fn execute_command(
             // Emit event
             let _ = event_tx.send(AuraEvent::GuardianApproved {
                 guardian_id: guardian_id.clone(),
-                current: current as u32,
-                threshold: threshold as u32,
+                current,
+                threshold,
             });
 
             Ok(())
@@ -3206,60 +3178,76 @@ pub(super) async fn execute_command(
                 }
             }
 
-            // HYBRID IMPLEMENTATION: Real TreeEffects + FROST threshold signing
-            // Uses real tree operations with real FROST 1-of-1 ceremony for bootstrap
+            // HYBRID IMPLEMENTATION: Real TreeEffects + Threshold Signing via AppCore
+            // Uses real tree operations with ThresholdSigningService for key management and signing
 
-            let authority_id = if let Some(ref effect_system_arc) = effect_system {
+            // 1. Generate deterministic authority ID from display name
+            // This allows us to bootstrap keys before tree operations
+            let authority_id = ids::authority_id(&format!("account:{}", display_name));
+
+            // 2. Bootstrap signing keys via AppCore's ThresholdSigningService
+            let public_key_package = if let Some(core) = app_core {
+                let mut core_guard = core.write().await;
+                // Set authority in AppCore first
+                core_guard.set_authority(authority_id.clone());
+
+                // Bootstrap 1-of-1 keys via ThresholdSigningService
+                match core_guard.bootstrap_signing_keys().await {
+                    Ok(pk) => {
+                        tracing::info!(
+                            "Bootstrapped signing keys via ThresholdSigningService: {} bytes",
+                            pk.len()
+                        );
+                        Some(pk)
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to bootstrap signing keys: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            // 3. Perform tree operations if effect system is available
+            if let Some(ref effect_system_arc) = effect_system {
                 let effect_sys = effect_system_arc.read().await;
                 tracing::info!("Using TreeEffects for account creation");
 
-                // 1. Generate FROST 1-of-1 keys for single-device bootstrap
-                // These keys will be stored and used for all future signing operations
-                let frost_keys = effect_sys
-                    .frost_generate_keys(1, 1) // threshold=1, max_signers=1
-                    .await
-                    .map_err(|e| format!("FROST key generation failed: {}", e))?;
+                // Get public key for leaf node (from ThresholdSigningService or generate fallback)
+                let pk = match &public_key_package {
+                    Some(pk) => pk.clone(),
+                    None => {
+                        // Fallback: Generate keys directly if no AppCore
+                        let frost_keys = effect_sys
+                            .frost_generate_keys(1, 1)
+                            .await
+                            .map_err(|e| format!("FROST key generation failed: {}", e))?;
+                        if frost_keys.key_packages.is_empty() {
+                            return Err("FROST key generation returned no key packages".to_string());
+                        }
+                        frost_keys.public_key_package
+                    }
+                };
 
-                if frost_keys.key_packages.is_empty() {
-                    return Err("FROST key generation returned no key packages".to_string());
-                }
-
-                tracing::info!(
-                        "Generated FROST 1-of-1 keys: public_key_package={} bytes, key_package={} bytes",
-                        frost_keys.public_key_package.len(),
-                        frost_keys.key_packages[0].len()
-                    );
-
-                // 2. Store FROST keys in BridgeState for future signing operations
-                {
-                    let mut bridge_state = state.write().await;
-                    bridge_state.frost_state = FrostState {
-                        device_key_package: Some(frost_keys.key_packages[0].clone()),
-                        public_key_package: Some(frost_keys.public_key_package.clone()),
-                        threshold: 1,
-                        max_signers: 1,
-                    };
-                    tracing::info!("Stored FROST keys in bridge state");
-                }
-
-                // 3. Create initial device leaf with REAL FROST public key
+                // Create initial device leaf with FROST public key
                 let device_id = ids::device_id(&format!("device:{}", display_name));
                 let leaf_id = LeafId(0); // Bootstrap leaf (first device)
                 let leaf = LeafNode {
                     leaf_id,
                     device_id,
                     role: LeafRole::Device,
-                    public_key: frost_keys.public_key_package.clone(), // Real FROST public key
+                    public_key: pk.clone(),
                     meta: display_name.as_bytes().to_vec(),
                 };
 
-                // 4. Propose adding leaf to tree (returns TreeOpKind directly)
+                // Propose adding leaf to tree
                 let tree_op_kind = effect_sys
                     .add_leaf(leaf, NodeIndex(0))
                     .await
                     .map_err(|e| e.to_string())?;
 
-                // 5. Get current tree state for parent info
+                // Get current tree state for parent info
                 let parent_epoch = effect_sys
                     .get_current_epoch()
                     .await
@@ -3269,44 +3257,71 @@ pub(super) async fn execute_command(
                     .await
                     .map_err(|e| e.to_string())?;
 
-                // 6. Wrap TreeOpKind in full TreeOp with parent state
+                // Wrap TreeOpKind in full TreeOp with parent state
                 let tree_op = TreeOp {
                     parent_epoch,
-                    parent_commitment: parent_commitment.0, // Extract inner [u8; 32]
+                    parent_commitment: parent_commitment.0,
                     op: tree_op_kind,
-                    version: 1, // Protocol version
+                    version: 1,
                 };
 
-                // 7. Create REAL FROST signature using the stored keys
-                let agg_sig = frost_sign_tree_op_with_keys(
-                    &tree_op,
-                    &*effect_sys,
-                    &frost_keys.key_packages[0],
-                    &frost_keys.public_key_package,
-                )
-                .await?;
-
-                let attested_op = AttestedOp {
-                    op: tree_op,
-                    agg_sig,         // Real FROST aggregate signature
-                    signer_count: 1, // Single device signed
+                // Sign via AppCore's ThresholdSigningService (or fallback to direct signing)
+                let attested_op = if let Some(core) = app_core {
+                    let core_guard = core.read().await;
+                    core_guard
+                        .sign_tree_op(&tree_op)
+                        .await
+                        .map_err(|e| format!("Threshold signing failed: {}", e))?
+                } else {
+                    // Fallback: Use effect system's crypto directly
+                    let frost_keys = effect_sys
+                        .frost_generate_keys(1, 1)
+                        .await
+                        .map_err(|e| format!("FROST key generation failed: {}", e))?;
+                    let message = serde_json::to_vec(&tree_op)
+                        .map_err(|e| format!("Failed to serialize TreeOp: {}", e))?;
+                    let nonces = effect_sys
+                        .frost_generate_nonces(&frost_keys.key_packages[0])
+                        .await
+                        .map_err(|e| format!("Nonce generation failed: {}", e))?;
+                    let signing_package = effect_sys
+                        .frost_create_signing_package(
+                            &message,
+                            std::slice::from_ref(&nonces),
+                            &[1u16],
+                            &frost_keys.public_key_package,
+                        )
+                        .await
+                        .map_err(|e| format!("Signing package creation failed: {}", e))?;
+                    let share = effect_sys
+                        .frost_sign_share(&signing_package, &frost_keys.key_packages[0], &nonces)
+                        .await
+                        .map_err(|e| format!("Signature share failed: {}", e))?;
+                    let agg_sig = effect_sys
+                        .frost_aggregate_signatures(&signing_package, &[share])
+                        .await
+                        .map_err(|e| format!("Signature aggregation failed: {}", e))?;
+                    AttestedOp {
+                        op: tree_op,
+                        agg_sig,
+                        signer_count: 1,
+                    }
                 };
 
-                // 8. Apply attested operation to tree
+                // Apply attested operation to tree
                 let cid = effect_sys
                     .apply_attested_op(attested_op)
                     .await
                     .map_err(|e| e.to_string())?;
 
-                // 9. Derive authority from tree commitment
-                let authority = ids::authority_id(&format!("tree:{}", hex::encode(&cid.0[..8])));
-                tracing::info!("Account created with tree-derived authority: {}", authority);
-                authority
+                tracing::info!(
+                    "Account created with authority: {}, tree CID: {}",
+                    authority_id,
+                    hex::encode(&cid.0[..8])
+                );
             } else {
-                // Fallback: Demo authority if no effect system
-                tracing::warn!("No effect system available, using demo authority");
-                ids::authority_id(&format!("account:{}", display_name))
-            };
+                tracing::warn!("No effect system available, skipping tree operations");
+            }
 
             // Store account in state
             {
@@ -4214,19 +4229,53 @@ pub(super) async fn execute_command(
                 tree_op.parent_commitment
             );
 
-            // 5. Create REAL FROST 1-of-1 attestation
+            // 5. Sign via AppCore's ThresholdSigningService
             // NOTE: Multi-device mode uses the OLD threshold to authorize the change
             // (i.e., if changing from 2-of-3 to 3-of-5, need 2 signers from old policy)
-            // For single-device demo, we use 1-of-1 FROST signing
-            let agg_sig = frost_sign_tree_op(&tree_op, &*effect_sys).await?;
-
-            let attested_op = AttestedOp {
-                op: tree_op,
-                agg_sig,         // Real FROST aggregate signature
-                signer_count: 1, // Single device signed
+            let attested_op = if let Some(core) = app_core {
+                let core_guard = core.read().await;
+                core_guard
+                    .sign_tree_op(&tree_op)
+                    .await
+                    .map_err(|e| format!("Threshold signing failed: {}", e))?
+            } else {
+                // Fallback: Use effect system's crypto directly (for testing without AppCore)
+                use aura_core::effects::CryptoEffects;
+                let frost_keys = effect_sys
+                    .frost_generate_keys(1, 1)
+                    .await
+                    .map_err(|e| format!("FROST key generation failed: {}", e))?;
+                let message = serde_json::to_vec(&tree_op)
+                    .map_err(|e| format!("Failed to serialize TreeOp: {}", e))?;
+                let nonces = effect_sys
+                    .frost_generate_nonces(&frost_keys.key_packages[0])
+                    .await
+                    .map_err(|e| format!("Nonce generation failed: {}", e))?;
+                let signing_package = effect_sys
+                    .frost_create_signing_package(
+                        &message,
+                        std::slice::from_ref(&nonces),
+                        &[1u16],
+                        &frost_keys.public_key_package,
+                    )
+                    .await
+                    .map_err(|e| format!("Signing package creation failed: {}", e))?;
+                let share = effect_sys
+                    .frost_sign_share(&signing_package, &frost_keys.key_packages[0], &nonces)
+                    .await
+                    .map_err(|e| format!("Signature share failed: {}", e))?;
+                let agg_sig = effect_sys
+                    .frost_aggregate_signatures(&signing_package, &[share])
+                    .await
+                    .map_err(|e| format!("Signature aggregation failed: {}", e))?;
+                AttestedOp {
+                    op: tree_op,
+                    agg_sig,
+                    signer_count: 1,
+                }
             };
 
-            tracing::info!("Created attested policy change operation with real FROST signature");
+            tracing::info!("Created attested policy change operation with threshold signature");
 
             // 6. Apply the attested operation to the tree
             let new_commitment = effect_sys
@@ -4283,34 +4332,31 @@ pub(super) async fn execute_command(
                 }
             }
 
-            // HYBRID IMPLEMENTATION: Real TreeEffects + FROST threshold signing
-            // Uses real tree operations with stored FROST keys for authorization
+            // HYBRID IMPLEMENTATION: Real TreeEffects + Threshold Signing via AppCore
+            // Uses real tree operations with ThresholdSigningService for signing
 
             let device_id = if let Some(ref effect_system_arc) = effect_system {
                 let effect_sys = effect_system_arc.read().await;
                 tracing::info!("Using TreeEffects for device addition");
 
-                // 1. Retrieve stored FROST keys for signing authorization
-                let (key_package, public_key_package) = {
-                    let bridge_state = state.read().await;
-                    let key_pkg = bridge_state
-                        .frost_state
-                        .device_key_package
-                        .clone()
+                // 1. Get public key from AppCore's ThresholdSigningService
+                let public_key_package = if let Some(core) = app_core {
+                    let core_guard = core.read().await;
+                    core_guard
+                        .threshold_signing_public_key()
+                        .await
                         .ok_or_else(|| {
-                            "No FROST key package stored. Create an account first.".to_string()
-                        })?;
-                    let pub_pkg = bridge_state
-                        .frost_state
-                        .public_key_package
-                        .clone()
-                        .ok_or_else(|| {
-                            "No FROST public key stored. Create an account first.".to_string()
-                        })?;
-                    (key_pkg, pub_pkg)
+                            "No signing keys available. Create an account first.".to_string()
+                        })?
+                } else {
+                    // Fallback: Generate ephemeral keys for testing
+                    use aura_core::effects::CryptoEffects;
+                    let frost_keys = effect_sys
+                        .frost_generate_keys(1, 1)
+                        .await
+                        .map_err(|e| format!("FROST key generation failed: {}", e))?;
+                    frost_keys.public_key_package
                 };
-
-                tracing::info!("Retrieved stored FROST keys for AddDevice signing");
 
                 // 2. Get current tree state to determine next leaf ID
                 let tree_state = effect_sys
@@ -4321,7 +4367,7 @@ pub(super) async fn execute_command(
                 // Compute next leaf ID from current leaf count
                 let next_leaf_id = LeafId(tree_state.num_leaves() as u32 + 1);
 
-                // 3. Create new device leaf with the stored FROST public key
+                // 3. Create new device leaf
                 // NOTE: In a real multi-device setup, the new device would generate its own
                 // key share via DKG resharing. For now, we use the same public key.
                 let new_device_id = ids::device_id(&format!("device:{}", device_name));
@@ -4329,7 +4375,7 @@ pub(super) async fn execute_command(
                     leaf_id: next_leaf_id,
                     device_id: new_device_id.clone(),
                     role: LeafRole::Device,
-                    public_key: public_key_package.clone(), // Use stored FROST public key
+                    public_key: public_key_package,
                     meta: device_name.as_bytes().to_vec(),
                 };
 
@@ -4357,21 +4403,48 @@ pub(super) async fn execute_command(
                     version: 1,
                 };
 
-                // 7. Sign with stored FROST keys
-                // Uses the account's FROST keys to authorize the device addition
-                // FUTURE: For multi-device, coordinate signing ceremony with other devices
-                let agg_sig = frost_sign_tree_op_with_keys(
-                    &tree_op,
-                    &*effect_sys,
-                    &key_package,
-                    &public_key_package,
-                )
-                .await?;
-
-                let attested_op = AttestedOp {
-                    op: tree_op,
-                    agg_sig,         // Real FROST aggregate signature
-                    signer_count: 1, // Single device signed
+                // 7. Sign via AppCore's ThresholdSigningService
+                let attested_op = if let Some(core) = app_core {
+                    let core_guard = core.read().await;
+                    core_guard
+                        .sign_tree_op(&tree_op)
+                        .await
+                        .map_err(|e| format!("Threshold signing failed: {}", e))?
+                } else {
+                    // Fallback: Use effect system's crypto directly
+                    use aura_core::effects::CryptoEffects;
+                    let frost_keys = effect_sys
+                        .frost_generate_keys(1, 1)
+                        .await
+                        .map_err(|e| format!("FROST key generation failed: {}", e))?;
+                    let message = serde_json::to_vec(&tree_op)
+                        .map_err(|e| format!("Failed to serialize TreeOp: {}", e))?;
+                    let nonces = effect_sys
+                        .frost_generate_nonces(&frost_keys.key_packages[0])
+                        .await
+                        .map_err(|e| format!("Nonce generation failed: {}", e))?;
+                    let signing_package = effect_sys
+                        .frost_create_signing_package(
+                            &message,
+                            std::slice::from_ref(&nonces),
+                            &[1u16],
+                            &frost_keys.public_key_package,
+                        )
+                        .await
+                        .map_err(|e| format!("Signing package creation failed: {}", e))?;
+                    let share = effect_sys
+                        .frost_sign_share(&signing_package, &frost_keys.key_packages[0], &nonces)
+                        .await
+                        .map_err(|e| format!("Signature share failed: {}", e))?;
+                    let agg_sig = effect_sys
+                        .frost_aggregate_signatures(&signing_package, &[share])
+                        .await
+                        .map_err(|e| format!("Signature aggregation failed: {}", e))?;
+                    AttestedOp {
+                        op: tree_op,
+                        agg_sig,
+                        signer_count: 1,
+                    }
                 };
 
                 // 8. Apply attested operation to tree
@@ -4474,16 +4547,50 @@ pub(super) async fn execute_command(
                     version: 1,
                 };
 
-                // 5. Create REAL FROST 1-of-1 attestation
-                // Uses genuine FROST threshold cryptography
+                // 5. Sign via AppCore's ThresholdSigningService
                 // FUTURE: Run real FROST threshold ceremony with remaining devices
                 // IMPORTANT: Device being removed CANNOT participate in signing
-                let agg_sig = frost_sign_tree_op(&tree_op, &*effect_sys).await?;
-
-                let attested_op = AttestedOp {
-                    op: tree_op,
-                    agg_sig,         // Real FROST aggregate signature
-                    signer_count: 1, // Single device signed (excluding removed device)
+                let attested_op = if let Some(core) = app_core {
+                    let core_guard = core.read().await;
+                    core_guard
+                        .sign_tree_op(&tree_op)
+                        .await
+                        .map_err(|e| format!("Threshold signing failed: {}", e))?
+                } else {
+                    // Fallback: Use effect system's crypto directly
+                    use aura_core::effects::CryptoEffects;
+                    let frost_keys = effect_sys
+                        .frost_generate_keys(1, 1)
+                        .await
+                        .map_err(|e| format!("FROST key generation failed: {}", e))?;
+                    let message = serde_json::to_vec(&tree_op)
+                        .map_err(|e| format!("Failed to serialize TreeOp: {}", e))?;
+                    let nonces = effect_sys
+                        .frost_generate_nonces(&frost_keys.key_packages[0])
+                        .await
+                        .map_err(|e| format!("Nonce generation failed: {}", e))?;
+                    let signing_package = effect_sys
+                        .frost_create_signing_package(
+                            &message,
+                            std::slice::from_ref(&nonces),
+                            &[1u16],
+                            &frost_keys.public_key_package,
+                        )
+                        .await
+                        .map_err(|e| format!("Signing package creation failed: {}", e))?;
+                    let share = effect_sys
+                        .frost_sign_share(&signing_package, &frost_keys.key_packages[0], &nonces)
+                        .await
+                        .map_err(|e| format!("Signature share failed: {}", e))?;
+                    let agg_sig = effect_sys
+                        .frost_aggregate_signatures(&signing_package, &[share])
+                        .await
+                        .map_err(|e| format!("Signature aggregation failed: {}", e))?;
+                    AttestedOp {
+                        op: tree_op,
+                        agg_sig,
+                        signer_count: 1,
+                    }
                 };
 
                 // 6. Apply attested operation to tree

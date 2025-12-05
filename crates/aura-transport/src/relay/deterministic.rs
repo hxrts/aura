@@ -108,7 +108,17 @@ impl DeterministicRandomSelector {
             hasher.update(&[round as u8]);
             let round_seed = hasher.finalize();
 
-            let index_bytes: [u8; 8] = round_seed[..8].try_into().unwrap();
+            // Hash output is always 32 bytes, so we can safely extract first 8 bytes
+            let index_bytes: [u8; 8] = [
+                round_seed[0],
+                round_seed[1],
+                round_seed[2],
+                round_seed[3],
+                round_seed[4],
+                round_seed[5],
+                round_seed[6],
+                round_seed[7],
+            ];
             let index = u64::from_le_bytes(index_bytes) as usize % remaining.len();
 
             result.push(remaining[index].authority_id);

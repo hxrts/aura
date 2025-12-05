@@ -200,6 +200,8 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **Choreography protocol** → Feature crate + `aura-mpst`
 - **Authorization logic** → `aura-wot`
 - **Social topology/relay selection** → `aura-social`
+- **Quint specification** → `specs/quint/` + `docs/807_verification_guide.md`
+- **Generative test** → `aura-simulator/src/quint/` + `docs/809_generative_testing_guide.md`
 
 #### "I need to understand..."
 - **How authorities work** → `docs/100_authority_and_identity.md`
@@ -227,6 +229,8 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **How core systems work together** → `docs/802_core_systems_guide.md`
 - **How to design advanced protocols** → `docs/804_advanced_coordination_guide.md`
 - **How simulation works** → `docs/806_simulation_guide.md`
+- **How verification works** → `docs/807_verification_guide.md` (Quint specs + Lean proofs)
+- **How generative testing works** → `docs/809_generative_testing_guide.md`
 - **How maintenance and OTA updates work** → `docs/808_maintenance_guide.md` + `docs/111_maintenance.md`
 - **How development patterns work** → `docs/805_development_patterns.md`
 - **The project's goals and constraints** → `docs/000_project_overview.md`

@@ -67,8 +67,9 @@ pub use choreographic::{
 pub use aura_core::effects::{
     AuthorizationEffects, ConsoleEffects, CryptoEffects, CryptoError, JournalEffects,
     LeakageEffects, NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream,
-    RandomEffects, StorageEffects, StorageError, StorageLocation, StorageStats, SystemEffects,
-    SystemError, TimeError, TimeoutHandle, WakeCondition,
+    RandomEffects, SecureStorageEffects, StorageEffects, StorageError, StorageLocation,
+    StorageStats, SystemEffects, SystemError, ThresholdSigningEffects, TimeError, TimeoutHandle,
+    WakeCondition,
 };
 // Domain-specific time traits (unified time system)
 pub use aura_core::effects::{LogicalClockEffects, OrderClockEffects, PhysicalTimeEffects};
@@ -109,6 +110,7 @@ pub trait AuraEffects:
     CryptoEffects
     + NetworkEffects
     + StorageEffects
+    + SecureStorageEffects
     + PhysicalTimeEffects
     + LogicalClockEffects
     + OrderClockEffects
@@ -121,6 +123,7 @@ pub trait AuraEffects:
     + SystemEffects
     + AuthorizationEffects
     + LeakageEffects
+    + ThresholdSigningEffects
     + Send
     + Sync
 {

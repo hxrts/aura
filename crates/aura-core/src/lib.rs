@@ -79,6 +79,8 @@ pub mod reactive;
 pub mod relational;
 /// Core algebraic types and semilattice laws
 pub mod semilattice;
+/// Unified threshold signing types
+pub mod threshold;
 /// Time semantics (Logical/Order/Physical/Range)
 pub mod time;
 /// Tree operation types
@@ -206,6 +208,8 @@ pub use effects::{
     SigningEffects,
     SnapshotEffects,
     TestingEffects,
+    // Unified threshold signing effects
+    ThresholdSigningEffects,
     TimeEffects,
     TreeEffects,
     WakeCondition,
@@ -250,6 +254,13 @@ pub use types::flow::{FlowBudget, Receipt};
 pub use types::relationships::*;
 #[doc = "stable: Resource scope types for authorization with semver guarantees"]
 pub use types::scope::{AuthorityOp, ContextOp, ResourceScope};
+
+// Threshold signing types
+#[doc = "unstable: Unified threshold signing types are under active development"]
+pub use threshold::{
+    ApprovalContext, ParticipantEndpoint, ParticipantIdentity, SignableOperation, SigningContext,
+    SigningParticipant, ThresholdSignature,
+};
 
 /// Standard result type for core operations
 pub type Result<T> = std::result::Result<T, AuraError>;

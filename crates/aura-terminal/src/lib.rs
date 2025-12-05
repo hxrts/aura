@@ -18,7 +18,7 @@
 //!
 //! ## Architecture
 //!
-//! All operations go through `AppCore` from `aura-app`:
+//! Uses dependency inversion: `aura-app` is pure, `aura-agent` implements runtime:
 //!
 //! ```text
 //! ┌─────────────────────────┐
@@ -28,21 +28,20 @@
 //! │  TUI screens/components │
 //! └───────────┬─────────────┘
 //!             │
-//!             ↓ imports from
-//! ┌───────────────────────────┐
-//! │        aura-app           │  ← AppCore + re-exports
-//! │                           │
-//! │  AppCore (with AuraAgent) │
-//! │  Intent dispatch          │
-//! │  ViewState signals        │
-//! └───────────────────────────┘
+//!             ↓ imports from both
+//! ┌───────────────────────────┐     ┌───────────────────────────┐
+//! │        aura-app           │     │       aura-agent          │
+//! │    (pure app core)        │     │    (runtime layer)        │
+//! │                           │     │                           │
+//! │  AppCore, Intent          │     │  AuraAgent, EffectContext │
+//! │  ViewState, RuntimeBridge │     │  Services (Auth, Recovery)│
+//! └───────────────────────────┘     └───────────────────────────┘
 //! ```
 //!
 //! ## Constraints
 //!
 //! This crate:
-//! - **IMPORTS FROM**: `aura-app` (primary), `aura-core` (types only)
-//! - **NEVER IMPORTS**: `aura-agent` directly (use aura-app re-exports)
+//! - **IMPORTS FROM**: `aura-app` (pure types), `aura-agent` (runtime), `aura-core` (types only)
 //! - **MUST NOT**: Create effect implementations or handlers (use aura-effects)
 //! - **MUST NOT**: Be imported by Layer 1-6 crates (no circular dependencies)
 //!
@@ -99,8 +98,10 @@ pub use handlers::CliHandler;
 // Action types defined in this module (no re-export needed)
 
 // Action types are defined in this module and automatically available
-// Import from aura_app which re-exports agent types
-use aura_app::{AgentBuilder, AppConfig, AppCore, EffectContext};
+// Import app types from aura-app (pure layer)
+use aura_app::{AppConfig, AppCore};
+// Import agent types from aura-agent (runtime layer)
+use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::{effects::ExecutionMode, identifiers::DeviceId, AuraError};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -117,15 +118,21 @@ pub fn create_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraError> 
         .with_authority(authority_id)
         .build_testing()
         .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
+    let agent = Arc::new(agent);
 
-    // Create AppCore with the agent
+    // Create AppCore with the runtime bridge (dependency inversion)
     let config = AppConfig::default();
-    let app_core = AppCore::with_agent(config, agent)
+    let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())
         .map_err(|e| AuraError::agent(format!("AppCore creation failed: {}", e)))?;
     let app_core = Arc::new(RwLock::new(app_core));
 
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
-    Ok(CliHandler::new(app_core, device_id, effect_context))
+    Ok(CliHandler::with_agent(
+        app_core,
+        agent,
+        device_id,
+        effect_context,
+    ))
 }
 
 /// Create a test CLI handler for the given device ID
@@ -138,15 +145,21 @@ pub fn create_test_cli_handler(device_id: DeviceId) -> Result<CliHandler, AuraEr
         .with_authority(authority_id)
         .build_testing()
         .map_err(|e| AuraError::agent(format!("Agent build failed: {}", e)))?;
+    let agent = Arc::new(agent);
 
-    // Create AppCore with the agent
+    // Create AppCore with the runtime bridge (dependency inversion)
     let config = AppConfig::default();
-    let app_core = AppCore::with_agent(config, agent)
+    let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())
         .map_err(|e| AuraError::agent(format!("AppCore creation failed: {}", e)))?;
     let app_core = Arc::new(RwLock::new(app_core));
 
     let effect_context = EffectContext::new(authority_id, context_id, ExecutionMode::Testing);
-    Ok(CliHandler::new(app_core, device_id, effect_context))
+    Ok(CliHandler::with_agent(
+        app_core,
+        agent,
+        device_id,
+        effect_context,
+    ))
 }
 
 /// Create a CLI handler with a generated device ID

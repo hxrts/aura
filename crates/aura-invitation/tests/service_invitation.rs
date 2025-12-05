@@ -1,11 +1,13 @@
-use aura_core::identifiers::{AuthorityId, ContextId};
+#![allow(missing_docs)]
+
+use aura_core::identifiers::ContextId;
+use aura_core::util::test_utils::test_authority_id;
 use aura_invitation::{GuardSnapshot, InvitationConfig, InvitationService, InvitationType};
-use uuid::Uuid;
 
 fn snapshot_with_caps(caps: &[&str]) -> GuardSnapshot {
     GuardSnapshot::new(
-        AuthorityId::from_uuid(Uuid::new_v4()),
-        ContextId::from_uuid(Uuid::new_v4()),
+        test_authority_id(10),
+        ContextId::new_from_entropy([20u8; 32]),
         10,
         caps.iter().map(|c| c.to_string()).collect(),
         0,
@@ -15,15 +17,12 @@ fn snapshot_with_caps(caps: &[&str]) -> GuardSnapshot {
 
 #[test]
 fn prepare_send_invitation_allows_with_capabilities() {
-    let svc = InvitationService::new(
-        AuthorityId::from_uuid(Uuid::new_v4()),
-        InvitationConfig::default(),
-    );
+    let svc = InvitationService::new(test_authority_id(1), InvitationConfig::default());
 
     let snap = snapshot_with_caps(&["invitation:send"]);
     let outcome = svc.prepare_send_invitation(
         &snap,
-        AuthorityId::from_uuid(Uuid::new_v4()),
+        test_authority_id(2),
         InvitationType::Contact { petname: None },
         Some("hi".to_string()),
         Some(1000),
@@ -38,10 +37,7 @@ fn prepare_send_invitation_allows_with_capabilities() {
 
 #[test]
 fn prepare_accept_invitation_requires_capability() {
-    let svc = InvitationService::new(
-        AuthorityId::from_uuid(Uuid::new_v4()),
-        InvitationConfig::default(),
-    );
+    let svc = InvitationService::new(test_authority_id(3), InvitationConfig::default());
 
     let snap = snapshot_with_caps(&[]); // no caps
     let outcome = svc.prepare_accept_invitation(&snap, "inv-absent");

@@ -179,8 +179,10 @@ RUNTIME_ALLOWLIST="crates/aura-agent/src/runtime/"
 # App core storage (Layer 5) - cfg-gated for native builds only (#[cfg(not(target_arch = "wasm32"))])
 APP_NATIVE_STORAGE_ALLOWLIST="crates/aura-app/src/core/app.rs"
 
-# CLI entry points (Layer 7) - main.rs where production starts
+# CLI entry points (Layer 7) - main.rs and bootstrap handlers where production starts
 CLI_ENTRY_ALLOWLIST="crates/aura-terminal/src/main.rs"
+# TUI bootstrap handler - needs fs access before effect system exists
+TUI_BOOTSTRAP_ALLOWLIST="crates/aura-terminal/src/handlers/tui.rs"
 
 # Common filter for effect/impure checks
 # Usage: filter_common_allowlist "$input" ["extra_pattern"]
@@ -319,12 +321,12 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
   emit_hits "Direct OS operations in domain crates (should use effect injection)" "$os_violations"
 
   # Check for direct std::fs usage outside handler layers (should use StorageEffects)
-  # Allowed: effect handler impls (storage.rs), runtime assembly, tests, cfg-gated native code
+  # Allowed: effect handler impls (storage.rs), runtime assembly, tests, cfg-gated native code, TUI bootstrap
   fs_pattern="std::fs::|std::io::File|std::io::BufReader|std::io::BufWriter"
   fs_hits=$(rg --no-heading "$fs_pattern" crates -g "*.rs" || true)
-  filtered_fs=$(filter_common_allowlist "$fs_hits" "$RUNTIME_ALLOWLIST|$APP_NATIVE_STORAGE_ALLOWLIST")
+  filtered_fs=$(filter_common_allowlist "$fs_hits" "$RUNTIME_ALLOWLIST|$APP_NATIVE_STORAGE_ALLOWLIST|$TUI_BOOTSTRAP_ALLOWLIST")
   emit_hits "Direct std::fs usage (should use StorageEffects)" "$filtered_fs"
-  verbose "Allowed: aura-effects/src/, aura-simulator/src/handlers/, aura-agent/src/runtime/, aura-app/src/core/app.rs (cfg-gated), tests/"
+  verbose "Allowed: aura-effects/src/, aura-simulator/src/handlers/, aura-agent/src/runtime/, aura-app/src/core/app.rs (cfg-gated), aura-terminal/src/handlers/tui.rs (bootstrap), tests/"
 
   # Check for direct std::net usage outside handler layers (should use NetworkEffects)
   # Allowed: effect handler impls (network.rs), runtime assembly, tests

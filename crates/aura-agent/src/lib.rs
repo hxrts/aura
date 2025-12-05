@@ -87,6 +87,9 @@ pub mod handlers;
 // Reactive programming infrastructure (public)
 pub mod reactive;
 
+// RuntimeBridge implementation (for aura-app dependency inversion)
+mod runtime_bridge_impl;
+
 // Journal fact registry helpers (public helper functions)
 pub mod fact_registry;
 
@@ -131,6 +134,9 @@ pub use runtime::services::{RendezvousManager, RendezvousManagerConfig};
 
 // Social service types
 pub use runtime::services::{SocialManager, SocialManagerConfig, SocialManagerState};
+
+// Threshold signing service types
+pub use runtime::services::ThresholdSigningService;
 
 // Re-export core types for convenience
 pub use aura_core::effects::ExecutionMode;

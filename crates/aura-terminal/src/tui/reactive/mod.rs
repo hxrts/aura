@@ -33,8 +33,8 @@ pub mod views; // View state with delta application
 // Re-exports
 pub use executor::{DataUpdate, QueryExecutor};
 
-// Re-export shared FRP primitives from aura-app (which re-exports from aura-agent)
-pub use aura_app::Dynamic;
+// Re-export shared FRP primitives from aura-agent (runtime layer)
+pub use aura_agent::reactive::Dynamic;
 pub use queries::{
     Channel, ChannelType, ChannelsQuery, Guardian, GuardianApproval, GuardianStatus,
     GuardiansQuery, Invitation, InvitationDirection, InvitationStatus, InvitationType,
@@ -46,4 +46,4 @@ pub use views::{
     StorageInfo, SuggestionPolicy, TraversalDepth, TraversalPosition, ViewState,
 };
 
-pub use aura_app::ReactiveScheduler;
+pub use aura_agent::reactive::ReactiveScheduler;

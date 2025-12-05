@@ -80,6 +80,45 @@ impl SecureStorageLocation {
             format!("{}/{}", self.namespace, self.key)
         }
     }
+
+    /// Create a location for storing a guardian's FROST share.
+    ///
+    /// Guardian shares are stored by:
+    /// - namespace: "guardian_shares"
+    /// - key: account authority being protected
+    /// - sub_key: guardian authority holding the share
+    ///
+    /// # Security Note
+    ///
+    /// Guardian shares MUST be encrypted with the guardian's public key before
+    /// storage. The share data stored here is the encrypted share bytes, not
+    /// the raw FROST SigningShare.
+    pub fn guardian_share(
+        account_authority: &crate::AuthorityId,
+        guardian_authority: &crate::AuthorityId,
+    ) -> Self {
+        Self::with_sub_key(
+            "guardian_shares",
+            account_authority.to_string(),
+            guardian_authority.to_string(),
+        )
+    }
+
+    /// Create a location for storing authority FROST keys.
+    ///
+    /// Authority keys are stored by:
+    /// - namespace: "authority_keys"
+    /// - key: authority ID
+    /// - sub_key: epoch number
+    ///
+    /// # Security Note
+    ///
+    /// This stores the SigningShare and PublicKeyPackage for the authority.
+    /// The SigningShare is the secret key material that must never leave
+    /// secure storage unencrypted.
+    pub fn authority_keys(authority: &crate::AuthorityId, epoch: u64) -> Self {
+        Self::with_sub_key("authority_keys", authority.to_string(), epoch.to_string())
+    }
 }
 
 /// Capabilities required for secure storage operations

@@ -1,14 +1,17 @@
 module protocol_recovery {
-  import protocol_core as core from "protocol_core"
-
+  // Base types (consistent with protocol_core)
   type Option[a] = Some(a) | None
+  type ProtocolId = str
+  type AuthorityId = str
+  type GuardianId = str
 
-  type ProtocolId = core.ProtocolId
-  type DeviceId = core.DeviceId
-  type GuardianId = DeviceId
-  type LifecycleStatus = Pending | Completed | Aborted
+  // Protocol effects (simplified for this module)
+  type ProtocolEffect = { effectType: str, payload: str }
+
+  // Note: Sum type variants must be globally unique in Quint
+  type LifecycleStatus = LifecyclePending | LifecycleCompleted | LifecycleAborted
   type RecoveryOutcome = {
-    newDevice: DeviceId,
+    newAuthority: AuthorityId,
     guardiansApproved: Set[GuardianId],
     shareCount: int
   }
@@ -18,8 +21,8 @@ module protocol_recovery {
     | CollectingApprovals
     | CooldownActive
     | ReconstructingShares
-    | Completed
-    | Cancelled
+    | RecoveryCompleted
+    | RecoveryCancelled
 
   // ============ STATE ============
 
@@ -28,18 +31,27 @@ module protocol_recovery {
   var threshold: ProtocolId -> int
   var currentPhase: ProtocolId -> RecoveryPhase
   var cooldownRemaining: ProtocolId -> int
-  var reconstructedDevice: ProtocolId -> Option[DeviceId]
+  var reconstructedAuthority: ProtocolId -> Option[AuthorityId]
   var pendingShares: ProtocolId -> GuardianId -> Option[int]
   var lifecycleStatus: ProtocolId -> LifecycleStatus
-  var lifecycleEffects: ProtocolId -> Set[core.ProtocolEffect]
+  var lifecycleEffects: ProtocolId -> Set[ProtocolEffect]
   var outcome: ProtocolId -> Option[RecoveryOutcome]
 
   // ============ HELPERS ============
 
-  pure def getOrDefault[K, V](m: K -> V, key: K, default: V): V =
-    if key.in(m.keys()) then m.get(key) else default
+  pure def getOrDefault(m: ProtocolId -> Set[GuardianId], key: ProtocolId, default: Set[GuardianId]): Set[GuardianId] =
+    if (key.in(m.keys())) m.get(key) else default
 
-  pure def optionIsSome[a](opt: Option[a]): bool =
+  pure def getOrDefaultInt(m: ProtocolId -> int, key: ProtocolId, default: int): int =
+    if (key.in(m.keys())) m.get(key) else default
+
+  pure def optionIsSome(opt: Option[AuthorityId]): bool =
+    match opt {
+      | Some(_) => true
+      | None => false
+    }
+
+  pure def optionIsSomeInt(opt: Option[int]): bool =
     match opt {
       | Some(_) => true
       | None => false
@@ -50,30 +62,35 @@ module protocol_recovery {
     pid: ProtocolId,
     members: Set[GuardianId]
   ): ProtocolId -> GuardianId -> Option[int] =
-    if pid.in(mapping.keys()) then mapping
+    if (pid.in(mapping.keys())) mapping
     else
       mapping.set(
         pid,
         members.fold(Map(), (acc, member) => acc.set(member, None))
       )
 
-  pure def approvalsCount(pid: ProtocolId): int =
+  def approvalsCount(pid: ProtocolId): int =
     getOrDefault(approvals, pid, Set()).size()
 
-  pure def thresholdReached(pid: ProtocolId): bool =
-    approvalsCount(pid) >= getOrDefault(threshold, pid, 0)
+  def thresholdReached(pid: ProtocolId): bool =
+    approvalsCount(pid) >= getOrDefaultInt(threshold, pid, 0)
 
-  pure def allSharesProvided(pid: ProtocolId): bool =
-    getOrDefault(guardians, pid, Set()).forall(guardian =>
-      optionIsSome(getOrDefault(pendingShares.get(pid), guardian, None))
+  def allSharesProvided(pid: ProtocolId): bool = {
+    val guardianSet = getOrDefault(guardians, pid, Set())
+    val shareMap = if (pid.in(pendingShares.keys())) pendingShares.get(pid) else Map()
+    guardianSet.forall(guardian =>
+      if (guardian.in(shareMap.keys())) optionIsSomeInt(shareMap.get(guardian)) else false
     )
+  }
 
-  pure def shareCount(pid: ProtocolId): int =
-    getOrDefault(guardians, pid, Set()).fold(0, (acc, guardian) =>
-      if optionIsSome(getOrDefault(pendingShares.get(pid), guardian, None))
-        then acc + 1
-        else acc
-    )
+  def shareCount(pid: ProtocolId): int = {
+    val guardianSet = getOrDefault(guardians, pid, Set())
+    val shareMapLocal = if (pid.in(pendingShares.keys())) pendingShares.get(pid) else Map()
+    guardianSet.fold(0, (acc, g) => {
+      val hasShare = if (g.in(shareMapLocal.keys())) optionIsSomeInt(shareMapLocal.get(g)) else false
+      if (hasShare) acc + 1 else acc
+    })
+  }
 
   // ============ INITIALISATION ============
 
@@ -83,7 +100,7 @@ module protocol_recovery {
     threshold' = Map(),
     currentPhase' = Map(),
     cooldownRemaining' = Map(),
-    reconstructedDevice' = Map(),
+    reconstructedAuthority' = Map(),
     pendingShares' = Map(),
     lifecycleStatus' = Map(),
     lifecycleEffects' = Map(),
@@ -100,170 +117,187 @@ module protocol_recovery {
     guardianSet.size() >= 1,
     thresholdValue >= 1,
     thresholdValue <= guardianSet.size(),
-    not pid.in(guardians.keys()),
+    not(pid.in(guardians.keys())),
     guardians' = guardians.set(pid, guardianSet),
     approvals' = approvals.set(pid, Set()),
     threshold' = threshold.set(pid, thresholdValue),
     currentPhase' = currentPhase.set(pid, Idle),
     cooldownRemaining' = cooldownRemaining.set(pid, 0),
-    reconstructedDevice' = reconstructedDevice.set(pid, None),
+    reconstructedAuthority' = reconstructedAuthority.set(pid, None),
     pendingShares' = ensureShareMap(pendingShares, pid, guardianSet),
-    lifecycleStatus' = lifecycleStatus.set(pid, Pending),
-    lifecycleEffects' = lifecycleEffects.set(pid, Set())
+    lifecycleStatus' = lifecycleStatus.set(pid, LifecyclePending),
+    lifecycleEffects' = lifecycleEffects.set(pid, Set()),
+    outcome' = outcome
   }
 
-  action initiateRecovery(pid: ProtocolId, device: DeviceId, cooldown: int): bool =
-    val phase = currentPhase.get(pid) {
-      phase = Idle and cooldown >= 0 {
-        all {
-          currentPhase' = currentPhase.set(pid, CollectingApprovals),
-          cooldownRemaining' = cooldownRemaining.set(pid, cooldown),
-          reconstructedDevice' = reconstructedDevice.set(pid, Some(device)),
-          guardians' = guardians,
-          approvals' = approvals.set(pid, Set()),
-          threshold' = threshold,
-          pendingShares' = ensureShareMap(pendingShares, pid, getOrDefault(guardians, pid, Set()))
-        }
-      }
+  action initiateRecovery(pid: ProtocolId, authority: AuthorityId, cooldown: int): bool = {
+    val phase = if (pid.in(currentPhase.keys())) currentPhase.get(pid) else Idle
+    val isIdle = match phase { | Idle => true | _ => false }
+    all {
+      isIdle,
+      cooldown >= 0,
+      currentPhase' = currentPhase.set(pid, CollectingApprovals),
+      cooldownRemaining' = cooldownRemaining.set(pid, cooldown),
+      reconstructedAuthority' = reconstructedAuthority.set(pid, Some(authority)),
+      guardians' = guardians,
+      approvals' = approvals.set(pid, Set()),
+      threshold' = threshold,
+      pendingShares' = ensureShareMap(pendingShares, pid, getOrDefault(guardians, pid, Set())),
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      outcome' = outcome
     }
+  }
 
-  action approveRecovery(pid: ProtocolId, guardian: GuardianId): bool =
-    val phase = currentPhase.get(pid) {
-    val guardianSet = guardians.get(pid) {
-      phase = CollectingApprovals and guardianSet.contains(guardian) {
-        val updated = getOrDefault(approvals, pid, Set()).union(Set(guardian)) {
-        all {
-          approvals' = approvals.set(pid, updated),
-          guardians' = guardians,
-          currentPhase' =
-            (if thresholdReached(pid) and getOrDefault(cooldownRemaining, pid, 0) > 0
-              then currentPhase.set(pid, CooldownActive)
-              else currentPhase),
-          threshold' = threshold,
-          cooldownRemaining' = cooldownRemaining,
-          reconstructedDevice' = reconstructedDevice,
-          pendingShares' = pendingShares
-        }
-      }
-    }}
+  action approveRecovery(pid: ProtocolId, guardian: GuardianId): bool = {
+    val phase = if (pid.in(currentPhase.keys())) currentPhase.get(pid) else Idle
+    val isCollecting = match phase { | CollectingApprovals => true | _ => false }
+    val guardianSet = getOrDefault(guardians, pid, Set())
+    val updated = getOrDefault(approvals, pid, Set()).union(Set(guardian))
+    val cooldown = getOrDefaultInt(cooldownRemaining, pid, 0)
+    all {
+      isCollecting,
+      guardianSet.contains(guardian),
+      approvals' = approvals.set(pid, updated),
+      guardians' = guardians,
+      currentPhase' =
+        (if (thresholdReached(pid) and cooldown > 0)
+          currentPhase.set(pid, CooldownActive)
+          else currentPhase),
+      threshold' = threshold,
+      cooldownRemaining' = cooldownRemaining,
+      reconstructedAuthority' = reconstructedAuthority,
+      pendingShares' = pendingShares,
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      outcome' = outcome
+    }
+  }
 
-  action tickCooldown(pid: ProtocolId): bool =
-    val phase = currentPhase.get(pid) {
-      phase = CooldownActive and getOrDefault(cooldownRemaining, pid, 0) > 0 {
-        val remaining = cooldownRemaining.get(pid) - 1 {
-        val nextPhase =
-          if remaining = 0 and thresholdReached(pid) then ReconstructingShares else CooldownActive {
-          all {
-            cooldownRemaining' = cooldownRemaining.set(pid, remaining),
-            currentPhase' = currentPhase.set(pid, nextPhase),
-            guardians' = guardians,
-            approvals' = approvals,
-            threshold' = threshold,
-            reconstructedDevice' = reconstructedDevice,
-            pendingShares' = pendingShares
-          }
-        }
-      }
-    }}
+  action tickCooldown(pid: ProtocolId): bool = {
+    val phase = if (pid.in(currentPhase.keys())) currentPhase.get(pid) else Idle
+    val isCooldownActive = match phase { | CooldownActive => true | _ => false }
+    val cooldown = getOrDefaultInt(cooldownRemaining, pid, 0)
+    val remaining = cooldown - 1
+    val nextPhase =
+      if (remaining == 0 and thresholdReached(pid)) ReconstructingShares else CooldownActive
+    all {
+      isCooldownActive,
+      cooldown > 0,
+      cooldownRemaining' = cooldownRemaining.set(pid, remaining),
+      currentPhase' = currentPhase.set(pid, nextPhase),
+      guardians' = guardians,
+      approvals' = approvals,
+      threshold' = threshold,
+      reconstructedAuthority' = reconstructedAuthority,
+      pendingShares' = pendingShares,
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      outcome' = outcome
+    }
+  }
 
   action submitShare(
     pid: ProtocolId,
     guardian: GuardianId,
     shareHash: int
-  ): bool =
-    val phase = currentPhase.get(pid) {
-    val guardianSet = guardians.get(pid) {
-      phase = ReconstructingShares and guardianSet.contains(guardian) and
-      optionIsSome(getOrDefault(pendingShares.get(pid), guardian, None)) = false {
-        val updated = pendingShares.set(
-          pid,
-          pendingShares.get(pid).set(guardian, Some(shareHash))
-        ) {
-        val deviceOpt = reconstructedDevice.get(pid) {
-        val completed = match deviceOpt {
-          | Some(_) =>
-              getOrDefault(guardians, pid, Set()).forall(member =>
-                optionIsSome(getOrDefault(updated.get(pid), member, None))
-              )
-          | None => false
-        } {
-        val nextPhase =
-          if completed then Completed else ReconstructingShares {
-          all {
-            pendingShares' = updated,
-            currentPhase' = currentPhase.set(pid, nextPhase),
-            guardians' = guardians,
-            approvals' = approvals,
-            threshold' = threshold,
-            cooldownRemaining' = cooldownRemaining,
-            reconstructedDevice' = reconstructedDevice,
-            outcome' = (if completed then outcome.set(pid, Some({
-              newDevice: match deviceOpt {
-                | Some(device) => device
-                | None => "unknown"
-              },
-              guardiansApproved: getOrDefault(approvals, pid, Set()),
-              shareCount: shareCount(pid)
-            })) else outcome)
-          }
-        }
-      }
-    }}}
-
-  action cancelRecovery(pid: ProtocolId): bool =
-    val phase = currentPhase.get(pid) {
-      not phase = Completed {
-        all {
-          currentPhase' = currentPhase.set(pid, Cancelled),
-          guardians' = guardians,
-          approvals' = approvals,
-          threshold' = threshold,
-          cooldownRemaining' = cooldownRemaining,
-          reconstructedDevice' = reconstructedDevice,
-          pendingShares' = pendingShares,
-          lifecycleStatus' = lifecycleStatus.set(pid, Aborted),
-          lifecycleEffects' = lifecycleEffects
-        }
-      }
+  ): bool = {
+    val phase = if (pid.in(currentPhase.keys())) currentPhase.get(pid) else Idle
+    val isReconstructing = match phase { | ReconstructingShares => true | _ => false }
+    val guardianSet = getOrDefault(guardians, pid, Set())
+    val shareMap = if (pid.in(pendingShares.keys())) pendingShares.get(pid) else Map()
+    val hasShare = if (guardian.in(shareMap.keys())) optionIsSomeInt(shareMap.get(guardian)) else false
+    val updatedShareMap = shareMap.set(guardian, Some(shareHash))
+    val updated = pendingShares.set(pid, updatedShareMap)
+    val authorityOpt = if (pid.in(reconstructedAuthority.keys())) reconstructedAuthority.get(pid) else None
+    val hasAuthority = optionIsSome(authorityOpt)
+    val extractedAuthority = match authorityOpt { | Some(a) => a | None => "" }
+    val allProvided = guardianSet.forall(member =>
+      if (member.in(updatedShareMap.keys())) optionIsSomeInt(updatedShareMap.get(member)) else false
+    )
+    val completed = hasAuthority and allProvided
+    val nextPhase = if (completed) RecoveryCompleted else ReconstructingShares
+    all {
+      isReconstructing,
+      guardianSet.contains(guardian),
+      not(hasShare),
+      pendingShares' = updated,
+      currentPhase' = currentPhase.set(pid, nextPhase),
+      guardians' = guardians,
+      approvals' = approvals,
+      threshold' = threshold,
+      cooldownRemaining' = cooldownRemaining,
+      reconstructedAuthority' = reconstructedAuthority,
+      outcome' = if (completed) outcome.set(pid, Some({
+        newAuthority: extractedAuthority,
+        guardiansApproved: getOrDefault(approvals, pid, Set()),
+        shareCount: shareCount(pid)
+      })) else outcome,
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects
     }
+  }
 
-  action signalComplete(pid: ProtocolId): bool =
-    val status = lifecycleStatus.get(pid) {
-    val phase = currentPhase.get(pid) {
-    val outcomeOpt = outcome.get(pid) {
-    val hasOutcome = match outcomeOpt {
-      | Some(_) => true
-      | None => false
-    } {
-      status = Pending and phase = Completed and allSharesProvided(pid) and hasOutcome {
-        lifecycleStatus' = lifecycleStatus.set(pid, Completed),
-        lifecycleEffects' = lifecycleEffects.set(pid, Set()),
-        guardians' = guardians,
-        approvals' = approvals,
-        threshold' = threshold,
-        currentPhase' = currentPhase,
-        cooldownRemaining' = cooldownRemaining,
-        reconstructedDevice' = reconstructedDevice,
-        pendingShares' = pendingShares,
-        outcome' = outcome
-      }
-    }}}}
-
-  action signalAbort(pid: ProtocolId): bool =
-    val status = lifecycleStatus.get(pid) {
-      status = Pending {
-        lifecycleStatus' = lifecycleStatus.set(pid, Aborted),
-        lifecycleEffects' = lifecycleEffects,
-        currentPhase' = currentPhase.set(pid, Cancelled),
-        guardians' = guardians,
-        approvals' = approvals,
-        threshold' = threshold,
-        cooldownRemaining' = cooldownRemaining,
-        reconstructedDevice' = reconstructedDevice,
-        pendingShares' = pendingShares,
-        outcome' = outcome
-      }
+  action cancelRecovery(pid: ProtocolId): bool = {
+    val phase = if (pid.in(currentPhase.keys())) currentPhase.get(pid) else Idle
+    val isCompleted = match phase { | RecoveryCompleted => true | _ => false }
+    all {
+      not(isCompleted),
+      currentPhase' = currentPhase.set(pid, RecoveryCancelled),
+      guardians' = guardians,
+      approvals' = approvals,
+      threshold' = threshold,
+      cooldownRemaining' = cooldownRemaining,
+      reconstructedAuthority' = reconstructedAuthority,
+      pendingShares' = pendingShares,
+      lifecycleStatus' = lifecycleStatus.set(pid, LifecycleAborted),
+      lifecycleEffects' = lifecycleEffects,
+      outcome' = outcome
     }
+  }
+
+  action signalComplete(pid: ProtocolId): bool = {
+    val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else LifecyclePending
+    val isPending = match status { | LifecyclePending => true | _ => false }
+    val phase = if (pid.in(currentPhase.keys())) currentPhase.get(pid) else Idle
+    val isPhaseCompleted = match phase { | RecoveryCompleted => true | _ => false }
+    val outcomeOpt = if (pid.in(outcome.keys())) outcome.get(pid) else None
+    val hasOutcome = match outcomeOpt { | Some(_) => true | None => false }
+    all {
+      isPending,
+      isPhaseCompleted,
+      allSharesProvided(pid),
+      hasOutcome,
+      lifecycleStatus' = lifecycleStatus.set(pid, LifecycleCompleted),
+      lifecycleEffects' = lifecycleEffects.set(pid, Set()),
+      guardians' = guardians,
+      approvals' = approvals,
+      threshold' = threshold,
+      currentPhase' = currentPhase,
+      cooldownRemaining' = cooldownRemaining,
+      reconstructedAuthority' = reconstructedAuthority,
+      pendingShares' = pendingShares,
+      outcome' = outcome
+    }
+  }
+
+  action signalAbort(pid: ProtocolId): bool = {
+    val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else LifecyclePending
+    val isPending = match status { | LifecyclePending => true | _ => false }
+    all {
+      isPending,
+      lifecycleStatus' = lifecycleStatus.set(pid, LifecycleAborted),
+      lifecycleEffects' = lifecycleEffects,
+      currentPhase' = currentPhase.set(pid, RecoveryCancelled),
+      guardians' = guardians,
+      approvals' = approvals,
+      threshold' = threshold,
+      cooldownRemaining' = cooldownRemaining,
+      reconstructedAuthority' = reconstructedAuthority,
+      pendingShares' = pendingShares,
+      outcome' = outcome
+    }
+  }
 
   // ============ INVARIANTS ============
 
@@ -284,31 +318,39 @@ module protocol_recovery {
   val InvariantPhaseConsistency =
     currentPhase.keys().forall(pid =>
       match currentPhase.get(pid) {
-        | Idle => approvalsCount(pid) = 0
+        | Idle => approvalsCount(pid) == 0
         | CollectingApprovals => cooldownRemaining.get(pid) >= 0
         | CooldownActive =>
             thresholdReached(pid) and cooldownRemaining.get(pid) > 0
         | ReconstructingShares =>
-            thresholdReached(pid) and cooldownRemaining.get(pid) = 0
-        | Completed =>
+            thresholdReached(pid) and cooldownRemaining.get(pid) == 0
+        | RecoveryCompleted =>
             thresholdReached(pid) and allSharesProvided(pid)
-        | Cancelled => true
+        | RecoveryCancelled => true
       }
     )
 
   val InvariantLifecycleStatusDefined =
-    lifecycleStatus.keys() = currentPhase.keys()
+    lifecycleStatus.keys() == currentPhase.keys()
 
   val InvariantLifecycleCompleteRequiresPhase =
-    lifecycleStatus.keys().forall(pid =>
-      lifecycleStatus.get(pid) = Completed implies currentPhase.get(pid) = Completed
-    )
+    lifecycleStatus.keys().forall(pid => {
+      val status = lifecycleStatus.get(pid)
+      val phase = currentPhase.get(pid)
+      val isCompleted = match status { | LifecycleCompleted => true | _ => false }
+      val isPhaseCompleted = match phase { | RecoveryCompleted => true | _ => false }
+      isCompleted implies isPhaseCompleted
+    })
 
   val InvariantLifecycleEffectsEmpty =
-    lifecycleEffects.keys().forall(pid => lifecycleEffects.get(pid).size() = 0)
+    lifecycleEffects.keys().forall(pid => lifecycleEffects.get(pid).size() == 0)
 
   val InvariantOutcomeWhenCompleted =
-    lifecycleStatus.keys().forall(pid =>
-      lifecycleStatus.get(pid) = Completed implies outcome.get(pid).isSome()
-    )
+    lifecycleStatus.keys().forall(pid => {
+      val status = lifecycleStatus.get(pid)
+      val isCompleted = match status { | LifecycleCompleted => true | _ => false }
+      val outcomeOpt = if (pid.in(outcome.keys())) outcome.get(pid) else None
+      val hasOutcome = match outcomeOpt { | Some(_) => true | None => false }
+      isCompleted implies hasOutcome
+    })
 }

@@ -1,34 +1,38 @@
 module protocol_dkg {
-  import protocol_core as core from "protocol_core"
-
+  // Base types (defined locally - type imports don't work in Quint)
   type Option[a] = Some(a) | None
-
-  type ProtocolId = core.ProtocolId
-  type DeviceId = core.DeviceId
+  type ProtocolId = str
+  type AuthorityId = str  // renamed from DeviceId for authority model
 
   type DkgPhase =
     | Unconfigured
     | AwaitingCommitments
     | AwaitingVerifications
     | AggregatingShares
-    | Completed
-    | Failed
+    | DkgCompleted  // unique name to avoid collision
+    | DkgFailed
 
-  type CommitmentState = ProtocolId -> DeviceId -> Option[int]
-  type VerificationState = ProtocolId -> DeviceId -> Option[bool]
-  type ShareState = ProtocolId -> DeviceId -> Option[int]
-  type LifecycleStatus = Pending | Completed | Aborted
-  type DkdOutcome = {
+  type CommitmentState = ProtocolId -> AuthorityId -> Option[int]
+  type VerificationState = ProtocolId -> AuthorityId -> Option[bool]
+  type ShareState = ProtocolId -> AuthorityId -> Option[int]
+
+  // Unique lifecycle variants for DKG
+  type DkgLifecycleStatus = DkgPending | DkgLifecycleCompleted | DkgAborted
+
+  type DkgOutcome = {
     derivedKey: int,
     publicKey: int,
     transcript: int,
-    participants: Set[DeviceId],
+    participants: Set[AuthorityId],
     threshold: int
   }
 
+  // Simplified effect type (no imports)
+  type DkgEffect = { effectType: str, payload: str }
+
   // ============ STATE ============
 
-  var participants: ProtocolId -> Set[DeviceId]
+  var participants: ProtocolId -> Set[AuthorityId]
   var threshold: ProtocolId -> int
   var phase: ProtocolId -> DkgPhase
   var dealerCommitments: CommitmentState
@@ -36,33 +40,42 @@ module protocol_dkg {
   var participantShares: ShareState
   var publicKeyPackage: ProtocolId -> Option[int]
   var transcriptDigest: ProtocolId -> Option[int]
-  var lifecycleStatus: ProtocolId -> LifecycleStatus
-  var lifecycleEffects: ProtocolId -> Set[core.ProtocolEffect]
-  var outcome: ProtocolId -> Option[DkdOutcome]
+  var lifecycleStatus: ProtocolId -> DkgLifecycleStatus
+  var lifecycleEffects: ProtocolId -> Set[DkgEffect]
+  var outcome: ProtocolId -> Option[DkgOutcome]
 
   // ============ HELPERS ============
 
-  pure def getOrDefault[K, V](m: K -> V, key: K, default: V): V =
-    if key.in(m.keys()) then m.get(key) else default
+  pure def getOrDefaultSet(m: ProtocolId -> Set[AuthorityId], key: ProtocolId): Set[AuthorityId] =
+    if (key.in(m.keys())) m.get(key) else Set()
 
-  pure def optionIsSome[a](opt: Option[a]): bool =
+  pure def getOrDefaultInt(m: ProtocolId -> int, key: ProtocolId, default: int): int =
+    if (key.in(m.keys())) m.get(key) else default
+
+  pure def optionIsSome(opt: Option[int]): bool =
     match opt {
       | Some(_) => true
       | None => false
     }
 
-  pure def optionValueOr[a](opt: Option[a], fallback: a): a =
+  pure def optionIsSomeBool(opt: Option[bool]): bool =
+    match opt {
+      | Some(_) => true
+      | None => false
+    }
+
+  pure def optionValueOrBool(opt: Option[bool], fallback: bool): bool =
     match opt {
       | Some(value) => value
       | None => fallback
     }
 
   pure def ensureParticipantMap(
-    mapping: ProtocolId -> DeviceId -> Option[int],
+    mapping: CommitmentState,
     pid: ProtocolId,
-    members: Set[DeviceId]
-  ): ProtocolId -> DeviceId -> Option[int] =
-    if pid.in(mapping.keys()) then mapping
+    members: Set[AuthorityId]
+  ): CommitmentState =
+    if (pid.in(mapping.keys())) mapping
     else
       mapping.set(
         pid,
@@ -70,23 +83,22 @@ module protocol_dkg {
       )
 
   pure def updateMapping(
-    mapping: ProtocolId -> DeviceId -> Option[int],
+    mapping: CommitmentState,
     pid: ProtocolId,
-    member: DeviceId,
+    member: AuthorityId,
     value: Option[int],
-    members: Set[DeviceId]
-  ): ProtocolId -> DeviceId -> Option[int] =
-    ensureParticipantMap(mapping, pid, members).set(
-      pid,
-      ensureParticipantMap(mapping, pid, members).get(pid).set(member, value)
-    )
+    members: Set[AuthorityId]
+  ): CommitmentState = {
+    val ensured = ensureParticipantMap(mapping, pid, members)
+    ensured.set(pid, ensured.get(pid).set(member, value))
+  }
 
   pure def ensureVerificationMap(
-    mapping: ProtocolId -> DeviceId -> Option[bool],
+    mapping: VerificationState,
     pid: ProtocolId,
-    members: Set[DeviceId]
-  ): ProtocolId -> DeviceId -> Option[bool] =
-    if pid.in(mapping.keys()) then mapping
+    members: Set[AuthorityId]
+  ): VerificationState =
+    if (pid.in(mapping.keys())) mapping
     else
       mapping.set(
         pid,
@@ -94,58 +106,43 @@ module protocol_dkg {
       )
 
   pure def updateVerification(
-    mapping: ProtocolId -> DeviceId -> Option[bool],
+    mapping: VerificationState,
     pid: ProtocolId,
-    member: DeviceId,
+    member: AuthorityId,
     value: Option[bool],
-    members: Set[DeviceId]
-  ): ProtocolId -> DeviceId -> Option[bool] =
-    ensureVerificationMap(mapping, pid, members).set(
-      pid,
-      ensureVerificationMap(mapping, pid, members).get(pid).set(member, value)
+    members: Set[AuthorityId]
+  ): VerificationState = {
+    val ensured = ensureVerificationMap(mapping, pid, members)
+    ensured.set(pid, ensured.get(pid).set(member, value))
+  }
+
+  pure def getCommitmentOpt(mapping: CommitmentState, pid: ProtocolId, member: AuthorityId): Option[int] =
+    if (pid.in(mapping.keys()))
+      if (member.in(mapping.get(pid).keys())) mapping.get(pid).get(member) else None
+    else None
+
+  pure def getVerificationOpt(mapping: VerificationState, pid: ProtocolId, member: AuthorityId): Option[bool] =
+    if (pid.in(mapping.keys()))
+      if (member.in(mapping.get(pid).keys())) mapping.get(pid).get(member) else None
+    else None
+
+  def countFilledCommitments(pid: ProtocolId): int =
+    getOrDefaultSet(participants, pid).fold(0, (acc, member) =>
+      acc + (if (optionIsSome(getCommitmentOpt(dealerCommitments, pid, member))) 1 else 0)
     )
 
-  pure def countFilled(
-    mapping: ProtocolId -> DeviceId -> Option[int],
-    pid: ProtocolId
-  ): int =
-    getOrDefault(participants, pid, Set()).fold(
-      0,
-      (acc, member) =>
-        acc +
-        (if optionIsSome(getOrDefault(mapping.get(pid), member, None)) then 1 else 0)
+  def allVerified(pid: ProtocolId): bool =
+    getOrDefaultSet(participants, pid).forall(member =>
+      getVerificationOpt(verifierResponses, pid, member) == Some(true)
     )
 
-  pure def verificationMap(
-    pid: ProtocolId
-  ): DeviceId -> Option[bool] =
-    ensureVerificationMap(
-      verifierResponses,
-      pid,
-      getOrDefault(participants, pid, Set())
-    ).get(pid)
-
-  pure def shareMap(
-    pid: ProtocolId
-  ): DeviceId -> Option[int] =
-    ensureParticipantMap(
-      participantShares,
-      pid,
-      getOrDefault(participants, pid, Set())
-    ).get(pid)
-
-  pure def allVerified(pid: ProtocolId): bool =
-    getOrDefault(participants, pid, Set()).forall(member =>
-      verificationMap(pid).get(member) = Some(true)
+  def sharesComplete(pid: ProtocolId): bool =
+    getOrDefaultSet(participants, pid).forall(member =>
+      optionIsSome(getCommitmentOpt(participantShares, pid, member))
     )
 
-  pure def sharesComplete(pid: ProtocolId): bool =
-    getOrDefault(participants, pid, Set()).forall(member =>
-      optionIsSome(shareMap(pid).get(member))
-    )
-
-  pure def thresholdReached(pid: ProtocolId, mapping: ProtocolId -> DeviceId -> Option[int]): bool =
-    countFilled(mapping, pid) >= getOrDefault(threshold, pid, 0)
+  def thresholdReachedCommitments(pid: ProtocolId): bool =
+    countFilledCommitments(pid) >= getOrDefaultInt(threshold, pid, 0)
 
   // ============ INITIALISATION ============
 
@@ -167,13 +164,13 @@ module protocol_dkg {
 
   action configureDkg(
     pid: ProtocolId,
-    members: Set[DeviceId],
+    members: Set[AuthorityId],
     t: int
   ): bool = all {
     members.size() >= 1,
     t >= 1,
     t <= members.size(),
-    not pid.in(participants.keys()),
+    not(pid.in(participants.keys())),
     participants' = participants.set(pid, members),
     threshold' = threshold.set(pid, t),
     phase' = phase.set(pid, AwaitingCommitments),
@@ -182,187 +179,215 @@ module protocol_dkg {
     participantShares' = ensureParticipantMap(participantShares, pid, members),
     publicKeyPackage' = publicKeyPackage.set(pid, None),
     transcriptDigest' = transcriptDigest.set(pid, None),
-    lifecycleStatus' = lifecycleStatus.set(pid, Pending),
+    lifecycleStatus' = lifecycleStatus.set(pid, DkgPending),
     lifecycleEffects' = lifecycleEffects.set(pid, Set()),
     outcome' = outcome.set(pid, None)
   }
 
   action submitCommitment(
     pid: ProtocolId,
-    participant: DeviceId,
+    participant: AuthorityId,
     commitment: int
-  ): bool =
-    val members = participants.get(pid) {
-    val currentPhase = phase.get(pid) {
-      members.contains(participant) and
-      (currentPhase = AwaitingCommitments or currentPhase = AwaitingVerifications) and
-      optionIsSome(getOrDefault(dealerCommitments.get(pid), participant, None)) = false {
-        val updated = updateMapping(dealerCommitments, pid, participant, Some(commitment), members) {
-        val nextPhase =
-          if thresholdReached(pid, updated) then AwaitingVerifications else currentPhase {
-          all {
-            dealerCommitments' = updated,
-            phase' = phase.set(pid, nextPhase),
-            participants' = participants,
-            threshold' = threshold,
-            verifierResponses' = verifierResponses,
-            participantShares' = participantShares,
-            publicKeyPackage' = publicKeyPackage,
-            transcriptDigest' = transcriptDigest
-          }
-        }
-      }
-    }}
+  ): bool = {
+    val members = getOrDefaultSet(participants, pid)
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Unconfigured
+    val hasCommitment = optionIsSome(getCommitmentOpt(dealerCommitments, pid, participant))
+    val isValidPhase = match currentPhase {
+      | AwaitingCommitments => true
+      | AwaitingVerifications => true
+      | _ => false
+    }
+    val updated = updateMapping(dealerCommitments, pid, participant, Some(commitment), members)
+    val newCount = members.fold(0, (acc, m) =>
+      acc + (if (optionIsSome(getCommitmentOpt(updated, pid, m))) 1 else 0)
+    )
+    val meetsThreshold = newCount >= getOrDefaultInt(threshold, pid, 0)
+    val nextPhase = if (meetsThreshold) AwaitingVerifications else currentPhase
+    all {
+      members.contains(participant),
+      isValidPhase,
+      not(hasCommitment),
+      dealerCommitments' = updated,
+      phase' = phase.set(pid, nextPhase),
+      participants' = participants,
+      threshold' = threshold,
+      verifierResponses' = verifierResponses,
+      participantShares' = participantShares,
+      publicKeyPackage' = publicKeyPackage,
+      transcriptDigest' = transcriptDigest,
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      outcome' = outcome
+    }
+  }
 
   action verifyCommitment(
     pid: ProtocolId,
-    participant: DeviceId,
+    participant: AuthorityId,
     valid: bool
-  ): bool =
-    val members = participants.get(pid) {
-    val currentPhase = phase.get(pid) {
-      members.contains(participant) and
-      currentPhase = AwaitingVerifications and
-      optionIsSome(getOrDefault(dealerCommitments.get(pid), participant, None)) {
-        val updated = updateVerification(
-          verifierResponses,
-          pid,
-          participant,
-          Some(valid),
-          members
-        ) {
-        val nextPhase =
-          if allVerified(pid) then AggregatingShares else currentPhase {
-          val nextState =
-            if not valid then Failed else nextPhase {
-            all {
-              participants' = participants,
-              threshold' = threshold,
-              dealerCommitments' = dealerCommitments,
-              verifierResponses' = updated,
-              participantShares' = participantShares,
-              publicKeyPackage' = publicKeyPackage,
-              transcriptDigest' = transcriptDigest,
-              phase' = phase.set(pid, nextState)
-            }
-        }}}}
+  ): bool = {
+    val members = getOrDefaultSet(participants, pid)
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Unconfigured
+    val isVerifyingPhase = match currentPhase { | AwaitingVerifications => true | _ => false }
+    val hasCommitment = optionIsSome(getCommitmentOpt(dealerCommitments, pid, participant))
+    val updated = updateVerification(verifierResponses, pid, participant, Some(valid), members)
+    val allVerifiedNow = members.forall(m =>
+      getVerificationOpt(updated, pid, m) == Some(true)
+    )
+    val nextPhase = if (not(valid)) DkgFailed else (if (allVerifiedNow) AggregatingShares else currentPhase)
+    all {
+      members.contains(participant),
+      isVerifyingPhase,
+      hasCommitment,
+      verifierResponses' = updated,
+      phase' = phase.set(pid, nextPhase),
+      participants' = participants,
+      threshold' = threshold,
+      dealerCommitments' = dealerCommitments,
+      participantShares' = participantShares,
+      publicKeyPackage' = publicKeyPackage,
+      transcriptDigest' = transcriptDigest,
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      outcome' = outcome
+    }
+  }
 
   action submitShare(
     pid: ProtocolId,
-    participant: DeviceId,
+    participant: AuthorityId,
     shareDigest: int
-  ): bool =
-    val members = participants.get(pid) {
-    val currentPhase = phase.get(pid) {
-      currentPhase = AggregatingShares and
-      members.contains(participant) and
-      optionIsSome(getOrDefault(verifierResponses.get(pid), participant, None)) and
-      optionValueOr(getOrDefault(verifierResponses.get(pid), participant, None), false) = true and
-      optionIsSome(getOrDefault(participantShares.get(pid), participant, None)) = false {
-        val updated = updateMapping(participantShares, pid, participant, Some(shareDigest), members) {
-        val nextPhase =
-          if sharesComplete(pid) then Completed else AggregatingShares {
-          all {
-            participantShares' = updated,
-            phase' = phase.set(pid, nextPhase),
-            participants' = participants,
-            threshold' = threshold,
-            dealerCommitments' = dealerCommitments,
-            verifierResponses' = verifierResponses,
-            publicKeyPackage' = publicKeyPackage,
-            transcriptDigest' = transcriptDigest
-          }
-        }
-      }
-    }}
+  ): bool = {
+    val members = getOrDefaultSet(participants, pid)
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Unconfigured
+    val isAggregating = match currentPhase { | AggregatingShares => true | _ => false }
+    val hasVerification = optionIsSomeBool(getVerificationOpt(verifierResponses, pid, participant))
+    val verificationValid = optionValueOrBool(getVerificationOpt(verifierResponses, pid, participant), false)
+    val hasShare = optionIsSome(getCommitmentOpt(participantShares, pid, participant))
+    val updated = updateMapping(participantShares, pid, participant, Some(shareDigest), members)
+    val allSharesNow = members.forall(m =>
+      optionIsSome(getCommitmentOpt(updated, pid, m))
+    )
+    val nextPhase = if (allSharesNow) DkgCompleted else AggregatingShares
+    all {
+      isAggregating,
+      members.contains(participant),
+      hasVerification,
+      verificationValid,
+      not(hasShare),
+      participantShares' = updated,
+      phase' = phase.set(pid, nextPhase),
+      participants' = participants,
+      threshold' = threshold,
+      dealerCommitments' = dealerCommitments,
+      verifierResponses' = verifierResponses,
+      publicKeyPackage' = publicKeyPackage,
+      transcriptDigest' = transcriptDigest,
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      outcome' = outcome
+    }
+  }
 
   action finalizeDkg(
     pid: ProtocolId,
     derivedKeyHash: int,
     publicKeyHash: int,
     transcriptHash: int
-  ): bool =
-    val currentPhase = phase.get(pid) {
-      currentPhase = Completed and sharesComplete(pid) {
-        all {
-          publicKeyPackage' = publicKeyPackage.set(pid, Some(publicKeyHash)),
-          transcriptDigest' = transcriptDigest.set(pid, Some(transcriptHash)),
-          participants' = participants,
-          threshold' = threshold,
-          dealerCommitments' = dealerCommitments,
-          verifierResponses' = verifierResponses,
-          participantShares' = participantShares,
-          phase' = phase,
-          outcome' = outcome.set(pid, Some({
-            derivedKey: derivedKeyHash,
-            publicKey: publicKeyHash,
-            transcript: transcriptHash,
-            participants: getOrDefault(participants, pid, Set()),
-            threshold: threshold.get(pid)
-          }))
-        }
-      }
+  ): bool = {
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Unconfigured
+    val isCompleted = match currentPhase { | DkgCompleted => true | _ => false }
+    val members = getOrDefaultSet(participants, pid)
+    val t = getOrDefaultInt(threshold, pid, 0)
+    all {
+      isCompleted,
+      sharesComplete(pid),
+      publicKeyPackage' = publicKeyPackage.set(pid, Some(publicKeyHash)),
+      transcriptDigest' = transcriptDigest.set(pid, Some(transcriptHash)),
+      outcome' = outcome.set(pid, Some({
+        derivedKey: derivedKeyHash,
+        publicKey: publicKeyHash,
+        transcript: transcriptHash,
+        participants: members,
+        threshold: t
+      })),
+      participants' = participants,
+      threshold' = threshold,
+      dealerCommitments' = dealerCommitments,
+      verifierResponses' = verifierResponses,
+      participantShares' = participantShares,
+      phase' = phase,
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects
     }
+  }
 
-  action failDkg(pid: ProtocolId): bool =
-    val currentPhase = phase.get(pid) {
-      not currentPhase = Completed {
-        all {
-          phase' = phase.set(pid, Failed),
-          participants' = participants,
-          threshold' = threshold,
-          dealerCommitments' = dealerCommitments,
-          verifierResponses' = verifierResponses,
-          participantShares' = participantShares,
-          publicKeyPackage' = publicKeyPackage,
-          transcriptDigest' = transcriptDigest,
-          lifecycleStatus' = lifecycleStatus.set(pid, Aborted),
-          lifecycleEffects' = lifecycleEffects
-        }
-      }
+  action failDkg(pid: ProtocolId): bool = {
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Unconfigured
+    val isNotCompleted = match currentPhase { | DkgCompleted => false | _ => true }
+    all {
+      isNotCompleted,
+      phase' = phase.set(pid, DkgFailed),
+      lifecycleStatus' = lifecycleStatus.set(pid, DkgAborted),
+      participants' = participants,
+      threshold' = threshold,
+      dealerCommitments' = dealerCommitments,
+      verifierResponses' = verifierResponses,
+      participantShares' = participantShares,
+      publicKeyPackage' = publicKeyPackage,
+      transcriptDigest' = transcriptDigest,
+      lifecycleEffects' = lifecycleEffects,
+      outcome' = outcome
     }
+  }
 
-  action signalComplete(pid: ProtocolId): bool =
-    val status = lifecycleStatus.get(pid) {
-    val currentPhase = phase.get(pid) {
-      status = Pending and currentPhase = Completed {
-        lifecycleStatus' = lifecycleStatus.set(pid, Completed),
-        lifecycleEffects' = lifecycleEffects.set(pid, Set()),
-        participants' = participants,
-        threshold' = threshold,
-        phase' = phase,
-        dealerCommitments' = dealerCommitments,
-        verifierResponses' = verifierResponses,
-        participantShares' = participantShares,
-        publicKeyPackage' = publicKeyPackage,
-        transcriptDigest' = transcriptDigest,
-        outcome' = outcome
-      }
-    }}
-
-  action signalAbort(pid: ProtocolId): bool =
-    val status = lifecycleStatus.get(pid) {
-      status = Pending {
-        lifecycleStatus' = lifecycleStatus.set(pid, Aborted),
-        lifecycleEffects' = lifecycleEffects,
-        phase' = phase.set(pid, Failed),
-        participants' = participants,
-        threshold' = threshold,
-        dealerCommitments' = dealerCommitments,
-        verifierResponses' = verifierResponses,
-        participantShares' = participantShares,
-        publicKeyPackage' = publicKeyPackage,
-        transcriptDigest' = transcriptDigest,
-        outcome' = outcome
-      }
+  action signalComplete(pid: ProtocolId): bool = {
+    val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else DkgPending
+    val isPending = match status { | DkgPending => true | _ => false }
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Unconfigured
+    val isPhaseCompleted = match currentPhase { | DkgCompleted => true | _ => false }
+    all {
+      isPending,
+      isPhaseCompleted,
+      lifecycleStatus' = lifecycleStatus.set(pid, DkgLifecycleCompleted),
+      lifecycleEffects' = lifecycleEffects.set(pid, Set()),
+      participants' = participants,
+      threshold' = threshold,
+      phase' = phase,
+      dealerCommitments' = dealerCommitments,
+      verifierResponses' = verifierResponses,
+      participantShares' = participantShares,
+      publicKeyPackage' = publicKeyPackage,
+      transcriptDigest' = transcriptDigest,
+      outcome' = outcome
     }
+  }
+
+  action signalAbort(pid: ProtocolId): bool = {
+    val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else DkgPending
+    val isPending = match status { | DkgPending => true | _ => false }
+    all {
+      isPending,
+      lifecycleStatus' = lifecycleStatus.set(pid, DkgAborted),
+      lifecycleEffects' = lifecycleEffects,
+      phase' = phase.set(pid, DkgFailed),
+      participants' = participants,
+      threshold' = threshold,
+      dealerCommitments' = dealerCommitments,
+      verifierResponses' = verifierResponses,
+      participantShares' = participantShares,
+      publicKeyPackage' = publicKeyPackage,
+      transcriptDigest' = transcriptDigest,
+      outcome' = outcome
+    }
+  }
 
   // ============ INVARIANTS ============
 
   val InvariantThresholdBounds =
     threshold.keys().forall(pid =>
       threshold.get(pid) >= 1 and
-      threshold.get(pid) <= getOrDefault(participants, pid, Set()).size()
+      threshold.get(pid) <= getOrDefaultSet(participants, pid).size()
     )
 
   val InvariantCommitmentsRequireConfiguration =
@@ -374,59 +399,46 @@ module protocol_dkg {
         | Unconfigured => true
         | AwaitingCommitments => true
         | AwaitingVerifications =>
-            thresholdReached(pid, dealerCommitments)
+            thresholdReachedCommitments(pid)
         | AggregatingShares =>
-            thresholdReached(pid, dealerCommitments) and allVerified(pid)
-        | Completed =>
-            thresholdReached(pid, dealerCommitments) and
+            thresholdReachedCommitments(pid) and allVerified(pid)
+        | DkgCompleted =>
+            thresholdReachedCommitments(pid) and
             allVerified(pid) and
-            sharesComplete(pid) and
-            match publicKeyPackage.get(pid) {
-              | Some(_) =>
-                  match transcriptDigest.get(pid) {
-                    | Some(_) => true
-                    | None => false
-                  }
-              | None => false
-            }
-        | Failed => true
+            sharesComplete(pid)
+        | DkgFailed => true
       }
     )
 
   val InvariantSharesOnlyAfterVerification =
     participantShares.keys().forall(pid =>
-      getOrDefault(participants, pid, Set()).forall(member =>
-        optionIsSome(getOrDefault(participantShares.get(pid), member, None)) implies
-          optionValueOr(getOrDefault(verifierResponses.get(pid), member, None), false)
+      getOrDefaultSet(participants, pid).forall(member =>
+        optionIsSome(getCommitmentOpt(participantShares, pid, member)) implies
+          optionValueOrBool(getVerificationOpt(verifierResponses, pid, member), false)
       )
     )
 
-  val InvariantCompletedImpliesPublicKey =
-    phase.keys().forall(pid =>
-      phase.get(pid) = Completed implies
-        match publicKeyPackage.get(pid) {
-          | Some(_) =>
-              match transcriptDigest.get(pid) {
-                | Some(_) => true
-                | None => false
-              }
-          | None => false
-        }
-    )
-
   val InvariantLifecycleStatusDefined =
-    lifecycleStatus.keys() = phase.keys()
+    lifecycleStatus.keys() == phase.keys()
 
   val InvariantLifecycleStatusMatchesPhase =
-    lifecycleStatus.keys().forall(pid =>
-      lifecycleStatus.get(pid) = Completed implies phase.get(pid) = Completed
-    )
+    lifecycleStatus.keys().forall(pid => {
+      val status = lifecycleStatus.get(pid)
+      val currentPhase = phase.get(pid)
+      val isLifecycleCompleted = match status { | DkgLifecycleCompleted => true | _ => false }
+      val isPhaseCompleted = match currentPhase { | DkgCompleted => true | _ => false }
+      isLifecycleCompleted implies isPhaseCompleted
+    })
 
   val InvariantLifecycleEffectsEmpty =
-    lifecycleEffects.keys().forall(pid => lifecycleEffects.get(pid).size() = 0)
+    lifecycleEffects.keys().forall(pid => lifecycleEffects.get(pid).size() == 0)
 
   val InvariantOutcomeWhenCompleted =
-    lifecycleStatus.keys().forall(pid =>
-      lifecycleStatus.get(pid) = Completed implies outcome.get(pid).isSome()
-    )
+    lifecycleStatus.keys().forall(pid => {
+      val status = lifecycleStatus.get(pid)
+      val isCompleted = match status { | DkgLifecycleCompleted => true | _ => false }
+      val outcomeOpt = if (pid.in(outcome.keys())) outcome.get(pid) else None
+      val hasOutcome = match outcomeOpt { | Some(_) => true | None => false }
+      isCompleted implies hasOutcome
+    })
 }

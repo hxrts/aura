@@ -348,6 +348,182 @@ pub struct NetworkState {
     pub partition_count: u32,
 }
 
+// =============================================================================
+// Extended State Integration (Phase 4)
+// =============================================================================
+
+use super::aura_state_extractors::QuintSimulationState;
+
+/// Extended evaluator that supports capability properties simulation state
+impl SimulationPropertyEvaluator {
+    /// Adapt capability simulation state to Quint-compatible format
+    ///
+    /// This method uses the structured `QuintSimulationState` for capability
+    /// properties evaluation, providing type-safe state extraction.
+    pub fn adapt_capability_state(&self, capability_state: &QuintSimulationState) -> Value {
+        if self.config.debug_state_adaptation {
+            tracing::debug!("Adapting capability simulation state to Quint format");
+        }
+        capability_state.to_quint()
+    }
+
+    /// Evaluate a property against capability simulation state
+    pub async fn evaluate_capability_property(
+        &self,
+        property: &Property,
+        capability_state: &QuintSimulationState,
+    ) -> Result<aura_core::effects::EvaluationResult> {
+        if self.config.debug_state_adaptation {
+            tracing::debug!(
+                "Evaluating property '{}' against capability state",
+                property.name
+            );
+        }
+
+        let adapted_state = self.adapt_capability_state(capability_state);
+        self.core_evaluator
+            .evaluate_property(property, &adapted_state)
+            .await
+    }
+
+    /// Run verification against capability simulation state
+    pub async fn verify_capability_properties(
+        &self,
+        spec: &PropertySpec,
+        capability_state: &QuintSimulationState,
+    ) -> Result<VerificationResult> {
+        if self.config.debug_state_adaptation {
+            tracing::debug!("Running capability verification for spec '{}'", spec.name);
+        }
+
+        let adapted_state = self.adapt_capability_state(capability_state);
+        let capability_spec =
+            PropertySpec::new(format!("capability_{}", spec.name)).with_context(adapted_state);
+
+        let mut updated_spec = capability_spec;
+        for property in &spec.properties {
+            updated_spec = updated_spec.with_property(property.clone());
+        }
+
+        self.core_evaluator.run_verification(&updated_spec).await
+    }
+}
+
+// =============================================================================
+// StateMapper Integration (Phase 4.5)
+// =============================================================================
+
+use super::state_mapper::SimulationStateMapper;
+
+/// StateMapper-based evaluator for bidirectional state synchronization
+impl SimulationPropertyEvaluator {
+    /// Create a state mapper initialized with capability simulation state
+    ///
+    /// This mapper can be used to:
+    /// 1. Load Aura state into Quint format
+    /// 2. Execute Quint actions
+    /// 3. Extract non-deterministic updates back to Aura state
+    pub fn create_state_mapper(
+        &self,
+        capability_state: &QuintSimulationState,
+    ) -> SimulationStateMapper {
+        let mut mapper = SimulationStateMapper::new();
+        mapper.load_from_simulation_state(capability_state);
+        mapper
+    }
+
+    /// Evaluate property using StateMapper for state management
+    ///
+    /// This method provides full bidirectional state synchronization:
+    /// - Initial state is loaded from `QuintSimulationState`
+    /// - Property evaluation uses the adapted Quint state
+    /// - Non-deterministic updates (if any) are captured in the mapper
+    pub async fn evaluate_with_mapper(
+        &self,
+        property: &Property,
+        mapper: &SimulationStateMapper,
+    ) -> Result<aura_core::effects::EvaluationResult> {
+        let adapted_state = mapper.to_quint();
+        self.core_evaluator
+            .evaluate_property(property, &adapted_state)
+            .await
+    }
+
+    /// Apply non-deterministic updates from Quint execution to state mapper
+    ///
+    /// After Quint executes an action that makes non-deterministic choices,
+    /// this method applies those updates to the mapper so they can be
+    /// extracted back to Aura state.
+    pub fn apply_nondet_to_mapper(
+        &self,
+        mapper: &mut SimulationStateMapper,
+        quint_updates: &Value,
+    ) -> Result<Vec<String>> {
+        mapper.apply_nondet_updates(quint_updates)
+    }
+
+    /// Extract updated state from mapper back to QuintSimulationState
+    ///
+    /// This is the reverse of `create_state_mapper`, used after Quint
+    /// execution to get the updated Aura state.
+    pub fn extract_state_from_mapper(
+        &self,
+        mapper: &SimulationStateMapper,
+    ) -> Result<QuintSimulationState> {
+        mapper.extract_to_simulation_state()
+    }
+
+    /// Full evaluation cycle with state synchronization
+    ///
+    /// This is a convenience method that:
+    /// 1. Creates a mapper from initial state
+    /// 2. Evaluates the property
+    /// 3. Optionally applies updates
+    /// 4. Returns both result and updated state
+    pub async fn evaluate_with_state_sync(
+        &self,
+        property: &Property,
+        initial_state: &QuintSimulationState,
+        quint_updates: Option<&Value>,
+    ) -> Result<(aura_core::effects::EvaluationResult, QuintSimulationState)> {
+        let mut mapper = self.create_state_mapper(initial_state);
+
+        // Apply any updates from Quint execution
+        if let Some(updates) = quint_updates {
+            self.apply_nondet_to_mapper(&mut mapper, updates)?;
+        }
+
+        // Evaluate property
+        let result = self.evaluate_with_mapper(property, &mapper).await?;
+
+        // Extract final state
+        let final_state = self.extract_state_from_mapper(&mapper)?;
+
+        Ok((result, final_state))
+    }
+}
+
+/// Capability property evaluator trait implementation
+#[async_trait]
+impl PropertyEvaluator<QuintSimulationState> for SimulationPropertyEvaluator {
+    async fn check_property(
+        &self,
+        property: &Property,
+        state: &QuintSimulationState,
+    ) -> Result<bool> {
+        let result = self.evaluate_capability_property(property, state).await?;
+        Ok(result.passed)
+    }
+
+    async fn evaluate_property_detailed(
+        &self,
+        property: &Property,
+        state: &QuintSimulationState,
+    ) -> Result<aura_core::effects::EvaluationResult> {
+        self.evaluate_capability_property(property, state).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,5 +642,240 @@ mod tests {
 
         let passed = evaluator.check_property(&property, &simulation_state).await;
         assert!(passed.is_ok());
+    }
+
+    // =========================================================================
+    // Capability State Integration Tests (Phase 4)
+    // =========================================================================
+
+    use crate::quint::aura_state_extractors::CapabilityToken;
+    use aura_core::types::{epochs::Epoch, AuthorityId, ContextId, FlowBudget};
+
+    fn create_test_capability_state() -> QuintSimulationState {
+        let mut state = QuintSimulationState::new();
+
+        let ctx = ContextId::new_from_entropy([1u8; 32]);
+        let auth1 = AuthorityId::new_from_entropy([2u8; 32]);
+        let auth2 = AuthorityId::new_from_entropy([3u8; 32]);
+
+        // Initialize context
+        state.current_epoch.insert(ctx, 0);
+        state.budgets.insert(
+            ctx,
+            FlowBudget {
+                limit: 100,
+                spent: 25,
+                epoch: Epoch::new(0),
+            },
+        );
+
+        // Initialize authorities with tokens
+        state.tokens.insert(auth1, CapabilityToken::new(4)); // CAP_FULL
+        state.tokens.insert(auth2, CapabilityToken::new(3)); // CAP_READ
+
+        state
+    }
+
+    #[test]
+    fn test_adapt_capability_state() {
+        let evaluator = SimulationPropertyEvaluator::new();
+        let capability_state = create_test_capability_state();
+
+        let adapted = evaluator.adapt_capability_state(&capability_state);
+
+        // Verify structure
+        assert!(adapted.is_object());
+        let obj = adapted.as_object().unwrap();
+        assert!(obj.contains_key("budgets"));
+        assert!(obj.contains_key("tokens"));
+        assert!(obj.contains_key("current_epoch"));
+        assert!(obj.contains_key("completed_ops"));
+    }
+
+    #[tokio::test]
+    async fn test_capability_property_evaluation() {
+        let evaluator = SimulationPropertyEvaluator::new();
+        let property = Property::new(
+            "spent_within_limit",
+            "Spent Within Limit",
+            PropertyKind::Invariant,
+            "true", // Simplified - real Quint expression would be more complex
+        );
+        let capability_state = create_test_capability_state();
+
+        let result = evaluator
+            .evaluate_capability_property(&property, &capability_state)
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_capability_property_evaluator_trait() {
+        let evaluator = SimulationPropertyEvaluator::new();
+        let property = Property::new(
+            "test_invariant",
+            "Test Invariant",
+            PropertyKind::Invariant,
+            "true",
+        );
+        let capability_state = create_test_capability_state();
+
+        // Use PropertyEvaluator trait
+        let result: Result<bool> = PropertyEvaluator::<QuintSimulationState>::check_property(
+            &evaluator,
+            &property,
+            &capability_state,
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_capability_state_with_operations() {
+        let mut state = QuintSimulationState::new();
+        let ctx = ContextId::new_from_entropy([1u8; 32]);
+        let auth1 = AuthorityId::new_from_entropy([2u8; 32]);
+        let auth2 = AuthorityId::new_from_entropy([3u8; 32]);
+
+        // Initialize
+        state.init_context(ctx, auth1, 100);
+        state.init_authority(auth1, 4);
+
+        // Complete transport op
+        let result = state.complete_transport_op(&ctx, &auth1, &auth2, 10);
+        assert!(result.is_ok());
+
+        // Verify state was updated
+        assert_eq!(state.budgets.get(&ctx).unwrap().spent, 10);
+        assert_eq!(state.completed_ops.len(), 1);
+
+        // Verify Quint representation
+        let quint = state.to_quint();
+        let ops = quint["completed_ops"].as_array().unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0]["cost"], 10);
+        assert_eq!(ops[0]["charged"], true);
+    }
+
+    // =========================================================================
+    // StateMapper Integration Tests (Phase 4.5)
+    // =========================================================================
+
+    #[test]
+    fn test_create_state_mapper() {
+        let evaluator = SimulationPropertyEvaluator::new();
+        let capability_state = create_test_capability_state();
+
+        let mapper = evaluator.create_state_mapper(&capability_state);
+
+        // Verify mapper has loaded state
+        assert!(mapper.has_variable("budgets"));
+        assert!(mapper.has_variable("tokens"));
+        assert!(mapper.has_variable("simulation_state"));
+    }
+
+    #[test]
+    fn test_extract_state_from_mapper() {
+        let evaluator = SimulationPropertyEvaluator::new();
+        let original_state = create_test_capability_state();
+
+        let mapper = evaluator.create_state_mapper(&original_state);
+        let extracted = evaluator.extract_state_from_mapper(&mapper).unwrap();
+
+        // Verify extracted state matches original
+        assert_eq!(original_state.budgets.len(), extracted.budgets.len());
+        assert_eq!(original_state.tokens.len(), extracted.tokens.len());
+    }
+
+    #[test]
+    fn test_apply_nondet_to_mapper() {
+        let evaluator = SimulationPropertyEvaluator::new();
+        let capability_state = create_test_capability_state();
+
+        let mut mapper = evaluator.create_state_mapper(&capability_state);
+
+        // Simulate non-deterministic update
+        let updates = serde_json::json!({
+            "tokens": {
+                "test-auth": {"cap_level": 2, "attenuation_count": 1}
+            }
+        });
+
+        let updated_vars = evaluator
+            .apply_nondet_to_mapper(&mut mapper, &updates)
+            .unwrap();
+        assert!(updated_vars.contains(&"tokens".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_with_mapper() {
+        let evaluator = SimulationPropertyEvaluator::new();
+        let property = Property::new(
+            "budget_check",
+            "Budget Check",
+            PropertyKind::Invariant,
+            "true",
+        );
+        let capability_state = create_test_capability_state();
+
+        let mapper = evaluator.create_state_mapper(&capability_state);
+        let result = evaluator.evaluate_with_mapper(&property, &mapper).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_with_state_sync() {
+        let evaluator = SimulationPropertyEvaluator::new();
+        let property = Property::new(
+            "sync_test",
+            "State Sync Test",
+            PropertyKind::Invariant,
+            "true",
+        );
+        let initial_state = create_test_capability_state();
+
+        // Test without updates
+        let (result, final_state) = evaluator
+            .evaluate_with_state_sync(&property, &initial_state, None)
+            .await
+            .unwrap();
+
+        assert!(result.passed);
+        assert_eq!(initial_state.budgets.len(), final_state.budgets.len());
+    }
+
+    #[tokio::test]
+    async fn test_evaluate_with_state_sync_and_updates() {
+        let evaluator = SimulationPropertyEvaluator::new();
+        let property = Property::new(
+            "sync_update_test",
+            "State Sync with Updates",
+            PropertyKind::Invariant,
+            "true",
+        );
+        let initial_state = create_test_capability_state();
+
+        // Get an existing authority ID for the update
+        let auth = AuthorityId::new_from_entropy([2u8; 32]);
+
+        // Provide updates with valid authority format
+        let updates = serde_json::json!({
+            "tokens": {
+                auth.to_string(): {"cap_level": 2, "attenuation_count": 1}
+            }
+        });
+
+        let (result, final_state) = evaluator
+            .evaluate_with_state_sync(&property, &initial_state, Some(&updates))
+            .await
+            .unwrap();
+
+        assert!(result.passed);
+
+        // Verify the update was applied
+        let token = final_state.tokens.get(&auth).unwrap();
+        assert_eq!(token.cap_level, 2);
+        assert_eq!(token.attenuation_count, 1);
     }
 }

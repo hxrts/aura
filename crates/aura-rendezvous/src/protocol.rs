@@ -313,6 +313,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(unused_assignments)]
     fn test_exchange_state_transitions() {
         let mut state = ExchangeState::Initial;
 
@@ -429,6 +430,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(unused_assignments)]
     fn test_relayed_state_transitions() {
         let mut state = RelayedState::Initial;
 

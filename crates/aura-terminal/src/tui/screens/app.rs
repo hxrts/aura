@@ -216,7 +216,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // - Version counter triggers re-renders
     let account_visible = hooks.use_state(|| props.show_account_setup);
     let account_creating = hooks.use_state(|| false);
-    let account_error: Option<String> = None; // Errors are transient
+    // account_error is not stored (errors are transient, shown inline)
+    let _account_error: Option<String> = None;
     let account_display_name: Arc<RwLock<String>> = Arc::new(RwLock::new(String::new()));
     let account_display_name_for_handler = account_display_name.clone();
     let account_version = hooks.use_state(|| 0usize);
@@ -374,7 +375,8 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         .read()
         .map(|s| s.clone())
         .unwrap_or_default();
-    let modal_error = account_error.unwrap_or_default();
+    // account_error is always None for now (errors are transient, not stored)
+    let modal_error = String::new();
     // account_version is used for triggering re-renders (not directly in UI)
     let _ = account_version.get();
 

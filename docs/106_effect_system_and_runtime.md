@@ -45,9 +45,21 @@ Follow YAGNI (You Aren't Gonna Need It) principles. Defer abstraction when only 
 
 #### Threshold Signatures
 
-Aura uses FROST directly without a `ThresholdSigEffects` trait. Only FROST is needed currently. There are no plans for alternative threshold signature schemes. Direct usage is simpler and clearer. Testing happens at the consensus level, not the crypto level.
+Aura provides a unified `ThresholdSigningEffects` trait in `aura-core/src/effects/threshold.rs` for all threshold signing scenarios. This abstraction enables:
 
-See [Cryptography](116_crypto.md) for the detailed threshold signature deferral decision. Introduce the trait only when a second scheme is required or FROST needs replacement.
+- **Multi-device personal signing** – User's own devices collaborating on threshold operations
+- **Guardian recovery approvals** – Guardians assisting with account recovery
+- **Group operation approvals** – Multi-party group decisions
+
+The trait uses a unified `SigningContext` that pairs a `SignableOperation` (what is being signed) with an `ApprovalContext` (why the signature is requested). This design allows the same FROST signing machinery to handle all scenarios with proper audit/display context.
+
+Key components:
+- `ThresholdSigningEffects` trait – Async interface for bootstrap, sign, and query operations
+- `ThresholdSigningService` in `aura-agent` – Production implementation using FROST
+- `SigningContext`, `SignableOperation`, `ApprovalContext` – Context types in `aura-core/src/threshold/`
+- `AppCore.sign_tree_op()` – High-level signing API returning `AttestedOp`
+
+See [Cryptography](116_crypto.md) for the detailed threshold signature architecture.
 
 #### Application-Specific Effect Traits
 

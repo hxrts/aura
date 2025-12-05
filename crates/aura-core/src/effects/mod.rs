@@ -73,6 +73,7 @@ pub mod supertraits;
 pub mod sync; // Anti-entropy synchronization
 pub mod system;
 pub mod testing;
+pub mod threshold; // Unified threshold signing
 pub mod time;
 pub mod transport;
 pub mod tree; // Commitment tree operations
@@ -121,9 +122,26 @@ pub use leakage::{
 // Migration utilities removed - middleware transition complete
 pub use network::{NetworkAddress, NetworkEffects, NetworkError, PeerEvent, PeerEventStream};
 pub use quint::{
-    Counterexample, EvaluationResult, EvaluationStatistics, Property, PropertyEvaluator,
-    PropertyId, PropertyKind, PropertySpec, QuintEvaluationEffects, QuintVerificationEffects,
-    VerificationId, VerificationResult,
+    // Generative simulation types
+    ActionDescriptor,
+    ActionEffect,
+    ActionResult,
+    // Core verification types
+    Counterexample,
+    EvaluationResult,
+    EvaluationStatistics,
+    Property,
+    PropertyEvaluator,
+    PropertyId,
+    PropertyKind,
+    PropertySpec,
+    QuintEvaluationEffects,
+    QuintMappable,
+    QuintSimulationEffects,
+    QuintStateExtractable,
+    QuintVerificationEffects,
+    VerificationId,
+    VerificationResult,
 };
 pub use random::RandomEffects;
 pub use relay::{RelayCandidate, RelayContext, RelayError, RelayRelationship, RelaySelector};
@@ -177,6 +195,7 @@ pub use guard::{
 };
 pub use ledger::{EffectApiEffects, EffectApiError, EffectApiEvent, EffectApiEventStream};
 pub use sync::{AntiEntropyConfig, BloomDigest, SyncEffects, SyncError, SyncMetrics};
+pub use threshold::{PublicKeyPackage, ThresholdSigningEffects, ThresholdSigningError};
 pub use tree::{Cut, Partial, ProposalId, Snapshot, TreeOperationEffects};
 
 // Re-export unified error system

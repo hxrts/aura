@@ -350,6 +350,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(unused_assignments)]
     fn test_exchange_state_transitions() {
         let mut state = InvitationExchangeState::Initial;
 
@@ -369,6 +370,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(unused_assignments)]
     fn test_guardian_state_transitions() {
         let mut state = GuardianInvitationState::Initial;
 

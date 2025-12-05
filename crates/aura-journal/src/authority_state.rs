@@ -2,195 +2,171 @@
 //!
 //! This module provides the implementation for deriving authority state
 //! from the fact-based journal, implementing the Authority trait.
+//!
+//! # Threshold Signing
+//!
+//! Authority signing operations use `ThresholdSigningEffects` for all FROST
+//! cryptographic operations. This provides:
+//! - Unified signing across all scenarios (multi-device, recovery, groups)
+//! - Proper key material management via secure storage
+//! - Single-device fast path when threshold=1
+//! - Multi-device coordination when threshold>1
 
 use crate::{fact::Journal, reduction::reduce_account_facts};
 use async_trait::async_trait;
-use aura_core::effects::{crypto::FrostKeyGenResult, CryptoEffects};
+use aura_core::effects::ThresholdSigningEffects;
+use aura_core::threshold::{SignableOperation, SigningContext};
+use aura_core::tree::TreeOp;
 use aura_core::{authority::TreeState, AuraError, Authority, AuthorityId, Hash32, Result};
 // Using aura-core type aliases for cryptographic types
 use aura_core::authority::{Ed25519Signature as Signature, Ed25519VerifyingKey as PublicKey};
 
 /// Authority state derived from facts
+///
+/// This struct represents the current state of an authority derived from
+/// the fact-based journal. All signing operations use `ThresholdSigningEffects`
+/// for proper FROST threshold cryptography.
 #[derive(Debug, Clone)]
 pub struct AuthorityState {
     /// Tree state derived from attested operations
     pub tree_state: TreeState,
 
-    /// Threshold signing key material derived from secure storage or facts
-    pub threshold_context: Option<FrostKeyGenResult>,
+    /// The authority identifier for signing operations
+    pub authority_id: Option<AuthorityId>,
 }
 
 impl AuthorityState {
-    /// Sign with threshold - internal implementation
-    pub async fn sign_with_threshold<E: CryptoEffects>(
-        &self,
-        effects: &E,
-        data: &[u8],
-    ) -> Result<Signature> {
-        // Get the root public key for signing context
-        let _public_key = self.tree_state.root_key();
-
-        // Delegate to FROST threshold signing coordination via effects
-        self.coordinate_frost_threshold_signing(effects, data).await
+    /// Create a new authority state with just tree state
+    pub fn new(tree_state: TreeState) -> Self {
+        Self {
+            tree_state,
+            authority_id: None,
+        }
     }
 
-    /// Coordinate threshold signing across devices via effects delegation.
+    /// Create authority state with authority ID for signing
+    pub fn with_authority(tree_state: TreeState, authority_id: AuthorityId) -> Self {
+        Self {
+            tree_state,
+            authority_id: Some(authority_id),
+        }
+    }
+
+    /// Sign a tree operation using threshold signing effects.
     ///
-    /// This properly delegates cryptography to the effects system, following
-    /// the architectural pattern: Layer 2 (journal) → Layer 3 (effects).
+    /// This delegates all FROST cryptographic operations to `ThresholdSigningEffects`,
+    /// which handles:
+    /// - Single-device fast path (no network for threshold=1)
+    /// - Multi-device coordination (via choreography for threshold>1)
+    /// - Key material retrieval from secure storage
+    /// - Nonce generation, signing, and aggregation
     ///
-    /// ## FROST Threshold Signing Protocol
+    /// # Arguments
+    /// - `effects`: The threshold signing effects implementation
+    /// - `tree_op`: The tree operation to sign
     ///
-    /// This function implements the complete FROST threshold signing workflow:
-    /// 1. Extract device key shares from secure storage
-    /// 2. Generate fresh nonces for each participant
-    /// 3. Collect nonce commitments from threshold participants
-    /// 4. Create signing package with message and commitments
-    /// 5. Collect partial signatures from participants
-    /// 6. Aggregate partial signatures into group signature
-    /// 7. Verify final signature before returning
-    /// 8. Return the aggregated signature as ed25519_dalek::Signature
+    /// # Returns
+    /// An Ed25519 signature over the serialized tree operation.
+    pub async fn sign_tree_op<E: ThresholdSigningEffects>(
+        &self,
+        effects: &E,
+        tree_op: TreeOp,
+    ) -> Result<Signature> {
+        let authority_id = self
+            .authority_id
+            .ok_or_else(|| AuraError::internal("Authority ID required for signing operations"))?;
+
+        let signing_context = SigningContext::self_tree_op(authority_id, tree_op);
+
+        tracing::debug!(
+            ?authority_id,
+            threshold = %self.tree_state.threshold(),
+            devices = %self.tree_state.device_count(),
+            "Signing tree operation via ThresholdSigningEffects"
+        );
+
+        let threshold_signature = effects
+            .sign(signing_context)
+            .await
+            .map_err(|e| AuraError::internal(format!("Threshold signing failed: {}", e)))?;
+
+        // Convert ThresholdSignature to Ed25519 Signature
+        let signature_bytes = threshold_signature.signature_bytes();
+        if signature_bytes.len() != 64 {
+            return Err(AuraError::invalid(format!(
+                "Invalid signature length: {} (expected 64)",
+                signature_bytes.len()
+            )));
+        }
+
+        let mut sig_array = [0u8; 64];
+        sig_array.copy_from_slice(signature_bytes);
+        Ok(Signature::from_bytes(&sig_array))
+    }
+
+    /// Sign arbitrary message data using threshold signing effects.
     ///
-    /// ## Error Handling
+    /// For signing arbitrary messages outside of tree operations, use the
+    /// `Message` variant of `SignableOperation`.
     ///
-    /// This function can fail at various stages:
-    /// - Insufficient participants for threshold
-    /// - Key retrieval failures
-    /// - Network coordination failures
-    /// - Invalid partial signatures
-    /// - Verification failures
-    async fn coordinate_frost_threshold_signing<E: CryptoEffects>(
+    /// # Arguments
+    /// - `effects`: The threshold signing effects implementation
+    /// - `domain`: Domain separator for the message (e.g., "authority_state")
+    /// - `data`: The message data to sign
+    pub async fn sign_message<E: ThresholdSigningEffects>(
+        &self,
+        effects: &E,
+        domain: &str,
+        data: &[u8],
+    ) -> Result<Signature> {
+        let authority_id = self
+            .authority_id
+            .ok_or_else(|| AuraError::internal("Authority ID required for signing operations"))?;
+
+        let signing_context = SigningContext {
+            authority: authority_id,
+            operation: SignableOperation::Message {
+                domain: domain.to_string(),
+                payload: data.to_vec(),
+            },
+            approval_context: aura_core::threshold::ApprovalContext::SelfOperation,
+        };
+
+        let threshold_signature = effects
+            .sign(signing_context)
+            .await
+            .map_err(|e| AuraError::internal(format!("Threshold signing failed: {}", e)))?;
+
+        // Convert ThresholdSignature to Ed25519 Signature
+        let signature_bytes = threshold_signature.signature_bytes();
+        if signature_bytes.len() != 64 {
+            return Err(AuraError::invalid(format!(
+                "Invalid signature length: {} (expected 64)",
+                signature_bytes.len()
+            )));
+        }
+
+        let mut sig_array = [0u8; 64];
+        sig_array.copy_from_slice(signature_bytes);
+        Ok(Signature::from_bytes(&sig_array))
+    }
+
+    /// Legacy method for backward compatibility.
+    ///
+    /// This method signs raw bytes by wrapping them in a `Message` operation.
+    /// Prefer using `sign_tree_op` for tree operations or `sign_message` for
+    /// other data with proper domain separation.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use sign_tree_op() or sign_message() for proper operation typing"
+    )]
+    pub async fn sign_with_threshold<E: ThresholdSigningEffects>(
         &self,
         effects: &E,
         data: &[u8],
     ) -> Result<Signature> {
-        // Get threshold requirements from tree state
-        let threshold = self.tree_state.threshold();
-        let device_count = self.tree_state.device_count();
-
-        // Validate we have sufficient devices for threshold
-        if device_count < threshold as u32 {
-            return Err(AuraError::invalid(format!(
-                "Insufficient devices for threshold signing: have {}, need {}",
-                device_count, threshold
-            )));
-        }
-
-        tracing::debug!(
-            "Starting FROST threshold signing with threshold={}, devices={}",
-            threshold,
-            device_count
-        );
-
-        // Step 1: Get the key packages from stored threshold context
-        let frost_keygen_result = self.threshold_context.as_ref().ok_or_else(|| {
-            AuraError::internal(
-                "Threshold signing keys not available. Load FrostKeyGenResult into AuthorityState",
-            )
-        })?;
-
-        // Step 2: Select deterministic participant set from tree state leaves
-        // Device IDs are derived from leaf indices in the tree (1-indexed for FROST)
-        let mut device_ids: Vec<u16> = (1..=device_count as u16).collect();
-        device_ids.sort_unstable();
-        device_ids.truncate(threshold as usize);
-        let participants = device_ids;
-
-        // Step 3: Generate FROST nonces using the first participant's key package
-        // (In a real multi-party scenario, each participant would generate their own nonces)
-        let first_participant_key = frost_keygen_result
-            .key_packages
-            .first()
-            .ok_or_else(|| AuraError::internal("No key packages available in threshold context"))?;
-        let nonces = effects
-            .frost_generate_nonces(first_participant_key)
+        self.sign_message(effects, "legacy_authority_state", data)
             .await
-            .map_err(|e| AuraError::internal(format!("Failed to generate FROST nonces: {}", e)))?;
-
-        let public_key_package = frost_keygen_result.public_key_package.clone();
-
-        // Step 4: Create signing package with message and participants
-        let signing_package = effects
-            .frost_create_signing_package(
-                data,
-                std::slice::from_ref(&nonces),
-                &participants,
-                &public_key_package,
-            )
-            .await
-            .map_err(|e| {
-                AuraError::internal(format!("Failed to create FROST signing package: {}", e))
-            })?;
-
-        // Step 5: Generate signature shares from each participant
-        // In a real distributed implementation, this would involve:
-        // - Sending signing package to each participant via transport effects
-        // - Each participant generating their signature share with their key share
-        // - Collecting signature shares from all participants
-        let mut signature_shares = Vec::new();
-
-        for (i, _participant_id) in participants.iter().enumerate() {
-            // Use the key package for this participant
-            if let Some(key_share) = frost_keygen_result.key_packages.get(i) {
-                let signature_share = effects
-                    .frost_sign_share(&signing_package, key_share, &nonces)
-                    .await
-                    .map_err(|e| {
-                        AuraError::internal(format!("Failed to create signature share: {}", e))
-                    })?;
-
-                signature_shares.push(signature_share);
-            }
-        }
-
-        // Validate we have enough signature shares for threshold
-        if signature_shares.len() < threshold as usize {
-            return Err(AuraError::invalid(format!(
-                "Insufficient signature shares: have {}, need {}",
-                signature_shares.len(),
-                threshold
-            )));
-        }
-
-        // Step 6: Aggregate partial signatures into group signature
-        let group_signature = effects
-            .frost_aggregate_signatures(&signing_package, &signature_shares)
-            .await
-            .map_err(|e| {
-                AuraError::internal(format!("Failed to aggregate FROST signatures: {}", e))
-            })?;
-
-        // Step 7: Verify the aggregated signature before returning
-        let group_public_key = self.tree_state.root_key().to_bytes().to_vec();
-        let verification_result = effects
-            .frost_verify(data, &group_signature, &group_public_key)
-            .await
-            .map_err(|e| AuraError::internal(format!("Failed to verify FROST signature: {}", e)))?;
-
-        if !verification_result {
-            return Err(AuraError::internal(
-                "FROST signature verification failed - aggregated signature is invalid",
-            ));
-        }
-
-        // Step 8: Return signature bytes directly through effects system
-        if group_signature.len() != 64 {
-            return Err(AuraError::invalid(format!(
-                "Invalid signature length: {} (expected 64)",
-                group_signature.len()
-            )));
-        }
-
-        // Convert bytes to ed25519_dalek::Signature for trait compatibility
-        if group_signature.len() != 64 {
-            return Err(AuraError::invalid(format!(
-                "Invalid signature length: {}",
-                group_signature.len()
-            )));
-        }
-        let mut signature_bytes = [0u8; 64];
-        signature_bytes.copy_from_slice(&group_signature);
-        Ok(Signature::from_bytes(&signature_bytes))
     }
 }
 
@@ -198,6 +174,9 @@ impl AuthorityState {
 ///
 /// This implements the Authority trait by deriving all state from
 /// the journal facts. No device information is exposed externally.
+///
+/// All signing operations use `ThresholdSigningEffects` for proper FROST
+/// cryptographic operations.
 #[derive(Debug, Clone)]
 pub struct DerivedAuthority {
     /// Authority identifier
@@ -219,16 +198,43 @@ impl DerivedAuthority {
         })
     }
 
-    /// Sign operation with proper effects delegation
+    /// Sign a tree operation using threshold signing effects.
     ///
-    /// This method provides the correct architectural pattern for threshold signing:
-    /// Layer 2 (journal) → Layer 3 (effects)
-    pub async fn sign_operation_with_effects<E: CryptoEffects>(
+    /// This is the preferred method for signing tree operations.
+    pub async fn sign_tree_operation<E: ThresholdSigningEffects>(
+        &self,
+        effects: &E,
+        tree_op: TreeOp,
+    ) -> Result<Signature> {
+        self.state.sign_tree_op(effects, tree_op).await
+    }
+
+    /// Sign arbitrary message data using threshold signing effects.
+    ///
+    /// For signing messages outside of tree operations.
+    pub async fn sign_message<E: ThresholdSigningEffects>(
+        &self,
+        effects: &E,
+        domain: &str,
+        data: &[u8],
+    ) -> Result<Signature> {
+        self.state.sign_message(effects, domain, data).await
+    }
+
+    /// Legacy method for backward compatibility.
+    ///
+    /// This method signs raw bytes by wrapping them in a `Message` operation.
+    /// Prefer using `sign_tree_operation` or `sign_message` for proper typing.
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use sign_tree_operation() or sign_message() for proper operation typing"
+    )]
+    #[allow(deprecated)]
+    pub async fn sign_operation_with_effects<E: ThresholdSigningEffects>(
         &self,
         effects: &E,
         operation: &[u8],
     ) -> Result<Signature> {
-        // Delegate to internal threshold signing with effects
         self.state.sign_with_threshold(effects, operation).await
     }
 }
@@ -265,17 +271,14 @@ impl Authority for DerivedAuthority {
 
 /// Reduce journal facts to authority state
 pub fn reduce_authority_state(
-    _authority_id: AuthorityId,
+    authority_id: AuthorityId,
     journal: &Journal,
 ) -> Result<AuthorityState> {
     // Use the reduction function to get tree state from facts
     let tree_state = reduce_account_facts(journal)
         .map_err(|e| AuraError::invalid(format!("Journal namespace mismatch: {}", e)))?;
 
-    Ok(AuthorityState {
-        tree_state,
-        threshold_context: None,
-    })
+    Ok(AuthorityState::with_authority(tree_state, authority_id))
 }
 
 #[cfg(test)]
@@ -323,7 +326,7 @@ mod tests {
 
         if let Ok(authority_state) = result {
             // Verify basic properties of the authority state
-            assert!(authority_state.threshold_context.is_none());
+            assert_eq!(authority_state.authority_id, Some(authority_id));
             // The tree state should be initialized with default values
             assert_eq!(authority_state.tree_state.threshold(), 1); // Default threshold
         }
@@ -333,14 +336,14 @@ mod tests {
     fn test_authority_state_creation() {
         // Test basic authority state creation
         let tree_state = aura_core::authority::TreeState::new();
+        let authority_id = AuthorityId::new_from_entropy([9u8; 32]);
 
-        let authority_state = AuthorityState {
-            tree_state,
-            threshold_context: None,
-        };
+        let authority_state = AuthorityState::new(tree_state.clone());
+        assert!(authority_state.authority_id.is_none());
+        assert_eq!(authority_state.tree_state.threshold(), 1);
 
-        // Verify the authority state was created correctly
-        assert!(authority_state.threshold_context.is_none());
-        assert_eq!(authority_state.tree_state.threshold(), 1); // Default threshold
+        let authority_state_with_id = AuthorityState::with_authority(tree_state, authority_id);
+        assert_eq!(authority_state_with_id.authority_id, Some(authority_id));
+        assert_eq!(authority_state_with_id.tree_state.threshold(), 1);
     }
 }

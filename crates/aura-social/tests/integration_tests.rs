@@ -6,7 +6,7 @@
 //! - Block and neighborhood availability
 //! - Social topology queries
 
-use aura_core::effects::relay::{RelayCandidate, RelayContext, RelayRelationship};
+use aura_core::effects::relay::{RelayContext, RelayRelationship};
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_core::time::{PhysicalTime, TimeStamp};
 use aura_journal::facts::social::{
@@ -16,7 +16,6 @@ use aura_journal::facts::social::{
 use aura_social::{
     Block, DiscoveryLayer, Neighborhood, ReachabilityChecker, RelayCandidateBuilder, SocialTopology,
 };
-use std::sync::Arc;
 
 // ============================================================================
 // Test Helpers
@@ -232,7 +231,7 @@ fn test_discovery_layer_priority() {
 
 #[test]
 fn test_relay_candidates_from_block_peers() {
-    let (block, steward, residents) = create_block(1, 5);
+    let (block, steward, _residents) = create_block(1, 5);
     let topology = SocialTopology::new(steward, Some(block), vec![]);
 
     // Get block peers
@@ -266,7 +265,7 @@ fn test_relay_candidate_builder_with_empty_topology() {
 
 #[test]
 fn test_relay_candidate_builder_with_reachability_filter() {
-    let (block, steward, residents) = create_block(1, 3);
+    let (block, steward, _residents) = create_block(1, 3);
     let topology = SocialTopology::new(steward, Some(block), vec![]);
 
     let builder = RelayCandidateBuilder::from_topology(topology);
@@ -334,7 +333,7 @@ fn test_block_available_slots() {
 
 #[test]
 fn test_neighborhood_adjacency() {
-    let block_ids: Vec<BlockId> = (1..=4).map(|i| test_block_id(i)).collect();
+    let block_ids: Vec<BlockId> = (1..=4).map(test_block_id).collect();
     let neighborhood = create_neighborhood(1, block_ids.clone());
 
     // Linear chain adjacencies: 1-2, 2-3, 3-4
@@ -349,7 +348,7 @@ fn test_neighborhood_adjacency() {
 
 #[test]
 fn test_neighborhood_membership() {
-    let block_ids: Vec<BlockId> = (1..=3).map(|i| test_block_id(i)).collect();
+    let block_ids: Vec<BlockId> = (1..=3).map(test_block_id).collect();
     let neighborhood = create_neighborhood(1, block_ids.clone());
 
     // All blocks should be members
@@ -364,7 +363,7 @@ fn test_neighborhood_membership() {
 
 #[test]
 fn test_neighborhood_adjacent_blocks() {
-    let block_ids: Vec<BlockId> = (1..=4).map(|i| test_block_id(i)).collect();
+    let block_ids: Vec<BlockId> = (1..=4).map(test_block_id).collect();
     let neighborhood = create_neighborhood(1, block_ids.clone());
 
     // Block 2 (index 1) should have blocks 1 and 3 as adjacent
@@ -567,7 +566,7 @@ fn test_block_with_config() {
         neighborhood_limit: 2,
     };
 
-    let residents: Vec<AuthorityId> = (1..=3).map(|i| test_authority(i)).collect();
+    let residents: Vec<AuthorityId> = (1..=3).map(test_authority).collect();
     let resident_facts: Vec<ResidentFact> = residents
         .iter()
         .map(|r| ResidentFact::new(*r, block_id, timestamp.clone()))

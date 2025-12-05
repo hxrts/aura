@@ -736,6 +736,174 @@ impl NetworkEffects for MockEffects {
     }
 }
 
+// ThresholdSigningEffects implementation
+#[async_trait]
+impl aura_core::effects::ThresholdSigningEffects for MockEffects {
+    async fn bootstrap_authority(&self, _authority: &AuthorityId) -> Result<Vec<u8>, AuraError> {
+        // Return a mock public key package (32 bytes of zeros)
+        Ok(vec![0u8; 32])
+    }
+
+    async fn sign(
+        &self,
+        _context: aura_core::threshold::SigningContext,
+    ) -> Result<aura_core::threshold::ThresholdSignature, AuraError> {
+        // Return a mock signature
+        Ok(aura_core::threshold::ThresholdSignature {
+            signature: vec![0u8; 64],
+            signer_count: 1,
+            signers: vec![1],
+            public_key_package: vec![0u8; 32],
+            epoch: 0,
+        })
+    }
+
+    async fn threshold_config(
+        &self,
+        _authority: &AuthorityId,
+    ) -> Option<aura_core::threshold::ThresholdConfig> {
+        // Default 1-of-1 threshold
+        Some(aura_core::threshold::ThresholdConfig {
+            threshold: 1,
+            total_participants: 1,
+        })
+    }
+
+    async fn has_signing_capability(&self, _authority: &AuthorityId) -> bool {
+        true
+    }
+
+    async fn public_key_package(&self, _authority: &AuthorityId) -> Option<Vec<u8>> {
+        Some(vec![0u8; 32])
+    }
+}
+
+// SecureStorageEffects implementation
+#[async_trait]
+impl aura_core::effects::SecureStorageEffects for MockEffects {
+    async fn secure_store(
+        &self,
+        location: &aura_core::effects::SecureStorageLocation,
+        data: &[u8],
+        _capabilities: &[aura_core::effects::SecureStorageCapability],
+    ) -> Result<(), AuraError> {
+        // Use regular storage with a secure_ prefix
+        let key = format!("secure_{}", location.full_path());
+        let mut state = self.state.lock().unwrap();
+        state.storage.insert(key, data.to_vec());
+        Ok(())
+    }
+
+    async fn secure_retrieve(
+        &self,
+        location: &aura_core::effects::SecureStorageLocation,
+        _required_capabilities: &[aura_core::effects::SecureStorageCapability],
+    ) -> Result<Vec<u8>, AuraError> {
+        let key = format!("secure_{}", location.full_path());
+        let state = self.state.lock().unwrap();
+        state
+            .storage
+            .get(&key)
+            .cloned()
+            .ok_or_else(|| AuraError::storage(format!("Secure key not found: {}", key)))
+    }
+
+    async fn secure_delete(
+        &self,
+        location: &aura_core::effects::SecureStorageLocation,
+        _required_capabilities: &[aura_core::effects::SecureStorageCapability],
+    ) -> Result<(), AuraError> {
+        let key = format!("secure_{}", location.full_path());
+        let mut state = self.state.lock().unwrap();
+        state.storage.remove(&key);
+        Ok(())
+    }
+
+    async fn secure_exists(
+        &self,
+        location: &aura_core::effects::SecureStorageLocation,
+    ) -> Result<bool, AuraError> {
+        let key = format!("secure_{}", location.full_path());
+        let state = self.state.lock().unwrap();
+        Ok(state.storage.contains_key(&key))
+    }
+
+    async fn secure_list_keys(
+        &self,
+        namespace: &str,
+        _required_capabilities: &[aura_core::effects::SecureStorageCapability],
+    ) -> Result<Vec<String>, AuraError> {
+        let prefix = format!("secure_{}/", namespace);
+        let state = self.state.lock().unwrap();
+        let keys: Vec<String> = state
+            .storage
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .map(|k| k.strip_prefix(&prefix).unwrap_or(k).to_string())
+            .collect();
+        Ok(keys)
+    }
+
+    async fn secure_generate_key(
+        &self,
+        location: &aura_core::effects::SecureStorageLocation,
+        key_type: &str,
+        _capabilities: &[aura_core::effects::SecureStorageCapability],
+    ) -> Result<Option<Vec<u8>>, AuraError> {
+        // Generate a deterministic key based on location and type
+        let key_bytes: Vec<u8> = match key_type {
+            "ed25519" => vec![1u8; 32],
+            "frost-share" => vec![2u8; 64],
+            _ => vec![0u8; 32],
+        };
+        // Store private key
+        let key = format!("secure_{}", location.full_path());
+        let mut state = self.state.lock().unwrap();
+        state.storage.insert(key, key_bytes.clone());
+        // Return public key (mock: same as private for testing)
+        Ok(Some(key_bytes))
+    }
+
+    async fn secure_create_time_bound_token(
+        &self,
+        location: &aura_core::effects::SecureStorageLocation,
+        _capabilities: &[aura_core::effects::SecureStorageCapability],
+        expires_at: &aura_core::time::PhysicalTime,
+    ) -> Result<Vec<u8>, AuraError> {
+        // Create a simple mock token (location hash + expiry)
+        let mut token = location.full_path().as_bytes().to_vec();
+        token.extend_from_slice(&expires_at.ts_ms.to_le_bytes());
+        Ok(token)
+    }
+
+    async fn secure_access_with_token(
+        &self,
+        _token: &[u8],
+        location: &aura_core::effects::SecureStorageLocation,
+    ) -> Result<Vec<u8>, AuraError> {
+        // Simply retrieve the data (mock doesn't validate token)
+        self.secure_retrieve(location, &[]).await
+    }
+
+    async fn get_device_attestation(&self) -> Result<Vec<u8>, AuraError> {
+        // Return mock attestation
+        Ok(b"mock_device_attestation".to_vec())
+    }
+
+    async fn is_secure_storage_available(&self) -> bool {
+        true
+    }
+
+    fn get_secure_storage_capabilities(&self) -> Vec<String> {
+        vec![
+            "read".to_string(),
+            "write".to_string(),
+            "delete".to_string(),
+            "list".to_string(),
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

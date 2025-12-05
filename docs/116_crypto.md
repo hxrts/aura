@@ -226,20 +226,64 @@ The cryptographic architecture maintains these invariants:
 
 ## 7. FROST and Threshold Signatures
 
-FROST threshold signatures use a different pattern from standard Ed25519:
+Aura provides a unified threshold signing architecture for all scenarios requiring m-of-n signatures.
 
-**Primitives** (`aura-core/src/crypto/tree_signing.rs`):
+### 7.1 Architecture Layers
+
+**Trait Definition** (`aura-core/src/effects/threshold.rs`):
+- `ThresholdSigningEffects` trait for async signing operations
+- `SigningContext` – pairs `SignableOperation` with `ApprovalContext`
+- `ThresholdConfig` – m-of-n parameters
+- `ThresholdSignature` – signature bytes wrapper
+
+**Context Types** (`aura-core/src/threshold/context.rs`):
+- `SignableOperation::TreeOp` – commitment tree updates
+- `SignableOperation::RecoveryApproval` – guardian recovery assistance
+- `SignableOperation::GroupProposal` – multi-party group decisions
+- `SignableOperation::Message` – arbitrary message signing
+- `ApprovalContext` variants for audit/display purposes
+
+**Service Implementation** (`aura-agent/src/runtime/services/threshold_signing.rs`):
+- `ThresholdSigningService` – production FROST implementation
+- Manages per-authority signing state and key storage
+- Uses `SecureStorageEffects` for key material persistence
+
+**Low-Level Primitives** (`aura-core/src/crypto/tree_signing.rs`):
 - Defines FROST types and pure coordination logic
-- No direct crypto library imports (uses frost_ed25519 types)
+- Re-exports frost_ed25519 types for type safety
 
 **Handler** (`aura-effects/src/crypto.rs`):
 - Implements FROST key generation and signing
-- Only location with direct `frost_ed25519` usage
+- Only location with direct `frost_ed25519` library calls
 
-**YAGNI Note**: We do not abstract FROST behind a generic trait because:
-- Only one threshold signature scheme is needed
-- Direct usage is clearer than premature abstraction
-- See `crates/aura-core/src/crypto/README.md` for details
+### 7.2 Usage Pattern
+
+The recommended pattern uses `AppCore` for high-level operations:
+
+```rust
+// Sign a tree operation
+let attested_op = app_core.sign_tree_op(&tree_op).await?;
+
+// Bootstrap 1-of-1 keys for single-device accounts
+let public_key = app_core.bootstrap_signing_keys().await?;
+```
+
+For direct trait usage:
+
+```rust
+use aura_core::effects::ThresholdSigningEffects;
+
+let context = SigningContext::self_tree_op(authority, tree_op);
+let signature = signing_service.sign(context).await?;
+```
+
+### 7.3 Design Rationale
+
+The unified trait abstraction enables:
+- **Consistent interface** across multi-device, guardian, and group scenarios
+- **Proper audit context** via `ApprovalContext` for UX and logging
+- **Testability** via mock implementations in `aura-testkit`
+- **Key isolation** with secure storage integration
 
 ## 8. Future Considerations
 

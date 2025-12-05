@@ -1245,6 +1245,7 @@ impl TraceConverter {
     }
 
     /// Convert QuintValue to ITF expression
+    #[allow(clippy::only_used_in_recursion)]
     fn quint_value_to_itf(&self, value: &QuintValue) -> Result<ItfExpression> {
         Ok(match value {
             QuintValue::Bool(b) => ItfExpression::Bool(*b),

@@ -1045,27 +1045,27 @@ mod tests {
     fn test_chat_reduction() {
         let reduction = ChatReduction;
 
-        // Create proper ChatFact instances and serialize them
-        let channel_fact = ChatFact::ChannelCreated {
-            context_id: test_context_id(),
-            channel_id: ChannelId::default(),
-            name: "general".to_string(),
-            topic: Some("General discussion".to_string()),
-            is_dm: false,
-            created_at_ms: 1234567890,
-            creator_id: AuthorityId::new_from_entropy([1u8; 32]),
-        };
+        // Create proper ChatFact instances using backward-compatible constructors
+        let channel_fact = ChatFact::channel_created_ms(
+            test_context_id(),
+            ChannelId::default(),
+            "general".to_string(),
+            Some("General discussion".to_string()),
+            false,
+            1234567890,
+            AuthorityId::new_from_entropy([1u8; 32]),
+        );
 
-        let message_fact = ChatFact::MessageSent {
-            context_id: test_context_id(),
-            channel_id: ChannelId::default(),
-            message_id: "msg-123".to_string(),
-            sender_id: AuthorityId::new_from_entropy([2u8; 32]),
-            sender_name: "Alice".to_string(),
-            content: "Hello, world!".to_string(),
-            sent_at_ms: 1234567900,
-            reply_to: None,
-        };
+        let message_fact = ChatFact::message_sent_ms(
+            test_context_id(),
+            ChannelId::default(),
+            "msg-123".to_string(),
+            AuthorityId::new_from_entropy([2u8; 32]),
+            "Alice".to_string(),
+            "Hello, world!".to_string(),
+            1234567900,
+            None,
+        );
 
         // Test with facts that should produce deltas
         let facts = vec![
@@ -1110,16 +1110,16 @@ mod tests {
         assert_eq!(deltas, deltas2);
 
         // Test monotonicity: more facts → same or more deltas
-        let another_message = ChatFact::MessageSent {
-            context_id: test_context_id(),
-            channel_id: ChannelId::default(),
-            message_id: "msg-124".to_string(),
-            sender_id: AuthorityId::new_from_entropy([3u8; 32]),
-            sender_name: "Bob".to_string(),
-            content: "Reply here".to_string(),
-            sent_at_ms: 1234567910,
-            reply_to: Some("msg-123".to_string()),
-        };
+        let another_message = ChatFact::message_sent_ms(
+            test_context_id(),
+            ChannelId::default(),
+            "msg-124".to_string(),
+            AuthorityId::new_from_entropy([3u8; 32]),
+            "Bob".to_string(),
+            "Reply here".to_string(),
+            1234567910,
+            Some("msg-123".to_string()),
+        );
 
         let mut more_facts = facts.clone();
         more_facts.push(make_test_fact(
@@ -1223,33 +1223,33 @@ mod tests {
 
         let reduction = RecoveryReduction;
 
-        // Create proper RecoveryFact instances
-        let setup_initiated = RecoveryFact::GuardianSetupInitiated {
-            context_id: test_context_id(),
-            initiator_id: AuthorityId::new_from_entropy([1u8; 32]),
-            guardian_ids: vec![
+        // Create proper RecoveryFact instances using backward-compatible constructors
+        let setup_initiated = RecoveryFact::guardian_setup_initiated_ms(
+            test_context_id(),
+            AuthorityId::new_from_entropy([1u8; 32]),
+            vec![
                 AuthorityId::new_from_entropy([2u8; 32]),
                 AuthorityId::new_from_entropy([3u8; 32]),
             ],
-            threshold: 2,
-            initiated_at_ms: 1234567890,
-        };
+            2,
+            1234567890,
+        );
 
-        let guardian_accepted = RecoveryFact::GuardianAccepted {
-            context_id: test_context_id(),
-            guardian_id: AuthorityId::new_from_entropy([2u8; 32]),
-            accepted_at_ms: 1234567900,
-        };
+        let guardian_accepted = RecoveryFact::guardian_accepted_ms(
+            test_context_id(),
+            AuthorityId::new_from_entropy([2u8; 32]),
+            1234567900,
+        );
 
-        let setup_completed = RecoveryFact::GuardianSetupCompleted {
-            context_id: test_context_id(),
-            guardian_ids: vec![
+        let setup_completed = RecoveryFact::guardian_setup_completed_ms(
+            test_context_id(),
+            vec![
                 AuthorityId::new_from_entropy([2u8; 32]),
                 AuthorityId::new_from_entropy([3u8; 32]),
             ],
-            threshold: 2,
-            completed_at_ms: 1234567999,
-        };
+            2,
+            1234567999,
+        );
 
         let facts = vec![
             make_test_fact(
@@ -1298,23 +1298,23 @@ mod tests {
     fn test_invitation_reduction() {
         let reduction = InvitationReduction;
 
-        // Create proper InvitationFact instances and serialize them
-        let sent_fact = InvitationFact::Sent {
-            context_id: test_context_id(),
-            invitation_id: "inv-123".to_string(),
-            sender_id: AuthorityId::new_from_entropy([1u8; 32]),
-            receiver_id: AuthorityId::new_from_entropy([2u8; 32]),
-            invitation_type: "guardian".to_string(),
-            sent_at_ms: 1234567890,
-            expires_at_ms: None,
-            message: None,
-        };
+        // Create proper InvitationFact instances using backward-compatible constructors
+        let sent_fact = InvitationFact::sent_ms(
+            test_context_id(),
+            "inv-123".to_string(),
+            AuthorityId::new_from_entropy([1u8; 32]),
+            AuthorityId::new_from_entropy([2u8; 32]),
+            "guardian".to_string(),
+            1234567890,
+            None,
+            None,
+        );
 
-        let accepted_fact = InvitationFact::Accepted {
-            invitation_id: "inv-123".to_string(),
-            acceptor_id: AuthorityId::new_from_entropy([2u8; 32]),
-            accepted_at_ms: 1234567900,
-        };
+        let accepted_fact = InvitationFact::accepted_ms(
+            "inv-123".to_string(),
+            AuthorityId::new_from_entropy([2u8; 32]),
+            1234567900,
+        );
 
         let facts = vec![
             make_test_fact(

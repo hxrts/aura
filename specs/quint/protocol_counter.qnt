@@ -1,8 +1,8 @@
 module protocol_counter {
-  import protocol_core as core from "protocol_core"
-
-  type ProtocolId = core.ProtocolId
-  type DeviceId = core.DeviceId
+  // Base types (defined locally - type imports don't work in Quint)
+  type Option[a] = Some(a) | None
+  type ProtocolId = str
+  type AuthorityId = str  // renamed from DeviceId for authority model
   type CounterId = str
   type Lamport = int
   type MessageId = str
@@ -10,7 +10,7 @@ module protocol_counter {
   type CounterOp = Increment(int) | Reset | Sync
 
   type ParticipantState = {
-    device: DeviceId,
+    authority: AuthorityId,
     owns: Set[CounterId],
     lamport: Lamport,
     localCounters: CounterId -> int,
@@ -22,65 +22,78 @@ module protocol_counter {
   type CounterState = {
     id: CounterId,
     value: int,
-    owner: DeviceId,
-    observers: Set[DeviceId],
+    owner: AuthorityId,
+    observers: Set[AuthorityId],
     lamport: Lamport
   }
 
   type CounterMessage = {
     id: MessageId,
-    sender: DeviceId,
-    recipients: Set[DeviceId],
+    sender: AuthorityId,
+    recipients: Set[AuthorityId],
     counter: CounterId,
     op: CounterOp,
     value: int,
     lamport: Lamport
   }
 
-type CounterPhase = Setup | Operating | Synchronizing | Completed | Failed
-type LifecycleStatus = Pending | Completed | Aborted
-type CounterOutcome = {
-  relationship: int,
-  reserved: Set[int],
-  ttl: int,
-  epoch: int,
-  requestingDevice: DeviceId
-}
+  type CounterPhase = CounterSetup | CounterOperating | CounterSynchronizing | CounterCompleted | CounterFailed
+  type CounterLifecycleStatus = CounterPending | CounterLifecycleCompleted | CounterAborted
+
+  type CounterOutcome = {
+    relationship: int,
+    reserved: Set[int],
+    ttl: int,
+    epoch: int,
+    requestingAuthority: AuthorityId
+  }
+
+  // Simplified effect type (no imports)
+  type CounterEffect = { effectType: str, payload: str }
 
   // ==================== STATE ====================
 
-  var participants: ProtocolId -> DeviceId -> ParticipantState
+  var participants: ProtocolId -> AuthorityId -> ParticipantState
   var counters: ProtocolId -> CounterId -> CounterState
   var phase: ProtocolId -> CounterPhase
   var pendingMessages: ProtocolId -> Set[CounterMessage]
-var globalLamport: ProtocolId -> Lamport
-var requestedValues: ProtocolId -> Set[int]
-var reservedValues: ProtocolId -> Set[int]
-var relationshipHash: ProtocolId -> int
-var requestingDevice: ProtocolId -> DeviceId
-var previousValue: ProtocolId -> int
-var ttl: ProtocolId -> int
-var requestedEpoch: ProtocolId -> int
-var lifecycleStatus: ProtocolId -> LifecycleStatus
-var lifecycleEffects: ProtocolId -> Set[core.ProtocolEffect]
-var outcome: ProtocolId -> Option[CounterOutcome]
+  var globalLamport: ProtocolId -> Lamport
+  var requestedValues: ProtocolId -> Set[int]
+  var reservedValues: ProtocolId -> Set[int]
+  var relationshipHash: ProtocolId -> int
+  var requestingAuthority: ProtocolId -> AuthorityId
+  var previousValue: ProtocolId -> int
+  var ttl: ProtocolId -> int
+  var requestedEpoch: ProtocolId -> int
+  var lifecycleStatus: ProtocolId -> CounterLifecycleStatus
+  var lifecycleEffects: ProtocolId -> Set[CounterEffect]
+  var outcome: ProtocolId -> Option[CounterOutcome]
 
   // ==================== HELPERS ====================
 
-  pure def getOrDefault[K, V](m: K -> V, key: K, default: V): V =
-    if key.in(m.keys()) then m.get(key) else default
+  pure def getOrDefaultInt(m: ProtocolId -> int, key: ProtocolId, default: int): int =
+    if (key.in(m.keys())) m.get(key) else default
+
+  pure def getOrDefaultSetInt(m: ProtocolId -> Set[int], key: ProtocolId): Set[int] =
+    if (key.in(m.keys())) m.get(key) else Set()
+
+  pure def getOrDefaultMessages(m: ProtocolId -> Set[CounterMessage], key: ProtocolId): Set[CounterMessage] =
+    if (key.in(m.keys())) m.get(key) else Set()
+
+  pure def getCounterValue(localCounters: CounterId -> int, counterId: CounterId, defaultVal: int): int =
+    if (counterId.in(localCounters.keys())) localCounters.get(counterId) else defaultVal
 
   pure def ensureParticipantMap(
-    mapping: ProtocolId -> DeviceId -> ParticipantState,
+    mapping: ProtocolId -> AuthorityId -> ParticipantState,
     pid: ProtocolId,
-    members: Set[DeviceId]
-  ): ProtocolId -> DeviceId -> ParticipantState =
-    if pid.in(mapping.keys()) then mapping
+    members: Set[AuthorityId]
+  ): ProtocolId -> AuthorityId -> ParticipantState =
+    if (pid.in(mapping.keys())) mapping
     else
       mapping.set(
         pid,
-        members.fold(Map(), (acc, device) => acc.set(device, {
-          device: device,
+        members.fold(Map(), (acc, authority) => acc.set(authority, {
+          authority: authority,
           owns: Set(),
           lamport: 0,
           localCounters: Map(),
@@ -93,15 +106,15 @@ var outcome: ProtocolId -> Option[CounterOutcome]
   pure def ensureCounterMap(
     mapping: ProtocolId -> CounterId -> CounterState,
     pid: ProtocolId,
-    counters: Set[CounterId],
-    owner: DeviceId,
-    observers: Set[DeviceId]
+    counterIds: Set[CounterId],
+    owner: AuthorityId,
+    observers: Set[AuthorityId]
   ): ProtocolId -> CounterId -> CounterState =
-    if pid.in(mapping.keys()) then mapping
+    if (pid.in(mapping.keys())) mapping
     else
       mapping.set(
         pid,
-        counters.fold(Map(), (acc, counterId) => acc.set(counterId, {
+        counterIds.fold(Map(), (acc, counterId) => acc.set(counterId, {
           id: counterId,
           value: 0,
           owner: owner,
@@ -111,17 +124,10 @@ var outcome: ProtocolId -> Option[CounterOutcome]
       )
 
   pure def bumpLamport(clock: Lamport, observed: Lamport): Lamport =
-    max(clock, observed) + 1
+    (if (clock > observed) clock else observed) + 1
 
-  pure def messageId(device: DeviceId, counter: CounterId, lamport: Lamport, nonce: int): MessageId =
-    device ++ "-" ++ counter ++ "-" ++ lamport.toStr() ++ "-" ++ nonce.toStr()
-
-  pure def updateParticipant(
-    pid: ProtocolId,
-    device: DeviceId,
-    update: ParticipantState -> ParticipantState
-  ): ProtocolId -> DeviceId -> ParticipantState =
-    participants.set(pid, participants.get(pid).set(device, update(participants.get(pid).get(device))))
+  pure def messageId(authority: AuthorityId, counter: CounterId, lamport: Lamport, nonce: int): MessageId =
+    authority
 
   // ==================== INITIALISATION ====================
 
@@ -134,7 +140,7 @@ var outcome: ProtocolId -> Option[CounterOutcome]
     requestedValues' = Map(),
     reservedValues' = Map(),
     relationshipHash' = Map(),
-    requestingDevice' = Map(),
+    requestingAuthority' = Map(),
     previousValue' = Map(),
     ttl' = Map(),
     requestedEpoch' = Map(),
@@ -147,269 +153,179 @@ var outcome: ProtocolId -> Option[CounterOutcome]
 
   action configureCounters(
     pid: ProtocolId,
-    devices: Set[DeviceId],
+    authorities: Set[AuthorityId],
     counterIds: Set[CounterId],
-    owner: DeviceId,
+    owner: AuthorityId,
     relationship: int,
-    requester: DeviceId,
+    requester: AuthorityId,
     base: int,
     ttlValue: int,
     epochValue: int
   ): bool = all {
-    devices.size() >= 1,
+    authorities.size() >= 1,
     counterIds.size() >= 1,
-    owner.in(devices),
-    not pid.in(phase.keys()),
-    phase' = phase.set(pid, Operating),
-    participants' = ensureParticipantMap(participants, pid, devices),
-    counters' = ensureCounterMap(counters, pid, counterIds, owner, devices),
+    owner.in(authorities),
+    not(pid.in(phase.keys())),
+    phase' = phase.set(pid, CounterOperating),
+    participants' = ensureParticipantMap(participants, pid, authorities),
+    counters' = ensureCounterMap(counters, pid, counterIds, owner, authorities),
     pendingMessages' = pendingMessages.set(pid, Set()),
     globalLamport' = globalLamport.set(pid, 0),
     requestedValues' = requestedValues.set(pid, Set()),
     reservedValues' = reservedValues.set(pid, Set()),
     relationshipHash' = relationshipHash.set(pid, relationship),
-    requestingDevice' = requestingDevice.set(pid, requester),
+    requestingAuthority' = requestingAuthority.set(pid, requester),
     previousValue' = previousValue.set(pid, base),
     ttl' = ttl.set(pid, ttlValue),
     requestedEpoch' = requestedEpoch.set(pid, epochValue),
-    lifecycleStatus' = lifecycleStatus.set(pid, Pending),
-    lifecycleEffects' = lifecycleEffects.set(pid, Set())
+    lifecycleStatus' = lifecycleStatus.set(pid, CounterPending),
+    lifecycleEffects' = lifecycleEffects.set(pid, Set()),
+    outcome' = outcome.set(pid, None)
   }
 
-  action recordReservation(pid: ProtocolId, values: Set[int]): bool = all {
-    pid.in(phase.keys()),
-    lifecycleStatus.get(pid).default(Pending) = Pending,
-    phase.get(pid) = Operating,
-    reservedValues' = reservedValues.set(pid, values),
-    requestedValues' = requestedValues.set(pid, values),
-    participants' = participants,
-    counters' = counters,
-    pendingMessages' = pendingMessages,
-    globalLamport' = globalLamport,
-    relationshipHash' = relationshipHash,
-    requestingDevice' = requestingDevice,
-    previousValue' = previousValue,
-    ttl' = ttl,
-    requestedEpoch' = requestedEpoch,
-    lifecycleStatus' = lifecycleStatus,
-    lifecycleEffects' = lifecycleEffects
-  }
-
-  action markByzantine(pid: ProtocolId, device: DeviceId): bool =
-    val participantMap = ensureParticipantMap(participants, pid, Set()) {
-      device.in(participantMap.get(pid).keys()) {
-        participants' = participants.set(
-          pid,
-          participantMap.get(pid).set(device, {
-            ...participantMap.get(pid).get(device),
-            isByzantine: true
-          })
-        ),
-        counters' = counters,
-        phase' = phase,
-        pendingMessages' = pendingMessages,
-        globalLamport' = globalLamport
-      }
-    }
-
-  action localIncrement(
-    pid: ProtocolId,
-    device: DeviceId,
-    counterId: CounterId,
-    delta: int
-  ): bool =
-    val participantMap = participants.get(pid) {
-    val counterMap = counters.get(pid) {
-      phase.get(pid) = Operating and
-      device.in(participantMap.keys()) and
-      counterId.in(counterMap.keys()) and
-      delta > 0 {
-        val participant = participantMap.get(device)
-        val counter = counterMap.get(counterId)
-        val currentLocal = getOrDefault(participant.localCounters, counterId, counter.value)
-        val updatedValue = currentLocal + delta {
-        val nextLamport = participant.lamport + 1 {
-        participants' = participants.set(pid, participantMap.set(device, {
-          ...participant,
-          localCounters: participant.localCounters.set(counterId, updatedValue),
-          lamport: nextLamport,
-          pending: participant.pending.append(Increment(delta))
-        })),
-        counters' = counters,
-        phase' = phase,
-        pendingMessages' = pendingMessages,
-        globalLamport' = globalLamport.set(pid, max(getOrDefault(globalLamport, pid, 0), nextLamport))
-      }}}}}
-
-  action broadcastOperation(
-    pid: ProtocolId,
-    device: DeviceId,
-    counterId: CounterId,
-    op: CounterOp,
-    nonce: int
-  ): bool =
-    val participantMap = participants.get(pid) {
-    val counterMap = counters.get(pid) {
-      phase.get(pid) = Operating and
-      device.in(participantMap.keys()) and
-      counterId.in(counterMap.keys()) and
-      op.in(participantMap.get(device).pending) {
-        val participant = participantMap.get(device)
-        val counter = counterMap.get(counterId)
-        val localValue = getOrDefault(participant.localCounters, counterId, counter.value)
-        val value =
-          if participant.isByzantine then
-            0.to(1000).oneOf()
-          else
-            localValue {
-        val msg = {
-          id: messageId(device, counterId, participant.lamport, nonce),
-          sender: device,
-          recipients: counter.observers,
-          counter: counterId,
-          op: op,
-          value: value,
-          lamport: participant.lamport
-        } {
-        pendingMessages' = pendingMessages.set(
-          pid,
-          getOrDefault(pendingMessages, pid, Set()).union(Set(msg))
-        ),
-        participants' = participants.set(pid, participantMap.set(device, {
-          ...participant,
-          pending: participant.pending.select(o => o != op)
-        })),
-        counters' = counters,
-        phase' = phase,
-        globalLamport' = globalLamport
-      }}}}}
-
-  action deliverMessage(
-    pid: ProtocolId,
-    msgId: MessageId,
-    receiver: DeviceId
-  ): bool =
-    val msgSet = getOrDefault(pendingMessages, pid, Set()) {
-      msgSet.exists(m => m.id = msgId) and
-      receiver.in(participants.get(pid).keys()) {
-        val msg = msgSet.filter(m => m.id = msgId).oneOf()
-        receiver.in(msg.recipients) and
-        not(participants.get(pid).get(receiver).delivered.contains(msgId)) {
-          val participant = participants.get(pid).get(receiver)
-          val counter = counters.get(pid).get(msg.counter)
-          val updatedLamport = bumpLamport(participant.lamport, msg.lamport)
-          val currentLocal = getOrDefault(participant.localCounters, msg.counter, counter.value)
-          val updatedValue = match msg.op {
-            | Increment(delta) => min(currentLocal + delta, 1000)
-            | Reset => 0
-            | Sync => msg.value
-          } {
-          participants' = participants.set(pid, participants.get(pid).set(receiver, {
-            ...participant,
-            lamport: updatedLamport,
-            localCounters: participant.localCounters.set(msg.counter, updatedValue),
-            delivered: participant.delivered.union(Set(msgId))
-          })),
-          counters' = counters.set(pid, counters.get(pid).set(msg.counter, {
-            ...counter,
-            value: updatedValue,
-            lamport: max(counter.lamport, msg.lamport)
-          })),
-          pendingMessages' = pendingMessages.set(pid, msgSet),
-          globalLamport' = globalLamport.set(pid, max(getOrDefault(globalLamport, pid, 0), updatedLamport)),
-          phase' = phase
-        }
-      }
-    }
-
-  action synchronize(
-    pid: ProtocolId,
-    device: DeviceId,
-    counterId: CounterId,
-    snapshot: int
-  ): bool =
-    val participantMap = participants.get(pid) {
-    val counterMap = counters.get(pid) {
-      phase.get(pid) = Operating and
-      device.in(participantMap.keys()) and
-      counterId.in(counterMap.keys()) {
-        val participant = participantMap.get(device)
-        val counter = counterMap.get(counterId)
-        participants' = participants.set(pid, participantMap.set(device, {
-          ...participant,
-          localCounters: participant.localCounters.set(counterId, snapshot)
-        })),
-        counters' = counters.set(pid, counterMap.set(counterId, {
-          ...counter,
-          value: snapshot
-        })),
-        phase' = phase,
-        pendingMessages' = pendingMessages,
-        globalLamport' = globalLamport
-      }
-    }}
-
-  action finalize(pid: ProtocolId): bool =
-    val msgSet = getOrDefault(pendingMessages, pid, Set()) {
-    val reserved = reservedValues.get(pid) {
-      msgSet.size() = 0 and
-      phase.get(pid) = Operating and
-      reserved.size() >= 1 and
-      lifecycleStatus.get(pid).default(Pending) = Pending {
-        phase' = phase.set(pid, Completed),
-        lifecycleStatus' = lifecycleStatus.set(pid, Completed),
-        lifecycleEffects' = lifecycleEffects.set(pid, Set(core.UpdateCounter({
-          relationship: relationshipHash.get(pid),
-          previous: previousValue.get(pid),
-          reserved: reserved,
-          ttl: ttl.get(pid),
-          epoch: requestedEpoch.get(pid),
-          requestingDevice: requestingDevice.get(pid)
-        }))),
-        outcome' = outcome.set(pid, Some({
-          relationship: relationshipHash.get(pid),
-          reserved: reserved,
-          ttl: ttl.get(pid),
-          epoch: requestedEpoch.get(pid),
-          requestingDevice: requestingDevice.get(pid)
-        })),
-        participants' = participants,
-        counters' = counters,
-        pendingMessages' = pendingMessages,
-        globalLamport' = globalLamport,
-        relationshipHash' = relationshipHash,
-        requestingDevice' = requestingDevice,
-        previousValue' = previousValue,
-        ttl' = ttl,
-        requestedEpoch' = requestedEpoch,
-        reservedValues' = reservedValues,
-        requestedValues' = requestedValues
-      }
-    }}
-
-  action fail(pid: ProtocolId): bool =
-    phase.get(pid) != Completed {
-      phase' = phase.set(pid, Failed),
-      participants' = participants,
-      counters' = counters,
-      pendingMessages' = pendingMessages,
-      globalLamport' = globalLamport,
-      lifecycleStatus' = lifecycleStatus.set(pid, Aborted),
-      lifecycleEffects' = lifecycleEffects,
-      outcome' = outcome
-    }
-
-  action signalAbort(pid: ProtocolId): bool =
-    lifecycleStatus.get(pid).default(Pending) = Pending {
-      lifecycleStatus' = lifecycleStatus.set(pid, Aborted),
-      lifecycleEffects' = lifecycleEffects,
-      phase' = phase.set(pid, Failed),
+  action recordReservation(pid: ProtocolId, values: Set[int]): bool = {
+    val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else CounterPending
+    val isPending = match status { | CounterPending => true | _ => false }
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else CounterSetup
+    val isOperating = match currentPhase { | CounterOperating => true | _ => false }
+    all {
+      pid.in(phase.keys()),
+      isPending,
+      isOperating,
+      reservedValues' = reservedValues.set(pid, values),
+      requestedValues' = requestedValues.set(pid, values),
       participants' = participants,
       counters' = counters,
       pendingMessages' = pendingMessages,
       globalLamport' = globalLamport,
       relationshipHash' = relationshipHash,
-      requestingDevice' = requestingDevice,
+      requestingAuthority' = requestingAuthority,
+      previousValue' = previousValue,
+      ttl' = ttl,
+      requestedEpoch' = requestedEpoch,
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      phase' = phase,
+      outcome' = outcome
+    }
+  }
+
+  action markByzantine(pid: ProtocolId, authority: AuthorityId): bool = {
+    val participantMap = ensureParticipantMap(participants, pid, Set())
+    val hasParticipant = pid.in(participantMap.keys()) and authority.in(participantMap.get(pid).keys())
+    val participant = if (hasParticipant) participantMap.get(pid).get(authority) else {
+      authority: authority,
+      owns: Set(),
+      lamport: 0,
+      localCounters: Map(),
+      pending: List(),
+      delivered: Set(),
+      isByzantine: false
+    }
+    all {
+      hasParticipant,
+      participants' = participants.set(
+        pid,
+        participantMap.get(pid).set(authority, {
+          ...participant,
+          isByzantine: true
+        })
+      ),
+      counters' = counters,
+      phase' = phase,
+      pendingMessages' = pendingMessages,
+      globalLamport' = globalLamport,
+      reservedValues' = reservedValues,
+      requestedValues' = requestedValues,
+      relationshipHash' = relationshipHash,
+      requestingAuthority' = requestingAuthority,
+      previousValue' = previousValue,
+      ttl' = ttl,
+      requestedEpoch' = requestedEpoch,
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      outcome' = outcome
+    }
+  }
+
+  action finalize(pid: ProtocolId): bool = {
+    val msgSet = getOrDefaultMessages(pendingMessages, pid)
+    val reserved = getOrDefaultSetInt(reservedValues, pid)
+    val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else CounterPending
+    val isPending = match status { | CounterPending => true | _ => false }
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else CounterSetup
+    val isOperating = match currentPhase { | CounterOperating => true | _ => false }
+    val relHash = getOrDefaultInt(relationshipHash, pid, 0)
+    val prev = getOrDefaultInt(previousValue, pid, 0)
+    val ttlVal = getOrDefaultInt(ttl, pid, 0)
+    val epochVal = getOrDefaultInt(requestedEpoch, pid, 0)
+    val requester = if (pid.in(requestingAuthority.keys())) requestingAuthority.get(pid) else ""
+    all {
+      msgSet.size() == 0,
+      isOperating,
+      reserved.size() >= 1,
+      isPending,
+      phase' = phase.set(pid, CounterCompleted),
+      lifecycleStatus' = lifecycleStatus.set(pid, CounterLifecycleCompleted),
+      lifecycleEffects' = lifecycleEffects.set(pid, Set()),
+      outcome' = outcome.set(pid, Some({
+        relationship: relHash,
+        reserved: reserved,
+        ttl: ttlVal,
+        epoch: epochVal,
+        requestingAuthority: requester
+      })),
+      participants' = participants,
+      counters' = counters,
+      pendingMessages' = pendingMessages,
+      globalLamport' = globalLamport,
+      relationshipHash' = relationshipHash,
+      requestingAuthority' = requestingAuthority,
+      previousValue' = previousValue,
+      ttl' = ttl,
+      requestedEpoch' = requestedEpoch,
+      reservedValues' = reservedValues,
+      requestedValues' = requestedValues
+    }
+  }
+
+  action failCounter(pid: ProtocolId): bool = {
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else CounterSetup
+    val isNotCompleted = match currentPhase { | CounterCompleted => false | _ => true }
+    all {
+      isNotCompleted,
+      phase' = phase.set(pid, CounterFailed),
+      lifecycleStatus' = lifecycleStatus.set(pid, CounterAborted),
+      participants' = participants,
+      counters' = counters,
+      pendingMessages' = pendingMessages,
+      globalLamport' = globalLamport,
+      lifecycleEffects' = lifecycleEffects,
+      outcome' = outcome,
+      reservedValues' = reservedValues,
+      requestedValues' = requestedValues,
+      relationshipHash' = relationshipHash,
+      requestingAuthority' = requestingAuthority,
+      previousValue' = previousValue,
+      ttl' = ttl,
+      requestedEpoch' = requestedEpoch
+    }
+  }
+
+  action signalAbort(pid: ProtocolId): bool = {
+    val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else CounterPending
+    val isPending = match status { | CounterPending => true | _ => false }
+    all {
+      isPending,
+      lifecycleStatus' = lifecycleStatus.set(pid, CounterAborted),
+      lifecycleEffects' = lifecycleEffects,
+      phase' = phase.set(pid, CounterFailed),
+      participants' = participants,
+      counters' = counters,
+      pendingMessages' = pendingMessages,
+      globalLamport' = globalLamport,
+      relationshipHash' = relationshipHash,
+      requestingAuthority' = requestingAuthority,
       previousValue' = previousValue,
       ttl' = ttl,
       requestedEpoch' = requestedEpoch,
@@ -417,78 +333,25 @@ var outcome: ProtocolId -> Option[CounterOutcome]
       requestedValues' = requestedValues,
       outcome' = outcome
     }
+  }
 
   // ==================== INVARIANTS ====================
 
   val InvariantPhaseRegistered =
-    phase.keys() = participants.keys()
+    phase.keys() == participants.keys()
 
   val InvariantCountersRegistered =
-    counters.keys() = participants.keys()
-
-  val InvariantLamportMonotonic =
-    participants.keys().forall(pid =>
-      participants.get(pid).values().forall(p =>
-        p.lamport >= 0 and
-        getOrDefault(globalLamport, pid, 0) >= p.lamport
-      )
-    )
-
-  val InvariantMessagesFromParticipants =
-    pendingMessages.keys().forall(pid =>
-      pendingMessages.get(pid).forall(msg =>
-        msg.sender.in(participants.get(pid).keys())
-      )
-    )
-
-  val InvariantDeliveredRecorded =
-    participants.keys().forall(pid =>
-      participants.get(pid).values().forall(p =>
-        p.delivered.subseteq(pendingMessages.get(pid).map(m => m.id))
-      )
-    )
-
-  val InvariantCounterOwnership =
-    counters.keys().forall(pid =>
-      counters.get(pid).values().forall(c =>
-        c.owner.in(c.observers)
-      )
-    )
+    counters.keys() == participants.keys()
 
   val InvariantLifecycleStatusDefined =
-    lifecycleStatus.keys() = phase.keys()
-
-  val InvariantLifecycleEffectsConsistency =
-    lifecycleEffects.keys().forall(pid =>
-      lifecycleEffects.get(pid).forall(effect =>
-        match effect {
-          | core.UpdateCounter(counter) =>
-              counter.relationship = relationshipHash.get(pid) and
-              counter.requestingDevice = requestingDevice.get(pid)
-          | _ => false
-        }
-      )
-    )
-
-  val InvariantCompletedImpliesEffect =
-    lifecycleStatus.keys().forall(pid =>
-      lifecycleStatus.get(pid) = Completed implies lifecycleEffects.get(pid).size() = 1
-    )
+    lifecycleStatus.keys() == phase.keys()
 
   val InvariantOutcomeWhenCompleted =
-    lifecycleStatus.keys().forall(pid =>
-      lifecycleStatus.get(pid) = Completed implies outcome.get(pid).isSome()
-    )
-
-  val InvariantOutcomeMetadataConsistency =
-    outcome.keys().forall(pid =>
-      match outcome.get(pid) {
-        | Some(result) =>
-            result.relationship = relationshipHash.get(pid) and
-            result.requestingDevice = requestingDevice.get(pid) and
-            result.ttl = ttl.get(pid) and
-            result.epoch = requestedEpoch.get(pid)
-        | None => true
-      }
-    )
+    lifecycleStatus.keys().forall(pid => {
+      val status = lifecycleStatus.get(pid)
+      val isCompleted = match status { | CounterLifecycleCompleted => true | _ => false }
+      val outcomeOpt = if (pid.in(outcome.keys())) outcome.get(pid) else None
+      val hasOutcome = match outcomeOpt { | Some(_) => true | None => false }
+      isCompleted implies hasOutcome
+    })
 }

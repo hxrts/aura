@@ -3,8 +3,8 @@
 //! All types use the authority model - guardians are identified by `AuthorityId`,
 //! not by device. Device information is obtained via commitment tree queries.
 
-use aura_core::frost::ThresholdSignature;
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::threshold::ThresholdSignature;
 use aura_core::TrustLevel;
 use serde::{Deserialize, Serialize};
 
@@ -214,7 +214,8 @@ impl RecoveryResponse {
             key_material: None,
             guardian_shares: Vec::new(),
             evidence: RecoveryEvidence::default(),
-            signature: ThresholdSignature::new(vec![0u8; 64], Vec::new()),
+            // Empty signature for error case
+            signature: ThresholdSignature::new(vec![0u8; 64], 0, Vec::new(), Vec::new(), 0),
         }
     }
 }

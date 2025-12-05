@@ -101,7 +101,17 @@ pub fn select_one_from_tier(
     let tier_seed = hasher.finalize();
 
     // Use first 8 bytes as index source
-    let index_bytes: [u8; 8] = tier_seed[..8].try_into().unwrap();
+    // Hash output is always 32 bytes, so we can safely extract first 8 bytes
+    let index_bytes: [u8; 8] = [
+        tier_seed[0],
+        tier_seed[1],
+        tier_seed[2],
+        tier_seed[3],
+        tier_seed[4],
+        tier_seed[5],
+        tier_seed[6],
+        tier_seed[7],
+    ];
     let index = u64::from_le_bytes(index_bytes) as usize % tier.len();
 
     Some(tier[index].authority_id)
@@ -163,7 +173,7 @@ fn select_multiple_from_tier(
 
     let count = tier.len().min(max_count);
     let mut result = Vec::with_capacity(count);
-    let mut remaining: Vec<_> = tier.iter().copied().collect();
+    let mut remaining: Vec<_> = tier.to_vec();
 
     for selection_round in 0..count {
         if remaining.is_empty() {
@@ -177,7 +187,17 @@ fn select_multiple_from_tier(
         let round_seed = hasher.finalize();
 
         // Use first 8 bytes as index
-        let index_bytes: [u8; 8] = round_seed[..8].try_into().unwrap();
+        // Hash output is always 32 bytes, so we can safely extract first 8 bytes
+        let index_bytes: [u8; 8] = [
+            round_seed[0],
+            round_seed[1],
+            round_seed[2],
+            round_seed[3],
+            round_seed[4],
+            round_seed[5],
+            round_seed[6],
+            round_seed[7],
+        ];
         let index = u64::from_le_bytes(index_bytes) as usize % remaining.len();
 
         result.push(remaining[index].authority_id);
@@ -269,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_select_one_from_tier_deterministic() {
-        let candidates = vec![block_candidate(1), block_candidate(2), block_candidate(3)];
+        let candidates = [block_candidate(1), block_candidate(2), block_candidate(3)];
         let refs: Vec<_> = candidates.iter().collect();
         let seed = [42u8; 32];
 

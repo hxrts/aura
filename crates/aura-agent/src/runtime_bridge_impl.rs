@@ -1,0 +1,297 @@
+//! RuntimeBridge implementation for AuraAgent
+//!
+//! This module implements the `RuntimeBridge` trait from `aura-app` for `AuraAgent`,
+//! enabling the dependency inversion where `aura-app` defines the trait and
+//! `aura-agent` provides the implementation.
+
+use crate::core::AuraAgent;
+use async_trait::async_trait;
+use aura_app::runtime_bridge::{RendezvousStatus, RuntimeBridge, SyncStatus};
+use aura_app::IntentError;
+use aura_core::domain::FactValue;
+use aura_core::effects::{JournalEffects, ThresholdSigningEffects};
+use aura_core::identifiers::AuthorityId;
+use aura_core::threshold::{SigningContext, ThresholdConfig, ThresholdSignature};
+use aura_core::time::TimeStamp;
+use aura_core::tree::{AttestedOp, TreeOp};
+use aura_core::DeviceId;
+use aura_journal::JournalFact;
+use std::sync::Arc;
+
+/// Wrapper to implement RuntimeBridge for AuraAgent
+///
+/// This struct wraps an Arc<AuraAgent> to provide the RuntimeBridge implementation.
+/// It handles the translation between the abstract RuntimeBridge interface and
+/// the concrete AuraAgent services.
+pub struct AgentRuntimeBridge {
+    agent: Arc<AuraAgent>,
+}
+
+impl AgentRuntimeBridge {
+    /// Create a new runtime bridge from an AuraAgent
+    pub fn new(agent: Arc<AuraAgent>) -> Self {
+        Self { agent }
+    }
+}
+
+#[async_trait]
+impl RuntimeBridge for AgentRuntimeBridge {
+    // =========================================================================
+    // Identity & Authority
+    // =========================================================================
+
+    fn authority_id(&self) -> AuthorityId {
+        self.agent.authority_id()
+    }
+
+    // =========================================================================
+    // Fact Persistence
+    // =========================================================================
+
+    async fn persist_facts(&self, facts: &[JournalFact]) -> Result<(), IntentError> {
+        if facts.is_empty() {
+            return Ok(());
+        }
+
+        // Get the effect system
+        let effects = self.agent.runtime().effects();
+        let effects_guard = effects.read().await;
+
+        // Get the current journal
+        let mut journal = effects_guard
+            .get_journal()
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Failed to get journal: {}", e)))?;
+
+        // Add each fact to the journal
+        for fact in facts {
+            let timestamp_ms = extract_timestamp_ms(&fact.timestamp);
+            let actor_id = fact.source_authority.to_string();
+            let key = format!("fact:{}:{}", actor_id, timestamp_ms);
+
+            journal.facts.insert_with_context(
+                key,
+                FactValue::String(fact.content.clone()),
+                actor_id,
+                timestamp_ms,
+                None,
+            );
+        }
+
+        // Persist the updated journal
+        effects_guard.persist_journal(&journal).await.map_err(|e| {
+            IntentError::internal_error(format!("Failed to persist journal: {}", e))
+        })?;
+
+        Ok(())
+    }
+
+    // =========================================================================
+    // Sync Operations
+    // =========================================================================
+
+    async fn get_sync_status(&self) -> SyncStatus {
+        if let Some(sync) = self.agent.runtime().sync() {
+            SyncStatus {
+                is_running: sync.is_running().await,
+                connected_peers: sync.peers().await.len(),
+                last_sync_ms: None, // Would need to track this in SyncServiceManager
+                pending_facts: 0,   // Would need to track this in SyncServiceManager
+            }
+        } else {
+            SyncStatus::default()
+        }
+    }
+
+    async fn get_sync_peers(&self) -> Vec<DeviceId> {
+        if let Some(sync) = self.agent.runtime().sync() {
+            sync.peers().await
+        } else {
+            Vec::new()
+        }
+    }
+
+    async fn trigger_sync(&self) -> Result<(), IntentError> {
+        if let Some(_sync) = self.agent.runtime().sync() {
+            // The sync service runs continuously in the background
+            // Triggering a manual sync would be a new feature
+            Ok(())
+        } else {
+            Err(IntentError::no_agent("Sync service not available"))
+        }
+    }
+
+    // =========================================================================
+    // Peer Discovery
+    // =========================================================================
+
+    async fn get_discovered_peers(&self) -> Vec<AuthorityId> {
+        if let Some(rendezvous) = self.agent.runtime().rendezvous() {
+            rendezvous.list_cached_peers().await
+        } else {
+            Vec::new()
+        }
+    }
+
+    async fn get_rendezvous_status(&self) -> RendezvousStatus {
+        if let Some(rendezvous) = self.agent.runtime().rendezvous() {
+            RendezvousStatus {
+                is_running: rendezvous.is_running().await,
+                cached_peers: rendezvous.list_cached_peers().await.len(),
+            }
+        } else {
+            RendezvousStatus::default()
+        }
+    }
+
+    // =========================================================================
+    // Threshold Signing
+    // =========================================================================
+
+    async fn sign_tree_op(&self, op: &TreeOp) -> Result<AttestedOp, IntentError> {
+        let authority = self.agent.authority_id();
+        let signing_service = self.agent.threshold_signing().await;
+
+        // Create signing context for self-operation
+        let context = SigningContext::self_tree_op(authority, op.clone());
+
+        // Sign using the unified threshold signing service
+        let signature = signing_service
+            .sign(context)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Threshold signing failed: {}", e)))?;
+
+        // Create attested operation
+        Ok(AttestedOp {
+            op: op.clone(),
+            agg_sig: signature.signature,
+            signer_count: signature.signer_count,
+        })
+    }
+
+    async fn bootstrap_signing_keys(&self) -> Result<Vec<u8>, IntentError> {
+        let authority = self.agent.authority_id();
+        let signing_service = self.agent.threshold_signing().await;
+
+        // Bootstrap 1-of-1 keys for single-device operation
+        let public_key_package = signing_service
+            .bootstrap_authority(&authority)
+            .await
+            .map_err(|e| {
+                IntentError::internal_error(format!("Failed to bootstrap signing keys: {}", e))
+            })?;
+
+        Ok(public_key_package)
+    }
+
+    async fn get_threshold_config(&self) -> Option<ThresholdConfig> {
+        let authority = self.agent.authority_id();
+        let signing_service = self.agent.threshold_signing().await;
+        signing_service.threshold_config(&authority).await
+    }
+
+    async fn has_signing_capability(&self) -> bool {
+        let authority = self.agent.authority_id();
+        let signing_service = self.agent.threshold_signing().await;
+        signing_service.has_signing_capability(&authority).await
+    }
+
+    async fn get_public_key_package(&self) -> Option<Vec<u8>> {
+        let authority = self.agent.authority_id();
+        let signing_service = self.agent.threshold_signing().await;
+        signing_service.public_key_package(&authority).await
+    }
+
+    async fn sign_with_context(
+        &self,
+        context: SigningContext,
+    ) -> Result<ThresholdSignature, IntentError> {
+        let signing_service = self.agent.threshold_signing().await;
+        signing_service
+            .sign(context)
+            .await
+            .map_err(|e| IntentError::internal_error(format!("Threshold signing failed: {}", e)))
+    }
+
+    // =========================================================================
+    // Authentication
+    // =========================================================================
+
+    async fn is_authenticated(&self) -> bool {
+        if let Ok(auth_service) = self.agent.auth().await {
+            auth_service.is_authenticated().await
+        } else {
+            false
+        }
+    }
+}
+
+// ============================================================================
+// AuraAgent extension
+// ============================================================================
+
+impl AuraAgent {
+    /// Get this agent as a RuntimeBridge
+    ///
+    /// This enables the dependency inversion pattern where `aura-app` defines
+    /// the `RuntimeBridge` trait and `aura-agent` implements it.
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// let agent = AgentBuilder::new()
+    ///     .with_authority(authority_id)
+    ///     .build_production(&ctx)
+    ///     .await?;
+    ///
+    /// let app = AppCore::with_runtime(config, agent.as_runtime_bridge())?;
+    /// ```
+    pub fn as_runtime_bridge(self: Arc<Self>) -> Arc<dyn RuntimeBridge> {
+        Arc::new(AgentRuntimeBridge::new(self))
+    }
+}
+
+// ============================================================================
+// Helper functions
+// ============================================================================
+
+/// Extract a millisecond timestamp from a TimeStamp enum.
+///
+/// Different TimeStamp variants are handled as follows:
+/// - PhysicalClock: Uses the ts_ms field directly
+/// - LogicalClock: Uses the lamport clock value
+/// - OrderClock: Uses 0 (opaque ordering, no temporal meaning)
+/// - Range: Uses the earliest bound if available
+fn extract_timestamp_ms(ts: &TimeStamp) -> u64 {
+    match ts {
+        TimeStamp::PhysicalClock(physical) => physical.ts_ms,
+        TimeStamp::LogicalClock(logical) => logical.lamport,
+        TimeStamp::OrderClock(_) => 0, // OrderClock is opaque, no timestamp extraction
+        TimeStamp::Range(range) => {
+            // Use earliest bound from range
+            range.earliest_ms
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Note: Full tests would require mock infrastructure which is in aura-testkit
+    // These are placeholder tests showing the API usage
+
+    #[test]
+    fn test_sync_status_default() {
+        let status = SyncStatus::default();
+        assert!(!status.is_running);
+        assert_eq!(status.connected_peers, 0);
+    }
+
+    #[test]
+    fn test_rendezvous_status_default() {
+        let status = RendezvousStatus::default();
+        assert!(!status.is_running);
+        assert_eq!(status.cached_peers, 0);
+    }
+}

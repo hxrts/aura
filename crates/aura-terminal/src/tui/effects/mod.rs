@@ -13,7 +13,6 @@
 //! - `command_parser`: Command and event types, authorization levels
 //! - `bridge_config`: Configuration types
 //! - `effect_dispatch`: Command execution and authorization logic
-//! - `frost_helpers`: FROST signing utilities for TreeOps
 //! - `bridge`: Core bridge implementation
 //! - `dispatcher`: IRC command parsing
 
@@ -22,7 +21,6 @@ mod bridge_config;
 mod command_parser;
 mod dispatcher;
 mod effect_dispatch;
-mod frost_helpers;
 
 use async_trait::async_trait;
 

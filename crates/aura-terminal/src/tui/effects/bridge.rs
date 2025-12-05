@@ -7,7 +7,6 @@
 //! - `command_parser`: Command and event types, authorization
 //! - `bridge_config`: Configuration types
 //! - `effect_dispatch`: Command execution and authorization logic
-//! - `frost_helpers`: FROST signing utilities for TreeOps
 //! - `bridge`: Core bridge implementation (this file)
 
 use std::sync::Arc;
@@ -16,6 +15,7 @@ pub use crate::tui::effects::bridge_config::BridgeConfig;
 pub use crate::tui::effects::command_parser::{
     AuraEvent, EffectCommand, EventFilter, EventSubscription,
 };
+use aura_agent::AuraAgent;
 use aura_app::AppCore;
 use aura_core::effects::amp::AmpChannelEffects;
 use aura_core::effects::time::PhysicalTimeEffects;
@@ -24,9 +24,6 @@ use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 
 // Import shared types and functions from effect_dispatch module
 use super::effect_dispatch::{execute_command, BridgeState};
-
-// Re-export FROST helpers for use by effect_dispatch
-pub(super) use super::frost_helpers::{frost_sign_tree_op, frost_sign_tree_op_with_keys};
 
 /// Bridge connecting TUI to the effect system
 pub struct EffectBridge {
@@ -41,6 +38,9 @@ pub struct EffectBridge {
     /// Time effects for async delays (injected for testability)
     #[allow(dead_code)]
     time_effects: Arc<dyn PhysicalTimeEffects>,
+    /// Optional agent for effect system access (dependency inversion pattern)
+    #[allow(dead_code)]
+    agent: Option<Arc<AuraAgent>>,
     /// Optional AppCore for intent-based state management
     #[allow(dead_code)]
     app_core: Option<Arc<RwLock<AppCore>>>,
@@ -56,11 +56,30 @@ impl EffectBridge {
     ///
     /// This is the recommended constructor for production use, enabling
     /// the full signal-based reactive architecture via AppCore's ViewState.
+    ///
+    /// Note: This creates a bridge in demo mode without agent. For full
+    /// functionality including effect system access, use `with_agent_and_app_core`.
     pub fn with_app_core(app_core: Arc<RwLock<AppCore>>) -> Self {
-        Self::with_full_config(
+        Self::with_complete_config(
             BridgeConfig::default(),
             Arc::new(PhysicalTimeHandler),
             None,
+            None,
+            Some(app_core),
+        )
+    }
+
+    /// Create a new effect bridge with agent and AppCore
+    ///
+    /// This is the full production constructor providing both:
+    /// - Agent for effect system and service access
+    /// - AppCore for intent-based state management
+    pub fn with_agent_and_app_core(agent: Arc<AuraAgent>, app_core: Arc<RwLock<AppCore>>) -> Self {
+        Self::with_complete_config(
+            BridgeConfig::default(),
+            Arc::new(PhysicalTimeHandler),
+            None,
+            Some(agent),
             Some(app_core),
         )
     }
@@ -87,16 +106,19 @@ impl EffectBridge {
         time_effects: Arc<dyn PhysicalTimeEffects>,
         amp_effects: Option<Arc<dyn AmpChannelEffects + Send + Sync>>,
     ) -> Self {
-        Self::with_full_config(config, time_effects, amp_effects, None)
+        Self::with_complete_config(config, time_effects, amp_effects, None, None)
     }
 
-    /// Create a new effect bridge with full configuration including AppCore
+    /// Create a new effect bridge with complete configuration
     ///
-    /// The effect system is obtained from `app_core.agent().runtime().effects()`.
-    pub fn with_full_config(
+    /// This constructor provides full control over all bridge components:
+    /// - Agent for effect system access (dependency inversion pattern)
+    /// - AppCore for intent-based state management
+    pub fn with_complete_config(
         config: BridgeConfig,
         time_effects: Arc<dyn PhysicalTimeEffects>,
         amp_effects: Option<Arc<dyn AmpChannelEffects + Send + Sync>>,
+        agent: Option<Arc<AuraAgent>>,
         app_core: Option<Arc<RwLock<AppCore>>>,
     ) -> Self {
         let (command_tx, command_rx) = mpsc::channel(config.command_buffer_size);
@@ -108,11 +130,12 @@ impl EffectBridge {
             event_tx: event_tx.clone(),
             state: Arc::new(RwLock::new(BridgeState::default())),
             time_effects: time_effects.clone(),
+            agent: agent.clone(),
             app_core: app_core.clone(),
         };
 
         // Start command consumer loop in background
-        // Effect system is obtained from app_core.agent() in execute_command
+        // Agent is passed separately for effect system access (dependency inversion)
         tokio::spawn(Self::command_consumer_loop(
             command_rx,
             event_tx,
@@ -120,6 +143,7 @@ impl EffectBridge {
             config,
             time_effects,
             amp_effects,
+            agent,
             app_core,
         ));
 
@@ -251,6 +275,7 @@ impl EffectBridge {
         config: BridgeConfig,
         time_effects: Arc<dyn PhysicalTimeEffects>,
         amp_effects: Option<Arc<dyn AmpChannelEffects + Send + Sync>>,
+        agent: Option<Arc<AuraAgent>>,
         app_core: Option<Arc<RwLock<AppCore>>>,
     ) {
         tracing::info!("EffectBridge command consumer loop started");
@@ -264,6 +289,7 @@ impl EffectBridge {
                 &config,
                 &time_effects,
                 amp_effects.as_deref(),
+                agent.as_ref(),
                 app_core.as_ref(),
             )
             .await;
@@ -291,6 +317,7 @@ impl EffectBridge {
         config: &BridgeConfig,
         time_effects: &Arc<dyn PhysicalTimeEffects>,
         amp_effects: Option<&(dyn AmpChannelEffects + Send + Sync)>,
+        agent: Option<&Arc<AuraAgent>>,
         app_core: Option<&Arc<RwLock<AppCore>>>,
     ) -> Result<(), String> {
         let mut attempts = 0;
@@ -303,6 +330,7 @@ impl EffectBridge {
                 state,
                 time_effects,
                 amp_effects,
+                agent,
                 app_core,
             )
             .await

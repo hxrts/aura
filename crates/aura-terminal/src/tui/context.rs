@@ -108,6 +108,7 @@ impl IoContext {
     /// - No network/sync capabilities
     ///
     /// The bridge is automatically configured with the AppCore for signal-based updates.
+    #[allow(clippy::expect_used)] // Panic on initialization failure is intentional
     pub fn with_defaults() -> Self {
         let app_core =
             AppCore::new(aura_app::AppConfig::default()).expect("Failed to create default AppCore");

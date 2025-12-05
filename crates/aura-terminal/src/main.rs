@@ -2,23 +2,18 @@
 //! Uses bpaf for CLI parsing and delegates execution to CLI handlers.
 
 use anyhow::Result;
-// Import from aura_app which re-exports agent types
-use aura_app::{AgentBuilder, AppConfig, AppCore, EffectContext};
+// Import app types from aura-app (pure layer)
+use aura_app::{AppConfig, AppCore};
+// Import agent types from aura-agent (runtime layer)
+use aura_agent::{AgentBuilder, EffectContext};
 use aura_core::effects::ExecutionMode;
 use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ThresholdArgs};
 use aura_terminal::ids;
 use aura_terminal::{CliHandler, SyncAction};
 use bpaf::Parser;
-use cfg_if::cfg_if;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-cfg_if! {
-    if #[cfg(feature = "development")] {
-        use aura_terminal::{DemoCommands, ScenarioAction};
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -36,18 +31,19 @@ async fn main() -> Result<()> {
         .with_authority(authority_id)
         .build_testing_async(&effect_context)
         .await?;
+    let agent = Arc::new(agent);
 
-    // Create AppCore with the agent for full runtime capabilities
+    // Create AppCore with runtime bridge (dependency inversion pattern)
     let config = AppConfig::default();
-    let app_core = AppCore::with_agent(config, agent)?;
+    let app_core = AppCore::with_runtime(config, agent.clone().as_runtime_bridge())?;
     let app_core = Arc::new(RwLock::new(app_core));
 
     // Initialize logging through effects
     let log_level = if args.verbose { "debug" } else { "info" };
     println!("Initializing Aura CLI with log level: {}", log_level);
 
-    // Create CLI handler with unified AppCore backend
-    let cli_handler = CliHandler::new(app_core, device_id, effect_context);
+    // Create CLI handler with agent and AppCore
+    let cli_handler = CliHandler::with_agent(app_core, agent, device_id, effect_context);
 
     // Execute command through effect system
     match command {
@@ -128,6 +124,7 @@ async fn resolve_config_path(
 mod tests {
     use super::*;
     use bpaf::Args;
+    use cfg_if::cfg_if;
 
     #[test]
     fn test_cli_parsing() {
@@ -226,6 +223,8 @@ mod tests {
 
     cfg_if! {
         if #[cfg(feature = "development")] {
+            use aura_terminal::ScenarioAction;
+
             #[test]
             fn test_cli_scenarios() {
                 let args = cli_parser()

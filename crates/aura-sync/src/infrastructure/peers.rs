@@ -42,13 +42,13 @@ use crate::core::{sync_config_error, sync_peer_error, SyncResult};
 use aura_core::time::PhysicalTime;
 use aura_core::DeviceId;
 
-/// Deterministic monotonic counter for test/dev purposes
-/// In production, callers should provide PhysicalTime from their time provider
+/// Deterministic monotonic counter for test/dev purposes.
+/// Real deployments should use `PhysicalTime` from the time effect provider.
 #[cfg(test)]
 static NEXT_PEER_TS: AtomicU64 = AtomicU64::new(1);
 
-/// Internal helper to create a test time from the monotonic counter
-/// **Note**: Production code should use `PhysicalTime` from their time provider
+/// Internal helper to create a test time from the monotonic counter.
+/// Real deployments should use `PhysicalTime` from the time effect provider.
 #[cfg(test)]
 fn test_time_now() -> PhysicalTime {
     PhysicalTime {
@@ -921,7 +921,7 @@ mod tests {
 
     #[test]
     fn test_peer_metadata_scoring() {
-        let now = test_time(1234567890_000); // Use milliseconds timestamp
+        let now = test_time(1_234_567_890_000); // Use milliseconds timestamp
         let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]), &now);
         meta.trust_level = 80;
         meta.successful_syncs = 8;
@@ -941,7 +941,7 @@ mod tests {
 
     #[test]
     fn test_peer_availability() {
-        let now = test_time(1234567890_000); // Use milliseconds timestamp
+        let now = test_time(1_234_567_890_000); // Use milliseconds timestamp
         let mut meta = PeerMetadata::new(DeviceId::from_bytes([1; 32]), &now);
         meta.status = PeerStatus::Connected;
         meta.active_sessions = 5;
@@ -960,7 +960,7 @@ mod tests {
         let peer2 = DeviceId::from_bytes([2; 32]);
         let peer3 = DeviceId::from_bytes([3; 32]);
 
-        let now = test_time(1234567890_000); // Use milliseconds timestamp
+        let now = test_time(1_234_567_890_000); // Use milliseconds timestamp
 
         manager.add_peer(peer1, &now).unwrap();
         manager.add_peer(peer2, &now).unwrap();

@@ -1,7 +1,7 @@
 module protocol_sbb {
-  import protocol_core as core from "protocol_core"
-
-  type PeerId = core.DeviceId
+  // Base types (defined locally - type imports don't work in Quint)
+  type Option[a] = Some(a) | None
+  type PeerId = str
   type EnvelopeId = str
   type Timestamp = int
 
@@ -28,17 +28,35 @@ module protocol_sbb {
 
   var peers: PeerId -> PeerRecord
   var envelopes: EnvelopeId -> Envelope
-  var networkPartitions: Map[int, Set[PeerId]]
+  var networkPartitions: int -> Set[PeerId]
   var currentTime: Timestamp
 
-  pure def getOrDefault[K, V](m: K -> V, key: K, default: V): V =
-    if key.in(m.keys()) then m.get(key) else default
+  // ============ HELPERS ============
 
-  pure def canCommunicate(a: PeerId, b: PeerId): bool =
-    peers.get(a).partition = peers.get(b).partition
+  pure def getOrDefaultPeerRecord(m: PeerId -> PeerRecord, key: PeerId): Option[PeerRecord] =
+    if (key.in(m.keys())) Some(m.get(key)) else None
+
+  pure def getOrDefaultEnvelope(m: EnvelopeId -> Envelope, key: EnvelopeId): Option[Envelope] =
+    if (key.in(m.keys())) Some(m.get(key)) else None
+
+  pure def getOrDefaultPartition(m: int -> Set[PeerId], key: int): Set[PeerId] =
+    if (key.in(m.keys())) m.get(key) else Set()
+
+  pure def getTrustLevel(trustGraph: PeerId -> TrustLevel, peer: PeerId): TrustLevel =
+    if (peer.in(trustGraph.keys())) trustGraph.get(peer) else Trusted
+
+  def canCommunicate(a: PeerId, b: PeerId): bool = {
+    val aRecordOpt = getOrDefaultPeerRecord(peers, a)
+    val bRecordOpt = getOrDefaultPeerRecord(peers, b)
+    val aPartition = match aRecordOpt { | Some(r) => r.partition | None => -1 }
+    val bPartition = match bRecordOpt { | Some(r) => r.partition | None => -1 }
+    aPartition == bPartition
+  }
 
   pure def envelopeExpired(env: Envelope, now: Timestamp): bool =
     now >= env.createdAt + env.ttl
+
+  // ============ INITIALISATION ============
 
   action init: bool = all {
     peers' = Map(),
@@ -47,8 +65,10 @@ module protocol_sbb {
     currentTime' = 0
   }
 
+  // ============ ACTIONS ============
+
   action registerPeer(peer: PeerId, neighbors: Set[PeerId], partition: int, quota: int): bool = all {
-    not peer.in(peers.keys()),
+    not(peer.in(peers.keys())),
     peers' = peers.set(peer, {
       trustGraph: neighbors.fold(Map(), (acc, n) => acc.set(n, Trusted)),
       bulletin: Set(),
@@ -59,139 +79,203 @@ module protocol_sbb {
       partition: partition
     }),
     envelopes' = envelopes,
-    networkPartitions' = networkPartitions.set(partition, getOrDefault(networkPartitions, partition, Set()).union(Set(peer))),
+    networkPartitions' = networkPartitions.set(partition, getOrDefaultPartition(networkPartitions, partition).union(Set(peer))),
     currentTime' = currentTime
   }
 
-  action markByzantine(peer: PeerId): bool =
-    val record = peers.get(peer) {
-      peer.in(peers.keys()) {
-        peers' = peers.set(peer, {
-          ...record,
-          isByzantine: true
-        }),
-        envelopes' = envelopes,
-        networkPartitions' = networkPartitions,
-        currentTime' = currentTime
-      }
+  action markByzantine(peer: PeerId): bool = {
+    val recordOpt = getOrDefaultPeerRecord(peers, peer)
+    val hasRecord = match recordOpt { | Some(_) => true | None => false }
+    val record = match recordOpt {
+      | Some(r) => r
+      | None => { trustGraph: Map(), bulletin: Set(), pending: Set(), delivered: Set(), quota: 0, isByzantine: false, partition: 0 }
     }
-
-  action postEnvelope(author: PeerId, recipient: PeerId, envId: EnvelopeId, payloadHash: int, ttl: int): bool =
-    val record = peers.get(author) {
-      author.in(peers.keys()) and recipient.in(peers.keys()) and ttl > 0 {
-        val envelope = {
-          id: envId,
-          author: author,
-          recipient: recipient,
-          payloadHash: payloadHash,
-          ttl: ttl,
-          createdAt: currentTime
-        }
-        envelopes' = envelopes.set(envId, envelope),
-        peers' = peers.set(author, {
-          ...record,
-          bulletin: record.bulletin.union(Set(envId))
-        }),
-        networkPartitions' = networkPartitions,
-        currentTime' = currentTime
-      }
+    all {
+      hasRecord,
+      peers' = peers.set(peer, {
+        ...record,
+        isByzantine: true
+      }),
+      envelopes' = envelopes,
+      networkPartitions' = networkPartitions,
+      currentTime' = currentTime
     }
+  }
 
-  action gossipEnvelope(sender: PeerId, peer: PeerId, envId: EnvelopeId): bool =
-    val senderRecord = peers.get(sender) {
-    val recipientRecord = peers.get(peer) {
-    val envelope = envelopes.get(envId) {
-      sender.in(peers.keys()) and
-      peer.in(peers.keys()) and
-      envId.in(envelopes.keys()) and
-      not envelopeExpired(envelope, currentTime) and
-      canCommunicate(sender, peer) and
-      senderRecord.quota > 0 {
-        val accepted =
-          if senderRecord.isByzantine then true
-          else recipientRecord.trustGraph.get(sender).default(Trusted) != Blocked {
-        peers' = peers.set(peer, {
-          ...recipientRecord,
-          pending: if accepted then recipientRecord.pending.union(Set(envId)) else recipientRecord.pending,
-          quota: recipientRecord.quota
-        }).set(sender, {
-          ...senderRecord,
-          quota: senderRecord.quota - 1
-        }),
-        envelopes' = envelopes,
-        networkPartitions' = networkPartitions,
-        currentTime' = currentTime
-      }
-    }}}
+  action postEnvelope(author: PeerId, recipient: PeerId, envId: EnvelopeId, payloadHash: int, ttlVal: int): bool = {
+    val recordOpt = getOrDefaultPeerRecord(peers, author)
+    val hasRecord = match recordOpt { | Some(_) => true | None => false }
+    val record = match recordOpt {
+      | Some(r) => r
+      | None => { trustGraph: Map(), bulletin: Set(), pending: Set(), delivered: Set(), quota: 0, isByzantine: false, partition: 0 }
+    }
+    val recipientExists = recipient.in(peers.keys())
+    val envelope = {
+      id: envId,
+      author: author,
+      recipient: recipient,
+      payloadHash: payloadHash,
+      ttl: ttlVal,
+      createdAt: currentTime
+    }
+    all {
+      hasRecord,
+      recipientExists,
+      ttlVal > 0,
+      envelopes' = envelopes.set(envId, envelope),
+      peers' = peers.set(author, {
+        ...record,
+        bulletin: record.bulletin.union(Set(envId))
+      }),
+      networkPartitions' = networkPartitions,
+      currentTime' = currentTime
+    }
+  }
 
-  action acceptEnvelope(peer: PeerId, envId: EnvelopeId): bool =
-    val record = peers.get(peer) {
-    val envelope = envelopes.get(envId) {
-      peer.in(peers.keys()) and envId.in(record.pending) and not envelopeExpired(envelope, currentTime) {
-        peers' = peers.set(peer, {
-          ...record,
-          pending: record.pending.filter(id => id != envId),
-          delivered: record.delivered.union(Set(envId))
-        }),
-        envelopes' = envelopes,
-        networkPartitions' = networkPartitions,
-        currentTime' = currentTime
-      }
-    }}
+  action gossipEnvelope(sender: PeerId, peer: PeerId, envId: EnvelopeId): bool = {
+    val senderRecordOpt = getOrDefaultPeerRecord(peers, sender)
+    val hasSender = match senderRecordOpt { | Some(_) => true | None => false }
+    val senderRecord = match senderRecordOpt {
+      | Some(r) => r
+      | None => { trustGraph: Map(), bulletin: Set(), pending: Set(), delivered: Set(), quota: 0, isByzantine: false, partition: 0 }
+    }
+    val recipientRecordOpt = getOrDefaultPeerRecord(peers, peer)
+    val hasRecipient = match recipientRecordOpt { | Some(_) => true | None => false }
+    val recipientRecord = match recipientRecordOpt {
+      | Some(r) => r
+      | None => { trustGraph: Map(), bulletin: Set(), pending: Set(), delivered: Set(), quota: 0, isByzantine: false, partition: 0 }
+    }
+    val envelopeOpt = getOrDefaultEnvelope(envelopes, envId)
+    val hasEnvelope = match envelopeOpt { | Some(_) => true | None => false }
+    val envelope = match envelopeOpt {
+      | Some(e) => e
+      | None => { id: "", author: "", recipient: "", payloadHash: 0, ttl: 0, createdAt: 0 }
+    }
+    val expired = envelopeExpired(envelope, currentTime)
+    val canComm = canCommunicate(sender, peer)
+    val hasQuota = senderRecord.quota > 0
+    val trustLevel = getTrustLevel(recipientRecord.trustGraph, sender)
+    val isBlocked = match trustLevel { | Blocked => true | _ => false }
+    val accepted = if (senderRecord.isByzantine) true else not(isBlocked)
+    all {
+      hasSender,
+      hasRecipient,
+      hasEnvelope,
+      not(expired),
+      canComm,
+      hasQuota,
+      peers' = peers.set(peer, {
+        ...recipientRecord,
+        pending: if (accepted) recipientRecord.pending.union(Set(envId)) else recipientRecord.pending
+      }).set(sender, {
+        ...senderRecord,
+        quota: senderRecord.quota - 1
+      }),
+      envelopes' = envelopes,
+      networkPartitions' = networkPartitions,
+      currentTime' = currentTime
+    }
+  }
 
-  action advanceTime(delta: int): bool = all {
-    delta > 0,
-    currentTime' = currentTime + delta,
-    peers' = peers.keys().fold(peers, (acc, pid) =>
-      val record = acc.get(pid) {
+  action acceptEnvelope(peer: PeerId, envId: EnvelopeId): bool = {
+    val recordOpt = getOrDefaultPeerRecord(peers, peer)
+    val hasRecord = match recordOpt { | Some(_) => true | None => false }
+    val record = match recordOpt {
+      | Some(r) => r
+      | None => { trustGraph: Map(), bulletin: Set(), pending: Set(), delivered: Set(), quota: 0, isByzantine: false, partition: 0 }
+    }
+    val envelopeOpt = getOrDefaultEnvelope(envelopes, envId)
+    val hasEnvelope = match envelopeOpt { | Some(_) => true | None => false }
+    val envelope = match envelopeOpt {
+      | Some(e) => e
+      | None => { id: "", author: "", recipient: "", payloadHash: 0, ttl: 0, createdAt: 0 }
+    }
+    val isPending = envId.in(record.pending)
+    val expired = envelopeExpired(envelope, currentTime)
+    all {
+      hasRecord,
+      hasEnvelope,
+      isPending,
+      not(expired),
+      peers' = peers.set(peer, {
+        ...record,
+        pending: record.pending.filter(id => id != envId),
+        delivered: record.delivered.union(Set(envId))
+      }),
+      envelopes' = envelopes,
+      networkPartitions' = networkPartitions,
+      currentTime' = currentTime
+    }
+  }
+
+  action advanceTime(delta: int): bool = {
+    val newTime = currentTime + delta
+    val updatedPeers = peers.keys().fold(peers, (acc, pid) =>
+      if (pid.in(acc.keys())) {
+        val record = acc.get(pid)
         acc.set(pid, {
           ...record,
-          pending: record.pending.filter(id => not envelopeExpired(envelopes.get(id), currentTime + delta))
+          pending: record.pending.filter(id =>
+            if (id.in(envelopes.keys())) not(envelopeExpired(envelopes.get(id), newTime)) else false
+          )
         })
-      }
-    ),
-    envelopes' = envelopes,
-    networkPartitions' = networkPartitions
+      } else acc
+    )
+    all {
+      delta > 0,
+      currentTime' = newTime,
+      peers' = updatedPeers,
+      envelopes' = envelopes,
+      networkPartitions' = networkPartitions
+    }
   }
 
-  action partitionNetwork(partitionId: int, peersInPartition: Set[PeerId]): bool = all {
-    peers' = peers.keys().fold(peers, (acc, pid) =>
-      val record = acc.get(pid) {
-        if pid.in(peersInPartition)
+  action partitionNetwork(partitionId: int, peersInPartition: Set[PeerId]): bool = {
+    val updatedPeers = peers.keys().fold(peers, (acc, pid) =>
+      if (pid.in(acc.keys())) {
+        val record = acc.get(pid)
+        if (pid.in(peersInPartition))
           acc.set(pid, {...record, partition: partitionId})
         else
-          acc.set(pid, {...record, partition: record.partition})
-      }
-    ),
-    networkPartitions' = networkPartitions.set(partitionId, peersInPartition),
-    envelopes' = envelopes,
-    currentTime' = currentTime
+          acc
+      } else acc
+    )
+    all {
+      peers' = updatedPeers,
+      networkPartitions' = networkPartitions.set(partitionId, peersInPartition),
+      envelopes' = envelopes,
+      currentTime' = currentTime
+    }
   }
 
   // ==================== INVARIANTS ====================
 
   val InvariantEnvelopeRegistered =
-    envelopes.values().forall(env =>
+    envelopes.keys().forall(envId => {
+      val env = envelopes.get(envId)
       env.author.in(peers.keys()) and env.recipient.in(peers.keys())
-    )
+    })
 
   val InvariantBulletinEntriesExist =
-    peers.values().forall(record =>
+    peers.keys().forall(pid => {
+      val record = peers.get(pid)
       record.bulletin.subseteq(envelopes.keys()) and
       record.pending.subseteq(envelopes.keys()) and
       record.delivered.subseteq(envelopes.keys())
-    )
+    })
 
   val InvariantQuotaNonNegative =
-    peers.values().forall(record => record.quota >= 0)
+    peers.keys().forall(pid => peers.get(pid).quota >= 0)
 
   val InvariantPendingNotDelivered =
-    peers.values().forall(record =>
-      record.pending.intersect(record.delivered).size() = 0
-    )
+    peers.keys().forall(pid => {
+      val record = peers.get(pid)
+      record.pending.intersect(record.delivered).size() == 0
+    })
 
   val InvariantPartitionMembership =
-    peers.keys().forall(pid =>
-      getOrDefault(networkPartitions, peers.get(pid).partition, Set()).contains(pid)
-    )
+    peers.keys().forall(pid => {
+      val record = peers.get(pid)
+      getOrDefaultPartition(networkPartitions, record.partition).contains(pid)
+    })
 }

@@ -1,61 +1,84 @@
 module harness_groups {
-  import protocol_core as core from "protocol_core"
-  import protocol_groups as groups from "protocol_groups"
-  import protocol_signals as signals from "protocol_signals"
+  // Local type definitions (imports don't work for types in Quint)
+  type ProtocolId = str
+  type AuthorityId = str
+  type GroupId = str
 
-  pure def messageFor(kind: groups.OperationKind): str =
-    match kind {
-      | groups.Create => signals.GROUP_CREATE
-      | groups.Add => signals.GROUP_ADD
-      | groups.Remove => signals.GROUP_REMOVE
-      | groups.RotateEpoch => signals.GROUP_ROTATE_EPOCH
-      | groups.Archive => signals.GROUP_ARCHIVE
-    }
+  // Import modules for actions (not types)
+  import protocol_groups from "./protocol_groups"
+
+  // Constants for signals
+  pure val SIGNAL_COMPLETE = "complete"
+  pure val SIGNAL_ABORT = "abort"
+
+  // Harness state - tracks which protocols have been registered via harness
+  var harnessRegistered: Set[ProtocolId]
+
+  action init: bool = all {
+    harnessRegistered' = Set()
+  }
 
   /// Register a group lifecycle with an initial roster.
   action register(
-    pid: core.ProtocolId,
-    descriptor: core.ProtocolDescriptor,
-    members: Set[core.DeviceId],
-    groupId: groups.GroupId,
-    initialMembers: Set[core.DeviceId]
-  ): bool =
-    all {
-      core.registerProtocol(pid, descriptor, members),
-      groups.configureGroup(pid, groupId, initialMembers)
-    }
+    pid: ProtocolId,
+    groupId: GroupId,
+    initialMembers: Set[AuthorityId]
+  ): bool = all {
+    not(pid.in(harnessRegistered)),
+    protocol_groups::configureGroup(pid, groupId, initialMembers),
+    harnessRegistered' = harnessRegistered.union(Set(pid))
+  }
 
-  /// Signal successful completion with a trace message.
-  action complete(
-    pid: core.ProtocolId
-  ): bool =
-    val op = groups.lastOperation.get(pid) {
-      val message = messageFor(op) {
-        all {
-          core.recordInput(pid, core.ProtocolInput::LocalSignal({signal: signals.COMPLETE})),
-          groups.signalSuccess(pid, message),
-      core.processStep(
-        pid,
-        core.ProtocolState::Completed,
-        groups.lifecycleEffects.get(pid),
-        None
-      )
-      }
-    }}
+  /// Propose adding members to the group.
+  action proposeAdd(
+    pid: ProtocolId,
+    additions: Set[AuthorityId]
+  ): bool = all {
+    pid.in(harnessRegistered),
+    protocol_groups::proposeAddMembers(pid, additions),
+    harnessRegistered' = harnessRegistered
+  }
 
-  /// Abort the lifecycle with a trace message.
-  action abort(
-    pid: core.ProtocolId,
-    reason: str
-  ): bool =
-    all {
-      core.recordInput(pid, core.ProtocolInput::LocalSignal({signal: signals.ABORT})),
-      groups.signalFailure(pid, signals.ABORT),
-      core.processStep(
-        pid,
-        core.ProtocolState::Failed,
-        groups.lifecycleEffects.get(pid),
-        Some(core.OutputState::Failure({reason: reason}))
-      )
-    }
+  /// Confirm the pending add operation.
+  action confirmAdd(pid: ProtocolId): bool = all {
+    pid.in(harnessRegistered),
+    protocol_groups::confirmAddMembers(pid),
+    harnessRegistered' = harnessRegistered
+  }
+
+  /// Propose removing members from the group.
+  action proposeRemove(
+    pid: ProtocolId,
+    removals: Set[AuthorityId]
+  ): bool = all {
+    pid.in(harnessRegistered),
+    protocol_groups::proposeRemoveMembers(pid, removals),
+    harnessRegistered' = harnessRegistered
+  }
+
+  /// Confirm the pending remove operation.
+  action confirmRemove(pid: ProtocolId): bool = all {
+    pid.in(harnessRegistered),
+    protocol_groups::confirmRemoveMembers(pid),
+    harnessRegistered' = harnessRegistered
+  }
+
+  /// Complete the group lifecycle.
+  action complete(pid: ProtocolId): bool = all {
+    pid.in(harnessRegistered),
+    protocol_groups::signalSuccess(pid),
+    harnessRegistered' = harnessRegistered
+  }
+
+  /// Abort the group lifecycle.
+  action abort(pid: ProtocolId): bool = all {
+    pid.in(harnessRegistered),
+    protocol_groups::signalFailure(pid),
+    harnessRegistered' = harnessRegistered
+  }
+
+  // ============ INVARIANTS ============
+
+  val InvariantHarnessTracksRegistrations =
+    harnessRegistered.forall(pid => pid != "")
 }

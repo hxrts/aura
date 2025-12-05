@@ -154,9 +154,7 @@ mod tests {
     use crate::core::context::RelationalContext;
     use crate::core::AgentConfig;
     use aura_core::identifiers::{AuthorityId, ContextId};
-    use aura_invitation::guards::{GuardDecision, GuardOutcome};
-    use std::sync::Arc;
-    use tokio::sync::RwLock;
+    use aura_invitation::guards::GuardOutcome;
 
     fn create_test_authority(seed: u8) -> AuthorityContext {
         let authority_id = AuthorityId::new_from_entropy([seed; 32]);
@@ -203,16 +201,16 @@ mod tests {
         let config = AgentConfig::default();
         let effects = AuraEffectSystem::testing(&config).unwrap();
 
-        let fact = InvitationFact::Sent {
-            context_id: ContextId::new_from_entropy([232u8; 32]),
-            invitation_id: "inv-test".to_string(),
-            sender_id: authority.authority_id,
-            receiver_id: AuthorityId::new_from_entropy([133u8; 32]),
-            invitation_type: "contact".to_string(),
-            sent_at_ms: 1000,
-            expires_at_ms: Some(2000),
-            message: None,
-        };
+        let fact = InvitationFact::sent_ms(
+            ContextId::new_from_entropy([232u8; 32]),
+            "inv-test".to_string(),
+            authority.authority_id,
+            AuthorityId::new_from_entropy([133u8; 32]),
+            "contact".to_string(),
+            1000,
+            Some(2000),
+            None,
+        );
 
         let outcome = GuardOutcome::allowed(vec![EffectCommand::JournalAppend { fact }]);
 

@@ -147,82 +147,177 @@ async fn validate_threshold_params(
 }
 
 /// Execute threshold signing operation
+///
+/// Signs a test message using the threshold signing service.
+/// For production use, prefer `aura sign` with proper authority context.
 async fn execute_threshold_signing(
-    _ctx: &HandlerContext<'_>,
+    ctx: &HandlerContext<'_>,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
+    use aura_core::effects::ThresholdSigningEffects;
+    use aura_core::threshold::{ApprovalContext, SignableOperation, SigningContext};
+    use aura_core::tree::{TreeOp, TreeOpKind};
+
     println!("Executing threshold signing operation");
 
-    // Simulate threshold signing process
-    for (i, (path, config)) in configs.iter().enumerate() {
-        println!(
-            "Signing with device {} ({}): {}",
-            i + 1,
-            config.device_id,
-            path.display()
-        );
-    }
+    // Get authority from context
+    let authority_id = ctx.effect_context().authority_id();
 
+    // Create a test tree operation for signing
+    let test_op = TreeOp {
+        parent_epoch: 0,
+        parent_commitment: [0u8; 32],
+        op: TreeOpKind::RotateEpoch { affected: vec![] },
+        version: 1,
+    };
+
+    let signing_context = SigningContext {
+        authority: authority_id,
+        operation: SignableOperation::TreeOp(test_op),
+        approval_context: ApprovalContext::SelfOperation,
+    };
+
+    println!("Signing with authority: {}", authority_id);
     println!(
-        "Threshold signing completed with {}/{} signatures",
-        configs.len(),
-        threshold
+        "Threshold configuration: {}/{} required",
+        threshold,
+        configs.len()
     );
+
+    // Attempt to sign using the threshold signing service
+    match ctx.effects().sign(signing_context).await {
+        Ok(signature) => {
+            println!("Threshold signing successful!");
+            println!("  Signers: {}", signature.signer_count);
+            println!("  Epoch: {}", signature.epoch);
+            println!("  Signature bytes: {}", signature.signature.len());
+        }
+        Err(e) => {
+            println!("Threshold signing failed: {}", e);
+            println!("  This may require {} signers to be online", threshold);
+        }
+    }
 
     Ok(())
 }
 
 /// Execute threshold verification operation
+///
+/// Verifies a threshold signature using the crypto effects.
+/// For production use, prefer `aura verify` with proper signature context.
 async fn execute_threshold_verification(
-    _ctx: &HandlerContext<'_>,
+    ctx: &HandlerContext<'_>,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
+    use aura_core::effects::{CryptoEffects, ThresholdSigningEffects};
+
     println!("Executing threshold verification operation");
 
-    // Simulate threshold verification process
-    for (i, (path, config)) in configs.iter().enumerate() {
-        println!(
-            "Verifying with device {} ({}): {}",
-            i + 1,
-            config.device_id,
-            path.display()
-        );
-    }
+    // Get authority from context
+    let authority_id = ctx.effect_context().authority_id();
 
+    // Get the public key package for this authority
+    let public_key_package = match ctx.effects().public_key_package(&authority_id).await {
+        Some(pkg) => pkg,
+        None => {
+            println!(
+                "No public key package found for authority: {}",
+                authority_id
+            );
+            println!("Run key generation first with: aura threshold --mode keygen");
+            return Ok(());
+        }
+    };
+
+    println!("Verifying with authority: {}", authority_id);
+    println!("Public key package: {} bytes", public_key_package.len());
     println!(
-        "Threshold verification completed with {}/{} verifications",
-        configs.len(),
-        threshold
+        "Threshold configuration: {}/{} required",
+        threshold,
+        configs.len()
     );
+
+    // Create a test message and empty signature for demonstration
+    let test_message = b"test message for verification";
+
+    // Verify using frost_verify (this will fail without a real signature)
+    println!("Verification requires a valid signature to check.");
+    println!("To verify a real signature:");
+    println!("  1. Obtain the signature bytes from a previous signing operation");
+    println!("  2. Use `aura verify --signature <bytes> --message <msg>`");
+
+    // Demonstrate the verification call structure
+    let empty_signature = vec![0u8; 64]; // Placeholder
+    match ctx
+        .effects()
+        .frost_verify(&public_key_package, test_message, &empty_signature)
+        .await
+    {
+        Ok(valid) => {
+            if valid {
+                println!("Signature verification: VALID");
+            } else {
+                println!("Signature verification: INVALID (expected for placeholder)");
+            }
+        }
+        Err(e) => {
+            println!(
+                "Verification failed: {} (expected for placeholder signature)",
+                e
+            );
+        }
+    }
 
     Ok(())
 }
 
 /// Execute threshold key generation operation
+///
+/// Bootstraps a new authority with 1-of-1 keys.
+/// For multi-device DKG, use `aura init` with proper participant coordination.
 async fn execute_threshold_keygen(
-    _ctx: &HandlerContext<'_>,
+    ctx: &HandlerContext<'_>,
     configs: &[(PathBuf, ThresholdConfig)],
     threshold: u32,
 ) -> Result<()> {
+    use aura_core::effects::ThresholdSigningEffects;
+
     println!("Executing threshold key generation operation");
 
-    // Simulate threshold key generation process
-    for (i, (path, config)) in configs.iter().enumerate() {
-        println!(
-            "Generating keys with device {} ({}): {}",
-            i + 1,
-            config.device_id,
-            path.display()
-        );
+    // Get authority from context
+    let authority_id = ctx.effect_context().authority_id();
+
+    println!("Generating keys for authority: {}", authority_id);
+    println!(
+        "Threshold configuration: {}/{} participants",
+        threshold,
+        configs.len()
+    );
+
+    if threshold > 1 {
+        println!("Multi-device DKG requires network coordination.");
+        println!("For single-device bootstrap, use threshold=1.");
+        println!("For multi-device setup, use `aura init` with participant coordination.");
+        return Ok(());
     }
 
-    println!(
-        "Threshold key generation completed with {}/{} participants",
-        configs.len(),
-        threshold
-    );
+    // Bootstrap 1-of-1 keys for single-device operation
+    match ctx.effects().bootstrap_authority(&authority_id).await {
+        Ok(public_key_package) => {
+            println!("Key generation successful!");
+            println!("  Authority: {}", authority_id);
+            println!("  Public key package: {} bytes", public_key_package.len());
+            println!("  Threshold: 1/1 (single-device)");
+            println!();
+            println!("Keys stored in secure storage. You can now sign operations.");
+        }
+        Err(e) => {
+            println!("Key generation failed: {}", e);
+            println!("  This may occur if keys already exist for this authority.");
+        }
+    }
 
     Ok(())
 }

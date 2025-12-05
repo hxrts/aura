@@ -622,12 +622,14 @@ impl SyncService {
 
     /// Update peer states after sync operations
     async fn update_peer_states(&self, peers: &[DeviceId]) -> SyncResult<()> {
-        let mut peer_manager = self.peer_manager.write();
+        // Get time before taking lock to avoid holding MutexGuard across await
         let now = self
             .time_effects
             .physical_time()
             .await
             .map_err(time_error_to_aura)?;
+
+        let mut peer_manager = self.peer_manager.write();
 
         for &peer in peers {
             // Update last contact time

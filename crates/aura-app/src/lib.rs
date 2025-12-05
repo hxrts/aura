@@ -1,13 +1,13 @@
-//! # aura-app: Unified Frontend Interface
+//! # aura-app: Pure Application Core
 //!
 //! This crate provides the portable, platform-agnostic application core for Aura.
-//! It is the **only** interface that frontends should use - TUI, CLI, iOS, Android,
-//! and web applications all access the Aura runtime through `AppCore`.
+//! It contains pure business logic (intents, reducers, views) without runtime dependencies.
 //!
 //! ## Architecture
 //!
-//! `AppCore` wraps `AuraAgent` to provide a clean API that hides the complexity
-//! of the effect system from UI code:
+//! `aura-app` is pure - it defines the application logic without runtime dependencies.
+//! The `RuntimeBridge` trait enables dependency inversion: `aura-agent` implements
+//! `RuntimeBridge` and depends on `aura-app`, not vice versa.
 //!
 //! ```text
 //! ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
@@ -16,19 +16,14 @@
 //!        │                │                │                │
 //!        └────────────────┴────────────────┴────────────────┘
 //!                                │
-//!                                ↓
-//!                    ┌───────────────────────┐
-//!                    │       AppCore         │  ← aura-app (THIS CRATE)
-//!                    │                       │
-//!                    │  • ViewState signals  │
-//!                    │  • Intent dispatch    │
-//!                    │  • Service wrappers   │
-//!                    └───────────┬───────────┘
-//!                                │
-//!                                ↓ (internal, hidden from frontends)
-//!                    ┌───────────────────────┐
-//!                    │      AuraAgent        │  ← aura-agent (runtime)
-//!                    └───────────────────────┘
+//!        ┌───────────────────────┼───────────────────────┐
+//!        ↓                       ↓                       ↓
+//! ┌─────────────┐       ┌─────────────┐       ┌─────────────┐
+//! │  aura-app   │       │ aura-agent  │       │   mocks     │
+//! │  (pure)     │←──────│ (runtime)   │       │   (test)    │
+//! │             │       │ implements  │       │ implements  │
+//! │ RuntimeBridge trait │ RuntimeBridge       │ RuntimeBridge
+//! └─────────────┘       └─────────────┘       └─────────────┘
 //! ```
 //!
 //! ## Push-Based Reactive Flow
@@ -46,17 +41,18 @@
 //! ## Construction Modes
 //!
 //! ```rust,ignore
-//! use aura_app::{AppCore, AppConfig, AgentBuilder};
+//! use aura_app::{AppCore, AppConfig, RuntimeBridge};
+//! use aura_agent::{AgentBuilder, AuraAgent};  // From aura-agent
 //!
 //! // Demo/Offline mode - local state only
 //! let app = AppCore::new(config)?;
 //!
-//! // Production mode - with agent for full functionality
+//! // Production mode - with runtime bridge for full functionality
 //! let agent = AgentBuilder::new()
 //!     .with_authority(authority_id)
 //!     .build_production()
 //!     .await?;
-//! let app = AppCore::with_agent(config, agent)?;
+//! let app = AppCore::with_runtime(config, agent.as_runtime_bridge())?;
 //! ```
 //!
 //! ## Features
@@ -79,10 +75,9 @@
 //!     reply_to: None,
 //! })?;
 //!
-//! // Access agent when available (production mode)
-//! if app.has_agent() {
-//!     let agent = app.agent().unwrap();
-//!     // Use agent services...
+//! // Check runtime status
+//! if app.has_runtime() {
+//!     let sync_status = app.is_sync_running().await;
 //! }
 //!
 //! // Subscribe to state changes
@@ -90,10 +85,11 @@
 //! let chat_signal = app.chat_signal();
 //! ```
 //!
-//! ## Re-exports
+//! ## Import Guide
 //!
-//! This crate re-exports types from `aura-agent` so frontends don't need
-//! direct dependencies on internal crates. Import everything from `aura_app`.
+//! Frontends should import from both crates:
+//! - **From `aura_app`**: `AppCore`, `Intent`, `ViewState`, `RuntimeBridge`
+//! - **From `aura_agent`**: `AuraAgent`, `AgentBuilder`, services, reactive types
 
 // =============================================================================
 // UniFFI scaffolding (when building for mobile)
@@ -109,6 +105,7 @@ uniffi::setup_scaffolding!();
 pub mod bridge;
 pub mod core;
 pub mod queries;
+pub mod runtime_bridge;
 pub mod views;
 
 #[cfg(feature = "signals")]
@@ -124,7 +121,13 @@ pub use crate::core::{
     AppConfig, AppCore, Intent, IntentChannelType, IntentError, InvitationType, Screen,
     StateSnapshot,
 };
+
+// Runtime bridge (for dependency inversion)
 pub use crate::queries::Query;
+pub use crate::runtime_bridge::{
+    BoxedRuntimeBridge, OfflineRuntimeBridge, RendezvousStatus, RuntimeBridge, RuntimeStatus,
+    SyncStatus,
+};
 pub use crate::views::{
     BlockState, Channel, ChannelType, ChatState, ContactsState, InvitationsState, Message,
     NeighborhoodState, RecoveryState, ViewState,
@@ -140,40 +143,13 @@ pub use crate::signals::{ReactiveState, ReactiveVec};
 pub use aura_core::identifiers::{AuthorityId, ContextId};
 pub use aura_core::time::TimeStamp;
 
-// Re-export agent types for frontends (so they don't need to import from aura-agent)
-pub use aura_agent::{AgentBuilder, AgentConfig, AuraAgent, AuraEffectSystem, EffectContext};
-
-// Re-export configuration types
-pub use aura_agent::core::config::StorageConfig;
-
-// Re-export service types needed by AppCore methods
-// Note: Some types are aliased to avoid conflicts with app-layer types
-pub use aura_agent::{
-    // Auth types
-    AuthChallenge,
-    AuthMethod,
-    AuthResponse,
-    AuthResult,
-    // Recovery types (use agent:: prefix for RecoveryState to avoid conflict)
-    GuardianApproval,
-    // Invitation types (use agent:: prefix for InvitationType to avoid conflict)
-    Invitation,
-    InvitationResult,
-    InvitationStatus,
-    InvitationType as AgentInvitationType,
-    RecoveryResult,
-    RecoveryState as AgentRecoveryState,
-    // Sync types
-    SyncManagerConfig,
-    SyncServiceManager,
-};
-
-// Re-export reactive types for TUI/signals integration
-pub use aura_agent::reactive::{Dynamic, FactSource, ReactiveScheduler};
-
-// Re-export additional reactive types for reactive TUI integration
-// These are used by aura-terminal's journal_bridge and test harnesses
-pub use aura_agent::reactive::{
-    BlockDelta, BlockReduction, ChatReduction, FactStreamAdapter, GuardianDelta, GuardianReduction,
-    InvitationReduction, RecoveryDelta, RecoveryReduction, SchedulerConfig, ViewAdapter,
-};
+// Note: Agent types (AuraAgent, AgentBuilder, reactive types, services) are NOT
+// re-exported here. With the dependency inversion:
+// - aura-app is pure (no aura-agent dependency)
+// - aura-agent depends on aura-app and implements RuntimeBridge
+// - Frontends import app types from aura_app, runtime types from aura_agent
+//
+// Example frontend imports:
+//   use aura_app::{AppCore, Intent, ViewState, RuntimeBridge};
+//   use aura_agent::{AuraAgent, AgentBuilder, EffectContext};
+//   use aura_agent::reactive::{Dynamic, ReactiveScheduler};

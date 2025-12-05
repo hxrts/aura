@@ -361,7 +361,13 @@ async fn approve_recovery(ctx: &HandlerContext<'_>, request_file: &Path) -> Resu
         key_material: None,
         guardian_shares: vec![share.clone()],
         evidence,
-        signature: aura_core::frost::ThresholdSignature::new(vec![0; 64], vec![0]),
+        signature: aura_core::threshold::ThresholdSignature::new(
+            vec![0; 64],
+            0,
+            vec![0],
+            Vec::new(),
+            0,
+        ),
     };
 
     // Persist approval so the requesting device can collect it

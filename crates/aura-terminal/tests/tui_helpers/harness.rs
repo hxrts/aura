@@ -5,7 +5,7 @@
 //! TODO: Update for IoContext migration - these tests need ReactiveScheduler
 //! integration which IoContext doesn't currently expose.
 
-use aura_app::SchedulerConfig;
+use aura_agent::reactive::SchedulerConfig;
 use aura_journal::fact::Fact;
 use aura_terminal::tui::context::IoContext;
 use std::time::Duration;

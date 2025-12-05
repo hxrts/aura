@@ -13,14 +13,16 @@
 //! ```
 
 use super::{Intent, IntentError, StateSnapshot};
+use crate::runtime_bridge::RuntimeBridge;
 use crate::views::ViewState;
 
-use aura_agent::AuraAgent;
 use aura_core::identifiers::AuthorityId;
 use aura_core::time::TimeStamp;
+use aura_core::tree::{AttestedOp, TreeOp};
 use aura_core::AccountId;
 use aura_journal::{Journal, JournalFact};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Configuration for creating an AppCore instance
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,18 +109,18 @@ pub struct AppCore {
     /// Path to journal file for persistence
     journal_path: Option<std::path::PathBuf>,
 
-    /// Optional AuraAgent for runtime operations (sync, services, network)
+    /// Optional RuntimeBridge for runtime operations (sync, signing, network)
     ///
     /// When present, enables:
     /// - Network sync operations
-    /// - InvitationService, RecoveryService, AuthService
+    /// - Threshold signing
     /// - Peer discovery and transport
     ///
     /// When absent (demo/offline mode):
     /// - Local-only state management
     /// - Intent dispatch still works (creates facts)
     /// - No network operations available
-    agent: Option<AuraAgent>,
+    runtime: Option<Arc<dyn RuntimeBridge>>,
 
     /// Observer registry for callback-based subscriptions (UniFFI/mobile)
     #[cfg(feature = "callbacks")]
@@ -147,20 +149,20 @@ impl AppCore {
             views: ViewState::default(),
             next_subscription_id: 1,
             journal_path,
-            agent: None,
+            runtime: None,
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
         })
     }
 
-    /// Create an AppCore with an AuraAgent for full runtime capabilities
+    /// Create an AppCore with a RuntimeBridge for full runtime capabilities
     ///
-    /// This constructor enables all agent-backed operations:
+    /// This constructor enables all runtime-backed operations:
     /// - Network sync and peer discovery
-    /// - InvitationService, RecoveryService, AuthService
+    /// - Threshold signing
     /// - Full distributed protocol support
     ///
-    /// The agent's authority ID is automatically set on the AppCore.
+    /// The runtime's authority ID is automatically set on the AppCore.
     ///
     /// ## Example
     ///
@@ -170,16 +172,19 @@ impl AppCore {
     ///     .with_authority(authority_id)
     ///     .build_production()
     ///     .await?;
-    /// let app = AppCore::with_agent(config, agent)?;
+    /// let app = AppCore::with_runtime(config, agent.as_runtime_bridge())?;
     /// ```
-    pub fn with_agent(config: AppConfig, agent: AuraAgent) -> Result<Self, IntentError> {
+    pub fn with_runtime(
+        config: AppConfig,
+        runtime: Arc<dyn RuntimeBridge>,
+    ) -> Result<Self, IntentError> {
         let mut app = Self::new(config)?;
 
-        // Set authority from agent
-        app.authority = Some(agent.authority_id());
+        // Set authority from runtime
+        app.authority = Some(runtime.authority_id());
 
-        // Store the agent
-        app.agent = Some(agent);
+        // Store the runtime
+        app.runtime = Some(runtime);
 
         Ok(app)
     }
@@ -200,7 +205,7 @@ impl AppCore {
             views: ViewState::default(),
             next_subscription_id: 1,
             journal_path: None,
-            agent: None,
+            runtime: None,
             #[cfg(feature = "callbacks")]
             observer_registry: crate::bridge::callback::ObserverRegistry::new(),
         })
@@ -231,26 +236,119 @@ impl AppCore {
         self.authority.as_ref()
     }
 
-    /// Get a reference to the agent, if available
+    /// Get a reference to the runtime bridge, if available
     ///
-    /// The agent provides access to runtime services:
-    /// - `agent.invitations()` - InvitationService
-    /// - `agent.recovery()` - RecoveryService
-    /// - `agent.auth()` - AuthService
-    /// - `agent.sessions()` - SessionService
-    pub fn agent(&self) -> Option<&AuraAgent> {
-        self.agent.as_ref()
+    /// The runtime provides access to:
+    /// - Threshold signing operations
+    /// - Sync status and peer discovery
+    /// - Fact persistence
+    pub fn runtime(&self) -> Option<&Arc<dyn RuntimeBridge>> {
+        self.runtime.as_ref()
     }
 
-    /// Check if an agent is available for runtime operations
+    /// Check if a runtime is available for runtime operations
     ///
-    /// Returns `true` if the AppCore was created with `with_agent()`,
-    /// enabling network sync, services, and distributed protocols.
+    /// Returns `true` if the AppCore was created with `with_runtime()`,
+    /// enabling network sync, signing, and distributed protocols.
     ///
     /// Returns `false` for demo/offline mode (created with `new()`).
-    pub fn has_agent(&self) -> bool {
-        self.agent.is_some()
+    pub fn has_runtime(&self) -> bool {
+        self.runtime.is_some()
     }
+
+    // ==================== Threshold Signing Operations ====================
+
+    /// Sign a tree operation and return an attested operation
+    ///
+    /// This method uses the RuntimeBridge to delegate threshold signing.
+    /// The signature proves authorization from the threshold of signers
+    /// configured for this authority.
+    ///
+    /// ## Requirements
+    /// - A runtime must be available (`has_runtime()` returns `true`)
+    /// - Signing keys must be bootstrapped (`bootstrap_signing_keys()`)
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// let tree_op = TreeOp { ... };
+    /// let attested = app.sign_tree_op(&tree_op).await?;
+    /// // attested.signature contains the threshold signature
+    /// ```
+    pub async fn sign_tree_op(&self, op: &TreeOp) -> Result<AttestedOp, IntentError> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::unauthorized("No runtime available - cannot sign tree operations")
+        })?;
+
+        runtime.sign_tree_op(op).await
+    }
+
+    /// Bootstrap signing keys for the current authority
+    ///
+    /// This initializes the threshold signing infrastructure with 1-of-1 keys
+    /// for single-device operation. For multi-device setups, additional
+    /// devices would participate in a DKG ceremony to create m-of-n keys.
+    ///
+    /// ## Requirements
+    /// - A runtime must be available (`has_runtime()` returns `true`)
+    /// - An authority must be set
+    ///
+    /// ## Returns
+    /// The public key package bytes that can be used to verify signatures
+    /// from this authority.
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// let public_key = app.bootstrap_signing_keys().await?;
+    /// // Store or share public_key for signature verification
+    /// ```
+    pub async fn bootstrap_signing_keys(&self) -> Result<Vec<u8>, IntentError> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            IntentError::unauthorized("No runtime available - cannot bootstrap signing keys")
+        })?;
+
+        runtime.bootstrap_signing_keys().await
+    }
+
+    /// Get the threshold signing configuration for the current authority
+    ///
+    /// Returns `None` if signing keys haven't been bootstrapped yet.
+    ///
+    /// ## Example
+    ///
+    /// ```rust,ignore
+    /// if let Some(config) = app.threshold_config().await {
+    ///     println!("Threshold: {}-of-{}", config.threshold, config.total);
+    /// }
+    /// ```
+    pub async fn threshold_config(&self) -> Option<aura_core::threshold::ThresholdConfig> {
+        let runtime = self.runtime.as_ref()?;
+        runtime.get_threshold_config().await
+    }
+
+    /// Check if this device has signing capability for the current authority
+    ///
+    /// Returns `true` if this device holds a key share and can participate
+    /// in threshold signing operations.
+    pub async fn has_signing_capability(&self) -> bool {
+        let Some(runtime) = self.runtime.as_ref() else {
+            return false;
+        };
+        runtime.has_signing_capability().await
+    }
+
+    /// Get the public key package for the current authority's signing keys
+    ///
+    /// Returns the group public key used for signature verification.
+    /// This can be used to identify the authority's signing identity
+    /// or to include in commitment tree leaf nodes.
+    pub async fn threshold_signing_public_key(&self) -> Option<Vec<u8>> {
+        let runtime = self.runtime.as_ref()?;
+        runtime.get_public_key_package().await
+    }
+
+    // ==================== Intent Dispatch ====================
 
     /// Dispatch an intent (user action that becomes a fact)
     ///
@@ -840,7 +938,7 @@ impl AppCore {
 // =============================================================================
 // Agent-backed operations (sync, services, network)
 // =============================================================================
-// These methods require an AuraAgent to be configured via `with_agent()`.
+// These methods require a RuntimeBridge to be configured via `with_runtime()`.
 // They provide high-level access to distributed protocol operations.
 
 impl AppCore {
@@ -850,12 +948,10 @@ impl AppCore {
 
     /// Check if the sync service is running
     ///
-    /// Returns `true` if the agent has an active sync service.
+    /// Returns `true` if the runtime has an active sync service.
     pub async fn is_sync_running(&self) -> bool {
-        if let Some(agent) = &self.agent {
-            if let Some(sync) = agent.runtime().sync() {
-                return sync.is_running().await;
-            }
+        if let Some(runtime) = &self.runtime {
+            return runtime.get_sync_status().await.is_running;
         }
         false
     }
@@ -864,277 +960,51 @@ impl AppCore {
     ///
     /// Returns device IDs of peers configured for sync.
     pub async fn sync_peers(&self) -> Result<Vec<aura_core::DeviceId>, IntentError> {
-        let agent = self
-            .agent
+        let runtime = self
+            .runtime
             .as_ref()
-            .ok_or_else(|| IntentError::no_agent("sync_peers requires an agent"))?;
+            .ok_or_else(|| IntentError::no_agent("sync_peers requires a runtime"))?;
 
-        let runtime = agent.runtime();
-        let sync_manager = runtime
-            .sync()
-            .ok_or_else(|| IntentError::no_agent("sync service not available"))?;
-
-        Ok(sync_manager.peers().await)
+        Ok(runtime.get_sync_peers().await)
     }
 
     /// Discover peers via rendezvous
     ///
     /// Returns a list of discovered peer authority IDs from the rendezvous cache.
     pub async fn discover_peers(&self) -> Result<Vec<AuthorityId>, IntentError> {
-        let agent = self
-            .agent
+        let runtime = self
+            .runtime
             .as_ref()
-            .ok_or_else(|| IntentError::no_agent("discover_peers requires an agent"))?;
+            .ok_or_else(|| IntentError::no_agent("discover_peers requires a runtime"))?;
 
-        let runtime = agent.runtime();
-        let rendezvous = runtime
-            .rendezvous()
-            .ok_or_else(|| IntentError::no_agent("rendezvous service not available"))?;
-
-        let peers = rendezvous.list_cached_peers().await;
-
-        Ok(peers)
+        Ok(runtime.get_discovered_peers().await)
     }
 
-    /// Check if the agent is online (has active sync or rendezvous services)
+    /// Check if the runtime is online (has active sync or rendezvous services)
     pub async fn is_online(&self) -> bool {
-        if let Some(agent) = &self.agent {
-            let runtime = agent.runtime();
+        if let Some(runtime) = &self.runtime {
+            let status = runtime.get_status().await;
             // Check if either sync or rendezvous is running
-            if let Some(sync) = runtime.sync() {
-                if sync.is_running().await {
-                    return true;
-                }
-            }
-            if let Some(rendezvous) = runtime.rendezvous() {
-                if rendezvous.is_running().await {
-                    return true;
-                }
-            }
+            return status.sync.is_running || status.rendezvous.is_running;
         }
         false
     }
 
-    // =========================================================================
-    // Invitation Operations
-    // =========================================================================
+    // Note: Invitation, Recovery, and Authentication service operations
+    // have been removed from AppCore. Frontends that need these should
+    // access the agent services directly via:
+    // - agent.invitations() -> InvitationService
+    // - agent.recovery() -> RecoveryService
+    // - agent.auth() -> AuthService
+    //
+    // This maintains clean separation between:
+    // - AppCore: Intent dispatch, ViewState, basic runtime status
+    // - Agent services: Full distributed protocol operations
 
-    /// Accept an invitation
-    ///
-    /// Delegates to InvitationService and emits appropriate facts.
-    pub async fn accept_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
-        let agent = self
-            .agent
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("accept_invitation requires an agent"))?;
-
-        let service = agent
-            .invitations()
-            .await
-            .map_err(|e| IntentError::service_error(format!("InvitationService: {}", e)))?;
-
-        service
-            .accept(invitation_id)
-            .await
-            .map_err(|e| IntentError::service_error(format!("accept failed: {}", e)))?;
-
-        Ok(())
-    }
-
-    /// Decline an invitation
-    pub async fn decline_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
-        let agent = self
-            .agent
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("decline_invitation requires an agent"))?;
-
-        let service = agent
-            .invitations()
-            .await
-            .map_err(|e| IntentError::service_error(format!("InvitationService: {}", e)))?;
-
-        service
-            .decline(invitation_id)
-            .await
-            .map_err(|e| IntentError::service_error(format!("decline failed: {}", e)))?;
-
-        Ok(())
-    }
-
-    /// Cancel a sent invitation
-    pub async fn cancel_invitation(&self, invitation_id: &str) -> Result<(), IntentError> {
-        let agent = self
-            .agent
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("cancel_invitation requires an agent"))?;
-
-        let service = agent
-            .invitations()
-            .await
-            .map_err(|e| IntentError::service_error(format!("InvitationService: {}", e)))?;
-
-        service
-            .cancel(invitation_id)
-            .await
-            .map_err(|e| IntentError::service_error(format!("cancel failed: {}", e)))?;
-
-        Ok(())
-    }
-
-    /// List pending invitations
-    pub async fn list_pending_invitations(
-        &self,
-    ) -> Result<Vec<aura_agent::Invitation>, IntentError> {
-        let agent = self
-            .agent
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("list_pending_invitations requires an agent"))?;
-
-        let service = agent
-            .invitations()
-            .await
-            .map_err(|e| IntentError::service_error(format!("InvitationService: {}", e)))?;
-
-        Ok(service.list_pending().await)
-    }
-
-    // =========================================================================
-    // Recovery Operations
-    // =========================================================================
-
-    /// Get active recovery sessions
-    ///
-    /// Returns a list of (recovery_id, state) pairs for active sessions.
-    pub async fn list_active_recoveries(
-        &self,
-    ) -> Result<Vec<(String, aura_agent::RecoveryState)>, IntentError> {
-        let agent = self
-            .agent
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("list_active_recoveries requires an agent"))?;
-
-        let service = agent
-            .recovery()
-            .await
-            .map_err(|e| IntentError::service_error(format!("RecoveryService: {}", e)))?;
-
-        Ok(service.list_active().await)
-    }
-
-    /// Get recovery state for a specific session
-    pub async fn get_recovery_state(
-        &self,
-        recovery_id: &str,
-    ) -> Result<Option<aura_agent::RecoveryState>, IntentError> {
-        let agent = self
-            .agent
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("get_recovery_state requires an agent"))?;
-
-        let service = agent
-            .recovery()
-            .await
-            .map_err(|e| IntentError::service_error(format!("RecoveryService: {}", e)))?;
-
-        Ok(service.get_state(recovery_id).await)
-    }
-
-    /// Submit a guardian approval for a recovery session
-    pub async fn submit_guardian_approval(
-        &self,
-        approval: aura_agent::GuardianApproval,
-    ) -> Result<aura_agent::RecoveryState, IntentError> {
-        let agent = self
-            .agent
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("submit_guardian_approval requires an agent"))?;
-
-        let service = agent
-            .recovery()
-            .await
-            .map_err(|e| IntentError::service_error(format!("RecoveryService: {}", e)))?;
-
-        service
-            .submit_approval(approval)
-            .await
-            .map_err(|e| IntentError::service_error(format!("submit_approval failed: {}", e)))
-    }
-
-    /// Complete a recovery session (after threshold approvals received)
-    pub async fn complete_recovery(
-        &self,
-        recovery_id: &str,
-    ) -> Result<aura_agent::RecoveryResult, IntentError> {
-        let agent = self
-            .agent
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("complete_recovery requires an agent"))?;
-
-        let service = agent
-            .recovery()
-            .await
-            .map_err(|e| IntentError::service_error(format!("RecoveryService: {}", e)))?;
-
-        service
-            .complete(recovery_id)
-            .await
-            .map_err(|e| IntentError::service_error(format!("complete failed: {}", e)))
-    }
-
-    /// Cancel an active recovery session
-    pub async fn cancel_recovery(
-        &self,
-        recovery_id: &str,
-        reason: String,
-    ) -> Result<aura_agent::RecoveryResult, IntentError> {
-        let agent = self
-            .agent
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("cancel_recovery requires an agent"))?;
-
-        let service = agent
-            .recovery()
-            .await
-            .map_err(|e| IntentError::service_error(format!("RecoveryService: {}", e)))?;
-
-        service
-            .cancel(recovery_id, reason)
-            .await
-            .map_err(|e| IntentError::service_error(format!("cancel failed: {}", e)))
-    }
-
-    // =========================================================================
-    // Authentication Operations
-    // =========================================================================
-
-    /// Authenticate using device key
-    ///
-    /// This performs challenge-response authentication with the device's key.
-    pub async fn authenticate_with_device_key(
-        &self,
-    ) -> Result<aura_agent::AuthResult, IntentError> {
-        let agent = self
-            .agent
-            .as_ref()
-            .ok_or_else(|| IntentError::no_agent("authenticate requires an agent"))?;
-
-        let service = agent
-            .auth()
-            .await
-            .map_err(|e| IntentError::service_error(format!("AuthService: {}", e)))?;
-
-        service
-            .authenticate_with_device_key()
-            .await
-            .map_err(|e| IntentError::service_error(format!("authenticate failed: {}", e)))
-    }
-
-    /// Check if the agent is authenticated
+    /// Check if the runtime is authenticated
     pub async fn is_authenticated(&self) -> bool {
-        if let Some(agent) = &self.agent {
-            if let Ok(service) = agent.auth().await {
-                return service.is_authenticated().await;
-            }
+        if let Some(runtime) = &self.runtime {
+            return runtime.is_authenticated().await;
         }
         false
     }

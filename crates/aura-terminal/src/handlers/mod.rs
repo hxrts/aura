@@ -75,7 +75,7 @@ use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-// Re-export agent types through handler_context for backward compatibility
+// Re-export agent types through handler_context for convenience
 pub use handler_context::{AuraAgent, AuraEffectSystem, EffectContext};
 
 pub mod admin;
@@ -109,11 +109,15 @@ pub mod scenarios;
 
 /// Main CLI handler that coordinates all operations through effects
 ///
-/// Uses `AppCore` as the unified backend, accessing agent and effect system
-/// through AppCore's accessors for clean architecture.
+/// Uses `AppCore` as the unified backend for intent-based state management,
+/// and stores the `AuraAgent` directly for effect system and service access.
+/// This follows the dependency inversion pattern where aura-app doesn't
+/// depend on aura-agent.
 pub struct CliHandler {
-    /// The portable application core (wraps agent and provides unified API)
+    /// The portable application core (provides intent-based state management)
     app_core: Arc<RwLock<AppCore>>,
+    /// The agent for effect system and service access
+    agent: Arc<AuraAgent>,
     /// The device ID for this handler
     device_id: DeviceId,
     /// Execution context propagated through effect calls
@@ -121,16 +125,19 @@ pub struct CliHandler {
 }
 
 impl CliHandler {
-    /// Create a new CLI handler with AppCore
+    /// Create a new CLI handler with AppCore and agent
     ///
-    /// This is the preferred constructor that uses the unified AppCore backend.
-    pub fn new(
+    /// This constructor uses both AppCore (for intent-based state) and
+    /// the agent directly (for effect system and services).
+    pub fn with_agent(
         app_core: Arc<RwLock<AppCore>>,
+        agent: Arc<AuraAgent>,
         device_id: DeviceId,
         effect_context: EffectContext,
     ) -> Self {
         Self {
             app_core,
+            agent,
             device_id,
             effect_context,
         }
@@ -151,13 +158,14 @@ impl CliHandler {
         &self.app_core
     }
 
+    /// Access the agent (for effect system and service access)
+    pub fn agent(&self) -> &Arc<AuraAgent> {
+        &self.agent
+    }
+
     /// Handle init command through effects
     pub async fn handle_init(&self, num_devices: u32, threshold: u32, output: &Path) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         init::handle_init(&ctx, num_devices, threshold, output).await
@@ -165,11 +173,7 @@ impl CliHandler {
 
     /// Handle status command through effects
     pub async fn handle_status(&self, config_path: &Path) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         status::handle_status(&ctx, config_path).await
@@ -177,11 +181,7 @@ impl CliHandler {
 
     /// Handle node command through effects
     pub async fn handle_node(&self, port: u16, daemon: bool, config_path: &Path) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         node::handle_node(&ctx, port, daemon, config_path).await
@@ -189,11 +189,7 @@ impl CliHandler {
 
     /// Handle threshold command through effects
     pub async fn handle_threshold(&self, configs: &str, threshold: u32, mode: &str) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         threshold::handle_threshold(&ctx, configs, threshold, mode).await
@@ -202,11 +198,7 @@ impl CliHandler {
     /// Handle scenarios command through effects (requires development feature)
     #[cfg(feature = "development")]
     pub async fn handle_scenarios(&self, action: &ScenarioAction) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         scenarios::handle_scenarios(&ctx, action).await
@@ -214,11 +206,7 @@ impl CliHandler {
 
     /// Handle version command through effects
     pub async fn handle_version(&self) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         version::handle_version(&ctx).await
@@ -226,11 +214,7 @@ impl CliHandler {
 
     /// Handle snapshot maintenance commands.
     pub async fn handle_snapshot(&self, action: &SnapshotAction) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         snapshot::handle_snapshot(&ctx, action).await
@@ -238,11 +222,7 @@ impl CliHandler {
 
     /// Handle admin maintenance commands.
     pub async fn handle_admin(&self, action: &AdminAction) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         admin::handle_admin(&ctx, action).await
@@ -250,11 +230,7 @@ impl CliHandler {
 
     /// Handle guardian recovery commands
     pub async fn handle_recovery(&self, action: &RecoveryAction) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         recovery::handle_recovery(&ctx, action).await
@@ -262,24 +238,21 @@ impl CliHandler {
 
     /// Handle invitation commands
     pub async fn handle_invitation(&self, action: &InvitationAction) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         // For invitation, we pass agent reference
-        let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, Some(agent));
+        let ctx = HandlerContext::new(
+            &self.effect_context,
+            &effects,
+            self.device_id,
+            Some(&*self.agent),
+        );
         invite::handle_invitation(&ctx, action).await
     }
 
     /// Handle authority management commands
     pub async fn handle_authority(&self, command: &AuthorityCommands) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         authority::handle_authority(&ctx, command).await
@@ -287,11 +260,7 @@ impl CliHandler {
 
     /// Handle context inspection commands
     pub async fn handle_context(&self, action: &ContextAction) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         context::handle_context(&ctx, action).await
@@ -299,11 +268,7 @@ impl CliHandler {
 
     /// Handle OTA upgrade commands
     pub async fn handle_ota(&self, action: &OtaAction) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         ota::handle_ota(&ctx, action).await
@@ -311,11 +276,7 @@ impl CliHandler {
 
     /// Handle AMP commands routed through the effect system.
     pub async fn handle_amp(&self, action: &AmpAction) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         amp::handle_amp(&ctx, action).await
@@ -323,11 +284,7 @@ impl CliHandler {
 
     /// Handle chat commands
     pub async fn handle_chat(&self, command: &ChatCommands) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         chat::handle_chat(&ctx, &effects, command).await
@@ -335,11 +292,7 @@ impl CliHandler {
 
     /// Handle sync commands (daemon mode by default)
     pub async fn handle_sync(&self, action: &SyncAction) -> Result<()> {
-        let app = self.app_core.read().await;
-        let agent = app
-            .agent()
-            .ok_or_else(|| anyhow::anyhow!("No agent available"))?;
-        let effects_arc = agent.runtime().effects();
+        let effects_arc = self.agent.runtime().effects();
         let effects = effects_arc.read().await;
         let ctx = HandlerContext::new(&self.effect_context, &effects, self.device_id, None);
         sync::handle_sync(&ctx, action).await

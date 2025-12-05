@@ -1,9 +1,11 @@
+#![allow(missing_docs)]
+
 use aura_core::identifiers::{AuthorityId, ContextId};
+use aura_core::util::test_utils::test_authority_id;
 use aura_invitation::{
     guards::GuardSnapshot, Invitation, InvitationConfig, InvitationService, InvitationStatus,
     InvitationType,
 };
-use uuid::Uuid;
 
 fn snapshot_with_caps(auth: AuthorityId, ctx: ContextId, caps: &[&str]) -> GuardSnapshot {
     GuardSnapshot::new(
@@ -40,9 +42,9 @@ fn make_invitation(
 
 #[test]
 fn invitation_send_and_accept_end_to_end() {
-    let sender = AuthorityId::from_uuid(Uuid::new_v4());
-    let receiver = AuthorityId::from_uuid(Uuid::new_v4());
-    let ctx = ContextId::from_uuid(Uuid::new_v4());
+    let sender = test_authority_id(1);
+    let receiver = test_authority_id(2);
+    let ctx = ContextId::new_from_entropy([1u8; 32]);
 
     let mut sender_service = InvitationService::new(sender, InvitationConfig::default());
     let mut receiver_service = InvitationService::new(receiver, InvitationConfig::default());
@@ -104,9 +106,9 @@ fn invitation_send_and_accept_end_to_end() {
 
 #[test]
 fn invitation_decline_flow_marks_status() {
-    let sender = AuthorityId::from_uuid(Uuid::new_v4());
-    let receiver = AuthorityId::from_uuid(Uuid::new_v4());
-    let ctx = ContextId::from_uuid(Uuid::new_v4());
+    let sender = test_authority_id(3);
+    let receiver = test_authority_id(4);
+    let ctx = ContextId::new_from_entropy([2u8; 32]);
 
     let mut svc = InvitationService::new(receiver, InvitationConfig::default());
     let invitation_id = "inv-decline";

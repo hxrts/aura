@@ -108,14 +108,6 @@ impl MembershipState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aura_core::time::{PhysicalTime, TimeStamp};
-
-    fn test_timestamp() -> TimeStamp {
-        TimeStamp::PhysicalClock(PhysicalTime {
-            ts_ms: 1700000000000,
-            uncertainty: None,
-        })
-    }
 
     fn test_authority(seed: u8) -> AuthorityId {
         AuthorityId::new_from_entropy([seed; 32])

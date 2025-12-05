@@ -4,6 +4,7 @@
 
 use super::{AgentConfig, AgentError, AgentResult, AuthorityContext};
 use crate::handlers::{AuthService, InvitationService, RecoveryService, SessionService};
+use crate::runtime::services::ThresholdSigningService;
 use crate::runtime::system::RuntimeSystem;
 use crate::runtime::{EffectContext, EffectSystemBuilder};
 use aura_core::{
@@ -32,6 +33,9 @@ pub struct AuraAgent {
 
     /// Recovery service (lazily initialized)
     recovery_service: Arc<RwLock<Option<RecoveryService>>>,
+
+    /// Threshold signing service (lazily initialized)
+    threshold_signing_service: Arc<RwLock<Option<ThresholdSigningService>>>,
 }
 
 impl AuraAgent {
@@ -44,6 +48,7 @@ impl AuraAgent {
             auth_service: Arc::new(RwLock::new(None)),
             invitation_service: Arc::new(RwLock::new(None)),
             recovery_service: Arc::new(RwLock::new(None)),
+            threshold_signing_service: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -189,6 +194,34 @@ impl AuraAgent {
         }
 
         Ok(service)
+    }
+
+    /// Get the threshold signing service
+    ///
+    /// Provides access to unified threshold signing operations including:
+    /// - Multi-device signing (your devices)
+    /// - Guardian recovery approvals (cross-authority)
+    /// - Group operation approvals (shared authority)
+    pub async fn threshold_signing(&self) -> ThresholdSigningService {
+        // Check if already initialized (note: we return a new instance each time
+        // since the service maintains state via Arc internally)
+        {
+            let guard = self.threshold_signing_service.read().await;
+            if guard.is_some() {
+                return ThresholdSigningService::new(self.runtime.effects());
+            }
+        }
+
+        // Initialize lazily
+        let service = ThresholdSigningService::new(self.runtime.effects());
+
+        // Store for future use (though we return a new instance each time for simplicity)
+        {
+            let mut guard = self.threshold_signing_service.write().await;
+            *guard = Some(ThresholdSigningService::new(self.runtime.effects()));
+        }
+
+        service
     }
 
     /// Shutdown the agent

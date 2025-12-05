@@ -1,25 +1,159 @@
-## Aura Quint Specifications Overview
+# Aura Quint Specifications
 
-### Goals
+Formal specifications of the Aura protocol using Quint 0.25.x, an executable specification language based on the Temporal Logic of Actions (TLA).
 
-- Provide executable Quint models for every protocol lifecycle built on `protocol-core`.
-- Mirror the complete control flow that the Rust lifecycles drive: descriptor registration, inputs, transitions, side effects, evidence, completion/abort.
-- Enable the simulator to run “Spec-in-the-loop” sessions: drive lifecycles with real inputs and verify invariants on each step.
-- Support generation of counter-examples and reproducible traces for debugging.
-- Serve as documentation of expected behaviour across modules such as DKD, resharing, recovery, locking, counter, group, sessions, SBB, and journal.
+## Getting Started
 
-### Components
+Enter the Nix development environment:
 
-- `protocol_core.qnt`: shared runtime utilities mirroring `ProtocolLifecycle`, `ProtocolInput`, `ProtocolEffect`, timers, evidence, typestate transitions.
-- Protocol lifecycles (`protocol_dkg.qnt`, `protocol_resharing.qnt`, `protocol_recovery.qnt`, `protocol_locking.qnt`, `protocol_counter.qnt`, `protocol_groups.qnt`, `protocol_sessions.qnt`, `protocol_sbb.qnt`, `protocol_journal.qnt`) capturing per-protocol state machines and effects.
-- Harness targets (`harness_dkg.qnt`, `harness_resharing.qnt`, `harness_recovery.qnt`, `harness_locking.qnt`, `harness_counter.qnt`, `harness_groups.qnt`) compose `protocol_core` with a specific lifecycle and expose helper actions (`register`, `complete`, `abort`, etc.) so the simulator can replay actual lifecycle steps using a single module entry point.
-- Bridge bindings (pending implementation) that translate Rust trace events into Quint action invocations.
+```bash
+nix develop
+```
 
-### Design Objectives
+Verify the Quint setup:
 
-1. **Trace Fidelity** – Every LocalSignal/transition emitted by Rust lifecycles must have an equivalent action. Specs should model successful and aborted completions, and capture the generated outputs/effects.
-2. **Effect Validation** – For each protocol, ensure emitted `ProtocolEffect`s match spec-defined expectations (e.g., counter reservations must produce `UpdateCounter`, group operations emit `Trace`).
-3. **Outcome Typing** – Define typed representations of results (commit payloads, reserved ranges) so specs verify final payloads.
-4. **Environment Constraints** – Tie effect_api updates, timers, evidence rehydration, and counter increments to invariants preventing invalid state (e.g., nonce uniqueness, active timers for non-final states).
-5. **Composable Harness** – Provide standard action entry points (`recordInput`, `advance`, `signalAbort`, etc.) to let the simulator forward real inputs to the specs.
-6. **Executable Specification** – When plugged into the simulator, the modules should allow `quint run/typecheck/verify` to act as an end-to-end specification runtime for any protocol built on `protocol-core`.
+```bash
+just verify-quint
+```
+
+Common Quint commands:
+
+```bash
+# Check syntax and types
+quint typecheck <spec>.qnt
+
+# Run the REPL
+quint repl <spec>.qnt
+
+# Generate random traces
+quint run <spec>.qnt
+
+# Verify properties with model checking (requires Apalache)
+quint verify <spec>.qnt
+```
+
+## Specification Structure
+
+### Protocol Specifications (12 specs)
+
+Core protocol state machines modeling Aura's distributed protocols:
+
+| Specification | Description | Documentation |
+|---------------|-------------|---------------|
+| `protocol_core.qnt` | Shared runtime utilities, protocol lifecycle, effects, timers | [System Architecture](../../docs/001_system_architecture.md) |
+| `protocol_dkg.qnt` | FROST Distributed Key Generation ceremony | [Crypto Guide](../../docs/116_crypto.md) |
+| `protocol_dkd.qnt` | Deterministic Key Derivation for context keys | [Crypto Guide](../../docs/116_crypto.md) |
+| `protocol_resharing.qnt` | Threshold key resharing protocol | [Crypto Guide](../../docs/116_crypto.md) |
+| `protocol_recovery.qnt` | Guardian-based recovery flows | [Relational Contexts](../../docs/103_relational_contexts.md) |
+| `protocol_locking.qnt` | Distributed locking protocol | - |
+| `protocol_counter.qnt` | Lamport clock counter coordination | - |
+| `protocol_groups.qnt` | Group membership management | [Social Architecture](../../docs/114_social_architecture.md) |
+| `protocol_sessions.qnt` | Session lifecycle and presence | [MPST Guide](../../docs/107_mpst_and_choreography.md) |
+| `protocol_sbb.qnt` | Social Bulletin Board gossip | [Rendezvous](../../docs/110_rendezvous.md) |
+| `protocol_journal.qnt` | CRDT journal operations | [Journal Guide](../../docs/102_journal.md) |
+| `protocol_signals.qnt` | Protocol signaling utilities | - |
+
+### Harness Modules (6 specs)
+
+Standard entry points for simulator integration:
+
+| Harness | Protocol | Entry Points |
+|---------|----------|--------------|
+| `harness_dkg.qnt` | DKG | `register`, `submitCommitment`, `complete`, `abort` |
+| `harness_resharing.qnt` | Resharing | `register`, `approve`, `moveToDistribution`, `complete`, `abort` |
+| `harness_recovery.qnt` | Recovery | `register`, `submitShare`, `complete`, `abort` |
+| `harness_locking.qnt` | Locking | `register`, `requestLock`, `complete`, `abort` |
+| `harness_counter.qnt` | Counter | `register`, `increment`, `complete`, `abort` |
+| `harness_groups.qnt` | Groups | `register`, `addMember`, `removeMember`, `complete`, `abort` |
+
+### Test Specifications
+
+Located in `crates/aura-simulator/tests/quint_specs/`:
+
+| Specification | Purpose |
+|---------------|---------|
+| `capability_properties.qnt` | Guard chain authorization, budget, and integrity verification |
+| `frost_protocol.qnt` | FROST threshold signature protocol model |
+| `dkd_minimal.qnt` | Minimal DKD protocol test |
+
+## Design Principles
+
+### Authority Model
+
+All specifications use the authority model with opaque identifiers:
+
+```quint
+type AuthorityId = str   // Opaque authority identifier
+type ContextId = str     // Relational context identifier
+type ProtocolId = str    // Protocol instance identifier
+```
+
+Specifications avoid exposing device-level details. Use `AuthorityId` instead of `DeviceId`.
+
+### Protocol Lifecycle
+
+Protocols follow a standard lifecycle with typestate transitions:
+
+```
+Initialized → Active → AwaitingEvidence → Completed
+                   ↘                    ↗
+                     → Failed/Cancelled
+```
+
+### Effect System
+
+Protocol actions emit effects that the simulator executes:
+
+```quint
+type ProtocolEffect =
+    | EffectSend           // P2P message
+    | EffectBroadcast      // Multi-party broadcast
+    | EffectAppendJournal  // Fact commitment
+    | EffectScheduleTimer  // Timer scheduling
+    | EffectCancelTimer    // Timer cancellation
+    | EffectTrace          // Debug tracing
+```
+
+## Verified Properties
+
+### Safety
+
+- **Guard Chain Order**: Operations follow CapGuard → FlowGuard → JournalCoupler → TransportSend
+- **Budget Invariants**: `spent ≤ limit` for all flow budgets
+- **Capability Attenuation**: Capabilities only narrow, never widen
+
+### Liveness
+
+- **Protocol Completion**: Honest threshold can complete any protocol
+- **Timeout Handling**: Sessions terminate within TTL
+
+### Security
+
+- **Threshold Security**: M-of-N signatures required for critical operations
+- **Session Isolation**: Compromised sessions don't affect others
+- **Counter Uniqueness**: No duplicate counter values
+
+## Integration with Simulator
+
+The `aura-simulator` crate provides generative testing integration:
+
+```
+Quint Spec (.qnt)
+      │
+      ▼ quint parse
+   JSON IR
+      │
+      ▼ ActionRegistry
+   Aura Effect Handlers
+      │
+      ▼ StateMapper
+   Property Evaluation
+```
+
+## Resources
+
+- [Quint Documentation](https://quint-lang.org/docs)
+- [Verification Guide](../../docs/807_verification_guide.md)
+- [Simulation Guide](../../docs/806_simulation_guide.md)
+- [Generative Testing Guide](../../docs/809_generative_testing_guide.md)
+- [System Architecture](../../docs/001_system_architecture.md)

@@ -309,14 +309,10 @@ impl JournalSyncProtocol {
                         peers_synced.push(peer);
 
                         // Update peer state to synced with current wall-clock time
-                        let sync_time =
-                            effects
-                                .physical_time()
-                                .await
-                                .unwrap_or_else(|_| PhysicalTime {
-                                    ts_ms: 0,
-                                    uncertainty: None,
-                                });
+                        let sync_time = effects.physical_time().await.unwrap_or(PhysicalTime {
+                            ts_ms: 0,
+                            uncertainty: None,
+                        });
                         self.peer_states.insert(
                             peer,
                             SyncState::Synced {
@@ -335,14 +331,10 @@ impl JournalSyncProtocol {
                         peers_failed.push(peer);
 
                         // Update peer state to failed with current wall-clock time
-                        let failed_time =
-                            effects
-                                .physical_time()
-                                .await
-                                .unwrap_or_else(|_| PhysicalTime {
-                                    ts_ms: 0,
-                                    uncertainty: None,
-                                });
+                        let failed_time = effects.physical_time().await.unwrap_or(PhysicalTime {
+                            ts_ms: 0,
+                            uncertainty: None,
+                        });
                         self.peer_states.insert(
                             peer,
                             SyncState::Failed {

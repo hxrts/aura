@@ -954,10 +954,11 @@ mod frost_tests {
     }
 
     #[tokio::test]
-    async fn test_frost_key_package_roundtrip() {
+    async fn test_frost_key_package_roundtrip() -> Result<(), Box<dyn std::error::Error>> {
         use frost_ed25519 as frost;
         use rand::SeedableRng;
         use rand_chacha::ChaCha20Rng;
+        use std::io;
 
         // Generate keys directly
         let seed = [0xA5u8; 32];
@@ -969,27 +970,21 @@ mod frost_tests {
             2, // threshold
             frost::keys::IdentifierList::Default,
             rng,
-        )
-        .expect("Key generation should succeed");
+        )?;
 
         // Convert SecretShare to KeyPackage (this verifies the share)
         let secret_share = secret_shares
             .values()
             .next()
-            .expect("Should have at least one share");
-        let key_package: frost::keys::KeyPackage = secret_share
-            .clone()
-            .try_into()
-            .expect("SecretShare to KeyPackage conversion should succeed");
+            .ok_or_else(|| io::Error::other("no secret shares"))?;
+        let key_package: frost::keys::KeyPackage = secret_share.clone().try_into()?;
         println!(
             "Original key package identifier: {:?}",
             key_package.identifier()
         );
 
         // Serialize using FROST's native serialize() method (uses postcard internally)
-        let serialized: Vec<u8> = key_package
-            .serialize()
-            .expect("Serialization should succeed");
+        let serialized: Vec<u8> = key_package.serialize()?;
         println!("Serialized length: {} bytes", serialized.len());
         println!(
             "First 32 bytes: {:02x?}",
@@ -998,8 +993,7 @@ mod frost_tests {
 
         // Deserialize using FROST's native deserialize() method
         let deserialized: frost::keys::KeyPackage =
-            frost::keys::KeyPackage::deserialize(&serialized)
-                .expect("Deserialization should succeed");
+            frost::keys::KeyPackage::deserialize(&serialized)?;
         println!(
             "Deserialized key package identifier: {:?}",
             deserialized.identifier()
@@ -1007,5 +1001,6 @@ mod frost_tests {
 
         // Verify they match
         assert_eq!(key_package.identifier(), deserialized.identifier());
+        Ok(())
     }
 }

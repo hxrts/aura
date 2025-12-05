@@ -634,7 +634,20 @@ impl DkdProtocol {
         Ok(derived_key)
     }
 
-    /// Verify the key derivation using FROST threshold signatures
+    /// Verify the key derivation and create an HMAC-based verification proof.
+    ///
+    /// This creates a deterministic verification proof that can be checked by
+    /// any participant who knows the derived key. The proof binds together:
+    /// - The derived key
+    /// - The session ID
+    /// - The contribution count
+    /// - All participant commitments
+    ///
+    /// # Note on Threshold Signing
+    ///
+    /// For stronger verification using threshold signatures (FROST), call
+    /// `verify_derivation_with_threshold()` which requires an authority with
+    /// established FROST keys via `ThresholdSigningEffects`.
     async fn verify_derivation<E>(
         &self,
         effects: &E,
@@ -647,38 +660,114 @@ impl DkdProtocol {
     {
         tracing::debug!(session_id = ?session_id, "Verifying key derivation");
 
-        // Create verification message (derived key + session info)
+        // Create verification message binding all session components
         let mut verification_message = Vec::new();
+        verification_message.extend_from_slice(b"DKD_VERIFICATION_V1:");
         verification_message.extend_from_slice(derived_key);
         verification_message.extend_from_slice(session_id.0.as_bytes());
         verification_message.extend_from_slice(&(contributions.len() as u32).to_le_bytes());
 
-        // For this implementation, create a simple verification proof
-        // In a full FROST implementation, this would involve threshold signature aggregation
+        // Include all participant commitments in the verification
+        for contribution in contributions {
+            verification_message.extend_from_slice(&contribution.commitment.0);
+        }
 
-        // Generate mock FROST threshold keys for verification
-        let frost_keys = effects
-            .frost_generate_keys(self.config.threshold, self.config.total_participants)
-            .await
-            .map_err(|e| DkdError::CryptographicFailure {
-                reason: e.to_string(),
-            })?;
-
-        // Create a verification signature using the group key
+        // Create keyed hash verification proof using HKDF
+        // This proves knowledge of the derived key and correct contribution binding
         let verification_proof = effects
-            .ed25519_sign(&verification_message, &frost_keys.public_key_package)
+            .hkdf_derive(
+                derived_key,
+                &verification_message,
+                b"dkd_verification_proof",
+                32,
+            )
             .await
             .map_err(|e| DkdError::CryptographicFailure {
-                reason: e.to_string(),
+                reason: format!("HKDF verification failed: {}", e),
             })?;
 
         tracing::debug!(
             session_id = ?session_id,
             proof_size = verification_proof.len(),
-            "Verification proof generated"
+            contributions_count = contributions.len(),
+            "HMAC verification proof generated"
         );
 
         Ok(verification_proof)
+    }
+
+    /// Verify the key derivation using threshold signatures (FROST).
+    ///
+    /// This creates a cryptographic proof using the authority's threshold signing
+    /// capabilities. Use this when the authority already has established FROST keys.
+    ///
+    /// # Arguments
+    /// - `effects`: Effects system implementing `ThresholdSigningEffects`
+    /// - `authority_id`: The authority whose FROST keys will sign the verification
+    /// - `session_id`: The DKD session identifier
+    /// - `derived_key`: The derived key to verify
+    /// - `contributions`: All participant contributions
+    ///
+    /// # Returns
+    /// A threshold signature over the verification message.
+    pub async fn verify_derivation_with_threshold<E>(
+        &self,
+        effects: &E,
+        authority_id: aura_core::AuthorityId,
+        session_id: &DkdSessionId,
+        derived_key: &[u8; 32],
+        contributions: &[ParticipantContribution],
+    ) -> Result<aura_core::threshold::ThresholdSignature, DkdError>
+    where
+        E: aura_core::effects::ThresholdSigningEffects + Send + Sync,
+    {
+        use aura_core::threshold::{ApprovalContext, SignableOperation, SigningContext};
+
+        tracing::debug!(
+            session_id = ?session_id,
+            ?authority_id,
+            "Verifying key derivation with threshold signature"
+        );
+
+        // Create verification message binding all session components
+        let mut verification_payload = Vec::new();
+        verification_payload.extend_from_slice(b"DKD_THRESHOLD_VERIFICATION_V1:");
+        verification_payload.extend_from_slice(derived_key);
+        verification_payload.extend_from_slice(session_id.0.as_bytes());
+        verification_payload.extend_from_slice(&(contributions.len() as u32).to_le_bytes());
+
+        // Include all participant commitments
+        for contribution in contributions {
+            verification_payload.extend_from_slice(&contribution.commitment.0);
+        }
+
+        // Create signing context for DKD verification
+        let signing_context = SigningContext {
+            authority: authority_id,
+            operation: SignableOperation::Message {
+                domain: "dkd_verification".to_string(),
+                payload: verification_payload,
+            },
+            approval_context: ApprovalContext::SelfOperation,
+        };
+
+        // Sign using threshold signing service
+        let signature =
+            effects
+                .sign(signing_context)
+                .await
+                .map_err(|e| DkdError::CryptographicFailure {
+                    reason: format!("Threshold signing failed: {}", e),
+                })?;
+
+        tracing::info!(
+            session_id = ?session_id,
+            ?authority_id,
+            signer_count = signature.signer_count,
+            "DKD threshold verification signature generated"
+        );
+
+        Ok(signature)
     }
 
     /// Validate a participant's contribution

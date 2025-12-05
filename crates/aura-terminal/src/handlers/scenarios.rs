@@ -9,8 +9,8 @@ use std::time::Instant;
 use crate::handlers::HandlerContext;
 use crate::ScenarioAction;
 use anyhow::Result;
-// Import from aura-app which re-exports agent types
-use aura_app::AgentConfig;
+// Import agent types from aura-agent (runtime layer)
+use aura_agent::AgentConfig;
 use aura_authenticate::{RecoveryContext, RecoveryOperationType};
 use aura_core::effects::{ConsoleEffects, StorageEffects};
 use aura_recovery::guardian_setup::GuardianSetupCoordinator;

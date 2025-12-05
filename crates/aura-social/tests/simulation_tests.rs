@@ -16,7 +16,6 @@ use aura_journal::facts::social::{
 use aura_social::{
     Block, DiscoveryLayer, Neighborhood, ReachabilityChecker, RelayCandidateBuilder, SocialTopology,
 };
-use std::collections::HashSet;
 
 // ============================================================================
 // Test Helpers
@@ -128,47 +127,6 @@ fn create_fully_connected_neighborhood(
     Neighborhood::from_facts(&neighborhood_fact, &member_facts, &adjacency_facts)
 }
 
-// ============================================================================
-// Reachability Implementations for Simulation
-// ============================================================================
-
-/// Simulates reachability based on a set of reachable peers
-struct SimulatedReachability {
-    reachable_peers: HashSet<AuthorityId>,
-}
-
-impl SimulatedReachability {
-    fn new(reachable: Vec<AuthorityId>) -> Self {
-        Self {
-            reachable_peers: reachable.into_iter().collect(),
-        }
-    }
-
-    fn all_reachable() -> Self {
-        Self {
-            reachable_peers: HashSet::new(), // Will always return true
-        }
-    }
-
-    fn none_reachable() -> Self {
-        Self {
-            reachable_peers: HashSet::new(), // Special case
-        }
-    }
-
-    fn is_all_mode(&self) -> bool {
-        // Dummy marker - in real use we'd track this differently
-        false
-    }
-}
-
-impl ReachabilityChecker for SimulatedReachability {
-    fn is_reachable(&self, peer: &AuthorityId) -> bool {
-        // If no specific peers set, assume all are reachable
-        self.reachable_peers.is_empty() || self.reachable_peers.contains(peer)
-    }
-}
-
 /// Always reachable implementation
 struct AlwaysReachable;
 impl ReachabilityChecker for AlwaysReachable {
@@ -187,7 +145,7 @@ impl ReachabilityChecker for NeverReachable {
 
 /// Partial reachability - only specified peers are reachable
 struct PartialReachability {
-    reachable: HashSet<AuthorityId>,
+    reachable: std::collections::HashSet<AuthorityId>,
 }
 
 impl PartialReachability {
@@ -302,7 +260,8 @@ fn test_partial_block_partition() {
     let topology = SocialTopology::new(steward, Some(block), vec![]);
 
     // Only first two peers are reachable
-    let reachable_peers: HashSet<AuthorityId> = residents[1..=2].iter().copied().collect();
+    let reachable_peers: std::collections::HashSet<AuthorityId> =
+        residents[1..=2].iter().copied().collect();
     let reachability = PartialReachability::new(reachable_peers.iter().copied());
 
     // Build candidates
@@ -353,7 +312,7 @@ fn test_complete_block_partition() {
 #[test]
 fn test_guardian_fallback_during_partition() {
     // Test that guardians can be used when block peers are unreachable
-    let (block, steward, residents) = create_block(1, 3);
+    let (block, steward, _residents) = create_block(1, 3);
     let mut topology = SocialTopology::new(steward, Some(block), vec![]);
 
     let guardian = test_authority(88);
@@ -405,7 +364,7 @@ fn test_discovery_layer_cost_progression() {
 
 #[test]
 fn test_progressive_social_presence_loss() {
-    let (block, steward, residents) = create_block(1, 3);
+    let (block, steward, _residents) = create_block(1, 3);
 
     // Full social presence
     let topology_full = SocialTopology::new(steward, Some(block.clone()), vec![]);
@@ -454,15 +413,15 @@ fn test_deterministic_topology_construction() {
     );
 
     // Block peers should be the same
-    let peers_a: HashSet<_> = topology_a.block_peers().into_iter().collect();
-    let peers_b: HashSet<_> = topology_b.block_peers().into_iter().collect();
+    let peers_a: std::collections::HashSet<_> = topology_a.block_peers().into_iter().collect();
+    let peers_b: std::collections::HashSet<_> = topology_b.block_peers().into_iter().collect();
     assert_eq!(peers_a, peers_b);
 }
 
 #[test]
 fn test_deterministic_neighborhood_adjacency() {
     // Verify that neighborhood adjacency is deterministic
-    let block_ids: Vec<BlockId> = (1..=4).map(|i| test_block_id(i)).collect();
+    let block_ids: Vec<BlockId> = (1..=4).map(test_block_id).collect();
 
     let neighborhood_a = create_neighborhood(1, block_ids.clone());
     let neighborhood_b = create_neighborhood(1, block_ids.clone());
@@ -559,7 +518,7 @@ fn test_isolated_node_behavior() {
     assert!(topology.block_peers().is_empty());
 
     // All unknown targets require rendezvous
-    let targets: Vec<_> = (2..=10).map(|i| test_authority(i)).collect();
+    let targets: Vec<_> = (2..=10).map(test_authority).collect();
     for target in targets {
         assert_eq!(
             topology.discovery_layer(&target),

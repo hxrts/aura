@@ -82,10 +82,16 @@ name = "app-host"
 path = "src/bin/app_host.rs"
 required-features = ["host"]
 
+# =============================================================================
+# Dependencies
+# =============================================================================
+# Architecture note: This crate is PURE - no runtime layer dependencies.
+# The agent layer depends on this crate (dependency inversion pattern).
+# Frontends import app types from here, runtime types from the agent layer.
+
 [dependencies]
 # Core Aura crates
 aura-core = { path = "../aura-core" }
-aura-agent = { path = "../aura-agent" }
 aura-journal = { path = "../aura-journal" }
 aura-wot = { path = "../aura-wot" }
 

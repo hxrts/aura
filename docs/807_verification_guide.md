@@ -228,6 +228,140 @@ just quint-parse crates/aura-simulator/tests/quint_specs/capability_properties.q
 
 The specification models the guard chain state machine with actions for context initialization, authority creation, transport operations, and capability attenuation. The `step` relation explores the state space through non-deterministic choices.
 
+### Quint Syntax Patterns (v0.25.x)
+
+Quint 0.25.x has specific syntax requirements. The following patterns avoid common errors.
+
+#### Type Definitions
+
+Type imports don't work in Quint. Define types locally in each module:
+
+```quint
+// ❌ WRONG: Type imports fail
+import protocol_core as core from "protocol_core"
+type MyId = core.AuthorityId  // Error: types can't be imported
+
+// ✅ CORRECT: Define types locally
+type AuthorityId = str
+type ContextId = str
+type ProtocolId = str
+```
+
+#### Reserved Keywords
+
+These identifiers are reserved and cannot be used as variable or parameter names:
+
+| Reserved | Use Instead |
+|----------|-------------|
+| `from` | `sender`, `source`, `origin` |
+| `to` | `recipient`, `target`, `destination` |
+| `next` | `targetState`, `successor`, `nextState` |
+| `fail` | `failProtocol`, `failX`, `abort` |
+
+#### Conditional Expressions
+
+Quint uses `if (cond) expr1 else expr2` without `then`:
+
+```quint
+// ❌ WRONG: Using 'then'
+val result = if x > 0 then "positive" else "non-positive"
+
+// ✅ CORRECT: No 'then' keyword
+val result = if (x > 0) "positive" else "non-positive"
+```
+
+#### Val Bindings in Actions
+
+Val bindings must be declared before `all {}` blocks:
+
+```quint
+// ❌ WRONG: Val inside all block
+action myAction(pid: ProtocolId): bool = all {
+  val phase = phases.get(pid)  // Error
+  phase == Active,
+  // ...
+}
+
+// ✅ CORRECT: Val before all block
+action myAction(pid: ProtocolId): bool = {
+  val phase = if (pid.in(phases.keys())) phases.get(pid) else Idle
+  all {
+    phase == Active,
+    // ...
+  }
+}
+```
+
+#### Sum Type Variants
+
+Sum type variant names must be globally unique within a module:
+
+```quint
+// ❌ WRONG: Conflicting variant names
+type Phase = Active | Pending | Completed | Failed
+type Lifecycle = Pending | Completed | Aborted  // Error: Pending, Completed conflict
+
+// ✅ CORRECT: Unique variant names
+type Phase = PhaseActive | PhasePending | PhaseCompleted | PhaseFailed
+type Lifecycle = LifecyclePending | LifecycleCompleted | LifecycleAborted
+```
+
+#### Map Operations
+
+Maps don't have `values()`. Use `keys()` iteration:
+
+```quint
+// ❌ WRONG: values() doesn't exist
+val allValid = myMap.values().forall(v => v > 0)
+
+// ✅ CORRECT: Iterate via keys
+val allValid = myMap.keys().forall(k => myMap.get(k) > 0)
+```
+
+#### Set Operations with forall/exists
+
+`forall` and `exists` only work on Sets, not Lists:
+
+```quint
+// ❌ WRONG: forall on List
+val myList: List[int] = [1, 2, 3]
+val allPositive = myList.forall(x => x > 0)  // Error
+
+// ✅ CORRECT: Use foldl for Lists
+val allPositive = myList.foldl(true, (acc, x) => acc and x > 0)
+
+// ✅ CORRECT: forall on Sets
+val mySet: Set[int] = Set(1, 2, 3)
+val allPositive = mySet.forall(x => x > 0)
+```
+
+#### String Operations
+
+Strings don't have `length()`. Use comparison for non-empty checks:
+
+```quint
+// ❌ WRONG: No length method
+val isValid = label.length() > 0
+
+// ✅ CORRECT: Compare with empty string
+val isValid = label != ""
+```
+
+#### Module Imports for Actions
+
+Import modules and use `::` for action calls:
+
+```quint
+// Import module
+import protocol_dkg from "./protocol_dkg"
+
+// Call actions with module prefix
+action register(pid: ProtocolId, members: Set[AuthorityId]): bool = all {
+  protocol_dkg::configureDkg(pid, members, 2),
+  // ...
+}
+```
+
 ### Simulator Integration
 
 The `aura-simulator::quint` module provides property evaluation during simulation.

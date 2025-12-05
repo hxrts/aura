@@ -19,6 +19,7 @@ use aura_core::{
 };
 use aura_effects::{
     crypto::RealCryptoHandler,
+    secure::RealSecureStorageHandler,
     storage::FilesystemStorageHandler,
     time::{LogicalClockHandler, OrderClockHandler, PhysicalTimeHandler},
 };
@@ -127,6 +128,8 @@ pub struct AuraEffectSystem {
     transport_inbox: Arc<RwLock<Vec<TransportEnvelope>>>,
     transport_stats: Arc<RwLock<TransportStats>>,
     fact_registry: Arc<FactRegistry>,
+    /// Secure storage for cryptographic key material (FROST keys, device keys)
+    secure_storage_handler: RealSecureStorageHandler,
     /// Test mode flag to bypass authorization guards
     test_mode: bool,
 }
@@ -191,6 +194,7 @@ impl AuraEffectSystem {
         let transport_handler = aura_effects::transport::RealTransportHandler::default();
         let transport_inbox = Arc::new(RwLock::new(Vec::new()));
         let transport_stats = Arc::new(RwLock::new(TransportStats::default()));
+        let secure_storage_handler = RealSecureStorageHandler::default();
 
         Self {
             config,
@@ -212,6 +216,7 @@ impl AuraEffectSystem {
             transport_inbox,
             transport_stats,
             fact_registry: Arc::new(build_fact_registry()),
+            secure_storage_handler,
             test_mode,
         }
     }
@@ -953,6 +958,246 @@ impl StorageEffects for AuraEffectSystem {
 
     async fn stats(&self) -> Result<StorageStats, StorageError> {
         self.storage_handler.stats().await
+    }
+}
+
+// Implementation of SecureStorageEffects
+#[async_trait]
+impl SecureStorageEffects for AuraEffectSystem {
+    async fn secure_store(
+        &self,
+        location: &SecureStorageLocation,
+        key: &[u8],
+        caps: &[SecureStorageCapability],
+    ) -> Result<(), SecureStorageError> {
+        self.secure_storage_handler
+            .secure_store(location, key, caps)
+            .await
+    }
+
+    async fn secure_retrieve(
+        &self,
+        location: &SecureStorageLocation,
+        caps: &[SecureStorageCapability],
+    ) -> Result<Vec<u8>, SecureStorageError> {
+        self.secure_storage_handler
+            .secure_retrieve(location, caps)
+            .await
+    }
+
+    async fn secure_delete(
+        &self,
+        location: &SecureStorageLocation,
+        caps: &[SecureStorageCapability],
+    ) -> Result<(), SecureStorageError> {
+        self.secure_storage_handler
+            .secure_delete(location, caps)
+            .await
+    }
+
+    async fn secure_exists(
+        &self,
+        location: &SecureStorageLocation,
+    ) -> Result<bool, SecureStorageError> {
+        self.secure_storage_handler.secure_exists(location).await
+    }
+
+    async fn secure_list_keys(
+        &self,
+        namespace: &str,
+        caps: &[SecureStorageCapability],
+    ) -> Result<Vec<String>, SecureStorageError> {
+        self.secure_storage_handler
+            .secure_list_keys(namespace, caps)
+            .await
+    }
+
+    async fn secure_generate_key(
+        &self,
+        location: &SecureStorageLocation,
+        context: &str,
+        caps: &[SecureStorageCapability],
+    ) -> Result<Option<Vec<u8>>, SecureStorageError> {
+        self.secure_storage_handler
+            .secure_generate_key(location, context, caps)
+            .await
+    }
+
+    async fn secure_create_time_bound_token(
+        &self,
+        location: &SecureStorageLocation,
+        caps: &[SecureStorageCapability],
+        expires_at: &aura_core::time::PhysicalTime,
+    ) -> Result<Vec<u8>, SecureStorageError> {
+        self.secure_storage_handler
+            .secure_create_time_bound_token(location, caps, expires_at)
+            .await
+    }
+
+    async fn secure_access_with_token(
+        &self,
+        token: &[u8],
+        location: &SecureStorageLocation,
+    ) -> Result<Vec<u8>, SecureStorageError> {
+        self.secure_storage_handler
+            .secure_access_with_token(token, location)
+            .await
+    }
+
+    async fn get_device_attestation(&self) -> Result<Vec<u8>, SecureStorageError> {
+        self.secure_storage_handler.get_device_attestation().await
+    }
+
+    async fn is_secure_storage_available(&self) -> bool {
+        self.secure_storage_handler
+            .is_secure_storage_available()
+            .await
+    }
+
+    fn get_secure_storage_capabilities(&self) -> Vec<String> {
+        self.secure_storage_handler
+            .get_secure_storage_capabilities()
+    }
+}
+
+// Implementation of ThresholdSigningEffects
+#[async_trait]
+impl aura_core::effects::ThresholdSigningEffects for AuraEffectSystem {
+    async fn bootstrap_authority(&self, authority: &AuthorityId) -> Result<Vec<u8>, AuraError> {
+        // Generate 1-of-1 FROST keys
+        let frost_keys = self.crypto_handler.frost_generate_keys(1, 1).await?;
+
+        // Store key package in secure storage
+        let location = SecureStorageLocation::with_sub_key(
+            "frost_keys",
+            format!("{}/0", authority), // epoch 0
+            "1",                        // signer index 1
+        );
+        let caps = vec![SecureStorageCapability::Write];
+        self.secure_storage_handler
+            .secure_store(&location, &frost_keys.key_packages[0], &caps)
+            .await?;
+
+        // Store public key package
+        let pub_location =
+            SecureStorageLocation::new("frost_public_keys", format!("{}/0", authority));
+        self.secure_storage_handler
+            .secure_store(&pub_location, &frost_keys.public_key_package, &caps)
+            .await?;
+
+        Ok(frost_keys.public_key_package)
+    }
+
+    async fn sign(
+        &self,
+        context: aura_core::threshold::SigningContext,
+    ) -> Result<aura_core::threshold::ThresholdSignature, AuraError> {
+        // Serialize the operation for signing
+        let message = serde_json::to_vec(&context.operation)
+            .map_err(|e| AuraError::internal(format!("Failed to serialize operation: {}", e)))?;
+
+        // Load key package from secure storage
+        // Default to epoch 0 for now - proper epoch tracking would require additional state
+        let location = SecureStorageLocation::with_sub_key(
+            "frost_keys",
+            format!("{}/0", context.authority),
+            "1",
+        );
+        let caps = vec![SecureStorageCapability::Read];
+        let key_package = self
+            .secure_storage_handler
+            .secure_retrieve(&location, &caps)
+            .await?;
+
+        // Load public key package
+        let pub_location =
+            SecureStorageLocation::new("frost_public_keys", format!("{}/0", context.authority));
+        let public_key_package = self
+            .secure_storage_handler
+            .secure_retrieve(&pub_location, &caps)
+            .await
+            .unwrap_or_else(|_| vec![0u8; 32]); // Fallback for bootstrapped authorities
+
+        // Generate nonces
+        let nonces = self
+            .crypto_handler
+            .frost_generate_nonces(&key_package)
+            .await
+            .map_err(|e| AuraError::internal(format!("Nonce generation failed: {}", e)))?;
+
+        // Create signing package (single participant)
+        let participants = vec![1u16];
+        let signing_package = self
+            .crypto_handler
+            .frost_create_signing_package(
+                &message,
+                std::slice::from_ref(&nonces),
+                &participants,
+                &public_key_package,
+            )
+            .await
+            .map_err(|e| AuraError::internal(format!("Signing package creation failed: {}", e)))?;
+
+        // Sign
+        let share = self
+            .crypto_handler
+            .frost_sign_share(&signing_package, &key_package, &nonces)
+            .await
+            .map_err(|e| AuraError::internal(format!("Signature share creation failed: {}", e)))?;
+
+        // Aggregate (trivial for single signer)
+        let signature = self
+            .crypto_handler
+            .frost_aggregate_signatures(&signing_package, &[share])
+            .await
+            .map_err(|e| AuraError::internal(format!("Signature aggregation failed: {}", e)))?;
+
+        Ok(aura_core::threshold::ThresholdSignature::single_signer(
+            signature,
+            public_key_package,
+            0, // epoch
+        ))
+    }
+
+    async fn threshold_config(
+        &self,
+        authority: &AuthorityId,
+    ) -> Option<aura_core::threshold::ThresholdConfig> {
+        // Check if we have keys for this authority
+        let location =
+            SecureStorageLocation::with_sub_key("frost_keys", format!("{}/0", authority), "1");
+        if self
+            .secure_storage_handler
+            .secure_exists(&location)
+            .await
+            .unwrap_or(false)
+        {
+            // Return default 1-of-1 config - proper config tracking would require state
+            Some(aura_core::threshold::ThresholdConfig {
+                threshold: 1,
+                total_participants: 1,
+            })
+        } else {
+            None
+        }
+    }
+
+    async fn has_signing_capability(&self, authority: &AuthorityId) -> bool {
+        let location =
+            SecureStorageLocation::with_sub_key("frost_keys", format!("{}/0", authority), "1");
+        self.secure_storage_handler
+            .secure_exists(&location)
+            .await
+            .unwrap_or(false)
+    }
+
+    async fn public_key_package(&self, authority: &AuthorityId) -> Option<Vec<u8>> {
+        let location = SecureStorageLocation::new("frost_public_keys", format!("{}/0", authority));
+        let caps = vec![SecureStorageCapability::Read];
+        self.secure_storage_handler
+            .secure_retrieve(&location, &caps)
+            .await
+            .ok()
     }
 }
 

@@ -1,12 +1,15 @@
 module protocol_journal {
-  import protocol_core as core from "protocol_core"
-
+  // Base types
+  type Option[a] = Some(a) | None
   type AccountId = str
-  type DeviceId = core.DeviceId
+  type AuthorityId = str  // renamed from DeviceId
   type EventId = str
-  type SessionId = core.SessionId
+  type SessionId = str
 
-  type EventAuthorization = Threshold | Device(DeviceId) | Guardian(DeviceId)
+  type EventAuthorization =
+    | AuthThreshold
+    | AuthDevice(AuthorityId)
+    | AuthGuardian(AuthorityId)
 
   type EventRecord = {
     id: EventId,
@@ -21,48 +24,63 @@ module protocol_journal {
 
   type LedgerState = {
     account: AccountId,
-    devices: Set[DeviceId],
-    guardians: Set[DeviceId],
+    authorities: Set[AuthorityId],
+    guardians: Set[AuthorityId],
     sessionEpoch: int,
     lamport: int,
-    cooldowns: Map[SessionId, int]
+    cooldowns: SessionId -> int
   }
 
-  var effect_apis: AccountId -> LedgerState
+  // Lifecycle status with unique names
+  type JournalStatus = JournalPending | JournalCompleted
+
+  var ledgerStates: AccountId -> LedgerState
   var events: AccountId -> List[EventRecord]
   var usedNonces: AccountId -> Set[int]
-  var lifecycleStatus: LifecycleStatus
+  var lifecycleStatus: JournalStatus
 
-  type LifecycleStatus = Pending | Completed
+  // ============ HELPERS ============
 
-  pure def getOrDefault[K, V](m: K -> V, key: K, default: V): V =
-    if key.in(m.keys()) then m.get(key) else default
+  pure def getOrDefaultLedger(m: AccountId -> LedgerState, key: AccountId): Option[LedgerState] =
+    if (key.in(m.keys())) Some(m.get(key)) else None
 
-  pure def appendEvent(list: List[EventRecord], event: EventRecord): List[EventRecord] =
-    list.append(event)
+  pure def getOrDefaultNonces(m: AccountId -> Set[int], key: AccountId): Set[int] =
+    if (key.in(m.keys())) m.get(key) else Set()
 
-  pure def validateNonce(account: AccountId, nonce: int): bool =
-    not nonce.in(getOrDefault(usedNonces, account, Set()))
+  pure def getOrDefaultEvents(m: AccountId -> List[EventRecord], key: AccountId): List[EventRecord] =
+    if (key.in(m.keys())) m.get(key) else List()
+
+  pure def validateNonce(account: AccountId, nonce: int, nonces: AccountId -> Set[int]): bool =
+    not(nonce.in(getOrDefaultNonces(nonces, account)))
+
+  pure def lastEventId(eventList: List[EventRecord]): Option[EventId] =
+    if (eventList.length() == 0) None
+    else Some(eventList[eventList.length() - 1].id)
+
+  // ============ INITIALISATION ============
 
   action init: bool = all {
-    effect_apis' = Map(),
+    ledgerStates' = Map(),
     events' = Map(),
     usedNonces' = Map(),
-    lifecycleStatus' = Pending
+    lifecycleStatus' = JournalPending
   }
 
-  action createAccount(account: AccountId, device: DeviceId, guardian: DeviceId): bool = all {
-    not account.in(effect_apis.keys()),
-    effect_apis' = effect_apis.set(account, {
+  // ============ ACTIONS ============
+
+  action createAccount(account: AccountId, authority: AuthorityId, guardian: AuthorityId): bool = all {
+    not(account.in(ledgerStates.keys())),
+    ledgerStates' = ledgerStates.set(account, {
       account: account,
-      devices: Set(device),
+      authorities: Set(authority),
       guardians: Set(guardian),
       sessionEpoch: 0,
       lamport: 0,
       cooldowns: Map()
     }),
     events' = events.set(account, List()),
-    usedNonces' = usedNonces.set(account, Set())
+    usedNonces' = usedNonces.set(account, Set()),
+    lifecycleStatus' = lifecycleStatus
   }
 
   action appendLedgerEvent(
@@ -71,94 +89,177 @@ module protocol_journal {
     nonce: int,
     eventType: str,
     auth: EventAuthorization
-  ): bool =
-    val effect_api = effect_apis.get(account) {
-      account.in(effect_apis.keys()) and
-      validateNonce(account, nonce) {
-        val newEvent = {
-          id: eventId,
-          account: account,
-          timestamp: effect_api.lamport + 1,
-          nonce: nonce,
-          parent: events.get(account).lastOption().map(ev => ev.id),
-          epoch: effect_api.sessionEpoch,
-          eventType: eventType,
-          authorization: auth
-        }
-        effect_apis' = effect_apis.set(account, {
-          ...effect_api,
-          lamport: effect_api.lamport + 1
-        }),
-        events' = events.set(account, appendEvent(events.get(account), newEvent)),
-        usedNonces' = usedNonces.set(account, getOrDefault(usedNonces, account, Set()).union(Set(nonce)))
-      }
+  ): bool = {
+    val ledgerOpt = getOrDefaultLedger(ledgerStates, account)
+    val hasLedger = match ledgerOpt { | Some(_) => true | None => false }
+    val ledger = match ledgerOpt {
+      | Some(l) => l
+      | None => { account: "", authorities: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
     }
-
-  action addDevice(account: AccountId, device: DeviceId, nonce: int): bool =
-    val effect_api = effect_apis.get(account) {
-      not effect_api.devices.contains(device) and
-      appendLedgerEvent(account, "AddDevice", nonce, "AddDevice", Threshold) {
-        effect_apis' = effect_apis.set(account, {
-          ...effect_api,
-          devices: effect_api.devices.union(Set(device))
-        }),
-        events' = events,
-        usedNonces' = usedNonces
-      }
+    val validNonce = validateNonce(account, nonce, usedNonces)
+    val parentId = lastEventId(getOrDefaultEvents(events, account))
+    val newEvent = {
+      id: eventId,
+      account: account,
+      timestamp: ledger.lamport + 1,
+      nonce: nonce,
+      parent: parentId,
+      epoch: ledger.sessionEpoch,
+      eventType: eventType,
+      authorization: auth
     }
-
-  action removeDevice(account: AccountId, device: DeviceId, nonce: int): bool =
-    val effect_api = effect_apis.get(account) {
-      device.in(effect_api.devices) and
-      appendLedgerEvent(account, "RemoveDevice", nonce, "RemoveDevice", Threshold) {
-        effect_apis' = effect_apis.set(account, {
-          ...effect_api,
-          devices: effect_api.devices.filter(d => d != device)
-        }),
-        events' = events,
-        usedNonces' = usedNonces
-      }
+    all {
+      hasLedger,
+      validNonce,
+      ledgerStates' = ledgerStates.set(account, {
+        ...ledger,
+        lamport: ledger.lamport + 1
+      }),
+      events' = events.set(account, getOrDefaultEvents(events, account).append(newEvent)),
+      usedNonces' = usedNonces.set(account, getOrDefaultNonces(usedNonces, account).union(Set(nonce))),
+      lifecycleStatus' = lifecycleStatus
     }
+  }
 
-  action bumpSessionEpoch(account: AccountId, nonce: int): bool =
-    val effect_api = effect_apis.get(account) {
-      appendLedgerEvent(account, "SessionEpochBump", nonce, "SessionEpochBump", Threshold) {
-        effect_apis' = effect_apis.set(account, {
-          ...effect_api,
-          sessionEpoch: effect_api.sessionEpoch + 1
-        }),
-        events' = events,
-        usedNonces' = usedNonces
-      }
+  action addAuthority(account: AccountId, authority: AuthorityId, nonce: int): bool = {
+    val ledgerOpt = getOrDefaultLedger(ledgerStates, account)
+    val hasLedger = match ledgerOpt { | Some(_) => true | None => false }
+    val ledger = match ledgerOpt {
+      | Some(l) => l
+      | None => { account: "", authorities: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
     }
+    val notPresent = not(ledger.authorities.contains(authority))
+    val validNonce = validateNonce(account, nonce, usedNonces)
+    val parentId = lastEventId(getOrDefaultEvents(events, account))
+    val newEvent = {
+      id: "AddAuthority",
+      account: account,
+      timestamp: ledger.lamport + 1,
+      nonce: nonce,
+      parent: parentId,
+      epoch: ledger.sessionEpoch,
+      eventType: "AddAuthority",
+      authorization: AuthThreshold
+    }
+    all {
+      hasLedger,
+      notPresent,
+      validNonce,
+      ledgerStates' = ledgerStates.set(account, {
+        ...ledger,
+        lamport: ledger.lamport + 1,
+        authorities: ledger.authorities.union(Set(authority))
+      }),
+      events' = events.set(account, getOrDefaultEvents(events, account).append(newEvent)),
+      usedNonces' = usedNonces.set(account, getOrDefaultNonces(usedNonces, account).union(Set(nonce))),
+      lifecycleStatus' = lifecycleStatus
+    }
+  }
 
-  action signalFinalize: bool = all {
-    lifecycleStatus = Pending,
-    lifecycleStatus' = Completed,
-    effect_apis' = effect_apis,
-    events' = events,
-    usedNonces' = usedNonces
+  action removeAuthority(account: AccountId, authority: AuthorityId, nonce: int): bool = {
+    val ledgerOpt = getOrDefaultLedger(ledgerStates, account)
+    val hasLedger = match ledgerOpt { | Some(_) => true | None => false }
+    val ledger = match ledgerOpt {
+      | Some(l) => l
+      | None => { account: "", authorities: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
+    }
+    val isPresent = ledger.authorities.contains(authority)
+    val validNonce = validateNonce(account, nonce, usedNonces)
+    val parentId = lastEventId(getOrDefaultEvents(events, account))
+    val newEvent = {
+      id: "RemoveAuthority",
+      account: account,
+      timestamp: ledger.lamport + 1,
+      nonce: nonce,
+      parent: parentId,
+      epoch: ledger.sessionEpoch,
+      eventType: "RemoveAuthority",
+      authorization: AuthThreshold
+    }
+    all {
+      hasLedger,
+      isPresent,
+      validNonce,
+      ledgerStates' = ledgerStates.set(account, {
+        ...ledger,
+        lamport: ledger.lamport + 1,
+        authorities: ledger.authorities.filter(d => d != authority)
+      }),
+      events' = events.set(account, getOrDefaultEvents(events, account).append(newEvent)),
+      usedNonces' = usedNonces.set(account, getOrDefaultNonces(usedNonces, account).union(Set(nonce))),
+      lifecycleStatus' = lifecycleStatus
+    }
+  }
+
+  action bumpSessionEpoch(account: AccountId, nonce: int): bool = {
+    val ledgerOpt = getOrDefaultLedger(ledgerStates, account)
+    val hasLedger = match ledgerOpt { | Some(_) => true | None => false }
+    val ledger = match ledgerOpt {
+      | Some(l) => l
+      | None => { account: "", authorities: Set(), guardians: Set(), sessionEpoch: 0, lamport: 0, cooldowns: Map() }
+    }
+    val validNonce = validateNonce(account, nonce, usedNonces)
+    val parentId = lastEventId(getOrDefaultEvents(events, account))
+    val newEvent = {
+      id: "SessionEpochBump",
+      account: account,
+      timestamp: ledger.lamport + 1,
+      nonce: nonce,
+      parent: parentId,
+      epoch: ledger.sessionEpoch,
+      eventType: "SessionEpochBump",
+      authorization: AuthThreshold
+    }
+    all {
+      hasLedger,
+      validNonce,
+      ledgerStates' = ledgerStates.set(account, {
+        ...ledger,
+        lamport: ledger.lamport + 1,
+        sessionEpoch: ledger.sessionEpoch + 1
+      }),
+      events' = events.set(account, getOrDefaultEvents(events, account).append(newEvent)),
+      usedNonces' = usedNonces.set(account, getOrDefaultNonces(usedNonces, account).union(Set(nonce))),
+      lifecycleStatus' = lifecycleStatus
+    }
+  }
+
+  action signalFinalize: bool = {
+    val isPending = match lifecycleStatus { | JournalPending => true | _ => false }
+    all {
+      isPending,
+      lifecycleStatus' = JournalCompleted,
+      ledgerStates' = ledgerStates,
+      events' = events,
+      usedNonces' = usedNonces
+    }
   }
 
   // ==================== INVARIANTS ====================
 
+  // Helper to check if all events in a list satisfy a predicate
+  pure def allEventsMatch(eventList: List[EventRecord], pred: EventRecord => bool): bool =
+    eventList.foldl(true, (acc, event) => acc and pred(event))
+
   val InvariantNonceUnique =
     usedNonces.keys().forall(account =>
       usedNonces.get(account).forall(n =>
-        usedNonces.get(account).filter(m => m = n).size() = 1
+        usedNonces.get(account).filter(m => m == n).size() == 1
       )
     )
 
   val InvariantEventsOrdered =
     events.keys().forall(account =>
-      events.get(account).forall(event => event.timestamp > 0)
+      allEventsMatch(events.get(account), event => event.timestamp > 0)
     )
 
   val InvariantEventsMatchAccount =
     events.keys().forall(account =>
-      events.get(account).forall(event => event.account = account)
+      allEventsMatch(events.get(account), event => event.account == account)
     )
 
-  val InvariantLifecycleCompletedImpliesStable =
-    lifecycleStatus = Completed implies true
+  val InvariantLifecycleCompletedImpliesStable = {
+    val isCompleted = match lifecycleStatus { | JournalCompleted => true | _ => false }
+    isCompleted implies true
+  }
 }

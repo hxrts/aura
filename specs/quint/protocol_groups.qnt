@@ -1,69 +1,75 @@
 module protocol_groups {
-  import protocol_core as core from "protocol_core"
-  import protocol_signals as signals from "protocol_signals"
-
-  type ProtocolId = core.ProtocolId
-  type DeviceId = core.DeviceId
+  // Base types (defined locally - type imports don't work in Quint)
+  type Option[a] = Some(a) | None
+  type ProtocolId = str
+  type AuthorityId = str  // renamed from DeviceId for authority model
   type GroupId = str
 
   type GroupPhase =
     | Uninitialized
-    | Active
-    | PendingChange
+    | GroupActive
+    | GroupPendingChange
     | Archived
-    | Failed
+    | GroupFailed
 
   type OperationKind =
-    | Create
-    | Add
-    | Remove
-    | RotateEpoch
-    | Archive
+    | OpCreate
+    | OpAdd
+    | OpRemove
+    | OpRotateEpoch
+    | OpArchive
 
-  type LifecycleStatus = Pending | Completed | Aborted
+  // Unique lifecycle variants for groups
+  type GroupLifecycleStatus = GroupPending | GroupLifecycleCompleted | GroupAborted
 
   type GroupOutcome = {
     operation: OperationKind,
     epoch: int,
-    members: Set[DeviceId]
+    members: Set[AuthorityId]
   }
 
   type OperationRecord = {
     protocol: ProtocolId,
     group: GroupId,
     operation: OperationKind,
-    members: Set[DeviceId],
+    members: Set[AuthorityId],
     epoch: int
   }
+
+  // Simplified effect type (no imports)
+  type GroupEffect = { effectType: str, payload: str }
 
   // ============ STATE ============
 
   var groupIds: ProtocolId -> GroupId
   var phase: ProtocolId -> GroupPhase
-  var members: ProtocolId -> Set[DeviceId]
-  var pendingAdds: ProtocolId -> Set[DeviceId]
-  var pendingRemoves: ProtocolId -> Set[DeviceId]
+  var members: ProtocolId -> Set[AuthorityId]
+  var pendingAdds: ProtocolId -> Set[AuthorityId]
+  var pendingRemoves: ProtocolId -> Set[AuthorityId]
   var epoch: ProtocolId -> int
   var operationLog: Set[OperationRecord]
-  var lifecycleStatus: ProtocolId -> LifecycleStatus
-  var lifecycleEffects: ProtocolId -> Set[core.ProtocolEffect]
+  var lifecycleStatus: ProtocolId -> GroupLifecycleStatus
+  var lifecycleEffects: ProtocolId -> Set[GroupEffect]
   var lastOperation: ProtocolId -> OperationKind
   var outcome: ProtocolId -> Option[GroupOutcome]
 
   // ============ HELPERS ============
 
-  pure def getOrDefault[K, V](m: K -> V, key: K, default: V): V =
-    if key.in(m.keys()) then m.get(key) else default
+  pure def getOrDefaultSet(m: ProtocolId -> Set[AuthorityId], key: ProtocolId): Set[AuthorityId] =
+    if (key.in(m.keys())) m.get(key) else Set()
 
-  pure def disjoint[A](left: Set[A], right: Set[A]): bool =
-    left.intersect(right).size() = 0
+  pure def getOrDefaultInt(m: ProtocolId -> int, key: ProtocolId): int =
+    if (key.in(m.keys())) m.get(key) else 0
+
+  pure def disjoint(left: Set[AuthorityId], right: Set[AuthorityId]): bool =
+    left.intersect(right).size() == 0
 
   pure def logOperation(
     log: Set[OperationRecord],
     pid: ProtocolId,
     gid: GroupId,
     kind: OperationKind,
-    targets: Set[DeviceId],
+    targets: Set[AuthorityId],
     groupEpoch: int
   ): Set[OperationRecord] =
     log.union(Set({
@@ -77,21 +83,12 @@ module protocol_groups {
   pure def makeOutcome(
     kind: OperationKind,
     groupEpoch: int,
-    roster: Set[DeviceId]
+    roster: Set[AuthorityId]
   ): GroupOutcome = {
     operation: kind,
     epoch: groupEpoch,
     members: roster
   }
-
-  pure def messageFor(kind: OperationKind): str =
-    match kind {
-      | Create => signals.GROUP_CREATE
-      | Add => signals.GROUP_ADD
-      | Remove => signals.GROUP_REMOVE
-      | RotateEpoch => signals.GROUP_ROTATE_EPOCH
-      | Archive => signals.GROUP_ARCHIVE
-    }
 
   // ============ INITIALISATION ============
 
@@ -114,196 +111,190 @@ module protocol_groups {
   action configureGroup(
     pid: ProtocolId,
     gid: GroupId,
-    initialMembers: Set[DeviceId]
+    initialMembers: Set[AuthorityId]
   ): bool = all {
-    not pid.in(groupIds.keys()),
-    phase' = phase.set(pid, Active),
+    not(pid.in(groupIds.keys())),
+    phase' = phase.set(pid, GroupActive),
     groupIds' = groupIds.set(pid, gid),
     members' = members.set(pid, initialMembers),
     pendingAdds' = pendingAdds.set(pid, Set()),
     pendingRemoves' = pendingRemoves.set(pid, Set()),
     epoch' = epoch.set(pid, 0),
-    operationLog' = logOperation(operationLog, pid, gid, Create, initialMembers, 0),
-    lifecycleStatus' = lifecycleStatus.set(pid, Pending),
+    operationLog' = logOperation(operationLog, pid, gid, OpCreate, initialMembers, 0),
+    lifecycleStatus' = lifecycleStatus.set(pid, GroupPending),
     lifecycleEffects' = lifecycleEffects.set(pid, Set()),
-    lastOperation' = lastOperation.set(pid, Create),
-    outcome' = outcome.set(pid, Some(makeOutcome(Create, 0, initialMembers)))
+    lastOperation' = lastOperation.set(pid, OpCreate),
+    outcome' = outcome.set(pid, Some(makeOutcome(OpCreate, 0, initialMembers)))
   }
 
-  action proposeAddMembers(pid: ProtocolId, additions: Set[DeviceId]): bool =
-    val currentPhase = phase.get(pid) {
-    val currentMembers = members.get(pid) {
-      currentPhase = Active and additions.size() >= 1 and disjoint(additions, currentMembers) {
-        all {
-          pendingAdds' = pendingAdds.set(pid, additions),
-          pendingRemoves' = pendingRemoves,
-          phase' = phase.set(pid, PendingChange),
-          groupIds' = groupIds,
-          members' = members,
-          epoch' = epoch,
-          operationLog' = operationLog
-        }
-      }
-    }}
-
-  action confirmAddMembers(pid: ProtocolId): bool =
-    val currentPhase = phase.get(pid) {
-    val gid = groupIds.get(pid) {
-    val additions = getOrDefault(pendingAdds, pid, Set()) {
-      currentPhase = PendingChange and additions.size() >= 1 {
-        val updatedMembers = members.get(pid).union(additions) {
-        val newEpoch = epoch.get(pid) + 1 {
-        all {
-          members' = members.set(pid, updatedMembers),
-          pendingAdds' = pendingAdds.set(pid, Set()),
-          pendingRemoves' = pendingRemoves.set(pid, Set()),
-          phase' = phase.set(pid, Active),
-          epoch' = epoch.set(pid, newEpoch),
-          groupIds' = groupIds,
-          operationLog' = logOperation(operationLog, pid, gid, Add, additions, newEpoch),
-          lifecycleStatus' = lifecycleStatus,
-          lifecycleEffects' = lifecycleEffects,
-          lastOperation' = lastOperation.set(pid, Add),
-          outcome' = outcome.set(pid, Some(makeOutcome(Add, newEpoch, updatedMembers)))
-        }
-      }}}
-    }}}}
-
-  action proposeRemoveMembers(pid: ProtocolId, removals: Set[DeviceId]): bool =
-    val currentPhase = phase.get(pid) {
-    val currentMembers = members.get(pid) {
-      currentPhase = Active and removals.size() >= 1 and removals.subseteq(currentMembers) {
-        all {
-          pendingRemoves' = pendingRemoves.set(pid, removals),
-          pendingAdds' = pendingAdds,
-          phase' = phase.set(pid, PendingChange),
-          groupIds' = groupIds,
-          members' = members,
-          epoch' = epoch,
-          operationLog' = operationLog
-        }
-      }
-    }}
-
-  action confirmRemoveMembers(pid: ProtocolId): bool =
-    val currentPhase = phase.get(pid) {
-    val gid = groupIds.get(pid) {
-    val removals = getOrDefault(pendingRemoves, pid, Set()) {
-      currentPhase = PendingChange and removals.size() >= 1 {
-        val updatedMembers = members.get(pid).diff(removals) {
-        val newEpoch = epoch.get(pid) + 1 {
-        all {
-          members' = members.set(pid, updatedMembers),
-          pendingAdds' = pendingAdds.set(pid, Set()),
-          pendingRemoves' = pendingRemoves.set(pid, Set()),
-          phase' = phase.set(pid, Active),
-          epoch' = epoch.set(pid, newEpoch),
-          groupIds' = groupIds,
-          operationLog' = logOperation(operationLog, pid, gid, Remove, removals, newEpoch),
-          lifecycleStatus' = lifecycleStatus,
-          lifecycleEffects' = lifecycleEffects,
-          lastOperation' = lastOperation.set(pid, Remove),
-          outcome' = outcome.set(pid, Some(makeOutcome(Remove, newEpoch, updatedMembers)))
-        }
-      }}}
-    }}}}
-
-  action advanceEpoch(pid: ProtocolId): bool =
-    val currentPhase = phase.get(pid) {
-    val gid = groupIds.get(pid) {
-    val roster = members.get(pid) {
-      currentPhase = Active {
-        val newEpoch = epoch.get(pid) + 1 {
-        all {
-          epoch' = epoch.set(pid, newEpoch),
-          phase' = phase,
-          groupIds' = groupIds,
-          members' = members,
-          pendingAdds' = pendingAdds,
-          pendingRemoves' = pendingRemoves,
-          operationLog' = logOperation(operationLog, pid, gid, RotateEpoch, Set(), newEpoch),
-          lifecycleStatus' = lifecycleStatus,
-          lifecycleEffects' = lifecycleEffects,
-          lastOperation' = lastOperation.set(pid, RotateEpoch),
-          outcome' = outcome.set(pid, Some(makeOutcome(RotateEpoch, newEpoch, roster)))
-        }
-      }}}}
-    }}
-
-  action archiveGroup(pid: ProtocolId): bool =
-    val currentPhase = phase.get(pid) {
-    val gid = groupIds.get(pid) {
-    val roster = members.get(pid) {
-      not currentPhase = Archived {
-        all {
-          phase' = phase.set(pid, Archived),
-          pendingAdds' = pendingAdds.set(pid, Set()),
-          pendingRemoves' = pendingRemoves.set(pid, Set()),
-          epoch' = epoch,
-          groupIds' = groupIds,
-          members' = members,
-          operationLog' = logOperation(operationLog, pid, gid, Archive, Set(), epoch.get(pid)),
-          lifecycleStatus' = lifecycleStatus,
-          lifecycleEffects' = lifecycleEffects,
-          lastOperation' = lastOperation.set(pid, Archive),
-          outcome' = outcome.set(
-            pid,
-            Some(makeOutcome(Archive, epoch.get(pid), roster))
-          )
-        }
-      }}}
-    }}
-
-  action failGroup(pid: ProtocolId): bool =
-    val currentPhase = phase.get(pid) {
-      not currentPhase = Archived {
-        all {
-          phase' = phase.set(pid, Failed),
-          groupIds' = groupIds,
-          members' = members,
-          pendingAdds' = pendingAdds,
-          pendingRemoves' = pendingRemoves,
-          epoch' = epoch,
-          operationLog' = operationLog,
-          lifecycleStatus' = lifecycleStatus.set(pid, Aborted),
-          lifecycleEffects' = lifecycleEffects,
-          lastOperation' = lastOperation,
-          outcome' = outcome
-        }
-      }
+  action proposeAddMembers(pid: ProtocolId, additions: Set[AuthorityId]): bool = {
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
+    val isActive = match currentPhase { | GroupActive => true | _ => false }
+    val currentMembers = getOrDefaultSet(members, pid)
+    all {
+      isActive,
+      additions.size() >= 1,
+      disjoint(additions, currentMembers),
+      pendingAdds' = pendingAdds.set(pid, additions),
+      pendingRemoves' = pendingRemoves,
+      phase' = phase.set(pid, GroupPendingChange),
+      groupIds' = groupIds,
+      members' = members,
+      epoch' = epoch,
+      operationLog' = operationLog,
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      lastOperation' = lastOperation,
+      outcome' = outcome
     }
+  }
 
-  action signalSuccess(pid: ProtocolId, message: str): bool =
-    val status = lifecycleStatus.get(pid).default(Pending) {
-    val outcomeOpt = outcome.get(pid) {
-    val op = lastOperation.get(pid) {
-      status = Pending and match outcomeOpt {
-        | Some(_) => true
-        | None => false
-      } and message = messageFor(op) {
-        lifecycleStatus' = lifecycleStatus.set(pid, Completed),
-        lifecycleEffects' = lifecycleEffects.set(pid, Set(core.Trace({
-          message: message
-        }))),
-        phase' = phase,
-        groupIds' = groupIds,
-        members' = members,
-        pendingAdds' = pendingAdds,
-        pendingRemoves' = pendingRemoves,
-        epoch' = epoch,
-        operationLog' = operationLog,
-        lastOperation' = lastOperation,
-        outcome' = outcome
-      }
-    }}}
+  action confirmAddMembers(pid: ProtocolId): bool = {
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
+    val isPending = match currentPhase { | GroupPendingChange => true | _ => false }
+    val gid = if (pid.in(groupIds.keys())) groupIds.get(pid) else ""
+    val additions = getOrDefaultSet(pendingAdds, pid)
+    val currentMembers = getOrDefaultSet(members, pid)
+    val updatedMembers = currentMembers.union(additions)
+    val newEpoch = getOrDefaultInt(epoch, pid) + 1
+    all {
+      isPending,
+      additions.size() >= 1,
+      members' = members.set(pid, updatedMembers),
+      pendingAdds' = pendingAdds.set(pid, Set()),
+      pendingRemoves' = pendingRemoves.set(pid, Set()),
+      phase' = phase.set(pid, GroupActive),
+      epoch' = epoch.set(pid, newEpoch),
+      groupIds' = groupIds,
+      operationLog' = logOperation(operationLog, pid, gid, OpAdd, additions, newEpoch),
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      lastOperation' = lastOperation.set(pid, OpAdd),
+      outcome' = outcome.set(pid, Some(makeOutcome(OpAdd, newEpoch, updatedMembers)))
+    }
+  }
 
-  action signalFailure(pid: ProtocolId, message: str): bool =
-    lifecycleStatus.get(pid).default(Pending) = Pending {
-      lifecycleStatus' = lifecycleStatus.set(pid, Aborted),
-      lifecycleEffects' = lifecycleEffects.set(pid, Set(core.Trace({
-        message: message
-      }))),
-      phase' = phase.set(pid, Failed),
+  action proposeRemoveMembers(pid: ProtocolId, removals: Set[AuthorityId]): bool = {
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
+    val isActive = match currentPhase { | GroupActive => true | _ => false }
+    val currentMembers = getOrDefaultSet(members, pid)
+    all {
+      isActive,
+      removals.size() >= 1,
+      removals.subseteq(currentMembers),
+      pendingRemoves' = pendingRemoves.set(pid, removals),
+      pendingAdds' = pendingAdds,
+      phase' = phase.set(pid, GroupPendingChange),
+      groupIds' = groupIds,
+      members' = members,
+      epoch' = epoch,
+      operationLog' = operationLog,
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      lastOperation' = lastOperation,
+      outcome' = outcome
+    }
+  }
+
+  action confirmRemoveMembers(pid: ProtocolId): bool = {
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
+    val isPending = match currentPhase { | GroupPendingChange => true | _ => false }
+    val gid = if (pid.in(groupIds.keys())) groupIds.get(pid) else ""
+    val removals = getOrDefaultSet(pendingRemoves, pid)
+    val currentMembers = getOrDefaultSet(members, pid)
+    val updatedMembers = currentMembers.exclude(removals)
+    val newEpoch = getOrDefaultInt(epoch, pid) + 1
+    all {
+      isPending,
+      removals.size() >= 1,
+      members' = members.set(pid, updatedMembers),
+      pendingAdds' = pendingAdds.set(pid, Set()),
+      pendingRemoves' = pendingRemoves.set(pid, Set()),
+      phase' = phase.set(pid, GroupActive),
+      epoch' = epoch.set(pid, newEpoch),
+      groupIds' = groupIds,
+      operationLog' = logOperation(operationLog, pid, gid, OpRemove, removals, newEpoch),
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      lastOperation' = lastOperation.set(pid, OpRemove),
+      outcome' = outcome.set(pid, Some(makeOutcome(OpRemove, newEpoch, updatedMembers)))
+    }
+  }
+
+  action advanceEpoch(pid: ProtocolId): bool = {
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
+    val isActive = match currentPhase { | GroupActive => true | _ => false }
+    val gid = if (pid.in(groupIds.keys())) groupIds.get(pid) else ""
+    val roster = getOrDefaultSet(members, pid)
+    val newEpoch = getOrDefaultInt(epoch, pid) + 1
+    all {
+      isActive,
+      epoch' = epoch.set(pid, newEpoch),
+      phase' = phase,
+      groupIds' = groupIds,
+      members' = members,
+      pendingAdds' = pendingAdds,
+      pendingRemoves' = pendingRemoves,
+      operationLog' = logOperation(operationLog, pid, gid, OpRotateEpoch, Set(), newEpoch),
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      lastOperation' = lastOperation.set(pid, OpRotateEpoch),
+      outcome' = outcome.set(pid, Some(makeOutcome(OpRotateEpoch, newEpoch, roster)))
+    }
+  }
+
+  action archiveGroup(pid: ProtocolId): bool = {
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
+    val isNotArchived = match currentPhase { | Archived => false | _ => true }
+    val gid = if (pid.in(groupIds.keys())) groupIds.get(pid) else ""
+    val roster = getOrDefaultSet(members, pid)
+    val currentEpoch = getOrDefaultInt(epoch, pid)
+    all {
+      isNotArchived,
+      phase' = phase.set(pid, Archived),
+      pendingAdds' = pendingAdds.set(pid, Set()),
+      pendingRemoves' = pendingRemoves.set(pid, Set()),
+      epoch' = epoch,
+      groupIds' = groupIds,
+      members' = members,
+      operationLog' = logOperation(operationLog, pid, gid, OpArchive, Set(), currentEpoch),
+      lifecycleStatus' = lifecycleStatus,
+      lifecycleEffects' = lifecycleEffects,
+      lastOperation' = lastOperation.set(pid, OpArchive),
+      outcome' = outcome.set(pid, Some(makeOutcome(OpArchive, currentEpoch, roster)))
+    }
+  }
+
+  action failGroup(pid: ProtocolId): bool = {
+    val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
+    val isNotArchived = match currentPhase { | Archived => false | _ => true }
+    all {
+      isNotArchived,
+      phase' = phase.set(pid, GroupFailed),
+      lifecycleStatus' = lifecycleStatus.set(pid, GroupAborted),
+      groupIds' = groupIds,
+      members' = members,
+      pendingAdds' = pendingAdds,
+      pendingRemoves' = pendingRemoves,
+      epoch' = epoch,
+      operationLog' = operationLog,
+      lifecycleEffects' = lifecycleEffects,
+      lastOperation' = lastOperation,
+      outcome' = outcome
+    }
+  }
+
+  action signalSuccess(pid: ProtocolId): bool = {
+    val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else GroupPending
+    val isPending = match status { | GroupPending => true | _ => false }
+    val outcomeOpt = if (pid.in(outcome.keys())) outcome.get(pid) else None
+    val hasOutcome = match outcomeOpt { | Some(_) => true | None => false }
+    all {
+      isPending,
+      hasOutcome,
+      lifecycleStatus' = lifecycleStatus.set(pid, GroupLifecycleCompleted),
+      lifecycleEffects' = lifecycleEffects.set(pid, Set()),
+      phase' = phase,
       groupIds' = groupIds,
       members' = members,
       pendingAdds' = pendingAdds,
@@ -313,6 +304,26 @@ module protocol_groups {
       lastOperation' = lastOperation,
       outcome' = outcome
     }
+  }
+
+  action signalFailure(pid: ProtocolId): bool = {
+    val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else GroupPending
+    val isPending = match status { | GroupPending => true | _ => false }
+    all {
+      isPending,
+      lifecycleStatus' = lifecycleStatus.set(pid, GroupAborted),
+      lifecycleEffects' = lifecycleEffects.set(pid, Set()),
+      phase' = phase.set(pid, GroupFailed),
+      groupIds' = groupIds,
+      members' = members,
+      pendingAdds' = pendingAdds,
+      pendingRemoves' = pendingRemoves,
+      epoch' = epoch,
+      operationLog' = operationLog,
+      lastOperation' = lastOperation,
+      outcome' = outcome
+    }
+  }
 
   // ============ INVARIANTS ============
 
@@ -320,71 +331,62 @@ module protocol_groups {
     members.keys().subseteq(groupIds.keys())
 
   val InvariantPhaseDefined =
-    phase.keys() = groupIds.keys()
+    phase.keys() == groupIds.keys()
 
   val InvariantPendingDisjoint =
     pendingAdds.keys().forall(pid =>
-      disjoint(getOrDefault(pendingAdds, pid, Set()), getOrDefault(pendingRemoves, pid, Set()))
+      disjoint(getOrDefaultSet(pendingAdds, pid), getOrDefaultSet(pendingRemoves, pid))
     )
 
   val InvariantEpochNonNegative =
     epoch.keys().forall(pid => epoch.get(pid) >= 0)
 
   val InvariantArchivedNoPending =
-    phase.keys().forall(pid =>
-      phase.get(pid) = Archived implies
-        getOrDefault(pendingAdds, pid, Set()).size() = 0 and
-        getOrDefault(pendingRemoves, pid, Set()).size() = 0
-    )
+    phase.keys().forall(pid => {
+      val currentPhase = phase.get(pid)
+      val isArchived = match currentPhase { | Archived => true | _ => false }
+      isArchived implies (
+        getOrDefaultSet(pendingAdds, pid).size() == 0 and
+        getOrDefaultSet(pendingRemoves, pid).size() == 0
+      )
+    })
 
   val InvariantLogMatchesGroup =
     operationLog.forall(entry =>
-      entry.protocol.in(groupIds.keys()) and entry.group = groupIds.get(entry.protocol)
+      entry.protocol.in(groupIds.keys()) and entry.group == groupIds.get(entry.protocol)
     )
 
   val InvariantPendingRequiresPendingPhase =
-    pendingAdds.keys().forall(pid =>
-      getOrDefault(pendingAdds, pid, Set()).size() = 0 or phase.get(pid) = PendingChange
-    ) and
-    pendingRemoves.keys().forall(pid =>
-      getOrDefault(pendingRemoves, pid, Set()).size() = 0 or phase.get(pid) = PendingChange
-    )
+    pendingAdds.keys().forall(pid => {
+      val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
+      val isPendingPhase = match currentPhase { | GroupPendingChange => true | _ => false }
+      getOrDefaultSet(pendingAdds, pid).size() == 0 or isPendingPhase
+    }) and
+    pendingRemoves.keys().forall(pid => {
+      val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
+      val isPendingPhase = match currentPhase { | GroupPendingChange => true | _ => false }
+      getOrDefaultSet(pendingRemoves, pid).size() == 0 or isPendingPhase
+    })
 
   val InvariantActiveMembersNonEmpty =
-    phase.keys().forall(pid =>
-      phase.get(pid) = Active implies getOrDefault(members, pid, Set()).size() >= 1
-    )
+    phase.keys().forall(pid => {
+      val currentPhase = phase.get(pid)
+      val isActive = match currentPhase { | GroupActive => true | _ => false }
+      isActive implies getOrDefaultSet(members, pid).size() >= 1
+    })
 
   val InvariantLifecycleStatusDefined =
-    lifecycleStatus.keys() = groupIds.keys()
+    lifecycleStatus.keys() == groupIds.keys()
 
-  val InvariantLifecycleEffectsTraceOnly =
-    lifecycleEffects.keys().forall(pid =>
-      lifecycleEffects.get(pid).forall(effect =>
-        match effect {
-          | core.Trace(_) => true
-          | _ => false
-        }
-      )
-    )
+  val InvariantLifecycleEffectsEmpty =
+    lifecycleEffects.keys().forall(pid => lifecycleEffects.get(pid).size() == 0)
 
-  val InvariantLifecycleCompletionHasTrace =
-    lifecycleStatus.keys().forall(pid =>
-      lifecycleStatus.get(pid) = Completed implies (
-        lifecycleEffects.get(pid).size() = 1 and
-        match outcome.get(pid) {
-          | Some(_) => true
-          | None => false
-        } and
-        pid.in(lastOperation.keys())
-      )
-    )
-
-  val InvariantOutcomeDefinedForOperations =
-    outcome.keys().forall(pid =>
-      match outcome.get(pid) {
-        | Some(result) => result.members.subseteq(getOrDefault(members, pid, Set()))
-        | None => true
-      }
-    )
+  val InvariantLifecycleCompletionHasOutcome =
+    lifecycleStatus.keys().forall(pid => {
+      val status = lifecycleStatus.get(pid)
+      val isCompleted = match status { | GroupLifecycleCompleted => true | _ => false }
+      val outcomeOpt = if (pid.in(outcome.keys())) outcome.get(pid) else None
+      val hasOutcome = match outcomeOpt { | Some(_) => true | None => false }
+      isCompleted implies hasOutcome
+    })
 }

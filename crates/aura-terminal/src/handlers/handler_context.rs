@@ -7,13 +7,12 @@
 //! Handlers use `HandlerContext` for consistent signatures and return
 //! `Result<HandlerResult, CliError>` to drive view deltas.
 
-// Import types from aura-app which re-exports them from aura-agent
+// Import types from aura-app (pure app types) and aura-agent (runtime types)
 use aura_app::core::ViewDelta;
 use aura_core::identifiers::{ContextId, DeviceId};
 
-// Re-export agent types through aura-app
-// This avoids direct aura-agent dependency for consumers
-pub use aura_app::{AuraAgent, AuraEffectSystem, EffectContext};
+// Import agent types from aura-agent (runtime layer)
+pub use aura_agent::{AuraAgent, AuraEffectSystem, EffectContext};
 
 /// Unified context for CLI handler functions
 ///
