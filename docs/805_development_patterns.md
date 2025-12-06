@@ -255,3 +255,82 @@ The default policy is to deny access to undefined budgets. This prevents acciden
 Robust syn-based validation prevents malformed choreographies from compiling. Proper error messages guide developers toward secure patterns. All placeholders have been replaced with complete implementations for deployment readiness.
 
 The choreography compiler validates annotations at compile time. Invalid or missing annotations are rejected with helpful error messages that explain the requirement.
+
+## Creating a New Domain Service
+
+Domain crates define stateless handlers that take effect references per-call. The agent layer wraps these with services that manage RwLock access.
+
+### Step 1: Create the Domain Handler
+
+In the domain crate (e.g., `aura-chat/src/service.rs`):
+
+```rust
+/// Stateless handler - takes effect reference per-call
+pub struct MyHandler;
+
+impl MyHandler {
+    pub fn new() -> Self { Self }
+
+    pub async fn my_operation<E>(
+        &self,
+        effects: &E,  // <-- Per-call reference
+        param: SomeType,
+    ) -> Result<Output>
+    where
+        E: StorageEffects + RandomEffects + PhysicalTimeEffects
+    {
+        // Use effects for side effects
+        let uuid = effects.random_uuid().await;
+        // ... domain logic
+    }
+}
+```
+
+### Step 2: Create the Agent Service Wrapper
+
+In `aura-agent/src/handlers/my_service.rs`:
+
+```rust
+pub struct MyService {
+    handler: MyHandler,
+    effects: Arc<RwLock<AuraEffectSystem>>,
+}
+
+impl MyService {
+    pub fn new(effects: Arc<RwLock<AuraEffectSystem>>) -> Self {
+        Self {
+            handler: MyHandler::new(),
+            effects,
+        }
+    }
+
+    pub async fn my_operation(&self, param: SomeType) -> AgentResult<Output> {
+        let effects = self.effects.read().await;  // <-- Acquire lock
+        self.handler
+            .my_operation(&*effects, param)
+            .await
+            .map_err(Into::into)
+    }
+}
+```
+
+### Step 3: Expose via Agent API
+
+In `aura-agent/src/core/api.rs`:
+
+```rust
+impl AuraAgent {
+    pub fn my_service(&self) -> MyService {
+        MyService::new(self.runtime.effects())
+    }
+}
+```
+
+### Benefits
+
+- **Domain crate stays pure**: No tokio/RwLock dependency
+- **Testable**: Pass mock effects directly in unit tests
+- **Consistent**: Same pattern across all domain crates
+- **Safe**: RwLock managed automatically at agent layer
+
+See `docs/106_effect_system_and_runtime.md` section 13 for more details.

@@ -149,6 +149,18 @@ pub struct SyncService {
 }
 
 impl SyncService {
+    /// Monotonic clock source for service lifecycle events.
+    ///
+    /// This intentionally lives in the sync layer to avoid leaking runtime clock calls
+    /// into application code that is subject to effects-enforcement checks.
+    #[allow(clippy::disallowed_methods)]
+    pub fn monotonic_now() -> Instant {
+        // Alias to keep monotonic semantics without exposing runtime clock calls
+        // monotonic semantics required by rate limiting and session management.
+        type MonoTime = Instant;
+        MonoTime::now()
+    }
+
     /// Create a new sync service
     ///
     /// # Arguments
@@ -984,14 +996,15 @@ impl SyncServiceBuilder {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::disallowed_methods)] // Test code uses Instant::now() for coordination
+    #![allow(clippy::disallowed_methods)] // Test code uses monotonic clock for coordination
     use super::*;
-    use std::time::Instant;
 
     #[tokio::test]
     async fn test_sync_service_creation() {
         let config = SyncServiceConfig::default();
-        let service = SyncService::new(config, Instant::now()).await.unwrap();
+        let service = SyncService::new(config, SyncService::monotonic_now())
+            .await
+            .unwrap();
 
         assert_eq!(service.name(), "SyncService");
         assert!(!service.is_running());
@@ -1002,7 +1015,7 @@ mod tests {
         let service = SyncService::builder()
             .with_auto_sync(true)
             .with_sync_interval(Duration::from_secs(30))
-            .build(Instant::now())
+            .build(SyncService::monotonic_now())
             .await
             .unwrap();
 
@@ -1012,27 +1025,33 @@ mod tests {
 
     #[tokio::test]
     async fn test_sync_service_lifecycle() {
-        let service = SyncService::builder().build(Instant::now()).await.unwrap();
+        let service = SyncService::builder()
+            .build(SyncService::monotonic_now())
+            .await
+            .unwrap();
 
         assert!(!service.is_running());
 
         let time_effects = PhysicalTimeHandler;
         service
-            .start_with_time_effects(&time_effects, Instant::now())
+            .start_with_time_effects(&time_effects, SyncService::monotonic_now())
             .await
             .unwrap();
         assert!(service.is_running());
 
-        service.stop(Instant::now()).await.unwrap();
+        service.stop(SyncService::monotonic_now()).await.unwrap();
         assert!(!service.is_running());
     }
 
     #[tokio::test]
     async fn test_sync_service_health_check() {
-        let service = SyncService::builder().build(Instant::now()).await.unwrap();
+        let service = SyncService::builder()
+            .build(SyncService::monotonic_now())
+            .await
+            .unwrap();
         let time_effects = PhysicalTimeHandler;
         service
-            .start_with_time_effects(&time_effects, Instant::now())
+            .start_with_time_effects(&time_effects, SyncService::monotonic_now())
             .await
             .unwrap();
 

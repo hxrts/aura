@@ -508,6 +508,112 @@ pub use aura_agent::{SyncManagerConfig, SyncServiceManager, ...};
 pub use aura_agent::reactive::{Dynamic, FactSource, ReactiveScheduler, ...};
 ```
 
-## 13. Summary
+## 13. Service Pattern for Domain Crates
 
-The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems as services accessible through `AuraAgent`. `AppCore` wraps the agent to provide a unified, platform-agnostic interface for all frontends. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior.
+Domain crates (Layer 5) define stateless handlers that take effect references per-call.
+The agent layer (Layer 6) wraps these with services that manage RwLock access.
+
+### 13.1 Handler Layer (Domain Crates)
+
+Handlers in `aura-chat`, `aura-invitation`, etc. are stateless and take `&E` per method:
+
+```rust
+// aura-chat/src/service.rs
+pub struct ChatHandler;
+
+impl ChatHandler {
+    pub fn new() -> Self { Self }
+
+    pub async fn create_group<E>(
+        &self,
+        effects: &E,  // <-- Per-call reference
+        name: &str,
+        creator_id: AuthorityId,
+        initial_members: Vec<AuthorityId>,
+    ) -> Result<ChatGroup>
+    where
+        E: StorageEffects + RandomEffects + PhysicalTimeEffects
+    {
+        let uuid = effects.random_uuid().await;
+        // ...
+    }
+}
+```
+
+### 13.2 Service Layer (Agent)
+
+Services in `aura-agent` wrap handlers with RwLock management:
+
+```rust
+// aura-agent/src/handlers/chat_service.rs
+pub struct ChatService {
+    handler: ChatHandler,
+    effects: Arc<RwLock<AuraEffectSystem>>,
+}
+
+impl ChatService {
+    pub fn new(effects: Arc<RwLock<AuraEffectSystem>>) -> Self {
+        Self {
+            handler: ChatHandler::new(),
+            effects,
+        }
+    }
+
+    pub async fn create_group(
+        &self,
+        name: &str,
+        creator_id: AuthorityId,
+        initial_members: Vec<AuthorityId>,
+    ) -> AgentResult<ChatGroup> {
+        let effects = self.effects.read().await;  // <-- Acquire lock
+        self.handler
+            .create_group(&*effects, name, creator_id, initial_members)
+            .await
+            .map_err(Into::into)
+    }
+}
+```
+
+### 13.3 Agent API
+
+The agent exposes services through clean accessor methods:
+
+```rust
+// aura-agent/src/core/api.rs
+impl AuraAgent {
+    pub fn chat(&self) -> ChatService {
+        ChatService::new(self.runtime.effects())
+    }
+
+    pub async fn invitations(&self) -> AgentResult<InvitationService> {
+        // Lazy initialization with caching
+        InvitationService::new(self.runtime.effects(), self.context.clone())
+    }
+}
+```
+
+### 13.4 Benefits
+
+This pattern keeps domain crates:
+
+- **Pure**: No tokio/RwLock dependency
+- **Testable**: Pass mock effects directly in unit tests
+- **Consistent**: Same pattern across all domain crates
+
+The agent layer provides:
+
+- **Lock management**: Automatic RwLock acquisition per call
+- **Error normalization**: Convert domain errors to `AgentError`
+- **Lazy initialization**: Some services initialize on first use
+
+### 13.5 When to Use
+
+| Scenario | Location |
+|----------|----------|
+| Domain service logic | Domain crate `*Handler` (e.g., `aura-chat::ChatHandler`) |
+| RwLock wrapper service | `aura-agent/src/handlers/*_service.rs` |
+| Agent API accessor | `aura-agent/src/core/api.rs` |
+
+## 14. Summary
+
+The effect system provides abstract interfaces and concrete handlers. The runtime assembles these handlers into working systems as services accessible through `AuraAgent`. Domain crates define stateless handlers that take effect references per-call, while the agent layer wraps these with services that manage RwLock access. `AppCore` wraps the agent to provide a unified, platform-agnostic interface for all frontends. Context propagation ensures consistent execution. Lifecycle management coordinates initialization and shutdown. Crate boundaries enforce separation. Testing and simulation provide deterministic behavior.

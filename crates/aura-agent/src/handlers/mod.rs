@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod auth_service;
+pub mod chat_service;
 pub mod invitation;
 pub mod invitation_bridge;
 pub mod invitation_service;
@@ -26,9 +27,13 @@ pub use sessions::shared::{SessionHandle, SessionStats};
 pub use auth::{AuthChallenge, AuthHandler, AuthMethod, AuthResponse, AuthResult};
 pub use auth_service::AuthService;
 
+// Re-export chat types for public API
+pub use chat_service::ChatService;
+
 // Re-export invitation types for public API
 pub use invitation::{
     Invitation, InvitationHandler, InvitationResult, InvitationStatus, InvitationType,
+    ShareableInvitation, ShareableInvitationError,
 };
 pub use invitation_service::InvitationService;
 

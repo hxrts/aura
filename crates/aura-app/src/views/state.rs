@@ -17,6 +17,7 @@ cfg_if! {
 
 cfg_if! {
     if #[cfg(feature = "signals")] {
+        #[derive(Default)]
         /// Aggregate view state that holds all domain states.
         ///
         /// This is the main state container for the application.
@@ -37,6 +38,7 @@ cfg_if! {
             neighborhood: Mutable<NeighborhoodState>,
         }
     } else {
+        #[derive(Default)]
         /// Aggregate view state that holds all domain states.
         ///
         /// This is the main state container for the application.
@@ -55,38 +57,6 @@ cfg_if! {
             blocks: BlocksState,
             /// Neighborhood state
             neighborhood: NeighborhoodState,
-        }
-    }
-}
-
-cfg_if! {
-    if #[cfg(feature = "signals")] {
-        impl Default for ViewState {
-            fn default() -> Self {
-                Self {
-                    chat: Mutable::new(ChatState::default()),
-                    recovery: Mutable::new(RecoveryState::default()),
-                    invitations: Mutable::new(InvitationsState::default()),
-                    contacts: Mutable::new(ContactsState::default()),
-                    block: Mutable::new(BlockState::default()),
-                    blocks: Mutable::new(BlocksState::default()),
-                    neighborhood: Mutable::new(NeighborhoodState::default()),
-                }
-            }
-        }
-    } else {
-        impl Default for ViewState {
-            fn default() -> Self {
-                Self {
-                    chat: ChatState::default(),
-                    recovery: RecoveryState::default(),
-                    invitations: InvitationsState::default(),
-                    contacts: ContactsState::default(),
-                    block: BlockState::default(),
-                    blocks: BlocksState::default(),
-                    neighborhood: NeighborhoodState::default(),
-                }
-            }
         }
     }
 }

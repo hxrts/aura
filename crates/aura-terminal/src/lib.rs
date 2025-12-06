@@ -322,6 +322,16 @@ pub enum InvitationAction {
     },
     /// List pending invitations.
     List,
+    /// Export an invitation as a shareable code for out-of-band transfer.
+    Export {
+        /// Invitation ID to export.
+        invitation_id: String,
+    },
+    /// Import and display details of a shareable invitation code.
+    Import {
+        /// The shareable invitation code (format: aura:v1:<base64>).
+        code: String,
+    },
 }
 
 /// OTA upgrade subcommands

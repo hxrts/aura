@@ -2,12 +2,20 @@
 //!
 //! Wraps `aura_rendezvous::RendezvousService` for integration with the agent runtime.
 //! Provides lifecycle management, descriptor caching, and channel establishment.
+//!
+//! ## LAN Discovery
+//!
+//! Supports local network peer discovery via UDP broadcast. When enabled, the manager
+//! will announce presence and discover peers on the local network.
 
+use aura_core::effects::time::TimeEffects;
 use aura_core::identifiers::{AuthorityId, ContextId};
 use aura_effects::time::PhysicalTimeHandler;
 use aura_rendezvous::{
-    RendezvousConfig, RendezvousDescriptor, RendezvousFact, RendezvousService, TransportHint,
+    DiscoveredPeer, LanDiscoveryConfig, LanDiscoveryService, RendezvousConfig,
+    RendezvousDescriptor, RendezvousFact, RendezvousService, TransportHint,
 };
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -32,6 +40,9 @@ pub struct RendezvousManagerConfig {
 
     /// Default transport hints for this node
     pub default_transport_hints: Vec<TransportHint>,
+
+    /// LAN discovery configuration
+    pub lan_discovery: LanDiscoveryConfig,
 }
 
 impl Default for RendezvousManagerConfig {
@@ -43,6 +54,7 @@ impl Default for RendezvousManagerConfig {
             auto_cleanup_enabled: true,
             cleanup_interval: Duration::from_secs(60),
             default_transport_hints: Vec::new(),
+            lan_discovery: LanDiscoveryConfig::default(),
         }
     }
 }
@@ -59,6 +71,10 @@ impl RendezvousManagerConfig {
             default_transport_hints: vec![TransportHint::QuicDirect {
                 addr: "127.0.0.1:0".to_string(),
             }],
+            lan_discovery: LanDiscoveryConfig {
+                enabled: false, // Disabled by default in tests
+                ..Default::default()
+            },
         }
     }
 
@@ -76,6 +92,18 @@ impl RendezvousManagerConfig {
         self.default_transport_hints = hints;
         self
     }
+
+    /// Set LAN discovery configuration
+    pub fn with_lan_discovery(mut self, config: LanDiscoveryConfig) -> Self {
+        self.lan_discovery = config;
+        self
+    }
+
+    /// Enable or disable LAN discovery
+    pub fn lan_discovery_enabled(mut self, enabled: bool) -> Self {
+        self.lan_discovery.enabled = enabled;
+        self
+    }
 }
 
 /// State of the rendezvous service manager
@@ -91,10 +119,20 @@ pub enum RendezvousManagerState {
     Stopping,
 }
 
+/// Task handles for LAN discovery announcer and listener.
+type LanTaskHandles = Option<(tokio::task::JoinHandle<()>, tokio::task::JoinHandle<()>)>;
+
 /// Manager for rendezvous operations
 ///
 /// Integrates `aura_rendezvous::RendezvousService` into the agent runtime lifecycle.
 /// Handles descriptor publication, caching, and channel establishment.
+///
+/// ## LAN Discovery
+///
+/// When `config.lan_discovery.enabled` is true, the manager will:
+/// - Broadcast presence on the local network periodically
+/// - Listen for other Aura nodes on the LAN
+/// - Cache discovered peer descriptors for connection
 pub struct RendezvousManager {
     /// Inner rendezvous service
     service: Arc<RwLock<Option<RendezvousService>>>,
@@ -110,6 +148,15 @@ pub struct RendezvousManager {
 
     /// Background cleanup task handle
     cleanup_task: Arc<RwLock<Option<tokio::task::JoinHandle<()>>>>,
+
+    /// LAN discovery service (if enabled)
+    lan_discovery: Arc<RwLock<Option<LanDiscoveryService>>>,
+
+    /// LAN discovery task handles (announcer, listener)
+    lan_tasks: Arc<RwLock<LanTaskHandles>>,
+
+    /// LAN-discovered peers (authority_id -> DiscoveredPeer)
+    lan_discovered_peers: Arc<RwLock<HashMap<AuthorityId, DiscoveredPeer>>>,
 }
 
 impl RendezvousManager {
@@ -121,6 +168,9 @@ impl RendezvousManager {
             state: Arc::new(RwLock::new(RendezvousManagerState::Stopped)),
             authority_id,
             cleanup_task: Arc::new(RwLock::new(None)),
+            lan_discovery: Arc::new(RwLock::new(None)),
+            lan_tasks: Arc::new(RwLock::new(None)),
+            lan_discovered_peers: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -167,6 +217,13 @@ impl RendezvousManager {
             self.start_cleanup_task().await;
         }
 
+        // Start LAN discovery if enabled
+        if self.config.lan_discovery.enabled {
+            if let Err(e) = self.start_lan_discovery().await {
+                tracing::warn!("Failed to start LAN discovery: {}", e);
+            }
+        }
+
         tracing::info!(
             "Rendezvous manager started for authority {}",
             self.authority_id
@@ -182,6 +239,9 @@ impl RendezvousManager {
         }
 
         *self.state.write().await = RendezvousManagerState::Stopping;
+
+        // Stop LAN discovery
+        self.stop_lan_discovery().await;
 
         // Cancel cleanup task if running
         if let Some(handle) = self.cleanup_task.write().await.take() {
@@ -385,6 +445,131 @@ impl RendezvousManager {
             .as_ref()
             .map(|s| s.list_cached_peers_for_context(context_id))
             .unwrap_or_default()
+    }
+
+    // ========================================================================
+    // LAN Discovery Operations
+    // ========================================================================
+
+    /// Start LAN discovery
+    ///
+    /// Creates a LAN discovery service and starts the announcer and listener.
+    /// Discovered peers are cached and their descriptors are stored.
+    pub async fn start_lan_discovery(&self) -> Result<(), String> {
+        if !self.config.lan_discovery.enabled {
+            return Ok(());
+        }
+
+        // Create LAN discovery service
+        let time: Arc<dyn TimeEffects> = Arc::new(PhysicalTimeHandler::new());
+        let lan_service =
+            LanDiscoveryService::new(self.config.lan_discovery.clone(), self.authority_id, time)
+                .await
+                .map_err(|e| format!("Failed to create LAN discovery service: {}", e))?;
+
+        // Set up callback to cache discovered peers
+        let discovered_peers = self.lan_discovered_peers.clone();
+        let service = self.service.clone();
+
+        let (announcer_handle, listener_handle) = lan_service.start(move |peer: DiscoveredPeer| {
+            let discovered_peers = discovered_peers.clone();
+            let service = service.clone();
+            let peer_clone = peer.clone();
+
+            // Spawn a task to handle the discovery
+            tokio::spawn(async move {
+                // Cache the peer
+                {
+                    let mut peers = discovered_peers.write().await;
+                    peers.insert(peer_clone.authority_id, peer_clone.clone());
+                }
+
+                // Also cache the descriptor in the rendezvous service
+                if let Some(ref mut svc) = *service.write().await {
+                    svc.cache_descriptor(peer_clone.descriptor);
+                }
+
+                tracing::info!(
+                    authority = %peer.authority_id,
+                    addr = %peer.source_addr,
+                    "Cached LAN-discovered peer"
+                );
+            });
+        });
+
+        *self.lan_discovery.write().await = Some(lan_service);
+        *self.lan_tasks.write().await = Some((announcer_handle, listener_handle));
+
+        tracing::info!(
+            "LAN discovery started on port {}",
+            self.config.lan_discovery.port
+        );
+        Ok(())
+    }
+
+    /// Stop LAN discovery
+    pub async fn stop_lan_discovery(&self) {
+        // Signal shutdown
+        if let Some(service) = self.lan_discovery.read().await.as_ref() {
+            service.stop();
+        }
+
+        // Abort tasks
+        if let Some((announcer, listener)) = self.lan_tasks.write().await.take() {
+            announcer.abort();
+            listener.abort();
+        }
+
+        *self.lan_discovery.write().await = None;
+        tracing::info!("LAN discovery stopped");
+    }
+
+    /// Set the descriptor to announce on LAN
+    ///
+    /// Should be called after publishing a descriptor to start announcing on LAN.
+    pub async fn set_lan_descriptor(&self, descriptor: RendezvousDescriptor) {
+        if let Some(service) = self.lan_discovery.read().await.as_ref() {
+            service.set_descriptor(descriptor).await;
+        }
+    }
+
+    /// Get LAN-discovered peers
+    ///
+    /// Returns a copy of all peers discovered via LAN broadcast.
+    pub async fn list_lan_discovered_peers(&self) -> Vec<DiscoveredPeer> {
+        self.lan_discovered_peers
+            .read()
+            .await
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// Get a specific LAN-discovered peer
+    pub async fn get_lan_discovered_peer(
+        &self,
+        authority_id: AuthorityId,
+    ) -> Option<DiscoveredPeer> {
+        self.lan_discovered_peers
+            .read()
+            .await
+            .get(&authority_id)
+            .cloned()
+    }
+
+    /// Check if LAN discovery is enabled and running
+    pub async fn is_lan_discovery_running(&self) -> bool {
+        self.lan_discovery.read().await.is_some()
+    }
+
+    /// Clear expired LAN-discovered peers
+    ///
+    /// Removes peers that haven't been seen for longer than the specified duration.
+    pub async fn prune_lan_peers(&self, max_age_ms: u64) {
+        let now_ms = PhysicalTimeHandler::new().physical_time_now_ms();
+
+        let mut peers = self.lan_discovered_peers.write().await;
+        peers.retain(|_, peer| now_ms.saturating_sub(peer.discovered_at_ms) < max_age_ms);
     }
 
     // ========================================================================

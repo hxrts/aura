@@ -17,136 +17,126 @@ fn test_context(authority_id: AuthorityId) -> EffectContext {
 }
 
 #[tokio::test]
-async fn test_auth_service_via_agent() {
+async fn test_auth_service_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([60u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let auth = agent.auth().await.expect("Failed to get auth service");
+    let auth = agent.auth().await?;
 
     // Check device ID is set
     assert!(!auth.device_id().0.is_nil());
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_is_authenticated_via_agent() {
+async fn test_is_authenticated_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([61u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let auth = agent.auth().await.expect("Failed to get auth service");
+    let auth = agent.auth().await?;
 
     // In test mode, is_authenticated should return true
     assert!(auth.is_authenticated().await);
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_create_challenge_via_agent() {
+async fn test_create_challenge_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([62u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let auth = agent.auth().await.expect("Failed to get auth service");
+    let auth = agent.auth().await?;
 
-    let challenge = auth
-        .create_challenge()
-        .await
-        .expect("Failed to create challenge");
+    let challenge = auth.create_challenge().await?;
 
     assert!(!challenge.challenge_id.is_empty());
     assert_eq!(challenge.challenge_bytes.len(), 32);
     assert!(challenge.expires_at > challenge.created_at);
     assert_eq!(challenge.authority_id, authority_id);
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_supported_methods_via_agent() {
+async fn test_supported_methods_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([63u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let auth = agent.auth().await.expect("Failed to get auth service");
+    let auth = agent.auth().await?;
 
     let methods = auth.supported_methods();
     assert!(methods.contains(&AuthMethod::DeviceKey));
     assert!(methods.contains(&AuthMethod::ThresholdSignature));
     assert!(!methods.contains(&AuthMethod::Passkey)); // Not yet supported
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_device_key_auth_flow_via_agent() {
+async fn test_device_key_auth_flow_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([64u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let auth = agent.auth().await.expect("Failed to get auth service");
+    let auth = agent.auth().await?;
 
     // Test the full device key authentication flow
-    let result = auth
-        .authenticate_with_device_key()
-        .await
-        .expect("Failed to authenticate");
+    let result = auth.authenticate_with_device_key().await?;
 
     assert!(result.authenticated);
     assert_eq!(result.authority_id, Some(authority_id));
     assert!(result.device_id.is_some());
     assert!(result.failure_reason.is_none());
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_challenge_response_flow_via_agent() {
+async fn test_challenge_response_flow_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([65u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let auth = agent.auth().await.expect("Failed to get auth service");
+    let auth = agent.auth().await?;
 
     // Create a challenge
-    let challenge = auth
-        .create_challenge()
-        .await
-        .expect("Failed to create challenge");
+    let challenge = auth.create_challenge().await?;
 
     // Verify the challenge was created correctly
     assert!(challenge.challenge_id.starts_with("challenge-"));
     assert_eq!(challenge.challenge_bytes.len(), 32);
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_invalid_challenge_rejected() {
+async fn test_invalid_challenge_rejected() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([66u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let auth = agent.auth().await.expect("Failed to get auth service");
+    let auth = agent.auth().await?;
 
     // Try to verify a response with an invalid challenge ID
     let invalid_response = aura_agent::AuthResponse {
@@ -156,12 +146,13 @@ async fn test_invalid_challenge_rejected() {
         auth_method: AuthMethod::DeviceKey,
     };
 
-    let result = auth
-        .verify(&invalid_response)
-        .await
-        .expect("Verify should return result");
+    let result = auth.verify(&invalid_response).await?;
 
     assert!(!result.authenticated);
-    assert!(result.failure_reason.is_some());
-    assert!(result.failure_reason.unwrap().contains("not found"));
+    if let Some(reason) = result.failure_reason {
+        assert!(reason.contains("not found"));
+    } else {
+        return Err("Expected failure reason to be present".into());
+    }
+    Ok(())
 }

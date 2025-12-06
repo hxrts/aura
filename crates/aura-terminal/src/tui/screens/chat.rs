@@ -355,7 +355,13 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                             }
                         }
                     }
-                    // Enter sends message when input is focused
+                    // Escape exits insert mode (input focus) back to channels
+                    KeyCode::Esc => {
+                        if focus.get() == ChatFocus::Input {
+                            focus.set(ChatFocus::Channels);
+                        }
+                    }
+                    // Enter sends message when input is focused, stays in insert mode
                     KeyCode::Enter => {
                         if focus.get() == ChatFocus::Input {
                             if let Ok(text) = input_text.read() {
@@ -365,13 +371,14 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                                     if let Some(ref callback) = on_send {
                                         callback(current_channel_id.clone(), text);
                                     }
-                                    // Clear input
+                                    // Clear input but stay in insert mode
                                     if let Ok(mut guard) = input_text.write() {
                                         guard.clear();
                                     }
                                     input_version.set(input_version.get().wrapping_add(1));
                                 }
                             }
+                            // Note: We stay in insert mode (ChatFocus::Input) after Enter
                         }
                     }
                     // Backspace removes last character
@@ -383,15 +390,19 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                             input_version.set(input_version.get().wrapping_add(1));
                         }
                     }
-                    // Character input when input is focused
+                    // Character input when input is focused, or 'i' to enter insert mode
                     KeyCode::Char(c) => {
                         if focus.get() == ChatFocus::Input
                             && !modifiers.contains(KeyModifiers::CONTROL)
                         {
+                            // In insert mode: accept all characters
                             if let Ok(mut guard) = input_text.write() {
                                 guard.push(c);
                             }
                             input_version.set(input_version.get().wrapping_add(1));
+                        } else if c == 'i' && focus.get() != ChatFocus::Input {
+                            // 'i' enters insert mode from any other focus
+                            focus.set(ChatFocus::Input);
                         }
                     }
                     _ => {}
@@ -518,7 +529,8 @@ pub async fn run_chat_screen() -> std::io::Result<()> {
 
     let hints = vec![
         KeyHint::new("↑↓", "Channels"),
-        KeyHint::new("Tab", "Switch panel"),
+        KeyHint::new("i", "Insert mode"),
+        KeyHint::new("Esc", "Exit insert"),
         KeyHint::new("Enter", "Send"),
         KeyHint::new("q", "Quit"),
     ];

@@ -42,6 +42,8 @@ pub fn FilterTabs(props: &FilterTabsProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Row,
+            width: 100pct,
+            overflow: Overflow::Hidden,
             gap: Spacing::SM,
             padding: Spacing::PANEL_PADDING,
             border_style: BorderStyle::Single,
@@ -98,10 +100,11 @@ pub fn InvitationItem(props: &InvitationItemProps) -> impl Into<AnyElement<'stat
             background_color: bg,
             padding_left: Spacing::XS,
             padding_right: Spacing::XS,
+            overflow: Overflow::Hidden,
         ) {
             Text(content: type_icon, color: Theme::SECONDARY)
             Text(content: direction_icon, color: Theme::TEXT_MUTED)
-            Text(content: name, color: Theme::TEXT)
+            Text(content: name, color: Theme::TEXT, wrap: TextWrap::NoWrap)
             Text(content: status_text, color: status_color)
         }
     }
@@ -132,7 +135,6 @@ pub fn InvitationList(props: &InvitationListProps) -> impl Into<AnyElement<'stat
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
             border_style: BorderStyle::Round,
             border_color: border_color,
         ) {
@@ -491,9 +493,12 @@ pub fn InvitationsScreen(
             flex_direction: FlexDirection::Column,
             width: 100pct,
             height: 100pct,
+            overflow: Overflow::Hidden,
         ) {
             // Header
             View(
+                width: 100pct,
+                overflow: Overflow::Hidden,
                 padding: 1,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Bottom,
@@ -508,11 +513,13 @@ pub fn InvitationsScreen(
             // Main content: list + detail
             View(
                 flex_direction: FlexDirection::Row,
+                width: 100pct,
                 flex_grow: 1.0,
-                gap: 1,
+                overflow: Overflow::Hidden,
+                gap: Spacing::XS,
             ) {
-                // List (25%)
-                View(width: 25pct) {
+                // List (30%)
+                View(width: 30pct) {
                     InvitationList(
                         invitations: filtered.clone(),
                         selected_index: current_selected,

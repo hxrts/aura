@@ -270,6 +270,143 @@ impl InvitationHandler {
     }
 }
 
+// =============================================================================
+// Shareable Invitation (Out-of-Band Sharing)
+// =============================================================================
+
+/// Error type for shareable invitation operations
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ShareableInvitationError {
+    /// Invalid invitation code format
+    InvalidFormat,
+    /// Unsupported version
+    UnsupportedVersion(u8),
+    /// Base64 decoding failed
+    DecodingFailed,
+    /// JSON parsing failed
+    ParsingFailed,
+}
+
+impl std::fmt::Display for ShareableInvitationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidFormat => write!(f, "invalid invitation code format"),
+            Self::UnsupportedVersion(v) => write!(f, "unsupported version: {}", v),
+            Self::DecodingFailed => write!(f, "base64 decoding failed"),
+            Self::ParsingFailed => write!(f, "JSON parsing failed"),
+        }
+    }
+}
+
+impl std::error::Error for ShareableInvitationError {}
+
+/// Shareable invitation for out-of-band transfer
+///
+/// This struct contains the minimal information needed to redeem an invitation.
+/// It can be encoded as a string (format: `aura:v1:<base64>`) for sharing via
+/// copy/paste, QR codes, etc.
+///
+/// # Example
+///
+/// ```ignore
+/// // Export an invitation
+/// let shareable = ShareableInvitation::from(&invitation);
+/// let code = shareable.to_code();
+/// println!("Share this code: {}", code);
+///
+/// // Import an invitation
+/// let decoded = ShareableInvitation::from_code(&code)?;
+/// println!("Invitation from: {}", decoded.sender_id);
+/// ```
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ShareableInvitation {
+    /// Version number for forward compatibility
+    pub version: u8,
+    /// Unique invitation identifier
+    pub invitation_id: String,
+    /// Sender authority
+    pub sender_id: AuthorityId,
+    /// Type of invitation
+    pub invitation_type: InvitationType,
+    /// Expiration timestamp (ms), if any
+    pub expires_at: Option<u64>,
+    /// Optional message from sender
+    pub message: Option<String>,
+}
+
+impl ShareableInvitation {
+    /// Current version of the shareable invitation format
+    pub const CURRENT_VERSION: u8 = 1;
+
+    /// Protocol prefix for invitation codes
+    pub const PREFIX: &'static str = "aura";
+
+    /// Encode the invitation as a shareable code string
+    ///
+    /// Format: `aura:v1:<base64-encoded-json>`
+    pub fn to_code(&self) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+        let json = serde_json::to_vec(self).expect("serialization should not fail");
+        let b64 = URL_SAFE_NO_PAD.encode(&json);
+        format!("{}:v{}:{}", Self::PREFIX, self.version, b64)
+    }
+
+    /// Decode an invitation from a code string
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The format is invalid (wrong prefix, missing parts)
+    /// - The version is unsupported
+    /// - Base64 decoding fails
+    /// - JSON parsing fails
+    pub fn from_code(code: &str) -> Result<Self, ShareableInvitationError> {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+
+        let parts: Vec<&str> = code.split(':').collect();
+        if parts.len() != 3 {
+            return Err(ShareableInvitationError::InvalidFormat);
+        }
+
+        if parts[0] != Self::PREFIX {
+            return Err(ShareableInvitationError::InvalidFormat);
+        }
+
+        // Parse version (format: "v1", "v2", etc.)
+        let version_str = parts[1];
+        if !version_str.starts_with('v') {
+            return Err(ShareableInvitationError::InvalidFormat);
+        }
+        let version: u8 = version_str[1..]
+            .parse()
+            .map_err(|_| ShareableInvitationError::InvalidFormat)?;
+
+        if version != Self::CURRENT_VERSION {
+            return Err(ShareableInvitationError::UnsupportedVersion(version));
+        }
+
+        let json = URL_SAFE_NO_PAD
+            .decode(parts[2])
+            .map_err(|_| ShareableInvitationError::DecodingFailed)?;
+
+        serde_json::from_slice(&json).map_err(|_| ShareableInvitationError::ParsingFailed)
+    }
+}
+
+impl From<&Invitation> for ShareableInvitation {
+    fn from(inv: &Invitation) -> Self {
+        Self {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: inv.invitation_id.clone(),
+            sender_id: inv.sender_id,
+            invitation_type: inv.invitation_type.clone(),
+            expires_at: inv.expires_at,
+            message: inv.message.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,5 +612,164 @@ mod tests {
         // Only inv3 should be pending
         let pending = handler.list_pending().await;
         assert_eq!(pending.len(), 1);
+    }
+
+    // =========================================================================
+    // ShareableInvitation Tests
+    // =========================================================================
+
+    #[test]
+    fn shareable_invitation_roundtrip_contact() {
+        let sender_id = AuthorityId::new_from_entropy([42u8; 32]);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: "inv-test-123".to_string(),
+            sender_id,
+            invitation_type: InvitationType::Contact {
+                petname: Some("alice".to_string()),
+            },
+            expires_at: Some(1700000000000),
+            message: Some("Hello!".to_string()),
+        };
+
+        let code = shareable.to_code();
+        assert!(code.starts_with("aura:v1:"));
+
+        let decoded = ShareableInvitation::from_code(&code).unwrap();
+        assert_eq!(decoded.version, shareable.version);
+        assert_eq!(decoded.invitation_id, shareable.invitation_id);
+        assert_eq!(decoded.sender_id, shareable.sender_id);
+        assert_eq!(decoded.expires_at, shareable.expires_at);
+        assert_eq!(decoded.message, shareable.message);
+    }
+
+    #[test]
+    fn shareable_invitation_roundtrip_guardian() {
+        let sender_id = AuthorityId::new_from_entropy([43u8; 32]);
+        let subject_authority = AuthorityId::new_from_entropy([44u8; 32]);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: "inv-guardian-456".to_string(),
+            sender_id,
+            invitation_type: InvitationType::Guardian { subject_authority },
+            expires_at: None,
+            message: None,
+        };
+
+        let code = shareable.to_code();
+        let decoded = ShareableInvitation::from_code(&code).unwrap();
+
+        match decoded.invitation_type {
+            InvitationType::Guardian {
+                subject_authority: sa,
+            } => {
+                assert_eq!(sa, subject_authority);
+            }
+            _ => panic!("wrong invitation type"),
+        }
+    }
+
+    #[test]
+    fn shareable_invitation_roundtrip_channel() {
+        let sender_id = AuthorityId::new_from_entropy([45u8; 32]);
+        let shareable = ShareableInvitation {
+            version: ShareableInvitation::CURRENT_VERSION,
+            invitation_id: "inv-channel-789".to_string(),
+            sender_id,
+            invitation_type: InvitationType::Channel {
+                block_id: "block-xyz".to_string(),
+            },
+            expires_at: Some(1800000000000),
+            message: Some("Join my channel!".to_string()),
+        };
+
+        let code = shareable.to_code();
+        let decoded = ShareableInvitation::from_code(&code).unwrap();
+
+        match decoded.invitation_type {
+            InvitationType::Channel { block_id } => {
+                assert_eq!(block_id, "block-xyz");
+            }
+            _ => panic!("wrong invitation type"),
+        }
+    }
+
+    #[test]
+    fn shareable_invitation_invalid_format() {
+        // Missing parts
+        assert_eq!(
+            ShareableInvitation::from_code("aura:v1").unwrap_err(),
+            ShareableInvitationError::InvalidFormat
+        );
+
+        // Wrong prefix
+        assert_eq!(
+            ShareableInvitation::from_code("badprefix:v1:abc").unwrap_err(),
+            ShareableInvitationError::InvalidFormat
+        );
+
+        // Invalid version format
+        assert_eq!(
+            ShareableInvitation::from_code("aura:1:abc").unwrap_err(),
+            ShareableInvitationError::InvalidFormat
+        );
+    }
+
+    #[test]
+    fn shareable_invitation_unsupported_version() {
+        // Version 99 doesn't exist
+        assert_eq!(
+            ShareableInvitation::from_code("aura:v99:abc").unwrap_err(),
+            ShareableInvitationError::UnsupportedVersion(99)
+        );
+    }
+
+    #[test]
+    fn shareable_invitation_decoding_failed() {
+        // Not valid base64
+        assert_eq!(
+            ShareableInvitation::from_code("aura:v1:!!!invalid!!!").unwrap_err(),
+            ShareableInvitationError::DecodingFailed
+        );
+    }
+
+    #[test]
+    fn shareable_invitation_parsing_failed() {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        // Valid base64 but not valid JSON
+        let bad_json = URL_SAFE_NO_PAD.encode("not json");
+        let code = format!("aura:v1:{}", bad_json);
+        assert_eq!(
+            ShareableInvitation::from_code(&code).unwrap_err(),
+            ShareableInvitationError::ParsingFailed
+        );
+    }
+
+    #[test]
+    fn shareable_invitation_from_invitation() {
+        let invitation = Invitation {
+            invitation_id: "inv-from-full".to_string(),
+            context_id: ContextId::new_from_entropy([50u8; 32]),
+            sender_id: AuthorityId::new_from_entropy([51u8; 32]),
+            receiver_id: AuthorityId::new_from_entropy([52u8; 32]),
+            invitation_type: InvitationType::Contact {
+                petname: Some("bob".to_string()),
+            },
+            status: InvitationStatus::Pending,
+            created_at: 1600000000000,
+            expires_at: Some(1700000000000),
+            message: Some("Hi Bob!".to_string()),
+        };
+
+        let shareable = ShareableInvitation::from(&invitation);
+        assert_eq!(shareable.invitation_id, invitation.invitation_id);
+        assert_eq!(shareable.sender_id, invitation.sender_id);
+        assert_eq!(shareable.expires_at, invitation.expires_at);
+        assert_eq!(shareable.message, invitation.message);
+
+        // Round-trip via code
+        let code = shareable.to_code();
+        let decoded = ShareableInvitation::from_code(&code).unwrap();
+        assert_eq!(decoded.invitation_id, invitation.invitation_id);
     }
 }

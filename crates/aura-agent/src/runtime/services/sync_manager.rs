@@ -7,7 +7,7 @@ use aura_core::effects::{PhysicalTimeEffects, TimeEffects};
 use aura_core::DeviceId;
 use aura_sync::services::{Service, SyncService, SyncServiceConfig};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 /// Configuration for the sync service manager
@@ -124,7 +124,6 @@ impl SyncServiceManager {
     ///
     /// # Arguments
     /// - `time_effects`: Time effects for service initialization
-    #[allow(clippy::disallowed_methods)] // Instant::now() needed for service initialization
     pub async fn start<T: PhysicalTimeEffects + TimeEffects + Send + Sync>(
         &self,
         time_effects: &T,
@@ -145,7 +144,7 @@ impl SyncServiceManager {
         };
 
         // Create the underlying sync service
-        let now_instant = Instant::now();
+        let now_instant = SyncService::monotonic_now();
         let service = SyncService::new_with_time_effects(sync_config, time_effects, now_instant)
             .await
             .map_err(|e| format!("Failed to create sync service: {}", e))?;
@@ -164,7 +163,6 @@ impl SyncServiceManager {
     }
 
     /// Stop the sync service
-    #[allow(clippy::disallowed_methods)] // Instant::now() needed for service shutdown
     pub async fn stop(&self) -> Result<(), String> {
         let current_state = *self.state.read().await;
         if current_state == SyncManagerState::Stopped {
@@ -180,7 +178,7 @@ impl SyncServiceManager {
 
         // Stop the underlying service
         if let Some(service) = self.service.read().await.as_ref() {
-            let now_instant = Instant::now();
+            let now_instant = SyncService::monotonic_now();
             service
                 .stop(now_instant)
                 .await
@@ -199,7 +197,6 @@ impl SyncServiceManager {
     /// # Arguments
     /// - `effects`: Effect system providing journal, network, and time capabilities
     /// - `peers`: List of peers to sync with
-    #[allow(clippy::disallowed_methods)] // Instant::now() needed for sync timing
     pub async fn sync_with_peers<E>(&self, effects: &E, peers: Vec<DeviceId>) -> Result<(), String>
     where
         E: aura_core::effects::JournalEffects
@@ -211,7 +208,7 @@ impl SyncServiceManager {
         let service = self.service.read().await;
         let service = service.as_ref().ok_or("Sync service not started")?;
 
-        let now_instant = Instant::now();
+        let now_instant = SyncService::monotonic_now();
         service
             .sync_with_peers(effects, peers, now_instant)
             .await

@@ -77,9 +77,9 @@ module protocol_dkg {
   ): CommitmentState =
     if (pid.in(mapping.keys())) mapping
     else
-      mapping.set(
+      mapping.put(
         pid,
-        members.fold(Map(), (acc, member) => acc.set(member, None))
+        members.fold(Map(), (acc, member) => acc.put(member, None))
       )
 
   pure def updateMapping(
@@ -90,7 +90,7 @@ module protocol_dkg {
     members: Set[AuthorityId]
   ): CommitmentState = {
     val ensured = ensureParticipantMap(mapping, pid, members)
-    ensured.set(pid, ensured.get(pid).set(member, value))
+    ensured.put(pid, ensured.get(pid).put(member, value))
   }
 
   pure def ensureVerificationMap(
@@ -100,9 +100,9 @@ module protocol_dkg {
   ): VerificationState =
     if (pid.in(mapping.keys())) mapping
     else
-      mapping.set(
+      mapping.put(
         pid,
-        members.fold(Map(), (acc, member) => acc.set(member, None))
+        members.fold(Map(), (acc, member) => acc.put(member, None))
       )
 
   pure def updateVerification(
@@ -113,7 +113,7 @@ module protocol_dkg {
     members: Set[AuthorityId]
   ): VerificationState = {
     val ensured = ensureVerificationMap(mapping, pid, members)
-    ensured.set(pid, ensured.get(pid).set(member, value))
+    ensured.put(pid, ensured.get(pid).put(member, value))
   }
 
   pure def getCommitmentOpt(mapping: CommitmentState, pid: ProtocolId, member: AuthorityId): Option[int] =
@@ -171,17 +171,17 @@ module protocol_dkg {
     t >= 1,
     t <= members.size(),
     not(pid.in(participants.keys())),
-    participants' = participants.set(pid, members),
-    threshold' = threshold.set(pid, t),
-    phase' = phase.set(pid, AwaitingCommitments),
+    participants' = participants.put(pid, members),
+    threshold' = threshold.put(pid, t),
+    phase' = phase.put(pid, AwaitingCommitments),
     dealerCommitments' = ensureParticipantMap(dealerCommitments, pid, members),
     verifierResponses' = ensureVerificationMap(verifierResponses, pid, members),
     participantShares' = ensureParticipantMap(participantShares, pid, members),
-    publicKeyPackage' = publicKeyPackage.set(pid, None),
-    transcriptDigest' = transcriptDigest.set(pid, None),
-    lifecycleStatus' = lifecycleStatus.set(pid, DkgPending),
-    lifecycleEffects' = lifecycleEffects.set(pid, Set()),
-    outcome' = outcome.set(pid, None)
+    publicKeyPackage' = publicKeyPackage.put(pid, None),
+    transcriptDigest' = transcriptDigest.put(pid, None),
+    lifecycleStatus' = lifecycleStatus.put(pid, DkgPending),
+    lifecycleEffects' = lifecycleEffects.put(pid, Set()),
+    outcome' = outcome.put(pid, None)
   }
 
   action submitCommitment(
@@ -325,7 +325,9 @@ module protocol_dkg {
   action failDkg(pid: ProtocolId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Unconfigured
     val isNotCompleted = match currentPhase { | DkgCompleted => false | _ => true }
+    val isConfigured = pid.in(phase.keys())
     all {
+      isConfigured,
       isNotCompleted,
       phase' = phase.set(pid, DkgFailed),
       lifecycleStatus' = lifecycleStatus.set(pid, DkgAborted),
@@ -346,7 +348,9 @@ module protocol_dkg {
     val isPending = match status { | DkgPending => true | _ => false }
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Unconfigured
     val isPhaseCompleted = match currentPhase { | DkgCompleted => true | _ => false }
+    val isConfigured = pid.in(lifecycleStatus.keys())
     all {
+      isConfigured,
       isPending,
       isPhaseCompleted,
       lifecycleStatus' = lifecycleStatus.set(pid, DkgLifecycleCompleted),
@@ -366,7 +370,9 @@ module protocol_dkg {
   action signalAbort(pid: ProtocolId): bool = {
     val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else DkgPending
     val isPending = match status { | DkgPending => true | _ => false }
+    val isConfigured = pid.in(lifecycleStatus.keys())
     all {
+      isConfigured,
       isPending,
       lifecycleStatus' = lifecycleStatus.set(pid, DkgAborted),
       lifecycleEffects' = lifecycleEffects,
@@ -441,4 +447,41 @@ module protocol_dkg {
       val hasOutcome = match outcomeOpt { | Some(_) => true | None => false }
       isCompleted implies hasOutcome
     })
+
+  // ============ STEP RELATION (for trace generation) ============
+
+  action step = any {
+    // Configure a new DKG session
+    nondet pid = oneOf(Set("dkg1", "dkg2", "dkg3"))
+    nondet members = oneOf(Set(
+      Set("alice", "bob"),
+      Set("alice", "bob", "carol"),
+      Set("bob", "carol", "dave")
+    ))
+    nondet t = oneOf(Set(2, 3))
+    any {
+      configureDkg(pid, members, t),
+      // Submit commitment
+      nondet participant = oneOf(Set("alice", "bob", "carol", "dave"))
+      nondet commitment = oneOf(Set(100, 200, 300))
+      submitCommitment(pid, participant, commitment),
+      // Verify commitment
+      nondet verifier = oneOf(Set("alice", "bob", "carol", "dave"))
+      nondet valid = oneOf(Set(true, false))
+      verifyCommitment(pid, verifier, valid),
+      // Submit share
+      nondet sharer = oneOf(Set("alice", "bob", "carol", "dave"))
+      nondet shareDigest = oneOf(Set(1000, 2000, 3000))
+      submitShare(pid, sharer, shareDigest),
+      // Finalize DKG
+      nondet derivedKey = oneOf(Set(9001, 9002))
+      nondet publicKey = oneOf(Set(8001, 8002))
+      nondet transcript = oneOf(Set(7001, 7002))
+      finalizeDkg(pid, derivedKey, publicKey, transcript),
+      // Fail or signal completion
+      failDkg(pid),
+      signalComplete(pid),
+      signalAbort(pid),
+    }
+  }
 }

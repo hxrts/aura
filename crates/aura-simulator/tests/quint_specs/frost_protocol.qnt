@@ -295,4 +295,27 @@ module FROSTProtocol {
             .put(2, { identifier: 2, signingShare: "share2", verifyingKey: "vk2" })
             .put(3, { identifier: 3, signingShare: "share3", verifyingKey: "vk3" })
     }
+
+    // ========== Step Relation (for trace generation) ==========
+
+    action step = any {
+        // Initiate a new signing session
+        nondet sessionId = oneOf(Set("session1", "session2", "session3"))
+        nondet message = oneOf(Set("msg_hello", "msg_transfer", "msg_approve"))
+        nondet threshold = oneOf(Set(2, 3))
+        nondet participants = oneOf(Set(Set(1, 2), Set(1, 3), Set(2, 3), Set(1, 2, 3)))
+        any {
+            initiateFROSTSession(sessionId, message, threshold, participants, "group_vk"),
+            // Submit commitment (Round 1)
+            nondet pid = oneOf(Set(1, 2, 3))
+            submitCommitment(sessionId, pid),
+            // Submit signature share (Round 2)
+            nondet pid2 = oneOf(Set(1, 2, 3))
+            submitSignatureShare(sessionId, pid2),
+            // Aggregate signature
+            aggregateSignature(sessionId),
+            // Fail session
+            failSession(sessionId),
+        }
+    }
 }

@@ -111,7 +111,10 @@ impl DomainFact for RendezvousFact {
     }
 
     fn to_bytes(&self) -> Vec<u8> {
-        serde_json::to_vec(self).expect("RendezvousFact serialization should not fail")
+        serde_json::to_vec(self).unwrap_or_else(|err| {
+            // Serialization should be infallible for well-formed facts; treat failures as unreachable bugs.
+            unreachable!("RendezvousFact serialization should not fail: {err}")
+        })
     }
 
     fn from_bytes(bytes: &[u8]) -> Option<Self> {

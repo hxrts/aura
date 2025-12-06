@@ -5,6 +5,7 @@
 
 use super::invitation::{
     Invitation, InvitationHandler, InvitationResult, InvitationStatus, InvitationType,
+    ShareableInvitation, ShareableInvitationError,
 };
 use crate::core::{AgentResult, AuthorityContext};
 use crate::runtime::AuraEffectSystem;
@@ -191,6 +192,53 @@ impl InvitationService {
             .await
             .map(|inv| inv.status == InvitationStatus::Pending)
             .unwrap_or(false)
+    }
+
+    // =========================================================================
+    // Sharing Methods (Out-of-Band Transfer)
+    // =========================================================================
+
+    /// Export an invitation as a shareable code string
+    ///
+    /// The code can be shared out-of-band (copy/paste, QR code, etc.)
+    /// and imported by the receiver using `import_code`.
+    ///
+    /// # Arguments
+    /// * `invitation_id` - ID of the invitation to export
+    ///
+    /// # Returns
+    /// A shareable code string (format: `aura:v1:<base64>`)
+    ///
+    /// # Errors
+    /// Returns an error if the invitation is not found
+    pub async fn export_code(&self, invitation_id: &str) -> AgentResult<String> {
+        let invitation = self
+            .handler
+            .get_invitation(invitation_id)
+            .await
+            .ok_or_else(|| {
+                aura_core::AuraError::not_found(format!("Invitation not found: {}", invitation_id))
+            })?;
+
+        let shareable = ShareableInvitation::from(&invitation);
+        Ok(shareable.to_code())
+    }
+
+    /// Import an invitation from a shareable code string
+    ///
+    /// Decodes the code and returns the shareable invitation details.
+    /// The receiver can then decide whether to accept.
+    ///
+    /// # Arguments
+    /// * `code` - The shareable code string (format: `aura:v1:<base64>`)
+    ///
+    /// # Returns
+    /// The decoded `ShareableInvitation`
+    ///
+    /// # Errors
+    /// Returns an error if the code is invalid
+    pub fn import_code(code: &str) -> Result<ShareableInvitation, ShareableInvitationError> {
+        ShareableInvitation::from_code(code)
     }
 }
 

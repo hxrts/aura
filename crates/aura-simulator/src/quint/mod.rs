@@ -27,6 +27,7 @@ pub mod cli_runner;
 pub mod domain_handlers;
 pub mod generative_simulator;
 pub mod itf_fuzzer;
+pub mod itf_loader;
 pub mod properties;
 pub mod simulation_evaluator;
 pub mod state_mapper;
@@ -117,4 +118,9 @@ pub use aura_state_extractors::{
     extract_authority_state, extract_budgets_state, extract_completed_ops, extract_flow_budget,
     extract_tokens_state, extract_tree_state, extract_tree_state_simple, CapabilityToken,
     QuintSimulationState, QuintStateExtractor, TransportOpRecord,
+};
+
+// ITF trace loading and replay
+pub use itf_loader::{
+    ITFLoader, ITFTraceBuilder, InferredAction, SimulationSequence, SimulationSequenceStep,
 };

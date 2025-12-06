@@ -170,6 +170,9 @@ EFFECT_HANDLER_ALLOWLIST="crates/aura-effects/src/"
 # Test infrastructure (Layer 8) - mocks and test harnesses
 TEST_ALLOWLIST="crates/aura-testkit/|/tests/|/examples/|benches/"
 
+# Rendezvous LAN discovery (UDP sockets are platform-specific and intentionally live here)
+LAN_DISCOVERY_ALLOWLIST="crates/aura-rendezvous/src/lan_discovery.rs"
+
 # Simulator handlers (Layer 6) - simulation-specific impurity
 SIMULATOR_ALLOWLIST="crates/aura-simulator/src/handlers/"
 
@@ -194,6 +197,7 @@ filter_common_allowlist() {
   # Filter doc comments (///) as they're examples, not actual code
   result=$(echo "$input" \
     | grep -v "$EFFECT_HANDLER_ALLOWLIST" \
+    | grep -v "$LAN_DISCOVERY_ALLOWLIST" \
     | grep -v "$SIMULATOR_ALLOWLIST" \
     | grep -Ev "$TEST_ALLOWLIST" \
     | grep -v "///" || true)
@@ -350,6 +354,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-terminal/" \
     | grep -v "crates/aura-composition/" \
     | grep -v "crates/aura-testkit/" \
+    | grep -v "$LAN_DISCOVERY_ALLOWLIST" \
     | grep -v "crates/aura-wot/src/storage_authorization.rs" \
     | grep -v "#\\[tokio::test\\]" \
     | grep -v "#\\[async_std::test\\]" \
@@ -373,6 +378,7 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_EFFECTS" = true ]; then
     | grep -v "crates/aura-simulator/" \
     | grep -v "crates/aura-agent/src/runtime/" \
     | grep -v "crates/aura-terminal/" \
+    | grep -v "$LAN_DISCOVERY_ALLOWLIST" \
     | grep -v "tests/performance_regression.rs" \
     | grep -v "///" \
     | grep -v "//!" \

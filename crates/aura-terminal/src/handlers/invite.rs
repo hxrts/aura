@@ -4,6 +4,7 @@ use crate::handlers::HandlerContext;
 use crate::InvitationAction;
 use anyhow::{anyhow, Result};
 // Import agent types from aura-agent (runtime layer)
+use aura_agent::handlers::{InvitationService, ShareableInvitation};
 use aura_agent::AuraAgent;
 use aura_core::identifiers::AuthorityId;
 use std::str::FromStr;
@@ -81,6 +82,66 @@ pub async fn handle_invitation(ctx: &HandlerContext<'_>, action: &InvitationActi
                 }
             }
             Ok(())
+        }
+        InvitationAction::Export { invitation_id } => {
+            let service = agent.invitations().await?;
+            let code = service.export_code(invitation_id).await?;
+            println!("=== Shareable Invitation Code ===");
+            println!("{}", code);
+            println!("\nShare this code with the recipient.");
+            println!("They can import it using: aura invite import <code>");
+            Ok(())
+        }
+        InvitationAction::Import { code } => {
+            let shareable = InvitationService::import_code(code)
+                .map_err(|e| anyhow!("Invalid invitation code: {}", e))?;
+
+            println!("=== Invitation Details ===");
+            println!("Invitation ID: {}", shareable.invitation_id);
+            println!("From: {}", shareable.sender_id);
+            println!("Type: {}", format_invitation_type(&shareable));
+
+            if let Some(msg) = &shareable.message {
+                println!("Message: {}", msg);
+            }
+
+            if let Some(exp) = shareable.expires_at {
+                // Convert ms to human-readable timestamp
+                let secs = exp / 1000;
+                let nanos = ((exp % 1000) * 1_000_000) as u32;
+                if let Some(dt) =
+                    std::time::UNIX_EPOCH.checked_add(std::time::Duration::new(secs, nanos))
+                {
+                    println!("Expires: {:?}", dt);
+                } else {
+                    println!("Expires: {} (ms since epoch)", exp);
+                }
+            } else {
+                println!("Expires: Never");
+            }
+
+            println!("\nTo accept this invitation, use:");
+            println!("  aura invite accept {}", shareable.invitation_id);
+            Ok(())
+        }
+    }
+}
+
+/// Format invitation type for display
+fn format_invitation_type(shareable: &ShareableInvitation) -> String {
+    match &shareable.invitation_type {
+        aura_agent::handlers::InvitationType::Contact { petname } => {
+            if let Some(name) = petname {
+                format!("Contact (petname: {})", name)
+            } else {
+                "Contact".to_string()
+            }
+        }
+        aura_agent::handlers::InvitationType::Guardian { subject_authority } => {
+            format!("Guardian (for: {})", subject_authority)
+        }
+        aura_agent::handlers::InvitationType::Channel { block_id } => {
+            format!("Channel (block: {})", block_id)
         }
     }
 }

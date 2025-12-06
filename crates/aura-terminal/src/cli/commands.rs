@@ -1,4 +1,4 @@
-use bpaf::{command, construct, long, pure, short, Parser};
+use bpaf::{construct, long, pure, short, Parser};
 use std::path::PathBuf;
 
 use crate::cli::{
@@ -286,12 +286,11 @@ fn recovery_command() -> impl Parser<Commands> {
             .command("dispute")
     };
 
-    command(
-        "recovery",
-        construct!([start, approve, status, dispute]).to_options(),
-    )
-    .help("Guardian recovery flows")
-    .map(|action| Commands::Recovery { action })
+    construct!([start, approve, status, dispute])
+        .to_options()
+        .command("recovery")
+        .help("Guardian recovery flows")
+        .map(|action| Commands::Recovery { action })
 }
 
 fn invite_command() -> impl Parser<Commands> {
@@ -352,12 +351,31 @@ fn invite_command() -> impl Parser<Commands> {
         .command("list")
         .help("List pending invitations");
 
-    command(
-        "invite",
-        construct!([create, accept, decline, cancel, list]).to_options(),
-    )
-    .help("Device invitations")
-    .map(|action| Commands::Invite { action })
+    let export = {
+        let invitation_id = long("invitation-id")
+            .help("Invitation ID to export as shareable code")
+            .argument::<String>("INVITATION_ID");
+        construct!(InvitationAction::Export { invitation_id })
+            .to_options()
+            .command("export")
+            .help("Export invitation as shareable code for out-of-band transfer")
+    };
+
+    let import = {
+        let code = long("code")
+            .help("Shareable invitation code (format: aura:v1:<base64>)")
+            .argument::<String>("CODE");
+        construct!(InvitationAction::Import { code })
+            .to_options()
+            .command("import")
+            .help("Import and display details of a shareable invitation code")
+    };
+
+    construct!([create, accept, decline, cancel, list, export, import])
+        .to_options()
+        .command("invite")
+        .help("Device invitations")
+        .map(|action| Commands::Invite { action })
 }
 
 fn authority_command() -> impl Parser<Commands> {

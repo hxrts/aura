@@ -26,7 +26,6 @@ thiserror = { workspace = true }
 hex = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros"] }
 async-trait = { workspace = true }
 uuid = { workspace = true }

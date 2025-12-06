@@ -93,7 +93,6 @@ required-features = ["host"]
 # Core Aura crates
 aura-core = { path = "../aura-core" }
 aura-journal = { path = "../aura-journal" }
-aura-wot = { path = "../aura-wot" }
 
 # Always required
 serde = { version = "1", features = ["derive"] }

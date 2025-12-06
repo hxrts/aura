@@ -152,8 +152,10 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 
 ### "Where does my code go?" Decision Tree
 - **Single-party stateless operation** → `aura-effects`
-- **Multi-party coordination** → `aura-protocol`  
+- **Multi-party coordination** → `aura-protocol`
 - **Domain-specific logic** → Domain crate (`aura-journal`, etc.)
+- **Domain service handler (stateless)** → Domain crate `*Handler` (e.g., `aura-chat::ChatHandler`)
+- **RwLock wrapper service** → `aura-agent/src/handlers/*_service.rs`
 - **Complete end-to-end protocol** → Feature crate (e.g., `aura-authenticate`; `aura-frost` deprecated)
 - **Effect trait definition** → `aura-core`
 - **Mock/test handlers** → `aura-testkit`

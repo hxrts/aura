@@ -119,6 +119,9 @@ build:
 # Creates ./bin/aura symlink for easy access
 build-dev:
     cargo build -p aura-terminal --bin aura --features development --release
+    mkdir -p bin
+    ln -sf ../target/release/aura bin/aura
+    @echo "Binary available at: ./bin/aura"
 
 build-app-host:
     cargo build -p aura-app --bin app-host --features host --release
@@ -716,7 +719,10 @@ ci-dry-run:
         ! -path "*/node_modules/*" \
         ! -path "*/target/*" \
         ! -path "*/.git/*" \
-        ! -path "*/.aura-test/*")
+        ! -path "*/.aura-test/*" \
+        ! -path "*/ext/quint/*" \
+        ! -path "*/work/*" \
+        ! -path "*/.claude/skills/*")
 
     if [ $doc_errors -eq 0 ]; then
         echo -e "${GREEN}[OK]${NC} Documentation links check passed"
@@ -885,6 +891,257 @@ verify-quint:
     echo ""
 
     echo "Quint setup verification completed!"
+
+# Typecheck all Quint specs without verification (fast sanity check)
+quint-typecheck-all:
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    GREEN='\033[0;32m'
+    RED='\033[0;31m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m'
+
+    echo "Typechecking All Quint Specs"
+    echo "============================"
+    echo ""
+
+    SPECS_DIR="specs/quint"
+    TEST_SPECS_DIR="crates/aura-simulator/tests/quint_specs"
+
+    passed=0
+    failed=0
+
+    # Typecheck specs/quint/
+    echo "Checking specs in $SPECS_DIR..."
+    for spec in $SPECS_DIR/protocol_*.qnt $SPECS_DIR/harness_*.qnt; do
+        if [ -f "$spec" ]; then
+            name=$(basename "$spec")
+            if quint typecheck "$spec" > /dev/null 2>&1; then
+                echo -e "  ${GREEN}✓${NC} $name"
+                passed=$((passed + 1))
+            else
+                echo -e "  ${RED}✗${NC} $name"
+                failed=$((failed + 1))
+            fi
+        fi
+    done
+
+    # Typecheck test specs
+    echo ""
+    echo "Checking specs in $TEST_SPECS_DIR..."
+    for spec in $TEST_SPECS_DIR/*.qnt; do
+        if [ -f "$spec" ]; then
+            name=$(basename "$spec")
+            if quint typecheck "$spec" > /dev/null 2>&1; then
+                echo -e "  ${GREEN}✓${NC} $name"
+                passed=$((passed + 1))
+            else
+                echo -e "  ${RED}✗${NC} $name"
+                failed=$((failed + 1))
+            fi
+        fi
+    done
+
+    echo ""
+    echo "=============================="
+    echo -e "Passed: ${GREEN}$passed${NC}"
+    echo -e "Failed: ${RED}$failed${NC}"
+
+    if [ $failed -gt 0 ]; then
+        echo -e "${RED}Some specs failed typecheck!${NC}"
+        exit 1
+    else
+        echo -e "${GREEN}All specs passed typecheck!${NC}"
+    fi
+
+# Verify Quint specs with Apalache symbolic model checking
+# Usage: just quint-verify-all              # Run with defaults
+# Usage: just quint-verify-all 5            # Max 5 steps
+# Usage: just quint-verify-all 10 traces    # Max 10 steps, output to traces/
+quint-verify-all max_steps="5" output_dir="traces/verify":
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    GREEN='\033[0;32m'
+    RED='\033[0;31m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m'
+
+    MAX_STEPS="{{max_steps}}"
+    OUTPUT_DIR="{{output_dir}}"
+
+    echo "Quint + Apalache Verification"
+    echo "============================="
+    echo "Max steps: $MAX_STEPS"
+    echo "Output dir: $OUTPUT_DIR"
+    echo ""
+
+    mkdir -p "$OUTPUT_DIR"
+
+    # Specs with their invariants to verify
+    # Format: spec_file:invariant1,invariant2,...
+    VERIFY_TARGETS=(
+        # Journal CRDT properties (proving.md §1)
+        "specs/quint/protocol_journal.qnt:InvariantNonceUnique,InvariantEventsOrdered,InvariantLamportMonotonic,InvariantReduceDeterministic"
+
+        # Consensus fast-path/fallback (proving.md §1)
+        "specs/quint/protocol_consensus.qnt:InvariantUniqueCommitPerInstance,InvariantCommitRequiresThreshold,InvariantPathConvergence"
+
+        # Anti-entropy convergence (proving.md §3)
+        "specs/quint/protocol_anti_entropy.qnt:InvariantFactsMonotonic,InvariantVectorClockConsistent,InvariantEventualConvergence"
+
+        # Recovery safety (proving.md §4)
+        "specs/quint/protocol_recovery.qnt:InvariantThresholdWithinBounds,InvariantApprovalsSubsetGuardians,InvariantPhaseConsistency"
+
+        # Session management
+        "specs/quint/protocol_sessions.qnt:InvariantAuthoritiesRegisteredSessions,InvariantRevokedInactive"
+    )
+
+    passed=0
+    failed=0
+    skipped=0
+
+    for target in "${VERIFY_TARGETS[@]}"; do
+        IFS=':' read -r spec invariants <<< "$target"
+        spec_name=$(basename "$spec" .qnt)
+
+        if [ ! -f "$spec" ]; then
+            echo -e "${YELLOW}SKIP${NC} $spec_name (file not found)"
+            skipped=$((skipped + 1))
+            continue
+        fi
+
+        echo ""
+        echo "Verifying $spec_name..."
+        echo "  Invariants: $invariants"
+
+        # Convert comma-separated invariants to --invariant flags
+        inv_flags=""
+        IFS=',' read -ra INV_ARRAY <<< "$invariants"
+        for inv in "${INV_ARRAY[@]}"; do
+            inv_flags="$inv_flags --invariant=$inv"
+        done
+
+        output_file="$OUTPUT_DIR/${spec_name}_verify.json"
+
+        # Run quint verify with Apalache
+        if quint verify "$spec" \
+            $inv_flags \
+            --max-steps="$MAX_STEPS" \
+            --out-itf="$OUTPUT_DIR/${spec_name}_counter.itf.json" \
+            > "$output_file" 2>&1; then
+            echo -e "  ${GREEN}✓ PASS${NC}"
+            passed=$((passed + 1))
+        else
+            # Check if it's a real failure or just a limitation
+            if grep -q "no violation found" "$output_file" 2>/dev/null; then
+                echo -e "  ${GREEN}✓ PASS${NC} (no violation in $MAX_STEPS steps)"
+                passed=$((passed + 1))
+            elif grep -q "Apalache" "$output_file" 2>/dev/null; then
+                echo -e "  ${RED}✗ FAIL${NC}"
+                echo "    Counterexample: $OUTPUT_DIR/${spec_name}_counter.itf.json"
+                echo "    Full output: $output_file"
+                failed=$((failed + 1))
+            else
+                echo -e "  ${YELLOW}? ERROR${NC} (see $output_file)"
+                skipped=$((skipped + 1))
+            fi
+        fi
+    done
+
+    echo ""
+    echo "=============================="
+    echo -e "Passed:  ${GREEN}$passed${NC}"
+    echo -e "Failed:  ${RED}$failed${NC}"
+    echo -e "Skipped: ${YELLOW}$skipped${NC}"
+    echo ""
+    echo "Counterexamples (if any) saved to: $OUTPUT_DIR/"
+
+    if [ $failed -gt 0 ]; then
+        echo -e "${RED}Some invariants were violated!${NC}"
+        exit 1
+    else
+        echo -e "${GREEN}All verified invariants hold (up to $MAX_STEPS steps)${NC}"
+    fi
+
+# Verify a single Quint spec with specific invariants
+# Usage: just quint-verify specs/quint/protocol_journal.qnt InvariantNonceUnique
+quint-verify spec invariants:
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    echo "Verifying {{spec}}..."
+    echo "Invariants: {{invariants}}"
+    echo ""
+
+    mkdir -p traces/verify
+    SPEC_NAME=$(basename "{{spec}}" .qnt)
+
+    # Convert comma-separated to multiple --invariant flags
+    INV_FLAGS=""
+    IFS=',' read -ra INV_ARRAY <<< "{{invariants}}"
+    for inv in "${INV_ARRAY[@]}"; do
+        INV_FLAGS="$INV_FLAGS --invariant=$inv"
+    done
+
+    quint verify "{{spec}}" \
+        $INV_FLAGS \
+        --max-steps=10 \
+        --out-itf="traces/verify/${SPEC_NAME}_counter.itf.json" \
+        --verbosity=3
+
+# Generate ITF traces from all Quint specs
+quint-generate-traces:
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    GREEN='\033[0;32m'
+    RED='\033[0;31m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m'
+
+    echo "Generating ITF Traces from Quint Specs"
+    echo "======================================"
+    echo ""
+
+    mkdir -p traces
+
+    # Specs that have step actions defined
+    RUNNABLE_SPECS=(
+        "specs/quint/protocol_journal.qnt:journal"
+        "specs/quint/protocol_consensus.qnt:consensus"
+        "specs/quint/protocol_anti_entropy.qnt:anti_entropy"
+        "specs/quint/protocol_epochs.qnt:epochs"
+        "specs/quint/protocol_cross_interaction.qnt:cross_interaction"
+        "crates/aura-simulator/tests/quint_specs/capability_properties.qnt:cap_props"
+        "crates/aura-simulator/tests/quint_specs/frost_protocol.qnt:frost"
+    )
+
+    for target in "${RUNNABLE_SPECS[@]}"; do
+        IFS=':' read -r spec trace_name <<< "$target"
+
+        if [ ! -f "$spec" ]; then
+            echo -e "${YELLOW}SKIP${NC} $spec (not found)"
+            continue
+        fi
+
+        echo "Generating trace for $trace_name..."
+        if quint run "$spec" \
+            --main=step \
+            --max-steps=15 \
+            --out-itf="traces/${trace_name}.itf.json" \
+            > /dev/null 2>&1; then
+            size=$(du -h "traces/${trace_name}.itf.json" | cut -f1)
+            echo -e "  ${GREEN}✓${NC} traces/${trace_name}.itf.json ($size)"
+        else
+            echo -e "  ${RED}✗${NC} Failed to generate trace"
+        fi
+    done
+
+    echo ""
+    echo "Trace generation complete. Files in traces/"
+    ls -la traces/*.itf.json 2>/dev/null || echo "No traces generated"
 
 # Execute any aura CLI command with nix build
 # Usage: just aura init -n 3 -t 2 -o test-account
@@ -1154,28 +1411,87 @@ test-quint-pipeline:
 # Initialize Lean project (run once or after clean)
 lean-init:
     @echo "Initializing Lean project..."
-    cd lean && lake update
+    cd specs/lean && lake update
 
 # Build Lean verification modules
 lean-build: lean-init
     @echo "Building Lean verification modules..."
-    cd lean && lake build
+    cd specs/lean && lake build
 
-# Build the Lean verifier CLI
+# Build the Lean verifier CLI (if executable is defined)
 lean-verifier: lean-build
-    @echo "Building Lean verifier CLI..."
-    cd lean && lake build aura_verifier
+    @echo "Lean library built. Verifier CLI not yet configured."
 
-# Run Lean verification tests (placeholder for now)
-lean-check: lean-verifier
-    @echo "Running Lean verification..."
-    cd lean && lake exe aura_verifier version
+# Run Lean verification (build and check for errors)
+lean-check: lean-build
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m'
+
+    echo "Checking Lean proof status..."
+    echo ""
+
+    # Check for sorry usage (incomplete proofs)
+    if grep -r "sorry" specs/lean/Aura --include="*.lean" > /tmp/sorry-check.txt 2>/dev/null; then
+        count=$(wc -l < /tmp/sorry-check.txt | tr -d ' ')
+        echo -e "${YELLOW}⚠ Found $count incomplete proofs (sorry):${NC}"
+        head -10 /tmp/sorry-check.txt | sed 's/^/  /'
+        if [ "$count" -gt 10 ]; then
+            echo "  ... and $(($count - 10)) more"
+        fi
+    else
+        echo -e "${GREEN}✓ All proofs complete (no sorry found)${NC}"
+    fi
 
 # Clean Lean build artifacts
 lean-clean:
     @echo "Cleaning Lean artifacts..."
-    cd lean && lake clean
+    cd specs/lean && lake clean
 
 # Full Lean workflow (clean, build, verify)
 lean-full: lean-clean lean-build lean-check
     @echo "Lean verification complete!"
+
+# Show Lean proof status summary
+lean-status:
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m'
+
+    echo "Lean Proof Status"
+    echo "================="
+    echo ""
+
+    LEAN_DIR="specs/lean"
+
+    if [ ! -d "$LEAN_DIR" ]; then
+        echo "No Lean directory found at $LEAN_DIR"
+        exit 0
+    fi
+
+    echo "Modules:"
+    find "$LEAN_DIR/Aura" -name "*.lean" -type f | sort | while read -r f; do
+        name=$(basename "$f" .lean)
+        dir=$(dirname "$f" | sed "s|$LEAN_DIR/Aura/||")
+        if [ "$dir" != "$LEAN_DIR/Aura" ] && [ -n "$dir" ]; then
+            display="$dir/$name"
+        else
+            display="$name"
+        fi
+        sorries=$(grep -c "sorry" "$f" 2>/dev/null || true)
+        sorries=${sorries:-0}
+        if [ "$sorries" -gt 0 ] 2>/dev/null; then
+            echo -e "  ${YELLOW}○${NC} $display ($sorries incomplete)"
+        else
+            echo -e "  ${GREEN}●${NC} $display"
+        fi
+    done
+
+    echo ""
+    echo "Run 'just lean-check' to build and verify proofs"

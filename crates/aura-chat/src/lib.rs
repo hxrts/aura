@@ -20,48 +20,45 @@
 //!
 //! - **ChatGroup**: Manages group membership and metadata
 //! - **ChatMessage**: Represents individual chat messages
-//! - **ChatService**: Core service for chat operations
+//! - **ChatHandler**: Stateless handler for chat operations (per-call effects pattern)
 //! - **ChatHistory**: Message history management and retrieval
 //!
 //! ## Effect System Compliance
 //!
-//! This crate follows the **Layer 5 Feature/Protocol Implementation** pattern:
+//! This crate follows the **Layer 5 Feature/Protocol Implementation** pattern with
+//! per-call effect references:
 //! - All operations flow through effect traits (`StorageEffects`, `RandomEffects`, `TimeEffects`)
-//! - Requires `EffectContext` for all async operations (tracing/correlation)
+//! - Handler methods take effect references per-call (no Arc<E> storage)
 //! - No direct system calls or global state
 //! - Deterministic testing via mock effect implementations
 //!
 //! ## Usage
 //!
 //! ```ignore
-//! use aura_chat::{ChatService, ChatGroup, ChatMessage};
+//! use aura_chat::{ChatHandler, ChatGroup, ChatMessage};
 //! use aura_core::context::EffectContext;
-//! use std::sync::Arc;
 //!
-//! // Create chat service with effect system
-//! let chat_service = ChatService::new(Arc::new(effect_system));
+//! // Create stateless chat handler
+//! let handler = ChatHandler::new();
 //!
-//! // All operations require EffectContext for tracing
-//! let ctx = EffectContext::new(authority_id);
-//!
-//! // Create group chat
-//! let group = chat_service.create_group(
-//!     &ctx,
+//! // Pass effects per-call (enables RwLock integration at agent layer)
+//! let group = handler.create_group(
+//!     &effects,
 //!     "Alice & Friends",
 //!     creator_authority,
 //!     initial_members
 //! ).await?;
 //!
 //! // Send message
-//! let message = chat_service.send_message(
-//!     &ctx,
+//! let message = handler.send_message(
+//!     &effects,
 //!     &group.id,
 //!     sender_authority,
 //!     "Hello everyone!".to_string()
 //! ).await?;
 //!
 //! // Get message history
-//! let history = chat_service.get_history(&ctx, &group.id, None, None).await?;
+//! let history = handler.get_history(&effects, &group.id, None, None).await?;
 //! ```
 
 use aura_core::AuraError;
@@ -76,7 +73,7 @@ pub mod view;
 pub use facts::{ChatFact, ChatFactReducer, CHAT_FACT_TYPE_ID};
 pub use group::ChatGroup;
 pub use history::ChatHistory;
-pub use service::ChatService;
+pub use service::ChatHandler;
 pub use types::*;
 pub use view::{ChatDelta, ChatViewReducer};
 

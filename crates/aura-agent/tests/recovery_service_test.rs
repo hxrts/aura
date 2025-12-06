@@ -19,39 +19,32 @@ fn test_context(authority_id: AuthorityId) -> EffectContext {
 }
 
 #[tokio::test]
-async fn test_recovery_service_via_agent() {
+async fn test_recovery_service_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([90u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let recovery = agent
-        .recovery()
-        .await
-        .expect("Failed to get recovery service");
+    let recovery = agent.recovery().await?;
 
     // Initially no active recoveries
     let active = recovery.list_active().await;
     assert!(active.is_empty());
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_add_device_recovery_via_agent() {
+async fn test_add_device_recovery_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([91u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let recovery = agent
-        .recovery()
-        .await
-        .expect("Failed to get recovery service");
+    let recovery = agent.recovery().await?;
 
     let guardians = vec![
         AuthorityId::new_from_entropy([92u8; 32]),
@@ -66,52 +59,44 @@ async fn test_add_device_recovery_via_agent() {
             "Adding backup device".to_string(),
             None,
         )
-        .await
-        .expect("Failed to initiate add device recovery");
+        .await?;
 
     assert!(request.recovery_id.starts_with("recovery-"));
     assert_eq!(request.threshold, 2);
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_remove_device_recovery_via_agent() {
+async fn test_remove_device_recovery_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([94u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let recovery = agent
-        .recovery()
-        .await
-        .expect("Failed to get recovery service");
+    let recovery = agent.recovery().await?;
 
     let guardians = vec![AuthorityId::new_from_entropy([95u8; 32])];
 
     let request = recovery
         .remove_device(0, guardians, 1, "Device compromised".to_string(), None)
-        .await
-        .expect("Failed to initiate remove device recovery");
+        .await?;
 
     assert!(request.recovery_id.starts_with("recovery-"));
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_replace_tree_recovery_via_agent() {
+async fn test_replace_tree_recovery_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([96u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let recovery = agent
-        .recovery()
-        .await
-        .expect("Failed to get recovery service");
+    let recovery = agent.recovery().await?;
 
     let guardians = vec![
         AuthorityId::new_from_entropy([97u8; 32]),
@@ -127,27 +112,23 @@ async fn test_replace_tree_recovery_via_agent() {
             "Full recovery after device loss".to_string(),
             Some(604800000), // 1 week
         )
-        .await
-        .expect("Failed to initiate replace tree recovery");
+        .await?;
 
     assert!(request.recovery_id.starts_with("recovery-"));
     assert!(request.expires_at.is_some());
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_update_guardians_recovery_via_agent() {
+async fn test_update_guardians_recovery_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([100u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let recovery = agent
-        .recovery()
-        .await
-        .expect("Failed to get recovery service");
+    let recovery = agent.recovery().await?;
 
     let current_guardians = vec![AuthorityId::new_from_entropy([101u8; 32])];
     let new_guardians = vec![
@@ -164,26 +145,22 @@ async fn test_update_guardians_recovery_via_agent() {
             "Upgrading guardian set".to_string(),
             None,
         )
-        .await
-        .expect("Failed to initiate update guardians recovery");
+        .await?;
 
     assert!(request.recovery_id.starts_with("recovery-"));
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_full_recovery_flow_via_agent() {
+async fn test_full_recovery_flow_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([104u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let recovery = agent
-        .recovery()
-        .await
-        .expect("Failed to get recovery service");
+    let recovery = agent.recovery().await?;
 
     let guardians = vec![AuthorityId::new_from_entropy([105u8; 32])];
 
@@ -196,8 +173,7 @@ async fn test_full_recovery_flow_via_agent() {
             "Test".to_string(),
             None,
         )
-        .await
-        .expect("Failed to initiate recovery");
+        .await?;
 
     // Check pending
     assert!(recovery.is_pending(&request.recovery_id).await);
@@ -210,41 +186,31 @@ async fn test_full_recovery_flow_via_agent() {
         share_data: None,
         approved_at: 12345,
     };
-    recovery
-        .submit_approval(approval)
-        .await
-        .expect("Failed to submit approval");
+    recovery.submit_approval(approval).await?;
 
     // Complete
-    let result = recovery
-        .complete(&request.recovery_id)
-        .await
-        .expect("Failed to complete recovery");
+    let result = recovery.complete(&request.recovery_id).await?;
     assert!(result.success);
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_cancel_recovery_via_agent() {
+async fn test_cancel_recovery_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([106u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let recovery = agent
-        .recovery()
-        .await
-        .expect("Failed to get recovery service");
+    let recovery = agent.recovery().await?;
 
     let guardians = vec![AuthorityId::new_from_entropy([107u8; 32])];
 
     // Initiate
     let request = recovery
         .add_device(vec![0u8; 32], guardians, 1, "Test".to_string(), None)
-        .await
-        .expect("Failed to initiate recovery");
+        .await?;
 
     // Verify pending
     assert!(recovery.is_pending(&request.recovery_id).await);
@@ -252,30 +218,26 @@ async fn test_cancel_recovery_via_agent() {
     // Cancel - note: success is false because cancellation means the recovery ceremony failed
     let result = recovery
         .cancel(&request.recovery_id, "Changed my mind".to_string())
-        .await
-        .expect("Failed to cancel recovery");
+        .await?;
     // Cancellation sets success to false (recovery did not complete successfully)
     assert!(!result.success);
     assert_eq!(result.error, Some("Changed my mind".to_string()));
 
     // Verify no longer pending
     assert!(!recovery.is_pending(&request.recovery_id).await);
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_list_active_via_agent() {
+async fn test_list_active_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([108u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let recovery = agent
-        .recovery()
-        .await
-        .expect("Failed to get recovery service");
+    let recovery = agent.recovery().await?;
 
     // Initially empty
     let active = recovery.list_active().await;
@@ -295,46 +257,40 @@ async fn test_list_active_via_agent() {
             "Test 1".to_string(),
             None,
         )
-        .await
-        .expect("Failed to initiate recovery 1");
+        .await?;
 
     recovery
         .remove_device(0, guardians, 2, "Test 2".to_string(), None)
-        .await
-        .expect("Failed to initiate recovery 2");
+        .await?;
 
     // Should have 2 active
     let active = recovery.list_active().await;
     assert_eq!(active.len(), 2);
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_get_state_via_agent() {
+async fn test_get_state_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([111u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
-    let recovery = agent
-        .recovery()
-        .await
-        .expect("Failed to get recovery service");
+    let recovery = agent.recovery().await?;
 
     let guardians = vec![AuthorityId::new_from_entropy([112u8; 32])];
 
     let request = recovery
         .add_device(vec![0u8; 32], guardians, 1, "Test".to_string(), None)
-        .await
-        .expect("Failed to initiate recovery");
+        .await?;
 
     // Should be able to retrieve state
-    let state = recovery
-        .get_state(&request.recovery_id)
-        .await
-        .expect("Recovery state should exist");
+    let state = match recovery.get_state(&request.recovery_id).await {
+        Some(state) => state,
+        None => return Err("Recovery state should exist".into()),
+    };
 
     match state {
         RecoveryState::Initiated { .. } => {}
@@ -344,4 +300,5 @@ async fn test_get_state_via_agent() {
     // Non-existent recovery should return None
     let non_existent = recovery.get_state("non-existent-id").await;
     assert!(non_existent.is_none());
+    Ok(())
 }

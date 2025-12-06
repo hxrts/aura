@@ -20,6 +20,8 @@ pub fn KeyHintsBar(props: &KeyHintsBarProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Row,
+            width: 100pct,
+            overflow: Overflow::Hidden,
             gap: 3,
             padding: 1,
         ) {

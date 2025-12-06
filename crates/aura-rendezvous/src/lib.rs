@@ -59,6 +59,9 @@ pub mod new_channel;
 /// Flood propagation for rendezvous packet flooding through social topology
 pub mod flood;
 
+/// LAN discovery via UDP broadcast
+pub mod lan_discovery;
+
 // =============================================================================
 // RE-EXPORTS
 // =============================================================================
@@ -100,3 +103,9 @@ pub use new_channel::{
 
 // Re-export flood types
 pub use flood::{DecryptedPayload, FloodPropagation, PacketBuilder, PacketCrypto, SeenNonces};
+
+// Re-export LAN discovery types
+pub use lan_discovery::{
+    DiscoveredPeer, LanAnnouncer, LanDiscoveryConfig, LanDiscoveryPacket, LanDiscoveryService,
+    LanListener, DEFAULT_ANNOUNCE_INTERVAL_MS, DEFAULT_LAN_PORT,
+};

@@ -22,14 +22,28 @@ def charge (budget : Budget) (cost : Nat) : Option Budget :=
 
 /-- Theorem: Charging never increases available budget -/
 theorem charge_decreases (budget : Budget) (cost : Nat) (result : Budget) :
-  charge budget cost = some result →
-  result.available ≤ budget.available := by
-  sorry  -- To be proven
+    charge budget cost = some result →
+    result.available ≤ budget.available := by
+  intro h
+  unfold charge at h
+  split at h
+  case isTrue hge =>
+    cases h
+    exact Nat.sub_le budget.available cost
+  case isFalse =>
+    contradiction
 
 /-- Theorem: Charging exact amount results in zero budget -/
 theorem charge_exact (budget : Budget) (result : Budget) :
-  charge budget budget.available = some result →
-  result.available = 0 := by
-  sorry  -- To be proven
+    charge budget budget.available = some result →
+    result.available = 0 := by
+  intro h
+  unfold charge at h
+  split at h
+  case isTrue =>
+    cases h
+    exact Nat.sub_self budget.available
+  case isFalse hlt =>
+    exact absurd (Nat.le_refl budget.available) hlt
 
 end Aura.FlowBudget

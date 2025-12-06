@@ -71,9 +71,8 @@ futures-signals = "0.3"
 toml = { workspace = true }
 serde = { workspace = true }
 hex = { workspace = true }
-blake3 = { workspace = true }
 cfg-if = "1"
-bpaf = "0.6"
+bpaf = "0.9"
 
 # Async
 tokio = { workspace = true }
@@ -85,7 +84,6 @@ tracing = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 once_cell = { workspace = true }
-chrono = { workspace = true }
 biscuit-auth = { workspace = true }
 
 [dev-dependencies]

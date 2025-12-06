@@ -1,6 +1,7 @@
 # Rust
 /target/
 target/
+/traces
 **/*.rs.bk
 *.pdb
 Cargo.lock
@@ -69,6 +70,6 @@ mermaid.min.js
 mermaid-init.js
 
 # Lean build artifacts
-lean/.lake/
-lean/build/
-lean/.lean_build/
+specs/lean/.lake/
+specs/lean/build/
+specs/lean/.lean_build/

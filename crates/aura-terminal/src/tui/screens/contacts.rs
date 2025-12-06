@@ -48,11 +48,6 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
 
     let name = c.petname.clone();
     let guardian_badge = if c.is_guardian { " [guardian]" } else { "" }.to_string();
-    let suggestion = c
-        .suggested_name
-        .as_ref()
-        .map(|s| format!(" (suggests: {})", s))
-        .unwrap_or_default();
 
     element! {
         View(
@@ -61,11 +56,11 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
             padding_left: Spacing::XS,
             padding_right: Spacing::XS,
             gap: Spacing::XS,
+            overflow: Overflow::Hidden,
         ) {
             StatusIndicator(status: status, icon_only: true)
-            Text(content: name, color: Theme::TEXT)
+            Text(content: name, color: Theme::TEXT, wrap: TextWrap::NoWrap)
             Text(content: guardian_badge, color: Theme::SECONDARY)
-            Text(content: suggestion, color: Theme::TEXT_MUTED)
         }
     }
 }
@@ -95,7 +90,6 @@ pub fn ContactList(props: &ContactListProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
-            flex_grow: 1.0,
             border_style: BorderStyle::Round,
             border_color: border_color,
         ) {
@@ -360,10 +354,13 @@ pub fn ContactsScreen(
             flex_direction: FlexDirection::Column,
             width: 100pct,
             height: 100pct,
+            overflow: Overflow::Hidden,
         ) {
             // Header
             View(
-                padding: Spacing::PANEL_PADDING,
+                width: 100pct,
+                overflow: Overflow::Hidden,
+                padding: 1,
                 border_style: BorderStyle::Single,
                 border_edges: Edges::Bottom,
                 border_color: Theme::BORDER,
@@ -374,11 +371,13 @@ pub fn ContactsScreen(
             // Main content: list + detail
             View(
                 flex_direction: FlexDirection::Row,
+                width: 100pct,
                 flex_grow: 1.0,
-                gap: 1,
+                overflow: Overflow::Hidden,
+                gap: Spacing::XS,
             ) {
-                // List (25%)
-                View(width: 25pct) {
+                // List (30%)
+                View(width: 30pct) {
                     ContactList(
                         contacts: contacts.clone(),
                         selected_index: current_selected,

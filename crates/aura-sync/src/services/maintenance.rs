@@ -713,8 +713,14 @@ impl Service for MaintenanceService {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::disallowed_methods)] // Test code uses Instant::now() for coordination
     use super::*;
+    use std::time::Instant;
+
+    #[allow(clippy::disallowed_methods)]
+    fn monotonic_now() -> Instant {
+        type MonoClock = Instant;
+        MonoClock::now()
+    }
 
     #[test]
     fn test_maintenance_service_creation() {
@@ -727,33 +733,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_maintenance_service_lifecycle() {
-        use std::time::Instant;
         let service = MaintenanceService::new(Default::default()).unwrap();
 
         let time_effects = aura_effects::time::PhysicalTimeHandler;
         service
-            .start_with_time_effects(&time_effects, Instant::now())
+            .start_with_time_effects(&time_effects, monotonic_now())
             .await
             .unwrap();
         assert!(service.is_running());
 
-        service.stop(Instant::now()).await.unwrap();
+        service.stop(monotonic_now()).await.unwrap();
         assert!(!service.is_running());
     }
 
     #[tokio::test]
     async fn test_maintenance_service_with_time_effects() {
-        use std::time::Instant;
         let service = MaintenanceService::new(Default::default()).unwrap();
         let time_effects = aura_testkit::stateful_effects::SimulatedTimeHandler::new();
 
         service
-            .start_with_time_effects(&time_effects, Instant::now())
+            .start_with_time_effects(&time_effects, monotonic_now())
             .await
             .unwrap();
         assert!(service.is_running());
 
-        service.stop(Instant::now()).await.unwrap();
+        service.stop(monotonic_now()).await.unwrap();
         assert!(!service.is_running());
     }
 

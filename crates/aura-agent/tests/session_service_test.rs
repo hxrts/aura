@@ -18,15 +18,14 @@ fn test_context(authority_id: AuthorityId) -> EffectContext {
 }
 
 #[tokio::test]
-async fn test_session_service_via_agent() {
+async fn test_session_service_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     // Create a testing agent
     let authority_id = AuthorityId::new_from_entropy([50u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
     // Get the session service
     let sessions = agent.sessions().await;
@@ -35,40 +34,39 @@ async fn test_session_service_via_agent() {
     let participants = vec![sessions.device_id()];
     let handle = sessions
         .create_coordination_session(participants.clone())
-        .await
-        .expect("Failed to create session");
+        .await?;
 
     assert!(!handle.session_id.is_empty());
     assert_eq!(handle.participants, participants);
     assert_eq!(handle.session_type, SessionType::Coordination);
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_session_stats_via_agent() {
+async fn test_session_stats_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([51u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
     let sessions = agent.sessions().await;
-    let stats = sessions.get_stats().await.expect("Failed to get stats");
+    let stats = sessions.get_stats().await?;
 
     // Initially no active sessions
     assert_eq!(stats.active_sessions, 0);
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_threshold_session_via_agent() {
+async fn test_threshold_session_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([52u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
     let sessions = agent.sessions().await;
     let device_id = sessions.device_id();
@@ -82,60 +80,51 @@ async fn test_threshold_session_via_agent() {
 
     let handle = sessions
         .create_threshold_session(participants.clone(), 2)
-        .await
-        .expect("Failed to create threshold session");
+        .await?;
 
     assert!(!handle.session_id.is_empty());
     assert_eq!(handle.session_type, SessionType::ThresholdOperation);
     assert!(handle.metadata.contains_key("threshold"));
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_key_rotation_session_via_agent() {
+async fn test_key_rotation_session_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([53u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
     let sessions = agent.sessions().await;
 
-    let handle = sessions
-        .create_key_rotation_session()
-        .await
-        .expect("Failed to create key rotation session");
+    let handle = sessions.create_key_rotation_session().await?;
 
     assert!(!handle.session_id.is_empty());
     assert_eq!(handle.session_type, SessionType::KeyRotation);
     assert!(handle.metadata.contains_key("rotation_type"));
+    Ok(())
 }
 
 #[tokio::test]
-async fn test_end_session_via_agent() {
+async fn test_end_session_via_agent() -> Result<(), Box<dyn std::error::Error>> {
     let authority_id = AuthorityId::new_from_entropy([54u8; 32]);
     let ctx = test_context(authority_id);
     let agent = AgentBuilder::new()
         .with_authority(authority_id)
         .build_testing_async(&ctx)
-        .await
-        .expect("Failed to build testing agent");
+        .await?;
 
     let sessions = agent.sessions().await;
     let participants = vec![sessions.device_id()];
 
     // Create and then end a session
-    let handle = sessions
-        .create_coordination_session(participants)
-        .await
-        .expect("Failed to create session");
+    let handle = sessions.create_coordination_session(participants).await?;
 
-    let ended = sessions
-        .end_session(&handle.session_id)
-        .await
-        .expect("Failed to end session");
+    let ended = sessions.end_session(&handle.session_id).await?;
 
     assert_eq!(ended.session_id, handle.session_id);
     assert!(ended.metadata.contains_key("status"));
+    Ok(())
 }

@@ -3,7 +3,9 @@
 //! Minimal public API surface for the agent runtime.
 
 use super::{AgentConfig, AgentError, AgentResult, AuthorityContext};
-use crate::handlers::{AuthService, InvitationService, RecoveryService, SessionService};
+use crate::handlers::{
+    AuthService, ChatService, InvitationService, RecoveryService, SessionService,
+};
 use crate::runtime::services::ThresholdSigningService;
 use crate::runtime::system::RuntimeSystem;
 use crate::runtime::{EffectContext, EffectSystemBuilder};
@@ -138,6 +140,16 @@ impl AuraAgent {
         }
 
         Ok(service)
+    }
+
+    /// Get the chat service
+    ///
+    /// Provides access to chat operations including group creation, messaging,
+    /// and message history retrieval.
+    pub fn chat(&self) -> ChatService {
+        // ChatService is simple - just wraps the effects with the handler
+        // No lazy initialization needed since it's stateless
+        ChatService::new(self.runtime.effects())
     }
 
     /// Get the invitation service

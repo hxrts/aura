@@ -3,8 +3,10 @@
 //! Configuration types for agent runtime behavior, including guardian consensus policy.
 
 use super::guardian::GuardianConsensusPolicy;
+use crate::runtime::services::rendezvous_manager::RendezvousManagerConfig;
 use aura_core::hash;
 use aura_core::DeviceId;
+use aura_rendezvous::LanDiscoveryConfig;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -30,6 +32,10 @@ pub struct AgentConfig {
     /// Guardian consensus policy
     #[serde(default)]
     pub guardian: GuardianConsensusPolicy,
+
+    /// LAN discovery configuration
+    #[serde(default, skip)]
+    pub lan_discovery: LanDiscoveryConfig,
 }
 
 impl Default for AgentConfig {
@@ -41,6 +47,7 @@ impl Default for AgentConfig {
             reliability: ReliabilityConfig::default(),
             choreography: ChoreographyConfig::default(),
             guardian: GuardianConsensusPolicy::default(),
+            lan_discovery: LanDiscoveryConfig::default(),
         }
     }
 }
@@ -180,5 +187,16 @@ impl AgentConfig {
 
     pub fn is_simulation(&self) -> bool {
         false
+    }
+
+    /// Get a rendezvous manager config with LAN discovery settings from this agent config
+    pub fn rendezvous_config(&self) -> RendezvousManagerConfig {
+        RendezvousManagerConfig::default().with_lan_discovery(self.lan_discovery.clone())
+    }
+
+    /// Enable LAN discovery
+    pub fn with_lan_discovery_enabled(mut self, enabled: bool) -> Self {
+        self.lan_discovery.enabled = enabled;
+        self
     }
 }

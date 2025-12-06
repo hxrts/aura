@@ -36,7 +36,6 @@ thiserror = { workspace = true }
 # Async support (runtime dependencies removed for Layer 2 compliance)
 async-trait = { workspace = true }
 futures = { workspace = true }
-futures-timer = "3.0"
 # tokio = { workspace = true } # Removed - violates Layer 2 runtime abstraction
 
 # Identifiers and time (unified time system via aura-core)
@@ -49,10 +48,6 @@ hex = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
-# Temporarily removed due to build issues in dependencies
-# aura-testkit = { path = "../aura-testkit" }
-# aura-protocol = { path = "../aura-protocol" }
-aura-macros = { path = "../aura-macros" }
 aura-effects = { path = "../aura-effects" }
 tokio = { workspace = true }
 futures = { workspace = true }
