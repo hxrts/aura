@@ -6,7 +6,7 @@ Identity is relational • Identity emerges bottom-up between parties that share
 
 Your friends are the network • The Aura network forms an encrypted mesh across the social graph. Distributed protocols run within scoped sessions and channels that conceal participant structure. Gossip, rendezvous, consensus, and storage all operate through these bounded contexts.
 
-Autonomy from consent • Relationships are expressed through a web-of-trust. Capabilities form a semilattice that restricts authority through attenuation. Information flow is governed by explicit consent predicates. Consent enables participants to coordinate more flexibly by ensuring boundaries by design.
+Autonomy from consent • Relationships are expressed through a web-of-trust. Capabilities form a semilattice that attenuates authority. Information flow is governed by explicit consent predicates, enabling participants to coordinate more freely by ensuring boundaries are respected by design.
 
 ## Architecture
 
