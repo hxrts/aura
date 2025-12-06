@@ -5,6 +5,8 @@
 use aura_core::AuraError;
 use std::path::PathBuf;
 
+use crate::cli::tui::TuiArgs;
+use crate::handlers::tui::handle_tui;
 use crate::ids;
 use crate::{
     cli::demo::{DemoCommands, DemoScenarioArg},
@@ -67,12 +69,59 @@ impl DemoHandler {
     }
 
     /// Handle TUI demo command
+    ///
+    /// Routes to the TUI handler with demo mode enabled.
+    /// The TUI code is IDENTICAL for demo and production - only the backend differs.
     async fn handle_tui_demo(scenario_arg: DemoScenarioArg) -> Result<(), AuraError> {
-        // The new iocraft-based TUI is still being wired to the CLI demo flow.
-        // Until that landing completes, surface a friendly placeholder so the
-        // command remains usable (and compilable) under the development feature.
-        println!("TUI demo for scenario '{scenario_arg:?}' is not yet available in aura-terminal.");
-        println!("Please run the CLI recovery workflow demo instead (e.g., `aura demo recovery-workflow`).");
-        Ok(())
+        // Map scenario arg to appropriate demo configuration
+        // Each scenario configures different behavior for Alice/Charlie peer agents
+        let (data_dir, device_id, scenario_name) = match scenario_arg {
+            DemoScenarioArg::HappyPath => {
+                // Happy path - guardians respond quickly
+                (
+                    "./aura-demo-happy".to_string(),
+                    "demo:bob:happy".to_string(),
+                    "happy_path",
+                )
+            }
+            DemoScenarioArg::SlowGuardian => {
+                // One guardian is slow to respond
+                (
+                    "./aura-demo-slow".to_string(),
+                    "demo:bob:slow".to_string(),
+                    "slow_guardian",
+                )
+            }
+            DemoScenarioArg::FailedRecovery => {
+                // Recovery fails (for error handling demo)
+                (
+                    "./aura-demo-failed".to_string(),
+                    "demo:bob:failed".to_string(),
+                    "failed_recovery",
+                )
+            }
+            DemoScenarioArg::Interactive => {
+                // Interactive demo for free-form exploration
+                (
+                    "./aura-demo-interactive".to_string(),
+                    "demo:bob:interactive".to_string(),
+                    "interactive",
+                )
+            }
+        };
+
+        println!("Starting demo scenario: {}", scenario_name);
+
+        // Construct TuiArgs with demo mode enabled
+        let tui_args = TuiArgs {
+            data_dir: Some(data_dir),
+            device_id: Some(device_id),
+            demo: true,
+        };
+
+        // Route to TUI handler - it uses the same code path for demo and production
+        handle_tui(&tui_args)
+            .await
+            .map_err(|e| AuraError::internal(format!("TUI demo failed: {}", e)))
     }
 }

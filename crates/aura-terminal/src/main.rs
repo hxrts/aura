@@ -10,14 +10,58 @@ use aura_core::effects::ExecutionMode;
 use aura_terminal::cli::commands::{cli_parser, Commands, GlobalArgs, ThresholdArgs};
 use aura_terminal::ids;
 use aura_terminal::{CliHandler, SyncAction};
-use bpaf::Parser;
+use bpaf::{Args, Parser};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// Print a friendly usage message when no command is provided
+fn print_usage() {
+    eprintln!(
+        "usage: aura [-v] [-c CONFIG] COMMAND [OPTIONS]
+
+commands:
+    init        Initialize a new threshold account
+    status      Show account status
+    node        Run node/agent daemon
+    tui         Interactive terminal user interface
+    chat        Secure messaging
+    sync        Journal synchronization
+    recovery    Guardian recovery flows
+    invite      Device invitations
+    authority   Authority management
+    context     Relational context inspection
+    amp         AMP channel operations
+    version     Show version information
+
+run 'aura COMMAND --help' for command-specific options"
+    );
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args: GlobalArgs = cli_parser().to_options().run();
+    // Check if no arguments were provided (just "aura" with no command)
+    let raw_args: Vec<String> = std::env::args().collect();
+    if raw_args.len() == 1 {
+        print_usage();
+        std::process::exit(0);
+    }
+
+    // Parse arguments, showing usage on parse failure
+    let args: GlobalArgs = match cli_parser().to_options().run_inner(Args::current_args()) {
+        Ok(args) => args,
+        Err(e) => {
+            // Check if this is a help request (exit code 0)
+            let exit_code = e.clone().exit_code();
+            if exit_code == 0 {
+                print!("{:?}", e);
+                std::process::exit(0);
+            }
+            // For other errors, show our friendly usage
+            print_usage();
+            std::process::exit(1);
+        }
+    };
     let command = args.command;
 
     // Create CLI device ID and identifiers

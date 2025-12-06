@@ -15,15 +15,27 @@ impl Theme {
 
     // === Text Colors ===
     pub const TEXT: Color = Color::White;
-    pub const TEXT_MUTED: Color = Color::DarkGrey;
+    pub const TEXT_MUTED: Color = Color::AnsiValue(245); // Light grey - visible on dark backgrounds
     pub const TEXT_HIGHLIGHT: Color = Color::Cyan;
 
     // === Background Colors ===
-    pub const BG_DARK: Color = Color::DarkGrey;
+    pub const BG_DARK: Color = Color::AnsiValue(236); // Dark grey background for unselected items
     pub const BG_PRIMARY: Color = Color::DarkBlue;
-    pub const BG_SELECTED: Color = Color::Blue; // Bright blue for clear selection visibility
+    pub const BG_SELECTED: Color = Color::AnsiValue(24); // Dark blue - distinct but not overpowering
     pub const BG_HOVER: Color = Color::AnsiValue(238); // Slightly lighter than dark
     pub const OVERLAY: Color = Color::AnsiValue(0); // Black for overlay backdrop
+
+    // === List Item Colors (for consistent scrollable lists) ===
+    /// Background for selected list items
+    pub const LIST_BG_SELECTED: Color = Color::AnsiValue(24); // Dark blue
+    /// Background for unselected list items
+    pub const LIST_BG_NORMAL: Color = Color::AnsiValue(236); // Dark grey
+    /// Text color for selected list items - high contrast on dark blue
+    pub const LIST_TEXT_SELECTED: Color = Color::White;
+    /// Primary text color for unselected list items
+    pub const LIST_TEXT_NORMAL: Color = Color::AnsiValue(252); // Light grey
+    /// Secondary/muted text for unselected list items
+    pub const LIST_TEXT_MUTED: Color = Color::AnsiValue(245); // Medium grey
 
     // === Border Colors ===
     pub const BORDER: Color = Color::DarkGrey;
@@ -38,7 +50,7 @@ impl Theme {
 
     // === Message Bubbles ===
     pub const MSG_OWN: Color = Color::DarkBlue;
-    pub const MSG_OTHER: Color = Color::DarkGrey;
+    pub const MSG_OTHER: Color = Color::AnsiValue(238); // Darker grey for other messages
 }
 
 /// Spacing scale for consistent layout

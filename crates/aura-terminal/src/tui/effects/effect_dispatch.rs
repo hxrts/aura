@@ -925,6 +925,29 @@ pub(super) async fn execute_command(
             Ok(())
         }
 
+        EffectCommand::StartDirectChat { contact_id } => {
+            // Create or navigate to a DM channel with the contact
+            // Dispatch CreateChannel intent with DirectMessage type
+            if let Some(core) = app_core {
+                let intent = Intent::CreateChannel {
+                    name: format!("DM:{}", contact_id),
+                    channel_type: IntentChannelType::DirectMessage,
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for StartDirectChat: {}", e);
+                }
+            }
+
+            // Emit event to notify UI to navigate to chat
+            let _ = event_tx.send(AuraEvent::DirectChatStarted {
+                contact_id: contact_id.clone(),
+            });
+
+            tracing::info!("Started direct chat with contact: {}", contact_id);
+            Ok(())
+        }
+
         EffectCommand::SendAction { channel, action } => {
             // Actions are special messages formatted with "* action" (emote style)
             // Send via AMP like regular messages
@@ -1262,8 +1285,254 @@ pub(super) async fn execute_command(
             Ok(())
         }
 
+        // LAN Discovery commands
+        EffectCommand::ListLanPeers => {
+            tracing::info!("Listing LAN-discovered peers");
+
+            // Get LAN peers from RendezvousManager via agent
+            let peers = if let Some(ref agent) = agent {
+                if let Some(rendezvous) = agent.runtime().rendezvous() {
+                    let discovered = rendezvous.list_lan_discovered_peers().await;
+                    discovered
+                        .into_iter()
+                        .map(|p| {
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as u64)
+                                .unwrap_or(0);
+                            let age_secs = if now_ms > p.discovered_at_ms {
+                                (now_ms - p.discovered_at_ms) / 1000
+                            } else {
+                                0
+                            };
+                            (
+                                format!("{}", p.authority_id),
+                                format!("{}", p.source_addr),
+                                age_secs,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    tracing::debug!("No rendezvous manager available");
+                    vec![]
+                }
+            } else {
+                tracing::debug!("No agent available for LAN discovery");
+                vec![]
+            };
+
+            // Emit event with discovered peers
+            let _ = event_tx.send(AuraEvent::LanPeersUpdated { peers });
+
+            Ok(())
+        }
+
+        EffectCommand::InviteLanPeer {
+            authority_id,
+            address,
+        } => {
+            tracing::info!(
+                "Inviting LAN peer: authority={}, address={}",
+                authority_id,
+                address
+            );
+
+            // Create a contact invitation for the LAN peer
+            // This uses the same Intent::CreateInvitation as regular invitations
+            // but we also store the peer address for direct connection
+
+            if let Some(core) = app_core {
+                // Create invitation intent
+                let intent = Intent::CreateInvitation {
+                    invitation_type: aura_app::InvitationType::Chat,
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!(
+                        "AppCore dispatch failed for LAN peer invitation: {}",
+                        e
+                    );
+                    return Err(format!("Failed to create LAN peer invitation: {}", e));
+                }
+                // Commit and persist
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist LAN peer invitation: {}", e);
+                }
+            }
+
+            // Also store the peer address for future direct connection
+            if let Some(ref effects) = effect_system {
+                use aura_core::effects::StorageEffects;
+                let effects_guard = effects.read().await;
+                let peer_key = format!("tui/lan_peers/{}/address", authority_id);
+                if let Err(e) = effects_guard
+                    .store(&peer_key, address.clone().into_bytes())
+                    .await
+                {
+                    tracing::warn!("Failed to store LAN peer address: {}", e);
+                }
+            }
+
+            // Emit event
+            let _ = event_tx.send(AuraEvent::LanPeerInvited {
+                authority_id: authority_id.clone(),
+            });
+
+            tracing::info!("LAN peer invitation sent to {}", authority_id);
+            Ok(())
+        }
+
         // Invitation commands - wired to aura-invitation protocol
         // Invitation state is managed via AppCore.views().get_invitations()
+        EffectCommand::CreateInvitation {
+            invitation_type,
+            message: _message, // Message/TTL handled at protocol level, not in Intent
+            ttl_secs: _ttl_secs,
+        } => {
+            tracing::info!("Creating invitation: type={}", invitation_type);
+
+            // Map TUI invitation type string to aura_app::InvitationType
+            let app_invitation_type = match invitation_type.to_lowercase().as_str() {
+                "guardian" => aura_app::InvitationType::Guardian,
+                "contact" => aura_app::InvitationType::Chat, // Contact maps to Chat
+                "channel" | "chat" => aura_app::InvitationType::Chat,
+                "block" => aura_app::InvitationType::Block,
+                _ => {
+                    return Err(format!("Unknown invitation type: {}", invitation_type));
+                }
+            };
+
+            // Dispatch intent to AppCore for state management
+            let invitation_id = if let Some(core) = app_core {
+                // Create the invitation fact via AppCore
+                let intent = Intent::CreateInvitation {
+                    invitation_type: app_invitation_type,
+                };
+                let mut core_guard = core.write().await;
+                if let Err(e) = core_guard.dispatch(intent) {
+                    tracing::warn!("AppCore dispatch failed for CreateInvitation: {}", e);
+                    return Err(format!("Failed to create invitation: {}", e));
+                }
+                // Commit pending facts and persist to storage
+                if let Err(e) = core_guard.commit_and_persist() {
+                    tracing::warn!("Failed to persist facts: {}", e);
+                }
+                // Get the created invitation ID from the view
+                // The newest invitation should be the one we just created
+                let invitations = core_guard.views().get_invitations();
+                invitations
+                    .sent
+                    .first()
+                    .map(|inv| inv.id.clone())
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string())
+            } else {
+                // Demo mode: generate a placeholder ID
+                uuid::Uuid::new_v4().to_string()
+            };
+
+            tracing::info!("Created invitation {}", invitation_id);
+
+            // Emit event for reactive view updates
+            // Note: The code will be generated when ExportInvitation is called
+            let _ = event_tx.send(AuraEvent::InvitationCreated {
+                invitation_id: invitation_id.clone(),
+                invitation_type: invitation_type.clone(),
+                code: None, // Code is generated on export
+            });
+
+            Ok(())
+        }
+
+        EffectCommand::ExportInvitation { invitation_id } => {
+            tracing::info!("Exporting invitation: {}", invitation_id);
+
+            // Generate a shareable code for the invitation
+            // Format: base64-encoded JSON containing invitation details
+            let code = if let Some(core) = app_core {
+                let core_read = core.read().await;
+                let invitations = core_read.views().get_invitations();
+                if let Some(invitation) = invitations.invitation(&invitation_id) {
+                    // Create a shareable code from the invitation
+                    // In production this would use proper encoding with crypto
+                    let code_data = serde_json::json!({
+                        "id": invitation_id,
+                        "type": format!("{:?}", invitation.invitation_type),
+                        "from": invitation.from_id,
+                        "from_name": invitation.from_name,
+                        "exp": invitation.expires_at,
+                    });
+                    use base64::Engine;
+                    let json_str = serde_json::to_string(&code_data)
+                        .map_err(|e| format!("Failed to serialize invitation: {}", e))?;
+                    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json_str.as_bytes())
+                } else {
+                    return Err(format!("Invitation {} not found", invitation_id));
+                }
+            } else {
+                // Demo mode: generate a placeholder code
+                format!("AURA-INV-{}", &invitation_id[..8.min(invitation_id.len())])
+            };
+
+            tracing::info!("Exported invitation {} as code: {}...", invitation_id, &code[..20.min(code.len())]);
+
+            // Emit event with the code
+            let _ = event_tx.send(AuraEvent::InvitationCodeExported {
+                invitation_id: invitation_id.clone(),
+                code: code.clone(),
+            });
+
+            Ok(())
+        }
+
+        EffectCommand::ImportInvitation { code } => {
+            tracing::info!("Importing invitation from code: {}...", &code[..20.min(code.len())]);
+
+            // Decode the invitation code
+            // In production this would validate crypto signatures
+            let (invitation_id, from, invitation_type) = if code.starts_with("AURA-INV-") {
+                // Demo code format
+                let id = format!("imported-{}", &code[9..]);
+                (id, "Unknown".to_string(), "Contact".to_string())
+            } else {
+                // Try to decode as base64 JSON
+                use base64::Engine;
+                let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(code.as_bytes())
+                    .map_err(|e| format!("Invalid invitation code: {}", e))?;
+                let json_str = String::from_utf8(decoded)
+                    .map_err(|e| format!("Invalid invitation code encoding: {}", e))?;
+                let data: serde_json::Value = serde_json::from_str(&json_str)
+                    .map_err(|e| format!("Invalid invitation code format: {}", e))?;
+
+                let id = data["id"].as_str().unwrap_or("unknown").to_string();
+                let from = data["from"].as_str()
+                    .or_else(|| data["from_name"].as_str())
+                    .unwrap_or("Unknown")
+                    .to_string();
+                let inv_type = data["type"].as_str().unwrap_or("Contact").to_string();
+                (id, from, inv_type)
+            };
+
+            // Note: There is no Intent::ImportInvitation - imported invitations
+            // are created via the invitation protocol layer. Here we just decode
+            // and emit an event for the UI to process.
+            // In production, this would trigger acceptance of the invitation
+            // via Intent::AcceptInvitation after the user confirms.
+            let _ = app_core; // Suppress unused warning
+
+            tracing::info!("Decoded invitation {} from {}", invitation_id, from);
+
+            // Emit event for reactive view updates
+            // The UI can use this to show a confirmation dialog before accepting
+            let _ = event_tx.send(AuraEvent::InvitationImported {
+                invitation_id: invitation_id.clone(),
+                from,
+                invitation_type,
+            });
+
+            Ok(())
+        }
+
         EffectCommand::AcceptInvitation { invitation_id } => {
             tracing::info!("Accepting invitation: {}", invitation_id);
 
@@ -1319,6 +1588,34 @@ pub(super) async fn execute_command(
             let _ = event_tx.send(AuraEvent::InvitationAccepted {
                 invitation_id: invitation_id.clone(),
             });
+
+            // Auto-create direct chat when accepting a contact invitation
+            // Get the contact_id from the invitation and start a direct chat
+            if let Some(core) = app_core {
+                let core_read = core.read().await;
+                let invitations = core_read.views().get_invitations();
+                if let Some(invitation) = invitations.invitation(&invitation_id) {
+                    // For contact invitations, the from_id is the contact's authority ID
+                    let contact_id = invitation.from_id.clone();
+                    let contact_name = invitation.from_name.clone();
+                    drop(core_read);
+
+                    // Dispatch CreateChannel intent to auto-create the DM channel
+                    use aura_app::IntentChannelType;
+                    let intent = Intent::CreateChannel {
+                        name: format!("DM with {}", contact_name),
+                        channel_type: IntentChannelType::DirectMessage,
+                    };
+                    let mut core_guard = core.write().await;
+                    if let Err(e) = core_guard.dispatch(intent) {
+                        tracing::warn!("Failed to auto-create direct chat: {}", e);
+                    } else {
+                        tracing::info!("Auto-created direct chat with contact {}", contact_id);
+                        // Emit event so UI can navigate to the new chat
+                        let _ = event_tx.send(AuraEvent::DirectChatStarted { contact_id });
+                    }
+                }
+            }
 
             Ok(())
         }

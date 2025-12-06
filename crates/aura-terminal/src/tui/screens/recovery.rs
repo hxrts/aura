@@ -12,11 +12,11 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::tui::components::{EmptyState, KeyHintsBar};
+use crate::tui::components::EmptyState;
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Icons, Spacing, Theme};
 use crate::tui::types::{
-    Guardian, GuardianApproval, GuardianStatus, KeyHint, RecoveryState, RecoveryStatus, RecoveryTab,
+    Guardian, GuardianApproval, GuardianStatus, RecoveryState, RecoveryStatus, RecoveryTab,
 };
 
 /// Callback type for recovery actions (no args)
@@ -87,7 +87,7 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
         View(
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0,
-            gap: Spacing::XS,
+            gap: 0,
         ) {
             // Guardian list
             View(
@@ -110,11 +110,13 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
                     } else {
                         guardians.iter().enumerate().map(|(idx, g)| {
                             let is_selected = idx == selected;
-                            let bg = if is_selected { Theme::BG_SELECTED } else { Theme::BG_DARK };
+                            // Use consistent list item colors
+                            let bg = if is_selected { Theme::LIST_BG_SELECTED } else { Theme::LIST_BG_NORMAL };
+                            let text_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL };
                             let status_color = match g.status {
                                 GuardianStatus::Active => Theme::SUCCESS,
                                 GuardianStatus::Pending => Theme::WARNING,
-                                GuardianStatus::Offline => Theme::TEXT_MUTED,
+                                GuardianStatus::Offline => Theme::LIST_TEXT_MUTED,
                                 GuardianStatus::Declined | GuardianStatus::Removed => Theme::ERROR,
                             };
                             let icon = g.status.icon().to_string();
@@ -124,7 +126,7 @@ pub fn GuardiansPanel(props: &GuardiansPanelProps) -> impl Into<AnyElement<'stat
                             element! {
                                 View(key: id, flex_direction: FlexDirection::Row, background_color: bg, padding_left: Spacing::XS, gap: Spacing::XS) {
                                     Text(content: icon, color: status_color)
-                                    Text(content: name, color: Theme::TEXT)
+                                    Text(content: name, color: text_color)
                                     Text(content: share_text, color: Theme::SECONDARY)
                                 }
                             }
@@ -179,7 +181,7 @@ pub fn RecoveryPanel(props: &RecoveryPanelProps) -> impl Into<AnyElement<'static
         View(
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0,
-            gap: Spacing::XS,
+            gap: 0,
         ) {
             // Status header
             View(
@@ -398,14 +400,6 @@ pub fn RecoveryScreen(
     let active_tab = hooks.use_state(|| RecoveryTab::Guardians);
     let guardian_index = hooks.use_state(|| 0usize);
 
-    let hints = vec![
-        KeyHint::new("←→", "Switch tab"),
-        KeyHint::new("↑↓", "Navigate"),
-        KeyHint::new("a", "Add guardian"),
-        KeyHint::new("s", "Start recovery"),
-        KeyHint::new("Esc", "Back"),
-    ];
-
     let current_tab = active_tab.get();
     let current_guardian_index = guardian_index.get();
 
@@ -423,14 +417,19 @@ pub fn RecoveryScreen(
         let guardian_count = guardians.len();
         move |event| match event {
             TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Left | KeyCode::Char('1') => {
-                    active_tab.set(RecoveryTab::Guardians);
+                KeyCode::Left | KeyCode::Char('h') => {
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        active_tab.set(RecoveryTab::Guardians);
+                        nav_throttle.set(Instant::now());
+                    }
                 }
-                KeyCode::Right | KeyCode::Char('2') => {
-                    active_tab.set(RecoveryTab::Recovery);
-                }
-                KeyCode::Tab => {
-                    active_tab.set(active_tab.get().next());
+                KeyCode::Right | KeyCode::Char('l') => {
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        active_tab.set(RecoveryTab::Recovery);
+                        nav_throttle.set(Instant::now());
+                    }
                 }
                 KeyCode::Up | KeyCode::Char('k') => {
                     let should_move = nav_throttle.read().elapsed() >= throttle_duration;
@@ -481,22 +480,15 @@ pub fn RecoveryScreen(
             flex_direction: FlexDirection::Column,
             width: 100pct,
             height: 100pct,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            overflow: Overflow::Hidden,
         ) {
-            // Header
-            View(
-                padding: 1,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(content: "Recovery", weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-
             // Tab bar
             TabBar(active_tab: current_tab)
 
             // Content based on active tab
-            View(flex_grow: 1.0, padding: Spacing::PANEL_PADDING) {
+            View(flex_grow: 1.0, flex_shrink: 1.0, overflow: Overflow::Hidden) {
                 #(match current_tab {
                     RecoveryTab::Guardians => vec![element! {
                         View(flex_grow: 1.0) {
@@ -515,9 +507,6 @@ pub fn RecoveryScreen(
                     }],
                 })
             }
-
-            // Key hints
-            KeyHintsBar(hints: hints)
         }
     }
 }

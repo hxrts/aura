@@ -13,13 +13,14 @@ mod recovery;
 mod router;
 mod settings;
 
-pub use app::{run_app, run_app_with_context, IoApp};
+pub use app::{run_app_with_context, IoApp};
 pub use block::{
     run_block_screen, BlockInviteCallback, BlockNavCallback, BlockScreen, BlockSendCallback,
 };
 pub use chat::{run_chat_screen, ChannelSelectCallback, ChatFocus, ChatScreen, SendCallback};
 pub use contacts::{
-    run_contacts_screen, ContactsScreen, EditPetnameCallback, ToggleGuardianCallback,
+    run_contacts_screen, ContactsScreen, StartChatCallback, ToggleGuardianCallback,
+    UpdatePetnameCallback,
 };
 pub use help::{run_help_screen, HelpCommand, HelpScreen};
 pub use invitations::{run_invitations_screen, InvitationCallback, InvitationsScreen};

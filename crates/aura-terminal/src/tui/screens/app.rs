@@ -5,22 +5,26 @@
 use iocraft::prelude::*;
 use std::sync::{Arc, RwLock};
 
-use crate::tui::components::{AccountSetupModal, KeyHintsBar};
+use crate::tui::components::{
+    AccountSetupModal, DemoInviteCodes, DiscoveredPeerInfo, InvitePeerCallback, KeyHintsBar,
+};
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::screens::block::{BlockInviteCallback, BlockNavCallback, BlockSendCallback};
-use crate::tui::screens::chat::{ChannelSelectCallback, SendCallback};
-use crate::tui::screens::contacts::{EditPetnameCallback, ToggleGuardianCallback};
-use crate::tui::screens::invitations::InvitationCallback;
+use crate::tui::screens::chat::{ChannelSelectCallback, CreateChannelCallback, SendCallback};
+use crate::tui::screens::contacts::{StartChatCallback, ToggleGuardianCallback, UpdatePetnameCallback};
+use crate::tui::screens::invitations::{
+    CreateInvitationCallback, ExportInvitationCallback, ImportInvitationCallback,
+    InvitationCallback,
+};
 use crate::tui::screens::neighborhood::{GoHomeCallback, NavigationCallback};
 use crate::tui::screens::recovery::RecoveryCallback;
 use crate::tui::screens::settings::MfaCallback;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{
-    BlockBudget, BlockSummary, Channel, Contact, ContactStatus, Device, Guardian, GuardianStatus,
-    Invitation, InvitationDirection, InvitationFilter, InvitationStatus, KeyHint, Message,
-    MfaPolicy, RecoveryState, RecoveryStatus, Resident, TraversalDepth,
+    BlockBudget, BlockSummary, Channel, Contact, Device, Guardian, Invitation, InvitationFilter,
+    KeyHint, Message, MfaPolicy, RecoveryStatus, Resident, TraversalDepth,
 };
 
 use super::router::Screen;
@@ -45,9 +49,6 @@ pub fn ScreenTabBar(props: &ScreenTabBarProps) -> impl Into<AnyElement<'static>>
             flex_direction: FlexDirection::Row,
             gap: Spacing::SM,
             padding: Spacing::PANEL_PADDING,
-            border_style: BorderStyle::Single,
-            border_edges: Edges::Bottom,
-            border_color: Theme::BORDER,
         ) {
             #(Screen::all().iter().map(|&screen| {
                 let is_active = screen == active;
@@ -76,7 +77,7 @@ pub struct StatusBarProps {
 /// Format a timestamp as relative time (e.g., "2m ago", "1h ago")
 fn format_relative_time(ts_ms: u64) -> String {
     // Simple implementation - just show minutes/hours ago
-    // In production, use actual current time comparison
+    // TODO: In production, use actual current time comparison
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
@@ -128,7 +129,8 @@ pub fn StatusBar(props: &StatusBarProps) -> impl Into<AnyElement<'static>> {
             gap: Spacing::MD,
             padding_left: Spacing::SM,
             padding_right: Spacing::SM,
-            background_color: Theme::BG_DARK,
+            border_style: BorderStyle::Round,
+            border_color: Theme::BORDER,
         ) {
             Text(content: sync_status, color: sync_color)
             Text(content: " | ", color: Theme::BORDER)
@@ -140,7 +142,7 @@ pub fn StatusBar(props: &StatusBarProps) -> impl Into<AnyElement<'static>> {
 /// Props for IoApp
 #[derive(Default, Props)]
 pub struct IoAppProps {
-    // Sample data for all screens
+    // Screen data - populated from IoContext via reactive views
     pub channels: Vec<Channel>,
     pub messages: Vec<Message>,
     pub help_commands: Vec<HelpCommand>,
@@ -159,6 +161,8 @@ pub struct IoAppProps {
     pub channel_name: String,
     // Contacts screen data
     pub contacts: Vec<Contact>,
+    /// Discovered LAN peers
+    pub discovered_peers: Vec<DiscoveredPeerInfo>,
     // Neighborhood screen data
     pub neighborhood_name: String,
     pub blocks: Vec<BlockSummary>,
@@ -167,9 +171,14 @@ pub struct IoAppProps {
     pub on_send: Option<SendCallback>,
     // Effect dispatch callback for channel selection
     pub on_channel_select: Option<ChannelSelectCallback>,
+    // Effect dispatch callback for creating new channels
+    pub on_create_channel: Option<CreateChannelCallback>,
     // Effect dispatch callbacks for invitation actions
     pub on_accept_invitation: Option<InvitationCallback>,
     pub on_decline_invitation: Option<InvitationCallback>,
+    pub on_create_invitation: Option<CreateInvitationCallback>,
+    pub on_export_invitation: Option<ExportInvitationCallback>,
+    pub on_import_invitation: Option<ImportInvitationCallback>,
     // Effect dispatch callbacks for neighborhood navigation
     pub on_enter_block: Option<NavigationCallback>,
     pub on_go_home: Option<GoHomeCallback>,
@@ -180,8 +189,10 @@ pub struct IoAppProps {
     // Effect dispatch callback for settings
     pub on_update_mfa: Option<MfaCallback>,
     // Effect dispatch callbacks for contacts actions
-    pub on_edit_petname: Option<EditPetnameCallback>,
+    pub on_update_petname: Option<UpdatePetnameCallback>,
     pub on_toggle_guardian: Option<ToggleGuardianCallback>,
+    pub on_start_chat: Option<StartChatCallback>,
+    pub on_invite_lan_peer: Option<InvitePeerCallback>,
     // Effect dispatch callbacks for block actions
     pub on_block_send: Option<BlockSendCallback>,
     pub on_block_invite: Option<BlockInviteCallback>,
@@ -198,6 +209,13 @@ pub struct IoAppProps {
     pub last_sync_time: Option<u64>,
     /// Number of known peers
     pub peer_count: usize,
+    // Demo mode
+    /// Whether running in demo mode
+    pub demo_mode: bool,
+    /// Alice's invite code (for demo mode)
+    pub demo_alice_code: String,
+    /// Charlie's invite code (for demo mode)
+    pub demo_charlie_code: String,
 }
 
 /// Callback for creating an account
@@ -247,6 +265,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let channel_name = props.channel_name.clone();
     // Contacts screen data
     let contacts = props.contacts.clone();
+    let discovered_peers = props.discovered_peers.clone();
     // Neighborhood screen data
     let neighborhood_name = props.neighborhood_name.clone();
     let blocks = props.blocks.clone();
@@ -254,28 +273,76 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     // Effect dispatch callbacks
     let on_send = props.on_send.clone();
     let on_channel_select = props.on_channel_select.clone();
+    let on_create_channel = props.on_create_channel.clone();
     let on_accept_invitation = props.on_accept_invitation.clone();
     let on_decline_invitation = props.on_decline_invitation.clone();
+    let on_create_invitation = props.on_create_invitation.clone();
+    let on_export_invitation = props.on_export_invitation.clone();
+    let on_import_invitation = props.on_import_invitation.clone();
     let on_enter_block = props.on_enter_block.clone();
     let on_go_home = props.on_go_home.clone();
     let on_back_to_street = props.on_back_to_street.clone();
     let on_start_recovery = props.on_start_recovery.clone();
     let on_add_guardian = props.on_add_guardian.clone();
     let on_update_mfa = props.on_update_mfa.clone();
-    let on_edit_petname = props.on_edit_petname.clone();
+    let on_update_petname = props.on_update_petname.clone();
     let on_toggle_guardian = props.on_toggle_guardian.clone();
+    let on_start_chat = props.on_start_chat.clone();
+    let on_invite_lan_peer = props.on_invite_lan_peer.clone();
     let on_block_send = props.on_block_send.clone();
     let on_block_invite = props.on_block_invite.clone();
     let on_block_navigate_neighborhood = props.on_block_navigate_neighborhood.clone();
 
-    let hints = vec![
-        KeyHint::new("Tab", "Next screen"),
-        KeyHint::new("S-Tab", "Prev screen"),
-        KeyHint::new("1-8", "Switch screen"),
-        KeyHint::new("q", "Quit"),
-    ];
+    // Demo modal state
+    let demo_modal_visible = hooks.use_state(|| false);
 
     let current_screen = screen.get();
+
+    // Build screen-specific hints based on current screen
+    let screen_hints: Vec<KeyHint> = match current_screen {
+        Screen::Block => vec![
+            KeyHint::new("c", "Compose"),
+            KeyHint::new("v", "Invite"),
+            KeyHint::new("n", "Neighborhood"),
+            KeyHint::new("↑↓", "Navigate"),
+        ],
+        Screen::Chat => vec![
+            KeyHint::new("i", "Type"),
+            KeyHint::new("n", "New channel"),
+            KeyHint::new("h/l", "Focus"),
+            KeyHint::new("↑↓", "Navigate"),
+        ],
+        Screen::Contacts => vec![
+            KeyHint::new("e", "Edit name"),
+            KeyHint::new("g", "Guardian"),
+            KeyHint::new("c", "Chat"),
+            KeyHint::new("i", "Invite"),
+        ],
+        Screen::Neighborhood => vec![
+            KeyHint::new("Enter", "Enter"),
+            KeyHint::new("g", "Home"),
+            KeyHint::new("↑↓←→", "Navigate"),
+        ],
+        Screen::Invitations => vec![
+            KeyHint::new("n", "New"),
+            KeyHint::new("i", "Import"),
+            KeyHint::new("e", "Export"),
+            KeyHint::new("f", "Filter"),
+        ],
+        Screen::Settings => vec![
+            KeyHint::new("↑↓", "Section"),
+            KeyHint::new("h/l", "Panel"),
+            KeyHint::new("Space", "Toggle"),
+        ],
+        Screen::Recovery => vec![
+            KeyHint::new("a", "Add guardian"),
+            KeyHint::new("s", "Start recovery"),
+            KeyHint::new("h/l", "Tab"),
+        ],
+        Screen::Help => vec![
+            KeyHint::new("↑↓", "Navigate"),
+        ],
+    };
 
     hooks.use_terminal_events({
         let mut screen = screen.clone();
@@ -285,10 +352,23 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let mut account_version = account_version.clone();
         let account_display_name = account_display_name_for_handler.clone();
         let on_create_account = on_create_account.clone();
+        let mut demo_modal_visible = demo_modal_visible.clone();
+        let is_demo_mode = props.demo_mode;
         move |event| match event {
             TerminalEvent::Key(KeyEvent {
                 code, modifiers, ..
             }) => {
+                // Handle demo modal (close on Esc or 'd')
+                if demo_modal_visible.get() {
+                    match code {
+                        KeyCode::Esc | KeyCode::Char('d') => {
+                            demo_modal_visible.set(false);
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+
                 // Handle account setup modal input first (captures all input when visible)
                 if account_visible.get() {
                     match code {
@@ -353,6 +433,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             screen.set(screen.get().next());
                         }
                     }
+                    KeyCode::Char('d') if is_demo_mode => demo_modal_visible.set(true),
                     KeyCode::Char('q') => should_exit.set(true),
                     _ => {}
                 }
@@ -360,13 +441,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             _ => {}
         }
     });
-
-    // Chat screen data
-    let chat_hints = vec![
-        KeyHint::new("↑↓", "Navigate"),
-        KeyHint::new("Enter", "Send"),
-        KeyHint::new("Tab", "Switch panel"),
-    ];
 
     // Extract account setup state for rendering
     let modal_visible = account_visible.get();
@@ -385,6 +459,11 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let last_sync = props.last_sync_time;
     let peers = props.peer_count;
 
+    // Extract demo mode props
+    let alice_code = props.demo_alice_code.clone();
+    let charlie_code = props.demo_charlie_code.clone();
+    let show_demo_modal = demo_modal_visible.get();
+
     element! {
         View(
             flex_direction: FlexDirection::Column,
@@ -397,17 +476,18 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             // Status bar showing sync status
             StatusBar(syncing: syncing, last_sync_time: last_sync, peer_count: peers)
 
-            // Screen content
-            View(flex_grow: 1.0) {
+            // Screen content - flex_grow fills available space, overflow clips to make room for hints
+            View(flex_grow: 1.0, flex_shrink: 1.0, overflow: Overflow::Hidden) {
                 #(match current_screen {
                     Screen::Block => vec![element! {
-                        View(width: 100pct, height: 100pct) {
+                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                             BlockScreen(
                                 block_name: block_name.clone(),
                                 residents: residents.clone(),
                                 messages: messages.clone(),
                                 budget: block_budget.clone(),
                                 channel_name: channel_name.clone(),
+                                contacts: contacts.clone(),
                                 on_send: on_block_send.clone(),
                                 on_invite: on_block_invite.clone(),
                                 on_go_neighborhood: on_block_navigate_neighborhood.clone(),
@@ -417,29 +497,32 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                     Screen::Chat => {
                         let idx: usize = 0;
                         vec![element! {
-                            View(width: 100pct, height: 100pct) {
+                            View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                                 ChatScreen(
                                     channels: channels.clone(),
                                     messages: messages.clone(),
-                                    hints: chat_hints.clone(),
                                     initial_channel_index: idx,
                                     on_send: on_send.clone(),
                                     on_channel_select: on_channel_select.clone(),
+                                    on_create_channel: on_create_channel.clone(),
                                 )
                             }
                         }]
                     }
                     Screen::Contacts => vec![element! {
-                        View(width: 100pct, height: 100pct) {
+                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                             ContactsScreen(
                                 contacts: contacts.clone(),
-                                on_edit_petname: on_edit_petname.clone(),
+                                discovered_peers: discovered_peers.clone(),
+                                on_update_petname: on_update_petname.clone(),
                                 on_toggle_guardian: on_toggle_guardian.clone(),
+                                on_start_chat: on_start_chat.clone(),
+                                on_invite_lan_peer: on_invite_lan_peer.clone(),
                             )
                         }
                     }],
                     Screen::Neighborhood => vec![element! {
-                        View(width: 100pct, height: 100pct) {
+                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                             NeighborhoodScreen(
                                 neighborhood_name: neighborhood_name.clone(),
                                 blocks: blocks.clone(),
@@ -451,18 +534,24 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                     }],
                     Screen::Invitations => vec![element! {
-                        View(width: 100pct, height: 100pct) {
+                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                             InvitationsScreen(
                                 invitations: invitations.clone(),
                                 filter: InvitationFilter::All,
                                 selected_index: 0usize,
                                 on_accept: on_accept_invitation.clone(),
                                 on_decline: on_decline_invitation.clone(),
+                                on_create: on_create_invitation.clone(),
+                                on_export: on_export_invitation.clone(),
+                                on_import: on_import_invitation.clone(),
+                                demo_mode: !alice_code.is_empty(),
+                                demo_alice_code: alice_code.clone(),
+                                demo_charlie_code: charlie_code.clone(),
                             )
                         }
                     }],
                     Screen::Settings => vec![element! {
-                        View(width: 100pct, height: 100pct) {
+                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                             SettingsScreen(
                                 display_name: display_name.clone(),
                                 threshold_k: threshold_k,
@@ -475,7 +564,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                     }],
                     Screen::Recovery => vec![element! {
-                        View(width: 100pct, height: 100pct) {
+                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                             RecoveryScreen(
                                 guardians: guardians.clone(),
                                 threshold_required: threshold_k as u32,
@@ -487,15 +576,22 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                         }
                     }],
                     Screen::Help => vec![element! {
-                        View(width: 100pct, height: 100pct) {
+                        View(width: 100pct, height: 100pct, flex_grow: 1.0, flex_shrink: 1.0) {
                             HelpScreen(commands: help_commands.clone())
                         }
                     }],
                 })
             }
 
-            // Global hints
-            KeyHintsBar(hints: hints)
+            // Key hints bar with screen-specific and global navigation hints
+            KeyHintsBar(screen_hints: screen_hints, demo_mode: props.demo_mode)
+
+            // Demo mode invite codes modal (triggered by 'd' key)
+            DemoInviteCodes(
+                alice_code: alice_code,
+                charlie_code: charlie_code,
+                visible: show_demo_modal,
+            )
 
             // Account setup modal overlay
             AccountSetupModal(
@@ -507,164 +603,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             )
         }
     }
-}
-
-/// Run the full application with screen navigation
-pub async fn run_app() -> std::io::Result<()> {
-    // Sample data for all screens
-    let channels = vec![
-        Channel::new("1", "general").with_unread(3).selected(true),
-        Channel::new("2", "random").with_unread(0).selected(false),
-        Channel::new("3", "dev").with_unread(1).selected(false),
-    ];
-
-    let messages = vec![
-        Message::new("1", "Alice", "Hello everyone!")
-            .with_timestamp("10:30")
-            .own(false),
-        Message::new("2", "You", "Hi Alice!")
-            .with_timestamp("10:31")
-            .own(true),
-        Message::new("3", "Bob", "What's up?")
-            .with_timestamp("10:32")
-            .own(false),
-    ];
-
-    let help_commands = vec![
-        HelpCommand::new("/join", "Join a channel", "Join #channel-name", "Channels"),
-        HelpCommand::new(
-            "/leave",
-            "Leave current channel",
-            "Leave the current channel",
-            "Channels",
-        ),
-        HelpCommand::new(
-            "/msg",
-            "Send direct message",
-            "Send a DM to user",
-            "Messaging",
-        ),
-        HelpCommand::new(
-            "/invite",
-            "Invite to channel",
-            "Invite user to channel",
-            "Invitations",
-        ),
-        HelpCommand::new(
-            "/help",
-            "Show this help",
-            "Display help information",
-            "General",
-        ),
-    ];
-
-    let invitations = vec![
-        Invitation::new("1", "Alice", InvitationDirection::Outbound)
-            .with_status(InvitationStatus::Pending),
-        Invitation::new("2", "Bob", InvitationDirection::Inbound)
-            .with_status(InvitationStatus::Pending),
-        Invitation::new("3", "Charlie", InvitationDirection::Outbound)
-            .with_status(InvitationStatus::Accepted),
-    ];
-
-    let guardians = vec![
-        Guardian::new("g1", "Alice")
-            .with_status(GuardianStatus::Active)
-            .with_share(),
-        Guardian::new("g2", "Bob")
-            .with_status(GuardianStatus::Active)
-            .with_share(),
-        Guardian::new("g3", "Charlie").with_status(GuardianStatus::Pending),
-    ];
-
-    let devices = vec![
-        Device::new("d1", "MacBook Pro").current(),
-        Device::new("d2", "iPhone"),
-        Device::new("d3", "iPad"),
-    ];
-
-    let recovery_status = RecoveryStatus {
-        state: RecoveryState::None,
-        approvals_received: 0,
-        threshold: 2,
-        approvals: vec![],
-    };
-
-    // Block screen data
-    let residents = vec![
-        Resident::new("r1", "You").is_current_user().steward(),
-        Resident::new("r2", "Alice"),
-        Resident::new("r3", "Bob"),
-    ];
-
-    let block_budget = BlockBudget {
-        total: 10 * 1024 * 1024,
-        used: 3 * 1024 * 1024,
-        resident_count: 3,
-        max_residents: 8,
-    };
-
-    // Contacts screen data
-    let contacts = vec![
-        Contact::new("c1", "Alice")
-            .with_status(ContactStatus::Active)
-            .guardian(),
-        Contact::new("c2", "Bob").with_status(ContactStatus::Active),
-        Contact::new("c3", "Charlie")
-            .with_status(ContactStatus::Pending)
-            .with_suggestion("Charles"),
-        Contact::new("c4", "Diana").with_status(ContactStatus::Blocked),
-    ];
-
-    // Neighborhood screen data
-    let blocks = vec![
-        BlockSummary::new("b1")
-            .with_name("My Block")
-            .with_residents(3)
-            .home(),
-        BlockSummary::new("b2")
-            .with_name("Alice's Block")
-            .with_residents(5)
-            .accessible(),
-        BlockSummary::new("b3")
-            .with_name("Bob's Block")
-            .with_residents(2)
-            .accessible(),
-        BlockSummary::new("b4").with_residents(8),
-        BlockSummary::new("b5")
-            .with_name("Community")
-            .with_residents(4)
-            .accessible(),
-    ];
-
-    element! {
-        IoApp(
-            channels: channels,
-            messages: messages,
-            help_commands: help_commands,
-            invitations: invitations,
-            guardians: guardians,
-            devices: devices,
-            display_name: "You".to_string(),
-            threshold_k: 2u8,
-            threshold_n: 3u8,
-            mfa_policy: MfaPolicy::SensitiveOnly,
-            recovery_status: recovery_status,
-            // Block screen data
-            block_name: "My Block".to_string(),
-            residents: residents,
-            block_budget: block_budget,
-            channel_name: "general".to_string(),
-            // Contacts screen data
-            contacts: contacts,
-            // Neighborhood screen data
-            neighborhood_name: "Downtown".to_string(),
-            blocks: blocks,
-            traversal_depth: TraversalDepth::Street,
-        )
-    }
-    .fullscreen()
-    .await
 }
 
 /// Run the application with IoContext (real data)
@@ -700,6 +638,24 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         }
     });
 
+    // CreateChannelCallback for creating new chat channels
+    let ctx_for_create_channel = ctx_arc.clone();
+    let on_create_channel: CreateChannelCallback =
+        Arc::new(move |name: String, topic: Option<String>| {
+            let ctx = ctx_for_create_channel.clone();
+            // Start with empty members (creator is automatically included)
+            let cmd = EffectCommand::CreateChannel {
+                name,
+                topic,
+                members: vec![],
+            };
+            tokio::spawn(async move {
+                if let Err(e) = ctx.dispatch(cmd).await {
+                    eprintln!("Failed to create channel: {}", e);
+                }
+            });
+        });
+
     // InvitationCallback for accepting invitations
     let ctx_for_accept = ctx_arc.clone();
     let on_accept_invitation: InvitationCallback = Arc::new(move |invitation_id: String| {
@@ -720,6 +676,48 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         tokio::spawn(async move {
             if let Err(e) = ctx.dispatch(cmd).await {
                 eprintln!("Failed to decline invitation: {}", e);
+            }
+        });
+    });
+
+    // CreateInvitationCallback for creating new invitations
+    let ctx_for_create = ctx_arc.clone();
+    let on_create_invitation: CreateInvitationCallback =
+        Arc::new(move |invitation_type: String, message: Option<String>, ttl_secs: Option<u64>| {
+            let ctx = ctx_for_create.clone();
+            let cmd = EffectCommand::CreateInvitation {
+                invitation_type,
+                message,
+                ttl_secs,
+            };
+            tokio::spawn(async move {
+                if let Err(e) = ctx.dispatch(cmd).await {
+                    eprintln!("Failed to create invitation: {}", e);
+                }
+            });
+        });
+
+    // ExportInvitationCallback for exporting invitation codes
+    let ctx_for_export = ctx_arc.clone();
+    let on_export_invitation: ExportInvitationCallback =
+        Arc::new(move |invitation_id: String| {
+            let ctx = ctx_for_export.clone();
+            let cmd = EffectCommand::ExportInvitation { invitation_id };
+            tokio::spawn(async move {
+                if let Err(e) = ctx.dispatch(cmd).await {
+                    eprintln!("Failed to export invitation: {}", e);
+                }
+            });
+        });
+
+    // ImportInvitationCallback for importing invitation codes
+    let ctx_for_import = ctx_arc.clone();
+    let on_import_invitation: ImportInvitationCallback = Arc::new(move |code: String| {
+        let ctx = ctx_for_import.clone();
+        let cmd = EffectCommand::ImportInvitation { code };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to import invitation: {}", e);
             }
         });
     });
@@ -815,17 +813,21 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         });
     });
 
-    // EditPetnameCallback for editing a contact's petname
-    // Note: Full implementation requires modal dialog to get new petname from user
-    // The UpdateContactPetname command is ready, but modal UI is needed to collect input
-    let on_edit_petname: EditPetnameCallback = Arc::new(|contact_id: String| {
-        // Log the action - modal implementation needed to collect new petname
-        // When modal is implemented: dispatch UpdateContactPetname { contact_id, petname }
-        tracing::info!(
-            "Edit petname triggered for contact: {} - awaiting modal implementation",
-            contact_id
-        );
-    });
+    // UpdatePetnameCallback for updating a contact's petname - dispatches UpdateContactPetname command
+    let ctx_for_update_petname = ctx_arc.clone();
+    let on_update_petname: UpdatePetnameCallback =
+        Arc::new(move |contact_id: String, new_petname: String| {
+            let ctx = ctx_for_update_petname.clone();
+            let cmd = EffectCommand::UpdateContactPetname {
+                contact_id,
+                petname: new_petname,
+            };
+            tokio::spawn(async move {
+                if let Err(e) = ctx.dispatch(cmd).await {
+                    eprintln!("Failed to update petname: {}", e);
+                }
+            });
+        });
 
     // ToggleGuardianCallback for toggling guardian status - dispatches ToggleContactGuardian command
     let ctx_for_toggle = ctx_arc.clone();
@@ -839,6 +841,34 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         });
     });
 
+    // StartChatCallback for starting a direct chat with a contact
+    let ctx_for_start_chat = ctx_arc.clone();
+    let on_start_chat: StartChatCallback = Arc::new(move |contact_id: String| {
+        let ctx = ctx_for_start_chat.clone();
+        let cmd = EffectCommand::StartDirectChat { contact_id };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to start direct chat: {}", e);
+            }
+        });
+    });
+
+    // InvitePeerCallback for inviting a discovered LAN peer
+    let ctx_for_invite_peer = ctx_arc.clone();
+    let on_invite_lan_peer: InvitePeerCallback =
+        Arc::new(move |authority_id: String, address: String| {
+            let ctx = ctx_for_invite_peer.clone();
+            let cmd = EffectCommand::InviteLanPeer {
+                authority_id,
+                address,
+            };
+            tokio::spawn(async move {
+                if let Err(e) = ctx.dispatch(cmd).await {
+                    eprintln!("Failed to invite LAN peer: {}", e);
+                }
+            });
+        });
+
     // BlockSendCallback for sending a message in the block channel
     // Note: Full implementation requires compose modal/input focus UI
     // The SendMessage command is ready for use when UI provides the message content
@@ -851,13 +881,19 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
         );
     });
 
-    // BlockInviteCallback for inviting someone to the block
-    // Note: Full implementation requires modal to select contact to invite
-    // The InviteUser and SendBlockInvitation commands are ready for use
-    let on_block_invite: BlockInviteCallback = Arc::new(|| {
-        // Log the action - invitation modal needed to select contact
-        // When modal is implemented: dispatch InviteUser { target } or SendBlockInvitation { contact_id }
-        tracing::info!("Block invite triggered - awaiting invitation modal to select contact");
+    // BlockInviteCallback for inviting a contact to the block
+    let ctx_for_block_invite = ctx_arc.clone();
+    let on_block_invite: BlockInviteCallback = Arc::new(move |contact_id: String| {
+        let ctx = ctx_for_block_invite.clone();
+        let cmd = EffectCommand::SendBlockInvitation {
+            contact_id: contact_id.clone(),
+        };
+        tokio::spawn(async move {
+            if let Err(e) = ctx.dispatch(cmd).await {
+                eprintln!("Failed to send block invitation: {}", e);
+            }
+        });
+        tracing::info!("Block invite sent to contact: {}", contact_id);
     });
 
     // BlockNavCallback for navigating to neighborhood view - dispatches MovePosition to Street depth
@@ -900,6 +936,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
     let contacts = ctx_arc.get_contacts();
     let residents = ctx_arc.get_residents();
     let block_budget = ctx_arc.get_block_budget();
+
+    // Get discovered LAN peers from context (populated by LAN discovery events)
+    // For now, starts empty and will be populated via LanPeersUpdated events
+    let discovered_peers: Vec<DiscoveredPeerInfo> = Vec::new();
 
     // Get block info from snapshot
     let block_snap = ctx_arc.snapshot_block();
@@ -1002,6 +1042,7 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     channel_name: channel_name,
                     // Contacts screen data
                     contacts: contacts,
+                    discovered_peers: discovered_peers,
                     // Neighborhood screen data
                     neighborhood_name: neighborhood_name,
                     blocks: blocks,
@@ -1009,8 +1050,12 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     // Effect dispatch callbacks
                     on_send: Some(on_send),
                     on_channel_select: Some(on_channel_select.clone()),
+                    on_create_channel: Some(on_create_channel),
                     on_accept_invitation: Some(on_accept_invitation),
                     on_decline_invitation: Some(on_decline_invitation),
+                    on_create_invitation: Some(on_create_invitation),
+                    on_export_invitation: Some(on_export_invitation),
+                    on_import_invitation: Some(on_import_invitation),
                     on_enter_block: Some(on_enter_block),
                     on_go_home: Some(on_go_home),
                     on_back_to_street: Some(on_back_to_street),
@@ -1020,8 +1065,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     // Settings callbacks
                     on_update_mfa: Some(on_update_mfa),
                     // Contacts callbacks
-                    on_edit_petname: Some(on_edit_petname),
+                    on_update_petname: Some(on_update_petname),
                     on_toggle_guardian: Some(on_toggle_guardian),
+                    on_start_chat: Some(on_start_chat),
+                    on_invite_lan_peer: Some(on_invite_lan_peer),
                     // Block callbacks
                     on_block_send: Some(on_block_send),
                     on_block_invite: Some(on_block_invite),
@@ -1033,6 +1080,10 @@ pub async fn run_app_with_context(ctx: IoContext) -> std::io::Result<()> {
                     sync_in_progress: sync_in_progress,
                     last_sync_time: last_sync_time,
                     peer_count: peer_count,
+                    // Demo mode (get from context)
+                    demo_mode: ctx_arc.is_demo_mode(),
+                    demo_alice_code: ctx_arc.demo_alice_code(),
+                    demo_charlie_code: ctx_arc.demo_charlie_code(),
                 )
             }
         }

@@ -1,23 +1,31 @@
+// Locking Test Harness
+//
+// Test driver for distributed locking protocol.
+// Wraps protocol_locking actions for integration testing.
+// Sequences: register → openLottery → submitBallot → voteRelease → complete.
+
 module harness_locking {
-  // Local type definitions (imports don't work for types in Quint)
+  // ============ TYPE DEFINITIONS ============
   type ProtocolId = str
   type AuthorityId = str
 
-  // Import modules for actions (not types)
+  // ============ IMPORTS ============
   import protocol_locking from "./protocol_locking"
 
-  // Constants for signals
+  // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"
   pure val SIGNAL_ABORT = "abort"
 
-  // Harness state - tracks which protocols have been registered via harness
+  // ============ HARNESS STATE ============
   var harnessRegistered: Set[ProtocolId]
 
   action init: bool = all {
     harnessRegistered' = Set()
   }
 
-  /// Register a locking lifecycle.
+  // ============ HARNESS ACTIONS ============
+
+  // Configure locking protocol with participants and quorum.
   action register(
     pid: ProtocolId,
     members: Set[AuthorityId],
@@ -28,14 +36,14 @@ module harness_locking {
     harnessRegistered' = harnessRegistered.union(Set(pid))
   }
 
-  /// Open the lottery phase.
+  // Start lottery for lock acquisition.
   action openLottery(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_locking::openLottery(pid),
     harnessRegistered' = harnessRegistered
   }
 
-  /// Submit a ballot for a contender.
+  // Submit ballot from participant.
   action submitBallot(
     pid: ProtocolId,
     member: AuthorityId,
@@ -46,7 +54,7 @@ module harness_locking {
     harnessRegistered' = harnessRegistered
   }
 
-  /// Cast a release vote.
+  // Vote to release the lock.
   action voteRelease(
     pid: ProtocolId,
     member: AuthorityId
@@ -56,21 +64,21 @@ module harness_locking {
     harnessRegistered' = harnessRegistered
   }
 
-  /// Finalize release before completion.
+  // Finalize lock release (clear ticket).
   action finalizeRelease(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_locking::finalizeRelease(pid),
     harnessRegistered' = harnessRegistered
   }
 
-  /// Complete the locking lifecycle.
+  // Signal successful completion.
   action complete(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_locking::signalComplete(pid),
     harnessRegistered' = harnessRegistered
   }
 
-  /// Abort the locking lifecycle.
+  // Signal abort/failure.
   action abort(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_locking::signalAbort(pid),
@@ -79,6 +87,7 @@ module harness_locking {
 
   // ============ INVARIANTS ============
 
+  // All registered protocol IDs are non-empty.
   val InvariantHarnessTracksRegistrations =
     harnessRegistered.forall(pid => pid != "")
 }

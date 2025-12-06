@@ -28,18 +28,31 @@ pub struct ListItemProps {
 /// A single item in a selectable list
 #[component]
 pub fn ListItem(props: &ListItemProps) -> impl Into<AnyElement<'static>> {
+    // Use consistent list item colors for all scrollable components
     let bg = if props.selected {
-        Theme::BG_SELECTED
+        Theme::LIST_BG_SELECTED
     } else if props.highlighted {
         Theme::BG_HOVER
     } else {
-        Theme::BG_DARK
+        Theme::LIST_BG_NORMAL
     };
 
     let label_color = if props.selected {
-        Theme::PRIMARY
+        Theme::LIST_TEXT_SELECTED
     } else {
-        Theme::TEXT
+        Theme::LIST_TEXT_NORMAL
+    };
+
+    let desc_color = if props.selected {
+        Theme::LIST_TEXT_SELECTED
+    } else {
+        Theme::LIST_TEXT_MUTED
+    };
+
+    let icon_color = if props.selected {
+        Theme::SECONDARY
+    } else {
+        Theme::SECONDARY
     };
 
     let label = props.label.clone();
@@ -58,7 +71,7 @@ pub fn ListItem(props: &ListItemProps) -> impl Into<AnyElement<'static>> {
         ) {
             #(if has_icon {
                 Some(element! {
-                    Text(content: icon, color: Theme::SECONDARY)
+                    Text(content: icon, color: icon_color)
                 })
             } else {
                 None
@@ -67,7 +80,7 @@ pub fn ListItem(props: &ListItemProps) -> impl Into<AnyElement<'static>> {
                 Text(content: label, color: label_color, weight: Weight::Bold)
                 #(if has_desc {
                     Some(element! {
-                        Text(content: description, color: Theme::TEXT_MUTED)
+                        Text(content: description, color: desc_color)
                     })
                 } else {
                     None
@@ -75,7 +88,7 @@ pub fn ListItem(props: &ListItemProps) -> impl Into<AnyElement<'static>> {
             }
             #(if props.selected {
                 Some(element! {
-                    Text(content: "→", color: Theme::PRIMARY)
+                    Text(content: "→", color: Theme::LIST_TEXT_SELECTED)
                 })
             } else {
                 None

@@ -1,5 +1,6 @@
--- CLI runner for Aura Lean verification
--- This is used for differential testing against Rust implementations
+-- CLI runner for Aura Lean verification.
+-- Enables differential testing: run the same inputs through Lean and Rust,
+-- compare outputs to catch specification drift or implementation bugs.
 
 import Lean.Data.Json
 import Aura.Journal
@@ -18,6 +19,10 @@ open Aura.TimeSystem (TimeStamp Policy Ordering compare)
 
 This CLI tool allows running Lean models from Rust tests for differential testing.
 It reads JSON from stdin and outputs model results as JSON to stdout.
+
+**Why this exists**: Differential testing catches bugs by running the same inputs
+through two implementations (Lean spec, Rust production) and comparing outputs.
+If they differ, either the Rust code has a bug or the Lean spec needs updating.
 
 ## Protocol
 
@@ -39,9 +44,17 @@ Output: `{"ordering": "lt" | "eq" | "gt"}`
 Output: `{"version": "0.2.0", "modules": [...]}`
 -/
 
+-- Version string for compatibility checking. Rust tests verify this matches
+-- before running differential tests to catch stale oracle builds.
 def version : String := "0.2.0"
 
--- JSON instances for FactId
+-- ============================================================================
+-- JSON Serialization Instances
+-- These enable bidirectional JSON conversion for all model types.
+-- Field names must match the Rust serde serialization for compatibility.
+-- ============================================================================
+
+-- FactId serializes as a bare number (not an object).
 instance : ToJson FactId where
   toJson f := Json.num f.id
 
@@ -50,7 +63,7 @@ instance : FromJson FactId where
     let n ← j.getNat?
     pure { id := n }
 
--- JSON instances for Fact
+-- Fact serializes as {"id": <factId>}.
 instance : ToJson Fact where
   toJson f := Json.mkObj [("id", toJson f.id)]
 
@@ -60,7 +73,7 @@ instance : FromJson Fact where
     let id ← FromJson.fromJson? idVal
     pure { id := id }
 
--- JSON instances for Journal
+-- Journal serializes as a JSON array of facts.
 instance : ToJson Journal where
   toJson j := Json.arr (j.map toJson).toArray
 
@@ -70,7 +83,7 @@ instance : FromJson Journal where
     let facts ← arr.toList.mapM FromJson.fromJson?
     pure facts
 
--- JSON instances for Budget
+-- Budget serializes as {"available": n}.
 instance : ToJson Budget where
   toJson b := Json.mkObj [("available", Json.num b.available)]
 
@@ -80,7 +93,7 @@ instance : FromJson Budget where
     let n ← avail.getNat?
     pure { available := n }
 
--- JSON instances for TimeStamp
+-- TimeStamp serializes as {"logical": n, "orderClock": n}.
 instance : ToJson TimeStamp where
   toJson t := Json.mkObj [
     ("logical", Json.num t.logical),
@@ -95,7 +108,7 @@ instance : FromJson TimeStamp where
     let oc ← ocVal.getNat?
     pure { logical := log, orderClock := oc }
 
--- JSON instances for Policy
+-- Policy serializes as {"ignorePhysical": bool}.
 instance : ToJson Policy where
   toJson p := Json.mkObj [("ignorePhysical", Json.bool p.ignorePhysical)]
 
@@ -105,16 +118,20 @@ instance : FromJson Policy where
     let ip ← ipVal.getBool?
     pure { ignorePhysical := ip }
 
--- JSON instances for TimeSystem.Ordering
+-- Ordering serializes as string: "lt", "eq", or "gt".
 instance : ToJson TimeSystem.Ordering where
   toJson o := match o with
     | .lt => Json.str "lt"
     | .eq => Json.str "eq"
     | .gt => Json.str "gt"
 
--- Command handlers
+-- ============================================================================
+-- Command Handlers
+-- Each handler parses JSON input, runs the Lean model, and returns JSON output.
+-- ============================================================================
 
-/-- Handle journal-merge command -/
+-- Merge two journals and return the result.
+-- Tests the CRDT merge operation against the proven specification.
 def handleJournalMerge (input : String) : IO String := do
   match Json.parse input with
   | .error err =>
@@ -138,7 +155,8 @@ def handleJournalMerge (input : String) : IO String := do
       let errJson := Json.mkObj [("error", Json.str "Missing journal1 or journal2 field")]
       pure errJson.compress
 
-/-- Handle journal-reduce command -/
+-- Reduce a journal to canonical form.
+-- Tests deterministic reduction against the specification.
 def handleJournalReduce (input : String) : IO String := do
   match Json.parse input with
   | .error err =>
@@ -162,7 +180,8 @@ def handleJournalReduce (input : String) : IO String := do
       let errJson := Json.mkObj [("error", Json.str "Missing journal field")]
       pure errJson.compress
 
-/-- Handle flow-charge command -/
+-- Charge a cost against a flow budget.
+-- Tests the charge operation; should match Rust's FlowBudget::charge.
 def handleFlowCharge (input : String) : IO String := do
   match Json.parse input with
   | .error err =>
@@ -194,7 +213,8 @@ def handleFlowCharge (input : String) : IO String := do
       let errJson := Json.mkObj [("error", Json.str "Missing budget or cost field")]
       pure errJson.compress
 
-/-- Handle timestamp-compare command -/
+-- Compare two timestamps under a given policy.
+-- Tests the proven reflexivity, transitivity, and privacy properties.
 def handleTimestampCompare (input : String) : IO String := do
   match Json.parse input with
   | .error err =>
@@ -217,7 +237,7 @@ def handleTimestampCompare (input : String) : IO String := do
       let errJson := Json.mkObj [("error", Json.str "Missing policy, a, or b field")]
       pure errJson.compress
 
-/-- Handle version command -/
+-- Return version and available modules for compatibility checking.
 def handleVersion : IO String := do
   let resultJson := Json.mkObj [
     ("version", Json.str version),
@@ -232,7 +252,7 @@ def handleVersion : IO String := do
   ]
   pure resultJson.compress
 
-/-- Read all input from stdin -/
+-- Read all lines from stdin until EOF. Used for piped JSON input.
 def readStdin : IO String := do
   let stdin ← IO.getStdin
   let mut result := ""
@@ -245,7 +265,7 @@ def readStdin : IO String := do
       result := result ++ line
   pure result.trim
 
-/-- Run a command with stdin/stdout -/
+-- Dispatch command by name. Each command reads JSON from stdin (except version).
 def runCommand (args : List String) : IO Unit := do
   match args with
   | ["version"] =>
@@ -284,7 +304,8 @@ def runCommand (args : List String) : IO Unit := do
 
 end Aura.Runner
 
-/-- Main entry point for the CLI -/
+-- Main entry point. Called by `aura_verifier <command>`.
+-- Returns 0 on success (even if the operation fails—errors are in JSON output).
 def main (args : List String) : IO UInt32 := do
   Aura.Runner.runCommand args
   pure 0

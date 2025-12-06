@@ -5,9 +5,7 @@
 use iocraft::prelude::*;
 use std::time::{Duration, Instant};
 
-use crate::tui::components::KeyHintsBar;
-use crate::tui::theme::Theme;
-use crate::tui::types::KeyHint;
+use crate::tui::theme::{Spacing, Theme};
 
 /// A command help item
 #[derive(Clone, Debug)]
@@ -46,10 +44,29 @@ pub struct CommandItemProps {
 /// A single command item in the list
 #[component]
 pub fn CommandItem(props: &CommandItemProps) -> impl Into<AnyElement<'static>> {
+    // Use consistent list item colors
     let bg = if props.is_selected {
-        Theme::BG_SELECTED
+        Theme::LIST_BG_SELECTED
     } else {
-        Theme::BG_DARK
+        Theme::LIST_BG_NORMAL
+    };
+
+    let name_color = if props.is_selected {
+        Theme::LIST_TEXT_SELECTED
+    } else {
+        Theme::PRIMARY
+    };
+
+    let syntax_color = if props.is_selected {
+        Theme::LIST_TEXT_SELECTED
+    } else {
+        Theme::LIST_TEXT_MUTED
+    };
+
+    let desc_color = if props.is_selected {
+        Theme::LIST_TEXT_SELECTED
+    } else {
+        Theme::LIST_TEXT_NORMAL
     };
 
     let name = props.name.clone();
@@ -60,14 +77,14 @@ pub fn CommandItem(props: &CommandItemProps) -> impl Into<AnyElement<'static>> {
         View(
             flex_direction: FlexDirection::Column,
             background_color: bg,
-            padding: 1,
-            margin_bottom: 1,
+            padding: Spacing::XS,
+            margin_bottom: 0,
         ) {
-            View(flex_direction: FlexDirection::Row, gap: 2) {
-                Text(content: name, weight: Weight::Bold, color: Theme::PRIMARY)
-                Text(content: syntax, color: Theme::TEXT_MUTED)
+            View(flex_direction: FlexDirection::Row, gap: Spacing::SM) {
+                Text(content: name, weight: Weight::Bold, color: name_color)
+                Text(content: syntax, color: syntax_color)
             }
-            Text(content: description, color: Theme::TEXT)
+            Text(content: description, color: desc_color)
         }
     }
 }
@@ -108,13 +125,6 @@ pub struct HelpScreenProps {
 #[component]
 pub fn HelpScreen(props: &HelpScreenProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
     let selected = hooks.use_state(|| props.selected_index);
-
-    let hints = vec![
-        KeyHint::new("↑↓", "Navigate"),
-        KeyHint::new("/", "Search"),
-        KeyHint::new("Tab", "Filter"),
-        KeyHint::new("Esc", "Close"),
-    ];
 
     let commands = props.commands.clone();
     let current_selected = selected.get();
@@ -160,23 +170,17 @@ pub fn HelpScreen(props: &HelpScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
             flex_direction: FlexDirection::Column,
             width: 100pct,
             height: 100pct,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            overflow: Overflow::Hidden,
         ) {
-            // Header
-            View(
-                padding: 1,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(content: "Help", weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-
             // Command list
             View(
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
-                padding: 1,
-                overflow: Overflow::Scroll,
+                flex_shrink: 1.0,
+                padding: Spacing::XS,
+                overflow: Overflow::Hidden,
             ) {
                 #(commands.iter().enumerate().map(|(idx, cmd)| {
                     let is_selected = idx == current_selected;
@@ -193,9 +197,6 @@ pub fn HelpScreen(props: &HelpScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                     }
                 }))
             }
-
-            // Key hints
-            KeyHintsBar(hints: hints)
         }
     }
 }

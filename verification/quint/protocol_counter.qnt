@@ -1,76 +1,104 @@
-module protocol_counter {
-  // Base types (defined locally - type imports don't work in Quint)
-  type Option[a] = Some(a) | None
-  type ProtocolId = str
-  type AuthorityId = str  // renamed from DeviceId for authority model
-  type CounterId = str
-  type Lamport = int
-  type MessageId = str
+// Counter Protocol Specification
+//
+// Models conflict-free counter allocation for distributed value reservation.
+// Authorities reserve unique counter ranges to avoid allocation conflicts.
+// Uses Lamport timestamps for causal ordering of counter operations.
+//
+// Phase progression: CounterSetup → CounterOperating → CounterCompleted (or CounterFailed)
+//
+// Safety: Reserved values are disjoint across authorities within same epoch.
+// Liveness: Protocol completes when reservation is recorded and finalized.
+//
+// See: docs/103_relational_contexts.md (counter leases)
 
+module protocol_counter {
+  // ============ TYPE DEFINITIONS ============
+  // Local type definitions (Quint doesn't support type imports).
+
+  type Option[a] = Some(a) | None
+
+  // Opaque identifiers prevent internal structure leakage.
+  type ProtocolId = str
+  type AuthorityId = str  // Opaque authority identifier (was DeviceId)
+  type CounterId = str    // Identifies a specific counter instance
+  type Lamport = int      // Lamport timestamp for causal ordering
+  type MessageId = str    // Unique message identifier
+
+  // Counter operations: increment by delta, reset to zero, or sync state.
   type CounterOp = Increment(int) | Reset | Sync
 
+  // ParticipantState tracks each authority's view of counters.
   type ParticipantState = {
-    authority: AuthorityId,
-    owns: Set[CounterId],
-    lamport: Lamport,
-    localCounters: CounterId -> int,
-    pending: List[CounterOp],
-    delivered: Set[MessageId],
-    isByzantine: bool
+    authority: AuthorityId,      // This participant's identity
+    owns: Set[CounterId],        // Counters this authority owns
+    lamport: Lamport,            // Local Lamport clock
+    localCounters: CounterId -> int,  // Local counter values
+    pending: List[CounterOp],    // Operations awaiting delivery
+    delivered: Set[MessageId],   // Messages already processed (dedup)
+    isByzantine: bool            // Byzantine fault injection flag
   }
 
+  // CounterState represents shared counter metadata.
   type CounterState = {
-    id: CounterId,
-    value: int,
-    owner: AuthorityId,
-    observers: Set[AuthorityId],
-    lamport: Lamport
+    id: CounterId,               // Counter identifier
+    value: int,                  // Current counter value
+    owner: AuthorityId,          // Authority that owns this counter
+    observers: Set[AuthorityId], // Authorities observing this counter
+    lamport: Lamport             // Last update timestamp
   }
 
+  // CounterMessage carries counter operations between authorities.
   type CounterMessage = {
-    id: MessageId,
-    sender: AuthorityId,
-    recipients: Set[AuthorityId],
-    counter: CounterId,
-    op: CounterOp,
-    value: int,
-    lamport: Lamport
+    id: MessageId,               // Unique message identifier
+    sender: AuthorityId,         // Who sent this message
+    recipients: Set[AuthorityId],// Who receives this message
+    counter: CounterId,          // Which counter is affected
+    op: CounterOp,               // Operation to apply
+    value: int,                  // Current value at send time
+    lamport: Lamport             // Sender's Lamport timestamp
   }
 
+  // Protocol phase tracks overall progress.
   type CounterPhase = CounterSetup | CounterOperating | CounterSynchronizing | CounterCompleted | CounterFailed
+
+  // Lifecycle status for external coordination.
   type CounterLifecycleStatus = CounterPending | CounterLifecycleCompleted | CounterAborted
 
+  // CounterOutcome captures the result of successful reservation.
   type CounterOutcome = {
-    relationship: int,
-    reserved: Set[int],
-    ttl: int,
-    epoch: int,
-    requestingAuthority: AuthorityId
+    relationship: int,           // Relational context identifier
+    reserved: Set[int],          // Reserved counter values
+    ttl: int,                    // Lease duration
+    epoch: int,                  // Epoch for stale detection
+    requestingAuthority: AuthorityId  // Who requested reservation
   }
 
-  // Simplified effect type (no imports)
+  // Effect type for logging (simplified, no imports).
   type CounterEffect = { effectType: str, payload: str }
 
-  // ==================== STATE ====================
+  // ============ STATE VARIABLES ============
+  // Protocol state tracked per session.
 
-  var participants: ProtocolId -> AuthorityId -> ParticipantState
-  var counters: ProtocolId -> CounterId -> CounterState
-  var phase: ProtocolId -> CounterPhase
-  var pendingMessages: ProtocolId -> Set[CounterMessage]
-  var globalLamport: ProtocolId -> Lamport
-  var requestedValues: ProtocolId -> Set[int]
-  var reservedValues: ProtocolId -> Set[int]
-  var relationshipHash: ProtocolId -> int
-  var requestingAuthority: ProtocolId -> AuthorityId
-  var previousValue: ProtocolId -> int
-  var ttl: ProtocolId -> int
-  var requestedEpoch: ProtocolId -> int
-  var lifecycleStatus: ProtocolId -> CounterLifecycleStatus
-  var lifecycleEffects: ProtocolId -> Set[CounterEffect]
-  var outcome: ProtocolId -> Option[CounterOutcome]
+  var participants: ProtocolId -> AuthorityId -> ParticipantState  // Per-authority state
+  var counters: ProtocolId -> CounterId -> CounterState            // Counter metadata
+  var phase: ProtocolId -> CounterPhase                            // Protocol phase
+  var pendingMessages: ProtocolId -> Set[CounterMessage]           // Undelivered messages
+  var globalLamport: ProtocolId -> Lamport                         // Global Lamport clock
+  var requestedValues: ProtocolId -> Set[int]                      // Values requested
+  var reservedValues: ProtocolId -> Set[int]                       // Values reserved
+  var relationshipHash: ProtocolId -> int                          // Relational context hash
+  var requestingAuthority: ProtocolId -> AuthorityId               // Who requested
+  var previousValue: ProtocolId -> int                             // Base value for reservation
+  var ttl: ProtocolId -> int                                       // Lease duration
+  var requestedEpoch: ProtocolId -> int                            // Epoch for reservation
+  var lifecycleStatus: ProtocolId -> CounterLifecycleStatus        // Lifecycle state
+  var lifecycleEffects: ProtocolId -> Set[CounterEffect]           // Emitted effects
+  var outcome: ProtocolId -> Option[CounterOutcome]                // Final outcome if completed
 
-  // ==================== HELPERS ====================
+  // ============ HELPERS ============
+  // Pure utility functions for map access and initialization.
 
+  // Safe map lookup with default value.
   pure def getOrDefaultInt(m: ProtocolId -> int, key: ProtocolId, default: int): int =
     if (key.in(m.keys())) m.get(key) else default
 
@@ -83,6 +111,8 @@ module protocol_counter {
   pure def getCounterValue(localCounters: CounterId -> int, counterId: CounterId, defaultVal: int): int =
     if (counterId.in(localCounters.keys())) localCounters.get(counterId) else defaultVal
 
+  // Initialize participant map for new protocol session.
+  // Creates default state for each member authority.
   pure def ensureParticipantMap(
     mapping: ProtocolId -> AuthorityId -> ParticipantState,
     pid: ProtocolId,
@@ -103,6 +133,8 @@ module protocol_counter {
         }))
       )
 
+  // Initialize counter map for new protocol session.
+  // Creates counters owned by specified authority, observed by all members.
   pure def ensureCounterMap(
     mapping: ProtocolId -> CounterId -> CounterState,
     pid: ProtocolId,
@@ -123,13 +155,16 @@ module protocol_counter {
         }))
       )
 
+  // Lamport clock update: max(local, observed) + 1.
   pure def bumpLamport(clock: Lamport, observed: Lamport): Lamport =
     (if (clock > observed) clock else observed) + 1
 
+  // Generate unique message ID (simplified for model).
   pure def messageId(authority: AuthorityId, counter: CounterId, lamport: Lamport, nonce: int): MessageId =
     authority
 
-  // ==================== INITIALISATION ====================
+  // ============ INITIALISATION ============
+  // Start with empty state (no protocols registered).
 
   action init: bool = all {
     participants' = Map(),
@@ -149,8 +184,12 @@ module protocol_counter {
     outcome' = Map()
   }
 
-  // ==================== ACTIONS ====================
+  // ============ ACTIONS ============
+  // Protocol operations for counter reservation.
 
+  // Configure a new counter protocol session.
+  // Requires: at least one authority, one counter, owner in authorities, pid not registered.
+  // Effect: Transitions to CounterOperating phase.
   action configureCounters(
     pid: ProtocolId,
     authorities: Set[AuthorityId],
@@ -183,6 +222,9 @@ module protocol_counter {
     outcome' = outcome.set(pid, None)
   }
 
+  // Record reserved counter values before finalization.
+  // Requires: protocol pending, phase is CounterOperating.
+  // Effect: Sets both reservedValues and requestedValues.
   action recordReservation(pid: ProtocolId, values: Set[int]): bool = {
     val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else CounterPending
     val isPending = match status { | CounterPending => true | _ => false }
@@ -210,6 +252,9 @@ module protocol_counter {
     }
   }
 
+  // Mark a participant as Byzantine (fault injection for testing).
+  // Requires: participant exists in protocol.
+  // Effect: Sets isByzantine flag on participant state.
   action markByzantine(pid: ProtocolId, authority: AuthorityId): bool = {
     val participantMap = ensureParticipantMap(participants, pid, Set())
     val hasParticipant = pid.in(participantMap.keys()) and authority.in(participantMap.get(pid).keys())
@@ -248,6 +293,9 @@ module protocol_counter {
     }
   }
 
+  // Finalize counter protocol with successful completion.
+  // Requires: no pending messages, phase is CounterOperating, at least one reserved value, lifecycle pending.
+  // Effect: Transitions to CounterCompleted, sets outcome with reserved values.
   action finalize(pid: ProtocolId): bool = {
     val msgSet = getOrDefaultMessages(pendingMessages, pid)
     val reserved = getOrDefaultSetInt(reservedValues, pid)
@@ -289,6 +337,9 @@ module protocol_counter {
     }
   }
 
+  // Fail counter protocol due to error.
+  // Requires: protocol not already completed.
+  // Effect: Transitions to CounterFailed, sets lifecycle to CounterAborted.
   action failCounter(pid: ProtocolId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else CounterSetup
     val isNotCompleted = match currentPhase { | CounterCompleted => false | _ => true }
@@ -312,6 +363,9 @@ module protocol_counter {
     }
   }
 
+  // Signal abort from external coordination layer.
+  // Requires: lifecycle status is pending.
+  // Effect: Sets lifecycle to CounterAborted, phase to CounterFailed.
   action signalAbort(pid: ProtocolId): bool = {
     val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else CounterPending
     val isPending = match status { | CounterPending => true | _ => false }
@@ -335,17 +389,23 @@ module protocol_counter {
     }
   }
 
-  // ==================== INVARIANTS ====================
+  // ============ INVARIANTS ============
+  // Safety properties verified by model checker.
 
+  // All protocol maps share the same key set.
   val InvariantPhaseRegistered =
     phase.keys() == participants.keys()
 
+  // Counter state exists for every protocol.
   val InvariantCountersRegistered =
     counters.keys() == participants.keys()
 
+  // Lifecycle status defined for all protocols.
   val InvariantLifecycleStatusDefined =
     lifecycleStatus.keys() == phase.keys()
 
+  // Completed protocols have an outcome set.
+  // Safety: No successful completion without recorded result.
   val InvariantOutcomeWhenCompleted =
     lifecycleStatus.keys().forall(pid => {
       val status = lifecycleStatus.get(pid)

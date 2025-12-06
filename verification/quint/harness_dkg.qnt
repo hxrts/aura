@@ -1,25 +1,33 @@
+// DKG Test Harness
+//
+// Test driver for Distributed Key Generation protocol.
+// Wraps protocol_dkg actions for integration testing and trace generation.
+// Tracks registered protocols to ensure proper lifecycle sequencing.
+
 module harness_dkg {
-  // Local type definitions (imports don't work for types in Quint)
+  // ============ TYPE DEFINITIONS ============
   type ProtocolId = str
   type AuthorityId = str
 
-  // Import modules for actions (not types)
+  // ============ IMPORTS ============
   import protocol_core from "./protocol_core"
   import protocol_dkg from "./protocol_dkg"
 
-  // Constants for signals
+  // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"
   pure val SIGNAL_ABORT = "abort"
 
-  // Harness state - tracks which protocols have been registered via harness
+  // ============ HARNESS STATE ============
+  // Tracks protocols registered via this harness.
   var harnessRegistered: Set[ProtocolId]
 
   action init: bool = all {
     harnessRegistered' = Set()
   }
 
-  /// Register a DKG lifecycle - drives both core and DKG module setup.
-  /// Note: This is a test harness action, so we track state locally.
+  // ============ HARNESS ACTIONS ============
+
+  // Configure and register a DKG protocol session.
   action register(
     pid: ProtocolId,
     members: Set[AuthorityId],
@@ -30,7 +38,7 @@ module harness_dkg {
     harnessRegistered' = harnessRegistered.union(Set(pid))
   }
 
-  /// Drive a successful DKG completion.
+  // Finalize DKG with derived key, public key, and transcript.
   action complete(
     pid: ProtocolId,
     derivedKey: int,
@@ -42,7 +50,7 @@ module harness_dkg {
     harnessRegistered' = harnessRegistered
   }
 
-  /// Abort the DKG lifecycle.
+  // Abort the DKG protocol (timeout or error).
   action abort(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_dkg::signalAbort(pid),
@@ -50,7 +58,9 @@ module harness_dkg {
   }
 
   // ============ INVARIANTS ============
+  // Harness-level safety properties.
 
+  // All registered protocol IDs are non-empty.
   val InvariantHarnessTracksRegistrations =
     harnessRegistered.forall(pid => pid != "")
 }

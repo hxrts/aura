@@ -1,23 +1,31 @@
+// Resharing Test Harness
+//
+// Test driver for proactive secret sharing (key resharing) protocol.
+// Wraps protocol_resharing actions for integration testing.
+// Sequences: register → approve → moveToDistribution → recordCommitment → deliverShare.
+
 module harness_resharing {
-  // Local type definitions (imports don't work for types in Quint)
+  // ============ TYPE DEFINITIONS ============
   type ProtocolId = str
   type AuthorityId = str
 
-  // Import modules for actions (not types)
+  // ============ IMPORTS ============
   import protocol_resharing from "./protocol_resharing"
 
-  // Constants for signals
+  // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"
   pure val SIGNAL_ABORT = "abort"
 
-  // Harness state - tracks which protocols have been registered via harness
+  // ============ HARNESS STATE ============
   var harnessRegistered: Set[ProtocolId]
 
   action init: bool = all {
     harnessRegistered' = Set()
   }
 
-  /// Register a resharing lifecycle across core + spec.
+  // ============ HARNESS ACTIONS ============
+
+  // Configure resharing with old and new participant sets.
   action register(
     pid: ProtocolId,
     oldParticipants: Set[AuthorityId],
@@ -29,7 +37,7 @@ module harness_resharing {
     harnessRegistered' = harnessRegistered.union(Set(pid))
   }
 
-  /// Submit an approval from an old participant.
+  // Old participant approves resharing proposal.
   action approve(
     pid: ProtocolId,
     member: AuthorityId
@@ -39,14 +47,14 @@ module harness_resharing {
     harnessRegistered' = harnessRegistered
   }
 
-  /// Move to distribution phase.
+  // Transition to share distribution phase.
   action moveToDistribution(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_resharing::moveToDistribution(pid),
     harnessRegistered' = harnessRegistered
   }
 
-  /// Record a commitment from a new participant.
+  // New participant commits to received share.
   action recordCommitment(
     pid: ProtocolId,
     member: AuthorityId,
@@ -57,7 +65,7 @@ module harness_resharing {
     harnessRegistered' = harnessRegistered
   }
 
-  /// Deliver a share to a new participant.
+  // Deliver encrypted share to new participant.
   action deliverShare(
     pid: ProtocolId,
     member: AuthorityId,
@@ -68,14 +76,14 @@ module harness_resharing {
     harnessRegistered' = harnessRegistered
   }
 
-  /// Complete the resharing lifecycle.
+  // Signal successful completion.
   action complete(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_resharing::signalComplete(pid),
     harnessRegistered' = harnessRegistered
   }
 
-  /// Abort the resharing lifecycle.
+  // Signal abort/failure.
   action abort(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_resharing::signalAbort(pid),
@@ -84,6 +92,7 @@ module harness_resharing {
 
   // ============ INVARIANTS ============
 
+  // All registered protocol IDs are non-empty.
   val InvariantHarnessTracksRegistrations =
     harnessRegistered.forall(pid => pid != "")
 }

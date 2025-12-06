@@ -1,33 +1,53 @@
+// Group Membership Protocol Specification
+//
+// Models dynamic group membership management with epoch tracking.
+// Supports adding/removing members through a propose-confirm flow.
+// Each membership change increments the group epoch for versioning.
+//
+// Phase progression: Uninitialized → GroupActive ↔ GroupPendingChange
+//                    → Archived (or GroupFailed)
+//
+// Safety: Members can only be added/removed through the proposal flow.
+// Liveness: Pending changes must be confirmed or the proposal expires.
+//
+// See: docs/114_social_architecture.md
+
 module protocol_groups {
-  // Base types (defined locally - type imports don't work in Quint)
+  // ============ TYPE DEFINITIONS ============
+  // Base types for group membership management.
+
   type Option[a] = Some(a) | None
-  type ProtocolId = str
-  type AuthorityId = str  // renamed from DeviceId for authority model
-  type GroupId = str
+  type ProtocolId = str       // Unique group session identifier
+  type AuthorityId = str      // Participant identity
+  type GroupId = str          // Group identifier
 
+  // Group phase (state machine progression).
   type GroupPhase =
-    | Uninitialized
-    | GroupActive
-    | GroupPendingChange
-    | Archived
-    | GroupFailed
+    | Uninitialized       // Not yet configured
+    | GroupActive         // Ready for operations
+    | GroupPendingChange  // Awaiting confirmation of add/remove
+    | Archived            // Group deactivated (terminal)
+    | GroupFailed         // Protocol error (terminal)
 
+  // Operation types for audit logging.
   type OperationKind =
-    | OpCreate
-    | OpAdd
-    | OpRemove
-    | OpRotateEpoch
-    | OpArchive
+    | OpCreate        // Initial group creation
+    | OpAdd           // Add members to group
+    | OpRemove        // Remove members from group
+    | OpRotateEpoch   // Rotate epoch without membership change
+    | OpArchive       // Archive/deactivate the group
 
-  // Unique lifecycle variants for groups
+  // Lifecycle status for external coordination.
   type GroupLifecycleStatus = GroupPending | GroupLifecycleCompleted | GroupAborted
 
+  // Result of a completed group operation.
   type GroupOutcome = {
-    operation: OperationKind,
-    epoch: int,
-    members: Set[AuthorityId]
+    operation: OperationKind,    // What operation completed
+    epoch: int,                  // Epoch after operation
+    members: Set[AuthorityId]    // Final membership roster
   }
 
+  // Audit log entry for membership operations.
   type OperationRecord = {
     protocol: ProtocolId,
     group: GroupId,
@@ -39,21 +59,23 @@ module protocol_groups {
   // Simplified effect type (no imports)
   type GroupEffect = { effectType: str, payload: str }
 
-  // ============ STATE ============
+  // ============ STATE VARIABLES ============
+  // Global mutable state tracked by the model checker.
 
-  var groupIds: ProtocolId -> GroupId
-  var phase: ProtocolId -> GroupPhase
-  var members: ProtocolId -> Set[AuthorityId]
-  var pendingAdds: ProtocolId -> Set[AuthorityId]
-  var pendingRemoves: ProtocolId -> Set[AuthorityId]
-  var epoch: ProtocolId -> int
-  var operationLog: Set[OperationRecord]
-  var lifecycleStatus: ProtocolId -> GroupLifecycleStatus
-  var lifecycleEffects: ProtocolId -> Set[GroupEffect]
-  var lastOperation: ProtocolId -> OperationKind
-  var outcome: ProtocolId -> Option[GroupOutcome]
+  var groupIds: ProtocolId -> GroupId                   // Group ID per protocol
+  var phase: ProtocolId -> GroupPhase                   // Current protocol phase
+  var members: ProtocolId -> Set[AuthorityId]           // Current membership roster
+  var pendingAdds: ProtocolId -> Set[AuthorityId]       // Proposed additions
+  var pendingRemoves: ProtocolId -> Set[AuthorityId]    // Proposed removals
+  var epoch: ProtocolId -> int                          // Membership version number
+  var operationLog: Set[OperationRecord]                // Audit trail of operations
+  var lifecycleStatus: ProtocolId -> GroupLifecycleStatus  // External lifecycle
+  var lifecycleEffects: ProtocolId -> Set[GroupEffect]  // Pending effects
+  var lastOperation: ProtocolId -> OperationKind        // Most recent operation
+  var outcome: ProtocolId -> Option[GroupOutcome]       // Final result
 
   // ============ HELPERS ============
+  // Pure functions for safe state access.
 
   pure def getOrDefaultSet(m: ProtocolId -> Set[AuthorityId], key: ProtocolId): Set[AuthorityId] =
     if (key.in(m.keys())) m.get(key) else Set()
@@ -61,9 +83,11 @@ module protocol_groups {
   pure def getOrDefaultInt(m: ProtocolId -> int, key: ProtocolId): int =
     if (key.in(m.keys())) m.get(key) else 0
 
+  // Check if two sets have no common elements.
   pure def disjoint(left: Set[AuthorityId], right: Set[AuthorityId]): bool =
     left.intersect(right).size() == 0
 
+  // Append operation to audit log.
   pure def logOperation(
     log: Set[OperationRecord],
     pid: ProtocolId,
@@ -91,6 +115,7 @@ module protocol_groups {
   }
 
   // ============ INITIALISATION ============
+  // Start with empty state (no group sessions).
 
   action init: bool = all {
     groupIds' = Map(),
@@ -107,7 +132,9 @@ module protocol_groups {
   }
 
   // ============ ACTIONS ============
+  // State transitions modeling the group membership protocol.
 
+  // Create a new group with initial members.
   action configureGroup(
     pid: ProtocolId,
     gid: GroupId,
@@ -127,6 +154,8 @@ module protocol_groups {
     outcome' = outcome.set(pid, Some(makeOutcome(OpCreate, 0, initialMembers)))
   }
 
+  // Propose adding new members to the group.
+  // Requires: group is active, additions are not current members.
   action proposeAddMembers(pid: ProtocolId, additions: Set[AuthorityId]): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
     val isActive = match currentPhase { | GroupActive => true | _ => false }
@@ -149,6 +178,7 @@ module protocol_groups {
     }
   }
 
+  // Confirm pending member additions, bump epoch.
   action confirmAddMembers(pid: ProtocolId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
     val isPending = match currentPhase { | GroupPendingChange => true | _ => false }
@@ -174,6 +204,8 @@ module protocol_groups {
     }
   }
 
+  // Propose removing members from the group.
+  // Requires: group is active, removals are current members.
   action proposeRemoveMembers(pid: ProtocolId, removals: Set[AuthorityId]): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
     val isActive = match currentPhase { | GroupActive => true | _ => false }
@@ -196,6 +228,7 @@ module protocol_groups {
     }
   }
 
+  // Confirm pending member removals, bump epoch.
   action confirmRemoveMembers(pid: ProtocolId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
     val isPending = match currentPhase { | GroupPendingChange => true | _ => false }
@@ -221,6 +254,7 @@ module protocol_groups {
     }
   }
 
+  // Rotate epoch without membership change (key rotation trigger).
   action advanceEpoch(pid: ProtocolId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
     val isActive = match currentPhase { | GroupActive => true | _ => false }
@@ -243,6 +277,7 @@ module protocol_groups {
     }
   }
 
+  // Archive group (deactivate, terminal state).
   action archiveGroup(pid: ProtocolId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
     val isNotArchived = match currentPhase { | Archived => false | _ => true }
@@ -265,6 +300,7 @@ module protocol_groups {
     }
   }
 
+  // Fail group protocol (error condition).
   action failGroup(pid: ProtocolId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
     val isNotArchived = match currentPhase { | Archived => false | _ => true }
@@ -284,6 +320,7 @@ module protocol_groups {
     }
   }
 
+  // Signal external completion (lifecycle status update).
   action signalSuccess(pid: ProtocolId): bool = {
     val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else GroupPending
     val isPending = match status { | GroupPending => true | _ => false }
@@ -306,6 +343,7 @@ module protocol_groups {
     }
   }
 
+  // Signal external abort (lifecycle status update).
   action signalFailure(pid: ProtocolId): bool = {
     val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else GroupPending
     val isPending = match status { | GroupPending => true | _ => false }
@@ -326,21 +364,27 @@ module protocol_groups {
   }
 
   // ============ INVARIANTS ============
+  // Safety properties that must hold in every reachable state.
 
+  // Members only exist for configured groups.
   val InvariantMembersOnlyWhenConfigured =
     members.keys().subseteq(groupIds.keys())
 
+  // Phase is defined for all configured groups.
   val InvariantPhaseDefined =
     phase.keys() == groupIds.keys()
 
+  // Pending adds and removes are disjoint (can't add and remove same member).
   val InvariantPendingDisjoint =
     pendingAdds.keys().forall(pid =>
       disjoint(getOrDefaultSet(pendingAdds, pid), getOrDefaultSet(pendingRemoves, pid))
     )
 
+  // Epoch is never negative.
   val InvariantEpochNonNegative =
     epoch.keys().forall(pid => epoch.get(pid) >= 0)
 
+  // Archived groups have no pending changes.
   val InvariantArchivedNoPending =
     phase.keys().forall(pid => {
       val currentPhase = phase.get(pid)
@@ -351,11 +395,13 @@ module protocol_groups {
       )
     })
 
+  // Audit log entries reference existing groups.
   val InvariantLogMatchesGroup =
     operationLog.forall(entry =>
       entry.protocol.in(groupIds.keys()) and entry.group == groupIds.get(entry.protocol)
     )
 
+  // Pending changes only exist in GroupPendingChange phase.
   val InvariantPendingRequiresPendingPhase =
     pendingAdds.keys().forall(pid => {
       val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Uninitialized
@@ -368,6 +414,7 @@ module protocol_groups {
       getOrDefaultSet(pendingRemoves, pid).size() == 0 or isPendingPhase
     })
 
+  // Active groups have at least one member.
   val InvariantActiveMembersNonEmpty =
     phase.keys().forall(pid => {
       val currentPhase = phase.get(pid)
@@ -375,12 +422,15 @@ module protocol_groups {
       isActive implies getOrDefaultSet(members, pid).size() >= 1
     })
 
+  // Lifecycle status defined for all configured groups.
   val InvariantLifecycleStatusDefined =
     lifecycleStatus.keys() == groupIds.keys()
 
+  // No pending effects (simplified model).
   val InvariantLifecycleEffectsEmpty =
     lifecycleEffects.keys().forall(pid => lifecycleEffects.get(pid).size() == 0)
 
+  // Completed lifecycle implies outcome is present.
   val InvariantLifecycleCompletionHasOutcome =
     lifecycleStatus.keys().forall(pid => {
       val status = lifecycleStatus.get(pid)

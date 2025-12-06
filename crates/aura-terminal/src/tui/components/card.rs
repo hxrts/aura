@@ -12,11 +12,21 @@ pub struct CardStyle;
 impl CardStyle {
     /// Get background and border colors based on selection/focus state
     pub fn colors(selected: bool, focused: bool) -> (Color, Color) {
+        // Use consistent list item colors
         match (selected, focused) {
-            (true, true) => (Theme::BG_SELECTED, Theme::BORDER_FOCUS),
-            (true, false) => (Theme::BG_SELECTED, Theme::BORDER),
+            (true, true) => (Theme::LIST_BG_SELECTED, Theme::BORDER_FOCUS),
+            (true, false) => (Theme::LIST_BG_SELECTED, Theme::BORDER),
             (false, true) => (Theme::BG_HOVER, Theme::BORDER_FOCUS),
             (false, false) => (Color::Reset, Theme::BORDER),
+        }
+    }
+
+    /// Get text color based on selection state
+    pub fn text_color(selected: bool) -> Color {
+        if selected {
+            Theme::LIST_TEXT_SELECTED
+        } else {
+            Theme::LIST_TEXT_NORMAL
         }
     }
 }
@@ -46,11 +56,17 @@ pub fn CardHeader(props: &CardHeaderProps) -> impl Into<AnyElement<'static>> {
     let title = props.title.clone();
     let subtitle = props.subtitle.clone();
     let trailing = props.trailing.clone();
-    let trailing_color = props.trailing_color.unwrap_or(Theme::TEXT_MUTED);
     let has_subtitle = !subtitle.is_empty();
     let has_trailing = !trailing.is_empty();
 
     let (bg, border_color) = CardStyle::colors(props.selected, props.focused);
+    let text_color = CardStyle::text_color(props.selected);
+    let subtitle_color = if props.selected {
+        Theme::LIST_TEXT_SELECTED
+    } else {
+        Theme::LIST_TEXT_MUTED
+    };
+    let trailing_color = props.trailing_color.unwrap_or(subtitle_color);
 
     element! {
         View(
@@ -63,10 +79,10 @@ pub fn CardHeader(props: &CardHeaderProps) -> impl Into<AnyElement<'static>> {
             margin_bottom: Spacing::XS,
         ) {
             View(flex_direction: FlexDirection::Column, flex_shrink: 1.0) {
-                Text(content: title, weight: Weight::Bold, color: Theme::TEXT)
+                Text(content: title, weight: Weight::Bold, color: text_color)
                 #(if has_subtitle {
                     Some(element! {
-                        Text(content: subtitle, color: Theme::TEXT_MUTED)
+                        Text(content: subtitle, color: subtitle_color)
                     })
                 } else {
                     None

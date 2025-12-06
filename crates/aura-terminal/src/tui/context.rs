@@ -69,6 +69,14 @@ pub struct IoContext {
     /// This is the portable application core from aura-app
     /// Always available - demo mode uses AppCore without agent
     app_core: Arc<RwLock<AppCore>>,
+
+    /// Whether an actual account exists (vs placeholder IDs for pre-setup state)
+    /// When false, the account setup modal should be shown
+    has_existing_account: bool,
+
+    /// Demo mode hints (None in production mode)
+    #[cfg(feature = "development")]
+    demo_hints: Option<crate::demo::DemoHints>,
 }
 
 impl IoContext {
@@ -85,6 +93,9 @@ impl IoContext {
         Self {
             bridge: Arc::new(bridge),
             app_core,
+            has_existing_account: true, // Default to true for backwards compatibility
+            #[cfg(feature = "development")]
+            demo_hints: None,
         }
     }
 
@@ -97,7 +108,95 @@ impl IoContext {
         Self {
             bridge: Arc::new(bridge),
             app_core,
+            has_existing_account: true, // Default to true for backwards compatibility
+            #[cfg(feature = "development")]
+            demo_hints: None,
         }
+    }
+
+    /// Create a new IoContext with explicit account existence flag
+    ///
+    /// Use this constructor when you need to control whether the account setup
+    /// modal should be shown. Pass `has_existing_account: false` to show the modal.
+    pub fn with_account_status(
+        bridge: EffectBridge,
+        app_core: Arc<RwLock<AppCore>>,
+        has_existing_account: bool,
+    ) -> Self {
+        Self {
+            bridge: Arc::new(bridge),
+            app_core,
+            has_existing_account,
+            #[cfg(feature = "development")]
+            demo_hints: None,
+        }
+    }
+
+    /// Create a new IoContext for demo mode with hints
+    ///
+    /// This constructor includes demo hints that provide contextual guidance
+    /// and pre-generated invite codes for Alice and Charlie.
+    #[cfg(feature = "development")]
+    pub fn with_demo_hints(
+        bridge: EffectBridge,
+        app_core: Arc<RwLock<AppCore>>,
+        hints: crate::demo::DemoHints,
+        has_existing_account: bool,
+    ) -> Self {
+        Self {
+            bridge: Arc::new(bridge),
+            app_core,
+            has_existing_account,
+            demo_hints: Some(hints),
+        }
+    }
+
+    /// Get demo hints if in demo mode
+    #[cfg(feature = "development")]
+    pub fn demo_hints(&self) -> Option<&crate::demo::DemoHints> {
+        self.demo_hints.as_ref()
+    }
+
+    /// Check if running in demo mode
+    #[cfg(feature = "development")]
+    pub fn is_demo_mode(&self) -> bool {
+        self.demo_hints.is_some()
+    }
+
+    /// Check if running in demo mode (always false without development feature)
+    #[cfg(not(feature = "development"))]
+    pub fn is_demo_mode(&self) -> bool {
+        false
+    }
+
+    /// Get Alice's invite code (for demo mode)
+    #[cfg(feature = "development")]
+    pub fn demo_alice_code(&self) -> String {
+        self.demo_hints
+            .as_ref()
+            .map(|h| h.alice_invite_code.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get Charlie's invite code (for demo mode)
+    #[cfg(feature = "development")]
+    pub fn demo_charlie_code(&self) -> String {
+        self.demo_hints
+            .as_ref()
+            .map(|h| h.charlie_invite_code.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get Alice's invite code (empty without development feature)
+    #[cfg(not(feature = "development"))]
+    pub fn demo_alice_code(&self) -> String {
+        String::new()
+    }
+
+    /// Get Charlie's invite code (empty without development feature)
+    #[cfg(not(feature = "development"))]
+    pub fn demo_charlie_code(&self) -> String {
+        String::new()
     }
 
     /// Create with default bridge configuration (demo mode with AppCore)
@@ -117,6 +216,9 @@ impl IoContext {
         Self {
             bridge: Arc::new(bridge),
             app_core,
+            has_existing_account: true, // Defaults assume account exists
+            #[cfg(feature = "development")]
+            demo_hints: None,
         }
     }
 
@@ -135,14 +237,18 @@ impl IoContext {
 
     /// Check if an account (authority) has been set up
     ///
-    /// Returns true if AppCore has an authority set,
-    /// indicating the user has completed account creation.
+    /// Returns true if an actual account exists (not placeholder IDs).
+    /// When false, the account setup modal should be shown.
     pub fn has_account(&self) -> bool {
-        // Use try_read to avoid blocking indefinitely
-        if let Ok(core) = self.app_core.try_read() {
-            return core.authority().is_some();
-        }
-        false
+        self.has_existing_account
+    }
+
+    /// Mark that an account has been created
+    ///
+    /// Called after the user completes the account setup modal.
+    /// This updates the internal flag so `has_account()` returns true.
+    pub fn set_account_created(&mut self) {
+        self.has_existing_account = true;
     }
 
     /// Get a snapshot from AppCore (blocking read lock)

@@ -1,45 +1,65 @@
+// CRDT Journal Specification
+//
+// Models Aura's fact-based journal as a state-based CRDT. Events form
+// a hash-linked log (via parent pointers) with nonce uniqueness enforcement.
+// Merging journals from different replicas converges via set union + max.
+//
+// Key CRDT properties verified:
+// - Merge is commutative, associative, idempotent (semilattice)
+// - Reduce is deterministic (same events → same derived state)
+// - Lamport timestamps monotonically increase
+//
+// See: docs/102_journal.md, verification/lean/Aura/Journal.lean
+
 module protocol_journal {
-  // Base types
+  // Base types for journal entries and state.
   type Option[a] = Some(a) | None
   type AccountId = str
-  type AuthorityId = str  // renamed from DeviceId
+  type AuthorityId = str  // Opaque authority (was DeviceId)
   type EventId = str
   type SessionId = str
 
+  // How was this event authorized?
   type EventAuthorization =
-    | AuthThreshold
-    | AuthDevice(AuthorityId)
-    | AuthGuardian(AuthorityId)
+    | AuthThreshold          // k-of-n threshold signature
+    | AuthDevice(AuthorityId)   // Single device signature
+    | AuthGuardian(AuthorityId) // Guardian-assisted recovery
 
+  // A single journal event (fact).
   type EventRecord = {
-    id: EventId,
-    account: AccountId,
-    timestamp: int,
-    nonce: int,
-    parent: Option[EventId],
-    epoch: int,
-    eventType: str,
+    id: EventId,                 // Unique identifier (typically a hash)
+    account: AccountId,          // Which account this event belongs to
+    timestamp: int,              // Lamport timestamp (causal ordering)
+    nonce: int,                  // Replay protection (must be unique)
+    parent: Option[EventId],     // Hash chain link to previous event
+    epoch: int,                  // Session epoch for invalidation
+    eventType: str,              // Type tag for deserialization
     authorization: EventAuthorization
   }
 
+  // Derived state computed by reducing the event log.
   type LedgerState = {
     account: AccountId,
-    authorities: Set[AuthorityId],
-    guardians: Set[AuthorityId],
-    sessionEpoch: int,
-    lamport: int,
-    cooldowns: SessionId -> int
+    authorities: Set[AuthorityId],  // Current authority set
+    guardians: Set[AuthorityId],    // Guardian set for recovery
+    sessionEpoch: int,              // Current session epoch
+    lamport: int,                   // Max Lamport seen
+    cooldowns: SessionId -> int     // Recovery cooldown timers
   }
 
-  // Lifecycle status with unique names
+  // Lifecycle status for external coordination.
   type JournalStatus = JournalPending | JournalCompleted
 
-  var ledgerStates: AccountId -> LedgerState
-  var events: AccountId -> List[EventRecord]
-  var usedNonces: AccountId -> Set[int]
-  var lifecycleStatus: JournalStatus
+  // ============ STATE VARIABLES ============
+  // Mutable state tracked by the model checker.
+
+  var ledgerStates: AccountId -> LedgerState      // Derived state per account
+  var events: AccountId -> List[EventRecord]      // Event log per account
+  var usedNonces: AccountId -> Set[int]           // Consumed nonces (replay protection)
+  var lifecycleStatus: JournalStatus              // External lifecycle coordination
 
   // ============ HELPERS ============
+  // Pure functions for safe map/option access.
 
   pure def getOrDefaultLedger(m: AccountId -> LedgerState, key: AccountId): Option[LedgerState] =
     if (key.in(m.keys())) Some(m.get(key)) else None
@@ -50,14 +70,17 @@ module protocol_journal {
   pure def getOrDefaultEvents(m: AccountId -> List[EventRecord], key: AccountId): List[EventRecord] =
     if (key.in(m.keys())) m.get(key) else List()
 
+  // Nonce validation: returns true if nonce hasn't been used yet.
   pure def validateNonce(account: AccountId, nonce: int, nonces: AccountId -> Set[int]): bool =
     not(nonce.in(getOrDefaultNonces(nonces, account)))
 
+  // Get the last event's ID for hash chain linking.
   pure def lastEventId(eventList: List[EventRecord]): Option[EventId] =
     if (eventList.length() == 0) None
     else Some(eventList[eventList.length() - 1].id)
 
   // ============ INITIALISATION ============
+  // Start with empty state (no accounts).
 
   action init: bool = all {
     ledgerStates' = Map(),
@@ -67,7 +90,9 @@ module protocol_journal {
   }
 
   // ============ ACTIONS ============
+  // These model journal mutations (event appends).
 
+  // Create a new account with initial authority and guardian.
   action createAccount(account: AccountId, authority: AuthorityId, guardian: AuthorityId): bool = all {
     not(account.in(ledgerStates.keys())),
     ledgerStates' = ledgerStates.put(account, {
@@ -83,6 +108,7 @@ module protocol_journal {
     lifecycleStatus' = lifecycleStatus
   }
 
+  // Append a generic event to the journal (with nonce validation).
   action appendLedgerEvent(
     account: AccountId,
     eventId: EventId,
@@ -121,6 +147,7 @@ module protocol_journal {
     }
   }
 
+  // Add a new authority to the account (requires threshold authorization).
   action addAuthority(account: AccountId, authority: AuthorityId, nonce: int): bool = {
     val ledgerOpt = getOrDefaultLedger(ledgerStates, account)
     val hasLedger = match ledgerOpt { | Some(_) => true | None => false }
@@ -156,6 +183,7 @@ module protocol_journal {
     }
   }
 
+  // Remove an authority from the account.
   action removeAuthority(account: AccountId, authority: AuthorityId, nonce: int): bool = {
     val ledgerOpt = getOrDefaultLedger(ledgerStates, account)
     val hasLedger = match ledgerOpt { | Some(_) => true | None => false }
@@ -191,6 +219,7 @@ module protocol_journal {
     }
   }
 
+  // Increment session epoch (invalidates all sessions in prior epochs).
   action bumpSessionEpoch(account: AccountId, nonce: int): bool = {
     val ledgerOpt = getOrDefaultLedger(ledgerStates, account)
     val hasLedger = match ledgerOpt { | Some(_) => true | None => false }
@@ -224,6 +253,7 @@ module protocol_journal {
     }
   }
 
+  // Signal that journal processing is complete.
   action signalFinalize: bool = {
     val isPending = match lifecycleStatus { | JournalPending => true | _ => false }
     all {
@@ -236,8 +266,8 @@ module protocol_journal {
   }
 
   // ==================== STEP ACTION ====================
+  // Nondeterministically choose any enabled action.
 
-  // Non-deterministic step for simulation
   action step: bool = any {
     nondet account = oneOf(Set("acc1", "acc2"))
     nondet authority = oneOf(Set("auth1", "auth2", "auth3"))
@@ -255,8 +285,10 @@ module protocol_journal {
   }
 
   // ==================== CRDT MERGE OPERATIONS ====================
+  // These implement the state-based CRDT merge for journal synchronization.
 
-  // Merge two event lists (union with deduplication by id)
+  // Merge two event lists (union with deduplication by id).
+  // This is the core CRDT operation for eventual consistency.
   pure def mergeEvents(a: List[EventRecord], b: List[EventRecord]): List[EventRecord] = {
     val aIds: Set[EventId] = a.foldl(Set(), (acc, e) => acc.union(Set(e.id)))
     // Filter b to only events not in a (by id)
@@ -267,10 +299,11 @@ module protocol_journal {
     a.concat(bOnly)
   }
 
-  // Merge two sets of nonces (simple set union)
+  // Merge nonce sets (set union = CRDT G-Set).
   pure def mergeNonces(a: Set[int], b: Set[int]): Set[int] = a.union(b)
 
-  // Merge two ledger states (take max of Lamport counters, union of sets)
+  // Merge ledger states using component-wise lattice operations.
+  // Sets use union, integers use max.
   pure def mergeLedgers(a: LedgerState, b: LedgerState): LedgerState = {
     {
       account: a.account,
@@ -283,27 +316,26 @@ module protocol_journal {
   }
 
   // ==================== CRDT PROPERTIES ====================
+  // These properties verify the CRDT semilattice laws.
+  // Proved formally in verification/lean/Aura/Journal.lean.
 
-  // Property: Nonce merge is commutative
-  // merge(a, b) == merge(b, a)
+  // Commutativity: merge(a, b) == merge(b, a)
   pure def propNonceMergeCommutative(a: Set[int], b: Set[int]): bool =
     mergeNonces(a, b) == mergeNonces(b, a)
 
-  // Property: Nonce merge is associative
-  // merge(a, merge(b, c)) == merge(merge(a, b), c)
+  // Associativity: merge(a, merge(b, c)) == merge(merge(a, b), c)
   pure def propNonceMergeAssociative(a: Set[int], b: Set[int], c: Set[int]): bool =
     mergeNonces(a, mergeNonces(b, c)) == mergeNonces(mergeNonces(a, b), c)
 
-  // Property: Nonce merge is idempotent
-  // merge(a, a) == a
+  // Idempotence: merge(a, a) == a
   pure def propNonceMergeIdempotent(a: Set[int]): bool =
     mergeNonces(a, a) == a
 
-  // Property: Authority sets merge commutatively (via set union)
+  // Authority merge is commutative (set union).
   pure def propAuthorityMergeCommutative(a: Set[AuthorityId], b: Set[AuthorityId]): bool =
     a.union(b) == b.union(a)
 
-  // Property: Lamport timestamps form a join-semilattice (max is the join)
+  // Lamport timestamps form a join-semilattice (max is the join operation).
   pure def propLamportJoin(a: int, b: int): bool = {
     val joined = if (a > b) a else b
     // Join is idempotent: join(a, a) == a
@@ -314,11 +346,10 @@ module protocol_journal {
   }
 
   // ==================== REDUCE DETERMINISM ====================
+  // Reduce computes derived state from the event log.
+  // Determinism: same events always yield same derived state.
 
-  // The reduce operation computes the final state from events
-  // For determinism: reduce(events) always yields same result for same input
-
-  // Compute authority set from event list (deterministic reduction)
+  // Compute authority set from event list by replaying events.
   pure def reduceAuthorities(eventList: List[EventRecord], initial: Set[AuthorityId]): Set[AuthorityId] =
     eventList.foldl(initial, (acc, event) =>
       if (event.eventType == "AddAuthority") acc.union(Set(event.id))
@@ -326,18 +357,18 @@ module protocol_journal {
       else acc
     )
 
-  // Compute max Lamport from event list (deterministic)
+  // Compute max Lamport timestamp from event list.
   pure def reduceLamport(eventList: List[EventRecord]): int =
     eventList.foldl(0, (acc, event) => if (event.timestamp > acc) event.timestamp else acc)
 
-  // Property: Reduce is deterministic - same events yield same Lamport
+  // Determinism: running reduce twice yields same result.
   pure def propReduceLamportDeterministic(events: List[EventRecord]): bool = {
     val result1 = reduceLamport(events)
     val result2 = reduceLamport(events)
     result1 == result2
   }
 
-  // Property: Reduce preserves event ordering (monotonic timestamps)
+  // Ordering: timestamps are monotonically increasing in the event list.
   pure def propReducePreservesOrder(events: List[EventRecord]): bool =
     events.length() < 2 or
     events.indices().filter(i => i > 0).forall(i =>
@@ -345,11 +376,13 @@ module protocol_journal {
     )
 
   // ==================== INVARIANTS ====================
+  // Safety properties that must hold in every reachable state.
 
-  // Helper to check if all events in a list satisfy a predicate
+  // Helper: check if all events satisfy a predicate.
   pure def allEventsMatch(eventList: List[EventRecord], pred: EventRecord => bool): bool =
     eventList.foldl(true, (acc, event) => acc and pred(event))
 
+  // Nonces are unique within each account (replay protection).
   val InvariantNonceUnique =
     usedNonces.keys().forall(account =>
       usedNonces.get(account).forall(n =>
@@ -357,25 +390,28 @@ module protocol_journal {
       )
     )
 
+  // Events have positive timestamps.
   val InvariantEventsOrdered =
     events.keys().forall(account =>
       allEventsMatch(events.get(account), event => event.timestamp > 0)
     )
 
+  // Events are scoped to their account.
   val InvariantEventsMatchAccount =
     events.keys().forall(account =>
       allEventsMatch(events.get(account), event => event.account == account)
     )
 
+  // Completed lifecycle implies stable state (placeholder).
   val InvariantLifecycleCompletedImpliesStable = {
     val isCompleted = match lifecycleStatus { | JournalCompleted => true | _ => false }
     isCompleted implies true
   }
 
   // ==================== CRDT INVARIANTS ====================
+  // These ensure the CRDT semilattice properties hold at runtime.
 
-  // Invariant: Nonce sets always merge commutatively
-  // This ensures concurrent nonce additions converge to same state
+  // Nonce merge is commutative (concurrent additions converge).
   val InvariantNonceMergeCommutative =
     usedNonces.keys().forall(acc1 =>
       usedNonces.keys().forall(acc2 =>
@@ -386,7 +422,7 @@ module protocol_journal {
       )
     )
 
-  // Invariant: Lamport timestamps monotonically increase per account
+  // Lamport timestamps are non-negative.
   val InvariantLamportMonotonic =
     ledgerStates.keys().forall(account =>
       ledgerStates.get(account).lamport >= 0

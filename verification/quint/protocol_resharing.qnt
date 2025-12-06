@@ -1,58 +1,85 @@
+// Key Resharing Protocol Specification
+//
+// Models proactive secret sharing: redistributing key shares to a new
+// participant set without reconstructing the secret. Essential for:
+// - Adding/removing participants from threshold group
+// - Refreshing shares to mitigate compromise
+// - Changing threshold value (e.g., 2-of-3 to 3-of-5)
+//
+// Phase progression: WaitingProposal → CollectingApprovals
+//                    → DistributingShares → ResharingCompleted (or ResharingFailed)
+//
+// Safety: New shares reconstruct to same secret; old shares invalidated.
+// Liveness: Requires threshold old participants to approve and contribute.
+//
+// See: docs/116_crypto.md
+
 module protocol_resharing {
-  // Base types (defined locally - type imports don't work in Quint)
+  // ============ TYPE DEFINITIONS ============
+  // Base types for resharing protocol.
+
   type Option[a] = Some(a) | None
-  type ProtocolId = str
-  type AuthorityId = str  // renamed from DeviceId for authority model
+  type ProtocolId = str       // Unique resharing session identifier
+  type AuthorityId = str      // Participant identity (old or new)
 
+  // Resharing phase (state machine progression).
   type ResharingPhase =
-    | WaitingProposal
-    | CollectingApprovals
-    | DistributingShares
-    | ResharingCompleted
-    | ResharingFailed
+    | WaitingProposal      // Awaiting resharing request
+    | CollectingApprovals  // Gathering old participant approvals
+    | DistributingShares   // Sending new shares to new participants
+    | ResharingCompleted   // Successfully reshared (terminal success)
+    | ResharingFailed      // Aborted (terminal failure)
 
+  // Nested map type for share tracking.
   type ShareState = ProtocolId -> AuthorityId -> Option[int]
 
-  // Unique lifecycle variants for resharing
+  // Lifecycle status for external coordination.
   type ResharingLifecycleStatus = ResharingPending | ResharingLifecycleCompleted | ResharingAborted
 
+  // Outcome of successful resharing.
   type ResharingOutcome = {
-    newThreshold: int,
-    newParticipants: Set[AuthorityId],
-    oldParticipants: Set[AuthorityId],
-    shareCount: int
+    newThreshold: int,               // New k value
+    newParticipants: Set[AuthorityId],  // Who holds new shares
+    oldParticipants: Set[AuthorityId],  // Who held old shares
+    shareCount: int                  // Shares successfully delivered
   }
 
-  // Simplified effect type (no imports)
+  // Protocol effect (simplified for this module).
   type ResharingEffect = { effectType: str, payload: str }
 
-  // ============ STATE ============
+  // ============ STATE VARIABLES ============
+  // Global mutable state tracked by the model checker.
 
-  var oldParticipants: ProtocolId -> Set[AuthorityId]
-  var newParticipants: ProtocolId -> Set[AuthorityId]
-  var currentPhase: ProtocolId -> ResharingPhase
-  var threshold: ProtocolId -> int
-  var approvals: ProtocolId -> Set[AuthorityId]
-  var shareCommitments: ShareState
-  var encryptedShares: ShareState
-  var lifecycleStatus: ProtocolId -> ResharingLifecycleStatus
-  var lifecycleEffects: ProtocolId -> Set[ResharingEffect]
-  var outcome: ProtocolId -> Option[ResharingOutcome]
+  var oldParticipants: ProtocolId -> Set[AuthorityId]   // Current share holders
+  var newParticipants: ProtocolId -> Set[AuthorityId]   // Future share holders
+  var currentPhase: ProtocolId -> ResharingPhase        // Current protocol phase
+  var threshold: ProtocolId -> int                      // New threshold value
+  var approvals: ProtocolId -> Set[AuthorityId]         // Old participants who approved
+  var shareCommitments: ShareState                      // Pedersen commitments
+  var encryptedShares: ShareState                       // Encrypted new shares
+  var lifecycleStatus: ProtocolId -> ResharingLifecycleStatus  // External lifecycle
+  var lifecycleEffects: ProtocolId -> Set[ResharingEffect]     // Pending effects
+  var outcome: ProtocolId -> Option[ResharingOutcome]   // Final result
 
   // ============ HELPERS ============
+  // Pure functions for safe state access.
 
+  // Safe map access for Set values.
   pure def getOrDefaultSet(m: ProtocolId -> Set[AuthorityId], key: ProtocolId): Set[AuthorityId] =
     if (key.in(m.keys())) m.get(key) else Set()
 
+  // Safe map access for int values.
   pure def getOrDefaultInt(m: ProtocolId -> int, key: ProtocolId, default: int): int =
     if (key.in(m.keys())) m.get(key) else default
 
+  // Check if Option[int] contains a value.
   pure def optionIsSome(opt: Option[int]): bool =
     match opt {
       | Some(_) => true
       | None => false
     }
 
+  // Initialize share map for all new participants with None.
   pure def ensureShareMap(
     mapping: ShareState,
     pid: ProtocolId,
@@ -65,11 +92,13 @@ module protocol_resharing {
         members.fold(Map(), (acc, member) => acc.set(member, None))
       )
 
+  // Get share value for a participant (safe nested access).
   pure def getShareOpt(mapping: ShareState, pid: ProtocolId, member: AuthorityId): Option[int] =
     if (pid.in(mapping.keys()))
       if (member.in(mapping.get(pid).keys())) mapping.get(pid).get(member) else None
     else None
 
+  // Set share value for a participant.
   pure def setShare(
     mapping: ShareState,
     pid: ProtocolId,
@@ -81,28 +110,34 @@ module protocol_resharing {
     ensured.set(pid, ensured.get(pid).set(member, value))
   }
 
+  // Count how many old participants have approved.
   def countApprovals(pid: ProtocolId): int =
     getOrDefaultSet(approvals, pid).size()
 
+  // Check if threshold approvals reached.
   def thresholdReached(pid: ProtocolId): bool =
     countApprovals(pid) >= getOrDefaultInt(threshold, pid, 0)
 
+  // Check if all new participants have commitments.
   def commitmentsReady(pid: ProtocolId): bool =
     getOrDefaultSet(newParticipants, pid).forall(member =>
       optionIsSome(getShareOpt(shareCommitments, pid, member))
     )
 
+  // Check if all new participants have received shares.
   def sharesDelivered(pid: ProtocolId): bool =
     getOrDefaultSet(newParticipants, pid).forall(member =>
       optionIsSome(getShareOpt(encryptedShares, pid, member))
     )
 
+  // Count shares in a share map for this protocol.
   def shareCountFor(mapping: ShareState, pid: ProtocolId): int =
     getOrDefaultSet(newParticipants, pid).fold(0, (acc, participant) =>
       if (optionIsSome(getShareOpt(mapping, pid, participant))) acc + 1 else acc
     )
 
   // ============ INITIALISATION ============
+  // Start with empty state (no resharing sessions).
 
   action init: bool = all {
     oldParticipants' = Map(),
@@ -118,7 +153,9 @@ module protocol_resharing {
   }
 
   // ============ ACTIONS ============
+  // State transitions modeling the resharing protocol.
 
+  // Configure a new resharing session with old/new participant sets.
   action configureResharing(
     pid: ProtocolId,
     oldSet: Set[AuthorityId],
@@ -142,6 +179,8 @@ module protocol_resharing {
     outcome' = outcome.set(pid, None)
   }
 
+  // Old participant approves the resharing proposal.
+  // When threshold reached, transitions to CollectingApprovals.
   action approveResharing(pid: ProtocolId, member: AuthorityId): bool = {
     val phase = if (pid.in(currentPhase.keys())) currentPhase.get(pid) else WaitingProposal
     val isWaiting = match phase { | WaitingProposal => true | _ => false }
@@ -164,6 +203,8 @@ module protocol_resharing {
     }
   }
 
+  // Move to share distribution phase.
+  // Requires: threshold approvals collected.
   action moveToDistribution(pid: ProtocolId): bool = {
     val phase = if (pid.in(currentPhase.keys())) currentPhase.get(pid) else WaitingProposal
     val isCollecting = match phase { | CollectingApprovals => true | _ => false }
@@ -183,6 +224,8 @@ module protocol_resharing {
     }
   }
 
+  // Record Pedersen commitment for a new participant.
+  // Commitments must be recorded before shares can be delivered.
   action recordCommitment(
     pid: ProtocolId,
     member: AuthorityId,
@@ -210,6 +253,8 @@ module protocol_resharing {
     }
   }
 
+  // Deliver encrypted share to a new participant.
+  // When all shares delivered, transitions to ResharingCompleted.
   action deliverShare(
     pid: ProtocolId,
     member: AuthorityId,
@@ -249,6 +294,8 @@ module protocol_resharing {
     }
   }
 
+  // Fail resharing (timeout or protocol error).
+  // Can be called at any phase except ResharingCompleted.
   action failResharing(pid: ProtocolId): bool = {
     val phase = if (pid.in(currentPhase.keys())) currentPhase.get(pid) else WaitingProposal
     val isNotCompleted = match phase { | ResharingCompleted => false | _ => true }
@@ -267,6 +314,8 @@ module protocol_resharing {
     }
   }
 
+  // Signal external completion (lifecycle status update).
+  // Requires: phase is ResharingCompleted, outcome is present.
   action signalComplete(pid: ProtocolId): bool = {
     val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else ResharingPending
     val isPending = match status { | ResharingPending => true | _ => false }
@@ -291,6 +340,8 @@ module protocol_resharing {
     }
   }
 
+  // Signal external abort (lifecycle status update).
+  // Moves lifecycle to ResharingAborted, phase to ResharingFailed.
   action signalAbort(pid: ProtocolId): bool = {
     val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else ResharingPending
     val isPending = match status { | ResharingPending => true | _ => false }
@@ -310,18 +361,24 @@ module protocol_resharing {
   }
 
   // ============ INVARIANTS ============
+  // Safety properties that must hold in every reachable state.
 
+  // Threshold is valid: 1 <= threshold <= newParticipants.size().
   val InvariantThresholdWithinBounds =
     threshold.keys().forall(pid =>
       threshold.get(pid) >= 1 and
       threshold.get(pid) <= getOrDefaultSet(newParticipants, pid).size()
     )
 
+  // Approvals only from old participants.
+  // New participants cannot approve (they don't hold old shares).
   val InvariantApprovalsSubsetOld =
     approvals.keys().forall(pid =>
       getOrDefaultSet(approvals, pid).subseteq(getOrDefaultSet(oldParticipants, pid))
     )
 
+  // Phase-specific constraints are satisfied.
+  // E.g., DistributingShares requires threshold approvals.
   val InvariantPhaseProgression =
     currentPhase.keys().forall(pid =>
       match currentPhase.get(pid) {
@@ -333,9 +390,11 @@ module protocol_resharing {
       }
     )
 
+  // Lifecycle status defined for all configured protocols.
   val InvariantLifecycleStatusDefined =
     lifecycleStatus.keys() == currentPhase.keys()
 
+  // LifecycleCompleted implies phase is ResharingCompleted.
   val InvariantLifecycleCompletionRequiresPhase =
     lifecycleStatus.keys().forall(pid => {
       val status = lifecycleStatus.get(pid)
@@ -345,9 +404,12 @@ module protocol_resharing {
       isCompleted implies isPhaseCompleted
     })
 
+  // No pending effects (simplified model).
   val InvariantLifecycleEffectsEmpty =
     lifecycleEffects.keys().forall(pid => lifecycleEffects.get(pid).size() == 0)
 
+  // LifecycleCompleted implies outcome is present.
+  // Successful resharing always produces a ResharingOutcome.
   val InvariantOutcomeWhenCompleted =
     lifecycleStatus.keys().forall(pid => {
       val status = lifecycleStatus.get(pid)

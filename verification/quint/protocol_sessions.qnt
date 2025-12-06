@@ -1,36 +1,59 @@
+// Session Management Protocol Specification
+//
+// Models authority sessions with presence tracking and epoch management.
+// Sessions track activity, issue presence tickets, and auto-expire on inactivity.
+// Supports hierarchical sub-sessions inheriting from parent authority.
+//
+// Key behaviors:
+// - Authorities register and create sessions bound to current epoch
+// - Sessions issue presence tickets to prove liveness
+// - Inactivity beyond MAX_INACTIVE marks session inactive
+// - Epoch transitions can revoke sessions missing presence requirements
+//
+// Safety: Compromised authorities cannot create new sessions.
+// Liveness: Active sessions with recent tickets persist across epochs.
+//
+// See: docs/100_authority_and_identity.md, docs/108_transport_and_information_flow.md
+
 module protocol_sessions {
-  // Base types (defined locally - type imports don't work in Quint)
+  // ============ TYPE DEFINITIONS ============
+  // Base types for session management.
+
   type Option[a] = Some(a) | None
-  type AuthorityId = str  // renamed from DeviceId for authority model
-  type SessionId = str
-  type EpochNumber = int
-  type Timestamp = int
+  type AuthorityId = str      // Participant identity
+  type SessionId = str        // Session identifier
+  type EpochNumber = int      // Protocol epoch
+  type Timestamp = int        // Wall-clock time
 
+  // Per-authority state tracking session and status.
   type AuthorityRecord = {
-    currentSession: Option[SessionId],
-    lastPresence: Timestamp,
-    compromised: bool,
-    suspended: bool
+    currentSession: Option[SessionId],  // Active session if any
+    lastPresence: Timestamp,            // Last activity timestamp
+    compromised: bool,                  // Compromised flag (blocks new sessions)
+    suspended: bool                     // Temporary suspension
   }
 
+  // Per-session state tracking activity and parent.
   type SessionRecord = {
-    authority: AuthorityId,
-    epoch: EpochNumber,
-    createdAt: Timestamp,
-    lastActivity: Timestamp,
-    tickets: Set[int],
-    active: bool,
-    parent: Option[SessionId]
+    authority: AuthorityId,       // Owning authority
+    epoch: EpochNumber,           // Epoch when created
+    createdAt: Timestamp,         // Creation time
+    lastActivity: Timestamp,      // Last ticket issue time
+    tickets: Set[int],            // Presence tickets issued
+    active: bool,                 // Currently active
+    parent: Option[SessionId]     // Parent session (for sub-sessions)
   }
 
+  // Per-epoch state tracking sessions and requirements.
   type EpochRecord = {
-    number: EpochNumber,
-    startTime: Timestamp,
-    sessions: Set[SessionId],
-    revoked: Set[SessionId],
-    presenceRequirement: int
+    number: EpochNumber,         // Epoch identifier
+    startTime: Timestamp,        // When epoch started
+    sessions: Set[SessionId],    // Sessions created in this epoch
+    revoked: Set[SessionId],     // Sessions revoked in this epoch
+    presenceRequirement: int     // Tickets needed to survive epoch
   }
 
+  // Session credential for authentication.
   type Credential = {
     authority: AuthorityId,
     session: SessionId,
@@ -38,23 +61,26 @@ module protocol_sessions {
     validUntil: Timestamp
   }
 
-  // ==================== STATE ====================
+  // ============ STATE VARIABLES ============
+  // Global mutable state tracked by the model checker.
 
-  var authorities: AuthorityId -> AuthorityRecord
-  var sessions: SessionId -> SessionRecord
-  var epochs: EpochNumber -> EpochRecord
-  var credentials: Set[Credential]
-  var currentEpoch: EpochNumber
-  var currentTime: Timestamp
-  var thresholdApprovers: int
+  var authorities: AuthorityId -> AuthorityRecord   // Authority registry
+  var sessions: SessionId -> SessionRecord          // Active sessions
+  var epochs: EpochNumber -> EpochRecord            // Epoch history
+  var credentials: Set[Credential]                  // Valid credentials
+  var currentEpoch: EpochNumber                     // Current epoch
+  var currentTime: Timestamp                        // Global clock
+  var thresholdApprovers: int                       // Approval threshold
 
-  // ==================== CONSTANTS ====================
+  // ============ CONSTANTS ============
+  // Protocol timing parameters.
 
-  pure val EPOCH_DURATION = 1000
-  pure val MAX_INACTIVE = 500
-  pure val SESSION_TIMEOUT = 2000
+  pure val EPOCH_DURATION = 1000    // Time units per epoch
+  pure val MAX_INACTIVE = 500       // Max inactivity before auto-expire
+  pure val SESSION_TIMEOUT = 2000   // Credential validity duration
 
-  // ==================== HELPERS ====================
+  // ============ HELPERS ============
+  // Pure functions for safe state access.
 
   pure def getOrDefaultAuthorityRecord(m: AuthorityId -> AuthorityRecord, key: AuthorityId): Option[AuthorityRecord] =
     if (key.in(m.keys())) Some(m.get(key)) else None
@@ -71,14 +97,16 @@ module protocol_sessions {
       | None => false
     }
 
+  // Check if threshold approval is met.
   pure def computeThresholdApproval(label: str, approvers: int): bool =
     approvers >= 2 and label != ""
 
+  // Generate presence ticket hash (simplified deterministic hash).
   pure def presenceTicket(sessionId: SessionId, epoch: EpochNumber, nonce: int): int =
-    // Hash computation using epoch and nonce (no string length in Quint)
     (epoch * 101 + nonce * 37) % 2147483647
 
-  // ==================== INITIALISATION ====================
+  // ============ INITIALISATION ============
+  // Start with epoch 0 and empty registries.
 
   action init: bool = all {
     authorities' = Map(),
@@ -96,8 +124,10 @@ module protocol_sessions {
     thresholdApprovers' = 2
   }
 
-  // ==================== AUTHORITY ACTIONS ====================
+  // ============ AUTHORITY ACTIONS ============
+  // Authority registration and status management.
 
+  // Register a new authority (fresh, not compromised).
   action registerAuthority(authority: AuthorityId): bool = all {
     not(authority.in(authorities.keys())),
     authorities' = authorities.set(authority, {
@@ -114,6 +144,7 @@ module protocol_sessions {
     thresholdApprovers' = thresholdApprovers
   }
 
+  // Mark authority as compromised (blocks new sessions, suspends).
   action markCompromised(authority: AuthorityId): bool = {
     val recordOpt = getOrDefaultAuthorityRecord(authorities, authority)
     val hasRecord = match recordOpt { | Some(_) => true | None => false }
@@ -137,8 +168,10 @@ module protocol_sessions {
     }
   }
 
-  // ==================== SESSION ACTIONS ====================
+  // ============ SESSION ACTIONS ============
+  // Session lifecycle management.
 
+  // Create new session for authority (requires not compromised/suspended).
   action createSession(authority: AuthorityId, session: SessionId): bool = {
     val authorityRecordOpt = getOrDefaultAuthorityRecord(authorities, authority)
     val hasAuthority = match authorityRecordOpt { | Some(_) => true | None => false }
@@ -193,6 +226,7 @@ module protocol_sessions {
     }
   }
 
+  // Create sub-session inheriting from parent (for delegation).
   action createSubSession(parent: SessionId, child: SessionId): bool = {
     val parentSessionOpt = getOrDefaultSessionRecord(sessions, parent)
     val hasParent = match parentSessionOpt { | Some(_) => true | None => false }
@@ -224,6 +258,7 @@ module protocol_sessions {
     }
   }
 
+  // Issue presence ticket (proves session is alive, updates lastActivity).
   action issueTicket(session: SessionId, nonce: int): bool = {
     val recordOpt = getOrDefaultSessionRecord(sessions, session)
     val hasRecord = match recordOpt { | Some(_) => true | None => false }
@@ -252,8 +287,10 @@ module protocol_sessions {
     }
   }
 
-  // ==================== EPOCH MANAGEMENT ====================
+  // ============ EPOCH MANAGEMENT ============
+  // Epoch transitions and session revocation.
 
+  // Advance to next epoch (expires sessions without enough tickets).
   action advanceEpoch: bool = {
     val currentRecordOpt = getOrDefaultEpochRecord(epochs, currentEpoch)
     val hasRecord = match currentRecordOpt { | Some(_) => true | None => false }
@@ -294,6 +331,7 @@ module protocol_sessions {
     }
   }
 
+  // Revoke a session (also revokes child sessions).
   action revokeSession(session: SessionId): bool = {
     val recordOpt = getOrDefaultSessionRecord(sessions, session)
     val hasRecord = match recordOpt { | Some(_) => true | None => false }
@@ -334,8 +372,10 @@ module protocol_sessions {
     }
   }
 
-  // ==================== TIME ====================
+  // ============ TIME ============
+  // Time progression and auto-expiration.
 
+  // Advance time (expires inactive sessions, removes stale credentials).
   action advanceTime(delta: int): bool = {
     val newTime = currentTime + delta
     val updatedSessions = sessions.keys().fold(sessions, (acc, sid) =>
@@ -359,18 +399,22 @@ module protocol_sessions {
     }
   }
 
-  // ==================== INVARIANTS ====================
+  // ============ INVARIANTS ============
+  // Safety properties that must hold in every reachable state.
 
+  // Sessions belong to registered authorities.
   val InvariantAuthoritiesRegisteredSessions =
     sessions.keys().forall(sid =>
       sessions.get(sid).authority.in(authorities.keys())
     )
 
+  // Active sessions have recent activity (within MAX_INACTIVE).
   val InvariantActiveSessionsRecent =
     sessions.keys().forall(sid =>
       sessions.get(sid).active implies currentTime - sessions.get(sid).lastActivity <= MAX_INACTIVE
     )
 
+  // Revoked sessions are inactive.
   val InvariantRevokedInactive =
     epochs.keys().forall(epochNum =>
       epochs.get(epochNum).revoked.forall(sid =>
@@ -378,11 +422,13 @@ module protocol_sessions {
       )
     )
 
+  // Credentials reference existing sessions and valid epochs.
   val InvariantCredentialsMatchEpoch =
     credentials.forall(c =>
       c.epoch <= currentEpoch and c.session.in(sessions.keys())
     )
 
+  // Presence requirement is non-negative.
   val InvariantPresenceThreshold =
     epochs.keys().forall(epochNum =>
       epochs.get(epochNum).presenceRequirement >= 0

@@ -153,6 +153,11 @@ pub enum EffectCommand {
         /// Message content
         content: String,
     },
+    /// Start or navigate to a direct chat with a contact
+    StartDirectChat {
+        /// Contact ID to chat with
+        contact_id: String,
+    },
     /// Send an action/emote
     SendAction {
         /// Channel ID
@@ -248,7 +253,37 @@ pub enum EffectCommand {
         contact_id: Option<String>,
     },
 
+    // === LAN Discovery Commands ===
+    /// List LAN-discovered peers
+    ListLanPeers,
+    /// Invite a LAN-discovered peer as a contact
+    InviteLanPeer {
+        /// Authority ID of the peer
+        authority_id: String,
+        /// Address of the peer (IP:port)
+        address: String,
+    },
+
     // === Invitation Commands ===
+    /// Create a new invitation
+    CreateInvitation {
+        /// Type of invitation (Contact, Guardian, Channel)
+        invitation_type: String,
+        /// Optional message to include
+        message: Option<String>,
+        /// TTL in seconds (None = no expiry)
+        ttl_secs: Option<u64>,
+    },
+    /// Export an invitation as a shareable code
+    ExportInvitation {
+        /// Invitation ID to export
+        invitation_id: String,
+    },
+    /// Import an invitation from a code
+    ImportInvitation {
+        /// The invitation code to import
+        code: String,
+    },
     /// Accept an invitation
     AcceptInvitation {
         /// Invitation ID
@@ -355,6 +390,7 @@ impl EffectCommand {
             | Self::RemovePeer { .. }
             | Self::ListPeers
             | Self::DiscoverPeers
+            | Self::ListLanPeers
             | Self::Ping
             | Self::ListParticipants { .. }
             | Self::GetUserInfo { .. } => CommandAuthorizationLevel::Public,
@@ -362,6 +398,7 @@ impl EffectCommand {
             // Basic - user token required
             Self::SendMessage { .. }
             | Self::SendDirectMessage { .. }
+            | Self::StartDirectChat { .. }
             | Self::SendAction { .. }
             | Self::CreateChannel { .. }
             | Self::CloseChannel { .. }
@@ -374,15 +411,22 @@ impl EffectCommand {
             | Self::UnpinMessage { .. }
             | Self::MovePosition { .. }
             | Self::InviteUser { .. }
+            | Self::CreateInvitation { .. }
+            | Self::ExportInvitation { .. }
+            | Self::ImportInvitation { .. }
             | Self::AcceptInvitation { .. }
             | Self::DeclineInvitation { .. }
             | Self::AcceptPendingBlockInvitation
             | Self::SendBlockInvitation { .. }
+            | Self::InviteLanPeer { .. }
             | Self::SetContext { .. } => CommandAuthorizationLevel::Basic,
 
-            // Sensitive - elevated authorization
-            Self::CreateAccount { .. }
-            | Self::CreateBlock { .. }
+            // CreateAccount is special - it's the bootstrapping command that creates an account
+            // It requires Basic level since users need to create an account before they have one
+            Self::CreateAccount { .. } => CommandAuthorizationLevel::Basic,
+
+            // Sensitive - elevated authorization (requires existing account/elevated token)
+            Self::CreateBlock { .. }
             | Self::UpdateThreshold { .. }
             | Self::AddDevice { .. }
             | Self::RemoveDevice { .. }
@@ -525,6 +569,11 @@ pub enum AuraEvent {
         /// Channel ID
         channel_id: String,
     },
+    /// Direct chat started with a contact
+    DirectChatStarted {
+        /// Contact ID to chat with
+        contact_id: String,
+    },
 
     // === Sync Events ===
     /// Sync started
@@ -587,7 +636,51 @@ pub enum AuraEvent {
         block_id: String,
     },
 
+    // === LAN Discovery Events ===
+    /// LAN peers list updated
+    LanPeersUpdated {
+        /// List of discovered peers (authority_id, address, age_secs)
+        peers: Vec<(String, String, u64)>,
+    },
+    /// A new peer was discovered on the LAN
+    LanPeerDiscovered {
+        /// Authority ID of the peer
+        authority_id: String,
+        /// Address (IP:port)
+        address: String,
+    },
+    /// LAN peer invitation sent
+    LanPeerInvited {
+        /// Authority ID of the invited peer
+        authority_id: String,
+    },
+
     // === Invitation Events ===
+    /// Invitation created
+    InvitationCreated {
+        /// Invitation ID
+        invitation_id: String,
+        /// Invitation type
+        invitation_type: String,
+        /// Shareable code (if available)
+        code: Option<String>,
+    },
+    /// Invitation code exported
+    InvitationCodeExported {
+        /// Invitation ID
+        invitation_id: String,
+        /// The shareable code
+        code: String,
+    },
+    /// Invitation imported from code
+    InvitationImported {
+        /// Invitation ID (local)
+        invitation_id: String,
+        /// Sender name/ID
+        from: String,
+        /// Invitation type
+        invitation_type: String,
+    },
     /// Invitation accepted
     InvitationAccepted {
         /// Invitation ID
@@ -852,6 +945,8 @@ pub struct EventFilter {
     pub errors: bool,
     /// Include system events
     pub system: bool,
+    /// Include LAN discovery events
+    pub lan_discovery: bool,
 }
 
 impl EventFilter {
@@ -870,6 +965,7 @@ impl EventFilter {
             authorization: true,
             errors: true,
             system: true,
+            lan_discovery: true,
         }
     }
 
@@ -916,7 +1012,8 @@ impl EventFilter {
             | AuraEvent::UserJoined { .. }
             | AuraEvent::UserLeft { .. }
             | AuraEvent::ChannelCreated { .. }
-            | AuraEvent::ChannelClosed { .. } => self.chat,
+            | AuraEvent::ChannelClosed { .. }
+            | AuraEvent::DirectChatStarted { .. } => self.chat,
             AuraEvent::SyncStarted { .. }
             | AuraEvent::SyncCompleted { .. }
             | AuraEvent::SyncFailed { .. }
@@ -925,7 +1022,10 @@ impl EventFilter {
             | AuraEvent::PeersListed { .. }
             | AuraEvent::PeersDiscovered { .. } => self.sync,
             AuraEvent::BlockCreated { .. } | AuraEvent::BlockJoined { .. } => self.block,
-            AuraEvent::InvitationAccepted { .. }
+            AuraEvent::InvitationCreated { .. }
+            | AuraEvent::InvitationCodeExported { .. }
+            | AuraEvent::InvitationImported { .. }
+            | AuraEvent::InvitationAccepted { .. }
             | AuraEvent::InvitationDeclined { .. }
             | AuraEvent::InvitationSent { .. } => self.invitation,
             AuraEvent::ThresholdUpdated { .. } | AuraEvent::MfaPolicyUpdated { .. } => {
@@ -948,6 +1048,9 @@ impl EventFilter {
             AuraEvent::AuthorizationDenied { .. } => self.authorization,
             AuraEvent::Error { .. } | AuraEvent::Warning { .. } => self.errors,
             AuraEvent::Pong { .. } | AuraEvent::ShuttingDown => self.system,
+            AuraEvent::LanPeersUpdated { .. }
+            | AuraEvent::LanPeerDiscovered { .. }
+            | AuraEvent::LanPeerInvited { .. } => self.lan_discovery,
         }
     }
 }

@@ -1414,9 +1414,11 @@ lean-init:
     cd verification/lean && lake update
 
 # Build Lean verification modules
-lean-build: lean-init
-    @echo "Building Lean verification modules..."
-    cd verification/lean && lake build
+# Usage: just lean-build [jobs]
+#   jobs: number of parallel threads (default: 2 for safe resource usage)
+lean-build jobs="2": lean-init
+    @echo "Building Lean verification modules (threads={{jobs}})..."
+    cd verification/lean && nice -n 15 lake build -K env.LEAN_THREADS={{jobs}}
 
 # Build the Lean oracle verifier CLI for differential testing
 lean-oracle-build: lean-init
@@ -1451,7 +1453,8 @@ test-differential: lean-oracle-build
     cargo test -p aura-testkit --test lean_differential -- --ignored --nocapture
 
 # Run Lean verification (build and check for errors)
-lean-check: lean-build
+# Usage: just lean-check [jobs]
+lean-check jobs="4": (lean-build jobs)
     #!/usr/bin/env bash
     set -uo pipefail
 
@@ -1524,8 +1527,19 @@ lean-status:
     echo ""
     echo "Run 'just lean-check' to build and verify proofs"
 
-# Translate pure Rust functions to Lean using Aeneas
-lean-translate:
+# Translate pure Rust functions to Lean using Charon + Aeneas
+# Workflow: Rust → Charon → LLBC → Aeneas → Lean
+# Usage: just lean-translate [jobs] [crate]
+#   jobs: number of parallel jobs (default: 1 for safe resource usage)
+#   crate: specific crate to translate (default: all)
+# Example: just lean-translate 2 aura-core
+#
+# Resource management:
+#   - Uses nice -n 19 for lowest CPU priority
+#   - Limits cargo parallelism with -j flag
+#   - Codegen units set to 1 to reduce memory per rustc process
+#   - On macOS, monitor with: watch -n1 'ps aux | grep -E "charon|aeneas|rustc" | head -5'
+lean-translate jobs="1" crate="all":
     #!/usr/bin/env bash
     set -uo pipefail
 
@@ -1534,66 +1548,111 @@ lean-translate:
     RED='\033[0;31m'
     NC='\033[0m'
 
-    echo "Translating Rust pure functions to Lean using Aeneas"
-    echo "====================================================="
+    JOBS="{{jobs}}"
+    TARGET_CRATE="{{crate}}"
+
+    # Set environment variables for resource limiting
+    export CARGO_BUILD_JOBS="$JOBS"
+    export RUSTFLAGS="${RUSTFLAGS:-} -C codegen-units=1"  # Reduce memory per rustc
+
+    echo "Translating Rust to Lean using Charon + Aeneas"
+    echo "==============================================="
+    echo "Resource settings:"
+    echo "  - Parallel jobs: $JOBS"
+    echo "  - CPU priority: nice -n 19 (lowest)"
+    echo "  - Codegen units: 1 (reduces memory)"
+    echo ""
+    echo "Tip: To monitor resource usage, run in another terminal:"
+    echo "  watch -n1 'ps aux | grep -E \"charon|aeneas|rustc\" | head -5'"
     echo ""
 
     OUTPUT_DIR="verification/lean/Generated"
-    mkdir -p "$OUTPUT_DIR"
+    LLBC_DIR="target/llbc"
+    mkdir -p "$OUTPUT_DIR" "$LLBC_DIR"
 
-    # Check if aeneas is available
+    # Check if charon and aeneas are available
+    if ! command -v charon &> /dev/null; then
+        echo -e "${RED}✗ Charon not found in PATH${NC}"
+        echo "  Run 'nix develop' to enter the development environment"
+        exit 1
+    fi
+
     if ! command -v aeneas &> /dev/null; then
         echo -e "${RED}✗ Aeneas not found in PATH${NC}"
         echo "  Run 'nix develop' to enter the development environment"
         exit 1
     fi
 
-    echo "Aeneas version: $(aeneas --version 2>/dev/null || echo 'unknown')"
+    echo "Charon: $(charon version 2>/dev/null || echo 'available')"
+    echo "Aeneas: available (use -help for options)"
     echo ""
 
-    # List of pure modules to translate
-    # Format: crate_path:module_name
-    MODULES=(
-        "crates/aura-journal/src/pure/merge.rs:Journal.Merge"
-        "crates/aura-journal/src/pure/reduce.rs:Journal.Reduce"
-        "crates/aura-core/src/time/pure/compare.rs:Time.Compare"
-    )
+    # Crates to translate (containing pure/ modules)
+    if [ "$TARGET_CRATE" = "all" ]; then
+        CRATES=(
+            "aura-core"
+            "aura-journal"
+        )
+    else
+        CRATES=("$TARGET_CRATE")
+    fi
 
     SUCCESS=0
     FAILED=0
 
-    for module in "${MODULES[@]}"; do
-        src="${module%%:*}"
-        name="${module##*:}"
-        out_dir="$OUTPUT_DIR/${name//./\/}"
+    for crate in "${CRATES[@]}"; do
+        echo "=== Translating $crate ==="
+        echo ""
 
-        echo -n "Translating $name from $src... "
+        # Step 1: Compile with Charon to LLBC
+        # Use nice for low priority, -j for limited parallelism
+        echo -n "  [1/2] Compiling to LLBC with Charon (jobs=$JOBS)... "
+        llbc_file="$LLBC_DIR/${crate//-/_}.llbc"
 
-        if [ ! -f "$src" ]; then
-            echo -e "${RED}✗ Source not found${NC}"
+        if nice -n 19 charon cargo --dest "$LLBC_DIR" -- -p "$crate" -j "$JOBS" 2>/tmp/charon_err.log; then
+            echo -e "${GREEN}✓${NC}"
+        else
+            echo -e "${RED}✗${NC}"
+            echo "    Error: $(head -5 /tmp/charon_err.log)"
             ((FAILED++))
             continue
         fi
 
-        mkdir -p "$out_dir"
+        # Step 2: Translate with Aeneas to Lean
+        echo -n "  [2/2] Translating to Lean with Aeneas... "
+        crate_out="$OUTPUT_DIR/${crate//-/_}"
+        mkdir -p "$crate_out"
 
-        # Run Aeneas translation
-        # Note: Aeneas requires the full crate context, so we translate at crate level
-        # and extract the specific module. For now, we show the command that would run.
-        echo -e "${YELLOW}○ Pending${NC}"
-        echo "    Would run: aeneas --backend lean4 --input $src --dest $out_dir"
-        ((SUCCESS++))
+        if nice -n 19 aeneas -backend lean "$llbc_file" -dest "$crate_out" 2>/tmp/aeneas_err.log; then
+            echo -e "${GREEN}✓${NC}"
+            ((SUCCESS++))
+        else
+            echo -e "${YELLOW}⚠${NC} (check output)"
+            echo "    Note: $(head -3 /tmp/aeneas_err.log)"
+            # Count as partial success if files were generated
+            if [ -n "$(find "$crate_out" -name '*.lean' 2>/dev/null)" ]; then
+                ((SUCCESS++))
+            else
+                ((FAILED++))
+            fi
+        fi
+        echo ""
     done
 
+    echo "Summary: $SUCCESS crates translated, $FAILED failed"
     echo ""
-    echo "Summary: $SUCCESS modules ready for translation, $FAILED failed"
-    echo ""
-    echo -e "${YELLOW}Note:${NC} Aeneas translation requires the full crate to be compilable."
-    echo "      Use 'aeneas --help' to see available options."
-    echo "      Generated Lean files will be in: $OUTPUT_DIR/"
+    echo "Generated Lean files: $OUTPUT_DIR/"
+    if [ -d "$OUTPUT_DIR" ]; then
+        find "$OUTPUT_DIR" -name "*.lean" -type f | head -10
+        count=$(find "$OUTPUT_DIR" -name "*.lean" -type f | wc -l | tr -d ' ')
+        if [ "$count" -gt 10 ]; then
+            echo "  ... and $(($count - 10)) more"
+        fi
+    fi
 
 # Verify translated Lean code compiles
-lean-verify-translated: lean-translate lean-init
+# Usage: just lean-verify-translated [jobs] [crate]
+lean-verify-translated jobs="2" crate="all": (lean-translate jobs crate) lean-init
     #!/usr/bin/env bash
     set -uo pipefail
 

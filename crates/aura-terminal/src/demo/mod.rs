@@ -3,7 +3,7 @@
 //!
 //! Provides demo modes for showcasing Aura's capabilities.
 //!
-//! The demo architecture uses the simulator to instantiate agents (Alice, Carol)
+//! The demo architecture uses the simulator to instantiate agents (Alice, Charlie)
 //! that the user (Bob) interacts with through the TUI. The demo layer is thin,
 //! simply providing initialization of the simulation configuration and guided flows
 //! with contextual tips.
@@ -19,6 +19,17 @@
 //!
 //! The agent doesn't start as a "guardian" - it becomes one through the
 //! interactive guardian ceremony, mirroring real Aura semantics.
+//!
+//! ## Submodules
+//!
+//! - `simulator`: The DemoSimulator coordinator that manages Alice/Charlie agents
+//! - `hints`: Demo mode hints and invite code generation
+
+pub mod hints;
+pub mod simulator;
+
+pub use hints::DemoHints;
+pub use simulator::DemoSimulator;
 
 use async_trait::async_trait;
 use aura_core::PhysicalTimeEffects;
@@ -306,6 +317,22 @@ impl SimulatedAgent {
         self.state.capabilities.iter().any(|cap| {
             matches!(cap, AgentCapability::Guardian { account_authority, .. } if account_authority == account)
         })
+    }
+
+    /// Add guardian capability for an account
+    ///
+    /// This makes the agent a guardian for the specified account,
+    /// allowing them to approve recovery requests.
+    pub fn add_guardian_for(&mut self, account: AuthorityId, context_id: ContextId) {
+        self.state.capabilities.insert(AgentCapability::Guardian {
+            account_authority: account,
+            context_id,
+        });
+        tracing::info!(
+            "Agent {} is now a guardian for account {}",
+            self.name,
+            account
+        );
     }
 
     /// Process an incoming event and generate responses
@@ -714,6 +741,15 @@ impl std::fmt::Debug for SimulatedAgent {
     }
 }
 
+/// State tracking for recovery sessions
+#[derive(Debug, Clone, Default)]
+struct RecoverySessionState {
+    /// Set of guardians who have approved
+    approved_guardians: HashSet<String>,
+    /// Required approval threshold (2-of-3 by default)
+    threshold: u32,
+}
+
 /// Bridge that connects TUI EffectCommands to simulated agents
 ///
 /// This is the key integration point - it routes commands from Bob's TUI
@@ -734,6 +770,9 @@ pub struct SimulatedBridge {
 
     /// Optional AMP channel handler (simulation or production)
     amp: Option<Arc<dyn aura_core::effects::amp::AmpChannelEffects + Send + Sync>>,
+
+    /// Recovery session state tracking
+    recovery_state: Arc<Mutex<RecoverySessionState>>,
 }
 
 #[async_trait]
@@ -785,6 +824,10 @@ impl SimulatedBridge {
             tui_event_tx,
             bob_authority,
             amp,
+            recovery_state: Arc::new(Mutex::new(RecoverySessionState {
+                approved_guardians: HashSet::new(),
+                threshold: 2, // Default 2-of-3
+            })),
         };
 
         (bridge, response_tx)
@@ -793,6 +836,14 @@ impl SimulatedBridge {
     /// Subscribe to agent events (for agents to receive)
     pub fn subscribe_agent_events(&self) -> broadcast::Receiver<AgentEvent> {
         self.agent_event_tx.subscribe()
+    }
+
+    /// Send an agent event to Alice/Charlie
+    ///
+    /// Used by the TUI event forwarder to route events from Bob's TUI
+    /// to the simulated agents.
+    pub fn send_agent_event(&self, event: AgentEvent) {
+        let _ = self.agent_event_tx.send(event);
     }
 
     /// Subscribe to TUI events (for TUI to receive)
@@ -914,14 +965,36 @@ impl SimulatedBridge {
                     session_id: _,
                     account: _,
                 } => {
-                    // Emit guardian approval event
-                    // Note: In a real implementation, we'd track approval count
+                    // Track this guardian's approval
+                    let guardian_id = authority_id.to_string();
+                    let (current, threshold) = {
+                        let mut state = self.recovery_state.lock().await;
+                        state.approved_guardians.insert(guardian_id.clone());
+                        (state.approved_guardians.len() as u32, state.threshold)
+                    };
+
+                    tracing::info!(
+                        "Guardian {} approved recovery ({}/{})",
+                        guardian_id,
+                        current,
+                        threshold
+                    );
+
+                    // Emit guardian approval event with accurate count
                     let event = AuraEvent::GuardianApproved {
-                        guardian_id: authority_id.to_string(),
-                        current: 1, // Would track actual count
-                        threshold: 2,
+                        guardian_id,
+                        current,
+                        threshold,
                     };
                     let _ = self.tui_event_tx.send(event);
+
+                    // Check if threshold reached
+                    if current >= threshold {
+                        tracing::info!("Recovery threshold reached! ({}/{})", current, threshold);
+                        let _ = self.tui_event_tx.send(AuraEvent::RecoveryCompleted {
+                            session_id: "demo-recovery".to_string(),
+                        });
+                    }
                 }
                 AgentResponse::AcceptGuardianBinding {
                     account,
@@ -939,6 +1012,12 @@ impl SimulatedBridge {
                 }
             }
         }
+    }
+
+    /// Reset recovery state (for new recovery sessions)
+    pub async fn reset_recovery_state(&self) {
+        let mut state = self.recovery_state.lock().await;
+        state.approved_guardians.clear();
     }
 
     /// Notify agents of phase change

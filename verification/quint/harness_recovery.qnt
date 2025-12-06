@@ -1,23 +1,31 @@
+// Recovery Test Harness
+//
+// Test driver for guardian-based social recovery protocol.
+// Wraps protocol_recovery actions for integration testing.
+// Sequences: register → submitShare (threshold) → complete.
+
 module harness_recovery {
-  // Local type definitions (imports don't work for types in Quint)
+  // ============ TYPE DEFINITIONS ============
   type ProtocolId = str
   type AuthorityId = str
 
-  // Import modules for actions (not types)
+  // ============ IMPORTS ============
   import protocol_recovery from "./protocol_recovery"
 
-  // Constants for signals
+  // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"
   pure val SIGNAL_ABORT = "abort"
 
-  // Harness state - tracks which protocols have been registered via harness
+  // ============ HARNESS STATE ============
   var harnessRegistered: Set[ProtocolId]
 
   action init: bool = all {
     harnessRegistered' = Set()
   }
 
-  /// Register a recovery lifecycle across core + spec.
+  // ============ HARNESS ACTIONS ============
+
+  // Configure recovery with guardians and threshold.
   action register(
     pid: ProtocolId,
     guardians: Set[AuthorityId],
@@ -28,7 +36,7 @@ module harness_recovery {
     harnessRegistered' = harnessRegistered.union(Set(pid))
   }
 
-  /// Submit a guardian share.
+  // Guardian submits their recovery share.
   action submitShare(
     pid: ProtocolId,
     guardian: AuthorityId,
@@ -39,14 +47,14 @@ module harness_recovery {
     harnessRegistered' = harnessRegistered
   }
 
-  /// Complete the recovery lifecycle.
+  // Signal successful completion.
   action complete(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_recovery::signalComplete(pid),
     harnessRegistered' = harnessRegistered
   }
 
-  /// Abort the recovery lifecycle.
+  // Signal abort/failure.
   action abort(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_recovery::signalAbort(pid),
@@ -55,6 +63,7 @@ module harness_recovery {
 
   // ============ INVARIANTS ============
 
+  // All registered protocol IDs are non-empty.
   val InvariantHarnessTracksRegistrations =
     harnessRegistered.forall(pid => pid != "")
 }

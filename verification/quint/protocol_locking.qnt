@@ -1,48 +1,69 @@
-module protocol_locking {
-  // Base types (defined locally - type imports don't work in Quint)
-  type Option[a] = Some(a) | None
-  type ProtocolId = str
-  type AuthorityId = str  // renamed from DeviceId for authority model
+// Distributed Locking Protocol Specification
+//
+// Models a lottery-based distributed lock for exclusive access coordination.
+// Participants submit ballots; when quorum reached, one participant wins
+// the lock ticket. The lock must be explicitly released via quorum vote.
+//
+// Phase progression: LockIdle → AwaitingQuorum → Held
+//                    → Releasing → Released (or LockFailed)
+//
+// Safety: At most one participant holds the lock at any time.
+// Liveness: Progress requires quorum participants to submit ballots/votes.
+//
+// See: docs/004_distributed_systems_contract.md
 
-  // Unique lifecycle variants for locking
+module protocol_locking {
+  // ============ TYPE DEFINITIONS ============
+  // Base types for distributed locking.
+
+  type Option[a] = Some(a) | None
+  type ProtocolId = str       // Unique lock session identifier
+  type AuthorityId = str      // Participant identity
+
+  // Lifecycle status for external coordination.
   type LockLifecycleStatus = LockPending | LockLifecycleCompleted | LockAborted
 
+  // Lock phase (state machine progression).
   type LockPhase =
-    | LockIdle
-    | AwaitingQuorum
-    | Held
-    | Releasing
-    | Released
-    | LockFailed
+    | LockIdle          // Not started (awaiting initiation)
+    | AwaitingQuorum    // Collecting ballots from participants
+    | Held              // Lock acquired by winner
+    | Releasing         // Collecting release votes
+    | Released          // Lock released (terminal success)
+    | LockFailed        // Failed to acquire/release (terminal failure)
 
+  // Outcome of successful lock acquisition.
   type LockOutcome = {
-    winner: AuthorityId,
-    granted: bool
+    winner: AuthorityId,  // Who won the lottery
+    granted: bool         // True if lock was granted
   }
 
-  // Lock ticket assigned to winning participant
+  // Lock ticket assigned to winning participant.
+  // Represents exclusive access until released or TTL expires.
   type LockTicket = {
-    holder: AuthorityId,
-    issuedAt: int,
-    ttl: int
+    holder: AuthorityId,  // Current lock holder
+    issuedAt: int,        // Timestamp when acquired
+    ttl: int              // Time-to-live (auto-release after TTL)
   }
 
-  // Simplified effect type (no imports)
+  // Protocol effect (simplified for this module).
   type LockEffect = { effectType: str, payload: str }
 
-  // ============ STATE ============
+  // ============ STATE VARIABLES ============
+  // Global mutable state tracked by the model checker.
 
-  var participants: ProtocolId -> Set[AuthorityId]
-  var phase: ProtocolId -> LockPhase
-  var quorumSize: ProtocolId -> int
-  var ballots: ProtocolId -> AuthorityId -> Option[int]
-  var ticket: ProtocolId -> Option[LockTicket]
-  var releaseVotes: ProtocolId -> Set[AuthorityId]
-  var lifecycleStatus: ProtocolId -> LockLifecycleStatus
-  var lifecycleEffects: ProtocolId -> Set[LockEffect]
-  var outcome: ProtocolId -> Option[LockOutcome]
+  var participants: ProtocolId -> Set[AuthorityId]  // All participants
+  var phase: ProtocolId -> LockPhase                // Current protocol phase
+  var quorumSize: ProtocolId -> int                 // Votes needed for quorum
+  var ballots: ProtocolId -> AuthorityId -> Option[int]  // Submitted ballots
+  var ticket: ProtocolId -> Option[LockTicket]      // Current lock ticket (if held)
+  var releaseVotes: ProtocolId -> Set[AuthorityId]  // Votes to release lock
+  var lifecycleStatus: ProtocolId -> LockLifecycleStatus  // External lifecycle
+  var lifecycleEffects: ProtocolId -> Set[LockEffect]     // Pending effects
+  var outcome: ProtocolId -> Option[LockOutcome]    // Final result
 
   // ============ HELPERS ============
+  // Pure functions for safe state access.
 
   pure def getOrDefaultSet(m: ProtocolId -> Set[AuthorityId], key: ProtocolId): Set[AuthorityId] =
     if (key.in(m.keys())) m.get(key) else Set()
@@ -85,6 +106,7 @@ module protocol_locking {
     )
 
   // ============ INITIALISATION ============
+  // Start with empty state (no lock sessions).
 
   action init: bool = all {
     participants' = Map(),
@@ -99,7 +121,9 @@ module protocol_locking {
   }
 
   // ============ ACTIONS ============
+  // State transitions modeling the locking protocol.
 
+  // Configure a new lock session with participant set and quorum.
   action configureLock(
     pid: ProtocolId,
     members: Set[AuthorityId],
@@ -120,6 +144,8 @@ module protocol_locking {
     outcome' = outcome.set(pid, None)
   }
 
+  // Open the lottery for lock acquisition.
+  // Transitions from LockIdle to AwaitingQuorum.
   action openLottery(pid: ProtocolId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else LockIdle
     val isIdle = match currentPhase { | LockIdle => true | _ => false }
@@ -137,6 +163,8 @@ module protocol_locking {
     }
   }
 
+  // Participant submits their ballot.
+  // When quorum reached, winner receives lock ticket.
   action submitBallot(
     pid: ProtocolId,
     member: AuthorityId,
@@ -177,6 +205,8 @@ module protocol_locking {
     }
   }
 
+  // Participant votes to release the lock.
+  // When quorum release votes received, transitions to Releasing.
   action voteRelease(pid: ProtocolId, member: AuthorityId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else LockIdle
     val isHeld = match currentPhase { | Held => true | _ => false }
@@ -200,6 +230,8 @@ module protocol_locking {
     }
   }
 
+  // Finalize lock release (clears ticket).
+  // Transitions from Releasing to Released.
   action finalizeRelease(pid: ProtocolId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else LockIdle
     val isReleasing = match currentPhase { | Releasing => true | _ => false }
@@ -217,6 +249,7 @@ module protocol_locking {
     }
   }
 
+  // Fail lock acquisition (timeout or error).
   action failLock(pid: ProtocolId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else LockIdle
     val isNotReleased = match currentPhase { | Released => false | _ => true }
@@ -234,6 +267,8 @@ module protocol_locking {
     }
   }
 
+  // Signal external completion (lifecycle status update).
+  // Requires: phase is Released.
   action signalComplete(pid: ProtocolId): bool = {
     val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else LockPending
     val isPending = match status { | LockPending => true | _ => false }
@@ -261,6 +296,7 @@ module protocol_locking {
     }
   }
 
+  // Signal external abort (lifecycle status update).
   action signalAbort(pid: ProtocolId): bool = {
     val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else LockPending
     val isPending = match status { | LockPending => true | _ => false }
@@ -279,13 +315,16 @@ module protocol_locking {
   }
 
   // ============ INVARIANTS ============
+  // Safety properties that must hold in every reachable state.
 
+  // Quorum is valid: 1 <= quorum <= participants.size().
   val InvariantQuorumWithinBounds =
     quorumSize.keys().forall(pid =>
       quorumSize.get(pid) >= 1 and
       quorumSize.get(pid) <= getOrDefaultSet(participants, pid).size()
     )
 
+  // Ballots only from configured participants.
   val InvariantBallotsFromParticipants =
     ballots.keys().forall(pid =>
       ensureBallotMap(ballots, pid, getOrDefaultSet(participants, pid))
@@ -294,6 +333,8 @@ module protocol_locking {
         .subseteq(getOrDefaultSet(participants, pid))
     )
 
+  // Ticket exists only when lock is Held or Releasing.
+  // Ensures exclusive access property.
   val InvariantTicketOnlyWhenHeld =
     ticket.keys().forall(pid => {
       val ticketOpt = ticket.get(pid)
@@ -303,11 +344,14 @@ module protocol_locking {
       hasTicket implies isHeldOrReleasing
     })
 
+  // Release votes only from configured participants.
   val InvariantReleaseVotesSubsetParticipants =
     releaseVotes.keys().forall(pid =>
       getOrDefaultSet(releaseVotes, pid).subseteq(getOrDefaultSet(participants, pid))
     )
 
+  // Phase-specific constraints are satisfied.
+  // E.g., Held requires ticket present.
   val InvariantPhaseProgression =
     phase.keys().forall(pid =>
       match phase.get(pid) {
@@ -324,9 +368,11 @@ module protocol_locking {
       }
     )
 
+  // Lifecycle status defined for all configured protocols.
   val InvariantLifecycleStatusDefined =
     lifecycleStatus.keys() == phase.keys()
 
+  // LifecycleCompleted implies phase is Released.
   val InvariantLifecycleCompletionRequiresPhase =
     lifecycleStatus.keys().forall(pid => {
       val status = lifecycleStatus.get(pid)
@@ -336,9 +382,11 @@ module protocol_locking {
       isCompleted implies isReleased
     })
 
+  // No pending effects (simplified model).
   val InvariantLifecycleEffectsEmpty =
     lifecycleEffects.keys().forall(pid => lifecycleEffects.get(pid).size() == 0)
 
+  // LifecycleCompleted implies outcome is present.
   val InvariantOutcomeWhenCompleted =
     lifecycleStatus.keys().forall(pid => {
       val status = lifecycleStatus.get(pid)

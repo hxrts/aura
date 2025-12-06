@@ -1,64 +1,80 @@
 // FROST (Flexible Round-Optimized Schnorr Threshold) Protocol
-// Formal specification of Aura's FROST threshold signature implementation
+//
+// Formal specification of threshold signature generation. FROST enables
+// k-of-n participants to jointly sign a message without reconstructing
+// the full private key. This is the signing protocol; key generation
+// is handled by DKG (see protocol_dkg.qnt).
+//
+// Round progression: FrostRound1Commitment → FrostRound2Signing
+//                    → FrostAggregation → FrostComplete (or FrostFailed)
+//
+// Safety: Only signed messages with threshold shares can produce valid signatures.
+// Liveness: Progress requires threshold honest participants with valid key shares.
 
 module FROSTProtocol {
     // ========== FROST Types ==========
 
     type SessionId = str
-    type Identifier = int  // FROST participant identifier
-    type SigningShare = str
-    type VerifyingKey = str
-    type Signature = str
-    type Nonce = str
-    type SigningCommitment = str
-    type SignatureShare = str
+    type Identifier = int    // FROST participant index (1..n)
+    type SigningShare = str  // Secret key share (from DKG)
+    type VerifyingKey = str  // Public key (individual or group)
+    type Signature = str     // Final aggregated signature
+    type Nonce = str         // One-time randomness (critical: never reuse!)
+    type SigningCommitment = str  // Public commitment to nonce
+    type SignatureShare = str     // Partial signature
 
+    // Long-lived key material from DKG ceremony.
     type FROSTKeyShare = {
         identifier: Identifier,
-        signingShare: SigningShare,
-        verifyingKey: VerifyingKey
+        signingShare: SigningShare,  // Secret: never transmitted
+        verifyingKey: VerifyingKey   // Public: used for verification
     }
 
+    // FROST signing rounds. Must proceed in order.
     type FROSTRound =
-        | FrostRound1Commitment
-        | FrostRound2Signing
-        | FrostAggregation
-        | FrostComplete
-        | FrostFailed
+        | FrostRound1Commitment  // Collecting nonce commitments
+        | FrostRound2Signing     // Collecting signature shares
+        | FrostAggregation       // Combining shares into signature
+        | FrostComplete          // Successfully signed
+        | FrostFailed            // Protocol aborted
 
+    // Session state for one signing operation.
     type FROSTSession = {
         sessionId: SessionId,
-        message: str,
-        threshold: int,
-        totalParticipants: int,
+        message: str,                // Message being signed
+        threshold: int,              // k in k-of-n
+        totalParticipants: int,      // n in k-of-n
         currentRound: FROSTRound,
         participants: Set[Identifier],
         nonces: Identifier -> Nonce,
         commitments: Identifier -> SigningCommitment,
         signatureShares: Identifier -> SignatureShare,
         finalSignature: Signature,
-        groupVerifyingKey: VerifyingKey
+        groupVerifyingKey: VerifyingKey  // Group public key for verification
     }
 
+    // Per-participant state within a signing session.
     type FROSTParticipant = {
         identifier: Identifier,
         keyShare: FROSTKeyShare,
-        currentNonce: Nonce,
+        currentNonce: Nonce,            // Ephemeral: fresh for each session
         currentCommitment: SigningCommitment,
         hasCommitted: bool,
         hasSigned: bool
     }
 
     // ========== State Variables ==========
+    // Global mutable state tracked by the model checker.
 
-    var frostSessions: SessionId -> FROSTSession
-    var frostParticipants: (SessionId, Identifier) -> FROSTParticipant
-    var keyPackages: Identifier -> FROSTKeyShare  // Long-lived key shares
+    var frostSessions: SessionId -> FROSTSession                      // Active signing sessions
+    var frostParticipants: (SessionId, Identifier) -> FROSTParticipant  // Per-participant state
+    var keyPackages: Identifier -> FROSTKeyShare                       // Long-lived key shares from DKG
 
     // ========== Helper Functions ==========
+    // Abstracted cryptographic operations (real impl uses curve arithmetic).
 
-    // Generate nonce and commitment (Round 1)
-    // Uses identifier as a seed for deterministic generation
+    // Generate nonce and commitment (Round 1).
+    // In practice: sample random nonce, compute commitment = g^nonce.
     pure def generateCommitment(keyShare: FROSTKeyShare): (Nonce, SigningCommitment) = {
         val nonce = if (keyShare.identifier == 1) "nonce_1"
                     else if (keyShare.identifier == 2) "nonce_2"
@@ -69,7 +85,8 @@ module FROSTProtocol {
         (nonce, commitment)
     }
 
-    // Create signature share (Round 2)
+    // Create signature share (Round 2).
+    // In practice: Schnorr partial signature using nonce, key share, and binding factor.
     pure def createSignatureShare(
         message: str,
         nonce: Nonce,
@@ -80,7 +97,8 @@ module FROSTProtocol {
         else if (keyShare.identifier == 2) "share_2"
         else "share_3"
 
-    // Aggregate signature shares
+    // Aggregate signature shares via Lagrange interpolation.
+    // In practice: sum shares with Lagrange coefficients at x=0.
     pure def aggregateSignatures(
         message: str,
         commitments: Identifier -> SigningCommitment,
@@ -89,7 +107,7 @@ module FROSTProtocol {
     ): Signature =
         "final_sig"
 
-    // Verify signature
+    // Verify aggregated signature against group public key.
     pure def verifySignature(
         message: str,
         signature: Signature,
@@ -97,17 +115,18 @@ module FROSTProtocol {
     ): bool =
         signature == "final_sig" and publicKey != "" and message != ""
 
-    // Check if we have threshold commitments
+    // True if we have enough commitments to proceed to signing.
     pure def hasThresholdCommitments(session: FROSTSession): bool =
         session.commitments.keys().size() >= session.threshold
 
-    // Check if we have threshold shares
+    // True if we have enough shares to aggregate.
     pure def hasThresholdShares(session: FROSTSession): bool =
         session.signatureShares.keys().size() >= session.threshold
 
     // ========== Actions ==========
+    // These model the FROST signing protocol's message handlers.
 
-    // Initialize FROST signing session
+    // Initialize a signing session. All participants must have key shares.
     action initiateFROSTSession(
         sessionId: SessionId,
         message: str,
@@ -147,7 +166,8 @@ module FROSTProtocol {
         }
     }
 
-    // Round 1: Generate and submit commitment
+    // Round 1: Generate fresh nonce and broadcast commitment.
+    // CRITICAL: Nonces must never be reused across sessions!
     action submitCommitment(sessionId: SessionId, participantId: Identifier): bool = {
         val session = if (sessionId.in(frostSessions.keys())) frostSessions.get(sessionId)
             else { sessionId: "", message: "", threshold: 0, totalParticipants: 0,
@@ -185,7 +205,8 @@ module FROSTProtocol {
         }
     }
 
-    // Round 2: Create and submit signature share
+    // Round 2: Compute and submit signature share using committed nonce.
+    // Requires: participant has committed in Round 1.
     action submitSignatureShare(sessionId: SessionId, participantId: Identifier): bool = {
         val session = if (sessionId.in(frostSessions.keys())) frostSessions.get(sessionId)
             else { sessionId: "", message: "", threshold: 0, totalParticipants: 0,
@@ -215,7 +236,8 @@ module FROSTProtocol {
         }
     }
 
-    // Aggregate shares into final signature
+    // Aggregate threshold shares into final signature.
+    // Requires: all signers submitted shares from their committed identities.
     action aggregateSignature(sessionId: SessionId): bool = {
         val session = if (sessionId.in(frostSessions.keys())) frostSessions.get(sessionId)
             else { sessionId: "", message: "", threshold: 0, totalParticipants: 0,
@@ -238,7 +260,7 @@ module FROSTProtocol {
         }
     }
 
-    // Fail signing session
+    // Abort signing session (timeout or invalid share detected).
     action failSession(sessionId: SessionId): bool = {
         val session = if (sessionId.in(frostSessions.keys())) frostSessions.get(sessionId)
             else { sessionId: "", message: "", threshold: 0, totalParticipants: 0,
@@ -256,8 +278,9 @@ module FROSTProtocol {
     }
 
     // ========== Invariants ==========
+    // Safety properties that must hold in every reachable state.
 
-    // Threshold requirement: can't complete without threshold participants
+    // Completion requires threshold participants in both rounds.
     val thresholdInvariant = frostSessions.keys().forall(sid =>
         val session = frostSessions.get(sid)
         session.currentRound == FrostComplete implies (
@@ -266,19 +289,19 @@ module FROSTProtocol {
         )
     )
 
-    // Commitment before signing
+    // Participants must commit before signing (Round 1 before Round 2).
     val commitmentBeforeSigning = frostParticipants.keys().forall(key =>
         val participant = frostParticipants.get(key)
         participant.hasSigned implies participant.hasCommitted
     )
 
-    // Shares only from committed participants
+    // Signature shares only from participants who committed.
     val sharesFromCommitted = frostSessions.keys().forall(sid =>
         val session = frostSessions.get(sid)
         session.signatureShares.keys().subseteq(session.commitments.keys())
     )
 
-    // Valid signature when complete
+    // Completed sessions have valid signatures.
     val validSignatureInvariant = frostSessions.keys().forall(sid =>
         val session = frostSessions.get(sid)
         session.currentRound == FrostComplete implies
@@ -286,10 +309,12 @@ module FROSTProtocol {
     )
 
     // ========== Initial State ==========
+    // Pre-populate key shares (normally from DKG).
 
     action init = all {
         frostSessions' = Map(),
         frostParticipants' = Map(),
+        // Initialize with 3 key shares (simulating completed DKG)
         keyPackages' = Map()
             .put(1, { identifier: 1, signingShare: "share1", verifyingKey: "vk1" })
             .put(2, { identifier: 2, signingShare: "share2", verifyingKey: "vk2" })
@@ -297,6 +322,7 @@ module FROSTProtocol {
     }
 
     // ========== Step Relation (for trace generation) ==========
+    // Nondeterministically choose any enabled action.
 
     action step = any {
         // Initiate a new signing session

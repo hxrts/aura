@@ -6,9 +6,8 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::tui::components::KeyHintsBar;
 use crate::tui::theme::{Spacing, Theme};
-use crate::tui::types::{Device, KeyHint, MfaPolicy, SettingsSection};
+use crate::tui::types::{Device, MfaPolicy, SettingsSection};
 
 /// Callback type for MFA policy changes (require_mfa: bool)
 pub type MfaCallback = Arc<dyn Fn(bool) + Send + Sync>;
@@ -34,6 +33,7 @@ pub fn SectionList(props: &SectionListProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
             border_style: BorderStyle::Round,
             border_color: border_color,
         ) {
@@ -43,8 +43,9 @@ pub fn SectionList(props: &SectionListProps) -> impl Into<AnyElement<'static>> {
             View(flex_direction: FlexDirection::Column, padding: Spacing::PANEL_PADDING) {
                 #(SettingsSection::all().iter().map(|&section| {
                     let is_selected = section == selected;
-                    let bg = if is_selected { Theme::BG_SELECTED } else { Theme::BG_DARK };
-                    let color = if is_selected { Theme::PRIMARY } else { Theme::TEXT };
+                    // Use consistent list item colors
+                    let bg = if is_selected { Theme::LIST_BG_SELECTED } else { Theme::LIST_BG_NORMAL };
+                    let color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL };
                     let title = section.title().to_string();
                     let key = title.clone();
                     element! {
@@ -262,13 +263,6 @@ pub fn SettingsScreen(
     let device_index = hooks.use_state(|| 0usize);
     let mfa_policy = hooks.use_state(|| props.mfa_policy);
 
-    let hints = vec![
-        KeyHint::new("↑↓", "Navigate"),
-        KeyHint::new("Tab", "Switch panel"),
-        KeyHint::new("Space", "Toggle/Cycle"),
-        KeyHint::new("Esc", "Back"),
-    ];
-
     let current_section = section.get();
     let is_detail_focused = detail_focused.get();
     let current_device_index = device_index.get();
@@ -322,8 +316,12 @@ pub fn SettingsScreen(
                         nav_throttle.set(Instant::now());
                     }
                 }
-                KeyCode::Tab => {
-                    detail_focused.set(!detail_focused.get());
+                KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') => {
+                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                    if should_move {
+                        detail_focused.set(!detail_focused.get());
+                        nav_throttle.set(Instant::now());
+                    }
                 }
                 KeyCode::Char(' ') => {
                     if detail_focused.get() && section.get() == SettingsSection::Mfa {
@@ -346,21 +344,16 @@ pub fn SettingsScreen(
             flex_direction: FlexDirection::Column,
             width: 100pct,
             height: 100pct,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            overflow: Overflow::Hidden,
         ) {
-            // Header
-            View(
-                padding: 1,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(content: "Settings", weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-
             // Main content: sidebar + detail
             View(
                 flex_direction: FlexDirection::Row,
                 flex_grow: 1.0,
+                flex_shrink: 1.0,
+                overflow: Overflow::Hidden,
                 gap: Spacing::XS,
             ) {
                 // Sidebar (30%)
@@ -380,9 +373,6 @@ pub fn SettingsScreen(
                     mfa_policy: current_mfa,
                 )
             }
-
-            // Key hints
-            KeyHintsBar(hints: hints)
         }
     }
 }

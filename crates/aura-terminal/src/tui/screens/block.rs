@@ -12,16 +12,16 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::tui::components::KeyHintsBar;
+use crate::tui::components::{ContactSelectModal, ContactSelectState};
 use crate::tui::hooks::AppCoreContext;
-use crate::tui::theme::Theme;
-use crate::tui::types::{BlockBudget, KeyHint, Message, Resident};
+use crate::tui::theme::{Spacing, Theme};
+use crate::tui::types::{BlockBudget, Contact, Message, Resident};
 
 /// Callback type for sending a message in the block channel
 pub type BlockSendCallback = Arc<dyn Fn(String) + Send + Sync>;
 
-/// Callback type for inviting someone to the block
-pub type BlockInviteCallback = Arc<dyn Fn() + Send + Sync>;
+/// Callback type for inviting someone to the block (contact_id: String)
+pub type BlockInviteCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Callback type for navigating to neighborhood view
 pub type BlockNavCallback = Arc<dyn Fn() + Send + Sync>;
@@ -44,13 +44,17 @@ pub fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>>
     element! {
         View(
             flex_direction: FlexDirection::Column,
+            flex_grow: 0.0,
+            flex_shrink: 1.0,
+            max_height: 8,  // Limit height to make room for Storage panel
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
+            overflow: Overflow::Hidden,
         ) {
             View(padding_left: 1) {
                 Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
             }
-            View(flex_direction: FlexDirection::Column, padding: 1) {
+            View(flex_direction: FlexDirection::Column, flex_grow: 1.0, flex_shrink: 1.0, padding: 1, overflow: Overflow::Scroll) {
                 #(if residents.is_empty() {
                     vec![element! {
                         View {
@@ -60,16 +64,19 @@ pub fn ResidentList(props: &ResidentListProps) -> impl Into<AnyElement<'static>>
                 } else {
                     residents.iter().enumerate().map(|(idx, r)| {
                         let is_selected = idx == selected;
-                        let bg = if is_selected { Theme::BG_SELECTED } else { Theme::BG_DARK };
+                        // Use consistent list item colors
+                        let bg = if is_selected { Theme::LIST_BG_SELECTED } else { Theme::LIST_BG_NORMAL };
+                        let text_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_NORMAL };
+                        let muted_color = if is_selected { Theme::LIST_TEXT_SELECTED } else { Theme::LIST_TEXT_MUTED };
                         let name = r.name.clone();
                         let id = r.id.clone();
                         let steward_badge = if r.is_steward { " ⚖︎" } else { "" }.to_string();
                         let self_badge = if r.is_self { " (you)" } else { "" }.to_string();
                         element! {
                             View(key: id, flex_direction: FlexDirection::Row, background_color: bg, padding_left: 1) {
-                                Text(content: name, color: Theme::TEXT)
+                                Text(content: name, color: text_color)
                                 Text(content: steward_badge, color: Theme::WARNING)
-                                Text(content: self_badge, color: Theme::TEXT_MUTED)
+                                Text(content: self_badge, color: muted_color)
                             }
                         }
                     }).collect()
@@ -96,6 +103,7 @@ pub fn BlockMessagesPanel(props: &BlockMessagesPanelProps) -> impl Into<AnyEleme
         View(
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0,
+            flex_shrink: 1.0,
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER_FOCUS,
         ) {
@@ -105,6 +113,7 @@ pub fn BlockMessagesPanel(props: &BlockMessagesPanelProps) -> impl Into<AnyEleme
             View(
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
+                flex_shrink: 1.0,
                 padding: 1,
                 overflow: Overflow::Scroll,
             ) {
@@ -162,21 +171,29 @@ pub fn StorageBudgetPanel(props: &StorageBudgetPanelProps) -> impl Into<AnyEleme
 
     let total_mb = b.total as f64 / (1024.0 * 1024.0);
     let used_mb = b.used as f64 / (1024.0 * 1024.0);
-    let usage_text = format!("{:.1} / {:.1} MB ({:.0}%)", used_mb, total_mb, usage_pct);
-    let residents_text = format!("Residents: {}/{}", b.resident_count, b.max_residents);
+    // Compact format to fit narrow sidebar
+    let usage_text = format!("{:.0}/{:.0}MB", used_mb, total_mb);
+    let pct_text = format!("({}%)", usage_pct as u32);
+    let residents_text = format!("{}/{}", b.resident_count, b.max_residents);
 
     element! {
         View(
             flex_direction: FlexDirection::Column,
+            flex_shrink: 1.0,  // Allow shrinking to fit within container
             border_style: BorderStyle::Round,
             border_color: Theme::BORDER,
-            padding: 1,
+            padding_left: 1,
+            padding_right: 1,
         ) {
-            View(flex_direction: FlexDirection::Row) {
-                Text(content: "Storage: ", color: Theme::TEXT_MUTED)
+            View(padding_left: 0) {
+                Text(content: "Storage", weight: Weight::Bold, color: Theme::PRIMARY)
+            }
+            View(flex_direction: FlexDirection::Row, gap: 1) {
                 Text(content: usage_text, color: usage_color)
+                Text(content: pct_text, color: Theme::TEXT_MUTED)
             }
             View(flex_direction: FlexDirection::Row) {
+                Text(content: "Members: ", color: Theme::TEXT_MUTED)
                 Text(content: residents_text, color: Theme::TEXT)
             }
         }
@@ -191,9 +208,11 @@ pub struct BlockScreenProps {
     pub messages: Vec<Message>,
     pub budget: BlockBudget,
     pub channel_name: String,
+    /// Available contacts for invite modal
+    pub contacts: Vec<Contact>,
     /// Callback when sending a message (receives message content)
     pub on_send: Option<BlockSendCallback>,
-    /// Callback when inviting someone to the block
+    /// Callback when inviting someone to the block (receives contact_id)
     pub on_invite: Option<BlockInviteCallback>,
     /// Callback when navigating to neighborhood view
     pub on_go_neighborhood: Option<BlockNavCallback>,
@@ -298,7 +317,6 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     }
 
     // Use reactive state for rendering
-    let block_name = reactive_block_name.read().clone();
     let residents = reactive_residents.read().clone();
     let budget = reactive_budget.read().clone();
 
@@ -307,14 +325,16 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     let channel_name = props.channel_name.clone();
 
     let resident_index = hooks.use_state(|| 0usize);
+    let compose_mode = hooks.use_state(|| false);
+    let message_input = hooks.use_state(String::new);
+    let invite_modal_state = hooks.use_state(ContactSelectState::new);
 
-    let hints = vec![
-        KeyHint::new("↑↓", "Navigate"),
-        KeyHint::new("Enter", "Send message"),
-        KeyHint::new("i", "Invite"),
-        KeyHint::new("n", "Neighborhood"),
-        KeyHint::new("Esc", "Menu"),
-    ];
+    // Get contacts from props
+    let contacts = props.contacts.clone();
+
+    // Hints change based on mode
+    let is_composing = compose_mode.get();
+    let is_invite_modal_visible = invite_modal_state.read().visible;
 
     let current_resident_index = resident_index.get();
 
@@ -331,82 +351,185 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
 
     hooks.use_terminal_events({
         let mut resident_index = resident_index.clone();
-        move |event| match event {
-            TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        let idx = resident_index.get();
-                        if idx > 0 {
-                            resident_index.set(idx - 1);
+        let mut compose_mode = compose_mode.clone();
+        let mut message_input = message_input.clone();
+        let mut invite_modal_state = invite_modal_state.clone();
+        let contacts_for_modal = contacts.clone();
+        move |event| {
+            let is_composing = compose_mode.get();
+            let is_invite_modal_visible = invite_modal_state.read().visible;
+
+            match event {
+                TerminalEvent::Key(KeyEvent { code, .. }) => {
+                    if is_invite_modal_visible {
+                        // Invite modal key handling
+                        match code {
+                            KeyCode::Esc => {
+                                let mut state = invite_modal_state.read().clone();
+                                state.hide();
+                                invite_modal_state.set(state);
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                let mut state = invite_modal_state.read().clone();
+                                state.select_prev();
+                                invite_modal_state.set(state);
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                let mut state = invite_modal_state.read().clone();
+                                state.select_next();
+                                invite_modal_state.set(state);
+                            }
+                            KeyCode::Enter => {
+                                let state = invite_modal_state.read().clone();
+                                if state.can_select() {
+                                    if let Some(contact_id) = state.get_selected_id() {
+                                        if let Some(ref callback) = on_invite {
+                                            callback(contact_id);
+                                        }
+                                    }
+                                }
+                                let mut state = invite_modal_state.read().clone();
+                                state.hide();
+                                invite_modal_state.set(state);
+                            }
+                            _ => {}
                         }
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        let idx = resident_index.get();
-                        if idx + 1 < resident_count {
-                            resident_index.set(idx + 1);
+                    } else if is_composing {
+                        // Compose mode key handling
+                        match code {
+                            KeyCode::Esc => {
+                                // Exit compose mode, clear input
+                                compose_mode.set(false);
+                                message_input.set(String::new());
+                            }
+                            KeyCode::Enter => {
+                                // Send message if not empty
+                                let content = message_input.read().clone();
+                                if !content.is_empty() {
+                                    if let Some(ref callback) = on_send {
+                                        callback(content);
+                                    }
+                                    message_input.set(String::new());
+                                }
+                                compose_mode.set(false);
+                            }
+                            KeyCode::Backspace => {
+                                let mut content = message_input.read().clone();
+                                content.pop();
+                                message_input.set(content);
+                            }
+                            KeyCode::Char(c) => {
+                                let mut content = message_input.read().clone();
+                                content.push(c);
+                                message_input.set(content);
+                            }
+                            _ => {}
                         }
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Enter => {
-                    if let Some(ref callback) = on_send {
-                        callback(String::new());
-                    }
-                }
-                KeyCode::Char('i') => {
-                    if let Some(ref callback) = on_invite {
-                        callback();
-                    }
-                }
-                KeyCode::Char('n') => {
-                    if let Some(ref callback) = on_go_neighborhood {
-                        callback();
+                    } else {
+                        // Normal mode key handling
+                        match code {
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move {
+                                    let idx = resident_index.get();
+                                    if idx > 0 {
+                                        resident_index.set(idx - 1);
+                                    }
+                                    nav_throttle.set(Instant::now());
+                                }
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move {
+                                    let idx = resident_index.get();
+                                    if idx + 1 < resident_count {
+                                        resident_index.set(idx + 1);
+                                    }
+                                    nav_throttle.set(Instant::now());
+                                }
+                            }
+                            // Enter compose mode
+                            KeyCode::Char('c') => {
+                                compose_mode.set(true);
+                            }
+                            // Invite - show modal with contacts
+                            KeyCode::Char('v') => {
+                                let mut state = invite_modal_state.read().clone();
+                                state.show("Invite to Block", contacts_for_modal.clone());
+                                invite_modal_state.set(state);
+                            }
+                            // Go to neighborhood
+                            KeyCode::Char('n') => {
+                                if let Some(ref callback) = on_go_neighborhood {
+                                    callback();
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                 }
                 _ => {}
-            },
-            _ => {}
+            }
         }
     });
+
+    // Get current values for conditional rendering
+    let current_message = message_input.read().clone();
+    let modal_state = invite_modal_state.read().clone();
 
     element! {
         View(
             flex_direction: FlexDirection::Column,
             width: 100pct,
             height: 100pct,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            overflow: Overflow::Hidden,
         ) {
-            // Header
-            View(
-                padding: 1,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(content: block_name, weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-
-            // Main content
+            // Main content - constrained height with overflow hidden
             View(
                 flex_direction: FlexDirection::Row,
                 flex_grow: 1.0,
-                gap: 1,
+                flex_shrink: 1.0,
+                overflow: Overflow::Hidden,
+                gap: Spacing::XS,
             ) {
-                // Sidebar (25%)
-                View(width: 25pct, flex_direction: FlexDirection::Column, gap: 1) {
+                // Sidebar (30%) - overflow scroll allows internal scrolling
+                View(width: 30pct, flex_direction: FlexDirection::Column, flex_shrink: 1.0, overflow: Overflow::Scroll, gap: 0) {
                     ResidentList(residents: residents, selected_index: current_resident_index)
                     StorageBudgetPanel(budget: budget)
                 }
-                // Messages (75%)
-                BlockMessagesPanel(messages: messages, channel_name: channel_name)
+                // Messages (70%)
+                View(flex_grow: 1.0, overflow: Overflow::Hidden) {
+                    BlockMessagesPanel(messages: messages, channel_name: channel_name)
+                }
             }
 
-            // Key hints
-            KeyHintsBar(hints: hints)
+            // Compose input (shown when in compose mode)
+            #(if is_composing {
+                Some(element! {
+                    View(
+                        flex_direction: FlexDirection::Row,
+                        border_style: BorderStyle::Round,
+                        border_color: Theme::BORDER_FOCUS,
+                        padding: 1,
+                    ) {
+                        Text(content: "> ", color: Theme::PRIMARY)
+                        Text(content: current_message.clone(), color: Theme::TEXT)
+                        Text(content: "_", color: Theme::PRIMARY)
+                    }
+                })
+            } else {
+                None
+            })
+
+            // Invite modal overlay (shown when modal is visible)
+            ContactSelectModal(
+                title: modal_state.title.clone(),
+                contacts: modal_state.contacts.clone(),
+                selected_index: modal_state.selected_index,
+                visible: is_invite_modal_visible,
+            )
         }
     }
 }

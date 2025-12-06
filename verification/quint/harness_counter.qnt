@@ -1,24 +1,32 @@
+// Counter Test Harness
+//
+// Test driver for counter-based value reservation protocol.
+// Wraps protocol_counter actions for integration testing.
+// Tracks registered protocols and sequences operations correctly.
+
 module harness_counter {
-  // Local type definitions (imports don't work for types in Quint)
+  // ============ TYPE DEFINITIONS ============
   type ProtocolId = str
   type AuthorityId = str
   type CounterId = str
 
-  // Import modules for actions (not types)
+  // ============ IMPORTS ============
   import protocol_counter from "./protocol_counter"
 
-  // Constants for signals
+  // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"
   pure val SIGNAL_ABORT = "abort"
 
-  // Harness state - tracks which protocols have been registered via harness
+  // ============ HARNESS STATE ============
   var harnessRegistered: Set[ProtocolId]
 
   action init: bool = all {
     harnessRegistered' = Set()
   }
 
-  /// Register a counter lifecycle and configure underlying metadata.
+  // ============ HARNESS ACTIONS ============
+
+  // Configure and register a counter protocol session.
   action register(
     pid: ProtocolId,
     members: Set[AuthorityId],
@@ -35,7 +43,7 @@ module harness_counter {
     harnessRegistered' = harnessRegistered.union(Set(pid))
   }
 
-  /// Record the reservation outcome prior to completion.
+  // Record reserved values before finalizing.
   action recordReservation(
     pid: ProtocolId,
     values: Set[int]
@@ -45,14 +53,14 @@ module harness_counter {
     harnessRegistered' = harnessRegistered
   }
 
-  /// Complete the counter lifecycle.
+  // Finalize the counter protocol.
   action complete(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_counter::finalize(pid),
     harnessRegistered' = harnessRegistered
   }
 
-  /// Abort the counter lifecycle.
+  // Abort the counter protocol.
   action abort(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_counter::signalAbort(pid),
@@ -61,6 +69,7 @@ module harness_counter {
 
   // ============ INVARIANTS ============
 
+  // All registered protocol IDs are non-empty.
   val InvariantHarnessTracksRegistrations =
     harnessRegistered.forall(pid => pid != "")
 }

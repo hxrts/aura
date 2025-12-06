@@ -71,6 +71,7 @@ futures-signals = "0.3"
 toml = { workspace = true }
 serde = { workspace = true }
 hex = { workspace = true }
+base64 = { workspace = true }
 cfg-if = "1"
 bpaf = "0.9"
 
@@ -92,3 +93,4 @@ aura-testkit = { path = "../aura-testkit", features = ["full-effect-system"] }
 aura-macros = { path = "../aura-macros" }
 tempfile = { workspace = true }
 insta = "1.34"  # Snapshot testing for TUI render tests
+futures = "0.3"  # For mock terminal testing with streams

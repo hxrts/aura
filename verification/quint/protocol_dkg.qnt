@@ -1,50 +1,67 @@
+// Distributed Key Generation (DKG) Protocol Specification
+//
+// Models the Pedersen DKG ceremony for establishing threshold key shares.
+// Participants exchange commitments, verify each other's contributions,
+// then combine shares to derive a group public key.
+//
+// Phase progression: Unconfigured → AwaitingCommitments → AwaitingVerifications
+//                    → AggregatingShares → DkgCompleted (or DkgFailed)
+//
+// Safety: No participant receives shares until all commitments are verified.
+// Liveness: Progress requires threshold honest participants.
+
 module protocol_dkg {
   // Base types (defined locally - type imports don't work in Quint)
   type Option[a] = Some(a) | None
   type ProtocolId = str
-  type AuthorityId = str  // renamed from DeviceId for authority model
+  type AuthorityId = str  // Opaque authority (was DeviceId)
 
+  // DkgPhase tracks the ceremony's progress through distinct rounds.
   type DkgPhase =
-    | Unconfigured
-    | AwaitingCommitments
-    | AwaitingVerifications
-    | AggregatingShares
-    | DkgCompleted  // unique name to avoid collision
-    | DkgFailed
+    | Unconfigured           // Not yet started
+    | AwaitingCommitments    // Round 1: collecting dealer commitments
+    | AwaitingVerifications  // Round 2: verifying commitments
+    | AggregatingShares      // Round 3: combining verified shares
+    | DkgCompleted           // Successfully derived group key
+    | DkgFailed              // Ceremony aborted (cheater detected or timeout)
 
+  // Per-participant state maps: None = not yet received.
   type CommitmentState = ProtocolId -> AuthorityId -> Option[int]
   type VerificationState = ProtocolId -> AuthorityId -> Option[bool]
   type ShareState = ProtocolId -> AuthorityId -> Option[int]
 
-  // Unique lifecycle variants for DKG
+  // Lifecycle status for external observers.
   type DkgLifecycleStatus = DkgPending | DkgLifecycleCompleted | DkgAborted
 
+  // Final output of a successful DKG ceremony.
   type DkgOutcome = {
-    derivedKey: int,
-    publicKey: int,
-    transcript: int,
+    derivedKey: int,             // Secret key material (never exposed)
+    publicKey: int,              // Group public key for verification
+    transcript: int,             // Audit log hash for replay
     participants: Set[AuthorityId],
-    threshold: int
+    threshold: int               // k-of-n threshold
   }
 
   // Simplified effect type (no imports)
   type DkgEffect = { effectType: str, payload: str }
 
   // ============ STATE ============
+  // Mutable state tracked by the model checker.
 
-  var participants: ProtocolId -> Set[AuthorityId]
-  var threshold: ProtocolId -> int
-  var phase: ProtocolId -> DkgPhase
-  var dealerCommitments: CommitmentState
-  var verifierResponses: VerificationState
-  var participantShares: ShareState
-  var publicKeyPackage: ProtocolId -> Option[int]
-  var transcriptDigest: ProtocolId -> Option[int]
-  var lifecycleStatus: ProtocolId -> DkgLifecycleStatus
-  var lifecycleEffects: ProtocolId -> Set[DkgEffect]
-  var outcome: ProtocolId -> Option[DkgOutcome]
+  var participants: ProtocolId -> Set[AuthorityId]      // Registered participants
+  var threshold: ProtocolId -> int                       // k-of-n threshold
+  var phase: ProtocolId -> DkgPhase                      // Current phase
+  var dealerCommitments: CommitmentState                 // Round 1 commitments
+  var verifierResponses: VerificationState               // Round 2 verifications
+  var participantShares: ShareState                      // Round 3 shares
+  var publicKeyPackage: ProtocolId -> Option[int]        // Derived group public key
+  var transcriptDigest: ProtocolId -> Option[int]        // Audit trail
+  var lifecycleStatus: ProtocolId -> DkgLifecycleStatus  // External status
+  var lifecycleEffects: ProtocolId -> Set[DkgEffect]     // Pending effects
+  var outcome: ProtocolId -> Option[DkgOutcome]          // Final result
 
   // ============ HELPERS ============
+  // Pure functions for safe map/option access.
 
   pure def getOrDefaultSet(m: ProtocolId -> Set[AuthorityId], key: ProtocolId): Set[AuthorityId] =
     if (key.in(m.keys())) m.get(key) else Set()
@@ -52,6 +69,7 @@ module protocol_dkg {
   pure def getOrDefaultInt(m: ProtocolId -> int, key: ProtocolId, default: int): int =
     if (key.in(m.keys())) m.get(key) else default
 
+  // Option predicates for cleaner guards.
   pure def optionIsSome(opt: Option[int]): bool =
     match opt {
       | Some(_) => true
@@ -70,6 +88,7 @@ module protocol_dkg {
       | None => fallback
     }
 
+  // Initialize participant map with None for all members.
   pure def ensureParticipantMap(
     mapping: CommitmentState,
     pid: ProtocolId,
@@ -82,6 +101,7 @@ module protocol_dkg {
         members.fold(Map(), (acc, member) => acc.put(member, None))
       )
 
+  // Update a single participant's entry in the commitment map.
   pure def updateMapping(
     mapping: CommitmentState,
     pid: ProtocolId,
@@ -126,25 +146,30 @@ module protocol_dkg {
       if (member.in(mapping.get(pid).keys())) mapping.get(pid).get(member) else None
     else None
 
+  // Count how many participants have submitted commitments.
   def countFilledCommitments(pid: ProtocolId): int =
     getOrDefaultSet(participants, pid).fold(0, (acc, member) =>
       acc + (if (optionIsSome(getCommitmentOpt(dealerCommitments, pid, member))) 1 else 0)
     )
 
+  // True if all participants verified their commitments as valid.
   def allVerified(pid: ProtocolId): bool =
     getOrDefaultSet(participants, pid).forall(member =>
       getVerificationOpt(verifierResponses, pid, member) == Some(true)
     )
 
+  // True if all participants have submitted their shares.
   def sharesComplete(pid: ProtocolId): bool =
     getOrDefaultSet(participants, pid).forall(member =>
       optionIsSome(getCommitmentOpt(participantShares, pid, member))
     )
 
+  // True if we have at least threshold commitments (can proceed to verification).
   def thresholdReachedCommitments(pid: ProtocolId): bool =
     countFilledCommitments(pid) >= getOrDefaultInt(threshold, pid, 0)
 
   // ============ INITIALISATION ============
+  // Start with empty state (no DKG ceremonies).
 
   action init: bool = all {
     participants' = Map(),
@@ -161,7 +186,10 @@ module protocol_dkg {
   }
 
   // ============ ACTIONS ============
+  // These model the DKG ceremony's message handlers.
 
+  // Configure a new DKG ceremony with participant set and threshold.
+  // Preconditions: 1 ≤ threshold ≤ participants.size(), no existing ceremony with this pid.
   action configureDkg(
     pid: ProtocolId,
     members: Set[AuthorityId],
@@ -184,6 +212,8 @@ module protocol_dkg {
     outcome' = outcome.put(pid, None)
   }
 
+  // Round 1: Submit a Pedersen commitment (polynomial evaluation point).
+  // Auto-advances to AwaitingVerifications when threshold is reached.
   action submitCommitment(
     pid: ProtocolId,
     participant: AuthorityId,
@@ -221,6 +251,9 @@ module protocol_dkg {
     }
   }
 
+  // Round 2: Verify another participant's commitment.
+  // If any participant rejects (valid=false), the ceremony fails.
+  // Auto-advances to AggregatingShares when all verify successfully.
   action verifyCommitment(
     pid: ProtocolId,
     participant: AuthorityId,
@@ -253,6 +286,9 @@ module protocol_dkg {
     }
   }
 
+  // Round 3: Submit secret share after verification succeeds.
+  // Only allowed for participants who verified successfully.
+  // Auto-advances to DkgCompleted when all shares are collected.
   action submitShare(
     pid: ProtocolId,
     participant: AuthorityId,
@@ -289,6 +325,8 @@ module protocol_dkg {
     }
   }
 
+  // Finalize the ceremony: combine shares into group key and transcript.
+  // Only callable after all shares are collected (DkgCompleted phase).
   action finalizeDkg(
     pid: ProtocolId,
     derivedKeyHash: int,
@@ -322,6 +360,7 @@ module protocol_dkg {
     }
   }
 
+  // Abort the ceremony (timeout or detected cheater).
   action failDkg(pid: ProtocolId): bool = {
     val currentPhase = if (pid.in(phase.keys())) phase.get(pid) else Unconfigured
     val isNotCompleted = match currentPhase { | DkgCompleted => false | _ => true }
@@ -343,6 +382,7 @@ module protocol_dkg {
     }
   }
 
+  // Signal successful completion to external observers.
   action signalComplete(pid: ProtocolId): bool = {
     val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else DkgPending
     val isPending = match status { | DkgPending => true | _ => false }
@@ -367,6 +407,7 @@ module protocol_dkg {
     }
   }
 
+  // Signal abort to external observers (user-initiated cancellation).
   action signalAbort(pid: ProtocolId): bool = {
     val status = if (pid.in(lifecycleStatus.keys())) lifecycleStatus.get(pid) else DkgPending
     val isPending = match status { | DkgPending => true | _ => false }
@@ -389,16 +430,20 @@ module protocol_dkg {
   }
 
   // ============ INVARIANTS ============
+  // Safety properties that must hold in every reachable state.
 
+  // Threshold is always valid: 1 ≤ t ≤ n.
   val InvariantThresholdBounds =
     threshold.keys().forall(pid =>
       threshold.get(pid) >= 1 and
       threshold.get(pid) <= getOrDefaultSet(participants, pid).size()
     )
 
+  // Commitments can only exist for configured ceremonies.
   val InvariantCommitmentsRequireConfiguration =
     dealerCommitments.keys().subseteq(participants.keys())
 
+  // Phase preconditions: each phase requires sufficient prior progress.
   val InvariantPhaseCommitmentCounts =
     phase.keys().forall(pid =>
       match phase.get(pid) {
@@ -416,6 +461,7 @@ module protocol_dkg {
       }
     )
 
+  // Shares can only be submitted after successful verification.
   val InvariantSharesOnlyAfterVerification =
     participantShares.keys().forall(pid =>
       getOrDefaultSet(participants, pid).forall(member =>
@@ -424,9 +470,11 @@ module protocol_dkg {
       )
     )
 
+  // Lifecycle status and phase maps have the same keys.
   val InvariantLifecycleStatusDefined =
     lifecycleStatus.keys() == phase.keys()
 
+  // Lifecycle completion implies phase completion.
   val InvariantLifecycleStatusMatchesPhase =
     lifecycleStatus.keys().forall(pid => {
       val status = lifecycleStatus.get(pid)
@@ -436,9 +484,11 @@ module protocol_dkg {
       isLifecycleCompleted implies isPhaseCompleted
     })
 
+  // No pending effects (simplified model).
   val InvariantLifecycleEffectsEmpty =
     lifecycleEffects.keys().forall(pid => lifecycleEffects.get(pid).size() == 0)
 
+  // Completed ceremonies have an outcome.
   val InvariantOutcomeWhenCompleted =
     lifecycleStatus.keys().forall(pid => {
       val status = lifecycleStatus.get(pid)
@@ -449,9 +499,10 @@ module protocol_dkg {
     })
 
   // ============ STEP RELATION (for trace generation) ============
+  // Nondeterministically choose any enabled action.
 
   action step = any {
-    // Configure a new DKG session
+    // Configure a new DKG ceremony
     nondet pid = oneOf(Set("dkg1", "dkg2", "dkg3"))
     nondet members = oneOf(Set(
       Set("alice", "bob"),

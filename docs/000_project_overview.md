@@ -6,8 +6,6 @@ This document provides an overview of Aura's architecture and goals.
 
 Aura aims to demonstrate that web-of-trust architectures can be practical and user-aligned. Instead of anchoring trust to a centralized service or a single device, Aura treats the social network as the platform. Identity is expressed through opaque authorities plus relational contexts. This keeps social relationships at the center of security decisions instead of infrastructure providers.
 
-The target is 20 close friends using the system twice weekly. This constraint forces delivery of something unique and valuable, not just technically interesting. Users must feel confident that their privacy expectations will not be violated, their data is durable, and the system is secure enough to trust with real relationships.
-
 ## Problem Statement
 
 Most existing approaches cannot meet the requirements for a practical web-of-trust system. Centralized services violate peer-to-peer and alignment constraints. Eventually-consistent systems without strong semantics fail unpredictably during network partitions. Ad-hoc peer-to-peer protocols cannot safely evolve because protocol changes fragment the network.

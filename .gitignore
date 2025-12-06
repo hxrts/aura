@@ -72,4 +72,5 @@ mermaid-init.js
 # Lean build artifacts
 verification/lean/.lake/
 verification/lean/build/
+verification/lean/Generated/
 verification/lean/.lean_build/

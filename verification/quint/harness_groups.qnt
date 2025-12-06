@@ -1,24 +1,32 @@
+// Groups Test Harness
+//
+// Test driver for group membership management protocol.
+// Wraps protocol_groups actions for integration testing.
+// Sequences propose → confirm flows for membership changes.
+
 module harness_groups {
-  // Local type definitions (imports don't work for types in Quint)
+  // ============ TYPE DEFINITIONS ============
   type ProtocolId = str
   type AuthorityId = str
   type GroupId = str
 
-  // Import modules for actions (not types)
+  // ============ IMPORTS ============
   import protocol_groups from "./protocol_groups"
 
-  // Constants for signals
+  // ============ CONSTANTS ============
   pure val SIGNAL_COMPLETE = "complete"
   pure val SIGNAL_ABORT = "abort"
 
-  // Harness state - tracks which protocols have been registered via harness
+  // ============ HARNESS STATE ============
   var harnessRegistered: Set[ProtocolId]
 
   action init: bool = all {
     harnessRegistered' = Set()
   }
 
-  /// Register a group lifecycle with an initial roster.
+  // ============ HARNESS ACTIONS ============
+
+  // Configure and register a group with initial members.
   action register(
     pid: ProtocolId,
     groupId: GroupId,
@@ -29,7 +37,7 @@ module harness_groups {
     harnessRegistered' = harnessRegistered.union(Set(pid))
   }
 
-  /// Propose adding members to the group.
+  // Propose adding members to the group.
   action proposeAdd(
     pid: ProtocolId,
     additions: Set[AuthorityId]
@@ -39,14 +47,14 @@ module harness_groups {
     harnessRegistered' = harnessRegistered
   }
 
-  /// Confirm the pending add operation.
+  // Confirm pending add operation.
   action confirmAdd(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_groups::confirmAddMembers(pid),
     harnessRegistered' = harnessRegistered
   }
 
-  /// Propose removing members from the group.
+  // Propose removing members from the group.
   action proposeRemove(
     pid: ProtocolId,
     removals: Set[AuthorityId]
@@ -56,21 +64,21 @@ module harness_groups {
     harnessRegistered' = harnessRegistered
   }
 
-  /// Confirm the pending remove operation.
+  // Confirm pending remove operation.
   action confirmRemove(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_groups::confirmRemoveMembers(pid),
     harnessRegistered' = harnessRegistered
   }
 
-  /// Complete the group lifecycle.
+  // Signal successful completion.
   action complete(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_groups::signalSuccess(pid),
     harnessRegistered' = harnessRegistered
   }
 
-  /// Abort the group lifecycle.
+  // Signal abort/failure.
   action abort(pid: ProtocolId): bool = all {
     pid.in(harnessRegistered),
     protocol_groups::signalFailure(pid),
@@ -79,6 +87,7 @@ module harness_groups {
 
   // ============ INVARIANTS ============
 
+  // All registered protocol IDs are non-empty.
   val InvariantHarnessTracksRegistrations =
     harnessRegistered.forall(pid => pid != "")
 }

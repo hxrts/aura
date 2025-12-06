@@ -13,18 +13,19 @@
 
 module protocol_consensus {
     // ==================== TYPE DEFINITIONS ====================
+    // Identifiers for consensus instances, results, and participants.
 
     type Option[a] = Some(a) | None
 
-    type ConsensusId = str
-    type ResultId = str         // H(Op, prestate)
-    type PrestateHash = str     // H(prestate)
-    type AuthorityId = str
-    type ShareData = str        // FROST signature share
-    type ThresholdSignature = str
-    type OperationData = str    // Abstract operation
+    type ConsensusId = str      // Unique consensus instance identifier
+    type ResultId = str         // H(Op, prestate) - deterministic result binding
+    type PrestateHash = str     // H(prestate) - ensures witnesses agree on starting state
+    type AuthorityId = str      // Participant identity (device or threshold group)
+    type ShareData = str        // FROST signature share (partial signature)
+    type ThresholdSignature = str  // Aggregated k-of-n signature
+    type OperationData = str    // Abstract operation being agreed upon
 
-    // Consensus instance phase
+    // Consensus instance phase (state machine progression).
     type ConsensusPhase =
         | ConsensusPending      // Not yet started
         | FastPathActive        // Collecting shares via fast path
@@ -109,15 +110,17 @@ module protocol_consensus {
         sig != "" and attesters.size() >= threshold
 
     // ==================== ACTIONS ====================
+    // State transitions modeling the consensus protocol.
 
-    // Initialize consensus module
+    // Initialize consensus module with empty state.
     action init: bool = all {
         instances' = Map(),
         committedFacts' = Set(),
         globalWitnesses' = Set("w1", "w2", "w3", "w4", "w5")
     }
 
-    // Initiator starts a consensus instance (fast path)
+    // Initiator starts a consensus instance (enters fast path).
+    // Broadcasts operation to witnesses and awaits their shares.
     action startConsensus(
         cid: ConsensusId,
         initiator: AuthorityId,
@@ -146,7 +149,8 @@ module protocol_consensus {
         globalWitnesses' = globalWitnesses
     }
 
-    // Witness submits share (fast path response)
+    // Witness submits share (fast path response).
+    // Share binds witness to (resultId, prestateHash). Equivocation detected.
     action submitWitnessShare(
         cid: ConsensusId,
         witness: AuthorityId,
@@ -204,7 +208,8 @@ module protocol_consensus {
         }
     }
 
-    // Trigger fallback when fast path stalls (timer expires or prestate mismatch)
+    // Trigger fallback when fast path stalls.
+    // Activated by timer expiry or prestate mismatch detection.
     action triggerFallback(cid: ConsensusId): bool = {
         val instOpt = getOrDefaultInstance(instances, cid)
         val hasInstance = match instOpt { | Some(_) => true | None => false }
@@ -231,7 +236,8 @@ module protocol_consensus {
         }
     }
 
-    // Gossip shares during fallback (AggregateShare message)
+    // Gossip shares during fallback (AggregateShare message).
+    // Witnesses exchange shares via gossip to overcome network partitions.
     action gossipShares(cid: ConsensusId, shareSet: Set[ShareProposal]): bool = {
         val instOpt = getOrDefaultInstance(instances, cid)
         val hasInstance = match instOpt { | Some(_) => true | None => false }
@@ -272,7 +278,8 @@ module protocol_consensus {
         }
     }
 
-    // Complete consensus via fallback (any witness can finalize)
+    // Complete consensus via fallback (any witness can finalize).
+    // Once threshold shares gathered via gossip, any node can aggregate.
     action completeViaFallback(cid: ConsensusId, winningRid: ResultId): bool = {
         val instOpt = getOrDefaultInstance(instances, cid)
         val hasInstance = match instOpt { | Some(_) => true | None => false }
@@ -311,7 +318,8 @@ module protocol_consensus {
         }
     }
 
-    // Fail consensus instance
+    // Fail consensus instance (abort without producing CommitFact).
+    // Called when consensus cannot complete (insufficient shares, timeout).
     action failConsensus(cid: ConsensusId): bool = {
         val instOpt = getOrDefaultInstance(instances, cid)
         val hasInstance = match instOpt { | Some(_) => true | None => false }
@@ -337,8 +345,10 @@ module protocol_consensus {
     }
 
     // ==================== INVARIANTS ====================
+    // Safety properties that must hold in every reachable state.
 
-    // Safety: Only one CommitFact per consensus instance
+    // Safety: Only one CommitFact per consensus instance.
+    // Prevents conflicting commits (double-spend protection).
     val InvariantUniqueCommitPerInstance =
         committedFacts.forall(cf1 =>
             committedFacts.forall(cf2 =>
@@ -346,7 +356,8 @@ module protocol_consensus {
             )
         )
 
-    // Safety: CommitFact requires threshold attesters
+    // Safety: CommitFact requires threshold attesters.
+    // Ensures k-of-n security (can't forge with fewer shares).
     val InvariantCommitRequiresThreshold =
         instances.keys().forall(cid => {
             val inst = instances.get(cid)
@@ -357,7 +368,8 @@ module protocol_consensus {
             }
         })
 
-    // Safety: Committed instances have valid commit facts
+    // Safety: Committed instances have valid commit facts.
+    // Phase==Committed implies commitFact is Some.
     val InvariantCommittedHasCommitFact =
         instances.keys().forall(cid => {
             val inst = instances.get(cid)
@@ -366,7 +378,8 @@ module protocol_consensus {
             isCommitted implies hasCommit
         })
 
-    // Safety: Equivocators are excluded from attestation
+    // Safety: Equivocators are excluded from attestation.
+    // Byzantine witnesses who vote inconsistently can't contribute.
     val InvariantEquivocatorsExcluded =
         instances.keys().forall(cid => {
             val inst = instances.get(cid)
@@ -376,14 +389,16 @@ module protocol_consensus {
             }
         })
 
-    // Safety: Proposals only from configured witnesses
+    // Safety: Proposals only from configured witnesses.
+    // Prevents Sybil attacks (only pre-approved witnesses vote).
     val InvariantProposalsFromWitnesses =
         instances.keys().forall(cid => {
             val inst = instances.get(cid)
             inst.proposals.forall(p => inst.witnesses.contains(p.witness))
         })
 
-    // Convergence: Fast-path and fallback produce same result for matching (cid, rid)
+    // Convergence: Fast-path and fallback produce same result.
+    // Both paths must agree on (cid, rid) binding.
     val InvariantPathConvergence =
         committedFacts.forall(cf =>
             cf.cid.in(instances.keys()) implies {
@@ -393,8 +408,10 @@ module protocol_consensus {
         )
 
     // ==================== TEMPORAL PROPERTIES ====================
+    // LTL properties for liveness and safety over time.
 
-    // Liveness: If threshold honest witnesses participate, consensus eventually commits
+    // Liveness: If threshold honest witnesses participate, consensus commits.
+    // Requires fairness assumption (messages eventually delivered).
     temporal livenessEventualCommit = always(
         instances.keys().forall(cid => {
             val inst = instances.get(cid)
@@ -405,7 +422,8 @@ module protocol_consensus {
         })
     )
 
-    // Safety: Once committed, result never changes
+    // Safety: Once committed, result never changes (immutability).
+    // CommitFacts are permanent once produced.
     temporal safetyImmutableCommit = always(
         committedFacts.forall(cf =>
             always(committedFacts.exists(cf2 => cf2.cid == cf.cid and cf2.rid == cf.rid))
@@ -413,6 +431,7 @@ module protocol_consensus {
     )
 
     // ==================== STEP RELATION (for trace generation) ====================
+    // Nondeterministically choose any enabled action for model checking.
 
     action step = any {
         nondet cid = oneOf(Set("cns1", "cns2", "cns3"))

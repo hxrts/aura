@@ -12,16 +12,22 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::tui::components::{EmptyState, KeyHintsBar, StatusIndicator};
+use crate::tui::components::{
+    DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, EmptyState, InvitePeerCallback,
+    StatusIndicator, TextInputModal, TextInputState,
+};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Spacing, Theme};
-use crate::tui::types::{Contact, ContactStatus, KeyHint};
+use crate::tui::types::{Contact, ContactStatus};
 
-/// Callback type for editing a contact's petname (contact_id: String)
-pub type EditPetnameCallback = Arc<dyn Fn(String) + Send + Sync>;
+/// Callback type for updating a contact's petname (contact_id: String, new_petname: String)
+pub type UpdatePetnameCallback = Arc<dyn Fn(String, String) + Send + Sync>;
 
 /// Callback type for toggling guardian status (contact_id: String)
 pub type ToggleGuardianCallback = Arc<dyn Fn(String) + Send + Sync>;
+
+/// Callback type for starting a direct chat with a contact (contact_id: String)
+pub type StartChatCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Props for ContactItem
 #[derive(Default, Props)]
@@ -34,10 +40,17 @@ pub struct ContactItemProps {
 #[component]
 pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
     let c = &props.contact;
+    // Use consistent list item colors
     let bg = if props.is_selected {
-        Theme::BG_SELECTED
+        Theme::LIST_BG_SELECTED
     } else {
-        Theme::BG_DARK
+        Theme::LIST_BG_NORMAL
+    };
+
+    let text_color = if props.is_selected {
+        Theme::LIST_TEXT_SELECTED
+    } else {
+        Theme::LIST_TEXT_NORMAL
     };
 
     let status = match c.status {
@@ -59,7 +72,7 @@ pub fn ContactItem(props: &ContactItemProps) -> impl Into<AnyElement<'static>> {
             overflow: Overflow::Hidden,
         ) {
             StatusIndicator(status: status, icon_only: true)
-            Text(content: name, color: Theme::TEXT, wrap: TextWrap::NoWrap)
+            Text(content: name, color: text_color, wrap: TextWrap::NoWrap)
             Text(content: guardian_badge, color: Theme::SECONDARY)
         }
     }
@@ -90,8 +103,11 @@ pub fn ContactList(props: &ContactListProps) -> impl Into<AnyElement<'static>> {
     element! {
         View(
             flex_direction: FlexDirection::Column,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
             border_style: BorderStyle::Round,
             border_color: border_color,
+            overflow: Overflow::Hidden,
         ) {
             View(padding_left: Spacing::PANEL_PADDING) {
                 Text(content: title, weight: Weight::Bold, color: Theme::PRIMARY)
@@ -99,6 +115,7 @@ pub fn ContactList(props: &ContactListProps) -> impl Into<AnyElement<'static>> {
             View(
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
+                flex_shrink: 1.0,
                 padding: Spacing::PANEL_PADDING,
                 overflow: Overflow::Scroll,
             ) {
@@ -144,8 +161,10 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
         View(
             flex_direction: FlexDirection::Column,
             flex_grow: 1.0,
+            flex_shrink: 1.0,
             border_style: BorderStyle::Round,
             border_color: border_color,
+            overflow: Overflow::Hidden,
         ) {
             View(padding_left: Spacing::PANEL_PADDING) {
                 Text(content: "Details", weight: Weight::Bold, color: Theme::PRIMARY)
@@ -153,7 +172,9 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
             View(
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
+                flex_shrink: 1.0,
                 padding: Spacing::PANEL_PADDING,
+                overflow: Overflow::Scroll,
             ) {
                 #(if let Some(c) = &props.contact {
                     let petname = format!("Petname: {}", c.petname);
@@ -191,10 +212,16 @@ pub fn ContactDetail(props: &ContactDetailProps) -> impl Into<AnyElement<'static
 #[derive(Default, Props)]
 pub struct ContactsScreenProps {
     pub contacts: Vec<Contact>,
-    /// Callback when editing a contact's petname
-    pub on_edit_petname: Option<EditPetnameCallback>,
+    /// Discovered LAN peers
+    pub discovered_peers: Vec<DiscoveredPeerInfo>,
+    /// Callback when updating a contact's petname
+    pub on_update_petname: Option<UpdatePetnameCallback>,
     /// Callback when toggling guardian status
     pub on_toggle_guardian: Option<ToggleGuardianCallback>,
+    /// Callback when starting a direct chat with a contact
+    pub on_start_chat: Option<StartChatCallback>,
+    /// Callback when inviting a discovered LAN peer
+    pub on_invite_lan_peer: Option<InvitePeerCallback>,
 }
 
 /// Convert aura-app contact to TUI contact
@@ -274,21 +301,37 @@ pub fn ContactsScreen(
     let selected = hooks.use_state(|| 0usize);
     let detail_focused = hooks.use_state(|| false);
 
-    let hints = vec![
-        KeyHint::new("↑↓", "Navigate"),
-        KeyHint::new("Tab", "Switch panel"),
-        KeyHint::new("e", "Edit petname"),
-        KeyHint::new("g", "Toggle guardian"),
-        KeyHint::new("Esc", "Back"),
-    ];
+    // Modal state for editing petnames
+    let petname_modal_state = hooks.use_state(TextInputState::new);
+
+    // LAN discovered peers state
+    let mut lan_peers_state = hooks.use_state({
+        let initial_peers = props.discovered_peers.clone();
+        move || {
+            let mut state = DiscoveredPeersState::new();
+            state.set_peers(initial_peers);
+            state
+        }
+    });
+
+    // Update LAN peers when props change
+    {
+        let mut state = lan_peers_state.read().clone();
+        if state.peers.len() != props.discovered_peers.len() {
+            state.set_peers(props.discovered_peers.clone());
+            lan_peers_state.set(state);
+        }
+    }
 
     let current_selected = selected.get();
     let is_detail_focused = detail_focused.get();
     let selected_contact = contacts.get(current_selected).cloned();
 
     // Clone callbacks for event handler
-    let on_edit_petname = props.on_edit_petname.clone();
+    let on_update_petname = props.on_update_petname.clone();
     let on_toggle_guardian = props.on_toggle_guardian.clone();
+    let on_start_chat = props.on_start_chat.clone();
+    let on_invite_lan_peer = props.on_invite_lan_peer.clone();
 
     // Throttle for navigation keys - persists across renders using use_ref
     let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
@@ -297,55 +340,126 @@ pub fn ContactsScreen(
     hooks.use_terminal_events({
         let mut selected = selected.clone();
         let mut detail_focused = detail_focused.clone();
+        let mut petname_modal_state = petname_modal_state.clone();
         let count = contacts.len();
         let contacts_for_handler = contacts.clone();
-        move |event| match event {
-            TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        let current = selected.get();
-                        if current > 0 {
-                            selected.set(current - 1);
+        move |event| {
+            // Check if modal is visible
+            let modal_visible = petname_modal_state.read().visible;
+
+            match event {
+                TerminalEvent::Key(KeyEvent { code, .. }) => {
+                    if modal_visible {
+                        // Handle modal keys
+                        match code {
+                            KeyCode::Esc => {
+                                let mut state = petname_modal_state.read().clone();
+                                state.hide();
+                                petname_modal_state.set(state);
+                            }
+                            KeyCode::Enter => {
+                                let state = petname_modal_state.read().clone();
+                                if state.can_submit() {
+                                    if let Some(ref callback) = on_update_petname {
+                                        if let Some(contact_id) = state.get_context_id() {
+                                            callback(contact_id.to_string(), state.get_value().to_string());
+                                        }
+                                    }
+                                    // Close modal
+                                    let mut state = petname_modal_state.read().clone();
+                                    state.hide();
+                                    petname_modal_state.set(state);
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                let mut state = petname_modal_state.read().clone();
+                                state.pop_char();
+                                petname_modal_state.set(state);
+                            }
+                            KeyCode::Char(c) => {
+                                let mut state = petname_modal_state.read().clone();
+                                state.push_char(c);
+                                petname_modal_state.set(state);
+                            }
+                            _ => {}
                         }
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        let current = selected.get();
-                        if current + 1 < count {
-                            selected.set(current + 1);
-                        }
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Tab => {
-                    detail_focused.set(!detail_focused.get());
-                }
-                KeyCode::Enter => {
-                    detail_focused.set(true);
-                }
-                // Edit petname - triggers callback with contact_id
-                KeyCode::Char('e') => {
-                    if let Some(contact) = contacts_for_handler.get(selected.get()) {
-                        if let Some(ref callback) = on_edit_petname {
-                            callback(contact.id.clone());
-                        }
-                    }
-                }
-                // Toggle guardian - triggers callback with contact_id
-                KeyCode::Char('g') => {
-                    if let Some(contact) = contacts_for_handler.get(selected.get()) {
-                        if let Some(ref callback) = on_toggle_guardian {
-                            callback(contact.id.clone());
+                    } else {
+                        // Normal screen keys
+                        match code {
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move {
+                                    let current = selected.get();
+                                    if current > 0 {
+                                        selected.set(current - 1);
+                                    }
+                                    nav_throttle.set(Instant::now());
+                                }
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move {
+                                    let current = selected.get();
+                                    if current + 1 < count {
+                                        selected.set(current + 1);
+                                    }
+                                    nav_throttle.set(Instant::now());
+                                }
+                            }
+                            KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') => {
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move {
+                                    detail_focused.set(!detail_focused.get());
+                                    nav_throttle.set(Instant::now());
+                                }
+                            }
+                            KeyCode::Enter => {
+                                detail_focused.set(true);
+                            }
+                            // Edit petname - show modal with current petname
+                            KeyCode::Char('e') => {
+                                if let Some(contact) = contacts_for_handler.get(selected.get()) {
+                                    let mut state = petname_modal_state.read().clone();
+                                    state.show(
+                                        "Edit Petname",
+                                        &contact.petname,
+                                        "Enter petname...",
+                                        Some(contact.id.clone()),
+                                    );
+                                    petname_modal_state.set(state);
+                                }
+                            }
+                            // Toggle guardian - triggers callback with contact_id
+                            KeyCode::Char('g') => {
+                                if let Some(contact) = contacts_for_handler.get(selected.get()) {
+                                    if let Some(ref callback) = on_toggle_guardian {
+                                        callback(contact.id.clone());
+                                    }
+                                }
+                            }
+                            // Start chat - triggers callback with contact_id
+                            KeyCode::Char('c') => {
+                                if let Some(contact) = contacts_for_handler.get(selected.get()) {
+                                    if let Some(ref callback) = on_start_chat {
+                                        callback(contact.id.clone());
+                                    }
+                                }
+                            }
+                            // Invite discovered LAN peer
+                            KeyCode::Char('i') => {
+                                let state = lan_peers_state.read();
+                                if let Some(peer) = state.get_selected() {
+                                    if let Some(ref callback) = on_invite_lan_peer {
+                                        callback(peer.authority_id.clone(), peer.address.clone());
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 }
                 _ => {}
-            },
-            _ => {}
+            }
         }
     });
 
@@ -354,45 +468,72 @@ pub fn ContactsScreen(
             flex_direction: FlexDirection::Column,
             width: 100pct,
             height: 100pct,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
             overflow: Overflow::Hidden,
         ) {
-            // Header
-            View(
-                width: 100pct,
-                overflow: Overflow::Hidden,
-                padding: 1,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(content: "Contacts", weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-
             // Main content: list + detail
             View(
                 flex_direction: FlexDirection::Row,
-                width: 100pct,
                 flex_grow: 1.0,
+                flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
                 gap: Spacing::XS,
             ) {
-                // List (30%)
-                View(width: 30pct) {
+                // Left column: LAN peers + contacts list (30%)
+                View(
+                    width: 30pct,
+                    flex_direction: FlexDirection::Column,
+                    flex_shrink: 1.0,
+                    overflow: Overflow::Hidden,
+                    gap: 0,
+                ) {
+                    // Discovered LAN peers panel (only show if there are peers)
+                    #({
+                        let state = lan_peers_state.read();
+                        if state.has_peers() {
+                            Some(element! {
+                                DiscoveredPeersPanel(
+                                    peers: state.peers.clone(),
+                                    selected_index: state.selected_index,
+                                    focused: false,
+                                )
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    // Contacts list
                     ContactList(
                         contacts: contacts.clone(),
                         selected_index: current_selected,
                         focused: !is_detail_focused,
                     )
                 }
-                // Detail (75%)
+                // Detail (70%)
                 ContactDetail(
                     contact: selected_contact,
                     focused: is_detail_focused,
                 )
             }
 
-            // Key hints
-            KeyHintsBar(hints: hints)
+            // Petname edit modal (overlays everything)
+            #(if petname_modal_state.read().visible {
+                let modal_state = petname_modal_state.read().clone();
+                Some(element! {
+                    TextInputModal(
+                        visible: true,
+                        focused: true,
+                        title: modal_state.title.clone(),
+                        value: modal_state.value.clone(),
+                        placeholder: modal_state.placeholder.clone(),
+                        error: modal_state.error.clone().unwrap_or_default(),
+                        submitting: modal_state.submitting,
+                    )
+                })
+            } else {
+                None
+            })
         }
     }
 }

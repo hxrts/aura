@@ -14,17 +14,20 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use crate::tui::components::{
-    navigate_list, KeyHintsBar, ListNavigation, MessageBubble, MessageInput,
+    navigate_list, ChatCreateModal, ChatCreateState, ListNavigation, MessageBubble, MessageInput,
 };
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Spacing, Theme};
-use crate::tui::types::{Channel, KeyHint, Message};
+use crate::tui::types::{Channel, Message};
 
 /// Callback type for sending messages
 pub type SendCallback = Arc<dyn Fn(String, String) + Send + Sync>;
 
 /// Callback type for channel selection (channel_id)
 pub type ChannelSelectCallback = Arc<dyn Fn(String) + Send + Sync>;
+
+/// Callback type for creating new channels (name, topic)
+pub type CreateChannelCallback = Arc<dyn Fn(String, Option<String>) + Send + Sync>;
 
 /// Format a timestamp (ms since epoch) as a human-readable time string
 fn format_timestamp(ts_ms: u64) -> String {
@@ -87,7 +90,7 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
             border_style: BorderStyle::Round,
             border_color: border_color,
             padding: Spacing::PANEL_PADDING,
-            width: 25pct,
+            width: 30pct,
         ) {
             Text(content: "Channels", weight: Weight::Bold, color: Theme::PRIMARY)
             View(
@@ -98,10 +101,11 @@ pub fn ChannelList(props: &ChannelListProps) -> impl Into<AnyElement<'static>> {
             ) {
             #(props.channels.iter().enumerate().map(|(idx, ch)| {
                 let is_selected = idx == selected_idx;
+                // Use consistent list item colors
                 let (bg, fg) = if is_selected {
-                    (Theme::BG_SELECTED, Theme::TEXT)
+                    (Theme::LIST_BG_SELECTED, Theme::LIST_TEXT_SELECTED)
                 } else {
-                    (Theme::BG_DARK, Theme::TEXT_MUTED)
+                    (Theme::LIST_BG_NORMAL, Theme::LIST_TEXT_NORMAL)
                 };
                 let id = ch.id.clone();
                 let name = ch.name.clone();
@@ -167,13 +171,14 @@ pub fn MessageList(props: &MessageListProps) -> impl Into<AnyElement<'static>> {
 pub struct ChatScreenProps {
     pub channels: Vec<Channel>,
     pub messages: Vec<Message>,
-    pub hints: Vec<KeyHint>,
     /// Initial selected channel index
     pub initial_channel_index: usize,
     /// Callback when sending a message (channel_id, content)
     pub on_send: Option<SendCallback>,
     /// Callback when selecting a channel (channel_id)
     pub on_channel_select: Option<ChannelSelectCallback>,
+    /// Callback when creating a new channel (name, topic)
+    pub on_create_channel: Option<CreateChannelCallback>,
 }
 
 /// The main chat screen component with keyboard navigation
@@ -260,7 +265,6 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // Use reactive state for rendering (updated by signal or initialized from props)
     let channels = reactive_channels.read().clone();
     let messages = reactive_messages.read().clone();
-    let hints = props.hints.clone();
     let channel_count = channels.len();
     let on_send = props.on_send.clone();
     let on_channel_select = props.on_channel_select.clone();
@@ -271,9 +275,12 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     // State for focus (ChatFocus is Copy)
     let mut focus = hooks.use_state(|| ChatFocus::Channels);
 
+    // Modal state for creating new channels
+    let create_modal_state = hooks.use_state(ChatCreateState::new);
+
     // Input text state - use Arc<RwLock> for thread-safe sharing
-    // We create it once and store it via use_state with a wrapper
-    let input_text: SharedText = Arc::new(RwLock::new(String::new()));
+    // Use use_state to persist across renders
+    let input_text: SharedText = hooks.use_state(|| Arc::new(RwLock::new(String::new()))).read().clone();
     let input_text_for_handler = input_text.clone();
 
     // Version counter to trigger rerenders when input changes
@@ -292,123 +299,202 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
     let throttle_duration = Duration::from_millis(150);
 
+    // Clone create callback for event handler
+    let on_create_channel = props.on_create_channel.clone();
+
     // Handle keyboard events
     hooks.use_terminal_events({
         let input_text = input_text_for_handler;
         let current_channel_id = current_channel_id.clone();
         let on_send = on_send.clone();
         let on_channel_select = on_channel_select.clone();
+        let on_create_channel = on_create_channel.clone();
+        let mut create_modal_state = create_modal_state.clone();
         let channels = channels_for_handler;
-        move |event| match event {
-            TerminalEvent::Key(KeyEvent {
-                code, modifiers, ..
-            }) => {
-                match code {
-                    // Tab cycles focus forward, Shift+Tab cycles backward
-                    KeyCode::Tab => {
-                        let new_focus = if modifiers.contains(KeyModifiers::SHIFT) {
-                            match focus.get() {
-                                ChatFocus::Channels => ChatFocus::Input,
-                                ChatFocus::Messages => ChatFocus::Channels,
-                                ChatFocus::Input => ChatFocus::Messages,
+        move |event| {
+            // Check if create modal is visible
+            let modal_visible = create_modal_state.read().visible;
+
+            match event {
+                TerminalEvent::Key(KeyEvent {
+                    code, modifiers, ..
+                }) => {
+                    if modal_visible {
+                        // Handle modal keys
+                        match code {
+                            KeyCode::Esc => {
+                                // Close modal
+                                let mut state = create_modal_state.read().clone();
+                                state.hide();
+                                create_modal_state.set(state);
                             }
-                        } else {
-                            match focus.get() {
-                                ChatFocus::Channels => ChatFocus::Messages,
-                                ChatFocus::Messages => ChatFocus::Input,
-                                ChatFocus::Input => ChatFocus::Channels,
+                            KeyCode::Tab => {
+                                // Switch field
+                                let mut state = create_modal_state.read().clone();
+                                state.next_field();
+                                create_modal_state.set(state);
                             }
-                        };
-                        focus.set(new_focus);
-                    }
-                    // Arrow keys navigate within focused panel (with throttle)
-                    KeyCode::Up => {
-                        let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                        if should_move && focus.get() == ChatFocus::Channels && channel_count > 0 {
-                            let new_idx =
-                                navigate_list(channel_idx.get(), channel_count, ListNavigation::Up);
-                            channel_idx.set(new_idx);
-                            nav_throttle.set(Instant::now());
-                            // Notify AppCore of channel selection for real-time message updates
-                            if let Some(ref callback) = on_channel_select {
-                                if let Some(ch) = channels.get(new_idx) {
-                                    callback(ch.id.clone());
-                                }
+                            KeyCode::BackTab => {
+                                // Switch field backwards
+                                let mut state = create_modal_state.read().clone();
+                                state.prev_field();
+                                create_modal_state.set(state);
                             }
-                        }
-                    }
-                    KeyCode::Down => {
-                        let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                        if should_move && focus.get() == ChatFocus::Channels && channel_count > 0 {
-                            let new_idx = navigate_list(
-                                channel_idx.get(),
-                                channel_count,
-                                ListNavigation::Down,
-                            );
-                            channel_idx.set(new_idx);
-                            nav_throttle.set(Instant::now());
-                            // Notify AppCore of channel selection for real-time message updates
-                            if let Some(ref callback) = on_channel_select {
-                                if let Some(ch) = channels.get(new_idx) {
-                                    callback(ch.id.clone());
-                                }
-                            }
-                        }
-                    }
-                    // Escape exits insert mode (input focus) back to channels
-                    KeyCode::Esc => {
-                        if focus.get() == ChatFocus::Input {
-                            focus.set(ChatFocus::Channels);
-                        }
-                    }
-                    // Enter sends message when input is focused, stays in insert mode
-                    KeyCode::Enter => {
-                        if focus.get() == ChatFocus::Input {
-                            if let Ok(text) = input_text.read() {
-                                let text = text.clone();
-                                if !text.is_empty() {
-                                    // Call the send callback
-                                    if let Some(ref callback) = on_send {
-                                        callback(current_channel_id.clone(), text);
+                            KeyCode::Enter => {
+                                // Submit
+                                let state = create_modal_state.read().clone();
+                                if state.can_submit() {
+                                    if let Some(ref callback) = on_create_channel {
+                                        let name = state.get_name().to_string();
+                                        let topic = state.get_topic().map(|s| s.to_string());
+                                        callback(name, topic);
                                     }
-                                    // Clear input but stay in insert mode
+                                    // Close modal
+                                    let mut state = create_modal_state.read().clone();
+                                    state.hide();
+                                    create_modal_state.set(state);
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                // Delete character
+                                let mut state = create_modal_state.read().clone();
+                                state.pop_char();
+                                create_modal_state.set(state);
+                            }
+                            KeyCode::Char(c) => {
+                                // Add character
+                                let mut state = create_modal_state.read().clone();
+                                state.push_char(c);
+                                create_modal_state.set(state);
+                            }
+                            _ => {}
+                        }
+                    } else if focus.get() == ChatFocus::Input {
+                        // Insert mode: only handle Escape, Enter, Backspace, and character input
+                        match code {
+                            // Escape exits insert mode back to channels
+                            KeyCode::Esc => {
+                                focus.set(ChatFocus::Channels);
+                            }
+                            // Shift+Enter adds newline, plain Enter sends message
+                            KeyCode::Enter => {
+                                if modifiers.contains(KeyModifiers::SHIFT) {
+                                    // Shift+Enter: add newline
                                     if let Ok(mut guard) = input_text.write() {
-                                        guard.clear();
+                                        guard.push('\n');
+                                    }
+                                    input_version.set(input_version.get().wrapping_add(1));
+                                } else {
+                                    // Plain Enter: send message
+                                    if let Ok(text) = input_text.read() {
+                                        let text = text.clone();
+                                        if !text.is_empty() {
+                                            if let Some(ref callback) = on_send {
+                                                callback(current_channel_id.clone(), text);
+                                            }
+                                            if let Ok(mut guard) = input_text.write() {
+                                                guard.clear();
+                                            }
+                                            input_version.set(input_version.get().wrapping_add(1));
+                                        }
+                                    }
+                                }
+                            }
+                            // Backspace removes last character
+                            KeyCode::Backspace => {
+                                if let Ok(mut guard) = input_text.write() {
+                                    guard.pop();
+                                }
+                                input_version.set(input_version.get().wrapping_add(1));
+                            }
+                            // Character input (including "/" for commands)
+                            KeyCode::Char(c) => {
+                                if !modifiers.contains(KeyModifiers::CONTROL) {
+                                    if let Ok(mut guard) = input_text.write() {
+                                        guard.push(c);
                                     }
                                     input_version.set(input_version.get().wrapping_add(1));
                                 }
                             }
-                            // Note: We stay in insert mode (ChatFocus::Input) after Enter
+                            // All other keys ignored in insert mode
+                            _ => {}
                         }
-                    }
-                    // Backspace removes last character
-                    KeyCode::Backspace => {
-                        if focus.get() == ChatFocus::Input {
-                            if let Ok(mut guard) = input_text.write() {
-                                guard.pop();
+                    } else {
+                        // Normal mode: navigation and hotkeys
+                        match code {
+                            // Left/Right arrows and h/l cycle focus between panels
+                            KeyCode::Left | KeyCode::Char('h') => {
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move {
+                                    let new_focus = match focus.get() {
+                                        ChatFocus::Channels => ChatFocus::Input,
+                                        ChatFocus::Messages => ChatFocus::Channels,
+                                        ChatFocus::Input => ChatFocus::Messages,
+                                    };
+                                    focus.set(new_focus);
+                                    nav_throttle.set(Instant::now());
+                                }
                             }
-                            input_version.set(input_version.get().wrapping_add(1));
-                        }
-                    }
-                    // Character input when input is focused, or 'i' to enter insert mode
-                    KeyCode::Char(c) => {
-                        if focus.get() == ChatFocus::Input
-                            && !modifiers.contains(KeyModifiers::CONTROL)
-                        {
-                            // In insert mode: accept all characters
-                            if let Ok(mut guard) = input_text.write() {
-                                guard.push(c);
+                            KeyCode::Right | KeyCode::Char('l') => {
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move {
+                                    let new_focus = match focus.get() {
+                                        ChatFocus::Channels => ChatFocus::Messages,
+                                        ChatFocus::Messages => ChatFocus::Input,
+                                        ChatFocus::Input => ChatFocus::Channels,
+                                    };
+                                    focus.set(new_focus);
+                                    nav_throttle.set(Instant::now());
+                                }
                             }
-                            input_version.set(input_version.get().wrapping_add(1));
-                        } else if c == 'i' && focus.get() != ChatFocus::Input {
-                            // 'i' enters insert mode from any other focus
-                            focus.set(ChatFocus::Input);
+                            // Up/Down arrows and j/k navigate within focused panel
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move && focus.get() == ChatFocus::Channels && channel_count > 0 {
+                                    let new_idx =
+                                        navigate_list(channel_idx.get(), channel_count, ListNavigation::Up);
+                                    channel_idx.set(new_idx);
+                                    nav_throttle.set(Instant::now());
+                                    if let Some(ref callback) = on_channel_select {
+                                        if let Some(ch) = channels.get(new_idx) {
+                                            callback(ch.id.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move && focus.get() == ChatFocus::Channels && channel_count > 0 {
+                                    let new_idx = navigate_list(
+                                        channel_idx.get(),
+                                        channel_count,
+                                        ListNavigation::Down,
+                                    );
+                                    channel_idx.set(new_idx);
+                                    nav_throttle.set(Instant::now());
+                                    if let Some(ref callback) = on_channel_select {
+                                        if let Some(ch) = channels.get(new_idx) {
+                                            callback(ch.id.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            // 'i' enters insert mode
+                            KeyCode::Char('i') => {
+                                focus.set(ChatFocus::Input);
+                            }
+                            // 'n' opens new channel modal
+                            KeyCode::Char('n') => {
+                                let mut state = create_modal_state.read().clone();
+                                state.show();
+                                create_modal_state.set(state);
+                            }
+                            _ => {}
                         }
                     }
-                    _ => {}
                 }
+                _ => {}
             }
-            _ => {}
         }
     });
 
@@ -422,12 +508,6 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let messages_focused = current_focus == ChatFocus::Messages;
     let input_focused = current_focus == ChatFocus::Input;
 
-    // Get current channel name for header
-    let channel_name = channels
-        .get(current_channel_idx)
-        .map(|c| c.name.clone())
-        .unwrap_or_else(|| "general".to_string());
-
     // Message list border color based on focus
     let msg_border = if messages_focused {
         Theme::BORDER_FOCUS
@@ -435,26 +515,25 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         Theme::BORDER
     };
 
+    // Check if create modal is visible
+    let is_create_modal_visible = create_modal_state.read().visible;
+
     element! {
         View(
             flex_direction: FlexDirection::Column,
             width: 100pct,
             height: 100pct,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            overflow: Overflow::Hidden,
         ) {
-            // Header with current channel
-            View(
-                padding: 1,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(content: format!("Chat - #{}", channel_name), weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-
             // Main content area
             View(
                 flex_direction: FlexDirection::Row,
                 flex_grow: 1.0,
+                flex_shrink: 1.0,
+                overflow: Overflow::Hidden,
+                gap: Spacing::XS,
             ) {
                 ChannelList(
                     channels: channels,
@@ -500,8 +579,23 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                 sending: false,
             )
 
-            // Key hints at bottom
-            KeyHintsBar(hints: hints)
+            // Create channel modal (overlays everything)
+            #(if is_create_modal_visible {
+                let modal_state = create_modal_state.read().clone();
+                Some(element! {
+                    ChatCreateModal(
+                        visible: true,
+                        focused: true,
+                        name: modal_state.name.clone(),
+                        topic: modal_state.topic.clone(),
+                        active_field: modal_state.active_field,
+                        error: modal_state.error.clone().unwrap_or_default(),
+                        creating: modal_state.creating,
+                    )
+                })
+            } else {
+                None
+            })
         }
     }
 }
@@ -527,20 +621,11 @@ pub async fn run_chat_screen() -> std::io::Result<()> {
             .own(false),
     ];
 
-    let hints = vec![
-        KeyHint::new("↑↓", "Channels"),
-        KeyHint::new("i", "Insert mode"),
-        KeyHint::new("Esc", "Exit insert"),
-        KeyHint::new("Enter", "Send"),
-        KeyHint::new("q", "Quit"),
-    ];
-
     let initial_idx: usize = 0;
     element! {
         ChatScreen(
             channels: channels,
             messages: messages,
-            hints: hints,
             initial_channel_index: initial_idx,
         )
     }

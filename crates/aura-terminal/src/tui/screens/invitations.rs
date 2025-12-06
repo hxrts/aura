@@ -12,16 +12,29 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::tui::components::{EmptyState, KeyHintsBar};
+use crate::tui::components::{
+    EmptyState, InvitationCodeModal, InvitationCodeState, InvitationCreateModal,
+    InvitationCreateState, InvitationImportModal, InvitationImportState,
+};
+use crate::tui::effects::{AuraEvent, EventFilter};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{
     format_timestamp, Invitation, InvitationDirection, InvitationFilter, InvitationStatus,
-    InvitationType, KeyHint,
+    InvitationType,
 };
 
 /// Callback type for invitation actions (invitation_id)
 pub type InvitationCallback = Arc<dyn Fn(String) + Send + Sync>;
+
+/// Callback type for creating new invitations (invitation_type, message, ttl_secs)
+pub type CreateInvitationCallback = Arc<dyn Fn(String, Option<String>, Option<u64>) + Send + Sync>;
+
+/// Callback type for exporting invitation code (invitation_id) -> returns code via state update
+pub type ExportInvitationCallback = Arc<dyn Fn(String) + Send + Sync>;
+
+/// Callback type for importing invitation code (code) -> triggers import flow
+pub type ImportInvitationCallback = Arc<dyn Fn(String) + Send + Sync>;
 
 /// Props for FilterTabs
 #[derive(Default, Props)]
@@ -74,18 +87,31 @@ pub struct InvitationItemProps {
 #[component]
 pub fn InvitationItem(props: &InvitationItemProps) -> impl Into<AnyElement<'static>> {
     let inv = &props.invitation;
+    // Use consistent list item colors
     let bg = if props.is_selected {
-        Theme::BG_SELECTED
+        Theme::LIST_BG_SELECTED
     } else {
-        Theme::BG_DARK
+        Theme::LIST_BG_NORMAL
+    };
+
+    let text_color = if props.is_selected {
+        Theme::LIST_TEXT_SELECTED
+    } else {
+        Theme::LIST_TEXT_NORMAL
+    };
+
+    let muted_color = if props.is_selected {
+        Theme::LIST_TEXT_SELECTED
+    } else {
+        Theme::LIST_TEXT_MUTED
     };
 
     let status_color = match inv.status {
         InvitationStatus::Pending => Theme::WARNING,
         InvitationStatus::Accepted => Theme::SUCCESS,
         InvitationStatus::Declined => Theme::ERROR,
-        InvitationStatus::Expired => Theme::TEXT_MUTED,
-        InvitationStatus::Cancelled => Theme::TEXT_MUTED,
+        InvitationStatus::Expired => Theme::LIST_TEXT_MUTED,
+        InvitationStatus::Cancelled => Theme::LIST_TEXT_MUTED,
     };
 
     let type_icon = inv.invitation_type.icon().to_string();
@@ -103,8 +129,8 @@ pub fn InvitationItem(props: &InvitationItemProps) -> impl Into<AnyElement<'stat
             overflow: Overflow::Hidden,
         ) {
             Text(content: type_icon, color: Theme::SECONDARY)
-            Text(content: direction_icon, color: Theme::TEXT_MUTED)
-            Text(content: name, color: Theme::TEXT, wrap: TextWrap::NoWrap)
+            Text(content: direction_icon, color: muted_color)
+            Text(content: name, color: text_color, wrap: TextWrap::NoWrap)
             Text(content: status_text, color: status_color)
         }
     }
@@ -251,6 +277,20 @@ pub struct InvitationsScreenProps {
     pub on_accept: Option<InvitationCallback>,
     /// Callback when declining an invitation
     pub on_decline: Option<InvitationCallback>,
+    /// Callback when creating a new invitation
+    pub on_create: Option<CreateInvitationCallback>,
+    /// Callback when exporting an invitation
+    pub on_export: Option<ExportInvitationCallback>,
+    /// Callback when importing an invitation code
+    pub on_import: Option<ImportInvitationCallback>,
+    /// Code to display (set after export)
+    pub exported_code: Option<String>,
+    /// Whether running in demo mode (enables quick-fill shortcuts)
+    pub demo_mode: bool,
+    /// Alice's invite code for demo mode (press 'a' in import modal to fill)
+    pub demo_alice_code: String,
+    /// Charlie's invite code for demo mode (press 'c' in import modal to fill)
+    pub demo_charlie_code: String,
 }
 
 /// Convert aura-app invitation type to TUI invitation type
@@ -331,8 +371,22 @@ pub fn InvitationsScreen(
         move || initial
     });
 
+    // State hooks must be called in consistent order - define all states first
+    let selected = hooks.use_state(|| props.selected_index);
+    let filter = hooks.use_state(|| props.filter);
+    let detail_focused = hooks.use_state(|| false);
+
+    // Modal state for creating new invitations
+    let create_modal_state = hooks.use_state(InvitationCreateState::new);
+
+    // Modal state for displaying invitation code
+    let code_modal_state = hooks.use_state(InvitationCodeState::new);
+
+    // Modal state for importing invitation code
+    let import_modal_state = hooks.use_state(InvitationImportState::new);
+
     // Subscribe to invitations signal updates if AppCoreContext is available
-    if let Some(ctx) = app_ctx {
+    if let Some(ref ctx) = app_ctx {
         hooks.use_future({
             let mut reactive_invitations = reactive_invitations.clone();
             let app_core = ctx.app_core.clone();
@@ -363,22 +417,46 @@ pub fn InvitationsScreen(
         });
     }
 
+    // Subscribe to invitation events to show code modal when export completes
+    if let Some(ref ctx) = app_ctx {
+        hooks.use_future({
+            let mut code_modal_state = code_modal_state.clone();
+            let io_context = ctx.io_context.clone();
+            async move {
+                // Subscribe to invitation events only
+                let filter = EventFilter {
+                    invitation: true,
+                    ..Default::default()
+                };
+                let mut subscription = io_context.subscribe(filter);
+
+                // Process events
+                while let Some(event) = subscription.recv().await {
+                    if let AuraEvent::InvitationCodeExported {
+                        invitation_id,
+                        code,
+                    } = event
+                    {
+                        // Show the code modal with the exported code
+                        let mut state = code_modal_state.read().clone();
+                        state.show(
+                            invitation_id,
+                            "Invitation".to_string(), // Generic type for now
+                            code,
+                        );
+                        code_modal_state.set(state);
+                    }
+                }
+            }
+        });
+    }
+
     // Use reactive state for rendering
     let all_invitations = reactive_invitations.read().clone();
 
-    let selected = hooks.use_state(|| props.selected_index);
-    let filter = hooks.use_state(|| props.filter);
-    let detail_focused = hooks.use_state(|| false);
-
-    let hints = vec![
-        KeyHint::new("↑↓", "Navigate"),
-        KeyHint::new("Tab", "Filter"),
-        KeyHint::new("Enter", "Details"),
-        KeyHint::new("a", "Accept"),
-        KeyHint::new("d", "Decline"),
-        KeyHint::new("n", "New"),
-        KeyHint::new("Esc", "Back"),
-    ];
+    let is_create_modal_visible = create_modal_state.read().visible;
+    let is_code_modal_visible = code_modal_state.read().visible;
+    let is_import_modal_visible = import_modal_state.read().visible;
 
     let current_filter = filter.get();
 
@@ -400,6 +478,14 @@ pub fn InvitationsScreen(
     // Clone callbacks for event handler
     let on_accept = props.on_accept.clone();
     let on_decline = props.on_decline.clone();
+    let on_create = props.on_create.clone();
+    let on_export = props.on_export.clone();
+    let on_import = props.on_import.clone();
+
+    // Demo mode settings (for auto-fill shortcuts)
+    let demo_mode = props.demo_mode;
+    let demo_alice_code = props.demo_alice_code.clone();
+    let demo_charlie_code = props.demo_charlie_code.clone();
 
     // Throttle for navigation keys - persists across renders using use_ref
     let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
@@ -409,82 +495,220 @@ pub fn InvitationsScreen(
         let mut selected = selected.clone();
         let mut filter = filter.clone();
         let mut detail_focused = detail_focused.clone();
+        let mut create_modal_state = create_modal_state.clone();
+        let mut code_modal_state = code_modal_state.clone();
+        let mut import_modal_state = import_modal_state.clone();
+        let on_create = on_create.clone();
+        let on_export = on_export.clone();
+        let on_import = on_import.clone();
         let count = filtered.len();
         let filtered_for_handler = filtered.clone();
-        move |event| match event {
-            TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        let current = selected.get();
-                        if current > 0 {
-                            selected.set(current - 1);
+        move |event| {
+            // Check if any modal is visible - if so, handle modal keys
+            let create_modal_visible = create_modal_state.read().visible;
+            let code_modal_visible = code_modal_state.read().visible;
+            let import_modal_visible = import_modal_state.read().visible;
+
+            match event {
+                TerminalEvent::Key(KeyEvent { code, .. }) => {
+                    if code_modal_visible {
+                        // Code modal is open - only Esc closes it
+                        if matches!(code, KeyCode::Esc) {
+                            let mut state = code_modal_state.read().clone();
+                            state.hide();
+                            code_modal_state.set(state);
                         }
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        let current = selected.get();
-                        if current + 1 < count {
-                            selected.set(current + 1);
+                    } else if import_modal_visible {
+                        // Import modal is open - handle text input
+                        // In demo mode, when input is empty: 'a' fills Alice code, 'c' fills Charlie code
+                        match code {
+                            KeyCode::Esc => {
+                                // Close modal
+                                let mut state = import_modal_state.read().clone();
+                                state.hide();
+                                import_modal_state.set(state);
+                            }
+                            KeyCode::Enter => {
+                                // Submit - import invitation
+                                let state = import_modal_state.read().clone();
+                                if state.can_submit() {
+                                    if let Some(ref callback) = on_import {
+                                        callback(state.code.clone());
+                                    }
+                                    // Close modal after submit
+                                    let mut state = import_modal_state.read().clone();
+                                    state.hide();
+                                    import_modal_state.set(state);
+                                }
+                            }
+                            KeyCode::Backspace => {
+                                // Delete character
+                                let mut state = import_modal_state.read().clone();
+                                state.pop_char();
+                                import_modal_state.set(state);
+                            }
+                            KeyCode::Char(c) => {
+                                let state = import_modal_state.read().clone();
+                                // Demo mode shortcuts: when input is empty, 'a' fills Alice, 'c' fills Charlie
+                                if demo_mode && state.code.is_empty() {
+                                    if c == 'a' || c == 'A' {
+                                        let mut state = state.clone();
+                                        state.code = demo_alice_code.clone();
+                                        import_modal_state.set(state);
+                                        return;
+                                    } else if c == 'c' || c == 'C' {
+                                        let mut state = state.clone();
+                                        state.code = demo_charlie_code.clone();
+                                        import_modal_state.set(state);
+                                        return;
+                                    }
+                                }
+                                // Normal character input
+                                let mut state = state.clone();
+                                state.push_char(c);
+                                import_modal_state.set(state);
+                            }
+                            _ => {}
                         }
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Tab => {
-                    if !detail_focused.get() {
-                        filter.set(filter.get().next());
-                        selected.set(0);
+                    } else if create_modal_visible {
+                        // Create modal is open - handle modal-specific keys
+                        match code {
+                            KeyCode::Esc => {
+                                // Close modal
+                                let mut state = create_modal_state.read().clone();
+                                state.hide();
+                                create_modal_state.set(state);
+                            }
+                            KeyCode::Tab => {
+                                // Cycle invitation type
+                                let mut state = create_modal_state.read().clone();
+                                state.next_type();
+                                create_modal_state.set(state);
+                            }
+                            KeyCode::BackTab => {
+                                // Cycle invitation type backwards
+                                let mut state = create_modal_state.read().clone();
+                                state.prev_type();
+                                create_modal_state.set(state);
+                            }
+                            KeyCode::Char('t') => {
+                                // Cycle TTL
+                                let mut state = create_modal_state.read().clone();
+                                state.cycle_ttl();
+                                create_modal_state.set(state);
+                            }
+                            KeyCode::Enter => {
+                                // Submit - create invitation
+                                let state = create_modal_state.read().clone();
+                                if state.can_submit() {
+                                    if let Some(ref callback) = on_create {
+                                        let inv_type = format!("{:?}", state.invitation_type);
+                                        let message = state.get_message().map(|s| s.to_string());
+                                        let ttl = state.ttl_secs();
+                                        callback(inv_type, message, ttl);
+                                    }
+                                    // Close modal after submit
+                                    let mut state = create_modal_state.read().clone();
+                                    state.hide();
+                                    create_modal_state.set(state);
+                                }
+                            }
+                            _ => {}
+                        }
                     } else {
-                        detail_focused.set(false);
-                    }
-                }
-                KeyCode::Enter => {
-                    detail_focused.set(!detail_focused.get());
-                }
-                KeyCode::Char('a') => {
-                    // Accept selected invitation
-                    if let Some(ref callback) = on_accept {
-                        if let Some(inv) = filtered_for_handler.get(selected.get()) {
-                            // Only accept received pending invitations
-                            if inv.direction == InvitationDirection::Inbound
-                                && inv.status == InvitationStatus::Pending
-                            {
-                                callback(inv.id.clone());
+                        // Normal screen keys
+                        match code {
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move {
+                                    let current = selected.get();
+                                    if current > 0 {
+                                        selected.set(current - 1);
+                                    }
+                                    nav_throttle.set(Instant::now());
+                                }
                             }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move {
+                                    let current = selected.get();
+                                    if current + 1 < count {
+                                        selected.set(current + 1);
+                                    }
+                                    nav_throttle.set(Instant::now());
+                                }
+                            }
+                            KeyCode::Char('f') => {
+                                // Cycle filter: All -> Sent -> Received -> All
+                                filter.set(filter.get().next());
+                                selected.set(0);
+                            }
+                            KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') => {
+                                // Toggle between list and detail panel
+                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
+                                if should_move {
+                                    detail_focused.set(!detail_focused.get());
+                                    nav_throttle.set(Instant::now());
+                                }
+                            }
+                            KeyCode::Enter => {
+                                detail_focused.set(true);
+                            }
+                            KeyCode::Char('n') => {
+                                // Open new invitation modal
+                                let mut state = create_modal_state.read().clone();
+                                state.show();
+                                create_modal_state.set(state);
+                            }
+                            KeyCode::Char('e') => {
+                                // Export selected invitation code
+                                if let Some(ref callback) = on_export {
+                                    if let Some(inv) = filtered_for_handler.get(selected.get()) {
+                                        // Only export sent invitations
+                                        if inv.direction == InvitationDirection::Outbound {
+                                            callback(inv.id.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char('i') => {
+                                // Open import invitation modal
+                                let mut state = import_modal_state.read().clone();
+                                state.show();
+                                import_modal_state.set(state);
+                            }
+                            KeyCode::Char('a') => {
+                                // Accept selected invitation
+                                if let Some(ref callback) = on_accept {
+                                    if let Some(inv) = filtered_for_handler.get(selected.get()) {
+                                        // Only accept received pending invitations
+                                        if inv.direction == InvitationDirection::Inbound
+                                            && inv.status == InvitationStatus::Pending
+                                        {
+                                            callback(inv.id.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Char('d') => {
+                                // Decline selected invitation
+                                if let Some(ref callback) = on_decline {
+                                    if let Some(inv) = filtered_for_handler.get(selected.get()) {
+                                        // Only decline received pending invitations
+                                        if inv.direction == InvitationDirection::Inbound
+                                            && inv.status == InvitationStatus::Pending
+                                        {
+                                            callback(inv.id.clone());
+                                        }
+                                    }
+                                }
+                            }
+                            _ => {}
                         }
                     }
-                }
-                KeyCode::Char('d') => {
-                    // Decline selected invitation
-                    if let Some(ref callback) = on_decline {
-                        if let Some(inv) = filtered_for_handler.get(selected.get()) {
-                            // Only decline received pending invitations
-                            if inv.direction == InvitationDirection::Inbound
-                                && inv.status == InvitationStatus::Pending
-                            {
-                                callback(inv.id.clone());
-                            }
-                        }
-                    }
-                }
-                KeyCode::Char('1') => {
-                    filter.set(InvitationFilter::All);
-                    selected.set(0);
-                }
-                KeyCode::Char('2') => {
-                    filter.set(InvitationFilter::Sent);
-                    selected.set(0);
-                }
-                KeyCode::Char('3') => {
-                    filter.set(InvitationFilter::Received);
-                    selected.set(0);
                 }
                 _ => {}
-            },
-            _ => {}
+            }
         }
     });
 
@@ -493,28 +717,18 @@ pub fn InvitationsScreen(
             flex_direction: FlexDirection::Column,
             width: 100pct,
             height: 100pct,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
             overflow: Overflow::Hidden,
         ) {
-            // Header
-            View(
-                width: 100pct,
-                overflow: Overflow::Hidden,
-                padding: 1,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(content: "Invitations", weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-
             // Filter tabs
             FilterTabs(filter: current_filter)
 
             // Main content: list + detail
             View(
                 flex_direction: FlexDirection::Row,
-                width: 100pct,
                 flex_grow: 1.0,
+                flex_shrink: 1.0,
                 overflow: Overflow::Hidden,
                 gap: Spacing::XS,
             ) {
@@ -533,8 +747,53 @@ pub fn InvitationsScreen(
                 )
             }
 
-            // Key hints
-            KeyHintsBar(hints: hints)
+            // Create invitation modal (overlays everything)
+            #(if is_create_modal_visible {
+                let modal_state = create_modal_state.read().clone();
+                Some(element! {
+                    InvitationCreateModal(
+                        visible: true,
+                        focused: true,
+                        creating: modal_state.creating,
+                        error: modal_state.error.clone().unwrap_or_default(),
+                        invitation_type: modal_state.invitation_type,
+                        message: modal_state.message.clone(),
+                        ttl_hours: modal_state.ttl_hours,
+                    )
+                })
+            } else {
+                None
+            })
+
+            // Invitation code modal (overlays everything)
+            #(if is_code_modal_visible {
+                let modal_state = code_modal_state.read().clone();
+                Some(element! {
+                    InvitationCodeModal(
+                        visible: true,
+                        code: modal_state.code.clone(),
+                        invitation_type: modal_state.invitation_type.clone(),
+                    )
+                })
+            } else {
+                None
+            })
+
+            // Import invitation modal (overlays everything)
+            #(if is_import_modal_visible {
+                let modal_state = import_modal_state.read().clone();
+                Some(element! {
+                    InvitationImportModal(
+                        visible: true,
+                        focused: true,
+                        code: modal_state.code.clone(),
+                        error: modal_state.error.clone().unwrap_or_default(),
+                        importing: modal_state.importing,
+                    )
+                })
+            } else {
+                None
+            })
         }
     }
 }

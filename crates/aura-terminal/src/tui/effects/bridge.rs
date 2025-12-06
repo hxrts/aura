@@ -264,6 +264,14 @@ impl EffectBridge {
         &self.config
     }
 
+    /// Get a clone of the event sender for external event injection
+    ///
+    /// This is useful for demo mode where external agents (Alice, Charlie)
+    /// need to emit events into Bob's TUI.
+    pub fn event_sender(&self) -> broadcast::Sender<AuraEvent> {
+        self.event_tx.clone()
+    }
+
     /// Command consumer loop (runs in background)
     async fn command_consumer_loop(
         mut command_rx: mpsc::Receiver<(

@@ -12,10 +12,9 @@ use iocraft::prelude::*;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::tui::components::KeyHintsBar;
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::Theme;
-use crate::tui::types::{BlockSummary, KeyHint, TraversalDepth};
+use crate::tui::types::{BlockSummary, TraversalDepth};
 
 /// Callback type for navigation actions (block_id, depth)
 pub type NavigationCallback = Arc<dyn Fn(String, TraversalDepth) + Send + Sync>;
@@ -315,20 +314,11 @@ pub fn NeighborhoodScreen(
 
     let selected = hooks.use_state(|| 0usize);
 
-    let hints = vec![
-        KeyHint::new("←→↑↓", "Navigate"),
-        KeyHint::new("Enter", "Enter block"),
-        KeyHint::new("h", "Go home"),
-        KeyHint::new("b", "Back to street"),
-        KeyHint::new("Esc", "Back"),
-    ];
-
     let current_selected = selected.get();
 
     // Clone callbacks for event handler
     let on_enter_block = props.on_enter_block.clone();
     let on_go_home = props.on_go_home.clone();
-    let on_back_to_street = props.on_back_to_street.clone();
 
     // Throttle for navigation keys - persists across renders using use_ref
     let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
@@ -340,8 +330,8 @@ pub fn NeighborhoodScreen(
         let count = blocks_for_handler.len();
         move |event| match event {
             TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                // Navigation - arrow keys and vim j/k/l (not h, as h is used for "go home")
-                KeyCode::Left => {
+                // Navigation - arrow keys and vim h/j/k/l
+                KeyCode::Left | KeyCode::Char('h') => {
                     let should_move = nav_throttle.read().elapsed() >= throttle_duration;
                     if should_move {
                         let current = selected.get();
@@ -394,14 +384,8 @@ pub fn NeighborhoodScreen(
                     }
                 }
                 // Go home - navigate to home block
-                KeyCode::Char('h') => {
+                KeyCode::Char('g') => {
                     if let Some(ref callback) = on_go_home {
-                        callback();
-                    }
-                }
-                // Back to street - reset to street view
-                KeyCode::Char('b') => {
-                    if let Some(ref callback) = on_back_to_street {
                         callback();
                     }
                 }
@@ -416,23 +400,17 @@ pub fn NeighborhoodScreen(
             flex_direction: FlexDirection::Column,
             width: 100pct,
             height: 100pct,
+            flex_grow: 1.0,
+            flex_shrink: 1.0,
+            overflow: Overflow::Hidden,
         ) {
-            // Header
-            View(
-                padding: 1,
-                border_style: BorderStyle::Single,
-                border_edges: Edges::Bottom,
-                border_color: Theme::BORDER,
-            ) {
-                Text(content: "Neighborhood", weight: Weight::Bold, color: Theme::PRIMARY)
-            }
-
             // Main content
             View(
                 flex_direction: FlexDirection::Column,
                 flex_grow: 1.0,
-                gap: 1,
-                padding: 1,
+                flex_shrink: 1.0,
+                overflow: Overflow::Hidden,
+                gap: 0,
             ) {
                 // Traversal info
                 TraversalInfo(depth: depth, neighborhood_name: neighborhood_name)
@@ -440,9 +418,6 @@ pub fn NeighborhoodScreen(
                 // Block grid
                 BlockGrid(blocks: blocks, selected_index: current_selected)
             }
-
-            // Key hints
-            KeyHintsBar(hints: hints)
         }
     }
 }
