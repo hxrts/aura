@@ -7,6 +7,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
+// Pure functions for Aeneas translation (formal verification)
+pub mod pure;
+
 use crate::{
     crypto::Ed25519Signature,
     types::identifiers::{AuthorityId, DeviceId},

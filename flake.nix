@@ -12,6 +12,11 @@
       url = "github:timewave-computer/crate2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # Aeneas: Rust-to-Lean/Coq/F*/HOL4 verification toolchain
+    aeneas = {
+      url = "github:AeneasVerif/aeneas";
+      # Don't follow nixpkgs - Aeneas has specific OCaml/Coq version requirements
+    };
   };
 
   outputs =
@@ -21,6 +26,7 @@
       flake-utils,
       rust-overlay,
       crate2nix,
+      aeneas,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -197,6 +203,7 @@
             nodejs_20
             jre # For ANTLR4TS and Apalache
             lean4 # Lean 4 for kernel verification
+            aeneas.packages.${system}.aeneas # Rust-to-Lean translator
 
             # Documentation tools
             markdown-link-check
@@ -218,6 +225,7 @@
               echo "TLA+ tools: $(tlc2 2>&1 | head -1 | grep -o 'Version.*' || echo 'available')"
               echo "Node.js version: $(node --version)"
               echo "Lean version: $(lean --version 2>/dev/null || echo 'available')"
+              echo "Aeneas version: $(aeneas --version 2>/dev/null || echo 'available')"
               echo ""
               echo "Available commands:"
               echo "  just --list          Show all available tasks"
@@ -229,6 +237,7 @@
               echo "  quint --help         Formal verification with Quint"
               echo "  apalache-mc --help   Model checking with Apalache"
               echo "  lean --help          Kernel verification with Lean 4"
+              echo "  aeneas --help        Rust-to-Lean translation"
               echo "  crate2nix --help     Generate hermetic Nix builds"
               echo ""
               echo "Hermetic builds:"

@@ -402,7 +402,7 @@ module protocol_journal {
   // ==================== LEAN PROOF CONNECTION ====================
   //
   // The CRDT properties defined above correspond to Lean 4 theorems in:
-  //   specs/lean/Aura/Semilattice.lean
+  //   verification/lean/Aura/Semilattice.lean
   //
   // Key correspondences:
   //   - propNonceMergeCommutative  ↔ Semilattice.join_comm

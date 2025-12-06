@@ -51,6 +51,9 @@ pub mod commitment_integration;
 pub mod fact;
 pub mod reduction;
 
+// Pure functions for Aeneas translation (formal verification)
+pub mod pure;
+
 // Extensible fact type infrastructure (Open/Closed Principle)
 pub mod extensibility;
 

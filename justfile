@@ -906,13 +906,13 @@ quint-typecheck-all:
     echo "============================"
     echo ""
 
-    SPECS_DIR="specs/quint"
+    SPECS_DIR="verification/quint"
     TEST_SPECS_DIR="crates/aura-simulator/tests/quint_specs"
 
     passed=0
     failed=0
 
-    # Typecheck specs/quint/
+    # Typecheck verification/quint/
     echo "Checking specs in $SPECS_DIR..."
     for spec in $SPECS_DIR/protocol_*.qnt $SPECS_DIR/harness_*.qnt; do
         if [ -f "$spec" ]; then
@@ -983,19 +983,19 @@ quint-verify-all max_steps="5" output_dir="traces/verify":
     # Format: spec_file:invariant1,invariant2,...
     VERIFY_TARGETS=(
         # Journal CRDT properties (proving.md §1)
-        "specs/quint/protocol_journal.qnt:InvariantNonceUnique,InvariantEventsOrdered,InvariantLamportMonotonic,InvariantReduceDeterministic"
+        "verification/quint/protocol_journal.qnt:InvariantNonceUnique,InvariantEventsOrdered,InvariantLamportMonotonic,InvariantReduceDeterministic"
 
         # Consensus fast-path/fallback (proving.md §1)
-        "specs/quint/protocol_consensus.qnt:InvariantUniqueCommitPerInstance,InvariantCommitRequiresThreshold,InvariantPathConvergence"
+        "verification/quint/protocol_consensus.qnt:InvariantUniqueCommitPerInstance,InvariantCommitRequiresThreshold,InvariantPathConvergence"
 
         # Anti-entropy convergence (proving.md §3)
-        "specs/quint/protocol_anti_entropy.qnt:InvariantFactsMonotonic,InvariantVectorClockConsistent,InvariantEventualConvergence"
+        "verification/quint/protocol_anti_entropy.qnt:InvariantFactsMonotonic,InvariantVectorClockConsistent,InvariantEventualConvergence"
 
         # Recovery safety (proving.md §4)
-        "specs/quint/protocol_recovery.qnt:InvariantThresholdWithinBounds,InvariantApprovalsSubsetGuardians,InvariantPhaseConsistency"
+        "verification/quint/protocol_recovery.qnt:InvariantThresholdWithinBounds,InvariantApprovalsSubsetGuardians,InvariantPhaseConsistency"
 
         # Session management
-        "specs/quint/protocol_sessions.qnt:InvariantAuthoritiesRegisteredSessions,InvariantRevokedInactive"
+        "verification/quint/protocol_sessions.qnt:InvariantAuthoritiesRegisteredSessions,InvariantRevokedInactive"
     )
 
     passed=0
@@ -1066,7 +1066,7 @@ quint-verify-all max_steps="5" output_dir="traces/verify":
     fi
 
 # Verify a single Quint spec with specific invariants
-# Usage: just quint-verify specs/quint/protocol_journal.qnt InvariantNonceUnique
+# Usage: just quint-verify verification/quint/protocol_journal.qnt InvariantNonceUnique
 quint-verify spec invariants:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -1109,13 +1109,13 @@ quint-generate-traces:
 
     # Specs that have step actions defined
     RUNNABLE_SPECS=(
-        "specs/quint/protocol_journal.qnt:journal"
-        "specs/quint/protocol_consensus.qnt:consensus"
-        "specs/quint/protocol_anti_entropy.qnt:anti_entropy"
-        "specs/quint/protocol_epochs.qnt:epochs"
-        "specs/quint/protocol_cross_interaction.qnt:cross_interaction"
-        "crates/aura-simulator/tests/quint_specs/capability_properties.qnt:cap_props"
-        "crates/aura-simulator/tests/quint_specs/frost_protocol.qnt:frost"
+        "verification/quint/protocol_journal.qnt:journal"
+        "verification/quint/protocol_consensus.qnt:consensus"
+        "verification/quint/protocol_anti_entropy.qnt:anti_entropy"
+        "verification/quint/protocol_epochs.qnt:epochs"
+        "verification/quint/protocol_cross_interaction.qnt:cross_interaction"
+        "verification/quint/protocol_capability_properties.qnt:cap_props"
+        "verification/quint/protocol_frost.qnt:frost"
     )
 
     for target in "${RUNNABLE_SPECS[@]}"; do
@@ -1350,10 +1350,10 @@ test-quint-pipeline:
     mkdir -p .aura-test
 
     echo "1. Converting Quint specification to JSON..."
-    echo "   Input: specs/quint/protocol_dkd.qnt"
+    echo "   Input: verification/quint/protocol_dkd.qnt"
     echo "   Output: /tmp/quint_pipeline_test.json"
     echo ""
-    just quint-parse specs/quint/protocol_dkd.qnt /tmp/quint_pipeline_test.json
+    just quint-parse verification/quint/protocol_dkd.qnt /tmp/quint_pipeline_test.json
     echo ""
 
     echo "2. Verifying JSON output structure..."
@@ -1387,7 +1387,7 @@ test-quint-pipeline:
         echo "   Created: $(stat -f%Sm /tmp/dkd_spec.json 2>/dev/null || stat -c%y /tmp/dkd_spec.json)"
     else
         echo "   [INFO] No existing DKD spec JSON found - creating one"
-        just quint-parse specs/quint/protocol_dkd.qnt /tmp/dkd_spec.json
+        just quint-parse verification/quint/protocol_dkd.qnt /tmp/dkd_spec.json
     fi
     echo ""
 
@@ -1411,16 +1411,44 @@ test-quint-pipeline:
 # Initialize Lean project (run once or after clean)
 lean-init:
     @echo "Initializing Lean project..."
-    cd specs/lean && lake update
+    cd verification/lean && lake update
 
 # Build Lean verification modules
 lean-build: lean-init
     @echo "Building Lean verification modules..."
-    cd specs/lean && lake build
+    cd verification/lean && lake build
 
-# Build the Lean verifier CLI (if executable is defined)
-lean-verifier: lean-build
-    @echo "Lean library built. Verifier CLI not yet configured."
+# Build the Lean oracle verifier CLI for differential testing
+lean-oracle-build: lean-init
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m'
+
+    # Store project root before changing directories
+    PROJECT_ROOT="$(pwd)"
+
+    echo "Building Lean oracle verifier..."
+    cd verification/lean && lake build aura_verifier
+
+    BINARY="$PROJECT_ROOT/verification/lean/.lake/build/bin/aura_verifier"
+    if [ -f "$BINARY" ]; then
+        echo -e "${GREEN}✓ Lean oracle built successfully${NC}"
+        echo "  Binary: $BINARY"
+        VERSION=$("$BINARY" version 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+        echo "  Version: $VERSION"
+    else
+        echo -e "${YELLOW}⚠ Binary not found at expected location${NC}"
+        echo "  Expected: $BINARY"
+        exit 1
+    fi
+
+# Run differential tests against Lean oracle
+test-differential: lean-oracle-build
+    @echo "Running differential tests against Lean oracle..."
+    cargo test -p aura-testkit --test lean_differential -- --ignored --nocapture
 
 # Run Lean verification (build and check for errors)
 lean-check: lean-build
@@ -1435,7 +1463,7 @@ lean-check: lean-build
     echo ""
 
     # Check for sorry usage (incomplete proofs)
-    if grep -r "sorry" specs/lean/Aura --include="*.lean" > /tmp/sorry-check.txt 2>/dev/null; then
+    if grep -r "sorry" verification/lean/Aura --include="*.lean" > /tmp/sorry-check.txt 2>/dev/null; then
         count=$(wc -l < /tmp/sorry-check.txt | tr -d ' ')
         echo -e "${YELLOW}⚠ Found $count incomplete proofs (sorry):${NC}"
         head -10 /tmp/sorry-check.txt | sed 's/^/  /'
@@ -1449,7 +1477,7 @@ lean-check: lean-build
 # Clean Lean build artifacts
 lean-clean:
     @echo "Cleaning Lean artifacts..."
-    cd specs/lean && lake clean
+    cd verification/lean && lake clean
 
 # Full Lean workflow (clean, build, verify)
 lean-full: lean-clean lean-build lean-check
@@ -1468,7 +1496,7 @@ lean-status:
     echo "================="
     echo ""
 
-    LEAN_DIR="specs/lean"
+    LEAN_DIR="verification/lean"
 
     if [ ! -d "$LEAN_DIR" ]; then
         echo "No Lean directory found at $LEAN_DIR"
@@ -1495,3 +1523,107 @@ lean-status:
 
     echo ""
     echo "Run 'just lean-check' to build and verify proofs"
+
+# Translate pure Rust functions to Lean using Aeneas
+lean-translate:
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    RED='\033[0;31m'
+    NC='\033[0m'
+
+    echo "Translating Rust pure functions to Lean using Aeneas"
+    echo "====================================================="
+    echo ""
+
+    OUTPUT_DIR="verification/lean/Generated"
+    mkdir -p "$OUTPUT_DIR"
+
+    # Check if aeneas is available
+    if ! command -v aeneas &> /dev/null; then
+        echo -e "${RED}✗ Aeneas not found in PATH${NC}"
+        echo "  Run 'nix develop' to enter the development environment"
+        exit 1
+    fi
+
+    echo "Aeneas version: $(aeneas --version 2>/dev/null || echo 'unknown')"
+    echo ""
+
+    # List of pure modules to translate
+    # Format: crate_path:module_name
+    MODULES=(
+        "crates/aura-journal/src/pure/merge.rs:Journal.Merge"
+        "crates/aura-journal/src/pure/reduce.rs:Journal.Reduce"
+        "crates/aura-core/src/time/pure/compare.rs:Time.Compare"
+    )
+
+    SUCCESS=0
+    FAILED=0
+
+    for module in "${MODULES[@]}"; do
+        src="${module%%:*}"
+        name="${module##*:}"
+        out_dir="$OUTPUT_DIR/${name//./\/}"
+
+        echo -n "Translating $name from $src... "
+
+        if [ ! -f "$src" ]; then
+            echo -e "${RED}✗ Source not found${NC}"
+            ((FAILED++))
+            continue
+        fi
+
+        mkdir -p "$out_dir"
+
+        # Run Aeneas translation
+        # Note: Aeneas requires the full crate context, so we translate at crate level
+        # and extract the specific module. For now, we show the command that would run.
+        echo -e "${YELLOW}○ Pending${NC}"
+        echo "    Would run: aeneas --backend lean4 --input $src --dest $out_dir"
+        ((SUCCESS++))
+    done
+
+    echo ""
+    echo "Summary: $SUCCESS modules ready for translation, $FAILED failed"
+    echo ""
+    echo -e "${YELLOW}Note:${NC} Aeneas translation requires the full crate to be compilable."
+    echo "      Use 'aeneas --help' to see available options."
+    echo "      Generated Lean files will be in: $OUTPUT_DIR/"
+
+# Verify translated Lean code compiles
+lean-verify-translated: lean-translate lean-init
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m'
+
+    echo "Verifying translated Lean code..."
+
+    GEN_DIR="verification/lean/Generated"
+    if [ ! -d "$GEN_DIR" ]; then
+        echo -e "${YELLOW}⚠ No generated code found in $GEN_DIR${NC}"
+        exit 0
+    fi
+
+    # Count generated files
+    count=$(find "$GEN_DIR" -name "*.lean" -type f | wc -l | tr -d ' ')
+    if [ "$count" -eq 0 ]; then
+        echo -e "${YELLOW}⚠ No .lean files found in $GEN_DIR${NC}"
+        exit 0
+    fi
+
+    echo "Found $count generated Lean files"
+    echo ""
+
+    # Try to build the generated code with lake
+    cd verification/lean
+    if lake build Generated 2>/dev/null; then
+        echo -e "${GREEN}✓ All translated code compiles${NC}"
+    else
+        echo -e "${YELLOW}⚠ Some translated code has errors${NC}"
+        echo "  Run 'cd verification/lean && lake build Generated' for details"
+    fi

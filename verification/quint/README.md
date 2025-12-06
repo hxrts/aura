@@ -34,7 +34,7 @@ quint verify <spec>.qnt
 
 ## Specification Structure
 
-### Protocol Specifications (16 specs)
+### Protocol Specifications (18 specs)
 
 Core protocol state machines modeling Aura's distributed protocols:
 
@@ -56,6 +56,8 @@ Core protocol state machines modeling Aura's distributed protocols:
 | `protocol_cross_interaction.qnt` | Recovery∥Consensus concurrent execution safety | [Distributed Contract](../../docs/004_distributed_systems_contract.md) |
 | `protocol_anti_entropy.qnt` | CRDT delta sync and eventual convergence | [Maintenance](../../docs/111_maintenance.md) |
 | `protocol_epochs.qnt` | Epoch transitions and receipt validity windows | [Transport](../../docs/108_transport_and_information_flow.md) |
+| `protocol_frost.qnt` | FROST threshold signature protocol model | [Crypto Guide](../../docs/116_crypto.md) |
+| `protocol_capability_properties.qnt` | Guard chain authorization, budget, and integrity verification | [Information Flow](../../docs/003_information_flow_contract.md) |
 
 ### Harness Modules (6 specs)
 
@@ -76,8 +78,6 @@ Located in `crates/aura-simulator/tests/quint_specs/`:
 
 | Specification | Purpose |
 |---------------|---------|
-| `capability_properties.qnt` | Guard chain authorization, budget, and integrity verification |
-| `frost_protocol.qnt` | FROST threshold signature protocol model |
 | `dkd_minimal.qnt` | Minimal DKD protocol test |
 
 ## Design Principles
@@ -132,8 +132,8 @@ All core protocol specifications have been verified with Apalache model checking
 | `protocol_cross_interaction.qnt` | `InvariantNoDeadlock`, `InvariantRevokedDevicesExcluded` |
 | `protocol_epochs.qnt` | `InvariantReceiptValidityWindow`, `InvariantCrossEpochReplayPrevention` |
 | `protocol_dkg.qnt` | `InvariantThresholdBounds`, `InvariantPhaseCommitmentCounts`, `InvariantSharesOnlyAfterVerification` |
-| `capability_properties.qnt` | `guardChainOrder`, `chargeBeforeSend`, `spentWithinLimit`, `attenuationOnlyNarrows` |
-| `frost_protocol.qnt` | `thresholdInvariant`, `commitmentBeforeSigning`, `sharesFromCommitted`, `validSignatureInvariant` |
+| `protocol_capability_properties.qnt` | `guardChainOrder`, `chargeBeforeSend`, `spentWithinLimit`, `attenuationOnlyNarrows` |
+| `protocol_frost.qnt` | `thresholdInvariant`, `commitmentBeforeSigning`, `sharesFromCommitted`, `validSignatureInvariant` |
 
 ## Verified Properties
 
@@ -181,8 +181,8 @@ Model-based testing traces are generated in `traces/`:
 
 | Trace File | Source Spec | Description |
 |------------|-------------|-------------|
-| `cap_props.itf.json` | `capability_properties.qnt` | Guard chain and budget verification |
-| `frost.itf.json` | `frost_protocol.qnt` | FROST threshold signature protocol |
+| `cap_props.itf.json` | `protocol_capability_properties.qnt` | Guard chain and budget verification |
+| `frost.itf.json` | `protocol_frost.qnt` | FROST threshold signature protocol |
 | `dkg.itf.json` | `protocol_dkg.qnt` | DKG ceremony execution |
 | `consensus.itf.json` | `protocol_consensus.qnt` | Fast-path/fallback consensus |
 | `cross_interaction.itf.json` | `protocol_cross_interaction.qnt` | Concurrent protocol safety |
@@ -192,7 +192,7 @@ Model-based testing traces are generated in `traces/`:
 Generate traces with:
 
 ```bash
-quint run specs/quint/protocol_consensus.qnt \
+quint run verification/quint/protocol_consensus.qnt \
   --main=protocol_consensus \
   --max-samples=5 --max-steps=20 \
   --out-itf=traces/consensus.itf.json

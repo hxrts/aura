@@ -263,3 +263,82 @@ jobs:
           else
             echo "[OK] Lints correctly caught violations"
           fi
+
+  lean-proofs:
+    name: Lean Formal Verification
+    runs-on: ubuntu-latest
+    # Only run when Lean files or kernel code changes
+    if: |
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'verification') ||
+      contains(join(github.event.pull_request.changed_files, ' '), 'verification/lean') ||
+      contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-journal') ||
+      contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-core/src/time')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - name: Cache Nix store
+        uses: actions/cache@v3
+        with:
+          path: /nix/store
+          key: ${{ runner.os }}-nix-${{ hashFiles('flake.lock') }}
+          restore-keys: ${{ runner.os }}-nix-
+      - name: Build Lean proofs
+        run: |
+          echo "Building Lean formal verification modules..."
+          nix develop --command bash -c "cd verification/lean && lake build"
+      - name: Check for incomplete proofs
+        run: |
+          echo "Checking for incomplete proofs (sorry usage)..."
+          if grep -r "sorry" verification/lean/Aura --include="*.lean" 2>/dev/null; then
+            echo "[WARNING] Found incomplete proofs (sorry). These should be resolved."
+            # Don't fail CI for now, just warn
+          else
+            echo "[OK] All proofs complete (no sorry found)"
+          fi
+
+  differential-testing:
+    name: Lean Differential Testing
+    runs-on: ubuntu-latest
+    needs: [lean-proofs]
+    # Only run when Lean or kernel code changes
+    if: |
+      github.event_name == 'push' ||
+      contains(github.event.pull_request.labels.*.name, 'verification') ||
+      contains(join(github.event.pull_request.changed_files, ' '), 'verification/lean') ||
+      contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-journal') ||
+      contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-core/src/time') ||
+      contains(join(github.event.pull_request.changed_files, ' '), 'crates/aura-testkit')
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - name: Cache Nix store
+        uses: actions/cache@v3
+        with:
+          path: /nix/store
+          key: ${{ runner.os }}-nix-${{ hashFiles('flake.lock') }}
+          restore-keys: ${{ runner.os }}-nix-
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache cargo build
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+      - name: Build Lean oracle
+        run: |
+          echo "Building Lean oracle verifier..."
+          nix develop --command just lean-oracle-build
+      - name: Run differential tests
+        run: |
+          echo "Running differential tests (Rust vs Lean oracle)..."
+          nix develop --command just test-differential

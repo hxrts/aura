@@ -9,7 +9,6 @@ package auraLean where
 lean_lib Aura
 
 -- CLI runner for differential testing (Lean model vs Rust implementation)
--- TODO: Fix executable build
--- lean_exe aura_verifier where
---   root := `Aura.Runner
---   supportInterpreter := true
+lean_exe aura_verifier where
+  root := `Aura.Runner
+  supportInterpreter := true
