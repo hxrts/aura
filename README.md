@@ -1,12 +1,12 @@
 # Aura
 
-Aura is a private peer-to-peer social network. Its design takes the following as points of departure:
+Aura is a private peer-to-peer social network designed around a few novel concepts:
 
-*Identity is relational* • Identity emerges through shared contexts rather than global identifiers. Each relationship forms its own identity boundary, an opaque authority. Threshold policies and device membership are maintained through commitment tree reduction. This enables social recovery without exposing private keys. 
+Identity is relational • Identity emerges bottom-up between parties that share context. Aura has no transparent state and no global singleton, rather each context is encrypted and governed by its own threshold authority. Aura's relational model enables social recovery and complete account rehydration without transient decryption in scenarios where users have lost all devices.
 
-*Your friends are the network* • Aura runs as an encrypted mesh across the social graph. Distributed protocols run within scoped session and channel contexts that conceal participant structure. Storage, gossip, rendezvous, and consensus all operate through these context boundaries.
+Your friends are the network • The Aura network forms an encrypted mesh across the social graph. Distributed protocols run within scoped sessions and channels that conceal participant structure. Gossip, rendezvous, consensus, and storage all operate through these bounded contexts.
 
-*Agency from consent* • Relationships are expressed through a web-of-trust. Capabilities form a semilattice that restricts authority through attenuation. Information flow is governed by explicit consent predicates. Consent enables participants to coordinate more flexibly by ensuring boundaries are by design.
+Autonomy from consent • Relationships are expressed through a web-of-trust. Capabilities form a semilattice that restricts authority through attenuation. Information flow is governed by explicit consent predicates. Consent enables participants to coordinate more flexibly by ensuring boundaries by design.
 
 ## Architecture
 

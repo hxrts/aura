@@ -538,7 +538,7 @@ async fn test_trace_replay() {
 
     // Generate traces from Quint spec
     let traces = fuzzer.generate_traces(
-        "specs/quint/capability_properties.qnt",
+        "verification/quint/protocol_capability_properties.qnt",
         100, // number of traces
     ).await?;
 
@@ -564,7 +564,7 @@ async fn test_exploration() {
 
     // Explore with effect execution
     let result = simulator.explore_with_effects(
-        "specs/quint/protocol_recovery.qnt",
+        "verification/quint/protocol_recovery.qnt",
         500, // max steps
     ).await?;
 
@@ -587,7 +587,7 @@ async fn generate_tests_from_quint() {
 
     // Generate test cases validated through effects
     let test_cases = fuzzer.generate_validated_test_cases(
-        "specs/quint/protocol_dkg.qnt",
+        "verification/quint/protocol_dkg.qnt",
         50, // number of test cases
     ).await?;
 
@@ -616,7 +616,7 @@ async fn test_mbt_pipeline() {
     // 3. Validate properties
     // 4. Generate test cases
     let result = fuzzer.run_mbt_with_effects(
-        "specs/quint/capability_properties.qnt",
+        "verification/quint/protocol_capability_properties.qnt",
         100, // trace count
     ).await?;
 
@@ -654,14 +654,14 @@ The following Quint specs are available for generative simulation:
 
 | Spec | Purpose | Location |
 |------|---------|----------|
-| `capability_properties.qnt` | Guard chain security | `specs/quint/` |
-| `protocol_core.qnt` | Protocol lifecycle | `specs/quint/` |
-| `protocol_recovery.qnt` | Guardian recovery | `specs/quint/` |
-| `protocol_dkg.qnt` | DKG ceremony | `specs/quint/` |
-| `protocol_journal.qnt` | Journal CRDT | `specs/quint/` |
-| `protocol_sessions.qnt` | Session management | `specs/quint/` |
-| `protocol_groups.qnt` | Group membership | `specs/quint/` |
-| `protocol_sbb.qnt` | Gossip transport | `specs/quint/` |
+| `protocol_capability_properties.qnt` | Guard chain security | `verification/quint/` |
+| `protocol_core.qnt` | Protocol lifecycle | `verification/quint/` |
+| `protocol_recovery.qnt` | Guardian recovery | `verification/quint/` |
+| `protocol_dkg.qnt` | DKG ceremony | `verification/quint/` |
+| `protocol_journal.qnt` | Journal CRDT | `verification/quint/` |
+| `protocol_sessions.qnt` | Session management | `verification/quint/` |
+| `protocol_groups.qnt` | Group membership | `verification/quint/` |
+| `protocol_sbb.qnt` | Gossip transport | `verification/quint/` |
 
 See [Verification Guide](807_verification_guide.md) for spec details and invariants.
 

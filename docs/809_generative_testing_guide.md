@@ -122,10 +122,10 @@ The simulator injects these choices into `RandomEffects` to ensure trace replay 
 
 ### 1. Develop Specification
 
-Write Quint spec in `specs/quint/` following authority model and syntax patterns:
+Write Quint spec in `verification/quint/` following authority model and syntax patterns:
 
 ```bash
-quint typecheck specs/quint/protocol_myprotocol.qnt
+quint typecheck verification/quint/protocol_myprotocol.qnt
 ```
 
 ### 2. Generate Traces

@@ -202,7 +202,7 @@ Aura uses a unified `TimeStamp` with domain-specific traits; legacy `TimeEffects
 - **Choreography protocol** → Feature crate + `aura-mpst`
 - **Authorization logic** → `aura-wot`
 - **Social topology/relay selection** → `aura-social`
-- **Quint specification** → `specs/quint/` + `docs/807_verification_guide.md`
+- **Quint specification** → `verification/quint/` + `docs/807_verification_guide.md`
 - **Generative test** → `aura-simulator/src/quint/` + `docs/809_generative_testing_guide.md`
 
 #### "I need to understand..."

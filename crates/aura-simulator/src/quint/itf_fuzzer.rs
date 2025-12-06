@@ -2904,7 +2904,7 @@ mod tests {
             "#meta": {
                 "format": "ITF",
                 "format-description": "https://apalache.informal.systems/docs/adr/015adr-trace.html",
-                "source": "capability_properties.qnt",
+                "source": "protocol_capability_properties.qnt",
                 "status": "ok",
                 "description": "E2E test trace",
                 "timestamp": 1234567890

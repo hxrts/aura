@@ -1253,10 +1253,10 @@ Formal verification bridge to Quint model checker and property evaluator.
 - `runner.rs`: Verification runner with caching and parallel execution
 - `properties.rs`: Property specification management and classification
 
-**Quint specifications** (`specs/quint/`):
+**Quint specifications** (`verification/quint/`):
 - `protocol_*.qnt`: Core protocol state machines (DKG, recovery, resharing, sessions, etc.)
 - `harness_*.qnt`: Standard harness modules for simulator integration
-- `capability_properties.qnt`: Guard chain and authorization verification
+- `protocol_capability_properties.qnt`: Guard chain and authorization verification
 
 **Usage**: See `docs/807_verification_guide.md` for Quint specification patterns.
 

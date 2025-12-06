@@ -1,6 +1,6 @@
 //! Domain-Specific Action Handlers for Capability Properties
 //!
-//! This module implements action handlers for the `capability_properties.qnt`
+//! This module implements action handlers for the `protocol_capability_properties.qnt`
 //! reference specification, enabling generative simulation of Aura's core
 //! security properties.
 //!

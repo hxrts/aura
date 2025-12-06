@@ -123,7 +123,7 @@ The `evaluator` module provides subprocess-based parsing using `quint parse --ou
 
 ### Quint Specifications
 
-Formal specifications are organized in `specs/quint/` and `crates/aura-simulator/tests/quint_specs/`. Each protocol has a core specification and a harness for simulator integration.
+Formal specifications are organized in `verification/quint/` and `crates/aura-simulator/tests/quint_specs/`. Each protocol has a core specification and a harness for simulator integration.
 
 | Specification | Description |
 |---------------|-------------|
@@ -134,7 +134,7 @@ Formal specifications are organized in `specs/quint/` and `crates/aura-simulator
 | `protocol_counter.qnt` | Counter reservation with Lamport clocks |
 | `protocol_sessions.qnt` | Session management |
 | `protocol_journal.qnt` | Ledger event tracking |
-| `capability_properties.qnt` | Guard chain, budget, and integrity verification |
+| `protocol_capability_properties.qnt` | Guard chain, budget, and integrity verification |
 | `session_types.qnt` | Session type state machine properties |
 | `journal_effect_api.qnt` | Journal CRDT and event authorization |
 
@@ -143,13 +143,13 @@ Harness specifications expose standard action entry points. The `register()` act
 ### Building Quint Specifications
 
 ```bash
-just quint-parse specs/quint/protocol_dkg.qnt output.json
+just quint-parse verification/quint/protocol_dkg.qnt output.json
 ```
 
 The parse command converts Quint specifications to JSON IR format. The simulator consumes this format for property evaluation.
 
 ```bash
-just quint-compile specs/quint/protocol_dkg.qnt output.json
+just quint-compile verification/quint/protocol_dkg.qnt output.json
 ```
 
 The compile command includes full type checking. Use this for validation before integration testing.
@@ -176,7 +176,7 @@ Safety properties verify that invalid states cannot occur. Liveness properties v
 
 ### Capability Property Verification
 
-The `capability_properties.qnt` specification verifies Aura's core security properties. These properties correspond to the guard chain architecture documented in `docs/003_information_flow_contract.md`.
+The `protocol_capability_properties.qnt` specification verifies Aura's core security properties. These properties correspond to the guard chain architecture documented in `docs/003_information_flow_contract.md`.
 
 #### Property Categories
 
@@ -223,7 +223,7 @@ Integrity verification ensures Biscuit tokens can only be attenuated (narrowed),
 #### Running Capability Verification
 
 ```bash
-just quint-parse crates/aura-simulator/tests/quint_specs/capability_properties.qnt output.json
+just quint-parse verification/quint/protocol_capability_properties.qnt output.json
 ```
 
 The specification models the guard chain state machine with actions for context initialization, authority creation, transport operations, and capability attenuation. The `step` relation explores the state space through non-deterministic choices.

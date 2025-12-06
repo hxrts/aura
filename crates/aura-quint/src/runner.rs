@@ -1466,7 +1466,7 @@ impl QuintRunner {
         properties: &[&str],
     ) -> AuraResult<()> {
         // Path to capability properties spec
-        let spec_path = "crates/aura-simulator/tests/quint_specs/capability_properties.qnt";
+        let spec_path = "verification/quint/protocol_capability_properties.qnt";
 
         // Check if spec file exists
         match self.storage.retrieve(spec_path).await {
