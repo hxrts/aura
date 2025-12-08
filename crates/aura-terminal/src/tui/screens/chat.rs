@@ -11,11 +11,9 @@
 use iocraft::prelude::*;
 
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
 
-use crate::tui::components::{
-    navigate_list, ChatCreateModal, ChatCreateState, ListNavigation, MessageBubble, MessageInput,
-};
+use crate::tui::components::{ChatCreateModal, ChatCreateState, MessageBubble, MessageInput};
+use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Channel, Message};
@@ -284,7 +282,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let input_text_for_handler = input_text.clone();
 
     // Version counter to trigger rerenders when input changes
-    let mut input_version = hooks.use_state(|| 0usize);
+    let input_version = hooks.use_state(|| 0usize);
 
     // Get current channel ID for sending
     let current_channel_id = channels
@@ -296,8 +294,7 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
     let channels_for_handler = channels.clone();
 
     // Throttle for navigation keys - persists across renders
-    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
-    let throttle_duration = Duration::from_millis(150);
+    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
 
     // Clone create callback for event handler
     let on_create_channel = props.on_create_channel.clone();
@@ -311,9 +308,52 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
         let on_create_channel = on_create_channel.clone();
         let mut create_modal_state = create_modal_state.clone();
         let channels = channels_for_handler;
+        let mut input_version = input_version.clone();
         move |event| {
             // Check if create modal is visible
             let modal_visible = create_modal_state.read().visible;
+            let current_focus = focus.get();
+
+            // Handle navigation keys first (only in normal mode, not in modal or input mode)
+            if !modal_visible && current_focus != ChatFocus::Input {
+                if let Some(nav_key) = is_nav_key_press(&event) {
+                    if nav_throttle.write().try_navigate() {
+                        match nav_key {
+                            // Horizontal: cycle focus between panels
+                            NavKey::Left => {
+                                let new_focus = match current_focus {
+                                    ChatFocus::Channels => ChatFocus::Input,
+                                    ChatFocus::Messages => ChatFocus::Channels,
+                                    ChatFocus::Input => ChatFocus::Messages,
+                                };
+                                focus.set(new_focus);
+                            }
+                            NavKey::Right => {
+                                let new_focus = match current_focus {
+                                    ChatFocus::Channels => ChatFocus::Messages,
+                                    ChatFocus::Messages => ChatFocus::Input,
+                                    ChatFocus::Input => ChatFocus::Channels,
+                                };
+                                focus.set(new_focus);
+                            }
+                            // Vertical: navigate within channel list when focused
+                            NavKey::Up | NavKey::Down => {
+                                if current_focus == ChatFocus::Channels && channel_count > 0 {
+                                    let new_idx =
+                                        navigate_list(channel_idx.get(), channel_count, nav_key);
+                                    channel_idx.set(new_idx);
+                                    if let Some(ref callback) = on_channel_select {
+                                        if let Some(ch) = channels.get(new_idx) {
+                                            callback(ch.id.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
 
             match event {
                 TerminalEvent::Key(KeyEvent {
@@ -421,73 +461,19 @@ pub fn ChatScreen(props: &ChatScreenProps, mut hooks: Hooks) -> impl Into<AnyEle
                         }
                     } else {
                         // Normal mode: navigation and hotkeys
+                        // First handle hotkeys that shouldn't be captured by nav detection
                         match code {
-                            // Left/Right arrows and h/l cycle focus between panels
-                            KeyCode::Left | KeyCode::Char('h') => {
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move {
-                                    let new_focus = match focus.get() {
-                                        ChatFocus::Channels => ChatFocus::Input,
-                                        ChatFocus::Messages => ChatFocus::Channels,
-                                        ChatFocus::Input => ChatFocus::Messages,
-                                    };
-                                    focus.set(new_focus);
-                                    nav_throttle.set(Instant::now());
-                                }
-                            }
-                            KeyCode::Right | KeyCode::Char('l') => {
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move {
-                                    let new_focus = match focus.get() {
-                                        ChatFocus::Channels => ChatFocus::Messages,
-                                        ChatFocus::Messages => ChatFocus::Input,
-                                        ChatFocus::Input => ChatFocus::Channels,
-                                    };
-                                    focus.set(new_focus);
-                                    nav_throttle.set(Instant::now());
-                                }
-                            }
-                            // Up/Down arrows and j/k navigate within focused panel
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move && focus.get() == ChatFocus::Channels && channel_count > 0 {
-                                    let new_idx =
-                                        navigate_list(channel_idx.get(), channel_count, ListNavigation::Up);
-                                    channel_idx.set(new_idx);
-                                    nav_throttle.set(Instant::now());
-                                    if let Some(ref callback) = on_channel_select {
-                                        if let Some(ch) = channels.get(new_idx) {
-                                            callback(ch.id.clone());
-                                        }
-                                    }
-                                }
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move && focus.get() == ChatFocus::Channels && channel_count > 0 {
-                                    let new_idx = navigate_list(
-                                        channel_idx.get(),
-                                        channel_count,
-                                        ListNavigation::Down,
-                                    );
-                                    channel_idx.set(new_idx);
-                                    nav_throttle.set(Instant::now());
-                                    if let Some(ref callback) = on_channel_select {
-                                        if let Some(ch) = channels.get(new_idx) {
-                                            callback(ch.id.clone());
-                                        }
-                                    }
-                                }
-                            }
                             // 'i' enters insert mode
                             KeyCode::Char('i') => {
                                 focus.set(ChatFocus::Input);
+                                return;
                             }
                             // 'n' opens new channel modal
                             KeyCode::Char('n') => {
                                 let mut state = create_modal_state.read().clone();
                                 state.show();
                                 create_modal_state.set(state);
+                                return;
                             }
                             _ => {}
                         }

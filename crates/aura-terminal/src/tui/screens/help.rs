@@ -3,8 +3,8 @@
 //! Displays help for IRC-style slash commands
 
 use iocraft::prelude::*;
-use std::time::{Duration, Instant};
 
+use crate::tui::navigation::{is_nav_key_press, navigate_list, NavThrottle};
 use crate::tui::theme::{Spacing, Theme};
 
 /// A command help item
@@ -124,42 +124,23 @@ pub struct HelpScreenProps {
 /// The help screen component
 #[component]
 pub fn HelpScreen(props: &HelpScreenProps, mut hooks: Hooks) -> impl Into<AnyElement<'static>> {
-    let selected = hooks.use_state(|| props.selected_index);
+    let mut selected = hooks.use_state(|| props.selected_index);
 
     let commands = props.commands.clone();
     let current_selected = selected.get();
+    let command_count = commands.len();
 
     // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
-    let throttle_duration = Duration::from_millis(150);
+    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
 
     hooks.use_terminal_events({
-        let mut selected = selected.clone();
-        let command_count = commands.len();
         move |event| {
-            if let TerminalEvent::Key(KeyEvent { code, .. }) = event {
-                match code {
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                        if should_move {
-                            let current = selected.get();
-                            if current > 0 {
-                                selected.set(current - 1);
-                            }
-                            nav_throttle.set(Instant::now());
-                        }
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                        if should_move {
-                            let current = selected.get();
-                            if current + 1 < command_count {
-                                selected.set(current + 1);
-                            }
-                            nav_throttle.set(Instant::now());
-                        }
-                    }
-                    _ => {}
+            // Handle navigation keys (vertical only for single-panel list)
+            if let Some(nav_key) = is_nav_key_press(&event) {
+                if nav_key.is_vertical() && nav_throttle.write().try_navigate() && command_count > 0
+                {
+                    let new_idx = navigate_list(selected.get(), command_count, nav_key);
+                    selected.set(new_idx);
                 }
             }
         }

@@ -10,9 +10,9 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use crate::tui::hooks::AppCoreContext;
+use crate::tui::navigation::{is_nav_key_press, navigate_grid, NavThrottle};
 use crate::tui::theme::Theme;
 use crate::tui::types::{BlockSummary, TraversalDepth};
 
@@ -312,86 +312,55 @@ pub fn NeighborhoodScreen(
     let blocks = reactive_blocks.read().clone();
     let depth = reactive_depth.get();
 
-    let selected = hooks.use_state(|| 0usize);
+    let mut selected = hooks.use_state(|| 0usize);
 
     let current_selected = selected.get();
+    let count = blocks.len();
+    // 2 columns in the grid
+    const GRID_COLS: usize = 2;
 
     // Clone callbacks for event handler
     let on_enter_block = props.on_enter_block.clone();
     let on_go_home = props.on_go_home.clone();
+    let blocks_for_handler = blocks.clone();
 
     // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
-    let throttle_duration = Duration::from_millis(150);
+    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
 
     hooks.use_terminal_events({
-        let mut selected = selected.clone();
-        let blocks_for_handler = blocks.clone();
-        let count = blocks_for_handler.len();
-        move |event| match event {
-            TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                // Navigation - arrow keys and vim h/j/k/l
-                KeyCode::Left | KeyCode::Char('h') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        let current = selected.get();
-                        if current > 0 {
-                            selected.set(current - 1);
-                        }
-                        nav_throttle.set(Instant::now());
-                    }
+        move |event| {
+            // Handle navigation keys first (2D grid navigation)
+            if let Some(nav_key) = is_nav_key_press(&event) {
+                if nav_throttle.write().try_navigate() && count > 0 {
+                    let new_idx = navigate_grid(selected.get(), GRID_COLS, count, nav_key);
+                    selected.set(new_idx);
                 }
-                KeyCode::Right | KeyCode::Char('l') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        let current = selected.get();
-                        if current + 1 < count {
-                            selected.set(current + 1);
-                        }
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        let current = selected.get();
-                        // Move up a row (2 blocks per row in 2x2 grid)
-                        if current >= 2 {
-                            selected.set(current - 2);
-                        }
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        let current = selected.get();
-                        // Move down a row (2 blocks per row in 2x2 grid)
-                        if current + 2 < count {
-                            selected.set(current + 2);
-                        }
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                // Enter block - navigate into the selected block
-                KeyCode::Enter => {
-                    if let Some(ref callback) = on_enter_block {
-                        if let Some(block) = blocks_for_handler.get(selected.get()) {
-                            if block.can_enter {
-                                callback(block.id.clone(), TraversalDepth::Interior);
+                return;
+            }
+
+            // Handle other keys
+            match event {
+                TerminalEvent::Key(KeyEvent { code, .. }) => match code {
+                    // Enter block - navigate into the selected block
+                    KeyCode::Enter => {
+                        if let Some(ref callback) = on_enter_block {
+                            if let Some(block) = blocks_for_handler.get(selected.get()) {
+                                if block.can_enter {
+                                    callback(block.id.clone(), TraversalDepth::Interior);
+                                }
                             }
                         }
                     }
-                }
-                // Go home - navigate to home block
-                KeyCode::Char('g') => {
-                    if let Some(ref callback) = on_go_home {
-                        callback();
+                    // Go home - navigate to home block
+                    KeyCode::Char('g') => {
+                        if let Some(ref callback) = on_go_home {
+                            callback();
+                        }
                     }
-                }
+                    _ => {}
+                },
                 _ => {}
-            },
-            _ => {}
+            }
         }
     });
 

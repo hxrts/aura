@@ -4,7 +4,7 @@
 //!
 //! Layout:
 //! - Top row(s): Screen-specific hints in a 4-column grid (max 4 per row)
-//! - Bottom row: Global navigation hints (Tab, S-Tab, 1-8, [d Demo], q Quit)
+//! - Bottom row: Global navigation hints (Tab, S-Tab, 1-8, q Quit)
 
 use iocraft::prelude::*;
 
@@ -16,8 +16,6 @@ use crate::tui::types::KeyHint;
 pub struct KeyHintsBarProps {
     /// Screen-specific hints (varies by screen)
     pub screen_hints: Vec<KeyHint>,
-    /// Whether demo mode is active (adds 'd Demo' to global hints)
-    pub demo_mode: bool,
 }
 
 /// A single hint item component with fixed width for 4-column grid layout
@@ -77,18 +75,12 @@ pub fn KeyHintsBar(props: &KeyHintsBarProps) -> impl Into<AnyElement<'static>> {
         .collect();
 
     // Build global hints (always in this fixed order)
-    let mut global_hints = vec![
+    let global_hints = vec![
         KeyHint::new("Tab", "Next"),
         KeyHint::new("S-Tab", "Prev"),
         KeyHint::new("1-8", "Screen"),
+        KeyHint::new("q", "Quit"),
     ];
-
-    // Add demo hint before quit if in demo mode
-    if props.demo_mode {
-        global_hints.push(KeyHint::new("d", "Demo"));
-    }
-
-    global_hints.push(KeyHint::new("q", "Quit"));
 
     element! {
         View(

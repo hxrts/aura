@@ -10,12 +10,12 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use crate::tui::components::{
     EmptyState, InvitationCodeModal, InvitationCodeState, InvitationCreateModal,
     InvitationCreateState, InvitationImportModal, InvitationImportState,
 };
+use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle, TwoPanelFocus};
 use crate::tui::effects::{AuraEvent, EventFilter};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Spacing, Theme};
@@ -372,9 +372,9 @@ pub fn InvitationsScreen(
     });
 
     // State hooks must be called in consistent order - define all states first
-    let selected = hooks.use_state(|| props.selected_index);
-    let filter = hooks.use_state(|| props.filter);
-    let detail_focused = hooks.use_state(|| false);
+    let mut selected = hooks.use_state(|| props.selected_index);
+    let mut filter = hooks.use_state(|| props.filter);
+    let mut panel_focus = hooks.use_state(|| TwoPanelFocus::List);
 
     // Modal state for creating new invitations
     let create_modal_state = hooks.use_state(InvitationCreateState::new);
@@ -472,7 +472,8 @@ pub fn InvitationsScreen(
         .collect();
 
     let current_selected = selected.get();
-    let is_detail_focused = detail_focused.get();
+    let current_focus = panel_focus.get();
+    let is_detail_focused = current_focus == TwoPanelFocus::Detail;
     let selected_invitation = filtered.get(current_selected).cloned();
 
     // Clone callbacks for event handler
@@ -488,13 +489,9 @@ pub fn InvitationsScreen(
     let demo_charlie_code = props.demo_charlie_code.clone();
 
     // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
-    let throttle_duration = Duration::from_millis(150);
+    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
 
     hooks.use_terminal_events({
-        let mut selected = selected.clone();
-        let mut filter = filter.clone();
-        let mut detail_focused = detail_focused.clone();
         let mut create_modal_state = create_modal_state.clone();
         let mut code_modal_state = code_modal_state.clone();
         let mut import_modal_state = import_modal_state.clone();
@@ -508,6 +505,30 @@ pub fn InvitationsScreen(
             let create_modal_visible = create_modal_state.read().visible;
             let code_modal_visible = code_modal_state.read().visible;
             let import_modal_visible = import_modal_state.read().visible;
+            let any_modal_visible = create_modal_visible || code_modal_visible || import_modal_visible;
+
+            // Handle navigation keys first (only when no modal is visible)
+            if !any_modal_visible {
+                if let Some(nav_key) = is_nav_key_press(&event) {
+                    if nav_throttle.write().try_navigate() {
+                        match nav_key {
+                            // Horizontal: toggle between list and detail
+                            NavKey::Left | NavKey::Right => {
+                                let new_focus = panel_focus.get().navigate(nav_key);
+                                panel_focus.set(new_focus);
+                            }
+                            // Vertical: navigate within list when list is focused
+                            NavKey::Up | NavKey::Down => {
+                                if panel_focus.get() == TwoPanelFocus::List && count > 0 {
+                                    let new_idx = navigate_list(selected.get(), count, nav_key);
+                                    selected.set(new_idx);
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
 
             match event {
                 TerminalEvent::Key(KeyEvent { code, .. }) => {
@@ -616,43 +637,15 @@ pub fn InvitationsScreen(
                             _ => {}
                         }
                     } else {
-                        // Normal screen keys
+                        // Normal screen keys (non-navigation hotkeys)
                         match code {
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move {
-                                    let current = selected.get();
-                                    if current > 0 {
-                                        selected.set(current - 1);
-                                    }
-                                    nav_throttle.set(Instant::now());
-                                }
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move {
-                                    let current = selected.get();
-                                    if current + 1 < count {
-                                        selected.set(current + 1);
-                                    }
-                                    nav_throttle.set(Instant::now());
-                                }
-                            }
                             KeyCode::Char('f') => {
                                 // Cycle filter: All -> Sent -> Received -> All
                                 filter.set(filter.get().next());
                                 selected.set(0);
                             }
-                            KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') => {
-                                // Toggle between list and detail panel
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move {
-                                    detail_focused.set(!detail_focused.get());
-                                    nav_throttle.set(Instant::now());
-                                }
-                            }
                             KeyCode::Enter => {
-                                detail_focused.set(true);
+                                panel_focus.set(TwoPanelFocus::Detail);
                             }
                             KeyCode::Char('n') => {
                                 // Open new invitation modal
@@ -789,6 +782,7 @@ pub fn InvitationsScreen(
                         code: modal_state.code.clone(),
                         error: modal_state.error.clone().unwrap_or_default(),
                         importing: modal_state.importing,
+                        demo_mode: demo_mode,
                     )
                 })
             } else {

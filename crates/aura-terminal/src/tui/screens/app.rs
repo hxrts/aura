@@ -6,7 +6,7 @@ use iocraft::prelude::*;
 use std::sync::{Arc, RwLock};
 
 use crate::tui::components::{
-    AccountSetupModal, DemoInviteCodes, DiscoveredPeerInfo, InvitePeerCallback, KeyHintsBar,
+    AccountSetupModal, DiscoveredPeerInfo, InvitePeerCallback, KeyHintsBar,
 };
 use crate::tui::context::IoContext;
 use crate::tui::effects::EffectCommand;
@@ -48,7 +48,12 @@ pub fn ScreenTabBar(props: &ScreenTabBarProps) -> impl Into<AnyElement<'static>>
         View(
             flex_direction: FlexDirection::Row,
             gap: Spacing::SM,
-            padding: Spacing::PANEL_PADDING,
+            padding_left: Spacing::SM,
+            padding_right: Spacing::SM,
+            padding_top: Spacing::XS,
+            border_style: BorderStyle::Single,
+            border_edges: Edges::Bottom,
+            border_color: Theme::BORDER,
         ) {
             #(Screen::all().iter().map(|&screen| {
                 let is_active = screen == active;
@@ -293,9 +298,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let on_block_invite = props.on_block_invite.clone();
     let on_block_navigate_neighborhood = props.on_block_navigate_neighborhood.clone();
 
-    // Demo modal state
-    let demo_modal_visible = hooks.use_state(|| false);
-
     let current_screen = screen.get();
 
     // Build screen-specific hints based on current screen
@@ -352,23 +354,10 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
         let mut account_version = account_version.clone();
         let account_display_name = account_display_name_for_handler.clone();
         let on_create_account = on_create_account.clone();
-        let mut demo_modal_visible = demo_modal_visible.clone();
-        let is_demo_mode = props.demo_mode;
         move |event| match event {
             TerminalEvent::Key(KeyEvent {
                 code, modifiers, ..
             }) => {
-                // Handle demo modal (close on Esc or 'd')
-                if demo_modal_visible.get() {
-                    match code {
-                        KeyCode::Esc | KeyCode::Char('d') => {
-                            demo_modal_visible.set(false);
-                        }
-                        _ => {}
-                    }
-                    return;
-                }
-
                 // Handle account setup modal input first (captures all input when visible)
                 if account_visible.get() {
                     match code {
@@ -433,7 +422,6 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
                             screen.set(screen.get().next());
                         }
                     }
-                    KeyCode::Char('d') if is_demo_mode => demo_modal_visible.set(true),
                     KeyCode::Char('q') => should_exit.set(true),
                     _ => {}
                 }
@@ -459,10 +447,9 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
     let last_sync = props.last_sync_time;
     let peers = props.peer_count;
 
-    // Extract demo mode props
+    // Extract demo mode props for passing to InvitationsScreen
     let alice_code = props.demo_alice_code.clone();
     let charlie_code = props.demo_charlie_code.clone();
-    let show_demo_modal = demo_modal_visible.get();
 
     element! {
         View(
@@ -584,14 +571,7 @@ pub fn IoApp(props: &IoAppProps, mut hooks: Hooks) -> impl Into<AnyElement<'stat
             }
 
             // Key hints bar with screen-specific and global navigation hints
-            KeyHintsBar(screen_hints: screen_hints, demo_mode: props.demo_mode)
-
-            // Demo mode invite codes modal (triggered by 'd' key)
-            DemoInviteCodes(
-                alice_code: alice_code,
-                charlie_code: charlie_code,
-                visible: show_demo_modal,
-            )
+            KeyHintsBar(screen_hints: screen_hints)
 
             // Account setup modal overlay
             AccountSetupModal(

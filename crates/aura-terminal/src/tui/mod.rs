@@ -29,6 +29,7 @@ pub mod commands;
 pub mod effects;
 pub mod flow_budget;
 pub mod local_store;
+pub mod navigation;
 pub mod reactive;
 pub mod recovery_session;
 
@@ -68,4 +69,10 @@ pub use reactive::{
     ChannelType, ChannelsQuery, GuardianApproval, GuardianStatus, GuardiansQuery,
     InvitationDirection, InvitationStatus, InvitationType, InvitationsQuery, MessagesQuery,
     RecoveryQuery, RecoveryState, TuiQuery,
+};
+
+// Re-export navigation types
+pub use navigation::{
+    is_nav_key_press, navigate_grid, navigate_list, NavKey, NavThrottle, ThreePanelFocus,
+    TwoPanelFocus, NAV_THROTTLE_MS,
 };

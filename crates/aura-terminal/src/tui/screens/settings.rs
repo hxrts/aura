@@ -4,8 +4,8 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
+use crate::tui::navigation::{is_nav_key_press, NavKey, NavThrottle, TwoPanelFocus};
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Device, MfaPolicy, SettingsSection};
 
@@ -258,13 +258,14 @@ pub fn SettingsScreen(
     props: &SettingsScreenProps,
     mut hooks: Hooks,
 ) -> impl Into<AnyElement<'static>> {
-    let section = hooks.use_state(|| SettingsSection::Profile);
-    let detail_focused = hooks.use_state(|| false);
-    let device_index = hooks.use_state(|| 0usize);
-    let mfa_policy = hooks.use_state(|| props.mfa_policy);
+    let mut section = hooks.use_state(|| SettingsSection::Profile);
+    let mut panel_focus = hooks.use_state(|| TwoPanelFocus::List);
+    let mut device_index = hooks.use_state(|| 0usize);
+    let mut mfa_policy = hooks.use_state(|| props.mfa_policy);
 
     let current_section = section.get();
-    let is_detail_focused = detail_focused.get();
+    let current_focus = panel_focus.get();
+    let is_detail_focused = current_focus == TwoPanelFocus::Detail;
     let current_device_index = device_index.get();
     let current_mfa = mfa_policy.get();
     let devices = props.devices.clone();
@@ -277,65 +278,66 @@ pub fn SettingsScreen(
     let on_update_mfa = props.on_update_mfa.clone();
 
     // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
-    let throttle_duration = Duration::from_millis(150);
+    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
 
     hooks.use_terminal_events({
-        let mut section = section.clone();
-        let mut detail_focused = detail_focused.clone();
-        let mut device_index = device_index.clone();
-        let mut mfa_policy = mfa_policy.clone();
         let device_count = devices.len();
-        move |event| match event {
-            TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        if !detail_focused.get() {
-                            section.set(section.get().prev());
-                        } else if section.get() == SettingsSection::Devices && device_count > 0 {
-                            let idx = device_index.get();
-                            if idx > 0 {
-                                device_index.set(idx - 1);
+        move |event| {
+            // Handle navigation keys first
+            if let Some(nav_key) = is_nav_key_press(&event) {
+                if nav_throttle.write().try_navigate() {
+                    let current_focus = panel_focus.get();
+                    match nav_key {
+                        // Horizontal: toggle between list and detail
+                        NavKey::Left | NavKey::Right => {
+                            let new_focus = current_focus.navigate(nav_key);
+                            panel_focus.set(new_focus);
+                        }
+                        // Vertical: navigate sections or devices depending on focus
+                        NavKey::Up => {
+                            if current_focus == TwoPanelFocus::List {
+                                section.set(section.get().prev());
+                            } else if section.get() == SettingsSection::Devices && device_count > 0 {
+                                let idx = device_index.get();
+                                if idx > 0 {
+                                    device_index.set(idx - 1);
+                                }
                             }
                         }
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        if !detail_focused.get() {
-                            section.set(section.get().next());
-                        } else if section.get() == SettingsSection::Devices && device_count > 0 {
-                            let idx = device_index.get();
-                            if idx + 1 < device_count {
-                                device_index.set(idx + 1);
+                        NavKey::Down => {
+                            if current_focus == TwoPanelFocus::List {
+                                section.set(section.get().next());
+                            } else if section.get() == SettingsSection::Devices && device_count > 0 {
+                                let idx = device_index.get();
+                                if idx + 1 < device_count {
+                                    device_index.set(idx + 1);
+                                }
                             }
                         }
-                        nav_throttle.set(Instant::now());
                     }
                 }
-                KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        detail_focused.set(!detail_focused.get());
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Char(' ') => {
-                    if detail_focused.get() && section.get() == SettingsSection::Mfa {
-                        let new_policy = mfa_policy.get().next();
-                        mfa_policy.set(new_policy);
-                        // Dispatch callback with new require_mfa value
-                        if let Some(ref callback) = on_update_mfa {
-                            callback(new_policy.requires_mfa());
+                return;
+            }
+
+            // Handle other keys
+            match event {
+                TerminalEvent::Key(KeyEvent { code, .. }) => match code {
+                    KeyCode::Char(' ') => {
+                        if panel_focus.get() == TwoPanelFocus::Detail
+                            && section.get() == SettingsSection::Mfa
+                        {
+                            let new_policy = mfa_policy.get().next();
+                            mfa_policy.set(new_policy);
+                            // Dispatch callback with new require_mfa value
+                            if let Some(ref callback) = on_update_mfa {
+                                callback(new_policy.requires_mfa());
+                            }
                         }
                     }
-                }
+                    _ => {}
+                },
                 _ => {}
-            },
-            _ => {}
+            }
         }
     });
 

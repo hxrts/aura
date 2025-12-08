@@ -10,10 +10,10 @@
 
 use iocraft::prelude::*;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
 
 use crate::tui::components::{ContactSelectModal, ContactSelectState, MessageInput};
 use crate::tui::hooks::AppCoreContext;
+use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle};
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{BlockBudget, Contact, Message, Resident};
 
@@ -349,7 +349,7 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     let input_text_for_handler = input_text.clone();
 
     // Version counter to trigger rerenders when input changes
-    let mut input_version = hooks.use_state(|| 0usize);
+    let input_version = hooks.use_state(|| 0usize);
 
     // Get contacts from props
     let contacts = props.contacts.clone();
@@ -367,8 +367,7 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
     let resident_count = residents.len();
 
     // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
-    let throttle_duration = Duration::from_millis(150);
+    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
 
     hooks.use_terminal_events({
         let input_text = input_text_for_handler;
@@ -376,10 +375,42 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
         let mut focus = focus.clone();
         let mut invite_modal_state = invite_modal_state.clone();
         let contacts_for_modal = contacts.clone();
+        let mut input_version = input_version.clone();
         move |event| {
             let current_focus = focus.get();
             let is_invite_modal_visible = invite_modal_state.read().visible;
 
+            // Check for navigation keys first
+            if let Some(nav_key) = is_nav_key_press(&event) {
+                if is_invite_modal_visible {
+                    // Modal navigation
+                    match nav_key {
+                        NavKey::Up => {
+                            let mut state = invite_modal_state.read().clone();
+                            state.select_prev();
+                            invite_modal_state.set(state);
+                        }
+                        NavKey::Down => {
+                            let mut state = invite_modal_state.read().clone();
+                            state.select_next();
+                            invite_modal_state.set(state);
+                        }
+                        _ => {}
+                    }
+                    return;
+                }
+
+                if current_focus == BlockFocus::Residents {
+                    // Normal mode: navigate residents list with throttle
+                    if nav_throttle.write().try_navigate() {
+                        let new_idx = navigate_list(resident_index.get(), resident_count, nav_key);
+                        resident_index.set(new_idx);
+                    }
+                }
+                return;
+            }
+
+            // Handle other key events
             match event {
                 TerminalEvent::Key(KeyEvent {
                     code, modifiers, kind, ..
@@ -390,16 +421,6 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                             KeyCode::Esc => {
                                 let mut state = invite_modal_state.read().clone();
                                 state.hide();
-                                invite_modal_state.set(state);
-                            }
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                let mut state = invite_modal_state.read().clone();
-                                state.select_prev();
-                                invite_modal_state.set(state);
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                let mut state = invite_modal_state.read().clone();
-                                state.select_next();
                                 invite_modal_state.set(state);
                             }
                             KeyCode::Enter => {
@@ -468,28 +489,8 @@ pub fn BlockScreen(props: &BlockScreenProps, mut hooks: Hooks) -> impl Into<AnyE
                             _ => {}
                         }
                     } else {
-                        // Normal mode key handling
+                        // Normal mode key handling (non-navigation keys)
                         match code {
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move {
-                                    let idx = resident_index.get();
-                                    if idx > 0 {
-                                        resident_index.set(idx - 1);
-                                    }
-                                    nav_throttle.set(Instant::now());
-                                }
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move {
-                                    let idx = resident_index.get();
-                                    if idx + 1 < resident_count {
-                                        resident_index.set(idx + 1);
-                                    }
-                                    nav_throttle.set(Instant::now());
-                                }
-                            }
                             // 'i' enters insert mode
                             KeyCode::Char('i') => {
                                 focus.set(BlockFocus::Input);

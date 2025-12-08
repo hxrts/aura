@@ -10,12 +10,12 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use crate::tui::components::{
     DiscoveredPeerInfo, DiscoveredPeersPanel, DiscoveredPeersState, EmptyState, InvitePeerCallback,
     StatusIndicator, TextInputModal, TextInputState,
 };
+use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle, TwoPanelFocus};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Spacing, Theme};
 use crate::tui::types::{Contact, ContactStatus};
@@ -298,8 +298,8 @@ pub fn ContactsScreen(
     // Use reactive state for rendering
     let contacts = reactive_contacts.read().clone();
 
-    let selected = hooks.use_state(|| 0usize);
-    let detail_focused = hooks.use_state(|| false);
+    let mut selected = hooks.use_state(|| 0usize);
+    let mut panel_focus = hooks.use_state(|| TwoPanelFocus::List);
 
     // Modal state for editing petnames
     let petname_modal_state = hooks.use_state(TextInputState::new);
@@ -324,7 +324,8 @@ pub fn ContactsScreen(
     }
 
     let current_selected = selected.get();
-    let is_detail_focused = detail_focused.get();
+    let current_focus = panel_focus.get();
+    let is_detail_focused = current_focus == TwoPanelFocus::Detail;
     let selected_contact = contacts.get(current_selected).cloned();
 
     // Clone callbacks for event handler
@@ -334,18 +335,38 @@ pub fn ContactsScreen(
     let on_invite_lan_peer = props.on_invite_lan_peer.clone();
 
     // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
-    let throttle_duration = Duration::from_millis(150);
+    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
 
     hooks.use_terminal_events({
-        let mut selected = selected.clone();
-        let mut detail_focused = detail_focused.clone();
         let mut petname_modal_state = petname_modal_state.clone();
         let count = contacts.len();
         let contacts_for_handler = contacts.clone();
         move |event| {
             // Check if modal is visible
             let modal_visible = petname_modal_state.read().visible;
+
+            // Handle navigation keys first (only when modal is not visible)
+            if !modal_visible {
+                if let Some(nav_key) = is_nav_key_press(&event) {
+                    if nav_throttle.write().try_navigate() {
+                        match nav_key {
+                            // Horizontal: toggle between list and detail
+                            NavKey::Left | NavKey::Right => {
+                                let new_focus = panel_focus.get().navigate(nav_key);
+                                panel_focus.set(new_focus);
+                            }
+                            // Vertical: navigate within list when list is focused
+                            NavKey::Up | NavKey::Down => {
+                                if panel_focus.get() == TwoPanelFocus::List && count > 0 {
+                                    let new_idx = navigate_list(selected.get(), count, nav_key);
+                                    selected.set(new_idx);
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+            }
 
             match event {
                 TerminalEvent::Key(KeyEvent { code, .. }) => {
@@ -384,37 +405,10 @@ pub fn ContactsScreen(
                             _ => {}
                         }
                     } else {
-                        // Normal screen keys
+                        // Normal screen keys (non-navigation hotkeys)
                         match code {
-                            KeyCode::Up | KeyCode::Char('k') => {
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move {
-                                    let current = selected.get();
-                                    if current > 0 {
-                                        selected.set(current - 1);
-                                    }
-                                    nav_throttle.set(Instant::now());
-                                }
-                            }
-                            KeyCode::Down | KeyCode::Char('j') => {
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move {
-                                    let current = selected.get();
-                                    if current + 1 < count {
-                                        selected.set(current + 1);
-                                    }
-                                    nav_throttle.set(Instant::now());
-                                }
-                            }
-                            KeyCode::Left | KeyCode::Right | KeyCode::Char('h') | KeyCode::Char('l') => {
-                                let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                                if should_move {
-                                    detail_focused.set(!detail_focused.get());
-                                    nav_throttle.set(Instant::now());
-                                }
-                            }
                             KeyCode::Enter => {
-                                detail_focused.set(true);
+                                panel_focus.set(TwoPanelFocus::Detail);
                             }
                             // Edit petname - show modal with current petname
                             KeyCode::Char('e') => {

@@ -30,6 +30,8 @@ pub struct InvitationImportModalProps {
     pub on_import: Option<ImportCallback>,
     /// Callback when canceling
     pub on_cancel: Option<CancelCallback>,
+    /// Whether running in demo mode (enables quick-fill shortcuts)
+    pub demo_mode: bool,
 }
 
 /// Modal for importing invitation codes
@@ -145,6 +147,30 @@ pub fn InvitationImportModal(props: &InvitationImportModalProps) -> impl Into<An
                         None
                     })
                 }
+
+                // Demo mode hints (only shown when code is empty and in demo mode)
+                #(if props.demo_mode && code.is_empty() {
+                    Some(element! {
+                        View(
+                            flex_direction: FlexDirection::Row,
+                            justify_content: JustifyContent::Center,
+                            padding: 1,
+                            background_color: Theme::BG_DARK,
+                            border_style: BorderStyle::Single,
+                            border_edges: Edges::Bottom,
+                            border_color: Theme::WARNING,
+                        ) {
+                            Text(content: "[DEMO] ", color: Theme::WARNING, weight: Weight::Bold)
+                            Text(content: "Press ", color: Theme::TEXT_MUTED)
+                            Text(content: "a", color: Theme::SECONDARY, weight: Weight::Bold)
+                            Text(content: " for Alice's code, ", color: Theme::TEXT_MUTED)
+                            Text(content: "c", color: Theme::SECONDARY, weight: Weight::Bold)
+                            Text(content: " for Charlie's code", color: Theme::TEXT_MUTED)
+                        }
+                    })
+                } else {
+                    None
+                })
 
                 // Footer with key hints
                 View(

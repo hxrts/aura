@@ -10,9 +10,9 @@
 
 use iocraft::prelude::*;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 use crate::tui::components::EmptyState;
+use crate::tui::navigation::{is_nav_key_press, navigate_list, NavKey, NavThrottle};
 use crate::tui::hooks::AppCoreContext;
 use crate::tui::theme::{Icons, Spacing, Theme};
 use crate::tui::types::{
@@ -397,81 +397,65 @@ pub fn RecoveryScreen(
     let threshold_total = reactive_threshold_total.get();
     let recovery_status = reactive_recovery_status.read().clone();
 
-    let active_tab = hooks.use_state(|| RecoveryTab::Guardians);
-    let guardian_index = hooks.use_state(|| 0usize);
+    let mut active_tab = hooks.use_state(|| RecoveryTab::Guardians);
+    let mut guardian_index = hooks.use_state(|| 0usize);
 
     let current_tab = active_tab.get();
     let current_guardian_index = guardian_index.get();
+    let guardian_count = guardians.len();
 
     // Clone callbacks for event handler
     let on_start_recovery = props.on_start_recovery.clone();
     let on_add_guardian = props.on_add_guardian.clone();
 
     // Throttle for navigation keys - persists across renders using use_ref
-    let mut nav_throttle = hooks.use_ref(|| Instant::now() - Duration::from_millis(200));
-    let throttle_duration = Duration::from_millis(150);
+    let mut nav_throttle = hooks.use_ref(NavThrottle::new);
 
     hooks.use_terminal_events({
-        let mut active_tab = active_tab.clone();
-        let mut guardian_index = guardian_index.clone();
-        let guardian_count = guardians.len();
-        move |event| match event {
-            TerminalEvent::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Left | KeyCode::Char('h') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        active_tab.set(RecoveryTab::Guardians);
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Right | KeyCode::Char('l') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move {
-                        active_tab.set(RecoveryTab::Recovery);
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move
-                        && active_tab.get() == RecoveryTab::Guardians
-                        && guardian_count > 0
-                    {
-                        let idx = guardian_index.get();
-                        if idx > 0 {
-                            guardian_index.set(idx - 1);
+        move |event| {
+            // Handle navigation keys first
+            if let Some(nav_key) = is_nav_key_press(&event) {
+                if nav_throttle.write().try_navigate() {
+                    match nav_key {
+                        // Horizontal: switch between tabs
+                        NavKey::Left => {
+                            active_tab.set(RecoveryTab::Guardians);
                         }
-                        nav_throttle.set(Instant::now());
-                    }
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    let should_move = nav_throttle.read().elapsed() >= throttle_duration;
-                    if should_move
-                        && active_tab.get() == RecoveryTab::Guardians
-                        && guardian_count > 0
-                    {
-                        let idx = guardian_index.get();
-                        if idx + 1 < guardian_count {
-                            guardian_index.set(idx + 1);
+                        NavKey::Right => {
+                            active_tab.set(RecoveryTab::Recovery);
                         }
-                        nav_throttle.set(Instant::now());
+                        // Vertical: navigate within guardian list when on Guardians tab
+                        NavKey::Up | NavKey::Down => {
+                            if active_tab.get() == RecoveryTab::Guardians && guardian_count > 0 {
+                                let new_idx =
+                                    navigate_list(guardian_index.get(), guardian_count, nav_key);
+                                guardian_index.set(new_idx);
+                            }
+                        }
                     }
                 }
-                // Add guardian - triggers callback
-                KeyCode::Char('a') => {
-                    if let Some(ref callback) = on_add_guardian {
-                        callback();
+                return;
+            }
+
+            // Handle other keys
+            match event {
+                TerminalEvent::Key(KeyEvent { code, .. }) => match code {
+                    // Add guardian - triggers callback
+                    KeyCode::Char('a') => {
+                        if let Some(ref callback) = on_add_guardian {
+                            callback();
+                        }
                     }
-                }
-                // Start recovery - triggers callback
-                KeyCode::Char('s') => {
-                    if let Some(ref callback) = on_start_recovery {
-                        callback();
+                    // Start recovery - triggers callback
+                    KeyCode::Char('s') => {
+                        if let Some(ref callback) = on_start_recovery {
+                            callback();
+                        }
                     }
-                }
+                    _ => {}
+                },
                 _ => {}
-            },
-            _ => {}
+            }
         }
     });
 
